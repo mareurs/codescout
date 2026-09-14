@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 136
+entry_high_water_F: 137
 entry_high_water_W: 131
 ---
 
@@ -52,6 +52,7 @@ entry_high_water_W: 131
 |----|------|---------:|----------|--------|-------|
 | F-136 | 2026-09-13 | high | design-gap | open | **A fix direction recorded as "settled" can be settled on the CHOICE and silent on the DEFAULT, and the default is where the whole corpus lands.** `BL-77`'s plan closes both alternatives with measurements and an ADR ruling, then never says what an ABSENT `snapshot_anchor` means — which on day one is all **24** augmented trackers, since the field does not exist yet. The two candidate defaults produce opposite wrong answers over the same 24 rows (whole-body scan preserves the exact false negative the bug was filed to remove; empty-set silences `snapshot_drift` corpus-wide via `body_keeps_snapshot`'s empty early-return), and neither is visible at unit-test grain because fixtures get written to whichever assumption the implementer held. Found by scouting the seam before typing, not by the plan being wrong about anything it addressed. |
 | F-135 | 2026-09-11 | med | verification/shared-checkout | open | **A shared-checkout rebuild maps to no commit, and POSITIVE BINARY IDENTIFICATION identifies the CHANGE, never the BUILD.** `cargo rb` relinked at 20:50:14 with zero code commits on HEAD since the previous build, while three peer-owned source files sat dirty. I read that as "their work is compiled in" and the mtimes refuted it — all three were written 1m33s to 2m51s AFTER the link, so the binary holds an intermediate state of them that is in no commit and no longer on disk. Both natural inferences are wrong in opposite directions. Puts a ceiling on `W-125`: its remedy answers *"does this binary contain my fix?"* and says nothing about what else is in there, and on a solo checkout those two questions coincide, which is why the gap is invisible from inside the practice. The specific wire claim survives because `src/tools/core/types.rs` is unmodified since 17:17:40, before the link — a property of that verification, not of the method. See `F-135` below. |
+| F-137 | 2026-09-14 | med | measurement | fixed-verified | **A length delta between two stores is blind to SUBSTITUTION, and the reflex fix it licenses is the destructive one.** A peer ranked the work-queue's `task` column by byte delta and reported five rows where "body is fuller", remedy *"copy the body into params"*. The set re-derived exactly — and two of the five were **divergent**, each store holding text the other lacked, which a magnitude cannot distinguish from truncation. The copy would have deleted `BL-38`'s *"26 of 66 tracker/bug files are unprotected"* (a measured defect population) and two thirds of `BL-20`'s symptom triple. Fixed by writing the **union** into both stores: body-fuller 5 → 0, nothing lost. This is § *Testing Discipline*'s monotonicity law arriving in a measurement rather than a test. Two smaller instances of the same shape in one pass: the peer's `bug=10` measured the template's em-dash for an absent key (withdrawn), and my own first script reported 67 disagreements that were a trailing `` ` |`` left by my cell split. See `F-137` below. |
 | F-134 | 2026-09-11 | med | design/scope | open | **A bug's own stated fix preference can conflict with a design invariant its author didn't check against the actual code.** `b75d2660ef37198c` recommended oversampling grep's context mode the way simple mode does; the actual code (`grep.rs:121`) documents that simple mode's oversample is display-capped by `cap_grouped` and context mode has no equivalent cap, so following the recommendation verbatim would have shipped a 4x output-size regression alongside the fix. Took the bug's own second, more conservative option instead. See `F-134` below. |
 | F-132 | 2026-09-10 | med | process/attribution | open | **Novelty of the discovery ROUTE is not novelty of the DEFECT, and the two are indistinguishable from the inside.** Filed a duplicate of a bug already in the 96-row list I had read six hours earlier (`7e0968e2ddfcbc07`), title truncated past the discriminating token. A dedup query was run two hours before, for a bug found by *reading*; skipped for this one, found by *measurement* — a surprise does not present as a rediscovery. Recurred in mild form within 24 hours. A check gated on suspicion is not reached by the case that needs it. |
 | F-131 | 2026-09-09 | med | tooling/ambient-state | open | **A subagent restoring the home project retargets its parent's reads, and the symptom is a plausible zero.** My brief told the implementer not to re-activate the worktree, since codescout activation is process-wide. They complied — then restored the HOME project when finished, which is ordinary hygiene and what the tool's own hint advises. My next `grep` returned **0 matches, twice**, for a file that exists only on the feature branch. **Politeness and the hazard are the same act, separated only by timing**, and neither side can see the conflict: the subagent does not know the parent is still reading, the parent observes no activation event. Near-miss: I was verifying that a review item had *removed* `#[allow(dead_code)]`, so a zero for `dead_code` was the success signal — only a second pattern in the same call, whose zero is impossible if the fix is right, made it suspicious, and that was luck in phrasing rather than method. `read_file` held the discriminating datum: it printed the absolute path it searched plus a hint naming this exact scenario. Workaround: pass `workspace=` on every call and use `git -C` for verification — both already mandatory for writes, so extending to reads costs nothing. **Reusable half:** `grep`'s warning correctly says the zero describes the search, not the pattern, but then guesses a *cause* it cannot know (fd exhaustion), which bought a wasted re-run; naming the **scope it resolved** is knowable and would have diagnosed this in one call |
@@ -14279,6 +14280,63 @@ including on `open-issue-work-queue.md`, the very tracker `BL-29` was filed abou
 worry was *"what does absent mean for 24 trackers"*; the answer is that absent is the state of **all**
 of them and the mechanism reaches none. Found by sessionId
 `8bd791df-5ff4-40fe-af30-69cc3fefc2f7`, at the code rather than by inference.
+
+## F-137 — a length delta between two stores cannot tell truncation from divergence
+
+**Valid:** dated 2026-09-14
+
+**Severity:** med
+**Status:** fixed-verified
+**Category:** measurement
+
+**Observed:** Reconciling `docs/trackers/open-issue-work-queue.md`'s params against its
+body snapshot, a peer session ranked the `task` column by byte delta and reported five rows
+where "body is fuller, params would lose N bytes", with the remedy *"copy the body text into
+params for those five."* Re-derived independently and the set matched exactly — same five,
+same ranking. Applying the remedy as stated would have deleted text from two of them.
+
+**The gap:** a length comparison is blind to *substitution*. It reports the same delta
+whether params is a prefix of the body or holds entirely different content of the same size.
+Testing **subsumption** instead split the five three ways:
+
+| rows | shape |
+|---|---|
+| `BL-13` `BL-16` | body = params + appended outcome — superset |
+| `BL-11` | `/`​`link_scan` inserted mid-string — no loss |
+| `BL-38` `BL-20` | **divergent** — each store holds text the other lacks |
+
+What a copy would have deleted: `BL-38`'s *"26 of 66 tracker/bug files are unprotected,
+including the most-damaged ledger"* — a measured defect population, the exact artifact
+§ *Testing Discipline* says to keep — and `BL-20`'s *"no report, no git backup"*, two thirds
+of the symptom triple naming the defect. Params held the symptom and the count; the body
+held the remedy. Resolved by writing the **union** into both stores rather than picking a
+winner, which took body-fuller from 5 to 0 with nothing lost.
+
+**Why it is worth an id:** this is § *Testing Discipline*'s monotonicity law arriving in a
+**measurement** rather than in a test. Byte-delta is monotone under substitution the same way
+an absence assertion is monotone under removal — it cannot express the failure it is being
+read as evidence about. The reflex fix for a disagreeing-stores report is "make the shorter
+one match the longer one", and that reflex is what the metric silently licenses.
+
+**Two smaller findings from the same pass, both the same shape:**
+
+- The peer's own three numbers: `status` was right, `bug=10` was **ten rows citing NO bug
+  id** (their loose comparison scored the template's `—` literal against a missing key as a
+  divergence — they measured an em-dash and withdrew it), and `task=28` was a 10-row
+  undercount from stripping backticks on one side only. One loose comparator,
+  over-reporting and under-reporting simultaneously.
+- My own first script reported 67 params/body disagreements on the `bug` column. All 67
+  were a trailing `` ` |`` my cell split left on the last column. Same class, my side,
+  ninety seconds later.
+
+**Rests on:** `docs/trackers/open-issue-work-queue.md` having two stores for one table —
+params (catalog) and a hand-maintained body snapshot. If the body ever becomes a pure
+render, the divergence case disappears and only the metric lesson survives.
+
+**Promote-when:** a third instance of "a magnitude was read as evidence about content"
+appears. `IC-21` (*an instrument reports presence or a count where the decision turns on
+magnitude*) is the near neighbour and is its **inverse** — that class is a count standing in
+for a magnitude; this is a magnitude standing in for content. Do not fold them.
 
 ## Template for new entries
 
