@@ -1,10 +1,9 @@
 ---
 kind: bug
-status: taken
+status: fixed
 tags:
 - cluster/addressing-without-an-escape-hatch
-claimed_by: 8bd791df-5ff4-40fe-af30-69cc3fefc2f7
-closed: null
+closed: 2026-09-14
 opened: 2026-09-12
 owner: marius
 related: []
@@ -113,8 +112,31 @@ permanently unaddressable"* — and a table is the same shape.
 
 ## Fix
 
-**Direction settled 2026-09-13: the augmentation carries an explicit anchor.** Not
-implemented.
+**SHIPPED on `experiments` 2026-09-14.** Direction settled 2026-09-13; the default it was
+silent on is resolved in § *The ruling* below.
+
+- **SHA** — `80f033c8` (branch `experiments`; positional, dies on the next rebase)
+- **patch-id** — `6081b6384928dca8bd4c1362e80c4582be066feb`
+  (`git show 80f033c8 | git patch-id --stable`; a content hash of the diff, surviving
+  rebase **and** cherry-pick)
+
+Recorded once, at fix time. No promotion path to check, nothing to reconcile later.
+
+`snapshot_block_range` returns the walk's inclusive range and `snapshot_block_last_line`
+becomes a projection of it, so that function's four existing tests keep guarding the walk
+rather than a second copy of it. `snapshot_rows_in_declared_block` narrows the primitive
+to that range, wired at `augmentation.rs:533` (`snapshot_stale_note`),
+`augmentation.rs:727` (`append_entry`) and `doctor.rs:4354` (`scan_snapshot_drift`).
+`body_snapshot_row_indices` is unchanged and still does the matching, so there stays **one**
+definition of what a snapshot row looks like.
+
+**A correction to this file's own earlier citation:** `augmentation.rs:724` is **not** the
+id allocator. Allocation reads `body_claimed_indices` — headings *and* rows, deliberately
+wide, so a heading claiming `F-33` still blocks reissuing it — while `:724`/`:727` feeds
+`snapshot_missing` alone. This narrowing therefore cannot affect id assignment in any
+direction, a smaller blast radius than the text here previously implied.
+
+### The direction, and why derivation stays forbidden
 
 1. **Bound the scan to a recorded boundary — CHOSEN.** The augmentation gains a
    `snapshot_anchor` field holding the block's header line verbatim, author-declared and
@@ -153,16 +175,40 @@ defines its **location**, and this bug's own Root cause section is the argument 
 location is not recoverable from shape.
 ## Tests added
 
-None yet. The discriminating test is a body with a snapshot table plus a second table
-anchoring the same prefix, asserting the unrelated row does **not** satisfy
-`snapshot_missing` — which reds under today's implementation.
+Four, each naming in its own doc comment the single production mutation it must red on,
+and each verified by an **observed red** rather than by existing.
+
+| test | guarded site | kills |
+|---|---|---:|
+| `snapshot_rows_in_declared_block_cannot_reach_an_unrelated_table` | the narrowing | 1 |
+| `snapshot_rows_in_declared_block_without_an_anchor_scans_the_whole_document` | the ruling | **7** |
+| `snapshot_rows_in_declared_block_falls_back_when_the_anchor_does_not_identify_one` | drifted / ambiguous anchor | 1 |
+| `a_stray_row_in_another_table_cannot_mask_a_row_missing_from_the_declared_block` | `snapshot_stale_note`'s wiring | 1 |
+
+The predicted discriminating test — *"a body with a snapshot table plus a second table
+anchoring the same prefix"* — is row 1, and it reds under the old implementation exactly as
+this section predicted it would.
+
+**Row 2's 7 is the ruling's real vindication.** The rejected default
+(absent ⇒ no snapshot block) reds **six pre-existing** tests across `append_entry` and
+`scan_snapshot_drift`. It was never viable, and the suite already said so a day before the
+ruling was framed as open.
+
+**Row 4 exists because mutation per SITE found a hole the feature-level mutation missed.**
+Mutating the shared function killed tests for two of the three call sites *incidentally*,
+through tests written for other reasons, and **zero** for the third: reverting
+`snapshot_stale_note`'s wiring alone left all 14 tests in its module green. Both readings
+emit an advisory there, so an `is_some()` assertion would not have discriminated either —
+the wide read says the row *"still shows the PREVIOUS field values"* and sends the reader
+to edit a row that is not in the block. The test asserts on **which message** the system
+names; the discriminator was already in the output, unused.
 
 ## Workarounds
 
 None needed today; no live misreading. Do not "fix" a future clean `snapshot_missing` by
 trusting it on a tracker whose body holds more than one `| PREFIX-N |` table.
 
-## Resume
+## The ruling — discharged by deriving the population
 
 **THE RULING IS DISCHARGED — and not by deciding it. The blocker was a wrong POPULATION.**
 
@@ -228,23 +274,18 @@ something before this read path was wired, which is the order that section asked
 
 ## Resume
 
-Mutation-verify the three guarded sites, then gate. Each test names in its own doc comment
-the single production mutation it must red on:
+N/A — fixed and verified on `experiments`.
 
-1. `snapshot_rows_in_declared_block_cannot_reach_an_unrelated_table` — pass `doc` instead
-   of the sliced `block`.
-2. `..._without_an_anchor_scans_the_whole_document` — return `Default::default()` from the
-   `declared_snapshot_anchor` `None` arm.
-3. `..._falls_back_when_the_anchor_does_not_identify_one` — return `Default::default()`
-   from the `snapshot_block_range` `None` arm.
+Gate: fmt **0**, clippy **0**, lean **0**, default **0** — **5901 passed, 0 failed**. The
+vacuity control was re-derived in the same run rather than cited, because the lean lane
+compiles no librarian code and its green would say nothing here: `librarian::` is **0** in
+the lean lane against **1855** in the default one, while `prompts::` is **103 in both** —
+so the lean lane demonstrably runs tests and its silence is absence, not sampling.
 
-One kill per site, not one per feature. **Not yet done at the time of writing**: the shared
-lib does not compile, from another session's in-flight `audit_doc_refs` work
-(`RefKind::ArtifactId` / `Verdict::ArtifactMissing` arms), so a red cannot be attributed to
-an injected mutation. Holder informed; parked, not abandoned.
-
-Then the four-command gate, chained with `;`. Read `librarian::` test names out of the
-**default** lane — the lean lane compiles no librarian code, so its green says nothing here.
+**Archive-eligible and deliberately not archived yet.** Gate green plus regression tests,
+both held. `doc(action="move")` re-keys the artifact (`id = sha256(abs_path)`) and strands
+every inbound citation of the old id until they are repointed in the same commit, so the
+move is its own act with its own checklist — not a tail of the fix.
 ## References
 
 - `docs/issues/archive/2026-08-28-body-keeps-snapshot-counts-headings-as-a-table.md` —
