@@ -160,7 +160,7 @@ and discriminated nothing.
 
 - `docs/trackers/bug-fix-session-log.md` § `F-140` — the 69-second still-frame, whose correction
   is what made E1 findable.
-- `docs/issues/2026-09-14-the-compile-advisory-reports-a-cached-failure-as-current-state.md`
+- `docs/issues/archive/2026-09-14-the-compile-advisory-reports-a-cached-failure-as-current-state.md`
   § Environment — records the same contention from a peer's side, as environment rather than as
   a defect.
 - `docs/trackers/issue-clusters/IC-17-shared-resource-carries-no-owner.md` — the class, and the

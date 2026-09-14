@@ -185,7 +185,7 @@ pub(crate) struct SessionBuildState {
     /// normally repaired inside that window. The repairing write was therefore discarded
     /// with no record, nothing re-checked, and the check that began BEFORE the repair wrote
     /// its failure down afterwards — which is the whole of
-    /// `docs/issues/2026-09-14-the-compile-advisory-reports-a-cached-failure-as-current-state.md`.
+    /// `docs/issues/archive/2026-09-14-the-compile-advisory-reports-a-cached-failure-as-current-state.md`.
     pub pending: bool,
 }
 
@@ -509,7 +509,7 @@ pub(crate) fn live_sessions() -> Vec<LiveSession> {
 ///
 /// `None` does **not** mean nothing happened: the deferral branch records a refused write
 /// in [`SessionBuildState::pending`], and that record is the fix for
-/// `docs/issues/2026-09-14-the-compile-advisory-reports-a-cached-failure-as-current-state.md`.
+/// `docs/issues/archive/2026-09-14-the-compile-advisory-reports-a-cached-failure-as-current-state.md`.
 pub(crate) fn decide_start(
     st: &mut SessionBuildState,
     root: &Path,
