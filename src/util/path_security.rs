@@ -634,11 +634,36 @@ pub fn worktree_main_root(root: &Path) -> Option<PathBuf> {
 
 /// Check if a tool is allowed by the current security configuration.
 /// Returns Ok(()) if allowed, or an error message explaining how to enable it.
-pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result<()> {
+///
+/// `is_write` is the dispatcher's own answer — `Tool::is_write(input)`, via
+/// [`CodeScoutServer::is_write_call`] — and it is a parameter rather than a name
+/// list here on purpose. This gate matched five literal tool names from 2026-03
+/// until 2026-09-14, while the write surface grew to include `doc`, `librarian`,
+/// `memory`, `onboarding` and `index(action="build")`; those wrote straight
+/// through a read-only activation, each having already taken the cross-process
+/// write lock on the strength of the very predicate this function was not asking.
+/// Two enumerations of "what is a write", and the narrower one was the one that
+/// guarded. Taking the parameter means a write tool added later is gated on the
+/// day it is added, with no list to remember.
+/// docs/issues/2026-09-14-read-only-blocks-five-tool-names-not-the-writes-it-promises.md
+pub fn check_tool_access(
+    tool_name: &str,
+    is_write: bool,
+    config: &PathSecurityConfig,
+) -> Result<()> {
     match tool_name {
-        "approve_write" | "create_file" | "edit_file" | "edit_code" | "library"
-            if !config.file_write_enabled =>
-        {
+        // Indexing is checked BEFORE the write gate, and the order is load-bearing.
+        // `index` is also a write under `action="build"`, so if the write arm
+        // claimed it first, a caller with indexing disabled would be told their
+        // project is read-only and sent to re-activate — a call that succeeds,
+        // changes nothing, and leaves indexing still off. Same reasoning as
+        // `WriteBlockCause` precedence: state the cause whose remedy works.
+        "semantic_search" | "index" if !config.indexing_enabled => {
+            bail!(
+                    "Indexing tools are disabled. Set security.indexing_enabled = true in .codescout/project.toml to enable."
+                );
+        }
+        _ if is_write && !config.file_write_enabled => {
             // State the cause when it is known. The hedged single message this
             // replaces named one of two possible causes with an "if", and the
             // reader could not tell which applied without a second call.
@@ -675,12 +700,7 @@ pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result
                 ),
             }
         }
-        "semantic_search" | "index" if !config.indexing_enabled => {
-            bail!(
-                    "Indexing tools are disabled. Set security.indexing_enabled = true in .codescout/project.toml to enable."
-                );
-        }
-        _ => {} // All other tools are always allowed
+        _ => {} // Reads are always allowed; writes are covered by the arm above.
     }
     Ok(())
 }
@@ -2400,8 +2420,8 @@ mod tests {
     fn file_write_enabled_by_default() {
         let config = PathSecurityConfig::default();
         assert!(config.file_write_enabled);
-        assert!(check_tool_access("create_file", &config).is_ok());
-        assert!(check_tool_access("edit_code", &config).is_ok());
+        assert!(check_tool_access("create_file", true, &config).is_ok());
+        assert!(check_tool_access("edit_code", true, &config).is_ok());
     }
 
     #[test]
@@ -2412,9 +2432,44 @@ mod tests {
         };
         for tool in &["create_file", "edit_file", "edit_code", "library"] {
             assert!(
-                check_tool_access(tool, &config).is_err(),
+                check_tool_access(tool, true, &config).is_err(),
                 "{} should be blocked",
                 tool
+            );
+        }
+    }
+
+    /// The write gate must cover every tool the dispatcher calls a write — not
+    /// the five it was given a name for in 2026-03.
+    ///
+    /// **What makes this fail:** reverting the `is_write` parameter and going back
+    /// to matching on `"approve_write" | "create_file" | "edit_file" | "edit_code"
+    /// | "library"`. Each tool below is `Tool::is_write(input) == true` — `doc` and
+    /// `librarian` via `LibrarianAdapter::is_write` (reads are the closed set),
+    /// `memory` on its mutating actions, `onboarding` unconditionally — so each
+    /// already acquires the cross-process write lock, and each wrote through a
+    /// read-only activation before this gate learned to ask.
+    ///
+    /// Deliberately NOT a name list of its own: the name list is the defect. The
+    /// population guard lives in `server.rs`
+    /// (`every_write_tool_is_refused_under_a_write_block`), which walks the real
+    /// registry so a write tool added later cannot slip past by not being named
+    /// here. This test is the readable statement of the same claim.
+    #[test]
+    fn a_write_tool_outside_the_legacy_name_list_is_still_refused() {
+        let config = PathSecurityConfig {
+            file_write_enabled: false,
+            write_block: Some(WriteBlock {
+                root: PathBuf::from("/work/browsed-repo"),
+                cause: WriteBlockCause::ActivatedReadOnly,
+            }),
+            ..PathSecurityConfig::default()
+        };
+        for tool in &["doc", "librarian", "memory", "onboarding"] {
+            assert!(
+                check_tool_access(tool, true, &config).is_err(),
+                "{tool} is is_write=true, so a read-only activation must refuse it; \
+                 it reached the tool body instead"
             );
         }
     }
@@ -2468,7 +2523,7 @@ mod tests {
             }),
             ..PathSecurityConfig::default()
         };
-        let err = check_tool_access("edit_file", &config)
+        let err = check_tool_access("edit_file", true, &config)
             .expect_err("writes are off, this must refuse")
             .to_string();
         assert!(
@@ -2505,7 +2560,7 @@ mod tests {
             }),
             ..PathSecurityConfig::default()
         };
-        let err = check_tool_access("edit_file", &config)
+        let err = check_tool_access("edit_file", true, &config)
             .expect_err("writes are off, this must refuse")
             .to_string();
 
@@ -2539,7 +2594,7 @@ mod tests {
             }),
             ..PathSecurityConfig::default()
         };
-        let err = check_tool_access("create_file", &config)
+        let err = check_tool_access("create_file", true, &config)
             .expect_err("writes are off, this must refuse")
             .to_string();
         assert!(err.contains("/work/locked"), "{err}");
@@ -2564,7 +2619,7 @@ mod tests {
             ..PathSecurityConfig::default()
         };
         assert!(config.write_block.is_none(), "Default must not invent one");
-        let err = check_tool_access("edit_file", &config)
+        let err = check_tool_access("edit_file", true, &config)
             .expect_err("writes are off, this must refuse")
             .to_string();
         assert!(
@@ -2580,7 +2635,7 @@ mod tests {
             ..PathSecurityConfig::default()
         };
         assert!(
-            check_tool_access("library", &config).is_err(),
+            check_tool_access("library", true, &config).is_err(),
             "library should be blocked when file_write_enabled = false"
         );
         let config = PathSecurityConfig {
@@ -2588,7 +2643,7 @@ mod tests {
             ..PathSecurityConfig::default()
         };
         assert!(
-            check_tool_access("library", &config).is_ok(),
+            check_tool_access("library", true, &config).is_ok(),
             "library should be allowed when file_write_enabled = true"
         );
     }
@@ -2599,9 +2654,11 @@ mod tests {
             indexing_enabled: false,
             ..PathSecurityConfig::default()
         };
+        // `is_write=false` on purpose: the indexing gate is about indexing_enabled
+        // and must fire for a READ too, independently of the write gate beside it.
         for tool in &["semantic_search", "index"] {
             assert!(
-                check_tool_access(tool, &config).is_err(),
+                check_tool_access(tool, false, &config).is_err(),
                 "{} should be blocked",
                 tool
             );
@@ -2615,17 +2672,22 @@ mod tests {
             indexing_enabled: false,
             ..PathSecurityConfig::default()
         };
-        // Read tools should always work
-        for tool in &[
-            "read_file",
-            "tree",
-            "grep",
-            "symbols",
-            "onboarding",
-            "workspace",
-        ] {
+        // Read tools should always work. `onboarding` sat in this list until
+        // 2026-09-14 and never belonged: `Onboarding::is_write` is unconditionally
+        // `true`, it writes memories and .codescout/system-prompt.md, and it takes
+        // the cross-process write lock like any other write. Its presence in a
+        // fixture named for READ tools is a large part of why the gap read as
+        // intended; it is now covered by
+        // `a_write_tool_outside_the_legacy_name_list_is_still_refused`.
+        //
+        // `workspace` stays, and that is load-bearing rather than incidental: it
+        // does NOT override `Tool::is_write`, so it defaults to a read. If it ever
+        // gains a `true`, activate(read_only: false) — the documented escape from a
+        // read-only project — becomes unreachable from inside one, and the refusal
+        // messages above would all prescribe a call the gate refuses.
+        for tool in &["read_file", "tree", "grep", "symbols", "workspace"] {
             assert!(
-                check_tool_access(tool, &config).is_ok(),
+                check_tool_access(tool, false, &config).is_ok(),
                 "{} should always be allowed",
                 tool
             );
@@ -2649,7 +2711,7 @@ mod tests {
             file_write_enabled: false,
             ..PathSecurityConfig::default()
         };
-        let err = check_tool_access("approve_write", &config).unwrap_err();
+        let err = check_tool_access("approve_write", true, &config).unwrap_err();
         assert!(
             err.to_string().contains("disabled"),
             "should block approve_write when writes disabled: {err}"
@@ -2662,7 +2724,7 @@ mod tests {
             file_write_enabled: false,
             ..PathSecurityConfig::default()
         };
-        let err = check_tool_access("create_file", &config).unwrap_err();
+        let err = check_tool_access("create_file", true, &config).unwrap_err();
         assert!(
             err.to_string().contains("workspace(action='status')"),
             "read-only refusal should point at workspace(action='status') so a caller can \

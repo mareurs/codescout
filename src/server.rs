@@ -649,13 +649,18 @@ impl CodeScoutServer {
             .unwrap_or(Value::Object(Default::default()))
     }
 
+    /// `is_write` is threaded from the dispatcher's own `Tool::is_write(input)`
+    /// rather than re-derived here: the gate below must agree with the predicate
+    /// that already decided whether to take the write lock, or the two disagree
+    /// and the narrower one silently wins.
     async fn check_tool_access(
         &self,
         name: &str,
+        is_write: bool,
         workspace_override: Option<&std::path::Path>,
     ) -> std::result::Result<(), CallToolResult> {
         let security = self.agent.security_config_for(workspace_override).await;
-        crate::util::path_security::check_tool_access(name, &security)
+        crate::util::path_security::check_tool_access(name, is_write, &security)
             .map_err(|e| CallToolResult::error(vec![Content::text(e.to_string())]))
     }
 
@@ -1255,6 +1260,12 @@ impl CodeScoutServer {
 
         let workspace_override = Self::extract_workspace_override(&input);
 
+        // Computed ONCE and threaded to both consumers below — the pinned-residency
+        // upgrade and the access gate. Deriving it twice is how the two halves of
+        // this decision drift apart, which is the defect in
+        // docs/issues/2026-09-14-read-only-blocks-five-tool-names-not-the-writes-it-promises.md
+        let is_write = tool.is_write(&input);
+
         // A per-request workspace= pin is the caller's explicit, deliberate
         // choice of target — they named the exact path. For a write-tool
         // call, grant that pinned workspace write access on first residency
@@ -1267,7 +1278,7 @@ impl CodeScoutServer {
         // the point of pinning. Read-only calls never reach this branch, so
         // a pinned read still gets the safer read-only default.
         if let Some(root) = workspace_override.as_deref() {
-            if tool.is_write(&input) {
+            if is_write {
                 let _ = self
                     .agent
                     .ensure_resident(root.to_path_buf(), Some(false))
@@ -1276,7 +1287,7 @@ impl CodeScoutServer {
         }
 
         if let Err(err) = self
-            .check_tool_access(&req.name, workspace_override.as_deref())
+            .check_tool_access(&req.name, is_write, workspace_override.as_deref())
             .await
         {
             return Ok(err);
@@ -6823,6 +6834,99 @@ mod tests {
         );
     }
 
+    /// Every call the dispatcher classifies as a write must be refused under a
+    /// write block — walked over the REAL registry, never a name list.
+    ///
+    /// **What makes this fail:** reverting `check_tool_access` to match on the
+    /// five literal tool names it carried from 2026-03 to 2026-09-14
+    /// (`approve_write | create_file | edit_file | edit_code | library`). By then
+    /// `doc`, `librarian`, `memory` and `onboarding` had all become writes and
+    /// wrote straight through a read-only activation, each having already taken
+    /// the cross-process write lock on the strength of the same `is_write` the
+    /// gate was not consulting.
+    ///
+    /// **A name list is precisely what this test must not be.** One here would
+    /// drift exactly as the production list did, and would stay green while a
+    /// write tool added tomorrow went unguarded — the defect reproduced one level
+    /// up, which CLAUDE.md § *Testing Discipline* calls an assertion computed over
+    /// a population that cannot falsify. So the oracle is each tool's own
+    /// `is_write`, and the inputs come from its own `action` enum, the same
+    /// two-source idiom as [`annotations_agree_with_is_write`] above.
+    ///
+    /// `indexing_enabled: true` is load-bearing: it keeps `index` and
+    /// `semantic_search` off the indexing arm so this asserts about the WRITE
+    /// gate. With indexing off, `index` would be refused for an unrelated reason
+    /// and the test would pass without exercising what it names.
+    #[tokio::test]
+    async fn every_write_call_is_refused_under_a_write_block() {
+        let (_dir, server) = make_server().await;
+
+        let blocked = crate::util::path_security::PathSecurityConfig {
+            file_write_enabled: false,
+            indexing_enabled: true,
+            write_block: Some(crate::util::path_security::WriteBlock {
+                root: std::path::PathBuf::from("/work/browsed-repo"),
+                cause: crate::util::path_security::WriteBlockCause::ActivatedReadOnly,
+            }),
+            ..crate::util::path_security::PathSecurityConfig::default()
+        };
+
+        let mut refused = 0usize;
+        let mut reads_allowed = 0usize;
+        let mut leaked: Vec<String> = Vec::new();
+
+        for tool in &server.tools {
+            let name = tool.name().to_string();
+
+            let mut inputs = vec![serde_json::json!({})];
+            if let Some(actions) = tool
+                .input_schema()
+                .get("properties")
+                .and_then(|p| p.get("action"))
+                .and_then(|a| a.get("enum"))
+                .and_then(|e| e.as_array())
+            {
+                for a in actions.iter().filter_map(|x| x.as_str()) {
+                    inputs.push(serde_json::json!({ "action": a }));
+                }
+            }
+
+            for input in &inputs {
+                let is_write = tool.is_write(input);
+                let verdict =
+                    crate::util::path_security::check_tool_access(&name, is_write, &blocked);
+                match (is_write, verdict.is_ok()) {
+                    (true, true) => leaked.push(format!("{name} {input}")),
+                    (true, false) => refused += 1,
+                    (false, true) => reads_allowed += 1,
+                    (false, false) => {}
+                }
+            }
+        }
+
+        assert!(
+            leaked.is_empty(),
+            "these calls are is_write=true but reached the tool body under a read-only \
+             activation: {leaked:?}"
+        );
+
+        // Non-triviality in both directions. Without the first, a registry that
+        // returned nothing reads as green; without the second, a gate that refused
+        // EVERYTHING — reads included — also reads as green, and that regression
+        // would make activate(read_only: false) unreachable from inside a read-only
+        // project, i.e. break the escape every refusal message prescribes.
+        assert!(
+            refused >= 10,
+            "only {refused} write call(s) were exercised — the walk is reading a truncated \
+             registry and this gate would otherwise pass vacuously"
+        );
+        assert!(
+            reads_allowed > 0,
+            "no read call was allowed through the write block — the gate is refusing reads too, \
+             which would strand a caller inside a read-only project with no way out"
+        );
+    }
+
     /// The attachment itself, on the path the wire takes.
     ///
     /// `annotations_agree_with_is_write` reads `Tool::annotations()` directly, so it stays
@@ -7257,7 +7361,9 @@ mod tests {
         // Shell is allowed by default: shell_command_mode defaults to "warn"
         // and check_tool_access no longer gates run_command.
         assert_eq!(security.shell_command_mode, "warn");
-        assert!(crate::util::path_security::check_tool_access("run_command", &security).is_ok());
+        assert!(
+            crate::util::path_security::check_tool_access("run_command", false, &security).is_ok()
+        );
     }
 
     // ── route_tool_error ───────────────────────────────────────────────────
