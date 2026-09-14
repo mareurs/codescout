@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: investigating
+status: mitigated
 title: 'BUG: the pre-edit dirty-check reports any write it did not mediate as another session''s — edit_code renames and librarian writes alike'
 tags:
 - cluster/gate-keyed-on-unobservable-event
@@ -150,40 +150,65 @@ not hold.
 
 ## Fix
 
-*Not written.*
+**Option 1 shipped 2026-09-14** — `claude-plugins:9169527`, patch-id
+`f909298548df5b1631c84a2ac281d1cca4468e3d`.
 
-**Read this before scoping one — a fix aimed at the rename route will go green and leave
-the common route open.** That is this bug's own cluster turned on its record: the title
-became the spec, `edit_code` is in the tags, and § *Reproduction* drives the rename path.
-A patch that teaches the hook about `edit_code`'s extra files closes one route of at least
-two, passes every test here, and leaves the librarian route — the higher-volume one —
-firing exactly as before. **The acceptance criterion is a librarian write, not a rename:**
-call `doc(action="update")` on a clean file, then `edit_file` it, and the advisory must
-stay silent.
+The headline now reads *"`<path>` has uncommitted changes that no edit through this hook
+accounts for"*, followed by a line stating that this is a claim about **this hook's
+records** and listing the routes that leave the same trace. The move is from a claim about
+the WORLD, unobservable from a `PreToolUse` payload, to a claim about the hook's own marker
+set, which it holds. The predicate is untouched and was correct throughout.
 
-Two candidates, in preference order:
+**What is NOT fixed, and why the status is `mitigated` rather than `fixed`.** The advisory
+still FIRES on a session's own unmediated writes — it no longer mislabels them. The
+acceptance criterion stated above (*"call `doc(action="update")` on a clean file, then
+`edit_file` it, and the advisory must stay silent"*) is **not met, and is not reachable
+from this hook**: `doc()` addresses artifacts by **id, not path** —
+`doc(action="update", id="dd98…")` carries no path — so there is nothing to hash a marker
+from without catalog access the hook does not have. That criterion was written before the
+obstacle was known; it is left standing rather than quietly relaxed, because the gap between
+what was specified and what shipped is the part a later reader needs.
 
-1. **Soften the headline to its predicate.** *"`<path>` has uncommitted changes"* plus the
-   existing fine print, dropping the authorship claim the hook cannot support. Cheapest,
-   and loses nothing the hook actually knows. **It is also the only candidate that is
-   route-independent** — it removes the unobservable claim rather than chasing the ways of
-   observing it, so no future write path can reopen it. That property, not the cost, is
-   the reason it leads.
-2. **Consult the same source the red-attribution hook already uses.** That hook resolves
-   authorship from Claude transcripts across profiles and names this session correctly. If
-   the dirty-check called it, the advisory could say *"written by THIS session"* and
-   suppress itself — at the cost of a ~7s scan on every structural edit, which is probably
-   why it does not. Route-independent too, but it buys a stronger claim at a price paid on
-   every call.
+Silence on the librarian route therefore remains open, and would need either a marker
+written by something that can resolve an artifact id to a path, or the hook shelling into
+`codescout`. Neither was attempted.
 
-Option 1 is likely right: the guard's value is *"look before you commit by pathspec"*, and
-that survives dropping the authorship assertion entirely.
+Option 2 (consult the transcript-scanning attribution source) remains available and
+unattempted. It would buy a stronger claim — *"written by THIS session"* and suppression —
+at a ~7s scan on every structural edit.
 ## Tests added
-None — fix not written. A regression test should assert the advisory string contains no
-negative authorship claim, i.e. that it names dirtiness and not a writer. Per this repo's
-own rule, assert the **shape** (does the message still name the provenance script as a
-second step?) rather than pinning the prose.
 
+Two suites cover this hook, in different trees, and the first search found only one —
+recorded as `context-injection-session-log:F-8`.
+
+`claude-plugins:codescout-companion/hooks/pre-edit-dirty-check.test.sh` — four new
+assertions:
+
+| assertion | direction |
+|---|---|
+| `headline claims only what the hook observes` | **absence** of the authorship claim |
+| `headline states the observable fact` | presence of the replacement |
+| `body still names the instrument that can answer authorship` | remedy shape |
+| `body still says whose records the claim is about` | remedy shape |
+
+The absence assertion is the load-bearing one: every pre-existing test in that file is
+about the **predicate**, which was correct throughout and stayed correct through the
+defect. A suite of predicate tests cannot see a headline that over-claims, so nothing would
+have reddened — which is why the defect survived a passing suite for as long as it did.
+
+`claude-plugins:tests/test-pre-edit-dirty-check.sh` — one assertion **repaired rather than
+added**. Its comment stated the intent (*"It does NOT establish a peer"*) while its code
+pinned the very sentence carrying the defect, so the fix reddened it. It now tests the
+intent in both directions, because each half alone is monotone the wrong way: absence
+alone passes on an empty message, presence alone passes on a message that scopes its claim
+and then asserts authorship anyway.
+
+Mutation-verified, with each mutation asserted to have APPLIED before its result was read
+(`context-injection-session-log:F-7`): restoring the authorship headline kills 2, dropping
+`file-provenance.py` kills 1, dropping the records-scoping line kills 1.
+
+**Not tested:** that the advisory goes silent after a librarian write. See § *Fix* — it is
+not reachable, and was left unasserted rather than weakened into something passable.
 ## Workarounds
 Read `git diff -- <path>` before believing the advisory. If the diff is entirely your own
 recent edit, it is this false positive. `edit_code`'s rename response already tells you

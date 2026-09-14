@@ -1041,6 +1041,38 @@ reading as their breakage.
 because path citations decay across moves. Nothing here generalises to corpora with no such
 enumerator; there, reading one real citation first is the only available check.
 
+**IT RECURRED THE SAME HOUR, AFTER THIS ENTRY WAS WRITTEN** — which is the more useful
+datapoint, and the reason this is an addendum rather than a second entry. About to change
+the dirty-check advisory's wording, I checked what pinned that text:
+
+```
+grep -n "did not write\|already has uncommitted" hooks/pre-edit-dirty-check.test.sh
+  -> nothing
+```
+
+and proceeded. A SECOND suite, `tests/test-pre-edit-dirty-check.sh`, pinned the exact
+phrase and went red. The pattern was right this time; the **directory** was wrong — I
+searched the colocated test and never the `tests/` tree, on a repo whose runner globs both.
+
+So the class has two axes and the first instance only showed one:
+
+| axis | the query said | the corpus said |
+|---|---|---|
+| **form** (F-8 above) | full filename | bare slug |
+| **location** (this one) | `hooks/*.test.sh` | also `tests/test-*.sh` |
+
+**And the stated mitigation did not cover this one.** *"Prefer a tool that enumerates"*
+works when an enumerator exists; for "what pins this string" there is none. What actually
+caught it was **running the whole suite** — `tests/run-all.sh`, whose globs are the
+authoritative answer to "what tests exist" precisely because the runner derives them rather
+than me. Generalised: when the question is *"what else depends on this?"* and no enumerator
+answers it, **the build IS the enumerator** — run it before trusting a grep that says
+nothing depends on anything.
+
+That it recurred within the hour, to the session that had just written the entry, is
+`CLAUDE.md` § *Observer Blindness* holding exactly as stated: *knowing the class prevented
+none of the four*. Recorded as a denominator, not as a second catch.
+
 ## Template for new entries
 
 <!-- New F-N / W-N entries land above this line. This heading is the anchor:
