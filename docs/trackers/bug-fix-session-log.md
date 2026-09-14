@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 149
+entry_high_water_F: 150
 entry_high_water_W: 135
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 135
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-150 | 2026-09-14 | med | reasoning/bug-triage | fixed-verified | **Concluded "no such code path exists" from a reproduction run at one point on a thresholded axis.** Filed `2546172a20a4751e` claiming nothing reads `BufferEntry.stderr`, from two of three call sites. The third read exactly that field, gated on `needs_summary` (>~10 KB). The reproduction was `grep -c` — two bytes — so every observation sat on the one side of the gate where the mechanism is absent, and *absent* and *gated out* are byte-identical there. Three fix shapes drafted on the false premise, all redesigning two tools' read contracts to duplicate a shipping mechanism. Tell: before concluding a mechanism does not exist, re-run the reproduction on the far side of every threshold the code consults — "widen the sample" does not reach this, because one more sample at the same size is the same observation. |
 | F-147 | 2026-09-14 | med | cross-session | fixed-verified | **A pathspec commit captured a peer's staged edit to the same file, because I read the staged SET instead of the staged DIFF.** `git status --short` answers which paths; only `git diff --cached` answers which bytes. |
 | F-148 | 2026-09-14 | high | tooling | fixed-verified | **Ran the gate backgrounded, believed its `✓ exit 0` summary, and put a truncated file into the shared build.** The buffer that same response pointed at held `could not compile`. Backgrounding also costs the `attribute-red` hook, so nothing local raised — two failures, one trigger, not to be conflated. Fixed at `cc57cd28`; run gate commands in the FOREGROUND, or capture `EXIT=$?` in band. |
 | F-146 | 2026-09-14 | low | doc-vs-code | promoted-to-bug-tracker | **A served worked example outranked the tool schema that was in context beside it.** Wrote `F-145`/`W-134` as section-then-index-row, reproducing the capture window `8857b0b2` fixed by giving `append_entry` `index_row` + `index_after_line`. The miss was NOT missing documentation: the schema describes both parameters, their coupling and their failure mode, and was served in the tool list all session. The disagreeing surface was the worked example in `codescout-companion:reconnaissance` § Phase 3 — which I had loaded and was executing — and the example won, because a schema is read once as a field list while an example is read at call-composition time as a copyable shape. A skill's worked example is therefore a second, unversioned copy of the tool's contract that decays independently while being the copy actually executed. Tell: when a recipe and a schema name the same call and the recipe uses FEWER parameters, prefer the schema — it is generated from the code and the recipe is not. Filed as `27d7469e027c3c86` (recipe half); this is the rank half |
@@ -15204,6 +15205,26 @@ closed bug.
 **Promote-when:** a second instance of "copied a sibling's shape and inherited its
 unmeasured bound" appears in any subsystem. Two instances make it an `IC-N`, not an F-N;
 `cluster/capped-result-presented-as-complete` is the likely home.
+
+## F-150 — A reproduction at one point on a thresholded axis cannot tell "no mechanism" from "mechanism gated out"
+
+**Valid:** dated 2026-09-14
+
+**Observed.** I filed `docs/issues/2026-09-14-every-reader-of-a-cmd-buffer-takes-stdout-only-so-the-stored-stderr-reaches-nobody.md` (`2546172a20a4751e`) with a § Root cause reading *"Established by reading both call sites, not inferred"* and a § Summary asserting **"Nothing ever reads that field."** Both `grep.rs:974` and `read_file.rs:286` do take `.stdout` alone, as reported — but a **third** reader existed at `src/tools/run_command/output.rs`, resolving the `@cmd_` token out of the query string and emitting `e.stderr` with `stderr_shown`/`stderr_total` counters. The field the bug said nothing reads had a reader, a response shape and three tests.
+
+**Mechanism — why a correct reproduction produced a wrong cause.** That reader was gated on `needs_summary(&raw_stdout, &raw_stderr)`, i.e. combined output over ~10 KB. My reproduction ran `grep -c MARKER @cmd_*`, whose output is `"0\n"` — two bytes. So every observation I took sat on the side of the gate where the mechanism is **absent**, and on that side *"no reader exists"* and *"the reader is gated out"* emit byte-identical output: a response with no `stderr` field. Nothing in the reproduction could separate them, and it was never re-run at a size that crosses the threshold.
+
+**Why this is not the "widen the sample" law.** One more `grep -c` is the same observation. Sample size is orthogonal — the axis that discriminates is the one the *code* branches on, and the reproduction has to be run on **both sides of it**. § *Testing Discipline*'s monotone-direction law is about which way an assertion is blind; this is about which **region of the input space** the observation was taken in. A conclusion of the form *"this code path does not exist"* drawn from one region is a claim about the region.
+
+**Cost.** Three fix shapes (concatenate at read time / labelled section / second handle), all premised on the false claim, all redesigning `grep`'s and `read_file`'s read contract — including one that would have silently changed line numbering for every `sed -n 'N,Mp' @cmd_*` caller. Caught before implementation, at the cost of one re-read. The actual fix (`9b6f4713`) was a hoist.
+
+**Sharper statement it bought.** The defect is better than first filed: the gate is **anti-correlated with need**. A query returning a flood gets the stderr in full; a query returning `0` gets nothing — and `0` is the only case where absence and loss are indistinguishable. That is the day's fourth remedy-unreachability instance, and the first in shipping production code rather than in a guard's message text.
+
+**Tell.** Before writing *"nothing does X"*, grep for the field/function name across **all** call sites rather than the ones the reproduction led you to, and check each reader's guard. Where a guard is a size or count threshold, re-run the reproduction on the far side of it. `CLAUDE.md` § *Bug Tracking* — *"run the reproduction before reading the fix plan, the plan is a hypothesis about the reproduction"* — applied here to a plan I wrote myself, twelve hours later.
+
+**Rests on:** `src/tools/run_command/output.rs` retaining a size-thresholded branch around the buffer-stderr lookup. The hoist removed that threshold, so the specific instance is closed; the class is not.
+
+**Status:** fixed-verified
 
 ## Template for new entries
 

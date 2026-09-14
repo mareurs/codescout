@@ -1,7 +1,7 @@
 ---
 id: '2546172a20a4751e'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: every reader of a @cmd_* buffer takes .stdout only, so the stderr it stores reaches nobody'
 tags:
 - cluster/capped-result-presented-as-complete
@@ -177,6 +177,36 @@ already in the fixture and no assertion pointed at it. A positive `contains("err
 discriminates.
 
 **Mutation-verified**, not merely added: see § *Fix provenance*.
+## Fix provenance
+
+- **SHA:** `9b6f4713`
+- **patch-id:** `b4ad8f93f7bf28bd6452123f4a4e6562aa5ced22`
+
+Gate 2026-09-14: `fmt 0`, `clippy 0`, `lean 0`, `default 0` (9805 passed, 92 ignored). Both
+tests read **by name** out of both lanes — `grep -c` returned `2` for each, so neither is a
+default-lane-only assertion.
+
+**Mutation-verified at the guarded site.** `scripts/mutation-probe.sh --strict`, reverting the
+short-output path's `&buffer_stderr` to `&raw_stderr` — the precise pre-fix behaviour:
+
+```
+177 passed; 2 failed
+  run_command_buffer_only_within_limit_no_truncation_fields
+  buffer_query_below_summary_threshold_still_surfaces_stored_stderr
+```
+
+Both messages **rendered**, and the second printed the defect verbatim —
+`Object {"exit_code": Number(1), "stdout": String("0\n")}`, a bare count with no stderr field.
+That is the point of reading a probe's output rather than its colour: a kill proves the
+assertion fires, never that the message it emits is reachable or legible.
+
+**The probe's own verdict line was dropped by the tool reading it, which is this bug.**
+`mutation-probe.sh` writes `KILLED`/`SURVIVED` with `echo … >&2`, so they are not in the
+`tee`'d `$RUNLOG` — they are the process's stderr, stored on the buffer entry and invisible to
+`grep @cmd_*`. The MCP server was still running the pre-fix binary. The verdict was recovered
+from the exit code instead: `--strict` remaps *only* INCONCLUSIVE to `3`, the probe exited
+`101`, and 179 tests executed — so not the zero-test branch, therefore KILLED. That is the
+channel `--strict` exists to preserve, used for the first time on the bug that motivated it.
 ## Workarounds
 
 **Fixed for `run_command`.** A buffer query now carries the entry's stored stderr at any
