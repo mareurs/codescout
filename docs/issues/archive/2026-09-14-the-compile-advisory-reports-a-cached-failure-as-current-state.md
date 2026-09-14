@@ -257,7 +257,16 @@ write a test that cannot exist, and the failure of that attempt looks like your 
 incompetence rather than a missing seam. (Framing owed to sessionId
 `9403d62d-116b-46ea-ac9b-004acff2b1cb`, who checked their own gate against this shape on
 receiving it and found it had two levels plus an end-to-end — the right response to a law, and
-the one that tells you whether it applies to you.)
+the one that tells you whether it applies to you. **Their own account, which corrects a
+too-generous reading of that:** the two-level *construction* was deliberate — a cap firing on
+every position satisfies the fenced half alone, so only the fenced/inline **pair**
+discriminates — but the *finding* was not. `cap_code_block_bites_artifact_missing` was written
+to CONFIRM a design that said the cap would apply "for free", and it failed. The gap surfaced
+because a confirming check came back **negative**, not because anyone anticipated it. That is
+this repo's *instrument the doubt, not the correction* arriving with a cheaper instrument than
+the one used here: **a confirming test is cheaper to run than a mutation is to reach**, and it
+can only report a gap if it was written against a band the production path cannot yet
+produce.)
 ### Known ceiling, stated rather than left to be found
 
 `pending` is also set when `may_start` refuses for the **debounce** alone, and nothing drains
