@@ -19,7 +19,7 @@ severity: medium
 seeds an empty workspace (`touch workspace.toml`) and never indexes. So in CI that table holds
 **zero rows**.
 
-Since `f4dc25f9`'s successor (this fix), an empty table disables the check rather than marking
+Since `ae6dc663` (patch-id `dc984ea9668ba34ac18a38cb1c2473393bdfcc71`), an empty table disables the check rather than marking
 every citation dead — which stops the false reds. The residual defect is the other half: **the gate
 is registered on the one job it was armed for and cannot fire there.** Every piece is individually
 correct — parser, resolver, severity chain, `--fail-on high`, the CI step — and nothing connects
@@ -81,7 +81,7 @@ instrument used to certify the tightening was structurally incapable of expressi
 
 ## Fix
 
-Not done. The disabling half shipped; the wiring half needs a decision:
+Not done. The disabling half shipped at `ae6dc663`; the wiring half needs a decision:
 
 1. **Expose reindex on the CLI** (`codescout librarian reindex`, or `audit-doc-refs --reindex`), then
    add a step to the `Audit Doc Refs` job. Restores the gate's meaning. Costs a new subcommand plus
