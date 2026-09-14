@@ -340,8 +340,26 @@ frees the lock, because `cargo test` returning *is* that event — which the sec
 So no arrangement of `;` closes it. The window is a property of **mutating bytes in a worktree a
 peer's build can read**, and only two things reach that:
 
-- **Do not mutate the shared worktree.** A git worktree or a copy removes the window entirely
-  and costs a cold `target/` — real money on this repo, and an operator's call, not a free swap.
+- **Do not mutate the shared worktree.** A git worktree or a copy removes the window entirely.
+  **Its cost is UNMEASURED and this file will not pretend otherwise.** The first draft of this
+  line read *"costs a cold `target/` — real money on this repo, and an operator's call, not a
+  free swap"*, which was asserted rather than derived. Checking it the same day found two facts
+  that move it in opposite directions and settle neither: `.cargo/config.toml` sets
+  `rustc-wrapper = "sccache"`, which READS as "mostly cached" and is not — `sccache
+  --show-stats` on this machine reports **3790 compile requests, 7 executed, 0 hits, 0.00%**,
+  because Rust incremental builds bypass sccache and dev builds are incremental; and the
+  existing linked worktree already carries a **6.7 G** `target/` against the main checkout's
+  108 G, so a build has been paid there once already. The number the recommendation actually
+  turns on — **wall-clock for a fresh worktree `cargo test --lib`** — is still not measured, and
+  anyone reaching for *"too expensive"* should measure it rather than inherit this sentence.
+
+  **Why the error belongs next to the remedy it suppressed:** an unmeasured cost attached to an
+  option you DECLINE is *self-sealing*. Declining produces no evidence, so nothing can ever
+  contradict the estimate, and the belief is reinforced only by true facts about adjacent
+  things. Same family as a gate keyed on something it cannot observe, pointed at a decision
+  rather than a predicate. (Shape from sessionId `6be73414-6293-4a4e-95a4-4bada8327f08`, who
+  found it in their own work — the premise that decided what they would NOT do was the only one
+  they never checked at the bytes — and offered it here rather than keeping it.)
 - **Accept the window and make the red legible**, which is this file's marker direction and its
   actual answer.
 
