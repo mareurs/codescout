@@ -12,7 +12,7 @@ topic: context-injection
 entry_prefix:
   - F
   - W
-entry_high_water_F: 10
+entry_high_water_F: 11
 entry_high_water_W: 4
 ---
 
@@ -43,7 +43,8 @@ author to make.
 | F-7 | 2026-09-14 | high | tooling | mitigated | A mutation that never applied is indistinguishable from a surviving mutant |
 | F-8 | 2026-09-14 | med | tooling | mitigated | A positive control validates the instrument, never the query |
 | F-9 | 2026-09-14 | med | plan-prose | mitigated | The fix plan's own workaround is wrong for most ledgers — an anchor is not a constant |
-| F-10 | 2026-09-14 | high | tooling | open | The schema is hand-written too, so "prefer the schema" rests on a false premise — and I shipped its stale claim to four surfaces |
+| F-10 | 2026-09-14 | high | tooling | fixed-verified | The schema is hand-written too, so "prefer the schema" rests on a false premise — and I shipped its stale claim to four surfaces |
+| F-11 | 2026-09-14 | med | tooling | open | A control whose subject was relabelled in transit — `2>&1` made my stderr evidence stdout |
 
 ## Wins Index
 
@@ -1246,8 +1247,62 @@ declaring artifact, so the `Declared` arm is verified as written, not as run.
 **Severity:** high — four prescriptive surfaces, two repos, now state a contract the code refuses
 to honour in one direction, and one of them is the regression guard for this exact class.
 
-**Status:** open — recorded at notice; the repair is four one-line corrections plus a decision
-about whether `artifact.rs:312` should be coupled to the arms rather than restated beside them.
+**Status:** fixed-verified — all four surfaces corrected and the schema string coupled to the
+arms by `index_row_description_names_every_way_to_anchor_a_row`, observed KILLED (rc=101) at
+`e00386e3` / patch-id `3286f54a85cd5c134c1cbf78a32b4efa7ec2f3a6`, cross-repo
+`codescout-companion:7118ad3` / `e1b5f825f2a97032a5c9b2b94ed19cd89b652506`. The budget ratchet
+55_740 → 55_977 rode with it, derivation in `TOOL_SURFACE_CHAR_BUDGET`'s log.
+
+## F-11 — A control whose subject was relabelled in transit — `2>&1` made my stderr evidence stdout
+
+**Valid:** dated 2026-09-14
+
+**Observed:** `docs/issues/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md`
+§ Hypotheses tried rejects *"stderr is never captured for test-type runs"* with: *"cargo's own
+`Compiling …` lines are stderr and are present [in the buffer]."* The verdict is right and **the
+reason is void**. Corrected by sessionId `9403d62d`, verified here at the bytes before accepting.
+
+`scripts/mutation-probe.sh:233` runs `( cd "$TREE" && "$@" ) 2>&1 | tee "$RUNLOG"`, and its own
+comment at `:229` says so: *"`tee` merges stderr into stdout for the caller — a visible change."*
+So by the time those `Compiling …` lines reached the buffer they **were stdout**. Their presence
+is evidence about stdout capture and says nothing whatever about stderr.
+
+The true state is stronger than the hypothesis I rejected: `read_from_buffer`
+(`src/tools/read_file.rs:276`) resolves `ctx.output_buffer.get(path)?.stdout` — **`.stdout` alone**.
+Buffer reads never return stderr on any path, so `BufferEntry.stderr` is written by `store()` and
+read by nobody (filed by them as `2546172a20a4751e`).
+
+**This is `F-8`'s mechanism at one further remove, and the distinction is the entry.** `F-8` was
+*a positive control validates the instrument, never the query* — my `grep` worked, and I cited that
+as though it answered a question about the corpus. Here the control's **subject was relabelled in
+transit**: I asked "is stderr in the buffer?", looked at bytes that had been stderr at the source,
+and never asked what they were *at the observation point*. A pipeline is a place where the answer
+to *"which stream is this?"* changes, and `2>&1` is precisely the instruction to change it.
+
+So the checkable form is not *"did my instrument work"* but **"is the thing I am looking at still
+the thing I named?"** — and it is cheap: the transform was written in a comment four lines above
+the command, in a file I had already opened twice today at other line ranges.
+
+**Second cost, which is why this is not merely a tidy correction.** The void reason was load-bearing
+for a recommendation. § Fix said *"the cheap form is likely right: carry `stderr` in the `test`
+envelope as the `generic` one does."* `summarize_generic`'s stderr is **unbounded**; 227 KB of it
+returns an envelope that itself busts `TOOL_OUTPUT_BUFFER_THRESHOLD` and re-buffers into a one-line
+summary carrying no stderr — shipping the same defect on every `cargo test` with a large compile
+log. Their `summarize_stderr` is bounded (lines **and** bytes) and **tail**-biased, because
+`first_error`/`failures` already mine the head and a wrapper's verdict is always last; its cut
+marker also states *"Full stderr is NOT in the `@cmd_*` buffer — buffer reads return stdout only"*,
+which is `IC-13`'s own remedy applied to the fix for an `IC-13` member.
+
+**Rests on:** `mutation-probe.sh:233`, `read_file.rs:276` and `command_summary.rs:236-341` read at
+`e00386e3` + their uncommitted worktree state. Their 227 KB measurement is **theirs, not
+re-derived here** — recorded as a report, which is the distinction this ledger keeps.
+
+**Severity:** med — no wrong artifact shipped; the bug file's verdict survived and only its stated
+reason and its fix recommendation were wrong. Both live in a file another session now holds.
+
+**Status:** open — the correction belongs in that bug file, which is `status: taken` by
+`9403d62d`. Left to them by design rather than patched around, since editing a record another
+session is actively fixing is the capture this corpus keeps paying for.
 
 ## Template for new entries
 
