@@ -690,7 +690,9 @@ pub fn check_tool_access(
                 }) => bail!(
                     "File writes are disabled for {} by security.file_write_enabled = false in \
                      its .codescout/project.toml. Re-activating with read_only: false will NOT \
-                     clear this — change the config.",
+                     clear this — and neither will editing the file and retrying: the config is \
+                     cached for the life of this process. Edit it, then restart the MCP server \
+                     (`/mcp`) to pick the change up.",
                     root.display()
                 ),
                 // No project root was available to the config builder, so say
@@ -2605,6 +2607,16 @@ mod tests {
         assert!(
             err.contains("will NOT clear this"),
             "must actively steer away from the wrong remedy: {err}"
+        );
+        assert!(
+            !err.contains("— change the config."),
+            "must not send the reader to edit project.toml and retry: the config is cached \
+             for the process's life, so that edit is invisible until a restart. See \
+             docs/issues/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md: {err}"
+        );
+        assert!(
+            err.contains("/mcp"),
+            "must name a remedy that actually re-reads the config: {err}"
         );
     }
 
