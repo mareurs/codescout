@@ -12,8 +12,8 @@ topic: context-injection
 entry_prefix:
   - F
   - W
-entry_high_water_F: 6
-entry_high_water_W: 3
+entry_high_water_F: 7
+entry_high_water_W: 4
 ---
 
 # Session Log — Context Injection & Principal Identity
@@ -40,6 +40,7 @@ author to make.
 | F-4 | 2026-09-14 | high | release-pipeline | superseded | The hook deploys instantly and the server does not, so shipping it now breaks every unreconnected session |
 | F-5 | 2026-09-14 | high | plan-prose | open | The deny_unknown_fields hazard does not exist at the tool surface — 42 occurrences read as 42 gates |
 | F-6 | 2026-09-14 | high | architectural | open | The end-to-end win was the shipped guide_rearm path, not this feature — Arm A was confounded |
+| F-7 | 2026-09-14 | high | tooling | mitigated | A mutation that never applied is indistinguishable from a surviving mutant |
 
 ## Wins Index
 
@@ -48,6 +49,7 @@ author to make.
 | W-1 | 2026-09-14 | high | scout the SINK a proposed value must be accepted at, not only the subsystem under design | an ADR would have shipped on a mechanism the `deny_unknown_fields` librarian tools reject, and the one option buildable today would have been wrongly recorded as unavailable | validated |
 | W-2 | 2026-09-14 | high | probe a would-be KEY in a universe containing two of whatever it keys | a single-field `agent_id` key would have passed every test and conflated two sessions' parents the first time two sessions shared a server | validated |
 | W-3 | 2026-09-14 | high | when the obvious benefit is already provided, measure the property the incumbent cannot have by construction | the ADR's justification would have stayed an argument after F-6 demoted it, with the real benefit unmeasured and unclaimable | validated |
+| W-4 | 2026-09-14 | high | ask what proposition a confirming result proves before copying the thing that produced it | `permissionDecision:'allow'` would have shipped on a matcher covering every codescout tool, auto-approving every subagent `run_command` and `edit_code` | validated |
 
 ---
 
@@ -804,6 +806,105 @@ the subagent, so I cannot say whether the subagent's call or mine drained the re
 request. It does not affect the outcome — either drain clears the shared ledger, which is
 what arm 1 observed — but the attribution is unestablished and the run should not be
 cited as showing *which* call drains.
+
+## F-7 — a mutation that never applied is indistinguishable from a surviving mutant
+
+**Valid:** dated 2026-09-14
+
+**Severity:** high
+**Status:** mitigated
+
+**Observed:** Mutation-testing `principal-stamp.mjs`, five `sed` mutations were
+applied to the production file, each expected to red a specific assertion. M1 —
+inserting `permissionDecision: 'allow'`, the one mutation guarding a permission
+escalation — reported **21/21 green**. Read at face value that is a surviving
+mutant: the assertion is blind and the guard is decorative.
+
+It was nothing of the kind. The `sed` pattern matched six leading spaces; the
+hook indents that line with four. **The mutation never applied.** The suite was
+green because the production file was unchanged, and a no-op mutation and a
+surviving mutant produce byte-identical output: `Total: N. Pass: N. Fail: 0.`
+
+Re-run with the correct indentation and a `diff` printed before the test, M1
+kills `no-permission-decision` cleanly (`expected=null got=allow`).
+
+**Cost if uncaught:** the conclusion available from the green run was "the
+absence assertion does not discriminate". The two repairs that invites are
+rewriting an assertion that was already correct, or recording in a commit
+message that the escalation guard is unverified. Both are worse than no mutation
+run, because each carries the authority of having measured.
+
+**Why the existing law does not cover it.** `CLAUDE.md` § *Testing Discipline*
+says *demand an observed RED, never an assertion's existence*, and *mutate the
+PRODUCTION path, not the test's inputs*. Both were obeyed here. The unstated
+third step is that **the mutation's arrival is itself unverified** — a `sed` that
+matches nothing exits 0 and prints nothing, so the instrument reports success for
+having done nothing. Same shape as the laws it sits beside: the refuting outcome
+leaves no artifact.
+
+**Mitigation, cheap and structural:** print `diff <orig> <mutated>` between the
+edit and the test run. A no-op mutation shows an empty diff; a real one shows the
+hunk. One line, and it converts an invisible failure into a visible one. Used for
+the M1 re-run, and M2-M5 carry the same check in the other direction via
+`file identical to pre-mutation` after restore.
+
+**Rests on:** `sed` exiting 0 on zero matches — true of GNU sed and POSIX. Any
+find-and-replace mutation tool has the same property.
+
+## W-4 — reading the binary stopped a context optimisation shipping as a permission bypass
+
+**Valid:** dated 2026-09-14
+
+**Status:** validated
+
+**Observed:** The disposable prototype that produced the W-3 precision
+measurement emitted `permissionDecision: 'allow'` alongside `updatedInput`. The
+permanent hook was about to inherit it by copying, and a sibling hook
+(`explore-inject.mjs`) sets the same pair — so both precedent and working
+evidence pointed at keeping it.
+
+Asking *what proposition does that evidence prove* stopped the copy. The
+prototype's success showed **the stamp landed**. It could not distinguish that
+from "the stamp landed *and* I disabled the permission prompt", because that
+session's permission mode made the two worlds produce identical output. A
+confirming result from an instrument that cannot express the failure is not
+evidence about the failure.
+
+**Resolved against the shipped binary, not the docs.** `docs.claude.com` lists
+the field but never states whether `updatedInput` applies independently, and two
+fetches truncated before the `#pretooluse` and `#decision-control` sections.
+Grepping Claude Code 2.1.270 settles it three ways:
+
+- the schema declares `permissionDecision` / `permissionDecisionReason` /
+  `updatedInput` / `additionalContext` as four **independent** `.optional()`s;
+- both composition paths attach `updatedInput` without consulting the decision —
+  `O = deny?{…}:ask?{…}:allow?{allow:!0}:{}; if(d) O.updatedInput = d;` and the
+  same shape in `hxo()`;
+- the precedence map `{deny:3, ask:2, allow:1, none:0}` makes "no decision" a
+  real state one rank **below** allow.
+
+In-repo corroboration from an independent source: `lib.mjs::contextPreToolUse`
+already emits a PreToolUse `hookSpecificOutput` with no `permissionDecision`, and
+the call proceeds.
+
+**Counterfactual — what copying would have cost.** The prototype was scoped to
+one session id and matched whatever it was pointed at. The permanent hook matches
+`mcp__codescout__.*`: **every** codescout tool, `run_command` and `edit_code`
+included. Carrying `allow` there would have auto-approved every tool call any
+subagent makes, and outranked every hook that correctly stays silent — the docs
+are explicit that silence does not approve while `allow` does. A context-window
+optimisation would have shipped as a permission bypass, in a plugin that is
+always active in this checkout and installed across three profiles.
+
+Nothing in the test suite as first drafted would have caught it either: the stamp
+lands correctly in both worlds, so every predicate assertion stays green. Only
+asserting the **absence** discriminates, which is why
+`no-permission-decision` / `no-permission-reason` exist and are mutation-verified
+(F-7 records how that verification nearly lied).
+
+**Rests on:** Claude Code 2.1.270's hook dispatcher. The field is undocumented in
+this respect, so a future version could couple them; the test reds if the
+emitted shape ever changes, which is the part that does not decay.
 
 ## Template for new entries
 
