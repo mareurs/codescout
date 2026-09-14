@@ -2,7 +2,7 @@
 
 ## Why It Exists
 
-The MCP server delivers 28 tools and a detailed `server_instructions` block that
+The MCP server delivers 21 tools and a detailed `server_instructions` block that
 tells the AI when to use each one. In a single-agent session this works well —
 the main agent receives the instructions and generally follows them.
 

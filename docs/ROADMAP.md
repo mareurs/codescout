@@ -19,7 +19,7 @@ surviving design records live under `docs/superpowers/plans/`.
 
 See [`FEATURES.md`](FEATURES.md) for the full feature reference. Summary:
 
-- **29 tools** across 7 categories (file, workflow, symbol, semantic, memory, config/nav, GitHub)
+- **21 tools** across 7 categories (file, workflow, symbol, semantic, memory, config/nav, knowledge) — 19 core plus `doc` and `librarian` under the default `librarian` feature
 - **LSP client** — transport, lifecycle, document symbols, references, definition, hover, rename + text sweep
 - **Tree-sitter AST** — symbol extraction + docstrings for Rust, Python, TypeScript, Go, Java, Kotlin
 - **Semantic search** — Qdrant + TEI hybrid retrieval (dense + BM25 sparse, RRF fusion); see [benchmark](research/2026-05-06-retrieval-stack-benchmark.md). Memory storage and recall still run on the in-process sqlite-vec path; see [legacy-removal tracker](trackers/2026-05-07-legacy-retrieval-removal.md) ([concepts](manual/src/concepts/semantic-search.md), [backends](manual/src/configuration/embedding-backends.md))

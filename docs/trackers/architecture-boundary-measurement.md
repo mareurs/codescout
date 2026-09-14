@@ -36,22 +36,6 @@ whether either belongs exclusively to one domain. Cross-domain operations such a
 `index`, `onboarding`, and workspace activation are candidate application workflows rather than
 forced members of one domain.
 
-## Verified starting state
-
-Verified 2026-09-10 and 2026-09-11:
-
-- codescout is a single Rust MCP server coordinating LSP, tree-sitter, retrieval, filesystem and
-  shell operations, project memory, and the librarian catalog.
-- VS Code successfully starts `/home/marius/.cargo/bin/codescout`; the MCP log reported
-  `Connection state: Running` and `Discovered 18 tools` on 2026-09-11 at 08:54 local time.
-- The Copilot conversation used for the initial investigation retained the tool registry captured
-  before the MCP restart. `tool_search` returned zero codescout tools even while VS Code's MCP log
-  showed 18. A new Copilot chat is required for the measurements below.
-- `docs/PROBES.md` contains no existing architectural-coupling probe. This work needs a new
-  instrument rather than adapting a neighboring metric and silently changing its unit.
-- The top-level docs disagree about the tool count and retrieval shape. Counts and backend claims
-  must therefore come from the live registry and current source, not from prose.
-
 ## Frozen source populations
 
 Use these exact path populations for the first baseline. Report unclassified Rust files instead of

@@ -106,12 +106,13 @@ project root.
 
 ### The Rest
 
-Beyond these pillars: 7 file/markdown operation tools (directory listing,
-file reading, pattern search, file creation, find-and-replace editing,
-markdown-aware reading and editing), 3 workflow tools (project onboarding,
-shell commands, write-root approval), and 1 config tool (`workspace`). With
-librarian enabled (default), 5 additional artifact tools appear at session
-start. **~20 tools in the base server, ~25 with librarian.**
+Beyond these pillars: 5 file operation tools (directory listing, file reading,
+pattern search, file creation, find-and-replace editing — `read_file` and
+`edit_file` are themselves markdown-aware rather than separate tools),
+3 workflow tools (project onboarding, shell commands, write-root approval),
+1 config tool (`workspace`), and `get_guide`. With librarian enabled
+(default), 2 further tools appear at session start: `doc` and `librarian`.
+**19 tools in the base server, 21 with librarian.**
 ### Token Efficiency by Design
 
 Every tool defaults to the most compact representation that is still useful.

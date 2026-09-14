@@ -50,7 +50,7 @@ and apply.
 ## Project Structure
 
 The main entry point is `src/main.rs`. The server is wired in `src/server.rs` via
-`CodeScoutServer::from_parts`, which registers all 29 tools. Tools are implemented in
+`CodeScoutServer::from_parts`, which registers all 21 tools. Tools are implemented in
 `src/tools/` grouped by category. The `Agent` struct in `src/agent.rs` holds project
 state and is accessible to all tools via `ctx.agent`. Error routing goes through
 `route_tool_error` in `src/server.rs`: `RecoverableError` maps to `isError: false`,

@@ -1,6 +1,6 @@
 # Tools Overview
 
-codescout exposes 20 tools organized into seven categories. This page is a
+codescout exposes 21 tools organized into seven categories. This page is a
 quick map. Each category has a dedicated reference page linked from the headings
 below.
 
@@ -97,6 +97,20 @@ Project setup, shell execution, and server configuration.
 | `run_command` | Run a shell command in the project root and return stdout/stderr |
 | `approve_write` | Grant write access to a directory outside the project root for this session |
 | `workspace` | Switch the active project (`action: activate`), display project state (`action: status`), or list all projects (`action: list_projects`) |
+
+---
+
+## Knowledge & Guides
+
+Just-in-time guidance, and the document catalog the librarian maintains.
+`doc` and `librarian` are registered only when the `librarian` feature is
+enabled, which it is by default; the base server is 19 tools without them.
+
+| Tool | Description |
+|------|-------------|
+| `get_guide` | Deep guidance for a topic (`librarian`, `error-handling`, `progressive-disclosure`, …); call with no arguments to list every topic with a one-line summary |
+| `doc` | Document catalog: find, read, create, update, move and link markdown documents — specs, plans, ADRs, trackers and bug files — plus their events, augmentations and entries |
+| `librarian` | Workspace-level operations over that catalog: context packing, reindex, staleness and reference audits, link scans, and the `doctor` consistency checks |
 
 ---
 

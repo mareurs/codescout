@@ -2,7 +2,7 @@
 
 ## Why the Plugin Exists
 
-Claude Code has access to codescout's 28 tools, but it also has built-in tools like `grep`,
+Claude Code has access to codescout's 21 tools, but it also has built-in tools like `grep`,
 `cat`, and `Read`. Without guidance, Claude tends to reach for the familiar built-ins — especially
 in subagents, which start each task with a blank slate and have no memory of earlier instructions.
 
@@ -39,7 +39,7 @@ The difference in practice:
 │  └──────────────────────┬──────────────────────┘    │
 │                         │ routes to                   │
 │  ┌──────────────────────▼──────────────────────┐    │
-│  │  codescout MCP server (28 tools)         │    │
+│  │  codescout MCP server (21 tools)         │    │
 │  │                                              │    │
 │  │  LSP · Semantic · Git · AST · Memory · ...   │    │
 │  └──────────────────────────────────────────────┘    │
