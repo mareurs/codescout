@@ -180,6 +180,40 @@ pub struct CodeScoutServer {
     /// `CodeScoutServer::from_parts_with_env` re-arms the project-scoped
     /// topic itself, before any `activate` runs.
     guide_hints_emitted: Arc<parking_lot::Mutex<crate::tools::guide_ledger::GuideLedger>>,
+    /// Ledgers for principals this process has served but is not serving right
+    /// now — the "restore" half that [`GuideLedger::rekey`] alone cannot provide,
+    /// because its re-arm is total by design.
+    ///
+    /// Without this, adopting a principal FIXES the subagent and moves the defect
+    /// to the parent's return leg: the subagent's adoption clears the parent's
+    /// delivered-set, and a parent's later call asserts nothing, so nothing keys
+    /// back. The parent is then served from the subagent's ledger and suppressed
+    /// on every topic the subagent consumed — starvation, the unsafe direction.
+    /// Measured before it could ship, at `context-injection-session-log:F-3`.
+    ///
+    /// **Unbounded by construction, and that is the lesser evil.** One entry per
+    /// principal for the life of the process; a long session spawning many
+    /// subagents accumulates them. Eviction is deliberately not implemented here
+    /// rather than implemented badly: evicting a live principal's ledger
+    /// re-delivers its guides, which is this ledger's documented safe direction,
+    /// but evicting on any policy keyed to recency would silently re-introduce
+    /// the starvation above for a principal that merely paused. An entry is a
+    /// `BTreeMap` of topic→timestamp, so the cost is bytes rather than anything
+    /// structural.
+    parked_ledgers: Arc<
+        parking_lot::Mutex<
+            std::collections::HashMap<String, crate::tools::guide_ledger::GuideLedger>,
+        >,
+    >,
+    /// The ledger key this process was constructed with — the PARENT's identity.
+    ///
+    /// A parent's calls assert no principal, so `None` cannot mean "leave the
+    /// ledger alone": after a subagent has been adopted, that is exactly how the
+    /// parent ends up served from its child's ledger. `None` means "restore
+    /// this", and this field is what it restores to. `None` here in turn means
+    /// the ledger was anonymous at construction, where there is no identity to
+    /// return to and the pre-existing behaviour is correct.
+    base_ledger_key: Option<String>,
     /// This MCP server process's own id — a fresh uuid per construction.
     session_id: String,
     /// The Claude Code session's id, resolved ONCE here (env var, then the
@@ -510,6 +544,14 @@ impl CodeScoutServer {
             crate::lsp::prewarm_lsp_background(Arc::clone(&lsp), root, &prewarm_langs);
         }
 
+        // Captured into a local, NOT inline in the struct literal below: the
+        // `MutexGuard` temporary would live to the end of the enclosing block
+        // rather than the end of its field, so the borrow outlives the move of
+        // `guide_hints_emitted` into the literal (E0505/E0597). Field evaluation
+        // order is what I first reasoned about, and it is not the binding
+        // constraint — temporary lifetime is.
+        let base_ledger_key = guide_hints_emitted.lock().key().map(str::to_string);
+
         Self {
             agent,
             lsp,
@@ -517,6 +559,8 @@ impl CodeScoutServer {
             tools,
             instructions: Arc::new(parking_lot::RwLock::new(instructions)),
             section_coverage,
+            base_ledger_key,
+            parked_ledgers: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
             guide_hints_emitted,
             session_id: uuid::Uuid::new_v4().to_string(),
             cc_session_id,
@@ -1083,43 +1127,65 @@ impl CodeScoutServer {
         self.guide_hints_emitted.lock().re_arm(&refs);
     }
 
-    /// Adopt the conversation a client asserted on THIS request, re-arming the
-    /// guide ledger when it names a conversation we were not already serving.
+    /// Serve `asserted`'s ledger, parking whichever principal's we were serving.
     ///
-    /// This is the per-request identity tier the guide-ledger design doc ranks
-    /// above the rendezvous (`docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md`,
-    /// § *Ranked options*, rank 3). It needs no companion hook and no
-    /// side-channel file, and it is the only tier that can distinguish a
-    /// subagent's call from its parent's: they share `CLAUDE_CODE_SESSION_ID`,
-    /// the process and the connection, so nothing else on the wire differs.
+    /// **`None` means "the parent", never "leave the ledger alone".** That
+    /// distinction is the whole of this function. A parent's calls carry no
+    /// principal stamp, so treating `None` as a no-op leaves the ledger keyed to
+    /// whichever subagent last called — and since [`GuideLedger::rekey`] clears
+    /// `emitted`, the parent is then served from its child's ledger and
+    /// suppressed on every topic that child consumed. That is starvation, the
+    /// unsafe direction, and it is the original subagent defect in mirror image.
+    /// Caught before it could ship, at `context-injection-session-log:F-3`.
     ///
-    /// **Inert until a client sends a CONVERSATION-scoped key — which is not the
-    /// same as "until a client populates `_meta`", because they already do.**
-    /// Claude Code 2.1.270 sends `claudecode/toolUseId` and `progressToken` on
-    /// every call (observed on the wire 2026-09-13); both are per-call, and
-    /// `session_key::CONVERSATION_META_KEYS` records why neither is usable here.
-    /// So `asserted` is `None` on every live call and this returns without
-    /// touching the ledger. Shipping the reader ahead of its sender costs one
-    /// `Option` check per call, and the client-side plumbing it needs exists.
+    /// So the three cases are:
     ///
-    /// **Known limitation, deliberately not closed here.** Adoption re-arms; it
-    /// does not restore. Returning to a previously-served conversation re-sends
-    /// its guides rather than remembering what it had already received, because
-    /// one ledger is held per process, not one per conversation. That
-    /// over-delivers, which is this ledger's documented safe direction
-    /// ([`GuideLedger::load`]: "degrading to re-sending a guide, never to
-    /// suppressing one"). Restoring instead needs a conversation→ledger map and
-    /// is a separate decision.
+    /// | asserted | ledger already on it | action |
+    /// |---|---|---|
+    /// | any | yes | nothing — the common case, every call after the first |
+    /// | seen before | no | park the outgoing, RESTORE the stored one |
+    /// | never seen | no | park the outgoing, re-arm fresh via `rekey` |
+    ///
+    /// Restoring is what `rekey` alone cannot do: its re-arm is total by design,
+    /// correct for a principal we have never served and wrong for one returning.
+    ///
+    /// An **anonymous** ledger (no identity at construction) is never parked —
+    /// there is no key to file it under — so a process with no resolvable session
+    /// behaves exactly as it did before this existed.
+    ///
+    /// The return value is deliberately `asserted` rather than the resolved
+    /// target: it feeds `serving_session`, where `None` must keep falling through
+    /// to the rendezvous. Restoring the parent is a ledger operation, not a claim
+    /// about which conversation the rendezvous should report.
     fn adopt_request_conversation(&self, asserted: Option<String>) -> Option<String> {
-        let session = asserted?;
-        let rekeyed = self.guide_hints_emitted.lock().rekey_if_changed(&session);
-        if rekeyed {
-            tracing::info!(
-                session = %session,
-                "conversation asserted on the request; re-arming the guide ledger"
-            );
+        let target = asserted.clone().or_else(|| self.base_ledger_key.clone())?;
+
+        let mut live = self.guide_hints_emitted.lock();
+        if live.key() == Some(target.as_str()) {
+            return asserted;
         }
-        Some(session)
+
+        let mut parked = self.parked_ledgers.lock();
+        if let Some(outgoing) = live.key().map(str::to_string) {
+            parked.insert(outgoing, live.clone());
+        }
+        match parked.remove(&target) {
+            Some(restored) => {
+                *live = restored;
+                tracing::info!(
+                    principal = %target,
+                    "restored the guide ledger of a previously served principal"
+                );
+            }
+            None => {
+                live.rekey(&target);
+                tracing::info!(
+                    principal = %target,
+                    "principal not served before; re-arming the guide ledger"
+                );
+            }
+        }
+        asserted
     }
 
     /// Drive [`poll_rendezvous`](Self::poll_rendezvous) without routing a tool
@@ -10220,6 +10286,75 @@ mod guide_hint_tests {
         assert!(
             !call(&server, Some("sess-1/agent-b")).await.is_empty(),
             "a second concurrent principal must be re-armed independently"
+        );
+    }
+
+    /// A parent's call after a subagent's restores the PARENT's own ledger,
+    /// rather than leaving it served from its child's.
+    ///
+    /// This is `context-injection-session-log:F-3`, and it is the reason the
+    /// parked-ledger map exists at all. Adopting a principal without it fixes the
+    /// subagent and moves the starvation to the parent: `rekey` clears `emitted`,
+    /// a parent's call asserts nothing, so nothing keys back and the parent is
+    /// suppressed on every topic its child consumed.
+    ///
+    /// **The subagent calls FIRST here, and that ordering is the whole test.**
+    /// With the parent served first, both the old and new behaviours dedupe at
+    /// every later step — the two converge, and the test would pass against the
+    /// defect. Serving the subagent first is what makes the parent's very first
+    /// call the one that must not be suppressed, which only restoration can do.
+    #[tokio::test]
+    async fn a_parent_call_after_a_subagent_restores_the_parents_own_ledger() {
+        async fn call(server: &CodeScoutServer, principal: Option<&str>) -> Vec<String> {
+            let mut arguments = serde_json::Map::new();
+            arguments.insert("command".to_string(), json!("echo hi"));
+            if let Some(p) = principal {
+                arguments.insert(
+                    crate::tools::session_key::PRINCIPAL_ARG_KEY.to_string(),
+                    json!(p),
+                );
+            }
+            let params = json!({
+                "name": "run_command",
+                "arguments": Value::Object(arguments),
+            });
+            let req: CallToolRequestParams = serde_json::from_value(params).unwrap();
+            let out = server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .unwrap();
+            guide_blocks(&out.content)
+        }
+
+        let (_dir, server) = make_server().await;
+
+        // 1. The SUBAGENT is served first, before the parent has received anything.
+        assert!(
+            !call(&server, Some("sess-1/agent-a")).await.is_empty(),
+            "a subagent's first call must be served"
+        );
+
+        // 2. THE ASSERTION THIS TEST EXISTS FOR. The parent has still never been
+        //    served. Without the parked map the ledger is keyed to agent-a, whose
+        //    delivered-set already holds the opener, and the parent is silently
+        //    suppressed on a guide it has not received a byte of.
+        assert!(
+            !call(&server, None).await.is_empty(),
+            "the parent must not be suppressed by what its subagent consumed"
+        );
+
+        // 3. POSITIVE CONTROL. The parent's own dedup must still work, or step 2
+        //    would be satisfied by a ledger that simply re-arms on every call.
+        assert!(
+            call(&server, None).await.is_empty(),
+            "the parent's second call must dedupe"
+        );
+
+        // 4. The subagent returns. Its ledger was PARKED at step 2, so it must be
+        //    restored and deduped — not re-armed as a newly-seen principal.
+        assert!(
+            call(&server, Some("sess-1/agent-a")).await.is_empty(),
+            "a returning principal must be restored, not re-armed"
         );
     }
 

@@ -12,7 +12,7 @@ topic: context-injection
 entry_prefix:
   - F
   - W
-entry_high_water_F: 2
+entry_high_water_F: 3
 entry_high_water_W: 2
 ---
 
@@ -36,6 +36,7 @@ author to make.
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-09-14 | low | plan-prose | open | TAXONOMY's `entry_prefix` tradeoff: one horn is false, the other is not a benefit |
 | F-2 | 2026-09-14 | high | plan-prose | fixed-verified | A code comment's scope qualifier was narrower than its phrasing, and it killed a viable design for two turns |
+| F-3 | 2026-09-14 | high | architectural | fixed-verified | Adopting a principal moves starvation to the parent's return leg, so the ledger map must precede the hook |
 
 ## Wins Index
 
@@ -467,6 +468,68 @@ own dispatch — confirmed by `session_id`, which differs from this session's in
 capture. Note honestly that this win was **accidental in origin**: I chose project scope
 for blast-radius reasons, not to obtain a second principal. The lesson is the one to keep;
 the foresight is not mine to claim.
+
+## F-3 — Adopting a principal moves starvation to the parent's return leg, so the ledger map must precede the hook
+
+**Observed:** 2026-09-14, immediately after committing `5e51e72f` (the per-call principal
+reader). Found by reading `GuideLedger::rekey` while planning the next slice — not by a
+failing test, and no test in the tree can currently fail on it.
+
+**When:** Deciding what to build next. The obvious answer was "the companion hook, so the
+feature becomes live". That answer is wrong, and this is why.
+
+**Expected:** that adopting a principal fixes the subagent-starvation class for the
+principals involved.
+
+**Got:** it fixes the subagent and moves the defect to the parent's **return leg**.
+`rekey` does `emitted.clear()` — the re-arm is total, deliberately. Trace
+parent → subagent → parent:
+
+| step | stamp | effect |
+|---|---|---|
+| parent call | none | ledger keyed to the session; parent's guides accumulate |
+| subagent call | `sess/agent-a` | key differs → `rekey` → `emitted` cleared → subagent served fresh ✓ |
+| parent call | none | `adopt_request_conversation(None)` returns early — **no re-key back** |
+
+So the parent's later calls are served from the **subagent's** ledger. The parent's own
+delivered-set was cleared at step 2 and is never restored, so every topic the subagent
+consumed now reads as delivered for the parent. That is **starvation — the unsafe
+direction** — and it is the original defect in mirror image, not its removal.
+
+**Probable cause:** one `GuideLedger` per process. Adoption re-arms; it does not restore.
+`adopt_request_conversation`'s own doc comment says exactly this and names the remedy as
+"a conversation→ledger map … a separate decision" — but that was written while the tier
+was **inert**, so the limitation was unreachable and read as theoretical.
+
+**Workaround / the constraint this produces:** none needed today, and that is the whole
+point — nothing stamps `dev.codescout.mcp/agentId` yet, so the path is unreachable. It
+becomes reachable the instant a companion hook ships. **Therefore the conversation→ledger
+map must land BEFORE the hook, not after.** Building the hook next is the obvious move and
+would ship a parent-starvation path.
+
+**Severity:** high — not for what is broken today (nothing is), but because the natural
+next step arms it. A one-commit ordering choice between two pieces of work that look
+independent and are not.
+
+**Status:** fixed-verified — the parked-ledger map landed in this entry's own commit,
+before the hook existed, so the path was never reachable in a shipped state.
+`adopt_request_conversation` now treats `None` as "restore the parent" rather than
+"leave the ledger alone", and parks the outgoing principal's ledger for restoration.
+Mutation-checked: reverting `None` to its old meaning kills
+`a_parent_call_after_a_subagent_restores_the_parents_own_ledger` at the assertion it
+exists for, and leaves 52 sibling tests green.
+
+**Valid:** dated 2026-09-14
+
+**Rests on:** two bodies read this session — `GuideLedger::rekey` (`emitted.clear()`) and
+`adopt_request_conversation` (`let session = asserted?`, so `None` returns before any
+re-key). If either changes so that an unstamped call re-keys back to the base session,
+this entry is void.
+
+**Fix idea / Pointer:** `HashMap<key, GuideLedger>` replacing the single ledger, so
+returning to a principal restores its delivered-set instead of re-arming it. Note the
+inverse hazard when designing it: a map that never evicts grows per subagent for the life
+of the process, and the safe direction on eviction is to re-deliver, never to suppress.
 
 ## Template for new entries
 

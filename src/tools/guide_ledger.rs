@@ -45,7 +45,7 @@ pub const DEFAULT_IDLE_TTL_SECS: u64 = 7200;
 /// The stamps are what make expiry (`expire_idle`) and garbage collection
 /// expressible. The pre-2026-08-18 shape was a bare `Vec<String>`, which is still
 /// read and migrated — see `read_entries`.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct GuideLedger {
     /// Per-session file (`<dir>/<session_id>.json`). `None` ⇒ ephemeral.
     path: Option<PathBuf>,
@@ -296,6 +296,18 @@ impl GuideLedger {
         }
         self.rekey(session);
         true
+    }
+
+    /// The conversation this ledger is currently keyed to, if any.
+    ///
+    /// `None` means anonymous — no session identity was resolvable at
+    /// construction — and is distinct from "keyed to the parent": a parent with a
+    /// resolved session id has `Some(base)`. The server's park-and-restore map
+    /// uses this as the key to file the outgoing ledger under, so an anonymous
+    /// ledger is deliberately never parked; there is nothing to file it as, and
+    /// re-arming is this ledger's documented safe direction.
+    pub fn key(&self) -> Option<&str> {
+        self.key.as_deref()
     }
 
     /// Forget the named topics so they inject again, leaving every other topic
