@@ -1,9 +1,9 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/gate-keyed-on-unobservable-event
-closed: null
+closed: 2026-09-14
 opened: 2026-09-13
 owner: marius
 related: []
@@ -84,28 +84,79 @@ same commit as this file, whose comment records why the fix could not live insid
 
 ## Fix
 
-Not implemented. Two shapes, and the cheap one is now available:
+**SHIPPED on `experiments` 2026-09-14.**
 
-1. **Compare the rendered row to the body row.** `resync_snapshot_row` (same file) already
-   renders the template and locates the row; the note could take the same two strings and
-   fire only when they differ. This is the honest fix and it did not exist before the
-   per-row re-render did.
-2. **Narrow the message to what presence supports** — "this tracker renders a snapshot and
-   you changed `params`; the row may now be behind". Weaker, but true, and it does not
-   require the artifact to declare a `snapshot_anchor`.
+- **SHA** — `e9995df3` (branch `experiments`; positional, dies on the next rebase)
+- **patch-id** — `8e69d8508c0af3aa2aab79f777346f6c1d2602d4`
+  (`git show e9995df3 | git patch-id --stable`; content hash, survives rebase **and**
+  cherry-pick)
 
-Direction 1 is only reachable for artifacts that declare an anchor. Direction 2 covers the
-rest, so they are complements rather than alternatives.
+**The reproduction changed the fix, and that is the reusable half.** This section
+previously offered two shapes and preferred the cheap one, because the honest one was
+priced at *"a template evaluation on every entry write"*. Running the reproduction first
+— per CLAUDE.md, *"the plan is a hypothesis about the reproduction"* — showed that
+evaluation **already happens and is discarded**:
 
-**Not fixed here** because the suppression at the call site makes the feature that
-surfaced it correct, and changing what the note MEANS is a wider change affecting every
-caller that reads it — including `doctor`.
+```rust
+if lines[idx] == new_row { return Ok(false); }   // the answer, collapsed into "couldn't check"
+```
 
+`resync_snapshot_row` returned `bool`, and that `false` conflated *"the body row is
+byte-identical to the render"* with *"I could not check"* — two facts licensing opposite
+advice. So the fix is a **return-type widening**, not a new render, and the cost objection
+the superseded record carried was false on the anchor path.
+
+`SnapshotRow { Rewritten, AlreadyCurrent, Undetermined }`. The caller suppresses the
+advisory on `Rewritten` **and** `AlreadyCurrent` — two silences that are *earned*, by
+different observations — and only `Undetermined` reaches the note.
+
+Both directions shipped, as this file predicted they must (*"complements rather than
+alternatives"*):
+
+1. **Suppression** where the comparison happened — anchor-declaring artifacts.
+2. **Honest wording** where it did not: the message now says it reads ids only, marks its
+   claim `UNVERIFIED`, and names declaring `snapshot_anchor` as what would make it
+   answerable. The **absent-row branch keeps its assertion** — absence is a genuine
+   id-level observation and needs no cell reading.
+
+`row_already_current` joins `row_resynced` in the response. That field exists because two
+silences were indistinguishable to a caller; this fix adds a third, and folding it into
+`row_resynced == false` would have put *"the body is verified current"* back beside
+*"nobody looked"* — the same defect with a new member.
 ## Tests added
 
-None for this defect. The discriminating test seeds a body row that already matches
-`params`, patches an unrelated field, and asserts `snapshot_stale` is `None`. It reds today.
+Four sites, and the three that are new were each verified by an **observed red** rather
+than by existing. One kill each, no cross-kills — § *Testing Discipline*'s *mutate once per
+guarded SITE*:
 
+| mutation on the production path | reds |
+|---|---|
+| collapse `AlreadyCurrent` into the note path | `patching_an_unrendered_field_does_not_claim_the_body_is_behind` |
+| revert the wording to the old assertion | `..._flags_it_without_asserting_the_cells_moved` (UNVERIFIED) |
+| delete the remedy sentence | the same test's third assertion (remedy naming) |
+
+**The reproduction, and why this fixture and not another.** Patch a field the template
+does **not** render. The rendered row cannot change, so the body is current *by
+construction* — the test asserts the file is byte-identical before and after as its
+precondition, which is what makes the second assertion an observation rather than a claim
+about the template. It also shows the defect **survives anchor adoption**:
+`resync_snapshot_row` returns early on equality, so the old `if row_resynced` gate never
+fired and the note ran anyway.
+
+**A rename, because the old name was the defect in miniature.**
+`patching_a_rendered_row_says_the_committed_table_now_disagrees` named the unverified
+claim, and asserted `note.contains("PREVIOUS")` — pinning the *rhetoric* of a claim rather
+than its warrant. A test named after an assertion gets restored to that assertion by the
+next reader consulting the name for intent. Now
+`patching_a_rendered_row_without_an_anchor_flags_it_without_asserting_the_cells_moved`,
+asserting the branch, the `UNVERIFIED` marker, and that the message names what would make
+it answerable — the remedy-SHAPE rule, which survives rewording and reds on deletion.
+
+**Verified live against the rebuilt MCP server, not only in tests.** `update_entry` on
+`open-issue-work-queue`'s `BL-77` `next` field — an unrendered column, so the row cannot
+change — returned `row_already_current: true` with **no** `snapshot_stale`, and
+`git diff` showed **zero** `BL-77` lines touched, independently confirming no write
+occurred. Before this change that exact call asserted the row was behind.
 ## Workarounds
 
 Do not read `snapshot_stale` as "the body is behind". Read it as "this tracker keeps a
@@ -114,10 +165,16 @@ snapshot and you touched `params`". To find out whether a row is actually behind
 
 ## Resume
 
-Found while building `BL-29` step 3 (`update_entry`'s per-row re-render): a test asserting
-the advisory falls silent after the row is re-rendered failed, and the reason was that it
-never could have passed.
+N/A — fixed and verified on `experiments`.
 
+Gate: fmt **0**, clippy **0**, lean **0**, default **0** — **5903 passed, 0 failed**, with
+the vacuity control re-derived in the same run rather than cited: `librarian::` **0** in
+the lean lane against **1856** in the default one, `prompts::` **103 in both**.
+
+Archive-eligible and not archived: `doc(action="move")` re-keys the artifact
+(`id = sha256(abs_path)`) and strands inbound citations of the old id until they are
+repointed in the same commit. That is its own act — and a peer spent this same morning
+repointing 50 such citations (`63d2b86f`), which is the cost of treating it as a tail.
 ## References
 
 - `CLAUDE.md` § *Testing Discipline* — "where a system already names its own failure state,

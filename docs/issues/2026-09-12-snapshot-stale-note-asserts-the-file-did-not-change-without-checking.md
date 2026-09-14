@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: superseded
 tags:
 - cluster/gate-keyed-on-unobservable-event
 closed: null
