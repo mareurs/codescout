@@ -126,6 +126,7 @@ else
 fi
 TARGET="$TREE/$FILE"
 BACKUP=$(mktemp)
+RUNLOG=$(mktemp)
 
 # Revert and unmark BEFORE this process exits — not after the test command does.
 # `cargo test` returning is the same event as the shared build lock freeing, so a
@@ -133,7 +134,7 @@ BACKUP=$(mktemp)
 # is aimed at the window rather than away from it.
 cleanup() {
     [ -f "$BACKUP" ] && [ -f "$TARGET" ] && cp "$BACKUP" "$TARGET"
-    rm -f "$BACKUP" "$MARKER"
+    rm -f "$BACKUP" "$RUNLOG" "$MARKER"
 }
 trap cleanup EXIT INT TERM
 
@@ -219,8 +220,13 @@ after=$(count_lit "$TARGET" "$FIND")
 [ "$after" = "0" ] || { echo "mutation-probe: patch did not apply (still $after)" >&2; exit 2; }
 
 echo "mutation-probe: ARMED  mode=$MODE  file=$FILE  tree=$TREE" >&2
-( cd "$TREE" && "$@" )
-rc=$?
+# Captured as well as streamed, because the verdict below needs to know whether any
+# test actually RAN. `tee` merges stderr into stdout for the caller — a visible change,
+# and the cheapest way to keep a long `cargo test` streaming rather than appearing all
+# at once when it finishes. `PIPESTATUS[0]` is the command's own status; `pipefail`
+# would otherwise hand us `tee`'s.
+( cd "$TREE" && "$@" ) 2>&1 | tee "$RUNLOG"
+rc=${PIPESTATUS[0]}
 
 # Revert here, explicitly, rather than leaving it to the EXIT trap: the trap is
 # the fallback for a signal, not the plan.
@@ -228,12 +234,67 @@ cp "$BACKUP" "$TARGET"; rm -f "$MARKER"
 restored=$(count_lit "$TARGET" "$FIND")
 [ "$restored" = "1" ] || echo "mutation-probe: WARNING — revert left $restored occurrences, expected 1" >&2
 
-if [ "$rc" -eq 0 ]; then
-    echo "mutation-probe: SURVIVED (rc=0) — the mutation applied and no test caught it." >&2
+# A VERDICT REQUIRES THAT TESTS ACTUALLY EXECUTED, and this one predicate closes two
+# opposite defects rather than one.
+#
+#   SURVIVED on zero tests. `cargo test` exits 0 when its filter matches nothing, so a
+#   run that executed nothing is byte-identical at the exit code to a mutation no test
+#   caught. Measured 2026-09-14: a probe printed `SURVIVED (rc=0)` over `running 0
+#   tests` because the caller's test lived in a file the isolated worktree builds at
+#   HEAD, and it was not yet committed. The reader is then sent to the verdict's two
+#   documented readings — untested, or unreachable — and neither is "your test was
+#   absent".
+#
+#   KILLED on a mutation that never compiled. A malformed `--replace` exits non-zero
+#   with no test having run, which this reported as a catch. That is the same error
+#   mirrored: a verdict rendered over an absence.
+#
+# Both are `absence rendered as a value` — the habit that also put `unwrap_or(0)` on an
+# absent exit status in `src/tools/run_command/output.rs` and rendered `✓ exit 0` for a
+# failed build (fixed at `cc57cd28`). Two instruments, one week, same shape.
+#
+# THE COUNT IS A PARSE OF SOMEONE ELSE'S STDOUT, and there is no count-free substitute:
+# the script takes an arbitrary command, so it cannot know a priori how many tests a
+# filter selects, and exit codes cannot stand in for exactly the reason above. So the
+# refusal branch is load-bearing rather than defensive — if the format ever changes,
+# this must decline to render a finding rather than fall back to one.
+ran_lines=$(grep -cE '^running [0-9]+ tests?$' "$RUNLOG" || true)
+executed=$(grep -oE '^running [0-9]+ tests?$' "$RUNLOG" | awk '{s+=$2} END {print s+0}')
+
+if [ "$ran_lines" -eq 0 ]; then
+    echo "mutation-probe: INCONCLUSIVE — no test-count line in the output, so whether any" >&2
+    echo "  test ran is unknown and no verdict is available. Three causes, and they differ:" >&2
+    echo "  the mutation did not COMPILE; the command was not a test runner; or the runner's" >&2
+    echo "  '^running N tests' line has changed shape and this parse needs updating." >&2
+    echo "  Read the output above — it says which." >&2
+elif [ "$executed" -eq 0 ]; then
+    echo "mutation-probe: INCONCLUSIVE — the runner started and selected 0 tests, so nothing" >&2
+    echo "  could have caught this mutation. Most often the filter matches no test NAME, or" >&2
+    echo "  the test is in a file this worktree built at HEAD because it is uncommitted —" >&2
+    echo "  only the mutated file is carried across. Commit the test, or name one that exists." >&2
+elif [ "$rc" -eq 0 ]; then
+    echo "mutation-probe: SURVIVED (rc=0, $executed test(s) ran) — no test caught the mutation." >&2
     echo "  Two readings, and they take opposite repairs: the line is UNTESTED (write the test)," >&2
     echo "  or it is UNREACHABLE by any test you could write (the code needs a seam first)." >&2
 else
-    echo "mutation-probe: KILLED (rc=$rc) — a test caught it. Applied-ness needs no further audit:" >&2
-    echo "  a red cannot be produced by a mutation that never applied." >&2
+    echo "mutation-probe: KILLED (rc=$rc, $executed test(s) ran) — a test caught it." >&2
+    echo "  Applied-ness needs no further audit: a red cannot be produced by a mutation that" >&2
+    echo "  never applied, and the count above rules out a compile failure wearing this verdict." >&2
 fi
+
+# The exit status stays the TEST COMMAND'S, unchanged, and that is a weighed trade
+# rather than an inheritance. Three things hold it there: `docs/PROBES.md` pins it, a
+# verdict has never been encoded in it — SURVIVED is a real finding and also exits 0 —
+# and cases 5, 6 and 14 assert `rc == 0` while running `-- true`, so a distinct exit
+# code would red fixtures that are testing RESTORATION and ISOLATION rather than
+# verdicts.
+#
+# THE RESIDUAL HAZARD, named because it is this same week's shape one layer down: a
+# caller chaining `mutation-probe ... && <next step>` reads INCONCLUSIVE as success,
+# which is absence rendered as a value again, at the exit-code layer. It is accepted
+# rather than unnoticed — the equivalent hazard already exists for SURVIVED, which
+# exits 0 and is a verdict people act on, so `$?` was never the channel to read.
+# READ THE VERDICT LINE. If a caller ever needs to branch on this, the honest change
+# is a `--strict` flag that maps INCONCLUSIVE to a distinct code, not a redefinition
+# of what `$?` has always meant here.
 exit "$rc"
