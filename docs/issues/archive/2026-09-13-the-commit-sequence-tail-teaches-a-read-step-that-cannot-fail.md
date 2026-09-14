@@ -123,9 +123,9 @@ checkout:
 | **batched** — the form step 4 prints | 4 | nothing, *and could not have*: the staged list printed above the commit result in one blob, read after the fact |
 | **split** — `git add` + read as one call, `git commit` as a **separate** call | 7 | nothing for six; on the seventh, another session's staged pair |
 
-The seventh is this bug file. At 19:40 their `git diff --cached` showed three paths — their own
-plus `docs/issues/2026-09-13-the-commit-sequence-tail-teaches-a-read-step-that-cannot-fail.md`
-and `docs/trackers/issue-clusters/IC-16-assertion-that-cannot-fail.md`, staged by `f3c594ce`.
+The seventh is this bug file. At 19:40 their `git diff --cached` showed three paths — their
+own, plus **this file** (then still unarchived) and its class file
+`docs/trackers/issue-clusters/IC-16-assertion-that-cannot-fail.md`, staged by `f3c594ce`.
 They committed by pathspec (`4fdf51c7`, one file, verified) and left both. A bare `git commit`
 would have taken the pair under a message about a hooks tracker **and split the coupling the
 ledger gate requires** — a bug file and the `+1:` naming it on its class's `**Members:**` line
