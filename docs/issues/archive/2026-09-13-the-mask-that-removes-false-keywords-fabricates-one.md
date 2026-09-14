@@ -1,13 +1,15 @@
 ---
-status: open
-opened: 2026-09-13
-closed:
-severity: medium
-owner: marius
-related: []
+kind: bug
+status: fixed
 tags:
 - cluster/addressing-without-an-escape-hatch
-kind: bug
+closed: 2026-09-14
+fix_patch_id: e3da14808a0df6174c949e024f1b3493141ad061
+fix_sha: 989fa34c
+opened: 2026-09-13
+owner: marius
+related: []
+severity: medium
 ---
 
 # The mask that removes false keywords fabricates one
@@ -149,41 +151,105 @@ untested load-bearing behaviour while its comment appeared to explain what it wa
 - Split into single-line edits — exempt from IL-2, and impractical for a paragraph.
 - `run_command` with `acknowledge_risk: true`.
 
-## Suggested fix
+## Fix
 
-Not started. Two candidates, cheapest first.
+**Shipped 2026-09-14 as candidate 1** — the one this file listed first, and its stated risk
+(*"any other consumer of `blank_non_code` that treats the filler as whitespace… need checking
+first"*) is what settled the design rather than merely clearing it. See § *Which lever is safe*.
 
-1. **Do not let the mask supply a word boundary.** Blank to a byte that is *not* a space — the mask
-   promises only byte-length and column preservation, never that the filler is whitespace. The bare
-   keyword followed by a non-space cannot match a needle ending in a space. One-line change in
-   `push`; the byte-offset contract is unaffected. Risk: any other consumer of `blank_non_code`
-   that treats the filler as whitespace, so `scan_line`'s other callers need checking first.
-2. **Only enter the quoted state when a closing apostrophe exists later on the line.** Closer to
-   the comment's stated intent, but it changes the scanner rather than the consumer, and the
-   scanner is shared with `scan_line` where the current behaviour may be load-bearing.
+**SHA:** `989fa34c` (on `experiments`). **patch-id:** `e3da14808a0df6174c949e024f1b3493141ad061`.
 
-Whichever ships, **the refusal's advertised scope needs correcting in the same change** — it
-currently promises that string-literal spans are blanked, which is exactly the mechanism that
-caused this. The archived sibling asked for that correction for comments and got it; the
-string-literal half of the same sentence is now the one that misleads.
+`src/util/text.rs` gains `const MASK_FILL: char = '\0'` and `push`'s non-code branch emits it
+instead of `' '`. Two production lines. A needle ending in a space can now only match if that
+space came from the source, so the fabrication is **unrepresentable rather than policed** —
+CLAUDE.md § *Observer Blindness* position 3. The constant carries the four requirements on any
+replacement: one UTF-8 byte so the per-line length contract survives; absent from every needle;
+neither alphanumeric nor `_`, so a left word-boundary test still sees a boundary; and not
+whitespace, so a caller's `trim_start()` filter is unchanged.
 
+Candidate 2 (only enter the quoted state when a closing apostrophe exists on the line) was
+**rejected on evidence, not on cost** — it changes the scanner, and the scanner's *state* is what
+`edit_code`'s reindentation consumes. § *Which lever is safe* has the chain.
+
+Also considered and rejected: re-verifying each match against the unmasked line at the same
+offset. It works — byte length is an asserted contract — but it *polices* the fabrication and
+leaves the mask able to invent bytes for the next consumer.
+
+`src/prompts/mod.rs:641` corrected in the same commit, as this file asked: it claimed *"a keyword
+inside a string literal … those spans are blanked before the scan"*, false for multi-line
+strings. It now says SINGLE-LINE and names both unblanked residuals.
+
+### Verified end to end, against the running binary
+
+The unit and guard tests were green before this, but the tool still fabricated until a `cargo rb`
+and a reconnect — the suite cannot tell you the shipped binary behaves. Re-run 2026-09-14 09:28
+against a server positively identified as running the post-fix image (PID 1593923, fresh inode):
+
+| probe | before | after |
+|---|---|---|
+| this file's Reproduction (`class's`) | REFUSED | **accepted** |
+| A (`klass's`) | accepted | accepted |
+| B (`class of thing`) | REFUSED | **still REFUSED** |
+
+Probe B is the one that had to *not* change, and the refusal it now returns names its own cause:
+*"a MULTI-LINE string such as a Python docstring — each line is scanned on its own, so only the
+opening line is blanked."* A reader hitting it learns why instead of searching for a keyword that
+is genuinely there and being told nothing useful. Both accepting probes write; both were reverted
+and the tree confirmed clean.
 ## Tests added
 
-None yet. A regression test wants both directions on one fixture, because the interesting property
-is that the mask *adds* a match:
+Four, at three sites. This file asked for a two-direction pair and the shipped set keeps that
+shape at every site — a fix that stopped scanning altogether would satisfy each first assertion
+and fail each second.
 
-- `find_def_keyword` over a line holding the possessive must return `None` (reds today).
-- `find_def_keyword` over a real Python definition must still return the keyword (must keep
-  passing — this is the arm a naive fix to either candidate could disarm).
+`src/util/text.rs`
 
-The second is not optional. A fix that stops matching the possessive by weakening the needle's
-right-hand boundary would also stop matching a real definition, and only the pair discriminates.
+- `blank_non_code_cannot_manufacture_a_word_boundary` — the invariant stated directly: the mask
+  must not contain `class ` when the source does not. **Observed RED:** the mask read
+  `"each class                                  "`, which is the bug rendered. Paired with an
+  assertion that everything after the apostrophe is *still* blanked, so a filler change that also
+  stopped blanking would fail.
+- `blank_non_code_keeps_code_and_blanks_comments_and_literals` — **rebuilt, not merely updated.**
+  Two of its expectations were exact string literals spelling the filler as spaces, so they were
+  pinning the FILLER BYTE — which is not what that test is about. It asserts which SPANS are
+  blanked, never what they become. All expectations are now built from `MASK_FILL` via `repeat`.
+  Its own note already forbade hand-counted padding; that note now has a second reason.
 
+`src/tools/edit_file/tests.rs`
+
+- `find_def_keyword_does_not_fabricate_a_keyword_from_a_possessive` — the unit. **Observed RED:**
+  `left: Some("class ")`, the same signature the 2026-09-11 fix recorded.
+- `guard_allows_a_possessive_in_prose_but_still_catches_a_python_definition` — the same defect at
+  the GUARD, because that is where it was reported and a unit kill says nothing about the caller.
+  **Observed RED:** the guard refused an edit it must allow. The docstring in the fixture is
+  load-bearing but NOT for the obvious reason — only the `"""` opener line is blanked, so line 3
+  is scanned exactly as if it were source. Move the prose onto the opener line and it asserts
+  nothing.
+
+`src/prompts/mod.rs`
+
+- `the_il2_condition_names_both_of_its_unblanked_residuals` — a SHAPE assertion, not a prose pin.
+  Pinning the sentence reds on every rewording and is rightly avoided, which is precisely how the
+  text came to over-promise; so it asserts only that both residuals stay NAMED and that the
+  blanking promise stays scoped to single-line literals. It buys arrival, never answerability.
+
+**Mutation, on the production path.** `MASK_FILL` reverted to `' '` killed 3 of 3. The prompts
+shape assertion killed separately by `MULTI-LINE` → `MULTILINE`. Both mutations reverted and the
+files confirmed byte-identical by sha256.
+
+**Untouched and green** — every `reindent_*` and `literal_continuation_*` test, plus
+`blank_non_code_does_not_carry_literal_state_between_lines`. That is the direct evidence the
+`edit_code` state path is unaffected, and it is why the filler was the safe lever.
 ## Resume
 
-Nothing is in flight. Pick a candidate above, write the two-direction test first, and correct the
-refusal's advertised scope in the same commit.
+`N/A` — fixed, verified against the running binary, archived 2026-09-14.
 
+One thing a later reader should not re-derive: **the docstring residual is not a bug to fix at
+this layer.** Probe B still refuses by design. `blank_non_code` receives the lines an edit
+CHANGED, joined — non-contiguous source — so there is no coherent multi-line string state to
+track over them, and `blank_non_code_does_not_carry_literal_state_between_lines` exists to red on
+any attempt. § *A SECOND, independent defect* has the reasoning. If it ever becomes worth fixing,
+it needs the FILE, not the edit fragment, and that is a different design.
 ## References
 
 - `docs/issues/archive/2026-09-11-edit-file-reads-a-keyword-in-prose-as-a-symbol-definition.md`

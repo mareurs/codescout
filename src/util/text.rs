@@ -756,7 +756,7 @@ mod tests {
     /// spaces were the same byte. A possessive read as a string opener (`class's`
     /// blanks to `class` + filler) therefore satisfied `"class "`, a sequence appearing
     /// nowhere in the input, and the caller could search for what the refusal named and
-    /// not find it. `5aceb817081050a3`.
+    /// not find it. `4d2e4052e1272a69`.
     ///
     /// The apostrophe reading itself is deliberate and stays: it is what stops a char
     /// literal containing a quote (`let q = '"';`) latching the scanner across the rest

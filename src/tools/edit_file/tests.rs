@@ -3807,7 +3807,7 @@ fn find_def_keyword_ignores_a_keyword_inside_a_string_literal() {
 /// trailing space to supply its right word boundary — so a possessive read as a string
 /// opener (`class's` -> `class` + filler) satisfied `"class "`, which appears nowhere in
 /// the input. A caller searching for what the refusal named found nothing, which reads
-/// as a broken guard rather than as an apostrophe. `5aceb817081050a3`.
+/// as a broken guard rather than as an apostrophe. `4d2e4052e1272a69`.
 ///
 /// Asserted at the UNIT here and at the guard in
 /// `guard_allows_a_possessive_in_prose_but_still_catches_a_python_definition` — the
