@@ -802,10 +802,15 @@ fn the_ledger_parsers_agree_on_a_fixture() {
 /// The hook script reads BOTH YAML tag styles, like [`cluster_tags`] does.
 ///
 /// Split from [`the_hook_script_agrees_on_the_cluster_parsers`] because that one runs against the live
-/// corpus, and the corpus cannot reach this branch: measured 2026-09-01, **zero** bug files
-/// carry a `cluster/` tag in flow style (`tags: [a, b]`), so deleting the inline arm from the
-/// Python leaves the corpus-driven check **green**. Verified by mutation, not assumed — that
-/// deletion was made and the other test passed.
+/// corpus, and **corpus coverage of either arm is incidental**: it is whatever the day's filings
+/// happen to contain, and nothing holds it at any value. This test feeds both styles as literal
+/// fixtures over stdin, so it covers the inline arm unconditionally — the only form of coverage
+/// that survives a corpus which moves.
+///
+/// Until 2026-09-14 this comment justified the split with a dated corpus snapshot instead, and
+/// three records cite that wording. It was exact when written and its conclusion **inverted** 38
+/// hours later. The reason above is a property rather than a measurement, so it cannot decay the
+/// same way — `docs/trackers/claim-decay.md` DC-6.
 ///
 /// The fixtures are [`both_yaml_tag_styles_are_read`]'s, deliberately: the two tests must
 /// agree about what the corpus is allowed to contain, not merely each about itself.

@@ -475,6 +475,71 @@ corpus's most productive discovery channel and is not expressible in the vocabul
 recorded rather than worked around silently. The schema did fire correctly on two invented
 values in the first append attempt, which is the guard working.
 
+## DC-6 — A test's doc comment recorded a corpus snapshot as the reason for its own existence; the corpus moved 38 hours later
+
+**Valid:** invariant
+
+**Site:** `tests/issue_clusters.rs:802-808`, the doc comment on
+`the_hook_script_agrees_on_both_yaml_tag_styles`. Written in `3be0088e` (2026-09-01 20:26) to
+justify why that fixture-driven test exists beside the corpus-driven one.
+
+**What decayed:** the comment justified the split with a snapshot — *zero bug files carry a
+`cluster/` tag in flow style, so deleting the inline arm leaves the corpus-driven check green* —
+carrying a date, a method, and the words **"Verified by mutation, not assumed."** The first
+flow-style tag landed **38 hours later** (`07b7819c`, 2026-09-03 10:01, flow-style at creation).
+Today three files carry one, and the deletion moves three counts and **reds** the gate. So the
+snapshot did not merely go stale: it **inverted the conclusion**, from *"this mutation is
+invisible"* to *"this mutation reds the shared gate"*.
+
+**The probe, run because `never-true` impersonates `decayed`.** Citing line `3be0088e`
+2026-09-01; substrate change `07b7819c` 2026-09-03. The citation predates the change, so this is
+`decayed` and not an authoring error. `e749c574` edited a neighbouring line of the same comment
+block on 2026-09-11 without re-checking it — a repair opportunity that passed without firing,
+which is the `repair_trigger: none` field earning its value rather than being assumed.
+
+**What makes this one worth a row rather than a third `measured-value-drift` tally: the
+credential travelled with the claim.** A bare assertion invites a check. This one shipped a date,
+a named method, and an explicit denial of assumption — the most quotable part of the sentence,
+hence the part that survives copying, hence precisely what forecloses the re-run. It was copied
+near-verbatim into `bug-fix-session-log:F-146` and used to argue a proposed gate would be
+decoration. **Correct authoring practice is what made it dangerous**, which is why "be careful"
+and "cite your measurements" are both null instruments here.
+
+**The twin, one level up, found in the same exchange.** Two sessions independently explained the
+error as a population-vs-member scope mistake, and both were wrong. The premise they reasoned
+from was *genuinely true* (two of that test's three parity arms do compare empty to empty), so
+every check either party ran **confirmed** — and the unexamined step was the inference, not the
+premise. An elegant inference from a verified premise is the expensive kind of wrong: diligence
+lands on the step that was never at fault. *(Both halves reached with
+`fix-mask-keyword-fabrication`, sessionId `f0b1a4c7`; the independent-derivation fact is theirs
+and is what turns it from one session's error into a property of the derivation.)*
+
+**Why the obvious gate is REJECTED, measured rather than argued.** The tempting remedy is to
+assert the premise: a test pinning the flow-style population at zero would have redded on
+2026-09-03. It is wrong. Flow style is **legitimate and deliberately supported** —
+`cluster_tags` reads both arms on purpose, and this very test exists to prove it — so that gate
+forbids a supported form to protect a comment. A wall across a road the project paved.
+
+**And the generalisation is rejected too, on uptake rather than on taste.** The candidate was a
+`re-derive: <command>` annotation plus a runner, so a dated claim checks itself. `CLAUDE.md`
+§ *Observer Blindness* position 3 **already mandates** its non-mechanised half — *ship the
+derivation rather than the value*. Measured at `9045c56a`: **77** dated `measured YYYY-MM-DD`
+claims across **43** Rust files in `src/` and `tests/`, and the reader-facing re-derive form
+appears in **zero** of them. The one instance in this repo that does it correctly is
+`scripts/pre-commit-ledger-counts.py:853` — Python, outside the grepped population, and notably
+the sibling of the very comment that decayed. *(Scope: a grep for the reader-instruction form over
+`src/` and `tests/` for `*.rs`; a wider grep returns 97 but those are runtime re-derivation in
+code, a different population.)* An opt-in annotation is opted into **by the author, at write
+time, when the claim is true and there is no reason to expect decay** — the exact party the class
+blinds. Building a runner atop a convention with 0/77 uptake adds machinery to a step nobody
+takes.
+
+**The remedy actually applied, and it needs no mechanism.** State the **property**, not the
+snapshot: corpus coverage of either arm is *incidental* — whatever the day's filings contain,
+with nothing holding it at any value — so the fixture test covers the inline arm unconditionally.
+That sentence is true on every possible corpus and therefore cannot decay. The decayed sentence
+was not load-bearing for the split at all; it was a measurement standing in for a property, which
+is the generalisable form of the mistake and the one line worth carrying out of this row.
 ## Template for new entries
 
 Copy the shape below; the server assigns the id.
