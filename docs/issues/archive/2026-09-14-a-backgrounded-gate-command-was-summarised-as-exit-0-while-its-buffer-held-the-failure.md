@@ -534,8 +534,42 @@ independently here, one step worse than first reported: `echo MARKER >&2; cargo 
 run_command::` returned `{type: test, exit_code: 0, output_id: …, passed: 187}` and the marker
 was absent from the envelope **and from the buffer** — dropped, not merely unrendered. The
 control is the same command one call earlier with a narrower filter: unclassified, inlined, and
-its `stderr` field carried the marker intact. The discriminator is the classification, not the
-command.
+its `stderr` field carried the marker intact.
+
+**CORRECTION 2026-09-14, raised by `9403d62d`: the sentence that stood here claimed the
+discriminator is the classification. That is true of the ENVELOPE and false of the BUFFER, and
+the control above cannot establish either.** An inlined run creates no `@cmd_*` buffer at all,
+so it discriminated envelope behaviour only — the buffer half was generalised onto it in
+transit. Re-measured here on a **generic, buffered** run (`seq 1 5000; echo MARKER >&2`):
+
+```
+{type: generic, exit_code: 0, output_id: @cmd_a0c22c51, stderr: MARKER}
+  grep -c MARKER @cmd_a0c22c51  ->  0
+  grep -c 4999   @cmd_a0c22c51  ->  1     <- stdout control, same buffer
+```
+
+Same run, stderr demonstrably reached the server — it is in the envelope in full — and the buffer
+still answers 0 while stdout answers 1. **So the buffer-level loss is UNIVERSAL, not
+test-specific.** It went unnoticed only because the generic path also puts stderr in the
+envelope, where a reader finds it without ever querying the buffer.
+
+Two separate facts, and only the first is about classification:
+
+| layer | behaviour |
+|---|---|
+| envelope | `type: test` omits stderr; `type: generic` carries it in full |
+| buffer | stderr is never materialised, for any type |
+
+Root cause read at the bytes by `9403d62d`: `grep.rs` and `read_file.rs`'s `read_from_buffer`
+both project `BufferEntry` to `.stdout` at materialisation — `BufferEntry.stderr` is written by
+`store()` and read by nobody. Filed as `2546172a20a4751e`, separate from the envelope bug,
+because the fix is a contract decision across three tools rather than a missing field.
+
+**The error class is worth more than the correction.** A control that discriminates one layer,
+read as discriminating the layer beneath it — the two measurements sat in adjacent sentences and
+the scope slipped between them. Same shape as the prescription-vs-mechanism slip recorded
+earlier in this file's § *Tests added*, and both were caught by an outside reader rather than by
+re-reading, because the supporting fact is correct and a reader checks it and stops.
 
 **Consequence:** an `exit_code: 0, passed: 0` envelope is the byte-identical rendering of a real
 SURVIVED, so an INCONCLUSIVE verdict does not merely get skipped by a caller chaining `&&` — it
