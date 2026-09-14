@@ -93,6 +93,36 @@ correctly — and a foreground `cargo test` chain in the same session correctly 
 
 ## Root cause
 
+**ESTABLISHED 2026-09-14 at the bytes** — located in source by sessionId `9403d62d`, verified
+here independently. `format_run_command`, `src/tools/run_command/output.rs:413-442`:
+
+```rust
+let mut s = if result["output_id"].is_string() {
+    let exit = result["exit_code"].as_i64().unwrap_or(0);
+    let check = if exit == 0 { "✓" } else { "✗" };
+    …
+    _ => format!("{check} exit {exit}  (query {output_id})"),
+```
+
+The guard is `result["output_id"].is_string()`, and **that predicate is true of two different
+shapes**: a buffered COMPLETED result, which carries `exit_code`, and a backgrounded
+STILL-RUNNING one, which does not — `output_id`, `hint`, `stdout` and nothing else, exactly as
+all six non-reproductions showed. On the second, `as_i64()` is `None`, `unwrap_or(0)` yields
+`0`, and `check` becomes `✓`. **Absent is rendered as success.** The `_ =>` arm at `:441` emits
+`{check} exit {exit}  (query {output_id})`, which is the observed string
+`✓ exit 0  (query @bg_00000001)` in shape, byte for byte.
+
+**A second site carries the same defaulting** at `:446`, in the non-`output_id` branch. That one
+is reached only by inline results, which do carry `exit_code`, so it is not currently reachable
+with an absent status — but it is the same `unwrap_or(0)` and `CLAUDE.md` § *Testing Discipline*
+is explicit that a mutation kill at one guarded site says nothing about another. Fix and test
+both, or state why not.
+
+---
+
+*Retained — the state of the inquiry before the source was read, because the reasoning below is
+what produced the prediction the code then confirmed.*
+
 **Not established, and deliberately left open.** Naming one without a reproduction would close
 the inquiry — the failure mode this corpus already pays for. What is measured is the outcome:
 a summary field asserted success while the buffer it pointed at held a compile failure.
@@ -207,6 +237,24 @@ the handle-durability note below exists.
 
 ## Fix
 
+**DESIGNED, not applied.** § *Root cause* now names the site. The shape is not *"read the exit
+code better"* — it is that **one predicate is being asked to separate three states**:
+completed-and-passed, completed-and-failed, and still-running. `output_id.is_string()`
+distinguishes the first two from inline results and collapses the third onto the first.
+
+So the fix is to make the still-running case its own branch and emit **neither** checkmark — the
+`hint`-shaped response already words this correctly (`Process running…`), so the summary has a
+correct sibling to agree with. Distinguishing on the presence of `exit_code` rather than on
+`output_id` is the obvious discriminator and is already in the payload, unused — which is
+`CLAUDE.md` § *Testing Discipline*'s *"assert on the name, not on a proxy for it"*, arriving
+here as *render* rather than *assert*.
+
+Framing credited to `9403d62d`. Not taken by them (their operator has not pointed them at it,
+and a peer cannot authorize work) and not taken here for the same reason; nothing is held, so
+whoever is pointed at it should take it with these findings.
+
+---
+
 Not designed — the mechanism is unidentified and a fix aimed at a guess would be unfalsifiable.
 What the record asks for first is the discriminating variable.
 
@@ -218,6 +266,21 @@ should decline to assert one — the `Process running` shape, which the three re
 returned, already does this correctly.
 
 ## Tests added
+
+**None yet, but the discriminating assertion is now known and it is not the obvious one.** Raised
+by `9403d62d`, and it is the reason this survived: **a test asserting `✓` versus `✗` cannot catch
+a third state rendered as the first.** Both checkmarks are about completed runs; the still-running
+state is invisible to that axis however many cases you add. The assertion that bites is that the
+**still-running shape produces NEITHER checkmark** — and, with the fix, neither an `exit N`.
+
+This is `CLAUDE.md` § *Testing Discipline*'s population law in its input-side form, and this
+corpus has the same finding under a different mechanism in
+`docs/issues/2026-09-10-the-ack-note-reports-no-foreign-population-exactly-when-the-ack-covered-all-of-it.md`:
+*"three states, two tested, and the untested one is the defect"*. Enumerate what the predicate can
+see, not what the fixtures can vary. Two sites per § *Root cause*, so two mutations — `:415` is
+the reachable one, `:446` currently is not.
+
+---
 
 None — there is nothing to regress against until the trigger is known. A test asserting
 "backgrounded non-zero exit is not summarised as `✓ exit 0`" would pass today against all three
