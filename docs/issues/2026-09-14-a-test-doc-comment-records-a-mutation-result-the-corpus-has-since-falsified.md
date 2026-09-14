@@ -166,6 +166,16 @@ instant in thirteen days was the pair consistent, and at no instant did anything
   vacuity finding at all. Recorded rather than deleted because it is the plausible-mechanism trap
   this corpus keeps paying for — two independent sessions preferred an elegant derivation over a
   `git show`, and the vacuity result was *genuinely true*, which is what made it attractive.
+
+  **Why care does not reach it — the reusable half, and it names where to aim.** The premise was
+  **verified**. Checking it confirms it, every time. So the diligence a careful reader actually
+  applies lands on the one step that was never wrong, and the unexamined step is the **inference**.
+  An elegant inference from a verified premise is the most expensive kind of error precisely
+  because it *rewards* the check a careful party would run — which makes "verify your premises" a
+  null instrument here, and "name the step between the premise and the claim" the live one.
+  Formulated by sessionId `6be73414-…`'s author on learning the account had been reached twice
+  independently: that is what makes it a property of the **derivation** rather than of either
+  session, and a stronger claim than "a session got it wrong".
 - *"The `:1476` must-kill line is the stale one."* — Falsified: it is correct at HEAD. It was the
   wrong half on the day it was written.
 
