@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 150
+entry_high_water_F: 151
 entry_high_water_W: 135
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 135
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-151 | 2026-09-14 | high | reasoning/search-scope | open | **Searched for CONSUMERS of a field, never for how the handle is RESOLVED — and the resolver was four lines from the struct.** `BufferEntry.stderr` is reachable via an `.err` suffix (`output_buffer.rs:289` `strip_suffix`, `:674` stream select), verified live: `grep -c TOKEN @cmd_x.err` → `1`. Distinct from `F-150`: that is about the region of input space an observation was taken in, this is about the shape of the search. *"Who reads this field?"* presumes the answer is a reader; an escape hatch that transforms the KEY is invisible to every grep phrased around the VALUE. Tell: when N call sites agree, read the thing they all call. Cost: a § Workarounds that sent readers to native `Bash` for a stream a four-character suffix already served. Peer `40130` owns the larger half — `.err` is on **no** agent-facing surface, and three sessions concluded the stream unrecoverable that evening, wrong in the same direction, which reads exactly like corroboration. |
 | F-150 | 2026-09-14 | med | reasoning/bug-triage | fixed-verified | **Concluded "no such code path exists" from a reproduction run at one point on a thresholded axis.** Filed `2546172a20a4751e` claiming nothing reads `BufferEntry.stderr`, from two of three call sites. The third read exactly that field, gated on `needs_summary` (>~10 KB). The reproduction was `grep -c` — two bytes — so every observation sat on the one side of the gate where the mechanism is absent, and *absent* and *gated out* are byte-identical there. Three fix shapes drafted on the false premise, all redesigning two tools' read contracts to duplicate a shipping mechanism. Tell: before concluding a mechanism does not exist, re-run the reproduction on the far side of every threshold the code consults — "widen the sample" does not reach this, because one more sample at the same size is the same observation. |
 | F-147 | 2026-09-14 | med | cross-session | fixed-verified | **A pathspec commit captured a peer's staged edit to the same file, because I read the staged SET instead of the staged DIFF.** `git status --short` answers which paths; only `git diff --cached` answers which bytes. |
 | F-148 | 2026-09-14 | high | tooling | fixed-verified | **Ran the gate backgrounded, believed its `✓ exit 0` summary, and put a truncated file into the shared build.** The buffer that same response pointed at held `could not compile`. Backgrounding also costs the `attribute-red` hook, so nothing local raised — two failures, one trigger, not to be conflated. Fixed at `cc57cd28`; run gate commands in the FOREGROUND, or capture `EXIT=$?` in band. |
@@ -15225,6 +15226,26 @@ unmeasured bound" appears in any subsystem. Two instances make it an `IC-N`, not
 **Rests on:** `src/tools/run_command/output.rs` retaining a size-thresholded branch around the buffer-stderr lookup. The hoist removed that threshold, so the specific instance is closed; the class is not.
 
 **Status:** fixed-verified
+
+## F-151 — Searching for consumers of a field cannot find an escape hatch that transforms the key
+
+**Valid:** dated 2026-09-14
+
+**Observed.** Second wrong root cause on the same bug file in one evening, and this one is a different mechanism from `F-150`. I searched for **consumers of `BufferEntry.stderr`** — `grep.rs`, `read_file.rs`, `output.rs` — and concluded from that population. I never searched for **how a `@cmd_*` handle is resolved**. `OutputBuffer::get_with_refresh_flag` does `id.strip_suffix(".err").unwrap_or(id)` at `src/tools/output_buffer.rs:289`, and `run_command`'s interpolation path selects the stream on `token.ends_with(".err")` at `:674`. The first of those is **four lines below the struct whose field the entire bug is about**, in a file I had open.
+
+Verified live rather than accepted: `@cmd_a11f5743`, 4000 stdout lines plus one `STDERR_ONLY_TOKEN` on stderr. `run_command("grep -c STDERR_ONLY_TOKEN @cmd_a11f5743.err")` → `1`. The stream was recoverable the whole time.
+
+**Mechanism.** `F-150` is about the **region of the input space** an observation was taken in. This is about the **shape of the search**. I asked *"who reads this field?"* — a question whose form already presumes the answer is a reader. The escape hatch is not a reader of the field; it is a **transform on the key**, so it is invisible to every grep phrased around the value. A search scoped to the shape of the answer you expect returns a complete-looking population that cannot contain the answer you did not expect.
+
+**The tell is available and I had it.** `grep.rs` and `read_file.rs` both call `get()`; `output.rs` calls it too. **Three consumers, one resolver, and I read none of the resolver.** When N call sites agree, the interesting code is usually the thing they all call, not the Nth site. Read the accessor before concluding anything about a field's reachability.
+
+**Cost.** A `## Workarounds` section that told readers to shell out to native `Bash` for a stream `run_command` could serve with a four-character suffix. It shipped in `9b6f4713` and stood for about an hour. Corrected in place; the filename's claim is left superseded rather than renamed, because a move mints a new id and seven files cite this one.
+
+**Not mine, and the better half of the finding:** peer session `40130` established that `.err` appears on **no agent-facing surface** — no `get_guide` topic, no `src/prompts/` slice, not `.codescout/system-prompt.md` — and that **three sessions independently concluded the stream was unrecoverable that evening.** That is the load-bearing part: not that I searched badly, but that a shipping, working mechanism invisible to its own audience produces confidently wrong conclusions *in the same direction* from independent readers, which is indistinguishable from corroboration. They own that write-up and the `read_file`/`grep` half, which silently serve stdout for an accepted `.err` token.
+
+**Rests on:** `.err` remaining undocumented on agent-facing surfaces. If peer `40130` lands that documentation, the *undiscoverability* premise closes and only the search-shape lesson survives.
+
+**Status:** open
 
 ## Template for new entries
 

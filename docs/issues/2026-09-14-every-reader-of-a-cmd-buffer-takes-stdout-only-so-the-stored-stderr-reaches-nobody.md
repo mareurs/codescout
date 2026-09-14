@@ -2,7 +2,7 @@
 id: '2546172a20a4751e'
 kind: bug
 status: fixed
-title: 'BUG: every reader of a @cmd_* buffer takes .stdout only, so the stderr it stores reaches nobody'
+title: 'BUG: a buffer query''s stderr was gated behind needs_summary, so a 2-byte query got nothing and a 10 KB query got everything'
 tags:
 - cluster/capped-result-presented-as-complete
 - run-command
@@ -11,6 +11,26 @@ tags:
 ---
 
 ## Summary
+
+> **CORRECTION 2026-09-14, and it falsifies this file's own FILENAME.** The stored stderr is
+> **recoverable and always was**: a `@cmd_*` handle takes an **`.err` suffix**.
+> `OutputBuffer::get_with_refresh_flag` (`src/tools/output_buffer.rs:289`) resolves the entry
+> with `id.strip_suffix(".err")`, and `run_command`'s ref-interpolation path
+> (`:674`) selects the stream on `token.ends_with(".err")`. Verified live on
+> `@cmd_a11f5743`: `grep -c STDERR_ONLY_TOKEN @cmd_a11f5743.err` returns `1`.
+>
+> So *"the stored stderr reaches nobody"* is false, and was false before this was filed.
+> The filename is left alone deliberately — renaming mints a new id and seven files cite this
+> one, two of them `.rs`. Read the filename as superseded by this block.
+>
+> **Three sessions concluded the stream was unrecoverable on one evening and none tested a
+> suffix that lives four lines from the struct field they were writing about.** The reason is
+> the finding, not the mistake: `.err` appears on **no agent-facing surface** — not
+> `get_guide("progressive-disclosure")`, not any `src/prompts/` slice, not
+> `.codescout/system-prompt.md`. A mechanism that ships, works, and is undiscoverable by the
+> agents it exists for produces confident wrong conclusions in the same direction from
+> independent readers. Found by sessionId `f0b1a4c7`-adjacent peer `40130`; the
+> silently-wrong-stream half is filed separately by them.
 
 `run_command` stores both streams: `ctx.output_buffer.store(command, raw_stdout, raw_stderr,
 exit_code)`, and `BufferEntry` has a `pub stderr: String` field to hold it.
@@ -81,6 +101,12 @@ Established by reading all three call sites — **the first filing read two and 
 them.** `grep.rs` and `read_file.rs` do each project `BufferEntry` to `.stdout`, as reported.
 But the claim built on that, *"nothing ever reads that field"*, was false: `output.rs`
 reads it.
+
+**And "all three call sites" was still the wrong population** — see the correction block in
+§ *Summary*. Both filings searched for **consumers of the field** and neither searched for
+**how a handle is resolved**, where `strip_suffix(".err")` sits four lines from the struct
+whose field the bug is about. Two wrong root causes on one file, from two sessions, both
+produced by scoping the search to the shape of the answer already assumed.
 
 The real cause is the gate, not a missing reader. The lookup sat inside
 
@@ -209,17 +235,26 @@ from the exit code instead: `--strict` remaps *only* INCONCLUSIVE to `3`, the pr
 channel `--strict` exists to preserve, used for the first time on the bug that motivated it.
 ## Workarounds
 
-**Fixed for `run_command`.** A buffer query now carries the entry's stored stderr at any
-size, capped at 20 lines with `stderr_shown`/`stderr_total` when there is more.
+**Use the `.err` suffix.** `run_command("grep PATTERN @cmd_abc.err")` searches the entry's
+stored **stderr**. This shipped long before the bug was filed and is the correct answer to
+the whole question; it is documented nowhere an agent reads, which is why three sessions
+missed it.
 
-**Still true of `grep` and `read_file`:** both take `.stdout` alone from a `@cmd_*` handle.
-So `grep PATTERN @cmd_abc` issued through **codescout's `grep` tool** still searches stdout
-only. Routing the same query through `run_command("grep PATTERN @cmd_abc")` — which is the
-form `server_instructions` Iron Law 3 actually prescribes — now surfaces the stderr beside
-the result.
+**Do NOT use `.err` with codescout's `grep` tool or with `read_file`.** Both accept the token,
+resolve it through the same `get()`, and serve **stdout** — silently, with no error, and
+`grep` reports a line number from the wrong stream. Verified 2026-09-14 on `@cmd_a11f5743`:
+`grep(pattern="STDERR_ONLY_TOKEN|stdout line 4000", path="@cmd_a11f5743.err")` returned
+`4000: stdout line 4000`; `read_file("@cmd_a11f5743.err")` returned 4000 lines of stdout.
+That is a separate defect with a separate mechanism — accepted token, wrong target — owned by
+peer session `40130` and filed by them.
+
+**Superseded:** an earlier revision of this section said to run the command through native
+`Bash` for a stream you must not lose. That is still true and is now the third-best answer;
+prefer `.err` through `run_command`.
 
 Do **not** read a `0` from a codescout-`grep` over a buffer as evidence of absence without
-first asking which stream the string would have been on.
+first asking which stream the string would have been on — and note that appending `.err` does
+not fix it there.
 ## Resume
 
 **Closed for the reported surface.** What is deliberately left open, and is not debt from
