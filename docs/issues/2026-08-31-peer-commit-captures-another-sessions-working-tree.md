@@ -1416,6 +1416,71 @@ attention — the instrument is simply keyed to the wrong event. A commit-time r
 remedy above) is keyed to the right one, which is the argument for building it rather than for
 reading harder.
 
+## Instance 14 — 2026-09-14, the outbound half, caught by a bytes check aimed at the wrong pair
+
+`2aec3cd4` (sessionId `aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66`) carried sessionId `codescout-e7`'s
+whole `## F-152` section **and** their `entry_high_water_F: 152` frontmatter bump into
+`docs/trackers/bug-fix-session-log.md`. Additive, nothing lost; they committed the matching index
+row separately as `432e379f` and named the split in its message, so both halves reconcile from
+the log. Confirmed at the bytes by the capturing session on the captured session's report:
+`git log -S'## F-152' -- <file>` returns `2aec3cd4` and nothing earlier.
+
+**No new record and no new class.** This is the **outbound** half — the capturing session
+committed what it never read — and § *the remedy is ordering rather than care* above already
+prescribes the fix verbatim: *stage, stop, read `--cached`, then commit as a separate call.*
+This paragraph exists to close the citation.
+
+**What it adds is only why the wrong instrument reads as an all-clear.** The capturing session
+did not skip the bytes check. It ran `git diff -- <file>` **after** committing, read
+`1 file changed, 1 insertion(+)`, and reported the peer's work safe. `git diff` is
+**worktree ↔ index**; the question is **index ↔ HEAD**. The captured section had already been
+absorbed into the index, so `git diff` structurally could not see it — all that survived in the
+worktree was the index row the peer added afterwards. **That output is smallest exactly when the
+capture is worst**, so the calm number was the signature of the failure rather than evidence
+against it. Same defect as the `&&`-chained check above, on the **time** axis rather than the
+sequencing one: right-shaped command, run where it could produce evidence and not act on it.
+Recorded as `bug-fix-session-log:F-153`.
+
+**And the designed inbound remedy would not have caught this one** — worth stating because the
+guard's header is the obvious place a reader will look. `scripts/pre-commit-foreign-index.sh:43`
+names *"record each path's blob at `git add`, re-hash at pre-commit, refuse if it moved"*
+(not built, `IC-14`). That is the **inbound** remedy. Here `F-152` was in the worktree *before*
+the capturing session's `git add` — necessarily, since its index commit carried it — so the
+add-time blob already held the section and a commit-time re-hash finds it unmoved and stays
+silent. An earlier draft of `F-153` proposed a hunk-authorship guard instead and recorded
+`file-provenance.py`'s `UNKNOWN` as its blocker; both halves were wrong and were corrected after
+`codescout-e7` checked them against this file. Noted so the correction is not re-derived.
+
+### The append seam this ledger measures at 5.9% is now closeable, and three entries in this file prove it
+
+§ *The seam is created by the append convention* attributes the window to the two-write
+discipline — `append_entry` writes the section, then a second call adds the Index row — and
+measures it over 186 entries. **`append_entry`'s one-call form closes that window**: passing
+`index_row` + `index_after_line` (or `index_row` alone against a declared `snapshot_anchor`)
+writes section, Index row and high-water mark in a single `fs::write`.
+
+Measured on this very ledger, 2026-09-14, by comparing the first commit to introduce
+`## <ID> — ` against the first to introduce `| <ID> | 20`:
+
+| entry | section | index row | |
+|---|---|---|---|
+| `F-150` | `dc94d10a` | `dc94d10a` | same commit |
+| `F-151` | `bed16c3e` | `bed16c3e` | same commit |
+| `F-152` | `2aec3cd4` | `432e379f` | **split — this instance** |
+| `F-153` | `a3a50794` | `a3a50794` | same commit |
+
+Three consecutive one-call entries, same file, same day, against one two-call entry that split —
+and the split one is the capture. **So the seam is a property of the retired protocol, not of the
+ledger.** That does not close the inbound half, which remains uncloseable by any per-session
+behaviour; it removes one *self-inflicted* window that this repo's own documented discipline used
+to mandate. The 5.9% figure is not re-derived here and should not be read as superseded — it
+measures a population written under the two-call form.
+
+**Where the retired protocol still lives**, and why this is worth an action rather than a note:
+this file's own § *Template for new entries* comment block still prescribes
+`edit_file(action="insert_before", …)` plus *"Also update the matching Index / Wins Index table
+row"* — the two-call form, in the ledger that measures its cost. Not swept here; the capturing
+session was already active in this file and appending to it is the act this bug documents.
 ## Resume
 
 Decide remedy (1) vs (2) and record it in `docs/RELEASE.md` § git workflow, which today
