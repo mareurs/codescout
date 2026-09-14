@@ -78,9 +78,9 @@ whole argument for re-deriving on read rather than trusting the figure — and f
 the count next to the command that produces it.)*
 
 > ⚠️ **F and W now appear among the declared prefixes, which contradicts the F/W row
-> below.** **Fourteen** session logs declare F/W — three as `entry_prefix: ["F", "W"]`, eleven as a
-> block sequence (`grep -lE '^entry_prefix:$' docs/trackers/*.md` → 11, plus
-> `grep -lE '^entry_prefix: \["F", "W"\]'` → 3; re-derived 2026-09-13). That is a real, unresolved
+> below.** **Fifteen** session logs declare F/W — three as `entry_prefix: ["F", "W"]`, twelve as a
+> block sequence (`grep -lE '^entry_prefix:$' docs/trackers/*.md` → 12, plus
+> `grep -lE '^entry_prefix: \["F", "W"\]'` → 3; re-derived 2026-09-14). That is a real, unresolved
 > contradiction between this document and the corpus — not a typo here. Decide it
 > deliberately before adding more: declaring F/W makes them dangling-checked but gives one
 > token many definers; leaving them undeclared keeps ambiguity.
@@ -95,6 +95,13 @@ the count next to the command that produces it.)*
 > 10 repos in 2 umbrellas: **33% of cross-file entry citations are ambiguous** and F/W are
 > the dominant contributors (`F-1` alone has 169 definers). codescout at 28% is among the
 > healthiest — this is a property of the per-file `PREFIX-N` convention, not a local defect.
+>
+> **The fifteenth, 2026-09-14, is the first added by a session that had read this warning first.**
+> Its derivation is `context-injection-session-log:F-1`, which measures the tradeoff stated above
+> and finds it is not one: declaring adds **no** definers, because `DefinitionIndex::build`
+> populates `active_definers` from `## F-N —` headings alone and never from a declaration.
+> The tradeoff sentence is left standing rather than rewritten — correcting it is a call over
+> 19 files, and this is a pointer to the measurement, not the decision.
 
 | Prefix | Lives in | Captures | Append tool | Promotes to |
 |---|---|---|---|---|
