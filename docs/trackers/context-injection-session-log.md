@@ -12,7 +12,7 @@ topic: context-injection
 entry_prefix:
   - F
   - W
-entry_high_water_F: 3
+entry_high_water_F: 4
 entry_high_water_W: 2
 ---
 
@@ -37,6 +37,7 @@ author to make.
 | F-1 | 2026-09-14 | low | plan-prose | open | TAXONOMY's `entry_prefix` tradeoff: one horn is false, the other is not a benefit |
 | F-2 | 2026-09-14 | high | plan-prose | fixed-verified | A code comment's scope qualifier was narrower than its phrasing, and it killed a viable design for two turns |
 | F-3 | 2026-09-14 | high | architectural | fixed-verified | Adopting a principal moves starvation to the parent's return leg, so the ledger map must precede the hook |
+| F-4 | 2026-09-14 | high | release-pipeline | open | The hook deploys instantly and the server does not, so shipping it now breaks every unreconnected session |
 
 ## Wins Index
 
@@ -530,6 +531,62 @@ this entry is void.
 returning to a principal restores its delivered-set instead of re-arming it. Note the
 inverse hazard when designing it: a map that never evicts grows per subagent for the life
 of the process, and the safe direction on eviction is to re-deliver, never to suppress.
+
+## F-4 — The hook deploys instantly and the server does not, so shipping it now breaks every unreconnected session
+
+**Observed:** 2026-09-14, about to start the companion hook (the ADR's remaining half)
+immediately after `b43e3702` landed the parked-ledger map. Stopped before writing it.
+
+**When:** The server-side work is complete and gate-green, so the hook looks like the
+obvious next commit. It is not, and the reason is not in either repo's code.
+
+**Expected:** that with the map in place, the hook could ship whenever.
+
+**Got:** the hook and the server are deployed by **different mechanisms with different
+latencies**, and the hook's is instantaneous. Measured earlier this session: editing
+hook config takes effect on the *next tool call*, with no restart — that is how the
+`PreToolUse` probe worked at all. The server is the opposite: the live MCP process is
+whatever binary existed when each session connected, and picking up new server code
+requires `cargo rb` **plus** `/mcp` reconnect, **per session**.
+
+So shipping the hook first stamps `dev.codescout.mcp/agentId` into the arguments of
+every codescout call in every live session — against server processes that have no
+`principal_from_arguments` and therefore never strip it. The key reaches the
+deserializer, and `#[serde(deny_unknown_fields)]` at 42 sites (concentrated in the
+librarian tools) **refuses the call** rather than ignoring the field. Every `doc`,
+`librarian`, `append_entry` call in every unreconnected session would start failing.
+
+**Probable cause:** the two halves of one feature live behind deployment surfaces whose
+lag differs by roughly "instant" versus "manual, per-session". Nothing in either repo
+expresses the dependency, and the natural build order — server first, then hook — is
+also the order that arms it, because the server being *written* is not the server being
+*run*.
+
+**Workaround / the required sequence:**
+1. `cargo rb`, then `/mcp` in **every live session on this checkout** (6 at last count).
+2. Verify the running server strips the key — one stamped call to a
+   `deny_unknown_fields` tool that returns normally.
+3. Only then add the hook.
+
+**Severity:** high — a cross-session outage affecting every peer on the checkout, from a
+commit that is green in its own repo and touches no Rust. The blast radius is other
+people's sessions, which is the part no local gate can see.
+
+**Status:** open — hook deliberately not written; the sequence above is unperformed.
+
+**Valid:** conditional — closes when every live session runs a server carrying
+`principal_from_arguments`, verified rather than assumed
+
+**Rests on:** `deny_unknown_fields` refusing rather than ignoring an unknown key on the
+librarian tool inputs — read from the derive sites, **not** executed against a live
+old-binary server. That is the one link in this chain I inferred rather than measured,
+and it is cheap to settle: one stamped call before the rebuild.
+
+**Fix idea / Pointer:** this is `context-injection-session-log:F-3`'s shape a second
+time — two pieces of work that look independent, where the build order is the hazard.
+F-3's constraint was internal to one repo and a test now guards it. This one crosses a
+repo boundary and no test can reach it, which is what makes it worth writing down rather
+than remembering.
 
 ## Template for new entries
 
