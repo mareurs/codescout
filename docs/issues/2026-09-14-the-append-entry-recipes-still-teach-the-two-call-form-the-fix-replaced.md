@@ -213,15 +213,32 @@ rule parity, nothing compared the rule SETS, and the one-tag rule was absent fro
 months while redding the shared gate
 (`docs/issues/archive/2026-09-09-the-pre-commit-cluster-hook-enforces-a-subset-of-the-gate-it-mirrors.md`).
 
-*Reported and not re-run here:* `F-146` states that dropping the inline-`[a, b]` arm from the
-Python leaves that parity test green, verified there by mutation. This session did not reproduce
-it and does not assert it — `cluster_tags` feeds `actual_counts`, which is the one arm that is
-NOT empty, so the outcome may depend on whether the corpus carries a flow-style tag on the day.
-Re-derive before citing it.
+**Re-derived 2026-09-14 at `c9561e1b` — the reported mutation result is FALSE, and the
+re-derivation is worth more than the claim.** `F-146` stated that dropping the inline-`[a, b]`
+arm from the Python leaves that parity test green. This session did not take it on report, re-ran
+it, and it **reds**: three entries of `actual` move (`doc-contradicted-by-code` 39→38,
+`selector-narrower-than-its-population` 43→42, `unclassified` 28→27), and
+`the_hook_script_agrees_on_the_cluster_parsers` compares `actual` with `assert_eq!`
+(`tests/issue_clusters.rs:1479`), so one moved entry is enough. `F-146`'s author re-derived the
+same three numbers independently and withdrew the claim in place.
 
-**Do not close this by deleting the index tables.** `get_guide("librarian")` is explicit that a
-table row defines no citable token and that the table is worth keeping if it reads well; the
-defect is the protocol taught for maintaining it, not the table.
+**So the precedent has ONE failure mode here, not two.** The vacuity leg is real for `claimed`
+and `declared` and does **not** reach `actual`, which is the arm this mutation touches — extending
+it there was an aggregate result applied to a member outside the aggregate. Only the SCOPE leg
+survives: parser parity is not rule parity, nothing compared the rule SETS, and the one-tag rule
+was absent from the hook for months while redding the shared gate
+(`docs/issues/archive/2026-09-09-the-pre-commit-cluster-hook-enforces-a-subset-of-the-gate-it-mirrors.md`).
+**The two-gate table above rests on the scope leg alone and stands unchanged.**
+
+**What the false claim was worth is larger than the claim.** Its source is a doc comment
+(`tests/issue_clusters.rs:805-808`) recording a mutation measured 2026-09-01, when zero bug files
+carried a flow-style `cluster/` tag. Three ordinary filings later the corpus reaches the branch
+and the comment is false — so **a mutation result over a live corpus decays exactly like a count,
+and needs the same instant and tree**, which `CLAUDE.md` § *Testing Discipline* demands of counts
+and of nothing else. Filed as
+`docs/issues/2026-09-14-a-test-doc-comment-records-a-mutation-result-the-corpus-has-since-falsified.md`
+(`33efc480b2da9ac3`). Both sessions reached it from opposite ends: this one stated it as a doubt
+before either had the number, `6be73414-…` measured it and named the class.
 
 A check requiring every append to pass `index_row` would also be wrong — 28 of 49 guarded
 ledgers keep no row table. The assertion belongs on the *documentation*, in the coupling form
