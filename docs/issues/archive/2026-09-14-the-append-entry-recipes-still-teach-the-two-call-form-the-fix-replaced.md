@@ -238,6 +238,21 @@ built to improve on. The missing test is the one `aa272bed-…` actually wrote:
 `index_row_description_names_every_way_to_anchor_a_row`, which asserts the DESCRIPTION against
 the behaviour, and it is a different instrument from anything proposed here.
 
+**Sharpened by `aa272bed-…` on reading the ceiling, and it is the inclusion test rather than a
+restatement:** the coupling was not merely stale, it was stale **in the direction that makes the
+parameter look UNUSABLE alone**. A gate keyed on a declared coupling **cannot distinguish *"the
+pair is required"* from *"the pair was required once"***, because both render identically in the
+string it reads. So the failure is not that the gate would have been wrong on this pair; it is
+that no declared-coupling gate can be right on any pair, and it would have been **a mechanism
+arguing for the error** rather than a reader repeating it.
+
+**Bound on the behavioural claim, held no stronger than its author holds it.** `aa272bed-…`
+closed the `(Some(row), None)` question by **execution**, not by reading:
+`a_declared_snapshot_anchor_places_the_row_at_the_blocks_tail` runs, `index_row` alone succeeds,
+the row lands at the block's tail. What is **not** exercised is a live call against a real ledger
+declaring `snapshot_anchor` — exactly one artifact in `docs/` declares one today
+(`open-issue-work-queue.md`), and appending to a live queue to prove a point was declined.
+
 **Both of the precedent's failure modes are real, and one is verifiable in a single command.**
 `python3 scripts/pre-commit-ledger-counts.py --source=worktree --json` returns
 `"claimed": []` and `"declared": {}` today — **two of that test's three arms compare empty to
