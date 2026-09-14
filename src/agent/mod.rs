@@ -202,6 +202,7 @@ impl AgentInner {
     ) -> Workspace {
         let ProjectResources {
             config,
+            config_stamp,
             memory,
             private_memory,
             library_registry,
@@ -241,6 +242,7 @@ impl AgentInner {
         let active = ActiveProject {
             root: root.to_path_buf(),
             config,
+            config_stamp,
             memory,
             private_memory,
             library_registry,
@@ -286,6 +288,44 @@ impl AgentInner {
     }
 }
 
+/// A cheap fingerprint of `.codescout/project.toml`, taken when the config it
+/// produced was read.
+///
+/// `None` (the holding field is `Option<ConfigStamp>`) means the file did not exist
+/// at load time — a project running on defaults. A file appearing later therefore
+/// reads as a change, which is the direction that matters: a project *gaining* a
+/// `[security]` section must not be ignored.
+///
+/// **What it deliberately does not detect.** An edit preserving both mtime and length
+/// is invisible here, and on a filesystem with coarse mtime granularity that includes
+/// a same-size edit inside one tick. The alternative is hashing the file on every
+/// gated call — a read and a parse per tool invocation, where a `stat` is neither.
+/// The residual is narrower than the defect it replaces by exactly the width of that
+/// coincidence, and it is stated here rather than left for a reader to infer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct ConfigStamp {
+    modified: Option<std::time::SystemTime>,
+    len: u64,
+}
+
+impl ConfigStamp {
+    /// Fingerprint a project's config file: one `stat`, no read, no parse.
+    ///
+    /// **Take this BEFORE the read it describes, never after.** A write landing
+    /// between the stat and the read then leaves a stamp describing the OLDER file,
+    /// so the next comparison sees a difference and reloads — an extra reload, never
+    /// a missed one. Stamping after the read fails the other way: the stamp would
+    /// describe bytes the cached config was not built from, and that change would be
+    /// swallowed permanently.
+    pub(crate) fn of(root: &Path) -> Option<Self> {
+        let md = std::fs::metadata(root.join(".codescout").join("project.toml")).ok()?;
+        Some(Self {
+            modified: md.modified().ok(),
+            len: md.len(),
+        })
+    }
+}
+
 /// Active project state.
 ///
 /// **Field-visibility contract:** all fields are `pub(crate)` rather than
@@ -315,6 +355,15 @@ impl AgentInner {
 pub struct ActiveProject {
     pub(crate) root: PathBuf,
     pub(crate) config: ProjectConfig,
+    /// Fingerprint of `project.toml` as it stood when `config` above was read.
+    ///
+    /// **Invariant: this moves with `config`, or not at all.** A config refreshed
+    /// without its stamp re-reads on every gated call forever; a stamp refreshed
+    /// without its config pins the staleness permanently, which is the defect the
+    /// field exists to close. Both writers go through
+    /// `ActiveProject::reload_config_from_disk`, and construction takes the pair out
+    /// of `ProjectResources`, so neither can be set alone without adding a new site.
+    pub(crate) config_stamp: Option<ConfigStamp>,
     pub(crate) memory: MemoryStore,
     pub(crate) private_memory: MemoryStore,
     pub(crate) library_registry: LibraryRegistry,
@@ -351,6 +400,36 @@ impl ActiveProject {
     /// `[project] name = ...` field.
     pub fn project_id(&self) -> &str {
         &self.config.project.name
+    }
+    /// True when `.codescout/project.toml` no longer matches the fingerprint taken
+    /// when this project's `config` was read.
+    ///
+    /// One `stat`, no read and no parse, so this is affordable before every gated
+    /// call — which is the point. The config is loaded once when a project becomes
+    /// resident and cached for the life of the process, and until this existed the
+    /// only thing that re-read it was codescout's *own* write tools targeting the
+    /// file. An edit made in an editor, by `Bash`, or by any other process was never
+    /// picked up, so a project flipped to `file_write_enabled = false` or
+    /// `shell_command_mode = "disabled"` on disk kept permitting, silently.
+    pub(crate) fn config_is_stale(&self) -> bool {
+        ConfigStamp::of(&self.root) != self.config_stamp
+    }
+
+    /// Re-read `project.toml` and re-stamp it, together.
+    ///
+    /// **On a parse failure the stamp still advances while `config` does not**, and
+    /// both halves of that are deliberate. Keeping the last-good config means a
+    /// malformed file cannot relax a gate by falling back to permissive defaults.
+    /// Advancing the stamp anyway means a file that stays broken is parsed once
+    /// rather than on every gated call — without it the retry is unbounded and paid
+    /// by every tool invocation. Fixing the file changes its fingerprint, so the
+    /// reload happens then.
+    pub(crate) fn reload_config_from_disk(&mut self) {
+        let stamp = ConfigStamp::of(&self.root);
+        if let Ok(fresh) = crate::config::project::ProjectConfig::load_or_default(&self.root) {
+            self.config = fresh;
+        }
+        self.config_stamp = stamp;
     }
 
     /// Absolute path to the project root on disk.
@@ -422,6 +501,9 @@ fn probe_has_git_remote(root: &Path) -> bool {
 /// by `AgentInner::build_workspace` under the write lock.
 struct ProjectResources {
     config: ProjectConfig,
+    /// Fingerprint of the file `config` was read from, taken BEFORE that read.
+    /// Travels with it so `build_workspace` cannot assemble one without the other.
+    config_stamp: Option<ConfigStamp>,
     memory: MemoryStore,
     private_memory: MemoryStore,
     library_registry: LibraryRegistry,
@@ -479,6 +561,8 @@ impl Agent {
             // path-form drift when activate_project(".") later canonicalizes its
             // argument and compares against home_root.
             let root = std::fs::canonicalize(&raw).unwrap_or(raw);
+            // Stamped before the read it describes — see `ConfigStamp::of`.
+            let config_stamp = ConfigStamp::of(&root);
             let config = ProjectConfig::load_or_default(&root)?;
             let memory = MemoryStore::open(&root)?;
             let private_memory = MemoryStore::open_private(&root)?;
@@ -489,6 +573,7 @@ impl Agent {
             let active = ActiveProject {
                 root: root.clone(),
                 config,
+                config_stamp,
                 memory,
                 private_memory,
                 library_registry,
@@ -629,6 +714,10 @@ impl Agent {
     /// and `ensure_resident`; the products are assembled into a `Workspace`
     /// under the write lock by `AgentInner::build_workspace`.
     async fn load_project_resources(root: &Path) -> Result<ProjectResources> {
+        // Stamped BEFORE the read it describes: a write landing between the two then
+        // leaves a stamp describing the OLDER file, so the next gated call reloads.
+        // The reverse order swallows that write permanently. See `ConfigStamp::of`.
+        let config_stamp = ConfigStamp::of(root);
         let config = ProjectConfig::load_or_default(root)?;
         let memory = MemoryStore::open(root)?;
         let private_memory = MemoryStore::open_private(root)?;
@@ -647,6 +736,7 @@ impl Agent {
             .with_context(|| format!("failed to open write.lock for {}", root.display()))?;
         Ok(ProjectResources {
             config,
+            config_stamp,
             memory,
             private_memory,
             library_registry,
@@ -739,13 +829,39 @@ impl Agent {
 
     /// Pinned twin of `security_config`: security config of the workspace named
     /// by `workspace_override` (resident-on-demand), or defaults if `None`/none.
+    ///
+    /// Re-reads `project.toml` first if it has changed on disk since the cached
+    /// config was built. See `security_config` for why that check lives at this
+    /// seam rather than at `ensure_resident`.
     pub async fn security_config_for(
         &self,
         workspace_override: Option<&Path>,
     ) -> crate::util::path_security::PathSecurityConfig {
-        self.with_project_at(workspace_override, |p| Ok(project_security_config(p)))
-            .await
-            .unwrap_or_default()
+        // Fast path: derive under the read lock and learn, in the SAME pass, whether
+        // project.toml moved under us. One `stat`, no read, no parse, no write lock.
+        let probe = self
+            .with_project_at(workspace_override, |p| {
+                Ok((project_security_config(p), p.config_is_stale()))
+            })
+            .await;
+        match probe {
+            Ok((config, false)) => config,
+            Ok((_, true)) => {
+                // Slow path only: the file really changed. Re-read under the write
+                // lock, then re-derive — never reuse the config probed above, which
+                // was built from the bytes we just learned are stale.
+                let _ = self
+                    .with_project_at_mut(workspace_override, |p| {
+                        p.reload_config_from_disk();
+                        Ok(())
+                    })
+                    .await;
+                self.with_project_at(workspace_override, |p| Ok(project_security_config(p)))
+                    .await
+                    .unwrap_or_default()
+            }
+            Err(_) => crate::util::path_security::PathSecurityConfig::default(),
+        }
     }
     /// Pinned twin of `require_project_root`: focused root of the workspace
     /// named by `workspace_override` (resident-on-demand), or a recoverable
@@ -907,11 +1023,7 @@ impl Agent {
             .with_project_at_mut(workspace_override, |p| {
                 let toml_path = p.root.join(".codescout").join("project.toml");
                 if path == toml_path {
-                    if let Ok(fresh) =
-                        crate::config::project::ProjectConfig::load_or_default(&p.root)
-                    {
-                        p.config = fresh;
-                    }
+                    p.reload_config_from_disk();
                 }
                 Ok(())
             })
@@ -1159,6 +1271,11 @@ impl Agent {
         let active = ActiveProject {
             root: abs_root.clone(),
             config,
+            // This path reuses a config already resolved above rather than reading
+            // one, so the stamp is taken here. Any write since that resolve leaves a
+            // NEWER file than this stamp describes, which the next gated call sees as
+            // a difference and reloads — the safe direction.
+            config_stamp: ConfigStamp::of(&abs_root),
             memory,
             private_memory,
             library_registry,
@@ -1439,14 +1556,19 @@ impl Agent {
     /// in-memory config from disk. Called by `edit_file` after every successful
     /// write so that tools like `semantic_search` see the updated model immediately
     /// without requiring a session restart.
+    ///
+    /// This is the *proxy* path — it fires on "one of my own write tools targeted
+    /// that file", never on "the file changed". `ActiveProject::config_is_stale` is
+    /// the observation that covers every other writer; this stays because it
+    /// refreshes eagerly at the moment of a known write rather than lazily at the
+    /// next gated call, and because it reaches consumers that never ask for a
+    /// security config at all.
     pub async fn reload_config_if_project_toml(&self, path: &std::path::Path) {
         let mut inner = self.inner.write().await;
         if let Some(ref mut p) = inner.active_project_mut() {
             let toml_path = p.root.join(".codescout").join("project.toml");
             if path == toml_path {
-                if let Ok(fresh) = crate::config::project::ProjectConfig::load_or_default(&p.root) {
-                    p.config = fresh;
-                }
+                p.reload_config_from_disk();
             }
         }
     }
@@ -1652,11 +1774,50 @@ impl Agent {
 impl Agent {
     /// Get the security config, or defaults if no project is active.
     /// Populates `library_paths` from the active project's library registry.
+    ///
+    /// **Re-reads `project.toml` when it has changed on disk since the cached config
+    /// was built, and this is the seam that closes the staleness rather than
+    /// `ensure_resident`.** The config is cached for the life of the process and
+    /// `ensure_resident` is where that cache goes stale — but it is not where the
+    /// staleness is *served*, and it is not on the path of every gated call. Every
+    /// one of those reaches a security decision through `project_security_config`,
+    /// which both this and `security_config_for` call, so checking here covers the
+    /// gates and checking at `ensure_resident` would not.
+    ///
+    /// Two cached-config readers are deliberately left out of scope, named so the
+    /// next reader does not re-derive them as covered: `current_capabilities`
+    /// (`server.rs`) reads `shell_command_mode` directly to decide whether to
+    /// *advertise* `run_command`, so a stale read there advertises a tool that then
+    /// correctly refuses — degraded, not permissive; and `max_index_bytes` is a
+    /// resource bound rather than a gate.
     pub async fn security_config(&self) -> crate::util::path_security::PathSecurityConfig {
-        let inner = self.inner.read().await;
-        match inner.active_project() {
-            Some(p) => project_security_config(p),
+        // Fast path: derive and check staleness under one read lock. The check is a
+        // single `stat` — no read, no parse — which is what makes it affordable on
+        // the path every tool call takes.
+        let probe = {
+            let inner = self.inner.read().await;
+            inner
+                .active_project()
+                .map(|p| (project_security_config(p), p.config_is_stale()))
+        };
+        match probe {
             None => crate::util::path_security::PathSecurityConfig::default(),
+            Some((config, false)) => config,
+            Some((_, true)) => {
+                // Slow path. The read lock above is released by the block, then the
+                // write lock is taken — sequential, never nested.
+                {
+                    let mut inner = self.inner.write().await;
+                    if let Some(ref mut p) = inner.active_project_mut() {
+                        p.reload_config_from_disk();
+                    }
+                }
+                let inner = self.inner.read().await;
+                inner
+                    .active_project()
+                    .map(project_security_config)
+                    .unwrap_or_default()
+            }
         }
     }
 
@@ -2138,6 +2299,13 @@ mod tests {
         ActiveProject {
             root: root.to_path_buf(),
             config,
+            // Test helper: the fixture mutates `config` in memory AFTER loading it, so
+            // no on-disk file corresponds to what this project is carrying. `None`
+            // reads as "no file at load time", which makes the first staleness check
+            // see any real project.toml as a change. Tests that care drive the stamp
+            // explicitly; tests that do not are unaffected, because nothing here calls
+            // `config_is_stale`.
+            config_stamp: None,
             memory: MemoryStore::from_dir(root.join("mem")).unwrap(),
             private_memory: MemoryStore::from_dir(root.join("priv")).unwrap(),
             library_registry: LibraryRegistry::default(),
@@ -3139,6 +3307,107 @@ mod tests {
         assert!(
             !config.file_write_enabled,
             "non-home project should be read-only by default"
+        );
+    }
+    /// The silent half of
+    /// `docs/issues/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`:
+    /// `project.toml` is read once when a project becomes resident and cached for the
+    /// life of the process, and until `config_is_stale` existed only codescout's OWN
+    /// write tools re-read it. An edit made in an editor, by `Bash`, or by any other
+    /// process was never picked up — so a project flipped to
+    /// `file_write_enabled = false` on disk kept ACCEPTING WRITES, with no error on
+    /// any surface. That is the direction an operator cares about most, because it
+    /// fails toward permitting.
+    ///
+    /// **The write below MUST be `std::fs::write`, and that is the whole test.**
+    /// Driving it through `edit_file` would call `reload_config_if_project_toml`,
+    /// which refreshes the config by an entirely different route, so the test would
+    /// pass against the broken code and prove nothing. Anyone "tidying" this onto the
+    /// tool API deletes the coverage and leaves the assertion green.
+    #[tokio::test]
+    async fn an_out_of_band_project_toml_edit_reaches_the_next_gated_call() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let toml = dir.path().join(".codescout").join("project.toml");
+
+        std::fs::write(
+            &toml,
+            "[project]\nname = \"t\"\n\n[security]\nfile_write_enabled = true\n",
+        )
+        .unwrap();
+
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        assert!(
+            agent.security_config().await.file_write_enabled,
+            "control: the project must START writable, or the flip below proves nothing"
+        );
+
+        // `true` -> `false` changes the file's LENGTH as well as its mtime, and that
+        // is load-bearing rather than incidental: the stamp is (mtime, len), so on a
+        // filesystem with coarse mtime granularity a same-length rewrite inside one
+        // tick would be invisible. Keep these two values different in length.
+        std::fs::write(
+            &toml,
+            "[project]\nname = \"t\"\n\n[security]\nfile_write_enabled = false\n",
+        )
+        .unwrap();
+
+        assert!(
+            !agent.security_config().await.file_write_enabled,
+            "an out-of-band edit must reach the gate: before the fix the project kept \
+             accepting writes for the life of the process, printing nothing"
+        );
+    }
+
+    /// `security_config_for` is the PINNED twin and a SEPARATE code path — the
+    /// staleness check is implemented once in each, so the test above cannot cover
+    /// this one. `CLAUDE.md` § *Testing Discipline*: mutate once per guarded SITE,
+    /// not once per feature; here applied before the mutation rather than after.
+    #[tokio::test]
+    async fn an_out_of_band_edit_reaches_the_pinned_security_config_too() {
+        let home = tempdir().unwrap();
+        let pinned = tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(pinned.path().join(".codescout")).unwrap();
+        let toml = pinned.path().join(".codescout").join("project.toml");
+
+        // `shell_command_mode` rather than `file_write_enabled`, deliberately: a
+        // pinned non-home workspace defaults to read-only, and
+        // `project_security_config` forces `file_write_enabled = false` for a
+        // read-only project regardless of config — so that field would assert
+        // vacuously here, passing whether or not the reload happened.
+        // `shell_command_mode` passes through untouched, and it is also the sharpest
+        // case in the bug's § Scope.
+        std::fs::write(
+            &toml,
+            "[project]\nname = \"p\"\n\n[security]\nshell_command_mode = \"warn\"\n",
+        )
+        .unwrap();
+
+        let agent = Agent::new(Some(home.path().to_path_buf())).await.unwrap();
+        assert_eq!(
+            agent
+                .security_config_for(Some(pinned.path()))
+                .await
+                .shell_command_mode,
+            "warn",
+            "control: the pinned project must START permissive"
+        );
+
+        std::fs::write(
+            &toml,
+            "[project]\nname = \"p\"\n\n[security]\nshell_command_mode = \"disabled\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            agent
+                .security_config_for(Some(pinned.path()))
+                .await
+                .shell_command_mode,
+            "disabled",
+            "a project flipped to disabled on disk kept EXECUTING shell commands for \
+             the life of the process — the permissive-direction failure"
         );
     }
 
