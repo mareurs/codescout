@@ -1,9 +1,11 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/unclassified
 closed: null
+fix_patch_id: 6a84e4a2b7eaca3c25e193f20a852d588381c9c2
+fix_sha: 122ea357
 opened: 2026-09-14
 owner: marius
 related: []
@@ -176,17 +178,56 @@ Do **not** re-derive the 2026-08-21 baseline to settle the 22/21 split — that 
 is gone. Make the surfaces agree on one figure, labelled as computed under the old
 conflated unit, or drop it.
 
-**SHA:** not fixed. **patch-id:** not fixed.
+**Fixed on `experiments` by `122ea357`** — SHA is positional and dies on rebase; the durable
+identifier is the patch-id below.
+
+**SHA:** `122ea357` (on `experiments`). **patch-id:** `6a84e4a2b7eaca3c25e193f20a852d588381c9c2`.
+
+**NOT ARCHIVED, and the reason is a gap rather than a formality.** CLAUDE.md's archive trigger
+is *gate green plus a regression test*. The regression test exists; the gate is not green. The
+fourth command (`cargo test --workspace`) never completed: two attempts wedged at the identical
+point (5529 lines, no `test result` block), main thread futex-parked, killed after ~12.5 minutes
+of zero output. `cargo test --workspace` opens the real
+`/home/marius/.local/share/librarian/catalog.db` with 14-17 fds — not an isolated fixture — and
+22 processes hold POSIX advisory READ locks on it with no WRITE lock anywhere, one of them a
+codescout server SIGSTOPped since 2026-09-10 whose parent `claude` is also stopped. A peer's gate
+wedged identically and did **not** resume when this session's run was killed, so the two were not
+deadlocking each other. The mechanism is **not established** and is a separate question from this
+bug. `fmt-mine.sh` also refused (exit 1) on two peer-owned unformatted files, correctly and
+unrelatedly; this change contains no Rust. clippy 0, lean 0.
 
 ## Tests added
 
-None yet. A regression test is cheap and should land with the fix: the classifier is a pure
-function of a cmdline string, so a fixture of three cmdlines — a server, a mux, and a server
-launched through the `~/.cargo/bin/codescout` symlink — pins the partition without needing
-live processes. Asserting that the remedy text still names **both** kinds is the shape
-assertion CLAUDE.md § *Testing Discipline* calls cheap and worth it: it reds on deletion of
-either branch and survives rewording.
+[`tests/stale-servers.sh`](../../tests/stale-servers.sh) — **18 cases**, wired as its own CI job
+(`stale-servers-tests` in `.github/workflows/ci.yml`; its own job because `shell-tests` is a
+known-flaky lane and this suite's assertions are verdicts about a count's UNIT).
 
+Driven through the two seams the fix added rather than through live processes, and that is the
+design: a mux exists only while a language server is warm, so a suite that waited for one would
+inherit the exact intermittency that hid this defect and would pass silently in CI, where no mux
+ever exists. `--classify` calls `kind_of_cmdline` and `--remedy` calls `remedy` — the same two
+functions the live loop calls, so the suite drives production and not a re-implementation of it.
+
+**Mutation run against the production path at fix time — 4 of 4 killed**, and the per-mutation
+kill counts are the informative part, because two of them died to exactly one case each, which is
+what says those cases are not redundant with the rest:
+
+| mutation of `scripts/stale-servers.sh` | cases killed |
+|---|---|
+| classifier narrowed to `*mux*` (drop the ` --socket`) | 1 — the `/opt/tmux-tools/` control, alone |
+| classifier stubbed to answer `server` unconditionally | 4 |
+| delete the `remedy`'s mux branch | 3 |
+| reinstate a combined `total=` line | 1 — the absence assertion, alone |
+
+The absence assertion (*no combined total is printed*) is monotone under removal — deleting the
+whole summary satisfies it — so it is paired on the line with the two presence assertions for
+`servers=` and `muxes=`. Neither half is worth anything alone, and the suite says so at the site.
+
+What these do **not** cover: the `/proc` read itself, and the live loop's counters. Those are
+exercised only by the one live invocation, whose value is population-independent (on a runner
+with no codescout process the counters print zero and every assertion still holds) — which is
+what makes it CI-safe and also what makes it thin. A regression that broke only the `/proc`
+reading would show up as an empty table, not as a failure.
 ## Workarounds
 
 Filter by hand before trusting the count:
@@ -202,13 +243,19 @@ Rows the script marks STALE that appear as `MUX` need no action.
 
 ## Resume
 
-Read `scripts/stale-servers.sh:36-62` (the collection loop) and add a `kind` field to the
-`rows` accumulator, sourced from `/proc/$p/cmdline` rather than a parent lookup. Confirm
-against a live mux first: run any LSP-backed call (`references`, `symbol_at`) in this
-checkout to warm one, then re-run the script and check that exactly the new row carries
-`mux --socket`. Then sweep the two published baselines at `docs/PROBES.md:180` and
-`docs/RELEASE.md:171`.
+**One step owed, and it is the archive blocker:** run `cargo test --workspace` to completion and
+confirm it is green, then archive via `doc(action="move", …)` — never a bare `git mv`. That run
+cannot currently complete on this machine; the state is described under § Fix. It is **not** a
+symptom of this change (both wedges predate the commit, and one predates the peer's gate that ran
+alongside it), and it is worth its own bug file if it recurs after the catalog is unwedged.
 
+The lever nobody in-session should pull: PID 3031162, a `claude` SIGSTOPped since 2026-09-10 with
+a codescout child holding a shared lock on the production catalog. Resuming or terminating
+another session's process is the operator's call, not a peer's.
+
+Nothing about the fix itself is outstanding. If a second instance of the defect CLASS appears,
+the roster's `cluster/unclassified` `**Members:**` field is where the adjudication is parked —
+see § Defect class.
 ## References
 
 - `scripts/stale-servers.sh` — the instrument
