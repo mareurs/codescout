@@ -12,7 +12,7 @@ topic: context-injection
 entry_prefix:
   - F
   - W
-entry_high_water_F: 11
+entry_high_water_F: 12
 entry_high_water_W: 4
 ---
 
@@ -45,6 +45,7 @@ author to make.
 | F-9 | 2026-09-14 | med | plan-prose | mitigated | The fix plan's own workaround is wrong for most ledgers — an anchor is not a constant |
 | F-10 | 2026-09-14 | high | tooling | fixed-verified | The schema is hand-written too, so "prefer the schema" rests on a false premise — and I shipped its stale claim to four surfaces |
 | F-11 | 2026-09-14 | med | tooling | open | A control whose subject was relabelled in transit — `2>&1` made my stderr evidence stdout |
+| F-12 | 2026-09-14 | med | self-friction | open | Third today: the falsifier was in my own § E1, three sections below the claim it refutes |
 
 ## Wins Index
 
@@ -1303,6 +1304,57 @@ reason and its fix recommendation were wrong. Both live in a file another sessio
 **Status:** open — the correction belongs in that bug file, which is `status: taken` by
 `9403d62d`. Left to them by design rather than patched around, since editing a record another
 session is actively fixing is the capture this corpus keeps paying for.
+
+## F-12 — Third today: the falsifier was in my own § E1, three sections below the claim it refutes
+
+**Valid:** dated 2026-09-14
+
+**Observed:** third instance today of one shape, and this entry exists for the **consolidation**
+rather than the instance — `F-8` and `F-11` are already here and were filed as unrelated.
+
+My own bug file (`c079fb93eb7fece8`) framed the discrimination as classification: § Reproduction
+contrasts *"`type: "generic"` → stderr in full"* with *"`type: "test"` → no stderr key"*. That is
+true only **conditional on the summarizer being entered at all**, and the gate is
+`needs_summary` — `(stdout.len() + stderr.len()) / 4 > MAX_INLINE_TOKENS`
+(`src/tools/command_summary.rs:218`), i.e. combined output > 10_000 bytes. Classification chooses
+*which* summarizer runs once that gate is crossed; it is not the gate.
+
+**I named the gate myself, in the same file, three sections down.** § E1 reads: *"With `-- true`
+**(no buffering)** the identical script returned its verdict inline."* The parenthetical is
+correct and it is the explanatory variable — spent as an aside about the setup, while the
+framing three sections above rested on something else. Corrected by sessionId `9403d62d`, who
+also supplied the bound my own overreach needed: a narrowly filtered `cargo test --lib` stays
+under the threshold and returns inline with stderr intact, so *"every `cargo test`"* was wrong
+and *"every workspace-scale run"* is right.
+
+**The consolidation, which is the point.** Three instances, three surfaces, one day:
+
+| | the falsifier | where it was |
+|---|---|---|
+| `F-8` | the phrase spanned a wrapped line | `CLAUDE.md:215-216`, on screen |
+| `F-11` | `2>&1` relabelled the stream | a comment 4 lines above the command, file already opened twice |
+| this | the gate is volume, not type | **my own § E1**, three sections below my framing |
+
+Each falsifier was **present, cheap, and in hand** — and in the third case authored by me, in the
+document making the claim. So the common factor is not access to evidence and not care: it is
+that nothing forced a **cross-read** between two parts of one artifact. "Look harder" is the
+wrong instrument for all three, which is `CLAUDE.md` § *Observer Blindness*'s own test.
+
+**What a mechanism would have to do**, stated because a class with no mechanism is a worklist
+item: catch a document whose § Evidence contradicts its § Root cause. No gate in this repo reads
+two sections of one file against each other — `audit_doc_refs` checks citations against the
+filesystem, `doctor` checks records against the catalog, and both are artifact-vs-world. This is
+artifact-vs-itself and is unguarded by construction. Not proposed as a build here: the inclusion
+test is not defensible on three self-selected instances, all mine, all noticed after the fact.
+
+**Rests on:** `command_summary.rs:218` read at `13a36537`; the `F-8`/`F-11` rows as filed.
+
+**Severity:** med — no wrong artifact shipped. Each was caught, two by a peer, within hours.
+
+**Status:** open — recorded as a candidate `OB-N` if a fourth arrives from a different author.
+Deliberately **not** promoted here: three instances by one session in one day is a broken
+observer, not a demonstrated class, and this corpus's standard for a class opened in passing is
+that nobody defends its inclusion test.
 
 ## Template for new entries
 
