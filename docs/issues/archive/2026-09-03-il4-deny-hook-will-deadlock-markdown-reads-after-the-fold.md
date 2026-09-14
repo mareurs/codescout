@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: zombie
+status: fixed
 tags:
 - cluster/gate-keyed-on-unobservable-event
 closed: 2026-09-04
@@ -166,6 +166,40 @@ means *"was it ever gone?"*. The real fix is cited in
 `docs/issues/archive/2026-09-04-companion-tool-name-gate-skips-every-mjs-hook.md` —
 codescout `1dacd204` (patch-id `037ce550126c46ca6569843e7a8ef1133dcc35d1`) and
 `claude-plugins:677fb6c9` (patch-id `ecf9efa7a9202f8f613fef23f42ad070949a41ab`).
+
+### Zombie watch discharged — 2026-09-14, on a third profile
+
+The watch this record opened asks *"was it ever gone?"*. § *Status now* answered it on **one**
+profile (`~/.claude-sdd`), 2026-09-04. Re-derived 2026-09-14 on **`~/.claude-kat`** — a profile
+neither the original observation (`~/.claude`, § *Environment*) nor that probe had touched —
+against the running binary, worktree `36eec498`. **Enforcement is per-profile, so this is a new
+scope rather than a repetition**, which is the only reason the re-run carries information.
+
+All three of § *Status now*'s own criteria were met, and *incidentally*: the calls were made to
+triage this record during an open-issue sweep, not to test it, so the probe could not have been
+shaped to pass.
+
+- **Bare markdown `read_file` returns a heading map plus an `@file_*` handle** — 4 calls
+  (`2026-09-01-two-correct-pre-commit-guards…`, `2026-08-31-peer-commit-captures…`,
+  `2026-09-13-fix-anchor-check-reads-a-cited-patch-id…`, and this file), 139–1422 lines. No deny
+  on any of them.
+- **The size-adaptive split was exercised in both directions** — three returned a map + handle;
+  the 139-line one returned full content inline.
+- **A librarian-managed artifact is refused with a hint naming LIVE tools** —
+  `docs/trackers/open-issue-work-queue.md` refused with `doc(action="get"/"find"/"update")`.
+  `read_markdown` appears nowhere in that message, which is the specific regression this record
+  was about.
+
+**This is a denominator, not a catch** (CLAUDE.md § *Testing Discipline* — *when a re-derivation
+confirms, publish the confirmation*). Nothing was found; the watch is discharged because its
+question was asked again on ground it had not covered and answered the same way. Absorbing it as a
+catch would make the population look self-correcting.
+
+What is discharged is the **watch**, not the reopen: `4a2f34f7-0669-487d-9ce9-39b77881642f` was
+right that the 2026-09-04 archive asserted a fix that did not exist, and § *CORRECTION 2026-09-05*
+stands. Status moved `zombie` → `fixed`. The § *Fix* SHA + patch-id are already declared, so
+`terminal_status_without_fix_anchor` stays clear, and the file stays where it already was.
+
 ## Fix
 
 Applied in the **plugin** repo, not here. The prescribed fix was *"delete the hook, not update its message"* — after the fold there is no wrong tool to redirect away from, so the rule it enforced no longer exists — and that is what landed.
