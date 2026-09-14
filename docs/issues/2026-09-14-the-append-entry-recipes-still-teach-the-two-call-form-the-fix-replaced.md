@@ -23,6 +23,13 @@ single `fs::write`. Three documentation surfaces still teach the superseded two-
 append, then add the row in a later call — and none mentions the parameters. Sessions follow
 the recipe, and every one of them reproduces the interval the fix was built to remove.
 
+**The schema is NOT one of the stale surfaces, and saying so is load-bearing.** `append_entry`'s
+served tool description carries both parameters, their both-or-neither coupling and their failure
+mode, and did so in both affected sessions' context throughout. This is not a documentation gap;
+it is a **worked example outranking a schema at call-composition time**. See § Root cause — a
+reader who fixes the three recipes without learning that could reasonably conclude the parameters
+were undocumented.
+
 The archived bug that shipped that fix named this outcome in advance, in its own frontmatter:
 
 > The window is closed for callers who USE the new parameters; it is not closed for callers who
@@ -72,10 +79,49 @@ and in the live tool schema.
 
 ## Root cause
 
-**The fix was opt-in and nothing migrated its callers.** `8857b0b2` added parameters and left
-every recipe intact, so the documented path and the capable path diverged with no gate between
-them — `doc(action="append_entry")` accepts a call with no `index_row` and returns `Ok`, which
-is correct behaviour and indistinguishable from the caller having chosen the one-call form.
+**The fix was opt-in and nothing migrated its callers** — but that framing is a coverage claim
+and coverage was never the problem. Corrected 2026-09-14 by sessionId
+`6be73414-4e...` (`bug-fix-session-log:F-146`, commit `23651065`), who hit this from the other
+side and declined to simply agree:
+
+> *"I was not missing documentation. `append_entry`'s own schema — served in my tool list, in
+> context the entire session — describes both parameters, their both-or-neither coupling, and
+> their failure mode. So code, tool and schema all agreed. What disagreed was the worked example
+> in `reconnaissance` § Phase 3 — which I had loaded and was executing — and the example won."*
+
+Verified independently at this session's own tool surface: `index_row` is described as *"written
+in the SAME file write as the section; `{id}` becomes the allocated id. Both-or-neither with
+`index_after_line`"*, and `index_after_line` as *"FIRST match … a line that does not exist writes
+nothing and allocates no id."* Both were in this session's context for its entire duration, and
+it produced the two-call form anyway.
+
+**So the mechanism is RANK, not coverage.** A schema is read **once**, as a field list, at the
+moment you are deciding whether a parameter exists. A worked example is read at
+**call-composition** time and arrives as a complete, copyable shape. Both surfaces were present
+to both sessions and there was no point at which comparing them was the task — which is why two
+sessions with the correct contract in context reproduced a fixed defect within twenty minutes of
+each other.
+
+**The transferable claim, and it outlives these three recipes: a skill's worked example is a
+second, unversioned copy of the tool's contract.** It decays independently of the schema while
+being the copy that actually gets executed. This repo already knows the shape one level down —
+`the_hook_script_agrees_on_the_cluster_parsers` exists because `scripts/pre-commit-ledger-counts.py`
+duplicates a parser on purpose and *"this test is what stops it becoming drift."* A worked example
+is the same duplication with no such test, and fixing the three recipes below does not address it:
+the next skill to ship an example acquires the liability on day one.
+
+**WHICH SURFACE TO TRUST WHEN THEY DISAGREE — and the tell is cheap, because "diff every example
+against its schema" is not a thing anyone will do.** When a recipe and a schema name the same
+call and **the recipe uses FEWER parameters, prefer the schema**: it is generated from the code,
+the recipe is not. Stated here because a reader who fixes the three recipes and never learns the
+schema was right could reasonably conclude the parameters were undocumented — they were not, and
+the archived fix's own worked example used them.
+
+**On the class:** `cluster/doc-contradicted-by-code` fits the *recipe* half — a recipe teaching a
+superseded form denies a capability the code has. It does **not** describe the rank half, and no
+class in the ledger does. Deliberately not opened here: this corpus's standard is that a class
+opened in passing is one whose inclusion test nobody defends, and `F-146` is its instance ledger
+until a second one arrives.
 
 Three surfaces state the old protocol (measured 2026-09-14, `git grep` at `HEAD`):
 
@@ -192,4 +238,9 @@ This file claims only that the recipes did not migrate.
   `unverified:` field predicting this residue.
 - `docs/trackers/bug-fix-session-log.md` § `F-144`, `F-145`, `W-134` — the three entries, and
   `19bee2ac`, the commit that carried two authors' work because neither could pathspec out of it.
-- `docs/trackers/issue-clusters/IC-11-doc-contradicted-by-code.md` — the class.
+- `docs/trackers/issue-clusters/IC-11-doc-contradicted-by-code.md` — the class, for the recipe
+  half only; see § Root cause on why the rank half has none.
+- `docs/trackers/bug-fix-session-log.md` § `F-146` (`23651065`) — sessionId `6be73414-…`'s entry
+  from the other side, and the source of the rank correction to § Root cause. Written with
+  `index_row` + `index_after_line` in a single call, which is also the first independent
+  confirmation that the workaround in this file behaves as documented.
