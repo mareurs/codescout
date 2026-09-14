@@ -2455,6 +2455,57 @@ on what a peer may **grant** you. This is the other half — a peer cannot
 **withhold** on your behalf either, because the withholding is invisible to the
 only party who could honour it.
 
+### Extension 2026-09-14 — an authorisation names a SET; execution applies to a PREFIX
+
+The class above is about the **substrate's missing field**: withheld and not-yet-pushed are
+byte-identical, so the state cannot be read off the artifact. This extension is about the
+**authorisation's own validity window**, and it bites *even when every commit's status is
+perfectly known* — which is why the parent's remedy does not reach it. Make authorisation
+fully recoverable, consult it at execution time, and you still hold a decision about the set
+that existed **when it was made**.
+
+An operator approves a set at an instant. Execution resolves a *prefix* later. A branch push
+sends every ancestor of the tip **at push time**, so commits that did not exist at the moment
+of decision are published by it. Re-deriving the range before executing tells you the set
+changed; it does not make the change consented to — and re-derivation feels like diligence,
+which is what makes it the trap rather than the fix.
+
+**Two instances the same day, both on this branch:**
+
+1. An operator said *"push all"* at 39 commits; the push executed at 40. The commit that
+   arrived in that window (`9045c56a`) was not in the set they were looking at — and is
+   also the tip `origin/experiments` now points at, so the one commit nobody had seen is
+   the one the branch resolves to. Raised by `f3c594ce-c424-40d3-a603-9693cfef3f63`, who
+   re-derived the range at push time, sent anyway, and said so in those terms rather than
+   citing the re-derivation as cover.
+2. The same shape one level up, noticed while writing about the first: by the time
+   `aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66` described `origin/experiments` to a peer, it was
+   already stale — `b6af203f` had landed since. Not *"the range moved during the
+   decision"* but *"the range never stops moving, so any published state is a
+   photograph"*.
+
+**Why it is not push-specific**, and the reason it sits here rather than in a git document:
+the pair is *approved set* / *executed prefix*, and any approval that outlives the tree it
+was given against has it. An approved plan executed after the substrate moved is the same
+defect with no `git` in it. The tell is a decision expressed over a **snapshot** and applied
+by a mechanism that re-resolves at **run time**.
+
+**No mechanism proposed.** *Re-derive and show the operator the delta before executing* is
+the obvious candidate and is only a policy — a *the model must notice* step, which the
+closing paragraph above measured at five failures by sessions actively writing about the
+rule. Naming the shape is what is offered; anyone who wants the mechanism should read that
+paragraph first.
+
+**Attribution, split because the halves were earned differently.** The sentence is the
+**pre-push guard's own refusal text**, which already cites OB-20 — `f3c594ce` quoted it and
+explicitly declined credit for deriving it, and correcting my attempt to cite them for it is
+what produced this paragraph. The generalisation past publication is
+`aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66`'s, filed here as an extension of OB-20 rather than a
+sibling class on `f3c594ce`'s recommendation — a second copy of a live class under a wrong
+name being the failure this repo's rules on superseded prose exist to prevent.
+
+**Valid:** dated 2026-09-14
+
 ## OB-21 — a session cannot audit its own successive claims, because it never re-reads what it sent
 
 **Valid:** invariant
