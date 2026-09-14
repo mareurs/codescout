@@ -13,7 +13,7 @@ entry_prefix:
   - F
   - W
 entry_high_water_F: 12
-entry_high_water_W: 4
+entry_high_water_W: 5
 ---
 
 # Session Log — Context Injection & Principal Identity
@@ -55,6 +55,7 @@ author to make.
 | W-2 | 2026-09-14 | high | probe a would-be KEY in a universe containing two of whatever it keys | a single-field `agent_id` key would have passed every test and conflated two sessions' parents the first time two sessions shared a server | validated |
 | W-3 | 2026-09-14 | high | when the obvious benefit is already provided, measure the property the incumbent cannot have by construction | the ADR's justification would have stayed an argument after F-6 demoted it, with the real benefit unmeasured and unclaimable | validated |
 | W-4 | 2026-09-14 | high | ask what proposition a confirming result proves before copying the thing that produced it | `permissionDecision:'allow'` would have shipped on a matcher covering every codescout tool, auto-approving every subagent `run_command` and `edit_code` | validated |
+| W-5 | 2026-09-14 | high | file specifically enough to be FALSIFIED, not merely accurately | the same bug filed vaguely would have been true, needed no correction, and yielded none of the six — and the shipped fix depends on two specifics it would not have carried | validated |
 
 ---
 
@@ -1378,6 +1379,53 @@ claim lives in § *Root cause* beside its confidence marker.
 **Status:** mitigated — retracted in place above, with the surviving claim narrowed to this entry
 alone and routed to `OB-26` as a confirming instance. The row on that tracker is the remaining
 work.
+
+## W-5 — A record that cannot be attacked returns no corrections, which looks exactly like being right
+
+**Valid:** dated 2026-09-14
+
+**Pattern:** file a record specific enough that each of its claims can be shown wrong by a
+command. Not "be accurate" — **be falsifiable**, which is a different and weaker discipline, and
+the one that actually compounds.
+
+**Observed 2026-09-14.** `docs/issues/…run-commands-test-envelope-drops-the-stderr…` drew **six**
+corrections from one peer (sessionId `9403d62d`) across an evening: a void reason for rejecting a
+hypothesis, a falsified fix recommendation, a frequency error of four orders of magnitude, an
+over-broad consolidation, a duplicate class, and a layer-inheritance in § *Reproduction*. I
+initially recorded that division as *"I ran the reproductions, they got the record right."*
+
+**That framing is wrong, and the correction is theirs:**
+
+> *"Every correction I made was downstream of a reproduction you had already built and published
+> in enough detail to be attacked. I falsified your fix recommendation by measuring the sibling
+> YOUR file told me to copy, and I found the buffer defect by constructing the control your
+> § Reproduction's framing made conspicuous by its absence. A vague bug file produces no
+> corrections because it offers nothing to falsify."*
+
+**Counterfactual, and it is the entry.** The same bug filed as *"run_command sometimes loses
+stderr on test runs; root cause unclear"* would have been **true**, would have needed no
+correction, and would have yielded **zero** of the six. It would also have left the fix
+unwritten: `summarize_stderr`'s tail bias exists because the file named `first_error` and
+`failures` as already mining the head, and the bound exists because the file named the sibling to
+copy — which is what let someone measure that sibling and find it unbounded.
+
+**Why this is not merely "write good bug reports".** A record with no corrections against it is
+**indistinguishable** between *right* and *unfalsifiable* — the same monotone blindness `CLAUDE.md`
+§ *Testing Discipline* names for absence assertions, one level up, applied to prose instead of
+tests. Vagueness is therefore not a neutral failure to help: it **suppresses the signal that would
+reveal it**, and it reads as a clean record. A correction count is only evidence about a claim if
+the claim could have produced one.
+
+**The operational form:** prefer the version of a sentence that could be *checked and found
+wrong* over the version that is merely defensible. Name the file and line, the sibling to copy,
+the control you did not run, the population you did not sweep. Each is an attack surface, and an
+attack surface is the only thing that returns a correction.
+
+**Rests on:** one artifact, one evening, one peer — so the mechanism is argued, not measured. The
+six corrections are countable; the counterfactual vague version is not, since nobody filed it.
+
+**Status:** validated — six corrections landed, all six improved the shipped fix or the record,
+and the fix that shipped depends on two specifics the vague version would not have carried.
 
 ## Template for new entries
 
