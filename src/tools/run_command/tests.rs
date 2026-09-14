@@ -2347,7 +2347,7 @@ async fn run_command_buffer_only_within_limit_no_truncation_fields() {
 /// LOAD-BEARING: the pattern must not occur in the stored stdout. One that matched
 /// would return a count > 0 and this would still pass while testing nothing about
 /// the zero case.
-/// BUG docs/issues/2026-09-14-every-reader-of-a-cmd-buffer-takes-stdout-only-so-the-stored-stderr-reaches-nobody.md
+/// BUG docs/issues/archive/2026-09-14-every-reader-of-a-cmd-buffer-takes-stdout-only-so-the-stored-stderr-reaches-nobody.md
 #[cfg(unix)]
 #[tokio::test]
 async fn buffer_query_below_summary_threshold_still_surfaces_stored_stderr() {

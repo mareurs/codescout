@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 151
+entry_high_water_F: 152
 entry_high_water_W: 135
 ---
 
@@ -51,7 +51,7 @@ entry_high_water_W: 135
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-151 | 2026-09-14 | high | reasoning/search-scope | open | **Searched for CONSUMERS of a field, never for how the handle is RESOLVED — and the resolver was four lines from the struct.** `BufferEntry.stderr` is reachable via an `.err` suffix (`output_buffer.rs:289` `strip_suffix`, `:674` stream select), verified live: `grep -c TOKEN @cmd_x.err` → `1`. Distinct from `F-150`: that is about the region of input space an observation was taken in, this is about the shape of the search. *"Who reads this field?"* presumes the answer is a reader; an escape hatch that transforms the KEY is invisible to every grep phrased around the VALUE. Tell: when N call sites agree, read the thing they all call. Cost: a § Workarounds that sent readers to native `Bash` for a stream a four-character suffix already served. Peer `40130` owns the larger half — `.err` is on **no** agent-facing surface, and three sessions concluded the stream unrecoverable that evening, wrong in the same direction, which reads exactly like corroboration. |
-| F-150 | 2026-09-14 | med | reasoning/bug-triage | fixed-verified | **Concluded "no such code path exists" from a reproduction run at one point on a thresholded axis.** Filed `2546172a20a4751e` claiming nothing reads `BufferEntry.stderr`, from two of three call sites. The third read exactly that field, gated on `needs_summary` (>~10 KB). The reproduction was `grep -c` — two bytes — so every observation sat on the one side of the gate where the mechanism is absent, and *absent* and *gated out* are byte-identical there. Three fix shapes drafted on the false premise, all redesigning two tools' read contracts to duplicate a shipping mechanism. Tell: before concluding a mechanism does not exist, re-run the reproduction on the far side of every threshold the code consults — "widen the sample" does not reach this, because one more sample at the same size is the same observation. |
+| F-150 | 2026-09-14 | med | reasoning/bug-triage | fixed-verified | **Concluded "no such code path exists" from a reproduction run at one point on a thresholded axis.** Filed `4c433eb615bedf68` claiming nothing reads `BufferEntry.stderr`, from two of three call sites. The third read exactly that field, gated on `needs_summary` (>~10 KB). The reproduction was `grep -c` — two bytes — so every observation sat on the one side of the gate where the mechanism is absent, and *absent* and *gated out* are byte-identical there. Three fix shapes drafted on the false premise, all redesigning two tools' read contracts to duplicate a shipping mechanism. Tell: before concluding a mechanism does not exist, re-run the reproduction on the far side of every threshold the code consults — "widen the sample" does not reach this, because one more sample at the same size is the same observation. |
 | F-147 | 2026-09-14 | med | cross-session | fixed-verified | **A pathspec commit captured a peer's staged edit to the same file, because I read the staged SET instead of the staged DIFF.** `git status --short` answers which paths; only `git diff --cached` answers which bytes. |
 | F-148 | 2026-09-14 | high | tooling | fixed-verified | **Ran the gate backgrounded, believed its `✓ exit 0` summary, and put a truncated file into the shared build.** The buffer that same response pointed at held `could not compile`. Backgrounding also costs the `attribute-red` hook, so nothing local raised — two failures, one trigger, not to be conflated. Fixed at `cc57cd28`; run gate commands in the FOREGROUND, or capture `EXIT=$?` in band. |
 | F-146 | 2026-09-14 | low | doc-vs-code | promoted-to-bug-tracker | **A served worked example outranked the tool schema that was in context beside it.** Wrote `F-145`/`W-134` as section-then-index-row, reproducing the capture window `8857b0b2` fixed by giving `append_entry` `index_row` + `index_after_line`. The miss was NOT missing documentation: the schema describes both parameters, their coupling and their failure mode, and was served in the tool list all session. The disagreeing surface was the worked example in `codescout-companion:reconnaissance` § Phase 3 — which I had loaded and was executing — and the example won, because a schema is read once as a field list while an example is read at call-composition time as a copyable shape. A skill's worked example is therefore a second, unversioned copy of the tool's contract that decays independently while being the copy actually executed. Tell: when a recipe and a schema name the same call and the recipe uses FEWER parameters, prefer the schema — it is generated from the code and the recipe is not. Filed as `27d7469e027c3c86` (recipe half); this is the rank half |
@@ -15211,7 +15211,7 @@ unmeasured bound" appears in any subsystem. Two instances make it an `IC-N`, not
 
 **Valid:** dated 2026-09-14
 
-**Observed.** I filed `docs/issues/2026-09-14-every-reader-of-a-cmd-buffer-takes-stdout-only-so-the-stored-stderr-reaches-nobody.md` (`2546172a20a4751e`) with a § Root cause reading *"Established by reading both call sites, not inferred"* and a § Summary asserting **"Nothing ever reads that field."** Both `grep.rs:974` and `read_file.rs:286` do take `.stdout` alone, as reported — but a **third** reader existed at `src/tools/run_command/output.rs`, resolving the `@cmd_` token out of the query string and emitting `e.stderr` with `stderr_shown`/`stderr_total` counters. The field the bug said nothing reads had a reader, a response shape and three tests.
+**Observed.** I filed `docs/issues/archive/2026-09-14-every-reader-of-a-cmd-buffer-takes-stdout-only-so-the-stored-stderr-reaches-nobody.md` (`4c433eb615bedf68`) with a § Root cause reading *"Established by reading both call sites, not inferred"* and a § Summary asserting **"Nothing ever reads that field."** Both `grep.rs:974` and `read_file.rs:286` do take `.stdout` alone, as reported — but a **third** reader existed at `src/tools/run_command/output.rs`, resolving the `@cmd_` token out of the query string and emitting `e.stderr` with `stderr_shown`/`stderr_total` counters. The field the bug said nothing reads had a reader, a response shape and three tests.
 
 **Mechanism — why a correct reproduction produced a wrong cause.** That reader was gated on `needs_summary(&raw_stdout, &raw_stderr)`, i.e. combined output over ~10 KB. My reproduction ran `grep -c MARKER @cmd_*`, whose output is `"0\n"` — two bytes. So every observation I took sat on the side of the gate where the mechanism is **absent**, and on that side *"no reader exists"* and *"the reader is gated out"* emit byte-identical output: a response with no `stderr` field. Nothing in the reproduction could separate them, and it was never re-run at a size that crosses the threshold.
 
@@ -15239,13 +15239,53 @@ Verified live rather than accepted: `@cmd_a11f5743`, 4000 stdout lines plus one 
 
 **The tell is available and I had it.** `grep.rs` and `read_file.rs` both call `get()`; `output.rs` calls it too. **Three consumers, one resolver, and I read none of the resolver.** When N call sites agree, the interesting code is usually the thing they all call, not the Nth site. Read the accessor before concluding anything about a field's reachability.
 
-**Cost.** A `## Workarounds` section that told readers to shell out to native `Bash` for a stream `run_command` could serve with a four-character suffix. It shipped in `9b6f4713` and stood for about an hour. Corrected in place; the filename's claim is left superseded rather than renamed, because a move mints a new id and seven files cite this one.
+**Cost.** A `## Workarounds` section that told readers to shell out to native `Bash` for a stream `run_command` could serve with a four-character suffix. It shipped in `9b6f4713` and stood for about an hour. Corrected in place; the filename's claim is left superseded rather than renamed. **The stated reason decayed within the hour** — it was *"a move mints a new id and seven files cite this one"*, and the file was archived later that day, so that repoint was paid regardless and the slug could have been fixed for free. The surviving reason is different and weaker: a record whose content is *"this claim was wrong"* is searched for by the wrong claim. Worth noting as its own small instance — **a justification that names a cost stops being a justification the moment something else pays that cost, and nothing re-examines it.**
 
 **Not mine, and the better half of the finding:** peer session `40130` established that `.err` appears on **no agent-facing surface** — no `get_guide` topic, no `src/prompts/` slice, not `.codescout/system-prompt.md` — and that **three sessions independently concluded the stream was unrecoverable that evening.** That is the load-bearing part: not that I searched badly, but that a shipping, working mechanism invisible to its own audience produces confidently wrong conclusions *in the same direction* from independent readers, which is indistinguishable from corroboration. They own that write-up and the `read_file`/`grep` half, which silently serve stdout for an accepted `.err` token.
 
 **Rests on:** `.err` remaining undocumented on agent-facing surfaces. If peer `40130` lands that documentation, the *undiscoverability* premise closes and only the search-shape lesson survives.
 
 **Status:** open
+
+## F-152 — A per-site defect repaired per-feature, and the bug record then recorded it as done
+
+**Valid:** dated 2026-09-14
+
+**Severity:** med · **Status:** fixed-verified · **Category:** record-vs-code drift
+
+**Observed:** `docs/issues/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`
+recorded *"Direction 2 IMPLEMENTED (`b21ad3b4`)"* — the remedy-text half, done. Scouting that
+record's own § *Resume* precondition ("confirm whether any other cached config field carries a
+security decision") showed the direction had been implemented at **one of four** sites.
+`project_security_config` copies the whole `SecuritySection` out of the resident project, so
+every refusal prescribing a `.codescout/project.toml` edit is defeated by the same per-process
+cache. `indexing_enabled`, `shell_command_mode` and `max_index_bytes` (two messages) were still
+sending readers to an edit the cache cannot see.
+
+**Cost:** the record read as settled on that half. The next session to pick it up would have
+gone straight to Direction 1 and left three misleading refusals in production indefinitely. The
+overclaim, not the defect, is what would have hidden them — and the defect is not cosmetic: the
+shell gate is one of the four, so `shell_command_mode = "disabled"` written on disk to a
+resident project is silently ignored.
+
+**Why the author could not see it:** I wrote the fix and the record in one session, having read
+the message I was repairing. What went unexamined was the *population* — I repaired the refusal
+I had a reproduction for, then generalised from it to "the remedy is fixed". `CLAUDE.md`
+§ *Testing Discipline* already names this: **mutate once per guarded SITE, not once per
+feature**. It is stated there as a law about *tests*; this is the same law arriving as a defect
+in a *fix*, and then propagating into a *record*. Knowing the class did not prevent it, which
+is § *Observer Blindness*'s whole point — the check that caught it was a standing precondition
+the record itself carried, not vigilance.
+
+**Fix:** `10a3c10d` — the remaining three sites, through one documented constant
+(`config::project::CONFIG_IS_CACHED_REMEDY`), plus a guard asserting the fourth site
+deliberately differs: it must NOT offer the `edit_file` escape, which is unreachable exactly
+when writes are the thing disabled. Both assertions mutation-killed independently (`:2722`,
+`:2717`), each `KILLED (rc=101, 1 test(s) ran)`.
+
+**Rests on:** `project_security_config` continuing to derive the gate config from the resident
+project's cached `SecuritySection`. If Direction 1 lands a per-call re-read, the four-site
+population dissolves and this entry becomes history rather than guidance.
 
 ## Template for new entries
 

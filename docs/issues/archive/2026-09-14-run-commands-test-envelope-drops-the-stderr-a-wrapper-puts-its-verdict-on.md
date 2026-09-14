@@ -99,7 +99,7 @@ The wrapper's lines are absent from the `@cmd_*` buffer as well:
 >    explain this one: `read_from_buffer` (`src/tools/read_file.rs`) and `grep`'s buffer branch
 >    resolve `.stdout` alone, for every classification. A `generic` run whose envelope carries
 >    the stderr line IN FULL still answers `0` here — the control nobody had a reason to
->    construct, because the section's framing gave none. Filed as `2546172a20a4751e`.
+>    construct, because the section's framing gave none. Filed as `4c433eb615bedf68`.
 > 2. **The closing sentence's premise was relabelled in transit.** `mutation-probe.sh` runs its
 >    command as `( cd "$TREE" && "$@" ) 2>&1 | tee`, so cargo's `Compiling …` lines are the
 >    SCRIPT's stdout by the time anything stores them. They prove nothing about stderr capture.

@@ -562,7 +562,7 @@ Two separate facts, and only the first is about classification:
 
 Root cause read at the bytes by `9403d62d`: `grep.rs` and `read_file.rs`'s `read_from_buffer`
 both project `BufferEntry` to `.stdout` at materialisation — `BufferEntry.stderr` is written by
-`store()` and read by nobody. Filed as `2546172a20a4751e`, separate from the envelope bug,
+`store()` and read by nobody. Filed as `4c433eb615bedf68`, separate from the envelope bug,
 because the fix is a contract decision across three tools rather than a missing field.
 
 **The error class is worth more than the correction.** A control that discriminates one layer,

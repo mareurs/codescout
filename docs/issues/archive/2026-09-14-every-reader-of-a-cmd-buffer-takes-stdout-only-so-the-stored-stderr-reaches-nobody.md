@@ -1,5 +1,5 @@
 ---
-id: '2546172a20a4751e'
+id: 4c433eb615bedf68
 kind: bug
 status: fixed
 title: 'BUG: a buffer query''s stderr was gated behind needs_summary, so a 2-byte query got nothing and a 10 KB query got everything'
@@ -20,8 +20,12 @@ tags:
 > `@cmd_a11f5743`: `grep -c STDERR_ONLY_TOKEN @cmd_a11f5743.err` returns `1`.
 >
 > So *"the stored stderr reaches nobody"* is false, and was false before this was filed.
-> The filename is left alone deliberately — renaming mints a new id and seven files cite this
-> one, two of them `.rs`. Read the filename as superseded by this block.
+> **The filename still says it, and that is now a deliberate choice rather than a cost.** It
+> was kept on archiving (2026-09-14) because the seven inbound citations were being repointed
+> for the move anyway, so the slug could have been corrected for free — and was not, because
+> renaming a record whose whole content is *"this claim was wrong"* costs the next reader the
+> one token they would search for. The claim is answered in this block, immediately, above the
+> body that makes it. Read the filename as a question this file answers, not as its finding.
 >
 > **Three sessions concluded the stream was unrecoverable on one evening and none tested a
 > suffix that lives four lines from the struct field they were writing about.** The reason is

@@ -251,7 +251,7 @@ pub(crate) async fn handle_successful_output(
     // exactly when its own output already exceeded ~10 KB, and never when it returned
     // `0` — the one case where absence and loss are indistinguishable. The gate was
     // anti-correlated with need: the more precise the query, the more certain the loss.
-    // BUG docs/issues/2026-09-14-every-reader-of-a-cmd-buffer-takes-stdout-only-so-the-stored-stderr-reaches-nobody.md
+    // BUG docs/issues/archive/2026-09-14-every-reader-of-a-cmd-buffer-takes-stdout-only-so-the-stored-stderr-reaches-nobody.md
     //
     // Deliberately NOT fed into `needs_summary`: that predicate decides whether a new
     // buffer ref is minted, and widening its input would move the buffering threshold

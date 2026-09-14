@@ -1272,7 +1272,7 @@ is evidence about stdout capture and says nothing whatever about stderr.
 The true state is stronger than the hypothesis I rejected: `read_from_buffer`
 (`src/tools/read_file.rs:276`) resolves `ctx.output_buffer.get(path)?.stdout` — **`.stdout` alone**.
 Buffer reads never return stderr on any path, so `BufferEntry.stderr` is written by `store()` and
-read by nobody (filed by them as `2546172a20a4751e`).
+read by nobody (filed by them as `4c433eb615bedf68`; **that claim was falsified 2026-09-14 — a `@cmd_*` handle takes an `.err` suffix and always did, so the field has a reader. See the correction block in that file's § Summary**).
 
 **This is `F-8`'s mechanism at one further remove, and the distinction is the entry.** `F-8` was
 *a positive control validates the instrument, never the query* — my `grep` worked, and I cited that
