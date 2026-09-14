@@ -121,7 +121,7 @@ commit body quoting it was written. (Point and derivation: sessionId `ad379a7c`.
 
 DEFAULT needed a second run. The first failed on
 `peer::server::tests::run_exits_after_idle_timeout_with_no_connections` — the known open flake
-`ee9d8d80ad5ecdc8`, in a subsystem this change does not touch — and cargo stops at the failing
+`e64f73913b100c9f`, in a subsystem this change does not touch — and cargo stops at the failing
 binary, so `issue_clusters` did not run in that lane at all. The re-run is what that bug file's
 own workaround prescribes, and it passed with both the flake and this fix's regression test green.
 

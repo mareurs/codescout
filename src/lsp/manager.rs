@@ -2068,7 +2068,7 @@ mod tests {
         // TTL elapses. Poll for it instead of sleeping a fixed 4×TTL: a fixed sleep
         // asserts "enough time has passed" and reds when the parallel suite has not
         // scheduled the eviction task yet
-        // (docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md).
+        // (docs/issues/archive/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md).
         // `active_languages` reads `clients` and never touches `last_used`, so polling
         // cannot refresh the idle timer it waits on — checked at the source, not
         // assumed. The loop exits early, so the 10s ceiling costs nothing.

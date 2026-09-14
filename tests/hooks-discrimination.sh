@@ -801,7 +801,7 @@ rm -rf "$T"
 # .pre-commit-config.yaml, which passed FILENAMES to rustfmt and so read the working
 # tree. That was correct only because the pre-commit framework stashes every unstaged
 # change in the checkout first — the repo-wide stash this migration exists to remove
-# (docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md).
+# (docs/issues/archive/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md).
 #
 # CASES 3 AND 4 ARE THE WHOLE POINT AND THEY POINT IN OPPOSITE DIRECTIONS. A stash-less
 # filename hook fails 3 (refusing a good commit over an unstaged edit) and — worse —

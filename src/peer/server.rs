@@ -745,7 +745,7 @@ mod tests {
     /// waiting for a quiet machine fixes it.
     ///
     /// Do NOT simplify back to `#[tokio::test]`: that reintroduces
-    /// `docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`,
+    /// `docs/issues/archive/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`,
     /// which cost three sessions eight red gate runs in one day. Still discriminating —
     /// mutating the loop's `break` to `continue` kills it, in 0.12s rather than the 10s
     /// a real clock spends first.

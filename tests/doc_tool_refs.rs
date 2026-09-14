@@ -1136,7 +1136,7 @@ fn the_unclosed_flag_fires_on_the_malformed_form_and_not_the_correct_one() {
 /// The manual's signature form names parameters, and the scan bills them.
 ///
 /// The founding case: `references(name_path, path)` sat in three files for the whole life of
-/// `57ecbac8f925d7b8` while this suite was green, because [`NAMED_ARG`] requires an `=` and the
+/// `43888bfe2327cbda` while this suite was green, because [`NAMED_ARG`] requires an `=` and the
 /// signature form has none. Measured 2026-09-12 at `408709ea`: **97** bare identifiers in the
 /// present-tense corpus are real parameters written this way — every one of them unguarded
 /// until this landed, and any of them free to rot exactly as `name_path` did.

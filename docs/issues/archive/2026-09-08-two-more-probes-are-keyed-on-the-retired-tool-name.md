@@ -20,7 +20,7 @@ severity: high
 ## Summary
 
 The 2026-09-02 rename `artifact` → `doc` (`ceb5b57a`) left **four** probes matching the dead name.
-One was fixed the next day (`f41bfeb963dcee56`, `d4ee86da`). One was fixed on 2026-09-08
+One was fixed the next day (`6f6d9b39f862be9e`, `d4ee86da`). One was fixed on 2026-09-08
 (`249dcf2690afcd35`). **Two were still blind when that second fix's own ceiling was written down**
 — and were found by the grep that ceiling implies, within the hour.
 
@@ -111,7 +111,7 @@ rebase and cherry-pick.
 
 **Whole-tree gate green in a single run, 2026-09-08:** `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, 9101
 passed, 1760 `librarian::` tests in the default lane. The `unverified:` field this record carried
-for two hours — naming `ee9d8d80ad5ecdc8`'s load-sensitive flake as the only red — is cleared,
+for two hours — naming `e64f73913b100c9f`'s load-sensitive flake as the only red — is cleared,
 not deleted-and-forgotten: it did its job, which was to keep *fixed* and *whole-tree verified*
 apart in a field a query can read.
 
@@ -166,5 +166,5 @@ avoid.
 ## References
 
 - `249dcf2690afcd35` — the sibling fix whose stated ceiling produced this grep.
-- `f41bfeb963dcee56` — the first instance, fixed 2026-09-03 and not swept.
+- `6f6d9b39f862be9e` — the first instance, fixed 2026-09-03 and not swept.
 - `docs/trackers/issue-clusters/IC-18-selector-narrower-than-its-population.md` — the class.

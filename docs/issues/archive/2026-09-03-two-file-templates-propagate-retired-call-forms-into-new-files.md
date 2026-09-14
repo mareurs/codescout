@@ -191,7 +191,7 @@ local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `ca
 date (`e6343717`) attributed the loss to a `doc(action="move")` staleness bug reported by a peer
 session. That report was **retracted by its own author** minutes later: `src/librarian/tools/mv.rs`
 uses `std::fs::rename`, which cannot write a stale copy. The actual mechanism was
-`8cc95806a7b5f37a` (*"every session's commit removes every other session's unstaged work from the
+`74d7306647646956` (*"every session's commit removes every other session's unstaged work from the
 working tree for the duration of its hooks"*) — a peer's commit in this shared checkout stashed my
 unstaged `edit_file(frontmatter={closed:...})` write during the exact window my `doc(action="move")`
 ran, so the atomic rename correctly moved the file as it stood at that instant: reverted to its

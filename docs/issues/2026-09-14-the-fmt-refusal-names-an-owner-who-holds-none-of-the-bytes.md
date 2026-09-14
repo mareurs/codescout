@@ -203,4 +203,4 @@ judgement that the other reading is wrong.
 - `scripts/fmt-mine.sh` — `refuse_not_mine`, and the `[LIVE] peer` / `SHARED` legend
 - `scripts/file-provenance.py` — `last_commit_time`, and the window line it prints
 - `docs/trackers/observer-blindness.md` — `OB-20`, and its measured answerability ceiling
-- `docs/issues/2026-09-09-the-documented-gates-first-command-rewrites-every-peers-uncommitted-rust.md` — why `fmt-mine.sh` exists at all
+- `docs/issues/archive/2026-09-09-the-documented-gates-first-command-rewrites-every-peers-uncommitted-rust.md` — why `fmt-mine.sh` exists at all

@@ -1427,9 +1427,9 @@ re-examined* — only the boundary).
 
 **What the pass cost and what it bought:** four candidates in, three confirmed, one refuted, and a test that can now discriminate. The refutation is the useful half — a list that had survived review as "reasoned" contained an entry a five-minute probe rejects.
 
-**A second instance in the same tool, filed separately:** `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md`. It is `IC-12` rather than this class — there the *reader* is deceived and the writer is fine, the exact inversion — but it shares the substrate and, usefully, the remedy direction: its exposure is the hook runtime, which `9e493b20` cut from ~2000 ms to ~40 ms while fixing something else.
+**A second instance in the same tool, filed separately:** `docs/issues/archive/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md`. It is `IC-12` rather than this class — there the *reader* is deceived and the writer is fine, the exact inversion — but it shares the substrate and, usefully, the remedy direction: its exposure is the hook runtime, which `9e493b20` cut from ~2000 ms to ~40 ms while fixing something else.
 
-**Instances:** `docs/issues/archive/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` (`IC-17`; the *mechanism* was removed 2026-09-07 by `074b749e`, which retires the pre-commit framework — the CLASS is untouched, and the instance is kept because it is the one with a live production observation: its holder caused the outage while building the fix, which is the blindness this row asserts); adjacent, `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` (`IC-12`); `9e493b20`.
+**Instances:** `docs/issues/archive/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` (`IC-17`; the *mechanism* was removed 2026-09-07 by `074b749e`, which retires the pre-commit framework — the CLASS is untouched, and the instance is kept because it is the one with a live production observation: its holder caused the outage while building the fix, which is the blindness this row asserts); adjacent, `docs/issues/archive/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` (`IC-12`); `9e493b20`.
 
 **Status:** open — **four verified instances**, one refuted, one session. The enumeration is no longer the honest gap; the **mechanism** is. Nothing in this repo names the holder of a dirty shared resource, and the machinery to do it exists (`scripts/pre-commit-foreign-index.sh` resolves a path to a `Session-Id` and prints its `SendMessage` address). Note the four verified files split by remedy: `.pre-commit-config.yaml` wants an owner field, while `rust-toolchain.toml` / `.cargo/config.toml` / `.gitignore` want *isolation* — which is `IC-17`'s other remedy and, concretely, per-session worktrees.
 
@@ -1987,7 +1987,7 @@ true, which is why it was not the one that misled.
 
 **Valid:** conditional — `pre-commit` stops stashing unstaged files
 
-**Rests on:** `docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md`
+**Rests on:** `docs/issues/archive/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md`
 and its queue item 3a; observed across two sessions 2026-09-06.
 
 **Class:** a mechanism emits a **clear, timestamped, real-time signal** and routes it to the one
@@ -2044,7 +2044,7 @@ routing, not detection, because the hard part is already solved.
 
 **Instances:** the 2026-09-06 seven-file stash (this entry); the mutation-window hold that prompted
 it, where the hazard was avoided *only* by a peer announcing uncommitted state in advance;
-`docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md`'s original
+`docs/issues/archive/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md`'s original
 symptom — peers reading wrong bytes or hitting `ENOENT` — which is the same mechanism reaching a
 **different victim**, and is why that file records an operation on wrong input where this records an
 inverted measurement.

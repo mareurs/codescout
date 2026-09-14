@@ -1,5 +1,5 @@
 ---
-id: '8cc95806a7b5f37a'
+id: 74d7306647646956
 kind: bug
 status: fixed
 title: 'BUG: every session''s commit removes every other session''s unstaged work from the working tree for the duration of its hooks'

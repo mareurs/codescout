@@ -1,5 +1,5 @@
 ---
-id: f41bfeb963dcee56
+id: 6f6d9b39f862be9e
 kind: bug
 status: fixed
 title: probe_guide_section_use.py's MECHANISM_TOOLS omits the renamed doc tool and goes blind monotonically

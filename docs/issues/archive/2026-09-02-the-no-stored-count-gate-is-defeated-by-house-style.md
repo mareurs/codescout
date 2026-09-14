@@ -1,5 +1,5 @@
 ---
-id: '40ca63a3b3497558'
+id: 71af91d903e927fd
 kind: bug
 status: mitigated
 title: 'BUG: the no-stored-count gate is defeated by the repo''s own typographic house style'

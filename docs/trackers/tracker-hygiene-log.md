@@ -2144,7 +2144,7 @@ population was deferred intact. **Measured 2026-09-11 ~09:45 local, at HEAD `1a3
 | `prefix_conflicts_live` | 3 | From `link_scan`, not `doctor`. `T-N` is the known case (`docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`, open). |
 | `entry_dated_stale` | 2 | `dated` past the freshness threshold; needs re-derivation of the underlying fact, which is the work. |
 | `params_status_drift` | 2 | `doctor` calls it a HEURISTIC, silent on ~8.6% of real disagreements, and both error directions possible. Requires reading the body and deciding which side is right. |
-| `terminal_status_without_fix_anchor` | 1 | `docs/issues/2026-09-10-a-conflicted-merge-yields-a-patch-id-and-it-is-the-wrong-one.md` — needs the real fix SHA + patch-id, and `doctor` warns the two hashes already in its prose are the commits it was *observed* at, so a reader scanning for provenance finds one and stops. |
+| `terminal_status_without_fix_anchor` | 1 | `docs/issues/archive/2026-09-10-a-conflicted-merge-yields-a-patch-id-and-it-is-the-wrong-one.md` — needs the real fix SHA + patch-id, and `doctor` warns the two hashes already in its prose are the commits it was *observed* at, so a reader scanning for provenance finds one and stops. |
 | `validity_unparseable` | 1 | `prompt-hamsa-audit-log:A-39` — `**Valid:** dated 2026-09-09; the window closes 2026-09-23.` Needs a verdict on which grammar branch was meant (`dated` takes no trailing text; only `conditional — <event>` carries one). |
 
 **Re-derive, do not cite this table.** Every number above decays, and three of the checks are

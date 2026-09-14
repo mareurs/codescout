@@ -932,7 +932,7 @@ impl Agent {
     /// So is a switch whose previous activation carries the SAME session id: that is
     /// one linear session using the documented cross-project pattern, and warning on
     /// it was a systematic false positive rather than noise
-    /// (`docs/issues/2026-09-02-the-concurrent-activation-guard-substitutes-proximity-for-identity.md`).
+    /// (`docs/issues/archive/2026-09-02-the-concurrent-activation-guard-substitutes-proximity-for-identity.md`).
     /// Identity only ever silences — an unknown id on either side keeps the old
     /// proximity behaviour.
     /// See docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md

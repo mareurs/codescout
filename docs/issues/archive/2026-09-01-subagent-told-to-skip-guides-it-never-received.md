@@ -100,7 +100,7 @@ record the patch-id rather than relying on the SHA, which orphans on rebase.
 
 The four-command gate is green at that commit, with one exception that is not this change:
 `peer::server::tests::run_exits_after_idle_timeout_with_no_connections`, the known
-load-sensitive flake filed as `ee9d8d80ad5ecdc8`. It passes in isolation in 1.13s against a
+load-sensitive flake filed as `e64f73913b100c9f`. It passes in isolation in 1.13s against a
 10s deadline, and `src/peer/server.rs` has not changed since 2026-08-18. Two reproductions
 from this session were handed to that file's owner; note that the accompanying
 "concurrent cargo held the target lock" hypothesis was **retracted** — one of the two runs

@@ -275,7 +275,7 @@ stay flat or rise. If writes fall instead, the spool has added friction rather t
   2*; it was the cheapest of the three, because `open_lock_file` already opened the file
   `.write(true)` and never wrote a byte to it.
   Closes the operational half of
-  `docs/issues/2026-09-03-a-held-write-lock-names-no-owner-progress-or-duration.md`.
+  `docs/issues/archive/2026-09-03-a-held-write-lock-names-no-owner-progress-or-duration.md`.
 
 ## References
 

@@ -17,7 +17,7 @@
 # happened to print. Cost that time was an interruption, not lost work. That is a
 # property of the instance — the same write against a file with an editor buffer
 # open is last-writer-wins with no git copy behind it.
-# `docs/issues/2026-09-09-the-documented-gates-first-command-rewrites-every-peers-uncommitted-rust.md`
+# `docs/issues/archive/2026-09-09-the-documented-gates-first-command-rewrites-every-peers-uncommitted-rust.md`
 #
 # WHY THIS SHAPE RATHER THAN A CHECK YOU REMEMBER TO RUN
 #

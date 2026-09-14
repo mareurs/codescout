@@ -21,17 +21,17 @@ section a second time.
 
 ## Symptom (Effect)
 
-Observed 2026-09-11 on `docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`
-(`ee9d8d80ad5ecdc8`), a shared checkout with at least two peer sessions active:
+Observed 2026-09-11 on `docs/issues/archive/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`
+(`e64f73913b100c9f`), a shared checkout with at least two peer sessions active:
 
 ```
-doc(action="update", id="ee9d8d80ad5ecdc8",
+doc(action="update", id="e64f73913b100c9f",
     patch={body_edits:[{action:"insert_after", heading:"### Fourteenth observation…", …}],
            extra:{last_observed:"2026-09-11"}})
 -> database is locked            # the whole response; no field, no hint, no partial-write flag
 
 # retry, identical arguments
--> {"id":"ee9d8d80ad5ecdc8","updated":true,"wrote_to":"…"}
+-> {"id":"e64f73913b100c9f","updated":true,"wrote_to":"…"}
 
 # result on disk
 729: ### Fifteenth observation, 2026-09-11 — …

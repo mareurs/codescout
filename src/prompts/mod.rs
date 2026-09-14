@@ -2460,7 +2460,7 @@ mod tests {
     /// pinned here is unchanged — the gate is the contract every session pays on every
     /// task. If the first command reverts to bare `cargo fmt`, this test must red, because
     /// that reversion silently restores a step that rewrites other sessions' uncommitted
-    /// Rust (`docs/issues/2026-09-09-the-documented-gates-first-command-rewrites-every-peers-uncommitted-rust.md`).
+    /// Rust (`docs/issues/archive/2026-09-09-the-documented-gates-first-command-rewrites-every-peers-uncommitted-rust.md`).
     ///
     /// Two traps this test is shaped around, both measured against CLAUDE.md on
     /// 2026-08-31 rather than reasoned about:

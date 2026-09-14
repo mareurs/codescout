@@ -34,7 +34,7 @@ Why each part, one line each. Every measurement, date and superseded form →
   gate as previously documented **rewrote other sessions' uncommitted Rust every time anyone ran
   it**, with nothing in the documented form to defeat — measured 2026-09-09, 7 hunks in a peer's
   untracked file that `git checkout` could not have restored
-  (`docs/issues/2026-09-09-the-documented-gates-first-command-rewrites-every-peers-uncommitted-rust.md`).
+  (`docs/issues/archive/2026-09-09-the-documented-gates-first-command-rewrites-every-peers-uncommitted-rust.md`).
   The script formats what `scripts/file-provenance.py` attributes to you and **refuses** the
   rest, naming the owner's sessionId and the socket to ask them on. On a tree needing no
   reformatting it exits in ~2s having run only the `--check` the gate pays anyway.

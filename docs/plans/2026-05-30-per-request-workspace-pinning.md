@@ -389,7 +389,7 @@ list into the phases that own them. What remains is genuinely open:
 > only on a path no pinned call can reach, which is the state 5(c) asked for.)*
 >
 > The verification did surface a real residual, filed rather than fixed:
-> `docs/issues/2026-09-02-the-concurrent-activation-guard-substitutes-proximity-for-identity.md`.
+> `docs/issues/archive/2026-09-02-the-concurrent-activation-guard-substitutes-proximity-for-identity.md`.
 > The guard substitutes wall-clock proximity for caller identity, so one session's
 > documented activate-foreign-then-return-home is indistinguishable from a two-caller race.
 > The obvious repair — exempting `ReturnToHome`, already computed one line above the call

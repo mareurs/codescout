@@ -106,7 +106,7 @@ run() {
     # this capture waits forever. Without the timeout a hang HANGS THE SUITE rather than
     # redding it, which is strictly worse than a failure: no assertion reports, no exit code
     # is produced, and CI shows a job that never finished instead of a test that failed.
-    # Measured 2026-09-07, docs/issues/2026-09-07-the-pre-push-guards-refusal-text-executes-its-own-example-commands.md.
+    # Measured 2026-09-07, docs/issues/archive/2026-09-07-the-pre-push-guards-refusal-text-executes-its-own-example-commands.md.
     OUT="$(printf '%s\n' "$line" | (cd "$REPO" && timeout 20 env -u CLAUDE_CODE_SESSION_ID -u CODESCOUT_PUSH_ACK "${env[@]}" "$GUARD" origin git@example.invalid:x) 2>&1)"
     EC=$?
 }
@@ -973,7 +973,7 @@ has   "owns nothing: and the three states reach it" "$OUT" "not withheld, UNCLEA
 
 # ---------------------------------------------------------------------------- Row 6
 # The three CODESCOUT_PUSH_ACK residuals of
-# docs/issues/2026-09-10-the-inert-ack-note-and-the-missing-mirror-on-what-an-ack-grants.md,
+# docs/issues/archive/2026-09-10-the-inert-ack-note-and-the-missing-mirror-on-what-an-ack-grants.md,
 # plus a fourth raised by five authors independently on 2026-09-10 after a real ack push.
 #
 # 6a/6b are BEHAVIOURAL and carry each other's control. 6c-6e are SHAPE assertions on the

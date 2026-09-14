@@ -24,7 +24,7 @@
 # dead paths, and rewriting history to satisfy a linter is the wrong remedy.
 #
 # Why the stash had to go: scripts/pre-commit-run.sh's header, and
-# docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md
+# docs/issues/archive/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md
 # ============================================================================
 #
 # Pre-commit hooks for codescout.

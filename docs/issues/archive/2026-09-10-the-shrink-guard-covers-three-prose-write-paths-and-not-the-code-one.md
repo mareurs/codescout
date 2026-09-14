@@ -1,5 +1,5 @@
 ---
-id: '12a8a56bf8a25138'
+id: 7dc6ea026d9881e6
 kind: bug
 status: mitigated
 title: 'BUG: the shrink guard covers three prose write paths and not the code one'

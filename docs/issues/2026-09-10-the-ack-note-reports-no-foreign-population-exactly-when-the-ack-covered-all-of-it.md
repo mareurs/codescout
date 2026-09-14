@@ -226,7 +226,7 @@ demand an observed red by reverting the branch.
 ## References
 
 - `scripts/pre-push-foreign-session-guard.sh:164-183, 200-235` — the loop and the note
-- `docs/issues/2026-09-10-the-inert-ack-note-and-the-missing-mirror-on-what-an-ack-grants.md` — the
+- `docs/issues/archive/2026-09-10-the-inert-ack-note-and-the-missing-mirror-on-what-an-ack-grants.md` — the
   filing this branch was added to answer; that report's *"missing mirror on what an ack GRANTS"* is
   the same gap seen from the other side, and this file is what the answer to it did
 - `docs/trackers/observer-blindness.md` `OB-20` — the class the guard belongs to

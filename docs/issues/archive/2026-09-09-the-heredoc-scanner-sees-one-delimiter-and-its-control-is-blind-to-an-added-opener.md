@@ -204,6 +204,6 @@ N/A — fixed, with an observed red in the direction that was blind.
 - `tests/pre-push-foreign-session-guard.sh:632-646` — the scanner, the emptiness assertion,
   and the control.
 - `scripts/pre-push-foreign-session-guard.sh:147` — the sole current opener.
-- `docs/issues/2026-09-07-the-pre-push-guards-refusal-text-executes-its-own-example-commands.md`
+- `docs/issues/archive/2026-09-07-the-pre-push-guards-refusal-text-executes-its-own-example-commands.md`
   — the defect this scanner exists to prevent, and why the delimiter must stay unquoted.
 - `.codescout/memories/test-design-discipline.md` — the positive-control prescription.

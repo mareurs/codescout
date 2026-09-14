@@ -111,7 +111,7 @@ PROFILES = [".claude", ".claude-sdd", ".claude-kat"]
 # 2026-09-03: 9 of 1,382 relevant transcripts already carried the new name, and every
 # future session moves that ratio the same way, so a run today is nearly correct and the
 # same command in a month is materially wrong.
-# docs/issues/2026-09-03-probe-mechanism-filter-omits-the-renamed-doc-tool.md
+# docs/issues/archive/2026-09-03-probe-mechanism-filter-omits-the-renamed-doc-tool.md
 #
 # `"doc"` is slightly greedy under a substring test: it would also match a hypothetical
 # `mcp__codescout__docs_*`. No such tool exists in the registry today. If one is added,
@@ -623,7 +623,7 @@ def main() -> int:
     # The guard is the fix, and authoring signatures for another topic is a separate
     # change. Shipping signatures without this guard would leave the next eight topics
     # silently broken, which is the trap that made this defect worth filing.
-    # docs/issues/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md
+    # docs/issues/archive/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md
     measurable = topics_with_rules()
     if args.topic not in measurable:
         print(
@@ -634,7 +634,7 @@ def main() -> int:
             f"  topics with rules: {', '.join(measurable) if measurable else '(none)'}\n"
             f"  Authoring rules for `{args.topic}` is a separate change -- the guard is "
             f"the fix.\n"
-            f"  docs/issues/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md",
+            f"  docs/issues/archive/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md",
             file=sys.stderr,
         )
         return 2

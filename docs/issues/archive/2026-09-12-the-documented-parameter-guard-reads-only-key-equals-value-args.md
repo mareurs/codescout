@@ -14,7 +14,7 @@ filed_by: b0b9bc40
 
 `tests/doc_tool_refs.rs` is the standing guard for "a present-tense document naming a tool
 parameter that does not exist". It walks `docs/manual/**`. It was green for the entire life of
-`57ecbac8f925d7b8` — a bug whose whole content is `docs/manual` naming `name_path` as
+`43888bfe2327cbda` — a bug whose whole content is `docs/manual` naming `name_path` as
 `references`' parameter, in three files inside that very corpus.
 
 The guard is not wrong about what it checks. It collects a call's parameters only from
@@ -309,4 +309,4 @@ narrower than the one the tool advertises — and would have red a correct page.
 - `tests/doc_tool_refs.rs:61-68` (the two constants and the header recording the prior narrowing)
 - `tests/doc_tool_refs.rs:345-422` (`calls_on_line`)
 - `tests/doc_tool_refs.rs:473` (`a_documented_tool_parameter_exists_on_that_tool`)
-- `57ecbac8f925d7b8` — the instance this guard did not catch
+- `43888bfe2327cbda` — the instance this guard did not catch

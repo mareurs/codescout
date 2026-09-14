@@ -210,7 +210,7 @@ passed / 1 failed** on `peer::server::tests::run_exits_after_idle_timeout_with_n
 That failure is **not this change**, and it was established here rather than inherited: the
 test passes in isolation in **1.13s** on this machine, and the diff touches nothing under
 `src/peer/`. It is the load-sensitive test of
-`docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`, measured
+`docs/issues/archive/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`, measured
 with **nine sessions live in this checkout** and a peer mid-build against the shared `target/`.
 Prior sessions reached the same verdict; citing theirs instead of running it would have been
 one blind spot counted twice, since a stale binary and a loaded machine produce identical

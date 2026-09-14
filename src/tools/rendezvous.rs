@@ -390,7 +390,7 @@ mod tests {
         // way as real Windows; that is unverified from this machine (native Windows,
         // not wine), so the sibling test below stays lenient rather than asserting a
         // specific wine-only value. See
-        // `docs/issues/2026-08-31-rendezvous-windows-ppid-test-asserted-a-wine-specific-zero-as-windows-by-design.md`.
+        // `docs/issues/archive/2026-08-31-rendezvous-windows-ppid-test-asserted-a-wine-specific-zero-as-windows-by-design.md`.
         #[cfg(unix)]
         {
             let dir = tempfile::tempdir().unwrap();

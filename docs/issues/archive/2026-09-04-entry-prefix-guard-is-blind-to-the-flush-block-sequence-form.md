@@ -212,7 +212,7 @@ Gate green at fix time: `cargo fmt -- --check` clean; `clippy --workspace --all-
 local-embed -D warnings` clean — re-run after `touch` on both files, because the first pass returned
 in 0.33s off a warm cache and a cache hit is not evidence; default lane 8657 passed / 1 failed. That
 one failure is `peer::server::tests::run_exits_after_idle_timeout_with_no_connections`, itself open
-as `docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`, in
+as `docs/issues/archive/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`, in
 `peer/server.rs`, and it passes in 1.15s run alone.
 
 **The lean lane's `exit 0` is NOT evidence for this fix.** Measured 2026-09-04 by running the

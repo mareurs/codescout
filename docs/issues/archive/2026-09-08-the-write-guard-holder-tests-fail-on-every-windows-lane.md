@@ -7,7 +7,7 @@ closed: 2026-09-08
 opened: 2026-09-08
 owner: marius
 related:
-- docs/issues/2026-09-03-a-held-write-lock-names-no-owner-progress-or-duration.md
+- docs/issues/archive/2026-09-03-a-held-write-lock-names-no-owner-progress-or-duration.md
 - docs/issues/archive/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md
 severity: medium
 ---
@@ -71,8 +71,8 @@ a third of the matrix from the day it shipped, and the three red tests were the 
 saying so.
 
 **How it shipped.** The tests came from
-`docs/issues/2026-09-03-a-held-write-lock-names-no-owner-progress-or-duration.md`
-(`7f023c2ec0ae7856`, status `fixed`), whose *Tests added* section asserts they are *"all reached
+`docs/issues/archive/2026-09-03-a-held-write-lock-names-no-owner-progress-or-duration.md`
+(`e339466c78a00231`, status `fixed`), whose *Tests added* section asserts they are *"all reached
 in **both** gate lanes (the file is under `src/agent/`, so the lean lane is not vacuous for
 it)"*. True, carefully derived, and insufficient: **both gate lanes are Linux.** The author
 reasoned about the feature axis and the platform axis never entered the sentence — so this class
@@ -140,7 +140,7 @@ green in every readable lane and unexercised on Windows indefinitely.
 ## References
 
 - `src/agent/write_guard.rs` — the three tests
-- `docs/issues/2026-09-03-a-held-write-lock-names-no-owner-progress-or-duration.md` — added them
+- `docs/issues/archive/2026-09-03-a-held-write-lock-names-no-owner-progress-or-duration.md` — added them
 - `docs/issues/archive/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md` — the prior
   instance of this shape, nine tests, archived `fixed`
 - `.github/workflows/ci.yml:218` — `cargo test --workspace ${{ matrix.config.flags }}`

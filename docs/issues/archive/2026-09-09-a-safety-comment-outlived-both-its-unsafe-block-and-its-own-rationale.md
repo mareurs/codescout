@@ -209,7 +209,7 @@ Measured at `f10eefe2`: **16** `// SAFETY:` comments under `src/`, `crates/`, `t
 > told the author to delete a live safety justification. Fixed by making the span the
 > **statement** (to delimiter balance) rather than the first line; four mutations, four
 > kills. Full record:
-> `docs/issues/2026-09-09-the-safety-gate-checked-one-line-where-its-name-promised-the-construct.md`.
+> `docs/issues/archive/2026-09-09-the-safety-gate-checked-one-line-where-its-name-promised-the-construct.md`.
 
 **Observed RED, on the production path.** The five lines above were restored verbatim
 into the working tree and the mutation confirmed present in the file before the run —

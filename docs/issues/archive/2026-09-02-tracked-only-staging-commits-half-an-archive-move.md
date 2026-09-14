@@ -172,7 +172,7 @@ nothing is owed later and no promotion path needs checking.
 4997 of 4998 green. The single failure was
 `peer::server::tests::run_exits_after_idle_timeout_with_no_connections` — the
 load-sensitive flake filed as
-`docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`,
+`docs/issues/archive/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`,
 which **passed in isolation in 1.13s** on the same binary, and which this diff cannot
 reach (nothing staged touched `src/peer`). Run with roughly twenty codescout servers
 and several concurrent builds live.

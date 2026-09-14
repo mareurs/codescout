@@ -1096,7 +1096,7 @@ impl EditCode {
             .as_ref()
             .and_then(|s| find_ast_name_path(s, &sym.name, sym.start_line));
 
-        // bug 12a8a56bf8a25138: `replace` overwrites the symbol's WHOLE range, so a
+        // bug 7dc6ea026d9881e6: `replace` overwrites the symbol's WHOLE range, so a
         // caller who supplied a partial body — having read only the top of the
         // function — deletes the remainder and gets `status: "ok"` back with no
         // delta. The three PROSE write paths (doc update, markdown edit_file,

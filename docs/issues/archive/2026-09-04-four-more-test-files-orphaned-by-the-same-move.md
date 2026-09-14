@@ -175,7 +175,7 @@ run, **not formatted**.
 `fmt` clean. `clippy --workspace --all-targets --features local-embed -- -D warnings`
 clean. Lean lane 3560 passed. Default lane 5505 passed, 1 failed —
 `peer::server::tests::run_exits_after_idle_timeout_with_no_connections`, the documented
-load-sensitive flake in `docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`,
+load-sensitive flake in `docs/issues/archive/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`,
 which passes in isolation in 1.13s and lives in `src/peer/`, a directory this change does
 not touch (`git diff --stat` shows zero files under `src/`).
 

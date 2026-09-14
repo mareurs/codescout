@@ -41,7 +41,7 @@ the Index table stores mechanism status again:
 exit=1
 ```
 
-The refused session had staged exactly one file, `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`.
+The refused session had staged exactly one file, `docs/issues/archive/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`.
 It matched `pre-commit-run.sh:157`'s pathspec (`docs/issues/.*\.md`), which is all it takes.
 
 ## Reproduction

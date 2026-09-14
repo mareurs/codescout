@@ -197,7 +197,7 @@ order):
 
 The one failure is `peer::server::tests::run_exits_after_idle_timeout_with_no_connections`, which
 is separately filed and still open at
-`docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`. Reproduced
+`docs/issues/archive/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`. Reproduced
 twice under load, passes **3/3** in isolation, and `src/peer/` holds **zero** references to
 `write_guard`, `WriteGuard` or `holder_record` — so there is no path from this diff to it. The
 load was this session's own concurrent `--workspace` runs on a checkout shared by 11 live

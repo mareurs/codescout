@@ -369,7 +369,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // Deliberately NOT derived from `cites` edges, and that is the whole point of the
         // field. The catalog indexes markdown artifacts only, so a citation inside a `.rs`
         // comment can never become an edge. Measured 2026-09-09 against
-        // `docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`:
+        // `docs/issues/archive/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`:
         // the link graph held THREE incoming `cites` and a repo scan found THIRTEEN citing
         // files, three of them source. Reporting the edge count would have been a plausible
         // number wrong by 4x, and a caller acting on it archives the file and reds CI on ten

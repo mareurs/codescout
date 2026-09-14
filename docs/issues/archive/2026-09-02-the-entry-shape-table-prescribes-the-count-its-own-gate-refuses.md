@@ -1,5 +1,5 @@
 ---
-id: '289b16a704c8e87f'
+id: 2e3f0f1de64b0774
 kind: bug
 status: fixed
 title: the entry-shape table prescribes the bare count its own gate refuses

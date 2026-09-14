@@ -5,7 +5,7 @@
 line. The backtick is the escape, and it is the only signal separating a live claim from a
 quotation -- which means a live count written in backticks passes the gate and decays exactly
 like the stored count the gate was inverted to remove
-(`docs/issues/2026-09-02-the-no-stored-count-gate-is-defeated-by-house-style.md`).
+(`docs/issues/archive/2026-09-02-the-no-stored-count-gate-is-defeated-by-house-style.md`).
 
 The obvious repair is a diff-scoped hook check: refuse a backticked `n=` that is on a gated line
 in the INDEX and was not on that line at HEAD. Existing quotations are untouched forever because

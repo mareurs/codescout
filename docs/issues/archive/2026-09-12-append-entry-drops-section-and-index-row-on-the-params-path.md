@@ -220,5 +220,5 @@ comparison § Fix had to guess at.
 
 - `src/librarian/tools/append_entry.rs` — both branches, and the both-or-neither guard inside one
 - `src/librarian/catalog/augmentation.rs` — `PendingSection`, `PendingIndexRow`, `insert_index_row`
-- `docs/issues/2026-09-02-append-entry-two-call-protocol-manufactures-a-capture-window.md`
+- `docs/issues/archive/2026-09-02-append-entry-two-call-protocol-manufactures-a-capture-window.md`
 - `docs/trackers/issue-clusters/IC-15-accepted-parameter-silently-dropped.md`

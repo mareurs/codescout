@@ -247,7 +247,7 @@ run "$P" "$MIXED_STUB"
 eq "8 mixed still exits 1 -- the peer's file keeps the gate red" "$RC" "1"
 eq "8 MY file was formatted" "$(grep -c 'pub fn mine() -> u32 {' "$P/src/lib.rs")" "1"
 # The control. Without it, a "fix" that simply dropped the guard and ran the formatter over
-# everything satisfies the assertion above -- and that is `ce3a628db5fa1168`, the defect
+# everything satisfies the assertion above -- and that is `1d32d341e4c7ada0`, the defect
 # this whole script exists to close, re-admitted by its own regression test.
 eq "8 THEIR file was left byte-untouched" "$(grep -c 'pub fn theirs(  )' "$P/tests/peer.rs")" "1"
 hasnt "8 the refusal does not list a file it just formatted" "$OUT" "src/lib.rs"
@@ -259,7 +259,7 @@ echo "== 9. MIXED scan whose module tree REACHES the peer's file: refuses wholes
 # case 8's partial success is illegal exactly when this session's file is the module ROOT
 # of a peer's file. This is not hypothetical: the first draft of the case-8 fix had no such
 # check, and THIS fixture is what caught it. src/lib.rs was formatted and src/peer.rs went
-# with it, which is `ce3a628db5fa1168` re-admitted through the regression test written to
+# with it, which is `1d32d341e4c7ada0` re-admitted through the regression test written to
 # close a different bug.
 #
 # LOAD-BEARING FIXTURE DETAIL: the `pub mod peer;` line IS the test. Delete it and this

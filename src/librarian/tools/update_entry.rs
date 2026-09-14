@@ -199,7 +199,7 @@ mod tests {
     }
 
     /// docs/issues/archive/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
-    /// docs/issues/2026-09-13-snapshot-stale-tests-row-presence-and-reports-a-content-claim.md
+    /// docs/issues/archive/2026-09-13-snapshot-stale-tests-row-presence-and-reports-a-content-claim.md
     ///
     /// The present-row branch: the id IS in the body, and the note must say so **without
     /// claiming the cells moved**, because on this path nothing compared them. The fixture
@@ -253,7 +253,7 @@ mod tests {
             note.contains("UNVERIFIED"),
             "the note reads ids and never cells, so it must mark its claim unchecked rather \
          than assert the row is behind. Dropping this marker reintroduces \
-         `2459a3965d98170b`, which fired on bodies that were provably current: {note}"
+         `01be550a9d05d5d1`, which fired on bodies that were provably current: {note}"
         );
         assert!(
             note.contains("snapshot_anchor"),
@@ -364,7 +364,7 @@ mod tests {
 
     /// The `snapshot_stale_note` wiring, and it was **unguarded until this test existed**.
     ///
-    /// Measured 2026-09-14 while mutation-testing `e9bea0ed3ff9927a`: reverting
+    /// Measured 2026-09-14 while mutation-testing `20159deb3f4d4c09`: reverting
     /// `snapshot_stale_note`'s call from `snapshot_rows_in_declared_block` back to the
     /// whole-document `body_snapshot_row_indices` left all 14 tests in this module green.
     /// The other two consumers were covered incidentally — the same revert at
@@ -433,7 +433,7 @@ mod tests {
         );
     }
 
-    /// REPRODUCTION for `2459a3965d98170b`: the advisory asserts the body is behind when
+    /// REPRODUCTION for `01be550a9d05d5d1`: the advisory asserts the body is behind when
     /// it is byte-identical to what the template renders.
     ///
     /// `snapshot_stale_note` branches on `in_body.contains(&num)` — PRESENCE — and then

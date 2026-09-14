@@ -181,7 +181,7 @@ Committed at `81bed596`, patch-id `81b10af7d03e05e1037868f51384a1f243d86bf5`. Ga
 `experiments`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --features
 local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test
 --workspace` — exit 0 on all four (one default-lane run hit the already-tracked flaky
-`run_exits_after_idle_timeout_with_no_connections` (`ee9d8d80ad5ecdc8`) under heavy concurrent
+`run_exits_after_idle_timeout_with_no_connections` (`e64f73913b100c9f`) under heavy concurrent
 load; a clean retry passed 5113/5113).
 ## Tests added
 

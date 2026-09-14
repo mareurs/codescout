@@ -181,6 +181,6 @@ Both SHAs are positional and die when `experiments` is rebased; the patch-ids ar
 hashes of the diffs and survive rebase and cherry-pick.
 
 Recorded 2026-09-11 at archive time by the session that merged `origin/experiments`. Not to be
-confused with `docs/issues/2026-08-31-rendezvous-windows-ppid-test-asserted-a-wine-specific-zero-as-windows-by-design.md`,
+confused with `docs/issues/archive/2026-08-31-rendezvous-windows-ppid-test-asserted-a-wine-specific-zero-as-windows-by-design.md`,
 a separate record about the same subsystem which `f50be810` annotated — that commit touched no
 part of this file.

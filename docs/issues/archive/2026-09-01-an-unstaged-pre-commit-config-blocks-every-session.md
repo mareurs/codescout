@@ -268,7 +268,7 @@ That refusal is correct as written — it exists to catch someone running `pre-c
 
 - `OB-10` in `docs/trackers/observer-blindness.md` — the class, its membership test, and
   the enumeration of other files with this shape.
-- `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — the
+- `docs/issues/archive/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — the
   other shared-state defect in the same tool, found in the same pass.
 - `.pre-commit-config.yaml` header — the whole-tree-diff defect that withdrew the pre-push
   hooks, and the `--no-verify`-teaching argument this bug feeds.

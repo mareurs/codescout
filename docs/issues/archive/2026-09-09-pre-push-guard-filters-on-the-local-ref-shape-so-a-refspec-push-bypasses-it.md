@@ -191,7 +191,7 @@ it rather than by editing the words. Nothing is owed on that finding.
 **TWO RESIDUALS ARE NOT FIXED AND HAVE MOVED**, so that archiving this file does not bury
 them: the inert-ack note's ambiguity (`:194-196`, unchanged) and the missing mirror on what
 an ack can grant. Both now live in
-`docs/issues/2026-09-10-the-inert-ack-note-and-the-missing-mirror-on-what-an-ack-grants.md`.
+`docs/issues/archive/2026-09-10-the-inert-ack-note-and-the-missing-mirror-on-what-an-ack-grants.md`.
 The first is materially de-fanged by this fix — with the scan no longer skippable, an empty
 population is much harder to reach — but the sentence still cannot distinguish the two cases.
 
@@ -242,7 +242,7 @@ N/A — fixed at `d6847322` (patch-id `03c1fcd5aee6ca1fb98399a0386437e33c586b06`
 `experiments`, regression test present, reproduction independently re-run against the fix.
 
 The two unfixed residuals moved to
-`docs/issues/2026-09-10-the-inert-ack-note-and-the-missing-mirror-on-what-an-ack-grants.md`.
+`docs/issues/archive/2026-09-10-the-inert-ack-note-and-the-missing-mirror-on-what-an-ack-grants.md`.
 
 ## References
 

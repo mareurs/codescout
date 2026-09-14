@@ -78,7 +78,7 @@ classifier, hints"*; `scripts/` was not in anyone's field of view, and could not
 
 
 **The same defect was found in a sibling probe five days earlier, fixed correctly, and not swept.**
-`f41bfeb963dcee56` — *"probe_guide_section_use.py's MECHANISM_TOOLS omits the renamed doc tool"* —
+`6f6d9b39f862be9e` — *"probe_guide_section_use.py's MECHANISM_TOOLS omits the renamed doc tool"* —
 was opened, fixed at `d4ee86da` and closed on **2026-09-03**, the day after the rename. Same
 class, same rename, same tag, same week. Its fix was local and correct: it added `"doc"` to one
 tuple. Nothing asked *"which other selectors name a tool?"*, so this one sat five more days.

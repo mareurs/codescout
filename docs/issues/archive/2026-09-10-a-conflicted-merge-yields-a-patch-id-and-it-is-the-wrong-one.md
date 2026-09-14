@@ -1,5 +1,5 @@
 ---
-id: f361f362d77940bb
+id: d0b9770fc836d2a5
 kind: bug
 status: fixed
 title: 'BUG: a conflicted merge commit does yield a patch-id, and it is the wrong one'

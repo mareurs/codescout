@@ -90,7 +90,7 @@ So step 1 of the gate has two opposite failure modes on a shared checkout, and t
 different remedies. **Scoping `fmt` to changed paths addresses the first and not the second** —
 a scoped `fmt` inside a peer's stash window is still a no-op that returns success. The second is
 the stash race
-(`docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md`,
+(`docs/issues/archive/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md`,
 symptom 4), and its precondition is checkable in advance: `git status --porcelain` on your
 inputs before running the gate.
 
@@ -161,7 +161,7 @@ belongs), and `src/prompts/mod.rs`'s pinning test must move together.
 - `docs/conventions/shared-checkout-commit-sequence.md` § 4 — amended this session with the
   neighbouring hazard (a pathspec commit takes the *working tree*, so it can carry a
   concurrent session's writes; `docs/trackers/issue-clusters.md` named as the hot file).
-- `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — adjacent,
+- `docs/issues/archive/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — adjacent,
   and the mechanism that destroyed the mtime evidence above.
 - Class note: filed `IC-1` on the remedy test — the blast radius of a write is wider than the
   set of peers the writer can see, and the remedy is an ownership/scoping protocol over the

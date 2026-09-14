@@ -154,7 +154,7 @@ SHA + patch-id; each has an ordinary patch-id that survives rebase normally. Nev
 an empty patch-id field, never substitute the SHA for it, and never record the value a
 conflicted merge hands you — the empty case you would have noticed, and that one you
 would not. Nor manufacture one from `git diff <first-parent>..<merge>`: same shape, same
-objection. docs/issues/2026-09-10-a-conflicted-merge-yields-a-patch-id-and-it-is-the-wrong-one.md
+objection. docs/issues/archive/2026-09-10-a-conflicted-merge-yields-a-patch-id-and-it-is-the-wrong-one.md
 
 Do not reach for `git diff <first-parent>..<merge>` to manufacture one: it hashes, but
 not to the object a cherry-pick would reproduce, so it is a plausible value in a field

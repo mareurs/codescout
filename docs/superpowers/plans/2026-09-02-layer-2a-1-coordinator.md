@@ -372,7 +372,7 @@ cargo clippy --workspace --all-targets --features local-embed -- -D warnings
 cargo test --workspace --no-default-features ; cargo test --workspace
 ```
 
-Expected: clean. `peer::server::tests::run_exits_after_idle_timeout_with_no_connections` is a filed load-sensitive flake (`docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`) — if it is the only failure, re-run it in isolation and record both results rather than dismissing it.
+Expected: clean. `peer::server::tests::run_exits_after_idle_timeout_with_no_connections` is a filed load-sensitive flake (`docs/issues/archive/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`) — if it is the only failure, re-run it in isolation and record both results rather than dismissing it.
 
 - [ ] **Step 8: Commit**
 

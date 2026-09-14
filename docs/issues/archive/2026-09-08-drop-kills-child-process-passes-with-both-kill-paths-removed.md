@@ -239,7 +239,7 @@ needs a simulated spawn hang, which is a different piece of work.
 
 - `src/lsp/client.rs` — the test, `Drop for LspClient`, and the spawn site
 - `src/platform/unix.rs:148-157` — `process_alive`, and why a zombie reads alive
-- `docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md` —
+- `docs/issues/archive/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md` —
   the flake-class work this was found under
 - `CLAUDE.md` § *Testing Discipline* — "demand an observed RED, never an assertion's
   existence"; "mutate the PRODUCTION path, not the test's inputs"

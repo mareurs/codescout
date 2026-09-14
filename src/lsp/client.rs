@@ -2239,7 +2239,7 @@ struct Point {
         // reading true for a window after the kill. Poll that window instead of
         // sleeping a fixed 500ms: a fixed sleep asserts "enough time has passed"
         // and reds when the parallel suite has not scheduled the reaper yet
-        // (docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md).
+        // (docs/issues/archive/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md).
         // The loop exits early on death, so the 10s ceiling costs nothing when the
         // reaper is prompt. Deleting the loop restores the load-sensitivity;
         // deleting the assertion below makes the test vacuous.

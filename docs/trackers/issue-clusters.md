@@ -111,7 +111,7 @@ commits in 11 days, and of the 14 tokens involved roughly 8 were legitimate quot
 explain that the two readings are byte-identical. A parser keyed on the undiscriminated token
 inherits the blindness it was built to remove, which is `IC-6` holding about the gate built to fix
 it. The replay, and the one discriminator that did survive, are in
-`docs/issues/2026-09-02-the-no-stored-count-gate-is-defeated-by-house-style.md`.
+`docs/issues/archive/2026-09-02-the-no-stored-count-gate-is-defeated-by-house-style.md`.
 
 A **slug is claim-shaped, never topic-shaped**: `blast-radius-exceeds-visibility`, not
 `concurrency`. A topic slug re-creates the tag soup this replaces; a claim slug can be false,

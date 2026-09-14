@@ -1,5 +1,5 @@
 ---
-id: b86ba0380dc36436
+id: 15f2a176235a863e
 kind: bug
 status: fixed
 title: 'BUG: a peer''s pre-commit stash window makes another session''s atomic file read/rename operate on the wrong bytes — or on no file at all'

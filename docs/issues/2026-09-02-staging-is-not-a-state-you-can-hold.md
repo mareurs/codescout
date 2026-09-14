@@ -5,7 +5,7 @@ closed:
 severity: medium
 owner: marius
 related:
-  - docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md
+  - docs/issues/archive/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md
   - docs/issues/archive/2026-09-02-cluster-gate-failure-text-prescribes-the-blindness-that-caused-it.md
 tags:
   - cluster/shared-resource-carries-no-owner
@@ -314,7 +314,7 @@ distinct and this instance does not close the second; see
 `the stage log records who STAGED, not who authored`.
 ## Hypotheses tried
 
-1. **Hypothesis:** the pre-commit stash (`docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md`)
+1. **Hypothesis:** the pre-commit stash (`docs/issues/archive/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md`)
    removed the staged paths.
    **Test:** that mechanism stashes *unstaged* work and restores it; the observed loss was of
    *staged* paths, and `codescout-26` reported the explicit `git restore --staged`.
@@ -397,7 +397,7 @@ opposite directions and the resolution is one decision, not two. Then add the at
 ## References
 
 - `62d7fa4b` — the commit that closed the red window with the single-invocation form.
-- `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — sibling
+- `docs/issues/archive/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — sibling
   mechanism, unstaged work rather than staged paths.
 - `docs/issues/archive/2026-09-02-one-ledger-file-serializes-every-class-edit.md` — why the pair had to be
   atomic in the first place.

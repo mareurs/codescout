@@ -94,7 +94,7 @@ claim it is.
 
 **Second correction, same day, same source — when a hook edit actually reaches anyone.**
 pre-commit clears unstaged changes before running hooks (`staged_files_only.py`; it is the
-root cause of `8cc95806a7b5f37a`, filed here the day before), so a `language: system` entry
+root cause of `74d7306647646956`, filed here the day before), so a `language: system` entry
 executes the **committed** copy of its own script rather than the one in your editor.
 Reproduced independently in a throwaway repo before acceptance, three cases:
 
@@ -375,7 +375,7 @@ no longer trading against a correctness hole. Direction 3 stays falsified — se
 - `docs/trackers/issue-clusters.md` § `IC-17` — the class; its *Mechanism status* line
   already names the git index as unowned.
 - `docs/issues/archive/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` and
-  `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — sibling
+  `docs/issues/archive/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — sibling
   hook defects on the same shared surface. **Both closed 2026-09-07 (`074b749e`) by retiring
   the pre-commit framework; this one is NOT, and the difference is the point.** Those two
   were defects OF the framework and died with it. This one is a property of the shared git

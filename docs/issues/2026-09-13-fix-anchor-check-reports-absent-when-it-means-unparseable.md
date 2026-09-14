@@ -21,7 +21,7 @@ bullet fields; prose under the right heading satisfies nothing, and nothing in t
 
 ## Symptom (Effect)
 
-Measured 2026-09-13 on `docs/issues/2026-09-10-the-references-manual-page-teaches-name_path-a-parameter-the-tool-has-never-accepted.md`.
+Measured 2026-09-13 on `docs/issues/archive/2026-09-10-the-references-manual-page-teaches-name_path-a-parameter-the-tool-has-never-accepted.md`.
 Three repair attempts, each verified against the check's own count rather than assumed:
 
 | attempt | what was written | `terminal_status_without_fix_anchor` |

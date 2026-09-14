@@ -1,5 +1,5 @@
 ---
-id: c4a3d1eb1be7654b
+id: 4d55d26204282497
 kind: bug
 status: fixed
 title: 'BUG: append_entry''s two-call protocol guarantees an interval where a ledger entry exists on disk without its index row'

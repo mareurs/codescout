@@ -2,7 +2,7 @@
 //!
 //! `docs/conventions/test-env-isolation.md` states the principle; this file pins the
 //! single instance that broke `experiments` for 36 hours with no owner
-//! (`docs/issues/2026-09-08-embedder-tests-read-an-ambient-env-var-ci-does-not-have.md`).
+//! (`docs/issues/archive/2026-09-08-embedder-tests-read-an-ambient-env-var-ci-does-not-have.md`).
 //!
 //! **Why a source scan rather than a behavioural test.** The failure mode is a test that
 //! reads `std::env` and therefore asserts about the developer's shell. You cannot catch
@@ -55,7 +55,7 @@ fn no_embedder_test_constructs_through_the_env_reading_path() {
             "{rel} calls EmbedderHttp::new(), which reads process env, so the test asserts \
              about the developer's shell and passes locally while failing in CI. Use \
              EmbedderHttp::with_config(dense, sparse, dim, \"m\", \"\") instead. \
-             Background: docs/issues/2026-09-08-embedder-tests-read-an-ambient-env-var-ci-does-not-have.md"
+             Background: docs/issues/archive/2026-09-08-embedder-tests-read-an-ambient-env-var-ci-does-not-have.md"
         );
     }
 }

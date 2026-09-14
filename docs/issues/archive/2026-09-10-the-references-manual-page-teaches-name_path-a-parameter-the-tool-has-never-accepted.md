@@ -1,5 +1,5 @@
 ---
-id: '57ecbac8f925d7b8'
+id: 43888bfe2327cbda
 kind: bug
 status: fixed
 title: 'BUG: the `references` manual page teaches `name_path`, a parameter the tool has never accepted'

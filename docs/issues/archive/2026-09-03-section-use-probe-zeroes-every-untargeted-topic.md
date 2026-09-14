@@ -1,5 +1,5 @@
 ---
-id: bcd3d846861f4a57
+id: 5cedc46a58ee2a14
 kind: bug
 status: fixed
 title: probe_guide_section_use.py reports 100% never-engaged by construction for nine of ten topics

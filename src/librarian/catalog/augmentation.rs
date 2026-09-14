@@ -489,7 +489,7 @@ pub fn update_entry(
     // earlier had just proven current. Patching a field the template does not render hit
     // it every time, because the rendered row cannot change and the note never sees which
     // fields moved.
-    // docs/issues/2026-09-13-snapshot-stale-tests-row-presence-and-reports-a-content-claim.md
+    // docs/issues/archive/2026-09-13-snapshot-stale-tests-row-presence-and-reports-a-content-claim.md
     let snapshot_stale = match snapshot_row {
         SnapshotRow::Rewritten | SnapshotRow::AlreadyCurrent => None,
         SnapshotRow::Undetermined => {
@@ -1003,7 +1003,7 @@ pub fn entry_high_water_key(id_prefix: &str) -> String {
 /// not tolerable, and that is the difference.
 /// A row to write into the ledger's index table, in the SAME file write as the
 /// section. Direction (3) of
-/// `docs/issues/2026-09-02-append-entry-two-call-protocol-manufactures-a-capture-window.md`:
+/// `docs/issues/archive/2026-09-02-append-entry-two-call-protocol-manufactures-a-capture-window.md`:
 /// the two-call protocol guarantees an interval in which the ledger holds an entry
 /// no row names, and no discipline available to the caller closes it — writing the
 /// row first is forbidden, because the allocator counts a row as a claimed id.
@@ -1125,7 +1125,7 @@ pub(crate) fn declared_prefixes_from_frontmatter(
 /// derivation is also only safe because the header happens to be unique in today's
 /// bodies — a property of the corpus rather than of the scheme, and the very
 /// collision
-/// `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`
+/// `docs/issues/archive/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`
 /// reports.
 ///
 /// A **scalar** key rather than a nested map, for [`ENTRY_HIGH_WATER_PREFIX`]'s
@@ -1545,7 +1545,7 @@ fn resolve_row_anchor(doc: &str, anchor: &RowAnchor, id: &str, caller: &str) -> 
 /// not check"*. The first is the answer `snapshot_stale_note` needs and cannot compute —
 /// that note receives only the id set, never the field values, so it branched on PRESENCE
 /// and worded the result as a claim about CONTENT
-/// (`docs/issues/2026-09-13-snapshot-stale-tests-row-presence-and-reports-a-content-claim.md`).
+/// (`docs/issues/archive/2026-09-13-snapshot-stale-tests-row-presence-and-reports-a-content-claim.md`).
 ///
 /// **The comparison was already being made and thrown away**, which is why this is a
 /// return type rather than a new render. The bug file superseded by that one priced the
@@ -1645,7 +1645,7 @@ fn resync_snapshot_row(
 
     // Locate the block, then the row WITHIN it. Scanning the whole document for the
     // id would reach a row in an unrelated table, which is the defect
-    // `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`
+    // `docs/issues/archive/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`
     // reports and the reason the anchor is declared rather than inferred.
     let Some((start, end)) = snapshot_block_range(&doc, &anchor) else {
         return Ok(SnapshotRow::Undetermined);
@@ -1973,7 +1973,7 @@ pub(crate) fn body_snapshot_row_indices(
 ///
 /// **An absent, drifted or ambiguous anchor falls back to the whole-document scan**,
 /// byte for byte today's behaviour. That is the asymmetry
-/// `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`
+/// `docs/issues/archive/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`
 /// already names: a **read** may fall back, a **write** may not — which is why
 /// [`resync_snapshot_row`], the write, returns `Ok(false)` on the very same input
 /// instead of guessing a block.
@@ -3038,8 +3038,8 @@ mod tests {
 
     /// The narrowing itself: a declared anchor confines the set to ITS block, so a
     /// `PREFIX-N` row sitting in an unrelated table further down is not a snapshot
-    /// row. This is `e9bea0ed3ff9927a` /
-    /// `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`.
+    /// row. This is `20159deb3f4d4c09` /
+    /// `docs/issues/archive/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`.
     ///
     /// **The first assertion is the control and it is what makes the second one
     /// evidence.** Without it, a fixture whose second table simply failed to match
@@ -3162,7 +3162,7 @@ mod tests {
     }
 
     /// The discriminating test for
-    /// `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`:
+    /// `docs/issues/archive/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`:
     /// a SECOND table further down must be unreachable. Contiguity is what makes that
     /// true by construction rather than by the first table happening to be last.
     ///
@@ -4053,7 +4053,7 @@ mod tests {
     }
 
     /// Direction (3) of
-    /// `docs/issues/2026-09-02-append-entry-two-call-protocol-manufactures-a-capture-window.md`:
+    /// `docs/issues/archive/2026-09-02-append-entry-two-call-protocol-manufactures-a-capture-window.md`:
     /// the section and its index row land in ONE file write, closing the interval in
     /// which the ledger holds an entry that no row names.
     ///

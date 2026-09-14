@@ -163,7 +163,7 @@ could have **set** the variable and reproduced that bug. Caught by `codescout-3e
 *Second error — the conclusion, which survived the first correction.* "Saving the file
 makes it live at that instant" is **false in the direction that matters**, and stays false
 under the corrected mechanism. `pre-commit` clears unstaged changes before running hooks
-(`staged_files_only.py:108` — see `8cc95806a7b5f37a`), so a `language: system` entry
+(`staged_files_only.py:108` — see `74d7306647646956`), so a `language: system` entry
 executes the **index** copy of its own script. Measured 2026-09-02 in a throwaway repo:
 
 | hook-script edit | version the hook actually ran |

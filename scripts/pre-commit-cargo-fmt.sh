@@ -11,7 +11,7 @@
 #
 # That stash is the defect. It is repo-wide and unconditional, so on a shared checkout
 # it reverts every OTHER session's in-flight work for the length of the hook run —
-# docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md,
+# docs/issues/archive/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md,
 # six symptoms, `high`, open. This script exists so the stash can be dropped: it is the
 # only one of the four commit-stage checks that read the working tree at all. The other
 # three already read the index by construction (`git rev-parse ":$path"`,

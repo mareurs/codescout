@@ -61,13 +61,13 @@ reader does not mistake them for observations:**
   containing an indented or fenced block — common in Rust doc comments.
 ## Reproduction
 
-Tree `408709ea`. Scanning `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`,
+Tree `408709ea`. Scanning `docs/issues/archive/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`,
 whose fence opens at line 83 and closes at 86, with line 84 holding a raw-string regex
 that contains a literal backtick inside a character class.
 
 ```
 librarian(action="audit_doc_refs",
-          paths=["docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md"],
+          paths=["docs/issues/archive/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md"],
           emit_tracker=false)
 ```
 
@@ -231,4 +231,4 @@ reader arriving by query meets it immediately rather than counting this as a mem
 
 - `CLAUDE.md` § *Parsers Over a Namespace — owe an escape and a disambiguator*, including
   the four-independent-shell-gates heredoc precedent.
-- `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`.
+- `docs/issues/archive/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`.

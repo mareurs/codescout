@@ -176,8 +176,8 @@ or explicitly accepted.
 > `cancel-in-progress` is live at `.github/workflows/ci.yml:15`, and its cheap first move —
 > read `conclusion`, never `status` — is written down nowhere outside this plan.
 
-`docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md` (`high`)
-and `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — one
+`docs/issues/archive/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md` (`high`)
+and `docs/issues/archive/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — one
 mechanism, two victim classes, deliberately kept as separate files with a shared
 `cluster/transient-shared-state-lies-to-readers` tag.
 

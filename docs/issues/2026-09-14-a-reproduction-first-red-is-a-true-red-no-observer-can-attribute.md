@@ -56,7 +56,7 @@ and said nothing about the test's STATUS.
 3. They observe a red they cannot attribute, in a file whose author is known and whose
    intent is not.
 
-Observed 2026-09-14 between 07:14 and 07:26 on `experiments`, bug `2459a3965d98170b`.
+Observed 2026-09-14 between 07:14 and 07:26 on `experiments`, bug `01be550a9d05d5d1`.
 
 ## Root cause
 
@@ -134,8 +134,8 @@ not evidence a convention holds.
   there because the remedies diverge: announce-then-revert for a red with nothing behind it,
   mark-the-message for a red with a live defect behind it. A shared title would make every
   reader work out which half applies before using either.
-- `docs/issues/2026-09-13-snapshot-stale-tests-row-presence-and-reports-a-content-claim.md`
-  (`2459a3965d98170b`) — the bug whose reproduction produced this incident.
+- `docs/issues/archive/2026-09-13-snapshot-stale-tests-row-presence-and-reports-a-content-claim.md`
+  (`01be550a9d05d5d1`) — the bug whose reproduction produced this incident.
 
 **Attribution.** The class and the incident are sessionId
 `8bd791df-5ff4-40fe-af30-69cc3fefc2f7`'s, who omitted the marker and caused the confusion.

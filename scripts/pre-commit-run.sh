@@ -20,7 +20,7 @@
 #
 # print in the COMMITTER's terminal — the one session for whom nothing is wrong. Six
 # symptoms, `high`, open:
-# docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md.
+# docs/issues/archive/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md.
 # pre-commit 4.6.2 exposes no way to disable the stash (verified: `pre-commit run --help`
 # names it zero times), so not using the framework is the only route to not stashing.
 #

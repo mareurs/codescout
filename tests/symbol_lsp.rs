@@ -3577,7 +3577,7 @@ pub fn other() {}
     );
 }
 
-// ── Shrink advisory on `replace` (bug 12a8a56bf8a25138) ──────────────────────
+// ── Shrink advisory on `replace` (bug 7dc6ea026d9881e6) ──────────────────────
 //
 // `replace` overwrites the symbol's whole range, so a caller who supplied a
 // partial body deletes the remainder and gets `status: "ok"`. These two tests

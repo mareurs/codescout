@@ -44,7 +44,7 @@ header was written for a scan containing only not-mine rows.
 **The prescribed remedy is the command this script exists to prevent.** The refusal text
 says: *"If you have decided it is safe, run `cargo fmt` yourself — that is the same act,
 minus the false assurance that a guard sanctioned it."* `cargo fmt` takes no pathspec and
-rewrites every `.rs` in the workspace, which is `ce3a628db5fa1168` exactly. Following the
+rewrites every `.rs` in the workspace, which is `1d32d341e4c7ada0` exactly. Following the
 guard's own advice re-admits the defect it was built to close.
 
 **And the narrow remedy is implemented thirty lines below the message that omits it.**
@@ -98,7 +98,7 @@ the message, which describes a file as not-this-session's while printing its `MI
 directly below, and which then routes to the wide command while the narrow one is already
 in the script. If the behaviour is intended, the text is still wrong.
 
-Its own bug file (`ce3a628db5fa1168` § Fix) describes the design as *"formats only the
+Its own bug file (`1d32d341e4c7ada0` § Fix) describes the design as *"formats only the
 files `scripts/file-provenance.py` attributes to this session and refuses the rest"* —
 which is the partial-success reading, not the wholesale one. So the documentation and the
 code disagree about which of the two this is.
@@ -110,7 +110,7 @@ code disagree about which of the two this is.
 not check. `CLAUDE.md:38` states the contract as *"The script formats what
 `scripts/file-provenance.py` attributes to you and **refuses** the rest"* — two actions in
 one run, not a choice between them — and it is the document every session is served at
-startup. With `ce3a628db5fa1168` saying the same, that is two independent documents against
+startup. With `1d32d341e4c7ada0` saying the same, that is two independent documents against
 the code, which makes this a defect rather than an open question. § Fix option 2.
 
 **But the naive option 2 is unsafe, and the reason retroactively justifies the behaviour
@@ -129,7 +129,7 @@ exactly what § Fix option 2 says and formatted `$MINE` on a mixed scan. The new
 control assertion — *"THEIR file was left byte-untouched"*, written because an assertion
 that only checks *my* file is satisfied by a fix that simply runs the formatter over
 everything — fired immediately. Without it the fix would have re-admitted
-`ce3a628db5fa1168`, the defect the whole script exists to close, **through the regression
+`1d32d341e4c7ada0`, the defect the whole script exists to close, **through the regression
 test written to close a different bug in it**, and every assertion about the refusal message
 would have stayed green.
 ## Fix
@@ -163,7 +163,7 @@ only what you name, and is the exact command the script runs at `:211`. Used on 
 to get through the gate.
 
 Do **not** take the suggested `cargo fmt`: on a shared checkout that is
-`ce3a628db5fa1168`, live.
+`1d32d341e4c7ada0`, live.
 
 ## Tests added
 
@@ -207,6 +207,6 @@ form. Adding the narrow form to `CLAUDE.md` as well was considered and dropped a
 out-of-scope for a bug about the script's own text.
 ## References
 
-- `ce3a628db5fa1168` — the bug this script mitigates, and the one its own suggested remedy
+- `1d32d341e4c7ada0` — the bug this script mitigates, and the one its own suggested remedy
   re-admits.
 - `scripts/fmt-mine.sh:146-181`, `:211`.
