@@ -54,6 +54,7 @@ HOOK_RULES = [
     "no_class_field_states_a_bare_n",
     "no_index_row_stores_a_count",
     "no_index_row_stores_a_mechanism",
+    "the_index_file_holds_no_class_sections",
 ]
 
 LEDGER = "docs/trackers/issue-clusters.md"
@@ -497,6 +498,35 @@ def index_header_readvertises_mechanism(ledger: str) -> str | None:
     return None
 
 
+def index_class_sections(index_text: str) -> list[str]:
+    """`## IC-<digits> ` headings in the Index file -- the twin of `index_class_sections` in
+    tests/issue_clusters.rs.
+
+    Takes the INDEX FILE ALONE and never `read_ledger()`'s concatenation. Every class file opens
+    with its own `## IC-N —` heading, so the joined text matches once per class on a perfectly
+    healthy corpus and this check would refuse every commit in the repo. The caller passing
+    `read(LEDGER, source)` rather than the ledger it already holds is the load-bearing half.
+
+    Digits are required because `## IC-N — <the class…>` in the template is not a class section:
+    the token grammar is `[A-Z]{1,3}-\\d+`, and `N` is not a digit.
+
+    `isascii()` beside `isdigit()` is what keeps this agreeing with Rust. Python's `str.isdigit()`
+    is true for `٣` and `²`; `char::is_ascii_digit` is not, so without it the two sides classify
+    the same heading differently and only the fixture would ever say so.
+    """
+    out = []
+    for line in index_text.splitlines():
+        if not line.startswith("## IC-"):
+            continue
+        n, sep, _ = line[len("## IC-") :].partition(" ")
+        # `sep` is what distinguishes "no space at all" from "empty head": Rust's
+        # `split_once(' ')` yields None for `## IC-8` and `("", rest)` for `## IC- 8`, and both
+        # are non-findings. `partition` collapses them without it.
+        if sep and n and n.isascii() and n.isdigit():
+            out.append(line)
+    return out
+
+
 def actual_counts(valid: set[str], source: str) -> dict[str, int]:
     """Mirrors `actual_counts` -- seeded at 0 so a class with no members is still compared."""
     out = {s: 0 for s in valid}
@@ -737,6 +767,15 @@ def main() -> int:
                 )
             )
             return 0
+        elif arg == "--fixture-index-sections":
+            # Pure over stdin, so `the_hook_script_agrees_on_the_index_section_scan` can feed
+            # headings the live corpus cannot hold. It cannot hold them BY CONSTRUCTION: this
+            # check exists to keep class sections out of the Index, so a correct ledger yields
+            # zero findings forever and a corpus-driven comparison is two empty lists -- green
+            # whether this scan works or has been deleted outright. Same argument as
+            # `--fixture-index-mechanism` above, for the same reason.
+            print(json.dumps(index_class_sections(sys.stdin.read())))
+            return 0
     if source not in ("index", "worktree", "head"):
         raise SystemExit(f"--source must be index|worktree|head, got {source!r}")
 
@@ -846,6 +885,49 @@ def main() -> int:
             "tag on disk and invisible to every `find`. If no existing slug fits, add one to the\n"
             "ledger rather than forcing a fit: a wrong declaration corrupts the counts that\n"
             "promotion reads.",
+            file=sys.stderr,
+        )
+        _emit_sequence_tail()
+        return 1
+
+    # CHECK 5 -- the Index file holds no class sections.
+    #
+    # Mirrors `the_index_file_holds_no_class_sections`. Ported 2026-09-14; until then it was a
+    # Rust-only rule, so a commit that left the section behind passed the commit path and redded
+    # `cargo test --test issue_clusters` for every other session sharing the checkout.
+    # docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md
+    #
+    # Placed above CHECK 3 for the reason CHECK 4 gives: CHECK 3 exits early on three paths, so
+    # anything below it is unreachable on most commits.
+    #
+    # This is the EXPECTED state right after `append_entry` files a new class -- `PendingSection`
+    # splices the section into the artifact's own file, and that artifact is the Index. The
+    # correct filing path produces this every time, which is why step 2 of the flow needs a
+    # mechanism rather than a filer who remembers it (skill-frictions:SKF-22).
+    #
+    # Reads the Index file ALONE, not `ledger`: the concatenation carries every class file's own
+    # `## IC-N —` heading and would refuse every commit in the repo.
+    stray_sections = index_class_sections(read(LEDGER, source) or "")
+    if stray_sections:
+        print(
+            f"{LEDGER} is the Index, and this commit leaves class section(s) in it:\n  "
+            + "\n  ".join(stray_sections)
+            + "\n\n"
+            "IF YOU JUST FILED A CLASS -- this is step 2 of the flow, not a mistake in step 1.\n"
+            f"Move the section verbatim into {LEDGER_DIR}/IC-N-<slug>.md with tracker\n"
+            "frontmatter, leave the Index row behind, and commit both together. Do NOT silence\n"
+            "this by declaring `entry_prefix: IC` in the class file -- that raises link_scan's\n"
+            "prefix_conflicts instead of fixing anything.\n"
+            "\n"
+            f"IF YOU DID NOT TOUCH {LEDGER}, THIS IS NOT YOUR DEFECT and the move is not yours\n"
+            "to make -- it is someone else's half-filed class. This check reads the INDEX, so a\n"
+            "peer's in-flight filing refuses you for work you cannot see. Ask them; the question\n"
+            "has an answer they can give ('landing now' or 'backed out'), which is why this\n"
+            "sends you to a person rather than to a file:\n"
+            f"    python3 scripts/file-provenance.py {LEDGER}\n"
+            "Do NOT edit their files. Do NOT reach for --no-verify: this same run carries the\n"
+            "one-tag and growth checks your own bug files need, so silencing a refusal that is\n"
+            "not yours silences two that are.",
             file=sys.stderr,
         )
         _emit_sequence_tail()

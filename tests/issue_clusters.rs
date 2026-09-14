@@ -1737,6 +1737,33 @@ fn every_declared_class_has_an_index_row() {
     );
 }
 
+/// `## IC-<digits> ` headings in the Index file — the twin of `index_class_sections` in
+/// `scripts/pre-commit-ledger-counts.py`.
+///
+/// Takes the Index file's own text and never [`ledger_text`]'s concatenation: every class file
+/// opens with its own `## IC-N —` heading, so the joined text matches once per class on a
+/// perfectly healthy corpus. The Python side carries the same warning, because there the ledger
+/// is already in hand and passing it is the easier mistake.
+///
+/// Extracted from [`the_index_file_holds_no_class_sections`] when the rule was ported to the
+/// commit hook, so the corpus gate and [`the_index_section_scan_discriminates`] share one
+/// derivation instead of two literals nothing keeps in step.
+fn index_class_sections(text: &str) -> Vec<&str> {
+    text.lines()
+        .filter(|l| {
+            // `## IC-N — <the class…>` in the template is not a class section: the token grammar
+            // is `[A-Z]{1,3}-\d+`, and `N` is not a digit. Requiring digits here is what keeps
+            // the template from tripping this gate.
+            //
+            // `is_ascii_digit` rather than `is_numeric` is what keeps this agreeing with the
+            // Python twin, whose `str.isdigit()` is true for `٣` and `²`.
+            l.strip_prefix("## IC-")
+                .and_then(|r| r.split_once(' '))
+                .is_some_and(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+        })
+        .collect()
+}
+
 /// The split's own regression guard, and the reason the two-step filing flow is a MECHANISM
 /// rather than a note somebody has to remember.
 ///
@@ -1765,17 +1792,7 @@ fn every_declared_class_has_an_index_row() {
 fn the_index_file_holds_no_class_sections() {
     let text = std::fs::read_to_string(repo_root().join(LEDGER))
         .unwrap_or_else(|e| panic!("cannot read {LEDGER}: {e}"));
-    let stray: Vec<&str> = text
-        .lines()
-        .filter(|l| {
-            // `## IC-N — <the class…>` in the template is not a class section: the token
-            // grammar is `[A-Z]{1,3}-\d+`, and `N` is not a digit. Requiring digits here is
-            // what keeps the template from tripping this gate.
-            l.strip_prefix("## IC-")
-                .and_then(|r| r.split_once(' '))
-                .is_some_and(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
-        })
-        .collect();
+    let stray = index_class_sections(&text);
     assert!(
         stray.is_empty(),
         "{LEDGER} is the Index — class sections live in {LEDGER_DIR}/IC-N-<slug>.md.\n\
@@ -1787,6 +1804,132 @@ fn the_index_file_holds_no_class_sections() {
          raises link_scan's prefix_conflicts instead.",
         stray.len(),
         stray.join("\n  ")
+    );
+}
+
+/// The known-answer input for the two tests below.
+///
+/// A real `const` shared by both, for the reason [`INDEX_MECHANISM_FIXTURE`] gives: two
+/// hand-maintained literals with a shared intent are a shared intent enforced by nobody.
+///
+/// Every line is a planted mutant-killer, and the assertions name which mutation each one kills.
+const INDEX_SECTION_FIXTURE: &str = "\
+# Issue clusters — the Index
+## IC-7 — a class section left behind in the parent
+## IC-23 — two digits, which a single-character digit test would miss
+## IC-N — <the class…>
+## IC-٣ — an Arabic-indic digit
+## IC-8
+### IC-9 — a deeper heading is not a class section
+prose mentioning ## IC-10 — mid-line
+## Roster
+";
+
+/// Feeds [`index_class_sections`] headings whose answers are known.
+///
+/// **The live Index cannot serve here, structurally rather than incidentally.** This rule exists
+/// to keep class sections OUT of that file, so a correct corpus yields zero findings forever and
+/// [`the_index_file_holds_no_class_sections`] is an absence assertion pinned to an absence —
+/// green whether the scan works or has been deleted outright. This fixture is the only surface on
+/// which the scan can be shown to MATCH anything.
+#[test]
+fn the_index_section_scan_discriminates() {
+    let got = index_class_sections(INDEX_SECTION_FIXTURE);
+
+    assert_eq!(
+        got,
+        vec![
+            "## IC-7 — a class section left behind in the parent",
+            "## IC-23 — two digits, which a single-character digit test would miss",
+        ],
+        "only `## IC-<digits> ` headings are class sections; got {got:?}"
+    );
+
+    // The template placeholder, which lives in the real Index today. Requiring digits is the only
+    // thing keeping it out — drop that and this gate reds on a clean corpus and gets deleted for it.
+    assert!(
+        !got.iter().any(|l| l.contains("<the class…>")),
+        "`## IC-N — <the class…>` is the template, not a class section: {got:?}"
+    );
+
+    // `is_ascii_digit`, not `is_numeric`. Python's `str.isdigit()` is true for `٣`, so a port
+    // written with `isdigit()` alone calls this line a finding while Rust does not — a
+    // cross-language divergence invisible on every ASCII heading the corpus will ever contain.
+    assert!(
+        !got.iter().any(|l| l.contains("Arabic-indic")),
+        "a non-ASCII digit is not an IC id: {got:?}"
+    );
+
+    // Heading-anchored, not substring. Kills a rewrite to `line.contains(\"## IC-\")`.
+    assert!(
+        !got.iter().any(|l| l.starts_with("prose")),
+        "a mid-line mention is not a heading: {got:?}"
+    );
+
+    // `### ` is not `## `. Kills a rewrite that trims or normalises the line before matching.
+    assert!(
+        !got.iter().any(|l| l.starts_with("###")),
+        "a deeper heading is not a class section: {got:?}"
+    );
+
+    // KNOWN BLIND SPOT, pinned deliberately rather than closed here: a titleless `## IC-8` is not
+    // a finding, because both sides require the space separating id from title. Nothing writes
+    // that shape — `append_entry` always emits `## IC-N — <title>` — so widening the rule is a
+    // change to make on both sides at once. Pinned so that a widening cannot happen on one side
+    // silently, which is the divergence this whole pair exists to prevent.
+    assert!(
+        !got.contains(&"## IC-8"),
+        "a titleless heading is currently out of scope on BOTH sides: {got:?}"
+    );
+}
+
+/// The hook script's section scan agrees with this one, on a fixture the corpus cannot reach.
+///
+/// Required by the porting contract in
+/// `docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md`:
+/// *"Each ported rule owes its own discrimination test … a fixture with a known answer fed
+/// through the PYTHON implementation, so a check that silently stops matching is not mistaken for
+/// a clean corpus. A ported rule without one converts a Rust guard into a pair where one half is
+/// decoration."*
+///
+/// Mutation that must kill this: in the Python, drop the `isascii()` beside `isdigit()`, drop the
+/// `startswith("## IC-")` anchor, feed it `read_ledger()` instead of the Index file, or require
+/// no space after the id.
+#[test]
+fn the_hook_script_agrees_on_the_index_section_scan() {
+    let mut child = Command::new("python3")
+        .args([
+            "scripts/pre-commit-ledger-counts.py",
+            "--fixture-index-sections",
+        ])
+        .current_dir(repo_root())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("python3 failed to spawn");
+    child
+        .stdin
+        .take()
+        .expect("stdin piped")
+        .write_all(INDEX_SECTION_FIXTURE.as_bytes())
+        .expect("write fixture");
+    let out = child.wait_with_output().expect("hook script failed");
+    assert!(out.status.success(), "script exited non-zero");
+
+    let theirs: Vec<String> =
+        serde_json::from_slice(&out.stdout).expect("script must emit a JSON array of strings");
+
+    assert_eq!(
+        index_class_sections(INDEX_SECTION_FIXTURE),
+        theirs,
+        "this gate and scripts/pre-commit-ledger-counts.py disagree about which Index headings are \
+         class sections"
+    );
+    assert!(
+        !theirs.is_empty(),
+        "the Python side returned nothing on a fixture with two planted findings — the check is \
+         present but no longer matching, which on the live corpus is indistinguishable from a \
+         clean Index"
     );
 }
 
@@ -1895,6 +2038,7 @@ const HOOK_OWED: &[&str] = &[
     "no_class_field_states_a_bare_n",
     "no_index_row_stores_a_count",
     "no_index_row_stores_a_mechanism",
+    "the_index_file_holds_no_class_sections",
 ];
 
 /// Rules the hook enforces that CANNOT be a test here, with the reason it cannot.
@@ -1995,10 +2139,14 @@ const NOT_HOOK_OWED: &[(&str, &str)] = &[
          where the Python column-count scan can return a non-empty answer",
     ),
     (
-        "the_index_file_holds_no_class_sections",
-        "OWED, not yet implemented — cheap (the Index file must hold no `## IC-N —` heading) \
-         and grouped with the other two rather than shipped alone; \
-         docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md",
+        "the_index_section_scan_discriminates",
+        "vacuity guard for the class-section scan; the live Index holds none by construction, so \
+         this fixture is the only surface on which the scan can be shown to match",
+    ),
+    (
+        "the_hook_script_agrees_on_the_index_section_scan",
+        "a test OF the hook rather than a rule it owes; feeds one fixture through both \
+         implementations of the class-section scan",
     ),
     (
         "the_index_mechanism_scan_discriminates",
