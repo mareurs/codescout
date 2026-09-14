@@ -1,4 +1,4 @@
-//! Guard for `docs/issues/2026-09-14-read-file-and-grep-accept-a-err-handle-and-silently-answer-from-stdout.md`.
+//! Guard for `docs/issues/archive/2026-09-14-read-file-and-grep-accept-a-err-handle-and-silently-answer-from-stdout.md`.
 //!
 //! ## What this guards, and why the helper alone would not
 //!
@@ -175,7 +175,7 @@ fn stream_selection_is_not_reinvented_per_caller() {
          site genuinely needs the whole entry or a different policy, add it to ALLOWED in \
          tests/buffer_stream_policy.rs WITH ITS REASON — the reason is the point; a bare \
          allowlist entry records only that someone wanted the build green.\n\n\
-         BUG docs/issues/2026-09-14-read-file-and-grep-accept-a-err-handle-and-silently-answer-from-stdout.md",
+         BUG docs/issues/archive/2026-09-14-read-file-and-grep-accept-a-err-handle-and-silently-answer-from-stdout.md",
         offenders.len(),
         rendered.join("\n")
     );

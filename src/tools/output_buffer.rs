@@ -300,7 +300,7 @@ impl OutputBuffer {
     /// (`tests/buffer_stream_policy.rs`) is what actually reds when a new site
     /// reintroduces the omission.
     ///
-    /// BUG docs/issues/2026-09-14-read-file-and-grep-accept-a-err-handle-and-silently-answer-from-stdout.md
+    /// BUG docs/issues/archive/2026-09-14-read-file-and-grep-accept-a-err-handle-and-silently-answer-from-stdout.md
     pub fn get_stream(&self, id: &str) -> Option<String> {
         let entry = self.get(id)?;
         if id.ends_with(".err") {

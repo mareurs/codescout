@@ -1,5 +1,5 @@
 ---
-id: fc08bf52ac6b478d
+id: 15c2646a7bd08180
 kind: bug
 status: fixed
 title: 'BUG: read_file and grep accept a .err buffer handle and silently answer from stdout'
@@ -8,6 +8,7 @@ tags:
 - output-buffer
 - run-command
 - progressive-disclosure
+closed: 2026-09-14
 ---
 
 ## Summary

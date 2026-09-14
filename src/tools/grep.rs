@@ -2627,7 +2627,7 @@ mod tests {
     /// blob contains the token on a zero-match response. The discriminator was already in the
     /// output, unused, while the test reached for a proxy for it.
     ///
-    /// BUG docs/issues/2026-09-14-read-file-and-grep-accept-a-err-handle-and-silently-answer-from-stdout.md
+    /// BUG docs/issues/archive/2026-09-14-read-file-and-grep-accept-a-err-handle-and-silently-answer-from-stdout.md
     #[tokio::test]
     async fn grep_on_an_err_handle_searches_stderr_not_stdout() {
         let ctx = test_ctx().await;

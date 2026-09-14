@@ -1604,7 +1604,7 @@ mod tests {
     /// both streams satisfies it and still misleads. Each stream carries a token the other
     /// does not, and the absence is asserted as well as the presence.
     ///
-    /// BUG docs/issues/2026-09-14-read-file-and-grep-accept-a-err-handle-and-silently-answer-from-stdout.md
+    /// BUG docs/issues/archive/2026-09-14-read-file-and-grep-accept-a-err-handle-and-silently-answer-from-stdout.md
     #[tokio::test]
     async fn read_file_err_handle_reads_stderr_not_stdout() {
         let ctx = test_ctx().await;
