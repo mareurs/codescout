@@ -1,11 +1,13 @@
 ---
 id: df0c18734b20fddd
 kind: bug
-status: investigating
+status: taken
 title: An armed mutation is a deliberate red, and no observer can distinguish it from a broken test
 tags:
 - cluster/transient-shared-state-lies-to-readers
 topic: shared-checkout mutation testing
+claimed_at: 2026-09-14
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 ---
 
 # BUG: an armed mutation is a deliberate red, and no observer can tell it from a broken test
@@ -305,6 +307,61 @@ process state (`pgrep -c rustc` = 0 while their run had been alive 16 minutes an
 — proof it had not compiled anything yet and would compile whatever the tree held when the lock
 freed). Not inferred from a red they saw; derived before one could happen.
 
+
+### 2026-09-14: the DIAGNOSIS above is right and the REMEDY under it does not follow
+
+The timeline is correct and the mechanism is correct. The prescribed fix does not address it,
+and it "costs nothing" because it changes nothing about the hazard.
+
+| | ordering |
+|---|---|
+| criticised as merely looking safe | `cargo test … ; cp original back` |
+| prescribed as the fix | `cargo test …; rc=$?; cp "$orig" "$target"; exit $rc` |
+
+Those are the **same three steps in the same order**: test runs, test exits — *which is the lock
+freeing* — then `cp`. `rc=$?` and `exit $rc` preserve an exit status the caller would otherwise
+lose; neither moves the revert relative to the lock. Read the section's own timeline against its
+own fix and they are the same sequence:
+
+```
+your cargo test exits        -> releases the shared build-directory lock   <- unchanged
+peer's queued cargo acquires -> begins compiling CURRENT source            <- unchanged
+your revert runs             -> too late                                   <- unchanged
+```
+
+**Why the wording hid it.** *"Revert before the process exits, not after the test does"* names
+exactly the right property — but the difference between the two snippets is the exit-code
+capture, not that property, and a reader checking the prose against the code finds a sentence
+that is true of neither sample over the other. The prose describes a fix; the diff delivers a
+tidier failure.
+
+**And the property is not reachable by reordering.** You cannot revert before your own process
+frees the lock, because `cargo test` returning *is* that event — which the section already says.
+So no arrangement of `;` closes it. The window is a property of **mutating bytes in a worktree a
+peer's build can read**, and only two things reach that:
+
+- **Do not mutate the shared worktree.** A git worktree or a copy removes the window entirely
+  and costs a cold `target/` — real money on this repo, and an operator's call, not a free swap.
+- **Accept the window and make the red legible**, which is this file's marker direction and its
+  actual answer.
+
+So the honest state is that the window is **open**, not fixed, and the marker is carrying more
+weight than the file currently says.
+
+**Instance, this session, arming the mutation described in `61d92a7f`'s record.** I ran the
+criticised form — `cargo test`, an `echo`, then `cp` — having read this section, and believed I
+was compliant because the revert was unconditional and in the same invocation. Those are the two
+properties the prescribed snippet has. Neither is the one that matters. Five peer sessions were
+live in this checkout at the time.
+
+**What DID hold, reported as a denominator rather than absorbed as a catch:** the other half of
+this file's guidance worked exactly as written. The patcher asserted its pattern occurred exactly
+once before writing (`assert t.count(old)==1`), so a silent no-op was impossible; the expected
+post-revert count was written down **before** the command ran; and the conclusion rested on an
+observed **kill**, not a survival, so by this file's own triage rule (*a mutation's GREEN is two
+propositions, a mutation's RED is one*) no applied-ness audit was owed at all. Three prescriptions
+followed, three held. The one that failed is the one whose remedy does not follow from its
+diagnosis.
 ## A mutation that never applied is indistinguishable from one that survived
 
 A second failure in the same session, and the one with the worse blast radius, because it
