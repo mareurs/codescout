@@ -14907,7 +14907,7 @@ fix and the only honest way to file it.
 (example outranks schema) is stated here and belongs in that file's § *Root cause* if its owner
 agrees; offered, not written, since I do not hold it.
 
-### Addendum — two things the peer exchange added, both verified
+### Addendum — two things the peer exchange added, and one claim of mine it falsified
 
 **1. It reproduces from both sides, which is what makes it a mechanism rather than my slip.**
 `fix-mask-keyword-fabrication` checked their own served `append_entry` description and found the
@@ -14931,11 +14931,37 @@ the commit path costs ~7s and blocks on the shared `target/` lock), and
 together. So this repo already holds the shape *"duplication is acceptable; duplication without a
 gate is the defect."*
 
-**But one parity test was not enough, and the way it failed is the transferable part.** That test
-runs against the **live corpus**, and the file says two of its three arms *"compare empty to
-empty"* — the corpus cannot reach the branches, so deleting the inline-`[a, b]` arm from the
-Python leaves it **green** (verified by mutation, not assumed). Hence two fixture-driven
-siblings. And parser parity is not **rule** parity: nothing compared the rule sets, so *"the
+**But one parity test was not enough, and the way it failed is the transferable part — though
+not the way this entry first said it.** Two of that test's three arms do compare empty to empty
+(`claimed: []`, `declared: {}`), and that is filed separately as
+`docs/issues/2026-09-13-two-of-three-parity-arms-compare-empty-to-empty.md`, which also names
+the reason: `no_index_row_stores_a_count` and `no_class_field_states_a_bare_n` exist precisely
+to hold those two populations at zero.
+
+**CORRECTED 2026-09-14 — I extended that observation to a member outside its population.**
+`cluster_tags` feeds `actual`, the one arm that is **not** empty (24 rows), so this entry's
+original claim — that dropping the inline-`[a, b]` arm from the Python leaves the test green —
+is **false**. Re-derived at `c9561e1b` by diffing a mutated copy's `--json` against the
+unmutated one (cheaper than a cargo run and it isolates the parser): three counts move,
+`doc-contradicted-by-code` 39→38, `selector-narrower-than-its-population` 43→42, `unclassified`
+28→27 — which breaks the equality assertion. The test's own doc comment names that mutation as
+one it must kill, and today it does. This is § *Testing Discipline*'s population-vs-member law
+run backwards: I took an aggregate **vacuity** result and applied it to a member the aggregate
+did not cover. The peer refused to propagate it for exactly this reason and was right to.
+
+**The reason it is false is worth more than the claim was.** The corpus carries **3** files with
+flow-style `cluster/` tags today, so the inline arm is exercised *incidentally* —
+`scripts/pre-commit-ledger-counts.py:853` says so itself and adds that "the count moves with
+every filing", which is why the fixture sibling (`the_hook_script_agrees_on_both_yaml_tag_styles`,
+fed by `--fixture-tags`) exists at all. So **a mutation result against a live corpus decays
+exactly like a count does**: my "green" and a later session's "red" could both be honest readings
+taken at different instants. § *Testing Discipline* already demands a count arrive with its unit,
+its instant and its tree; nothing there says it of a **mutation result**, which everyone treats as
+a permanent property of the test. Hence two fixture-driven siblings — not because the corpus
+*cannot* reach the branch, but because whether it reaches it is not something the test can promise.
+
+**The leg that survives is the scope half, and it was always the load-bearing one.** Parser
+parity is not **rule** parity: nothing compared the rule sets, so *"the
 one-tag rule was missing for months"* and a commit adding a second cluster tag passed the commit
 path while redding the shared gate for every other session
 (`docs/issues/archive/2026-09-09-the-pre-commit-cluster-hook-enforces-a-subset-of-the-gate-it-mirrors.md`).
