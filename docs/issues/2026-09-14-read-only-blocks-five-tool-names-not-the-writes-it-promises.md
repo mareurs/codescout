@@ -1,15 +1,14 @@
 ---
 id: '9024da758e0870ee'
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: read_only blocks five tool names, not the writes it promises — doc, memory and onboarding write through it'
 tags:
 - cluster/guard-narrower-than-its-name
 - workspace-state
 - path-security
 - librarian
-claimed_at: 2026-09-14
-claimed_by: 6be73414-6293-4a4e-95a4-4bada8327f08
+closed: 2026-09-14
 ---
 
 ## Summary
@@ -222,6 +221,28 @@ gate refuses. `read_tools_always_allowed` now carries that reasoning on the fixt
 true` is the default for a foreign activation, so activating a sibling repo and appending to its
 trackers now refuses, naming the project and offering `workspace=<path>`. That is the ruled
 semantics (`open-issue-work-queue:BL-46`, 2026-09-14).
+
+## Fix provenance
+
+- **SHA:** `a13b31c659c7502120535400a675ea169c10120f` (`a13b31c6`), 2026-09-14, on `experiments`.
+- **patch-id:** `16e5289ce733a192d7faae30803863f65febab88`
+
+Recorded as a **pair at fix time**, per CLAUDE.md § *Git Workflow*: the SHA is positional and
+orphans when `experiments` is rebased after a ship, while the patch-id is a content hash of the
+diff and survives both rebase and cherry-pick. Not a merge commit, so the value is citable — a
+clean merge emits no diff and would have returned empty, and a conflicted one would have returned
+a well-formed value hashing only the resolution hunks.
+
+The commit carries **four coupled files** — the two source files, this record, and IC-14's
+`**Members:**` entry. That coupling is enforced: `pre-commit` refuses a class gaining a member its
+ledger does not name, and it refused this commit once for exactly that. The refusal was correct
+and the omission was mine.
+
+**Not yet archived, and the reason is a citation rather than a doubt.** `id = sha256(abs_path)`,
+so `doc(action="move")` mints a new id — and `open-issue-work-queue:BL-46`'s `status_note` cites
+this record by its **id**, not its path. Archiving therefore has to repoint that citation in the
+same commit. IC-14 is safe either way: it cites the **slug**, which survives the move.
+
 ## Tests added
 
 Two, deliberately at different grains — a readable statement and a population guard.
