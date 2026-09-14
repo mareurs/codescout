@@ -1,7 +1,7 @@
 ---
-id: '60ad8dda4d0b7ec3'
+id: 1f280b2def570b97
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a backgrounded gate command was summarised as exit 0 while the buffer it pointed at held the compile failure'
 tags:
 - cluster/unclassified
@@ -237,6 +237,19 @@ the handle-durability note below exists.
 
 ## Fix
 
+**APPLIED 2026-09-14 at `cc57cd28`.** `format_run_command` now matches on `exit_code` rather
+than defaulting it: absent renders `… running  (query <id>)` and asserts nothing, agreeing with
+the `hint`-shaped response that already worded it correctly. Gate green on both lanes, 9782
+passed.
+
+**The second site at `:446` is deliberately NOT changed, and the reason is at the site.** An
+inline result is by construction a completed one, so no caller reaches that `unwrap_or(0)` with
+an absent status. Adding a branch nothing reaches would be decoration, and untestable
+decoration — `CLAUDE.md` § *Testing Discipline*, loudness is a property of a PATH. The comment
+names it as the second site so a future pending inline shape finds it.
+
+---
+
 **DESIGNED, not applied.** § *Root cause* now names the site. The shape is not *"read the exit
 code better"* — it is that **one predicate is being asked to separate three states**:
 completed-and-passed, completed-and-failed, and still-running. `output_id.is_string()`
@@ -266,6 +279,33 @@ should decline to assert one — the `Process running` shape, which the three re
 returned, already does this correctly.
 
 ## Tests added
+
+**ADDED 2026-09-14 at `cc57cd28`**, two in `src/tools/run_command/tests.rs`, written *before*
+the fix. The TDD red reproduced the defect verbatim — the failure message printed
+`✓ exit 0  (query @bg_00000001)`, character for character the string the original clippy call
+returned. That is a unit-level reproduction of a bug that six probe attempts could not
+reproduce end-to-end, which is the useful shape: once the state was named, expressing it was
+trivial.
+
+- `a_still_running_background_result_never_asserts_an_exit_status` — the one that bites: NEITHER
+  checkmark, and no `exit ` at all. It asserts against `✗` as well as `✓`, because guessing the
+  other direction is the same defect mirrored rather than fixed.
+- `a_completed_buffered_result_still_reports_its_exit_status` — the sibling that keeps the fix
+  honest. A change that silenced the status for *every* `output_id`-bearing shape would satisfy
+  the first test and destroy the reporting this function exists for.
+
+**Mutation-verified, and the first attempt was VACUOUS in a way worth recording.** Restoring the
+old `✓ exit 0` rendering is KILLED (`rc=101`, `running 1 test`). But the first probe run
+reported **SURVIVED** — because `mutation-probe.sh` builds its isolated worktree at HEAD and
+does not carry *other* dirty files, so the then-uncommitted test was absent: `running 0 tests`,
+`5541 filtered out`. The script warns that dirty files are not carried, yet still prints
+`SURVIVED` with two readings (*untested* / *unreachable*), neither of which is *"your test was
+not in the tree"*. That is this corpus's own
+`docs/issues/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md` arriving inside
+the instrument built to check for it. **Commit the test before mutating it, and read the test
+count in the probe output, not only the verdict.**
+
+---
 
 **None yet, but the discriminating assertion is now known and it is not the obvious one.** Raised
 by `9403d62d`, and it is the reason this survived: **a test asserting `✓` versus `✗` cannot catch
@@ -426,3 +466,10 @@ exists to re-read.
 - `CLAUDE.md` § *Reaching a Peer Session* — the documented `run_in_background` attribution
   ceiling, the sibling half of this trigger.
 - `get_guide("progressive-disclosure")` — the summary/buffer contract this violates.
+
+## Fix provenance
+
+- **SHA:** `cc57cd28` (experiments) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `37ef2b3feb70a79881f8c5bbd2ce64edae72cd5d` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id.

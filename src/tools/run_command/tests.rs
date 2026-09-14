@@ -4905,7 +4905,7 @@ async fn a_red_attaches_wip_authors_on_the_buffer_only_arm() {
 /// first. The assertion that bites is that the still-running shape produces NEITHER checkmark
 /// and names no exit status at all.
 ///
-/// docs/issues/2026-09-14-a-backgrounded-gate-command-was-summarised-as-exit-0-while-its-buffer-held-the-failure.md
+/// docs/issues/archive/2026-09-14-a-backgrounded-gate-command-was-summarised-as-exit-0-while-its-buffer-held-the-failure.md
 #[test]
 fn a_still_running_background_result_never_asserts_an_exit_status() {
     let rendered = super::output::format_run_command(&serde_json::json!({

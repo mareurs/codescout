@@ -419,7 +419,7 @@ pub(crate) fn format_run_command(result: &Value) -> String {
             // `unwrap_or(0)`, which made that absence indistinguishable from a clean exit and
             // rendered `✓ exit 0` for a run that had already failed to compile. Absence is a
             // third state, not a default: say "running" and assert nothing.
-            // docs/issues/2026-09-14-a-backgrounded-gate-command-was-summarised-as-exit-0-while-its-buffer-held-the-failure.md
+            // docs/issues/archive/2026-09-14-a-backgrounded-gate-command-was-summarised-as-exit-0-while-its-buffer-held-the-failure.md
             None => format!("… running  (query {output_id})"),
             Some(exit) => {
                 let check = if exit == 0 { "✓" } else { "✗" };
