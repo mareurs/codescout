@@ -2322,6 +2322,68 @@ async fn run_command_buffer_only_within_limit_no_truncation_fields() {
         "no buffer ref: {:?}",
         result
     );
+    // ADDED 2026-09-14. The three assertions above are all ABSENCE assertions, and each
+    // stays true whether or not the entry's stderr is surfaced — so this test built the
+    // failing case (15 stored stderr lines), named the gate in its own comment, and
+    // still could not see the stream vanish. CLAUDE.md § Testing Discipline, law one:
+    // monotone under removal. The positive assertion is the half that discriminates.
+    assert!(
+        result["stderr"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("err15"),
+        "the entry's stored stderr must reach the reader on the short-output path \
+         too; got: {result:?}"
+    );
+}
+
+/// THE BUG'S OWN REPRODUCTION, pinned. A `grep -c` that finds nothing returns two
+/// bytes, so `needs_summary` is false — and until 2026-09-14 that was exactly the
+/// query that received no stderr at all, while one returning >10 KB got it in full.
+/// The gate was anti-correlated with need: this `0` is indistinguishable from a
+/// stream that was never surfaced, which is why the SMALL query is the one that has
+/// to carry it.
+///
+/// LOAD-BEARING: the pattern must not occur in the stored stdout. One that matched
+/// would return a count > 0 and this would still pass while testing nothing about
+/// the zero case.
+/// BUG docs/issues/2026-09-14-every-reader-of-a-cmd-buffer-takes-stdout-only-so-the-stored-stderr-reaches-nobody.md
+#[cfg(unix)]
+#[tokio::test]
+async fn buffer_query_below_summary_threshold_still_surfaces_stored_stderr() {
+    let (_dir, ctx) = project_ctx().await;
+    let stdout: String = (1..=30).map(|i| format!("out{i}\n")).collect();
+    let id = ctx.output_buffer.store(
+        "cmd".into(),
+        stdout,
+        "WRAPPER_VERDICT: the stream a reader came for\n".into(),
+        0,
+    );
+    let result = RunCommand
+        .call(
+            json!({ "command": format!("grep -c NOSUCHTOKEN {id}") }),
+            &ctx,
+        )
+        .await
+        .expect("expected Ok");
+    // Control first: the query really did return the empty-looking count, so the
+    // assertion below is about a genuinely SMALL response rather than one that
+    // accidentally crossed the summary threshold and took the other branch.
+    assert!(
+        result["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with('0'),
+        "expected a zero count from a pattern absent from the buffer; got: {result:?}"
+    );
+    assert!(
+        result["stderr"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("WRAPPER_VERDICT"),
+        "a buffer query below the summary threshold must still carry the entry's \
+         stored stderr; got: {result:?}"
+    );
 }
 
 #[test]

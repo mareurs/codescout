@@ -243,27 +243,41 @@ pub(crate) async fn handle_successful_output(
     )
     .await;
 
+    // Computed BEFORE the branch below, and the HOIST is the fix rather than tidying.
+    // A `@cmd_*` entry stores both streams, but `grep`'s and `read_file`'s buffer
+    // branches each materialize `.stdout` alone — so this is the only surface that can
+    // hand a reader the stored stderr. Until 2026-09-14 the lookup sat inside the
+    // `needs_summary` arm below, which meant a buffer query received the stored stderr
+    // exactly when its own output already exceeded ~10 KB, and never when it returned
+    // `0` — the one case where absence and loss are indistinguishable. The gate was
+    // anti-correlated with need: the more precise the query, the more certain the loss.
+    // BUG docs/issues/2026-09-14-every-reader-of-a-cmd-buffer-takes-stdout-only-so-the-stored-stderr-reaches-nobody.md
+    //
+    // Deliberately NOT fed into `needs_summary`: that predicate decides whether a new
+    // buffer ref is minted, and widening its input would move the buffering threshold
+    // for every caller. This changes what a buffer query REPORTS, never what it stores.
+    // cap-class: RESULT_CAP run_command.stderr_lines — probed
+    const STDERR_BUDGET: usize = 20;
+    let buffer_stderr: String = if buffer_only && raw_stderr.is_empty() {
+        original_command
+            .find("@cmd_")
+            .or_else(|| original_command.find("@file_"))
+            .and_then(|pos| {
+                original_command[pos..]
+                    .split_whitespace()
+                    .next()
+                    .and_then(|tok| ctx.output_buffer.get(tok))
+            })
+            .map(|e| e.stderr)
+            .unwrap_or_default()
+    } else {
+        raw_stderr.clone()
+    };
+
     // --- Step 6: Decide whether to buffer + summarize ---
     let mut result = if needs_summary(&raw_stdout, &raw_stderr) {
         if buffer_only {
             // Buffer-only: return inline, never create a new buffer ref (avoids infinite loop).
-            // cap-class: RESULT_CAP run_command.stderr_lines — probed
-            const STDERR_BUDGET: usize = 20;
-            let buffer_stderr: String = if raw_stderr.is_empty() {
-                original_command
-                    .find("@cmd_")
-                    .or_else(|| original_command.find("@file_"))
-                    .and_then(|pos| {
-                        original_command[pos..]
-                            .split_whitespace()
-                            .next()
-                            .and_then(|tok| ctx.output_buffer.get(tok))
-                    })
-                    .map(|e| e.stderr)
-                    .unwrap_or_default()
-            } else {
-                raw_stderr.clone()
-            };
             let stderr_budget = STDERR_BUDGET.min(count_lines(&buffer_stderr));
             let stdout_budget = BUFFER_QUERY_INLINE_CAP - stderr_budget;
 
@@ -345,17 +359,27 @@ pub(crate) async fn handle_successful_output(
                 > crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD.saturating_sub(300)
         {
             const JSON_OVERHEAD: usize = 300;
+            // Capped like the summarized path above, then stdout is budgeted against
+            // what the stderr ACTUALLY costs. Budgeting against `raw_stderr` here was
+            // wrong twice: on a buffer query it is empty, so it under-counted by the
+            // whole stored stream, and it was never the text being emitted.
+            let (stderr_out, stderr_shown, stderr_total) =
+                truncate_lines(&buffer_stderr, STDERR_BUDGET);
             let byte_budget = crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
                 .saturating_sub(JSON_OVERHEAD)
-                .saturating_sub(raw_stderr.len());
+                .saturating_sub(stderr_out.len());
             let (stdout_out, stdout_shown, stdout_total) =
                 truncate_lines_and_bytes(&raw_stdout, BUFFER_QUERY_INLINE_CAP, byte_budget);
             let mut r = json!({"exit_code": exit_code});
             if !stdout_out.is_empty() {
                 r["stdout"] = json!(stdout_out);
             }
-            if !raw_stderr.is_empty() {
-                r["stderr"] = json!(raw_stderr);
+            if !stderr_out.is_empty() {
+                r["stderr"] = json!(stderr_out);
+            }
+            if stderr_shown < stderr_total {
+                r["stderr_shown"] = json!(stderr_shown);
+                r["stderr_total"] = json!(stderr_total);
             }
             if stdout_shown < stdout_total {
                 r["truncated"] = json!(true);
@@ -373,7 +397,24 @@ pub(crate) async fn handle_successful_output(
             if !raw_stdout.is_empty() {
                 r["stdout"] = json!(raw_stdout);
             }
-            if !raw_stderr.is_empty() {
+            if buffer_only {
+                // THE REPRODUCED PATH. `grep -c MARKER @cmd_abc` returns two bytes, so
+                // `needs_summary` is false and control arrives HERE — which is exactly
+                // the query whose `0` a reader cannot tell apart from a stream that was
+                // never surfaced. Capped like the path above so a large stored stderr
+                // cannot re-trigger buffering on a query whose own output was short.
+                let (stderr_out, stderr_shown, stderr_total) =
+                    truncate_lines(&buffer_stderr, STDERR_BUDGET);
+                if !stderr_out.is_empty() {
+                    r["stderr"] = json!(stderr_out);
+                }
+                if stderr_shown < stderr_total {
+                    r["stderr_shown"] = json!(stderr_shown);
+                    r["stderr_total"] = json!(stderr_total);
+                }
+            } else if !raw_stderr.is_empty() {
+                // Ordinary command: unchanged, uncapped. The cap above is a property of
+                // reading someone else's stored stream, not of stderr generally.
                 r["stderr"] = json!(raw_stderr);
             }
             r
