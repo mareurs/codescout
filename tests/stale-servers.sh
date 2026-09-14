@@ -10,7 +10,7 @@
 # and printed one `total=` under a header that said "servers", closing with a remedy
 # ("Reconnect those sessions (/mcp)") that a mux row cannot obey: a mux has no session, and
 # exits by itself once idle past its --idle-timeout, where a server never recycles.
-# docs/issues/2026-09-14-the-stale-server-probe-counts-lsp-muxes-under-a-name-that-excludes-them.md
+# docs/issues/archive/2026-09-14-the-stale-server-probe-counts-lsp-muxes-under-a-name-that-excludes-them.md
 #
 # WHY IT IS DRIVEN THROUGH FLAGS AND NOT THROUGH LIVE PROCESSES.
 # A mux exists only while a language server is warm — within --idle-timeout (300s Kotlin,

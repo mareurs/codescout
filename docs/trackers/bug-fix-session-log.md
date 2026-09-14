@@ -14379,7 +14379,7 @@ whose own header says *"Start here before answering a question with a number."*
 counts LSP muxes under a header that says *"servers"* and closes with a remedy —
 *"Reconnect those sessions (/mcp)"* — that names an action no reader can perform on a mux
 row. Filed as
-[`docs/issues/2026-09-14-the-stale-server-probe-counts-lsp-muxes-under-a-name-that-excludes-them.md`](../issues/2026-09-14-the-stale-server-probe-counts-lsp-muxes-under-a-name-that-excludes-them.md).
+[`docs/issues/archive/2026-09-14-the-stale-server-probe-counts-lsp-muxes-under-a-name-that-excludes-them.md`](../issues/archive/2026-09-14-the-stale-server-probe-counts-lsp-muxes-under-a-name-that-excludes-them.md).
 
 **Counterfactual, stated precisely rather than flatteringly.** The probe's output is not
 silent about the defect — it prints `PPID`, and the mux row's `PPID` (`2895390`) is another

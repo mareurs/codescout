@@ -30,7 +30,7 @@
 #
 #   So there is deliberately no `total=` line to bring back. The unit error is not policed,
 #   it is unrepresentable: every count this prints names its population.
-#   (docs/issues/2026-09-14-the-stale-server-probe-counts-lsp-muxes-under-a-name-that-excludes-them.md)
+#   (docs/issues/archive/2026-09-14-the-stale-server-probe-counts-lsp-muxes-under-a-name-that-excludes-them.md)
 #
 # WHAT THE PREDICATE LITERALLY COUNTS
 #   Processes named exactly `codescout` whose /proc/<pid>/exe symlink resolves to a path

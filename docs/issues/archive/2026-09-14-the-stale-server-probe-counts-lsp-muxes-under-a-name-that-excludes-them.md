@@ -3,7 +3,7 @@ kind: bug
 status: fixed
 tags:
 - cluster/unclassified
-closed: null
+closed: 2026-09-14
 fix_patch_id: 6a84e4a2b7eaca3c25e193f20a852d588381c9c2
 fix_sha: 122ea357
 opened: 2026-09-14
@@ -184,14 +184,34 @@ identifier is the patch-id below.
 
 **SHA:** `122ea357` (on `experiments`). **patch-id:** `6a84e4a2b7eaca3c25e193f20a852d588381c9c2`.
 
-**NOT ARCHIVED, and the reason is a gap rather than a formality.** CLAUDE.md's archive trigger
-is *gate green plus a regression test*. The regression test exists; the gate is not green. The
-fourth command (`cargo test --workspace`) never completed: two attempts wedged at the identical
-point (5529 lines, no `test result` block), main thread futex-parked, killed after ~12.5 minutes
-of zero output. `cargo test --workspace` opens the real
-`/home/marius/.local/share/librarian/catalog.db` with 14-17 fds — not an isolated fixture — and
-22 processes hold POSIX advisory READ locks on it with no WRITE lock anywhere, one of them a
-codescout server SIGSTOPped since 2026-09-10 whose parent `claude` is also stopped.
+**ARCHIVED 2026-09-14 08:13.** The archive trigger is *gate green plus a regression test*, and
+both now hold. What the gate actually says, with its instants, because three of the four lanes
+were re-run on the current tree and one was not:
+
+| lane | result | tree |
+|---|---|---|
+| `./scripts/fmt-mine.sh` | **0** | current (08:11) — its earlier refusal named two peer files since landed by `d311762a` |
+| `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` | **0** | current (08:12), 0 warnings |
+| `cargo test --workspace --no-default-features` | **0** (35 ok blocks) | **06:15, NOT re-run** |
+| `cargo test --workspace` | **0** (38 ok blocks, no failures) | current (08:11) |
+
+**The lean lane is deliberately stale and that is stated rather than papered over.** Re-running it
+would oblige a second default lane after it — the ordering in CLAUDE.md § *Development Commands*
+exists because a terminal lean lane leaves a librarian-less `target/debug/codescout` for the next
+session — and this change alters no compiled input, so it cannot introduce a lean-only failure.
+Anything the lean lane would catch today belongs to a peer's Rust, not to this fix.
+
+**Read by name out of the default lane, never off its total**, since the three targets this change
+can reach are integration binaries: `no_tracked_script_hardcodes_a_personal_home_path` ok,
+`an_untracked_script_is_excluded_and_a_tracked_one_is_not` ok (`tests/committed_paths.rs`),
+`every_declared_feature_has_a_lane_or_a_reason` ok, `the_guard_is_not_vacuous` ok
+(`tests/feature_lanes.rs` — the pair that reads `.github/workflows/*.yml`, which this change edits).
+
+**Earlier wedge, resolved and not this bug's business.** Two attempts at the default lane wedged
+against a peer's concurrent gate on the shared production catalog; a third failed to compile on a
+peer's in-flight Rust. Neither recurred once the tree compiled and no other `cargo test` was
+running. The mistaken reading that came out of the first wedge is recorded above and in
+`bug-fix-session-log:F-140`.
 
 **CORRECTED 2026-09-14 07:20, and the correction is the useful part.** The two sentences that
 stood here — *"a peer's gate wedged identically and did not resume when this session's run was
@@ -207,11 +227,13 @@ proven is the falsification of the hypothesis this file pointed at: the SIGSTOPp
 its shared lock throughout and the peer's run completed anyway, so it was never the cause.
 (`bug-fix-session-log:F-140`.)
 
-**Also checked, and NOT a defect:** `fmt-mine.sh` refused (exit 1) during this gate run, naming
-two peer-owned files. Both are now `rustfmt --check`-clean and match HEAD — peer commit
-`d311762a` landed them — so that refusal was correct when it fired and is merely stale. Run fresh
-it refuses on a *different* peer's file, because the refusal set rotates with whoever is holding
-uncommitted Rust. This change contains no Rust. clippy 0, lean 0.
+**Also checked, and NOT a defect:** `fmt-mine.sh` refused (exit 1) during the 06:15 gate run,
+naming two peer-owned files. Both are now `rustfmt --check`-clean and match HEAD — peer commit
+`d311762a` landed them — so that refusal was correct when it fired and went stale within the
+hour. Re-run at 08:11 it passes. In between it refused on a *different* peer's file, because the
+refusal set rotates with whoever is holding uncommitted Rust; on a checkout with five live
+sessions that is most of the time, which is a cost of the gate's first step rather than a fault
+in the script. This change contains no Rust either way.
 
 ## Tests added
 
@@ -260,23 +282,28 @@ Rows the script marks STALE that appear as `MUX` need no action.
 
 ## Resume
 
-**One step owed, and it is the archive blocker:** run `cargo test --workspace` to completion and
-confirm it is green, then archive via `doc(action="move", …)` — never a bare `git mv`.
+`N/A` — fixed, gate recorded under § Fix, archived 2026-09-14.
 
-At 07:17 that lane failed in 37 lines for a reason unrelated to both this fix and the earlier
-wedge: a peer's uncommitted `src/util/path_security.rs` references `extract_grep_pattern`, which
-does not exist yet (5 × `E0425`). `run_command`'s `wip_authors` hook named the holder
-automatically. That is ordinary shared-checkout churn — ask, never fix — and it clears when they
-land. Retry then.
+Two things a later reader should NOT re-derive from scratch:
 
-**Do not chase the SIGSTOPped process this section used to name as the lever.** That hypothesis is
-falsified; see § Fix. The earlier wedge is best explained by two concurrent `cargo test
---workspace` runs on the shared production catalog, and the cheap avoidance is not to start one
-while another session's gate is running — `pgrep -a -f 'cargo test'` answers that in one call.
+**The `21–22 of 26` baseline is not resolvable.** Three surfaces recorded one 2026-08-21 run and
+two said 21 while the script's header said 22; the process table is gone. All three predate the
+server/mux split, so the unit is *processes* whichever is right. A mux miscounted in one reading
+is a plausible but **unestablished** explanation of the off-by-one. Re-derive a post-split
+baseline if you need one; do not try to settle the old figure.
 
-Nothing about the fix itself is outstanding. If a second instance of the defect CLASS appears,
-the roster's `cluster/unclassified` `**Members:**` field is where the adjudication is parked —
-see § Defect class.
+**Before starting a gate on this shared checkout, check with `pgrep -a -x cargo`, never
+`pgrep -a -f 'cargo test'`.** This section recommended the `-f` form for about forty minutes on
+2026-09-14 and it is worthless: `-f` matches the whole command line, so the shell asking the
+question contains the literal string and matches itself. Observed — exactly 1 hit, and the hit
+was the asking shell, so **100% of the result was the instrument**. It cannot return zero when
+invoked that way, which means it reads *"a gate is running"* every time and the action it gates is
+never taken. Pair `-x` with `pgrep -a -f 'target/debug/deps'` for a harness outliving cargo.
+That slip is the **third datapoint** for the class this bug is parked against and is recorded on
+the roster's `cluster/unclassified` `**Members:**` entry — see § Defect class.
+
+If a second *filed* instance of the class appears, that same entry is where the adjudication is
+parked, deliberately unpromoted.
 ## References
 
 - `scripts/stale-servers.sh` — the instrument
