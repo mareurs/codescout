@@ -1642,7 +1642,7 @@ fn split_outside_quotes(s: &str, seps: &[&str]) -> Vec<String> {
 /// Two-part heuristic: both a blocked command name AND a source file extension must be
 /// present in the command string. Use codescout tools instead: `read_file`, `symbols` for
 /// reading. `grep` is no longer blocked here (it has its own MCP tool and is exempted
-/// command-wide, see docs/issues/2026-09-14-il3-grep-remedy-assumes-symbol-lookup-for-identifier-shaped-patterns.md).
+/// command-wide, see docs/issues/archive/2026-09-14-il3-grep-remedy-assumes-symbol-lookup-for-identifier-shaped-patterns.md).
 ///
 /// The command name is matched against the segment's first token as the *shell* sees
 /// it ([`shell_tokens`]). This closes a bypass: `'cat' src/main.rs` used to yield the
@@ -3130,7 +3130,7 @@ mod tests {
         // `grep` was removed from `SOURCE_ACCESS_COMMANDS`: it has its own MCP tool
         // (codescout's `grep`), unlike `cat`/`sed`/`awk`, so blocking the shell
         // command bought routing, not capability. See
-        // docs/issues/2026-09-14-il3-grep-remedy-assumes-symbol-lookup-for-identifier-shaped-patterns.md
+        // docs/issues/archive/2026-09-14-il3-grep-remedy-assumes-symbol-lookup-for-identifier-shaped-patterns.md
         assert!(check_source_file_access_at_root("grep WriteMemory src/tools/memory.rs").is_none());
         assert!(check_source_file_access_at_root(
             "grep -rn 'CODESCOUT_EMBEDDER_MODEL_NAME|EMBED_API_KEY' . --include=*.rs"

@@ -1,13 +1,14 @@
 ---
-id: '92a7c607d7ce7aee'
+id: e4fbea5400c81bc4
 kind: bug
-status: open
+status: fixed
 title: 'BUG: IL-3''s grep remedy hint suggests symbol tools for identifier-shaped patterns that are plain string literals, never mentioning grep()'
 tags:
 - cluster/hint-composed-without-the-request
 - il3
 - run_command
 - path_security
+closed: 2026-09-14
 ---
 
 ## Summary
@@ -58,19 +59,19 @@ grep(pattern="CODESCOUT_EMBEDDER_MODEL_NAME|EMBED_API_KEY|CODESCOUT_MODEL_DIM", 
 2. **Hypothesis:** the *remedy* text, not the block, is what's wrong for this pattern class. **Test:** ran the suggested remedy (`symbols`) and the omitted alternative (`grep`) side by side. **Verdict:** confirmed. **Evidence link:** Evidence section above.
 
 ## Fix
-*Plan first, not yet implemented.* In the `is_identifier_pattern(&pat)` branch of the remedy `match` in `check_source_file_access` (`src/util/path_security.rs`), always include `grep(pattern, path)` as an option alongside `symbols`/`references`/`call_graph`, rather than omitting it. Candidate refinement: only suggest the symbol-tool trio when the pattern is a *single* identifier (no `|`); an alternation of 2+ tokens is closer to "search for any of these strings" than "look up this one declaration," so for alternations, lead with `grep()` and offer the symbol tools as a secondary option only for the first token.
+Resolved by removing `grep` command-wide from `SOURCE_ACCESS_COMMANDS` (`src/util/path_security.rs`) rather than by fixing this remedy's text — the whole `"grep" => { ... }` arm this bug is about, along with `extract_grep_pattern`, is now dead code and has been deleted. `grep` no longer routes through `check_source_file_access` at all, so there is no remedy branch left to misfire. `is_identifier_pattern` is kept (live caller in `src/tools/grep.rs`).
 
-Status: **open** — fix not yet written.
+Fix commit: `439cd82f6a874267f771284954d983720c3ad5fa` on `experiments`.
+Patch-id: `e2530335cdc68746233803ff8fe87468bd8328f5` (`git show 439cd82f | git patch-id --stable`).
 
+Status: **fixed** — moot by removal, not a text fix.
 ## Tests added
-N/A — fix not yet implemented. A regression test should assert that the remedy string for an identifier-alternation pattern still contains `grep(` (case: `"FOO|BAR"` → hint mentions both `grep` and `symbols`).
-
+`util::path_security::tests::grep_on_in_project_source_is_no_longer_blocked` (`src/util/path_security.rs`) — asserts shell `grep` on an in-project source file, and a recursive `--include=*.rs` grep, are both now allowed. The six tests that pinned the old (buggy) remedy text were deleted, since their premise (the `"grep" =>` arm) no longer exists. Verified: `cargo test --workspace --no-default-features ; cargo test --workspace`, both green for this change (one unrelated pre-existing failure elsewhere, in `librarian::tools::update_entry`, tracked separately).
 ## Workarounds
 Use the codescout `grep()` MCP tool directly (`grep(pattern=..., glob=..., mode="files")`) instead of following the auto-generated hint literally — it is not blocked by IL-3 at all and was the correct tool the whole time. Raw shell grep remains available via `acknowledge_risk: true` if truly needed.
 
 ## Resume
-Edit the `"grep" => { ... }` arm in `check_source_file_access` (`src/util/path_security.rs`, remedy `match` block) to include `grep(pattern, path)` in the identifier-pattern branch. Add a unit test alongside the existing `is_identifier_pattern_*` tests asserting the composed remedy string for an alternation pattern contains `grep(`.
-
+N/A — fixed and verified on `experiments`.
 ## References
 - `docs/trackers/bug-fix-session-log.md` — `W-133` (initial, incomplete verification; corrected by an F-N entry filed alongside this bug)
 - `docs/trackers/issue-clusters.md` — `IC-22`, slug `hint-composed-without-the-request`
