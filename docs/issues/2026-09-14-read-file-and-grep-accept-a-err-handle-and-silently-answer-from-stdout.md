@@ -1,7 +1,7 @@
 ---
 id: fc08bf52ac6b478d
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: read_file and grep accept a .err buffer handle and silently answer from stdout'
 tags:
 - cluster/addressing-without-an-escape-hatch
@@ -95,19 +95,39 @@ with a false central claim.
 
 ## Fix
 
-Planned, not yet landed:
+**Implemented 2026-09-14**, verified on `experiments`.
 
-1. `OutputBuffer::get_stream(id) -> Option<String>` applying the suffix policy **once**; route
-   `read_file` and `grep` through it.
-2. A **population guard** that reds when a new site takes `.stdout` off a resolved entry. This is
-   the load-bearing half — the helper shortens the right path without removing the wrong one, so
-   a guard is what actually closes it (`CLAUDE.md` § *Observer Blindness* position 3).
-3. Document the suffix on at least one agent-facing surface.
+| commit | patch-id | what |
+|---|---|---|
+| `4f62a824` | `5ad162619dd403a15dadc7eb3b1a8b8182ac3cbc` | `get_stream`, both sites, the guard, the tests, the guide |
+| `8618922f` | `f9b0a9aed0bcbd1432e5aff14d49a7b6c0248f55` | the guard reports a line number rather than the previous statement's tail |
 
-**Deliberately out of scope:** `src/peer/server.rs`'s concatenation (a legitimate different
-policy — a peer reading a handle wants everything) and the interpolation path (correct, tested,
-and carrying `@tool_*` pretty-printing that a shared selector would have to grow a branch for).
+1. `OutputBuffer::get_stream(id) -> Option<String>` applies the suffix policy **once**;
+   `read_file` and `grep` route through it.
+2. `tests/buffer_stream_policy.rs` — a statement-level scan for *resolve a handle, then pick a
+   stream*, with an allowlist that demands a **reason** per entry. **This is the load-bearing
+   half**: `get()` still exists and must, so the helper shortens the right path without
+   removing the wrong one.
+3. The suffix is documented in `src/prompts/guides/progressive-disclosure.md`, including the
+   sentence a reader needs most — *a bare-handle search that finds nothing has not shown the
+   command did not print it*.
 
+**Statement-level, not line-level, and the reason is measured:** the shipping defect was a
+four-line method chain, which no single-line predicate can see. A first draft scanned lines and
+reported `val.get("buffer_truncated")` as an offender.
+
+**Out of scope, deliberately:** `src/peer/server.rs`'s concatenation (a legitimate third policy
+— a peer reading a handle wants everything) and the interpolation path (correct, tested, and
+carrying `@tool_*` pretty-printing a shared selector would have to grow a branch for). Both are
+ALLOWED entries with their reasons.
+
+**The guard's own defect, found by mutating it.** Its first offender line read
+`} } } path } /// Read from an output buffer ref …` — the right file and nowhere in it, because
+a `;`-split statement begins at the tail of its predecessor. A passing guard prints nothing, so
+that locator was unreachable by every green run and only the mutation could surface it. Second
+instance this session of *a suite tests a guard's PREDICATE and never its REMEDY TEXT*; fixed at
+`8618922f` and re-verified by the same mutation, which now renders
+`src/tools/read_file.rs:277`.
 ## Tests added
 
 Three behavioural, one predicate, one allowlist-hygiene, plus the population guard.
