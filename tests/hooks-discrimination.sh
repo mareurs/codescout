@@ -122,10 +122,37 @@ has "foreign path -> refuse" "$out" "EXIT=1"
 has "names the foreign path" "$out" "b.txt"
 has "offers the pathspec remedy for mine" "$out" "git commit -- a.txt"
 
-# A pathspec commit gets a temp index named next-index-<pid>.lock and ignores the shared
-# index entirely, so it cannot capture and must not be refused.
-has "pathspec commit -> silent" \
+# An EMPTY temp index commits nothing, so there is nothing to capture and the guard must be
+# silent. RENAMED 2026-09-14: this was "pathspec commit -> silent", which read as a claim
+# about pathspec commits in general and was cited as one. It is not — it says nothing about
+# a pathspec commit that NAMES a contested path, which is the case below.
+has "empty pathspec index -> silent" \
     "$(CLAUDE_CODE_SESSION_ID="$A" GIT_INDEX_FILE=".git/next-index-1.lock" \
+        bash "$SRC/pre-commit-foreign-index.sh" 2>&1; echo "EXIT=$?")" "EXIT=0"
+
+# A pathspec commit DOES capture. It commits the named path's WORKING-TREE content, which
+# is a peer's whenever a peer is editing that file. The guard exited 0 here until
+# 2026-09-14 on the premise that it could not, and the case above is why that went
+# unnoticed: an empty index passes whether the guard works or is deleted.
+# docs/issues/2026-09-02-a-pathspec-commit-does-capture-staged-content-and-both-guards-stand-down.md
+cp .git/index .git/next-index-2.lock
+pout="$(CLAUDE_CODE_SESSION_ID="$A" GIT_INDEX_FILE=".git/next-index-2.lock" \
+    bash "$SRC/pre-commit-foreign-index.sh" 2>&1; echo "EXIT=$?")"
+has "pathspec capturing a peer's path -> refuse" "$pout" "EXIT=1"
+has "pathspec refusal names the captured path" "$pout" "b.txt"
+# The REMEDY, not only the predicate. The bare form's remedy IS "commit by pathspec";
+# printing that to someone whose pathspec commit just failed routes them back into the
+# failure, and no assertion about who is refused would catch it.
+has "pathspec refusal does not prescribe the refused form" "$pout" "cannot narrow further"
+has "pathspec refusal warns against discarding their work" "$pout" "destroys it"
+
+# DISCRIMINATION: the guard must not refuse every pathspec commit. A temp index holding
+# only the committer's own path stays silent. Without this, the four assertions above pass
+# against a guard that refuses unconditionally.
+cp .git/index .git/next-index-3.lock
+GIT_INDEX_FILE=".git/next-index-3.lock" git reset -q -- b.txt
+has "pathspec naming only my own path -> silent" \
+    "$(CLAUDE_CODE_SESSION_ID="$A" GIT_INDEX_FILE=".git/next-index-3.lock" \
         bash "$SRC/pre-commit-foreign-index.sh" 2>&1; echo "EXIT=$?")" "EXIT=0"
 
 git reset -q

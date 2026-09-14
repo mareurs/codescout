@@ -92,13 +92,36 @@ set -uo pipefail
 me="${CLAUDE_CODE_SESSION_ID:-}"
 [ -n "$me" ] || exit 0
 
-# A PATHSPEC commit gets a temporary index named `next-index-<pid>.lock` and IGNORES
-# the shared index entirely, so it cannot capture staged content and needs no guard.
-# This is the same discriminator scripts/pre-commit-unreviewed-content.sh uses, read
-# in the opposite direction.
+# A PATHSPEC commit gets a temporary index named `next-index-<pid>.lock`. This block used
+# to `exit 0` here, on the stated premise that such a commit "IGNORES the shared index
+# entirely, so it cannot capture staged content and needs no guard."
+#
+# THE PREMISE IS FALSE, and the stand-down was the entire defect. A pathspec commit
+# ignores the index only for paths it does NOT name; for a path it DOES name it commits
+# that path's WORKING-TREE content, which is a peer's whenever a peer is editing that file.
+#
+# Measured 2026-09-14 in a throwaway repo, and the control is what makes it a measurement:
+# session A stages f.txt, session B runs the guard over a temp index carrying A's blob.
+# Identical content, identical ownership, one difference — the bare form REFUSED and named
+# f.txt, the pathspec form exited 0. It had already fired twice in production, most
+# recently taking a live session's staged tracker edit into a peer's commit under the
+# peer's Session-Id.
+#
+# The discriminator is KEPT and its meaning inverted: it now selects the REMEDY rather than
+# standing the guard down. That is not cosmetic — the bare form's remedy IS "commit by
+# pathspec", and printing that to someone whose pathspec commit just failed routes them
+# back into the thing that failed. A guard whose message prescribes the refused action is
+# how you teach `--no-verify`.
+#
+# What this does NOT do is refuse a peer's unrelated staged paths. Verified 2026-09-14:
+# with P.txt and Q.txt both staged, `git commit -- Q.txt` builds a temp index whose
+# `git diff --cached --name-only` is Q.txt ALONE. The temp index holds only the named
+# paths, so the loop below never sees P.txt and the false-positive case cannot arise.
+# docs/issues/2026-09-02-a-pathspec-commit-does-capture-staged-content-and-both-guards-stand-down.md
 idx="${GIT_INDEX_FILE:-}"
+pathspec=0
 case "${idx##*/}" in
-    next-index-*) exit 0 ;;
+    next-index-*) pathspec=1 ;;
 esac
 
 git_dir="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
@@ -201,7 +224,11 @@ done < <(git diff --cached --raw --no-renames 2>/dev/null |
 
 {
     echo
-    echo "Refusing a bare commit: the index holds paths staged by another session."
+    if ((pathspec)); then
+        echo "Refusing this pathspec commit: it captures content another session wrote."
+    else
+        echo "Refusing a bare commit: the index holds paths staged by another session."
+    fi
     echo
     echo "  theirs:"
     for path in "${theirs[@]}"; do
@@ -215,21 +242,47 @@ done < <(git diff --cached --raw --no-renames 2>/dev/null |
         done
     fi
     echo
-    echo "\`git commit\` with no pathspec commits the WHOLE index, and this checkout"
-    echo "shares one index across every session working it. Committing now would file"
-    echo "their work under your message, where it is durable and no longer theirs to"
-    echo "attribute."
-    echo
-    echo "Commit your own paths by pathspec — that form ignores the shared index:"
-    echo
-    if ((${#mine[@]})); then
-        echo "    git commit -- ${mine[*]}"
+    if ((pathspec)); then
+        echo "\`git commit -- <path>\` commits that path's WORKING-TREE content. It bypasses"
+        echo "the shared index for paths it does not NAME, which is what makes this form the"
+        echo "right remedy in general — but the content at the path you named is theirs, so"
+        echo "committing now would file their work under your message, where it is durable"
+        echo "and no longer theirs to attribute."
+        echo
+        echo "You cannot narrow further: the contested path IS one you named."
+        echo
+        if ((${#mine[@]})); then
+            echo "Drop it and commit the rest:"
+            echo
+            echo "    git commit -- ${mine[*]}"
+        else
+            echo "Every path you named is contested, so there is nothing to narrow to."
+        fi
+        echo
+        echo "Then ask the owner below to commit theirs. Once their change is in HEAD your"
+        echo "next commit of that path carries only your own, and this guard goes quiet."
+        echo
+        echo "Do NOT \`git checkout\` or \`git stash\` the path to clear this. Their work is"
+        echo "in the working tree and is not committed anywhere — discarding it destroys it,"
+        echo "which is worse than the mislabelling this guard exists to prevent."
     else
-        echo "    git commit -- <your paths>   # <- none of the staged paths look like yours"
+        echo "\`git commit\` with no pathspec commits the WHOLE index, and this checkout"
+        echo "shares one index across every session working it. Committing now would file"
+        echo "their work under your message, where it is durable and no longer theirs to"
+        echo "attribute."
+        echo
+        echo "Commit your own paths by pathspec — that form ignores the shared index for"
+        echo "paths it does not name:"
+        echo
+        if ((${#mine[@]})); then
+            echo "    git commit -- ${mine[*]}"
+        else
+            echo "    git commit -- <your paths>   # <- none of the staged paths look like yours"
+        fi
+        echo
+        echo "Leave theirs staged; it is not yours to unstage either. \`git reset\` here"
+        echo "would take their work out of the index seconds before they commit it."
     fi
-    echo
-    echo "Leave theirs staged; it is not yours to unstage either. \`git reset\` here"
-    echo "would take their work out of the index seconds before they commit it."
     echo
     echo "Staged by:"
     for owner in "${foreign_owners[@]-}"; do
