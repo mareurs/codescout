@@ -17,14 +17,27 @@ topic: tool-contracts
 
 ## Status
 
-Accepted, pending implementation. Measured 2026-09-14; the measurement is recorded at
-`context-injection-session-log:F-2` (what the wire actually carries) and
-`context-injection-session-log:W-2` (why the key is composite rather than a single field).
+**Accepted and shipped**, both halves.
+
+| half | where | commit | patch-id |
+|---|---|---|---|
+| server — read + strip + park/restore | `codescout` | `9cf7cae6` and predecessors | `b17e17943eb1f87503115fe74d2ba8d65a2ef1f3` |
+| hook — the writer | `claude-plugins` | `de7d16a`, released as companion 1.20.9 | `3d651075ea8daa4901b31c425467d47960992989` |
+
+The server half shipped first and was **inert for the intervening commits** —
+`PRINCIPAL_ARG_KEY` occurred in exactly three places, the constant and two test fixtures,
+so no production path could reach it. Worth stating rather than quietly closing: a
+passing suite over an unreachable feature is this repo's own `ListFunctions` case, and
+this ADR's implementation spent a day in it.
+
+Measured 2026-09-14 throughout: `context-injection-session-log:F-2` (what the wire
+actually carries), `W-2` (why the key is composite rather than a single field), `W-3`
+(the precision benefit, both the single-dispatch and concurrent halves), and `W-4` (why
+the hook emits no `permissionDecision`).
 
 This ADR supersedes two designs produced earlier the same day and never built. Both are
 kept under *Alternatives considered* rather than deleted, because each was rejected by a
 measurement rather than by an argument, and the measurement is the reusable part.
-
 ## Context
 
 Several independent engines deliver guidance into one agent's context window and stamp one
@@ -54,7 +67,45 @@ Two prior mitigations exist and neither carries identity. `guide_rearm` (`Subage
 hook → per-`(pid, agent_id)` request file) reaches the live in-memory ledger, but
 `GuideRearmInbox::poll` returns `Vec<String>` — topics only, so the server learns *reset
 these* and never *for whom*. The `agent-guide-snapshot` / `agent-guide-restore` bracket
-edits the on-disk ledger, which the running process never re-reads.\n\n**Corrected 2026-09-14 by running it, and this supersedes how the table above reads.**\nThose bugs are **archived**, and `guide_rearm` is why: measured end-to-end on a rebuilt\nserver, a subagent receives `project-activation-bootstrap` *with or without* a principal\nstamp, because the `SubagentStart` hook re-arms the shared ledger before the subagent's\nfirst call lands. Subagent guide-starvation is therefore **already mitigated in\npractice**, and an earlier draft of this Context implied otherwise.\n\nWhat survives is narrower and still real: `guide_rearm` is a broadcast **reset**, never a\nrestore. It carries no identity, so it cannot distinguish two concurrent subagents and\ncannot return a principal to its own prior state. The value of this ADR is **precision**,\nnot delivery.\n\n**Precision measured 2026-09-14** (`context-injection-session-log:W-3`), which retires\nthe "unmeasured" caveat this paragraph carried for one commit. From a verified-silent\nbaseline, one subagent dispatch costs the parent:\n\n| stamp hook | parent re-deliveries |\n|---|---|\n| off | **2** — a whole `tracker-conventions` body, then `librarian § Filter Syntax` |\n| on | **0**, and 0 again after a second dispatch |\n\nwhile the subagent continues to receive its own guides under the stamp. So the benefit is\nthe parent's context window not being re-filled with text it already holds, once per\nsubagent dispatch — a thing `guide_rearm` cannot avoid, because a reset with no identity\nhas nothing to scope itself to. The concurrency half (two subagents, no cross-suppression)\nfollows from the same mechanism and is **not** yet measured.\n\nRead the table above as evidence that the class recurs, never as evidence that subagents\nare starved today. `context-injection-session-log:F-6`.
+edits the on-disk ledger, which the running process never re-reads.
+
+**Corrected 2026-09-14 by running it, and this supersedes how the table above reads.**
+Those bugs are **archived**, and `guide_rearm` is why: measured end-to-end on a rebuilt
+server, a subagent receives `project-activation-bootstrap` *with or without* a principal
+stamp, because the `SubagentStart` hook re-arms the shared ledger before the subagent's
+first call lands. Subagent guide-starvation is therefore **already mitigated in
+practice**, and an earlier draft of this Context implied otherwise.
+
+What survives is narrower and still real: `guide_rearm` is a broadcast **reset**, never a
+restore. It carries no identity, so it cannot distinguish two concurrent subagents and
+cannot return a principal to its own prior state. The value of this ADR is **precision**,
+not delivery.
+
+**Precision measured 2026-09-14** (`context-injection-session-log:W-3`), which retires
+the "unmeasured" caveat this paragraph carried for one commit. From a verified-silent
+baseline, one subagent dispatch costs the parent:
+
+| stamp hook | parent re-deliveries |
+|---|---|
+| off | **2** — a whole `tracker-conventions` body, then `librarian § Filter Syntax` |
+| on | **0**, and 0 again after a second dispatch |
+
+while the subagent continues to receive its own guides under the stamp. So the benefit is
+the parent's context window not being re-filled with text it already holds, once per
+subagent dispatch — a thing `guide_rearm` cannot avoid, because a reset with no identity
+has nothing to scope itself to. **The concurrency half is measured too, 2026-09-14, against the shipped hook** rather
+than the prototype: from the same verified-silent baseline, **two** subagents dispatched
+concurrently in one message also cost the parent **0** re-deliveries, while both received
+their own guides. That run carried a positive control — a not-yet-touched `doc` surface
+still delivered `librarian § doc — Event Log` in the same turn — because a frozen ledger
+returns silence too and would have read as a clean result.
+
+Note what the subagent side does *not* establish: two subagents each getting their own
+guides is equally what `guide_rearm` produces, since it re-arms per `(pid, agent_id)`.
+**Only the parent's return leg discriminates.**
+
+Read the table above as evidence that the class recurs, never as evidence that subagents
+are starved today. `context-injection-session-log:F-6`.
 
 **There is also a decoy.** `ToolContext::is_subagent_capable()` resolves to
 `name.is_some_and(|n| n.to_lowercase().contains("claude"))` — a substring test on
@@ -125,7 +176,9 @@ deliberate product decision on 2026-09-14, not assumed.
 
 - The three guide-ledger bugs above become addressable at their shared cause rather than
   one at a time.
-- Concurrent subagents need no special handling: identity arrives per call.
+- Concurrent subagents need no special handling: identity arrives per call. **Measured**,
+  not predicted — two concurrent dispatches cost the parent 0 re-deliveries while both
+  children received their own guides (`context-injection-session-log:W-3`).
 - Any later per-call identity source — an upstream `_meta` key, a new transport — lands on
   the same context field rather than growing a second lookup.
 
@@ -134,8 +187,14 @@ deliberate product decision on 2026-09-14, not assumed.
 - The server is no longer correct standalone for this behaviour. A deployment without the
   companion gets today's coarse session grain.
 - One more field on the hot path, and a strip step at the busiest chokepoint in the server.
-- Two id sources to keep honest: the hook's injection key and the server's strip key are a
-  co-change contract enforced by nothing but a test.
+- Two id sources to keep honest, **across two repositories**: the hook's injection key
+  (`claude-plugins:codescout-companion/hooks/principal-stamp.mjs`) and the server's strip
+  key (`src/tools/session_key.rs::PRINCIPAL_ARG_KEY`). Drift is silent in the worst
+  direction — the server ignores an unknown argument key, so a typo costs the entire
+  feature and reds nothing. The only guard is `principal-stamp.test.sh`'s
+  `key-matches-server`, which greps the Rust constant from the sibling checkout and
+  **skips rather than fails when that checkout is absent**. So the contract is enforced
+  on a developer machine holding both repos, and nowhere else.
 
 ### Change scenarios absorbed
 

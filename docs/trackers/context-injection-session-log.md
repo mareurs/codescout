@@ -786,26 +786,54 @@ cannot avoid it: it has no identity to scope the reset to.
 **Confirming data points:**
 1. This session — 2 → 0 re-deliveries, stable across two dispatches, subagent delivery
    intact.
-2. Pending: the concurrency half — two subagents in flight, neither suppressing the
-   other's guides. Predicted by the same mechanism and **not** measured here.
+2. **The concurrency half, measured 2026-09-14 against the SHIPPED hook** (claude-plugins
+   `de7d16a`, released as 1.20.9 and registered via `/reload-plugins`) rather than the
+   disposable prototype. Same call shape, same protocol: three identical parent
+   `doc(find)` calls with the 2nd and 3rd byte-identical and silent, then **two subagents
+   dispatched concurrently in one message**, then the identical call again.
+   **0 re-deliveries**, and 0 again on a repeat. Both subagents independently received
+   `project-activation-bootstrap` (~2.4 KB and ~2.6 KB), so neither suppressed the other.
+
+   **A positive control was necessary and is what makes that 0 a measurement.** A frozen
+   or broken ledger returns silence too, and would have read as a clean result. So the
+   same turn issued `doc(action="event_list")`, a surface not yet touched this session:
+   `librarian § doc — Event Log` arrived fresh. The parent's ledger was demonstrably still
+   *capable* of delivering while declining to re-deliver.
+
+   **What the subagent side does NOT show, and the distinction is F-6's whole lesson.**
+   Both probes receiving their own guides is equally what `guide_rearm` produces — it
+   re-arms per `(pid, agent_id)` on SubagentStart, so two subagents get two fresh ledgers
+   with or without this feature. That observable is a consistency check, not evidence.
+   **Only the parent's return leg discriminates**, because restoring a principal to its
+   own prior state is the thing a broadcast reset cannot do by construction.
 
 **Impact:** high — it converts the ADR's justification from an argument into a
 measurement, after F-6 had correctly demoted the previous one.
 
-**Promote-when:** the concurrency half is measured too. At that point the ADR's
-Consequences can state the benefit in observed terms rather than predicted ones.
+**Promote-when:** — **met 2026-09-14.** Both halves are measured against the shipped
+hook, so the ADR's Consequences may state the benefit in observed terms. What remains
+unmeasured is the *shape of the curve*: 1 dispatch and 2 concurrent dispatches both cost
+the parent 0, and no run has probed where, if anywhere, that stops holding.
 
 **Status:** validated — single work-stream datapoint, both directions checked.
 
 **Valid:** dated 2026-09-14
 
-**Rests on:** a disposable prototype hook scoped to one session id, whose own behaviour
-was controlled separately (stamps for an agent in this session; emits nothing for the
-parent or another session). One honest gap in arm 1: my own `sleep` ran concurrently with
-the subagent, so I cannot say whether the subagent's call or mine drained the re-arm
-request. It does not affect the outcome — either drain clears the shared ledger, which is
-what arm 1 observed — but the attribution is unestablished and the run should not be
-cited as showing *which* call drains.
+**Rests on:** for datapoint 1, a disposable prototype hook scoped to one session id, whose
+own behaviour was controlled separately (stamps for an agent in this session; emits
+nothing for the parent or another session). One honest gap in arm 1: my own `sleep` ran
+concurrently with the subagent, so I cannot say whether the subagent's call or mine
+drained the re-arm request. It does not affect the outcome — either drain clears the
+shared ledger, which is what arm 1 observed — but the attribution is unestablished and the
+run should not be cited as showing *which* call drains.
+
+For datapoint 2, the shipped hook, and **no codescout call was made by the parent between
+dispatch and measurement** — the specific confound arm 1 carried. Its control arm is
+**historical, not simultaneous**: the "stamp off → 2 re-deliveries" figure comes from arm 1
+earlier the same session, under the same call shape and baseline protocol but with one
+dispatch rather than two. A within-session A/B would need the hook unregistered and the
+plugin reloaded mid-measurement; it was judged not worth disturbing a live deployment,
+and that is a judgement rather than a finding.
 
 ## F-7 — a mutation that never applied is indistinguishable from a surviving mutant
 
