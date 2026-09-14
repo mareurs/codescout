@@ -2079,7 +2079,7 @@ mod tests {
     /// `doctor.rs`. The guide said to record a SHA and a patch-id, at length, and never said
     /// where or in what shape, so a record written to its spec was flagged and the grammar had
     /// to be reverse-engineered from `doctor.rs`'s test fixtures.
-    /// docs/issues/2026-09-14-the-fix-anchor-grammar-is-enforced-by-doctor-and-defined-in-no-guide.md
+    /// docs/issues/archive/2026-09-14-the-fix-anchor-grammar-is-enforced-by-doctor-and-defined-in-no-guide.md
     ///
     /// **This is the cheap half of a cross-surface contract, and it is only available because
     /// both halves are in one repo.** The same shape across a repo boundary —
@@ -2115,7 +2115,7 @@ mod tests {
                  terminal_status_without_fix_anchor enforces. A session writing a bug record \
                  reads this guide and never the check, so dropping the token restores the \
                  defect filed at \
-                 docs/issues/2026-09-14-the-fix-anchor-grammar-is-enforced-by-doctor-and-defined-in-no-guide.md"
+                 docs/issues/archive/2026-09-14-the-fix-anchor-grammar-is-enforced-by-doctor-and-defined-in-no-guide.md"
             );
         }
     }
