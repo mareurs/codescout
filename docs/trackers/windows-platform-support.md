@@ -558,6 +558,8 @@ server-stack feature gate are laid out in
 `docs/plans/archive/2026-06-16-two-stack-retrieval-lite.md`.
 
 ### 2026-07-02 — WIN-26 closed (verify-open pass, perf-windows brainstorm)
+
+<!-- audit-doc-refs:ignore-refs `42dfdfc8b1522192` — the sentence's own subject: an id this text states is absent from the catalog -->
 Recon during the perf+Windows brainstorm found WIN-26 zombie-open: the plan
 (`docs/plans/archive/2026-06-16-two-stack-retrieval-lite.md`) marks Phases 0-4 ALL DONE and
 `git branch --contains 5c1ecfa8` includes **master** — the daemon-free lite stack

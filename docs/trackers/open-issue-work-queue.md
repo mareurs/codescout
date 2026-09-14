@@ -90,7 +90,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-39 | 1 | the two sanctioned entry formats are not equivalent — a params-rendered index defines no citable token, so 117 BL-N citations (incl. this queue's own) resolve to nothing | done-archived | `9dc28c0860b214d9` |
 | BL-38 | 1 | the librarian guard is blind to any artifact whose frontmatter omits `id:` — 26 of 66 tracker/bug files unprotected, including the most-damaged ledger; fixed by teaching it the `entry_prefix` ledger declaration, and the plan's heading-scoped half was cut as unnecessary | done | `388290ad0f86fe03` |
 | BL-45 | 1 | Decision 1: may a process on an unlinked binary re-index? Direction 2 of the zombie-server bug, corrected — refuse BEFORE the embed pass, not at the sidecar write | **done** — `22f8b8d5`, patch-id `fd2c453b…`. Hard refusal as a `RecoverableError` naming `/mcp`; `guard_stale_binary` guards both `sync_project` and `sync_worktree` ahead of the embed pass; 5 tests, wiring mutation-checked; live from the 2026-08-29 rebuild | `8400845b81ff0475` |
-| BL-46 | 2 | Decision 2: the write-root split — unpinned WRITES resolve to the last writable root, unpinned READS keep resolving to the activated one | **not started** — needs a `last_writable_root` field plus write-awareness in `with_project_at`; ~4,600 tests sit on that primitive | — |
+| BL-46 | 2 | Decision 2: the write-root split — RULED: refuse an unpinned write under a read-only activation; do NOT resolve to a last-writable root | **RULED 2026-09-14 — `last_writable_root` is NOT needed and the prescribed shape is superseded.** Refuse an unpinned write under a read-only activation (name the project, offer the pin); keeps lock target == write target, needs no second root and no change to `with_project_at`. Implementation not started; it is now bug `9024da758e0870ee` — `check_tool_access`'s five-name allowlist. Detail in the body section. | `9024da758e0870ee` |
 | BL-47 | 1 | `tags.in` returns zero while `tags.contains` finds the same row — and the librarian guide teaches the broken form | **done** — `9e4e2d36`, patch-id `cfac211d…`. Both engines routed through `json_each`; `nin` was the worse half, returning EVERY row incl. those holding the tag; 3 tests. Live-verified post-rebuild: same call 0 → 11 in scope | `1d085bcddf13d685` |
 | BL-48 | 1 | `edit_file`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | **done** — `518549d6`, patch-id `c424f89f…`. Installed hook mirroring `librarian_guard`'s oracle; never creates a row; 8 tests, wiring mutation-checked both ways. Residual: the server-side install is covered by nothing. Bug file archived 2026-08-30 — the status flip reproduced the bug on itself, the fix not being live in this server | `013458f0acdb88b8` |
 | BL-49 | 2 | `workspace(post_compact)` flushes LSP without prewarming — next nav call pays cold start and can blow the 60s timeout, while its hint promises no disruption | **done-archived** 2026-09-13 — bug is `mitigated` + archived. Prior detail retained: **partial** — hint + manual fixed; diagnosis corrected in 3 places. Its prescribed fix (a) was a NO-OP for its own Rust repro (`PREWARM_LANGUAGES` is JVM-only), and a mux keyed by workspace keeps the server warm across sessions, so the cold window is far narrower than filed. The actually-false sentence is cross-repo (`session-start.mjs:339`) and still emitting — stays open for that. Hint fix `ff90ce41`, patch-id `9da21228d4392923`; **observed live** in the running release binary on 2026-08-30 when `workspace(post_compact=true)` returned the new text after a compaction — first sighting in the wild, so this row reports it rather than inferring it from source | `d7072ed21959aca1` |
@@ -121,7 +121,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-74 | 2 | BL-29: its `**Valid:**` conditional names an unobservable event ("until the snapshot gate reaches majority coverage") — the discriminator already existed when the entry was declared, so re-declare on a checkable condition | **done** 2026-09-12 — intent recovered from the record: the condition was a TRANSCRIPTION ARTIFACT, not an open requirement. `0dbfd0ee` shipped majority coverage 2026-08-16; the status line describing what the gate *requires* was transcribed into an event the entry *awaited*, inverting the verb. Re-declared on what is still owed | — |
 | BL-75 | 3 | Triage `terminal_status_with_caveat`: a bug record that is terminal but carries an `unverified:` caveat is unreachable by the canonical triage query, so live residual work sits in files that read as closed | **done** 2026-09-12 — both passes plus a verification pass over the actionable bucket. Live and archived records triaged; `unverified:` has two machine states and needs three, so the count is partly an artifact of a missing discharged marker. Verifying the still-live bucket against CODE flipped one of four — the loudest — to correctly-parked: a deliberate design decision reads exactly like an unfixed gap in its author's own words | — |
 | BL-76 | 1 | Give `unverified:` a DISCHARGED form the scan can read, so a settled doubt keeps its text and stops firing. Five authors already invented in-band markers (`CLEARED`, `REFUTED`, `Resolved by measurement`) that `terminal_status_with_caveat` cannot see, because it keys on presence alone | **done** 2026-09-12 — shipped as an ADDITIVE marker: a leading uppercase `CLEARED`/`REFUTED`/`RESOLVED`/`WITHDRAWN` silences the record and keeps its text; an unmarked caveat behaves exactly as before, which is what defuses the 2026-08-19 objection. `MEASURED` is deliberately excluded — the one record using it is an ESCALATION. Verified live: 2 silenced, 3 negative controls still reporting; both test halves observed RED under mutation | — |
-| BL-77 | 2 | `body_snapshot_row_indices` counts a pipe-anchored `PREFIX-N` row from ANY table as a snapshot row — the 2026-08-28 headings-vs-rows narrowing holding one level over, so a real lag can be masked by rows outside the snapshot block | **done** 2026-09-14 — `80f033c8`, patch-id `6081b6384928dca8bd4c1362e80c4582be066feb`. The ruling was **discharged by deriving the population, not by deciding the fork**: the stored blocker said the two defaults "fail in opposite directions over the same 24 rows", and they differ on **zero** files — only a ledger that both passes `body_keeps_snapshot` and anchors ids in >1 table can tell them apart, and of 4 that pass the gate the single multi-table one already declares. Rejected default reds **6 pre-existing** tests, so it was never viable. Mutation per SITE found a real hole: 1 of 3 call sites was **silently revertible** (14 tests green), closed by a test asserting on *which message* the advisory names. → `bug-fix-session-log:F-138` | `e9bea0ed3ff9927a` |
+| BL-77 | 2 | `body_snapshot_row_indices` counts a pipe-anchored `PREFIX-N` row from ANY table as a snapshot row — the 2026-08-28 headings-vs-rows narrowing holding one level over, so a real lag can be masked by rows outside the snapshot block | **done** 2026-09-14 — `80f033c8`, patch-id `6081b6384928dca8bd4c1362e80c4582be066feb`. The ruling was **discharged by deriving the population, not by deciding the fork**: the stored blocker said the two defaults "fail in opposite directions over the same 24 rows", and they differ on **zero** files — only a ledger that both passes `body_keeps_snapshot` and anchors ids in >1 table can tell them apart, and of 4 that pass the gate the single multi-table one already declares. Rejected default reds **6 pre-existing** tests, so it was never viable. Mutation per SITE found a real hole: 1 of 3 call sites was **silently revertible** (14 tests green), closed by a test asserting on *which message* the advisory names. → `bug-fix-session-log:F-138` | `20159deb3f4d4c09` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -1078,30 +1078,68 @@ server will decline to re-index until restarted. That is the decision working, n
 Reads and navigation are unaffected — only indexing refuses.
 ### BL-46 — Decision 2: the write-root split
 
-**Status:** not-started — needs a `last_writable_root` field plus write-awareness in `with_project_at`; ~4,600 tests sit on that primitive.
+**Status:** not-started (implementation). **The decision is settled** — see the ruling below.
 
-**Valid:** dated 2026-08-29
+**Valid:** dated 2026-09-14
 
 **Rests on:** `docs/trackers/bug-ledger-resume-2026-08-28.md` § *Two decisions waiting on a human*.
 
-Answered in principle 2026-08-28: a read-only activation means *exploring only, no
-writing*. One implementation was tried and **reverted**, with the blast radius measured —
-making a read-only activation resident-but-never-default broke **14 tests**
+Answered in principle 2026-08-28: a read-only activation means *exploring only, no writing*.
+One implementation was tried and **reverted**, with the blast radius measured — making a
+read-only activation resident-but-never-default broke **14 tests**
 (`activate_replaces_previous_project`, `is_home_false_after_switching`,
-`activate_hint_shows_switched_when_away_from_home`, …). Those tests are the specification
-of browse-by-activate, and the change would have forced a `workspace=` pin on every call to
+`activate_hint_shows_switched_when_away_from_home`, …). Those tests are the specification of
+browse-by-activate, and the change would have forced a `workspace=` pin on every call to
 explore the repo just activated — which is not "exploring only", it is "not exploring".
 
-The remaining gap is narrower, and is the whole change:
+## RULED 2026-09-14 — refuse, do not re-resolve
 
-> Unpinned **writes** should resolve to the last writable root, while unpinned **reads**
-> keep resolving to the activated one.
+The entry used to prescribe: *"unpinned **writes** resolve to the last writable root, while
+unpinned **reads** keep resolving to the activated one"*, needing a `last_writable_root` field
+plus write-awareness threaded into `with_project_at`. **Both halves are superseded.** The
+operator ruled for the third option: an unpinned write under a read-only activation is
+**refused**, naming the project and offering `workspace=<path>`.
 
-Both go through a single `with_project_at` today, so this needs a second field
-(`last_writable_root`, set only on a writable activation) plus write-awareness at
-resolution. `call_content` already computes `is_write(&input)` at the choke point, so the
-signal exists; the work is threading it through a core primitive that ~4,600 tests sit on.
+**Why the last-writable-root form was rejected, and it is not a preference.** The librarian
+catalog is machine-global and `doc(action="update", id=…)` resolves its target file from the
+artifact id, not from the active project. So a session that activated repo B read-only and
+issued an unpinned `doc(update)` on one of B's artifacts would have taken **repo A's write lock
+while writing repo B's bytes** — lock target ≠ write target, which is precisely what the write
+guard exists to prevent and what `src/server.rs:753-756` records fixing once already for the
+pinned case. The refuse form cannot produce that state: there is no second root to diverge to.
 
+**Consequences of the ruling, measured:**
+
+- `last_writable_root` is **not needed**. No new field on `AgentInner`, nothing to keep in sync.
+- `with_project_at` is **untouched** — 52 references across 10 files, ~10 forwarding "pinned
+  twins" (`project_root_for`, `security_config_for`, `mark_file_dirty_for`,
+  `call_edges_project_id_for`, …), and the ~4,600 tests that sit on it. The entry's own cost
+  estimate evaporates with the design it costed.
+- `with_project_at_mut` was never the write path and is not part of this. Its doc comment says
+  write tools mutating via interior mutability go through the **read** `with_project_at`; the
+  mut/non-mut split tracks Rust borrow mutability, not write semantics.
+
+## What actually remains — `9024da758e0870ee`
+
+The ruling's behaviour is **already partly shipped, and the gap is a filed bug**:
+`docs/issues/2026-09-14-read-only-blocks-five-tool-names-not-the-writes-it-promises.md`.
+
+`check_tool_access` (`src/util/path_security.rs:637-686`) refuses writes for a hand-maintained
+five-name allowlist — `approve_write | create_file | edit_file | edit_code | library` — and ends
+`_ => {} // All other tools are always allowed`. `doc`, `memory` and `onboarding` are
+`is_write == true` and pass straight through, so a read-only activation does not stop them
+today.
+
+**The seam is already built and already exercised.** `call_tool_inner`
+(`src/server.rs:1256-1277`) branches on `workspace_override` + `tool.is_write(&input)` together,
+to upgrade a *pinned* workspace to writable on first residency. This work is the `None` arm of
+that same `if`, and `src/server.rs:652-658` already holds both `name` and `input` where
+`check_tool_access` is called. No new primitive, no new plumbing.
+
+**The cost to count before shipping** — `read_only: true` is the *default* for a foreign
+activation, so enforcing it will surface as new refusals in cross-repo workflows that currently
+append to a sibling repo's trackers after a bare `activate`. That is the intended semantics, but
+it is a behaviour change, not just a closed hole.
 ### BL-44 — a params row can drift out of sync with its body counterpart with no check on either side of that direction
 
 **Valid:** conditional — until a drift check compares body and params field-by-field rather than by id

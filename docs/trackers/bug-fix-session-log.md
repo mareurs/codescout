@@ -198,7 +198,7 @@ entry_high_water_W: 133
 | W-132 | 2026-09-14 | med | **Re-derived a shipped probe by hand before reading the index that names it — and the redundancy is what found the probe's defect.** Recon after a `cargo rb` classified every `codescout` process by its own cmdline (`mux --socket` → MUX, else SERVER), following memory `gotchas` § *MCP Binary Symlink*, and only then consulted [`docs/PROBES.md`](../PROBES.md) — whose header reads *"Start here before answering a question with a number."* [`scripts/stale-servers.sh:39`](../../scripts/stale-servers.sh) selects with `pgrep -x codescout` and applies no cmdline filter, so it counts LSP muxes under a header saying *servers* and closes with *"Reconnect those sessions (/mcp)"* — unperformable on a mux, which has no session and self-heals at `--idle-timeout`. | Following the documented route alone returns `total=22 stale-exe=18 current=4` under the word *servers*, with nothing marking the unit as mixed — a plausible number, not an error. **Stated precisely: the probe is not silent about it.** It prints `PPID`, and the mux row's `PPID` is another row's `PID`; the tell is present and **unnamed**, so reading it needs the server/mux distinction already in hand. All four documented blind spots (`scripts/stale-servers.sh:22-29`) bound the count from *below*; the missing one bounds it from above. The rule this yields is not *re-derive everything* but **classify the population by hand once per session when a probe's answer is a count.** | validated |
 | W-131 | 2026-09-13 | med | **Scouted a test file's rule-parity section before planning a gate, and found the parser the gate reuses is already filed debt.** `tests/issue_clusters.rs` requires every `#[test]` to be declared `HOOK_OWED` / `HOOK_ONLY` / `NOT_HOOK_OWED` *with a reason*, and `the_hook_enforces_every_rule_it_declares` compares that against `scripts/pre-commit-ledger-counts.py`'s `HOOK_RULES` by **equality, not subset**. Decisive find: `no_mechanism_status_is_a_bare_verdict` already reads `OWED, not yet implemented — needs the mechanism-status parser ported`, citing open bug `c77c15b68a60e126` (`cluster/guard-narrower-than-its-name`) — and the planned gate reuses that same parser. | Both new tests would have redded the parity gate on first run, which is cheap and self-announcing. The expensive half is the repair that red invites: declare them `NOT_HOOK_OWED`, landing a **fourth** `OWED, not yet implemented` entry against that one bug — widening an open IC-14 instance inside a change advertising itself as closing a gate hole, invisible to a reviewer reading a green suite. **The cheap red hides the expensive decision behind it.** Scout converts it into a scope question asked before any code is written. Also derived rather than cited: **20 of 23** index rows agree with their class field; the 3 that differ are three different kinds (IC-13 real drift, IC-2 a parenthetical, IC-3 no verdict token at all), so equality reds two of them wrongly — the vocabulary is the design question, the predicate is nearly free. | validated |
 | W-130 | 2026-09-12 | high | **Three readings of one cause, every one taken through the instrument that caused it.** `e69ebcbb96c28f7f` held that subagent writes reach no transcript; the cause had gone substrate → version (*"2.1.x emits none — zero across 41 versions, 1,928 dispatches"*), both counted through `scan()`'s own **non-recursive** `d.glob("*.jsonl")`. 2.1.x writes them to `<project-dir>/<parent-sid>/subagents/agent-<id>.jsonl`, one directory below reach, so every count returned zero and read as corroboration. Re-derived with `find`: **756** files, **755** carrying the flag, **192,797** records, newest same-day on **2.1.267** — inside the range cited as emitting none. | The file had queued two fixes — a controller-written sidecar per SDD task, and a working-tree substitute question — both workarounds for a substrate gap that is not there, each shipping a **second source of truth** for data the harness already writes, neither wrong in any way its own tests could show. Real fix: one glob plus a fallback correction, no parsing change. Worse, the conclusion was written into the **user-facing** refusal — *"stop looking for the owner — there is none recorded"* — while `fmt-mine.sh`'s whole remedy is *ask the named owner*: `--all` before named 10 owners, **0 of 10 live**; after, 11, the new one `[LIVE]` with a socket. **Operational form: when a count of "does the substrate contain X" returns zero, re-derive it with an instrument that does not share the first one's window.** | validated |
-| W-129 | 2026-09-12 | high | **The control fired, and what it caught was that the guard I was narrowing was load-bearing for a reason nobody had written down.** Fixing `d4db8a2d93bdced9` (fmt-mine refusing this session's own files on a mixed scan), I paired the positive assertion with *"THEIR file must be byte-untouched"*. It fired on the first draft: **`rustfmt <file>` is not per-file** — it descends into every `mod` the file declares, so formatting `$MINE` rewrote a peer's child module. Verified at the bytes on rustfmt 1.9.0-stable; `--skip-children` is nightly-only. | `ce3a628db5fa1168` — the defect the script exists to close — re-admitted **through the regression test written to close a different bug in the same script**, with every other assertion green: exit code, refusal text, peer socket, narrow command. The positive assertion passed *because* the formatter had run over everything. Second-order, and the half worth carrying: the wholesale refusal read as over-caution but was the only thing closing that door, since a peer's child can only be damaged if it too needs formatting and such a file is by construction a row in the same scan. **Before narrowing a guard that looks broader than its stated reason, ask what else its breadth is covering** — it will not be in the code, because anyone who knew would have written it. | validated |
+| W-129 | 2026-09-12 | high | **The control fired, and what it caught was that the guard I was narrowing was load-bearing for a reason nobody had written down.** Fixing `d4db8a2d93bdced9` (fmt-mine refusing this session's own files on a mixed scan), I paired the positive assertion with *"THEIR file must be byte-untouched"*. It fired on the first draft: **`rustfmt <file>` is not per-file** — it descends into every `mod` the file declares, so formatting `$MINE` rewrote a peer's child module. Verified at the bytes on rustfmt 1.9.0-stable; `--skip-children` is nightly-only. | `1d32d341e4c7ada0` — the defect the script exists to close — re-admitted **through the regression test written to close a different bug in the same script**, with every other assertion green: exit code, refusal text, peer socket, narrow command. The positive assertion passed *because* the formatter had run over everything. Second-order, and the half worth carrying: the wholesale refusal read as over-caution but was the only thing closing that door, since a peer's child can only be damaged if it too needs formatting and such a file is by construction a row in the same scan. **Before narrowing a guard that looks broader than its stated reason, ask what else its breadth is covering** — it will not be in the code, because anyone who knew would have written it. | validated |
 | W-128 | 2026-09-12 | med | **Verified a rebuild by PROCESS, not by file — and the verification expired eleven minutes later.** Identified my own server by `ppid` (PID 968351, inode `190428843`, shared with 3 peer servers), read its baked provenance (`git_sha=ad243cb7`, `git_dirty=true`), confirmed ancestry, then probed the wire: the `$VAR` source-gate refusal now names cause AND a performable remedy, and a 400-row `doc(find)` overflowed to a buffer whose envelope still carried the tool's own `corrections` with **no** `param_aliases` — the absence control, since two unrelated mechanisms write that key. At 19:33:11 a peer had relinked: on-disk inode `190441132`, and all four of those servers — mine included — now hold a deleted exe. | "The gate was green when I committed" is evidence about a suite, not the process answering my calls. Framed as *"the build on disk has my fix"* the same evidence goes false in 11 minutes with nothing marking the transition; framed as *"the process serving me"* it survives, because a running process keeps its mapped inode. **Also carries its own falsified count:** the entry first said "20 of 26" — `pgrep -f codescout` matches the `cargo`/`rustc`/`sccache` processes *building* it, so that counted pgrep's list rather than codescout servers. Re-derived: 19 of 21 on a dead inode, and the 2 on the current one are worker children of a peer's server, not session servers. | validated |
 | W-127 | 2026-09-12 | high | **Nearly filed a phantom bug against `grep` — the corpus moved mid-read, and the check was two commands.** Two reads of ONE line disagreed a minute apart: substring grep saw `{group_by_file, render_grouped}` at `display.rs:109`, a whole-word grep matched nothing there, and `read_file` saw `{group_by_file_ranked, …}`. My first hypothesis was that `grep` had mis-rendered the line. `git status` + `stat` showed the file DIRTY with an mtime **2 seconds** before my check — a peer wrote it while I was reading. Settled against both trees: HEAD has bare `group_by_file` (2 occurrences, 0 ranked), the worktree has the ranked variant, uncommitted. The instrument was right at each instant. | A bug filed against a core tool for returning content not in the file — **unreproducible by construction**, because the worktree had already moved past the state that produced it. It would have sat open as a phantom, and the next session re-running the grep would get the new answer and be unable to tell fixed from flaky from never-real. `CLAUDE.md` names the tell (line drift means the corpus MOVED, not that the reader ERRED) and records 3 of 4 sessions reaching for *"they made a mistake"*; I reached for *"the TOOL made a mistake"*, which is the same move aimed at an instrument — worse, because a person can correct the record and a tool accusation just accumulates. Also **corrects `codescout-75`'s self-criticism in their favour** — **⚠ RETRACTED 06:56Z, see the entry's correction block: the worktree/HEAD divergence postdated their claim, created by their own step-4 edit (now `48d39f53`), so their retraction stands whole. What the exchange actually found is their class — a claim can become TRUE after it is withdrawn, when the withdrawer edits toward it — and a ceiling on this row's own remedy: naming the TREE resolves two CONCURRENT readings and does nothing for two SEQUENTIAL states.** Operational half, cheaper than the habit it replaces: name the TREE, not just the instant — `git show HEAD:<path>` is one command and removes the ambiguity a timestamp only dates. | validated |
 | W-126 | 2026-09-12 | med | **Scouted the caller's INPUT, not its signature, and it inverted the implementation.** Fixing `0947b2a32cb86e00` meant giving `edit_file`'s keyword scan literal-awareness by reusing `src/util/text.rs`'s scanner rather than writing a second copy of the literal rules. Its existing caller threads `Scan` state line to line — correct for `literal_continuation_mask`, which walks real blocks. Reading the NEW caller's input showed `find_def_keyword` receives `lines_only_in(old, new)` joined: the lines an edit CHANGED, which are never contiguous source. So `blank_non_code` resets to `Scan::Code` per line, and the choice is annotated where it is made rather than left to look like an oversight. | Carried state would blank real code lying between two unrelated quotes — a **false negative**, which the module's stated asymmetry at `:45-49` calls the direction that corrupts rather than annoys, so it surfaces as no complaint from anyone. It would also have passed the entire suite: every existing scanner test feeds a real contiguous block, where carrying state is correct, so no fixture in the repo can express the failure. The guard that now reds on it, `blank_non_code_does_not_carry_literal_state_between_lines`, was written from the scout and not from an observed red — the one shape this ledger keeps finding that a test run cannot hand you. | validated |
@@ -4681,7 +4681,7 @@ correct standing mitigation and was already in effect. No new rule to promote.
 
 ## F-58 — A same-day concurrent commit made a bug's own prescribed fix wrong before I got to it
 
-**Observed:** Bug `93a9e4055b10eb7a` (doctor.rs comment misnaming `entry_cite`'s writer) was
+**Observed:** Bug `801e5b4c13198406` (doctor.rs comment misnaming `entry_cite`'s writer) was
 filed 2026-08-20 with root cause "`link_scan` never writes `entry_cite`" (grep evidence: 0
 matches) and a `## Resume` instruction to rename `link_scan` to `append_entry` in the comment.
 Re-grepping before editing (per [[reconnaissance]]) found 13 matches for `entry_cite` in
@@ -9555,7 +9555,7 @@ like having tested it. Being blocked by a guard tells you what it refuses, never
 
 **Blast radius, because this is the part that stings:** the claim shipped to **five** surfaces
 before anyone checked it — three commit messages (`7278508e`, `fc48f829`, and the peer messages
-quoting it), the bug file `882fea0f3d66d72f`, and a comment block in
+quoting it), the bug file `e06f747f579eca84`, and a comment block in
 `scripts/post-index-change-stage-log.sh` where a future reader would have taken it as established.
 Caught by `codescout-68`, who had hit both guards in sequence and noticed the ordering put the
 `-C` on the commit, not the stage — and who flagged it as *"a lead again, not a finding"* rather
@@ -9961,7 +9961,7 @@ different path"); I accepted both, because a peer who has just caught me in an e
 as *more* reliable, not less. The conclusion was independently false, for a reason neither
 of us had looked up. **A correction is a fresh claim and gets a fresh check — including the
 part of the original it leaves standing.** Note the shape: the two halves of the refutation
-were *both already filed in this repo* (the `hooksPath` test, and bug `8cc95806a7b5f37a`
+were *both already filed in this repo* (the `hooksPath` test, and bug `74d7306647646956`
 naming `staged_files_only.py:108` as a root cause the day before), held one each by two
 sessions who agreed with each other instead of composing them. Agreement between parties
 reading the same wrong premise is one blind spot counted twice — CLAUDE.md § *Observer
@@ -9969,7 +9969,7 @@ Blindness* states that for instruments; this is the same failure between **agent
 
 **Rests on:** `git config --show-origin --get-all core.hooksPath` → exit 1 (2026-09-02);
 `scratchpad/probe-hooklive.sh`, three cases, isolated throwaway repo;
-`tests/hook_config.rs`; bug `8cc95806a7b5f37a` § Root cause.
+`tests/hook_config.rs`; bug `74d7306647646956` § Root cause.
 
 **Status:** fixed-verified — both editable surfaces corrected in place (the archive file
 and the peer's file, the latter flagged to its author); `054c8a3e`'s message is immutable
@@ -12660,7 +12660,7 @@ Every clause of that is true except whose the files are. They are `c9ab2c8d`'s �
 Positively identified, not by elimination:
 
 - `scripts/file-provenance.py` at 20:28:20 → `PEER … written by c9ab2c8d-… [LIVE]` for both files.
-- `df517af91b43a5f7`'s frontmatter carries `claimed_by: c9ab2c8d`, `status: taken` — the bug
+- `f78453d36d18c818`'s frontmatter carries `claimed_by: c9ab2c8d`, `status: taken` — the bug
   `attribute-red.py` is the `H`-target for, and the file's own docstring cites it.
 - `attribute-red.py`'s mtime moved **20:17:03 → 20:28:03** between two of my reads, with
   `attribute-red.py.bak` and `tests/attribute-red.sh` appearing in between. I have made zero
@@ -13057,7 +13057,7 @@ refspec is `5399543d`'s, independently reached by `b80a27d4` for a different rea
 
 **Valid:** dated 2026-09-09
 
-**Observed:** 2026-09-09, establishing whether `param_probe` had ever checked `doctor:scope` (`4bfec00edf979204`).
+**Observed:** 2026-09-09, establishing whether `param_probe` had ever checked `doctor:scope` (`190955a99d482631`).
 
 **Pattern:** **A guard whose failure signature is *"the two calls are identical"* turns its own GREEN into a positive result — but only in conjunction with an independently established defect.** State it as an implication; the tempting short form is false.
 
@@ -13088,6 +13088,8 @@ So `every_action_labelled_schema_key_is_honored_by_that_action` passing, *combin
 **Status:** validated
 
 ## W-119 — a scout caught a vacuous assertion in the test I was writing about vacuous assertions
+
+<!-- audit-doc-refs:ignore-refs `aabbccdd11223344` — mk_ctx's seeded test id, not a citation -->
 
 **Valid:** dated 2026-09-09
 
@@ -13140,6 +13142,8 @@ I had answered their three-state question identically all night — **NOT WITHHE
 **Cost avoided:** would have broken 2 tests silently changed maybe unnoticed if not the assertions had been read; caught before any edit via reconnaissance rather than via a failed `cargo test` run.
 
 ## F-129 — a partial fix's own doc comment cited the bug id, and that reads as closure
+
+<!-- audit-doc-refs:ignore-refs `d4b61746950b86b7` — verbatim quotation of 26b60af8's doc comment; repointing would falsify the quote -->
 
 **Valid:** dated 2026-09-09
 
@@ -13531,6 +13535,8 @@ banner needs a fourth line, and the honest wording is the peer's: *overtaken, no
 
 ## W-123 — The live probe named the blast radius Critical C1 could only hypothesise — 2 rows in an unrelated repo
 
+<!-- audit-doc-refs:ignore-refs `1f8784f932f042bc` — a catalog digest over 4786 rows, not an artifact id -->
+
 **Valid:** dated 2026-09-10
 
 **Observed:** After `cargo rb` + `/mcp`, one live `librarian(action="doctor",
@@ -13650,6 +13656,8 @@ Instance 2 (`1a34a131`). Enumerating a 14-commit push for my operator, I derived
 **Rests on:** `git log -1 --format='%b' <sha>` output for all 8 foreign commits in `d5a1fea2..1a34a131`, read 2026-09-11; both instances independently confirmed by sessionId `b80a27d4-9729-40ef-8c28-ad8982df6d13`, who found instance 2 without prompting.
 
 ## F-134 — bug b75d2660ef37198c's own "prefer oversample" fix recommendation conflicts with a design invariant it didn't check
+
+<!-- audit-doc-refs:ignore-refs `b75d2660ef37198c` — the pre-archive id, recorded beside the live one deliberately -->
 
 **Valid:** dated 2026-09-11
 
@@ -13913,7 +13921,7 @@ a binary, on evidence that says the opposite.
 
 **Valid:** dated 2026-09-12
 
-**Observed:** Fixing `447d98db54393338` meant giving `edit_file`'s keyword scan literal-awareness.
+**Observed:** Fixing `0947b2a32cb86e00` meant giving `edit_file`'s keyword scan literal-awareness.
 The obvious implementation reuses `src/util/text.rs`'s scanner the way its existing caller does —
 threading `Scan` state line to line, which is what makes multi-line literals work for
 `literal_continuation_mask`. Scouting the **caller's input** rather than its signature showed that
@@ -14102,7 +14110,7 @@ through a `pub mod peer;` line, and `--skip-children` is nightly-only. So format
 took a peer's file with it, from a command whose entire purpose is to be the narrow
 alternative to `cargo fmt`.
 
-**Counterfactual:** `ce3a628db5fa1168` — *the* defect this script exists to close, peers'
+**Counterfactual:** `1d32d341e4c7ada0` — *the* defect this script exists to close, peers'
 uncommitted Rust being rewritten — re-admitted **through the regression test written to
 close a different bug in the same script**. Every other assertion was green: exit code
 right, refusal message right, the peer's socket named, the narrow command offered. The
@@ -14415,7 +14423,7 @@ part that carried information.
 
 **Severity:** med · **Status:** fixed-verified · **Category:** measurement
 
-**Observed.** Bug `e9bea0ed3ff9927a` / `open-issue-work-queue:BL-77` sat `blocked` for a
+**Observed.** Bug `20159deb3f4d4c09` / `open-issue-work-queue:BL-77` sat `blocked` for a
 day, its `next` reading *"BLOCKED ON A RULING, not on typing"*. The ruling owed: what does
 an **absent** `snapshot_anchor` mean for `body_snapshot_row_indices`? The file framed it as
 *"on day one that is every augmented tracker — **24** of them … the two available defaults
@@ -14487,7 +14495,7 @@ observed red rather than by its own existence.
 
 **Cost:** filed a tracker entry (`W-133`) asserting the tool behaved correctly when only half of its behavior (the block) had been checked — the other half (the remedy text) was wrong. Caught in the same conversation before it propagated further, but it is exactly the "confirmed too early" shape this tracker's own `F-109`/`F-122` entries warn about.
 
-**Fix:** filed `docs/issues/2026-09-14-il3-grep-remedy-assumes-symbol-lookup-for-identifier-shaped-patterns.md` (`92a7c607d7ce7aee`), tagged `cluster/hint-composed-without-the-request` (IC-22) — the remedy is composed from the pattern's lexical shape, not from what the request was actually for.
+**Fix:** filed `docs/issues/archive/2026-09-14-il3-grep-remedy-assumes-symbol-lookup-for-identifier-shaped-patterns.md` (`e4fbea5400c81bc4`), tagged `cluster/hint-composed-without-the-request` (IC-22) — the remedy is composed from the pattern's lexical shape, not from what the request was actually for.
 
 **Lesson:** "the gate fired correctly" and "the gate's remedy is correct" are two separate claims with two separate code paths (the predicate vs. the `match` that composes the hint string); verifying one is not evidence for the other.
 

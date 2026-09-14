@@ -931,6 +931,8 @@ move to fixed/active."
 
 ## Final verification
 
+<!-- audit-doc-refs:ignore-refs `ece908f37854e557` — a completed checklist step quoting the pre-archive id it was about to invalidate -->
+
 - [ ] `cargo fmt --check && cargo clippy -- -D warnings && cargo test` — all green.
 - [ ] `cargo rb` (release build; **not** `cargo build --release` on this stack), then `/mcp` to reconnect.
 - [ ] Live check against the recorded symptoms:

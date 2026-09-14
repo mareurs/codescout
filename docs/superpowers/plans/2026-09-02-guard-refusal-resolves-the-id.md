@@ -88,6 +88,8 @@ So the refusal stays. What changes is that following it costs one call instead o
 
 ### Test design — read this before writing the tests
 
+<!-- audit-doc-refs:ignore-refs `deadbeefdeadbeef` — a fixture literal in a test spec, not a citation -->
+
 The obvious test installs a fixture oracle whose `id_for` returns a known string and
 asserts the hint contains it. **That test asserts about its own fixture**, which is the
 failure `CLAUDE.md` § *Testing Discipline* names: *"a second level asserting about its own
