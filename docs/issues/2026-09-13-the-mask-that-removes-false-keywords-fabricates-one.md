@@ -94,6 +94,54 @@ corruption, so it narrows only where unambiguous. That reasoning prices a false 
 the caller cannot tell why. That is `IC-6` — the defect is the input the parser admits no way to
 write, which is why ordinary testing does not reach it.
 
+### A SECOND, independent defect, measured 2026-09-14 — this file named only the first
+
+Three probes at HEAD, all placed in the same Python module docstring. **Correction to the
+Reproduction section above: "a refusal writes nothing, so this probe is free" covers only
+the refusing half.** Probe A was accepted and wrote; it had to be reverted.
+
+| probe | text | result |
+|---|---|---|
+| the repro above | `each class's field` | REFUSED |
+| A | `each klass's field` | **accepted** — so the apostrophe alone is not the trigger |
+| B | `each class of thing` | **REFUSED** |
+
+Probe B carries a genuine `class ` with a real space and no apostrophe, so the fabrication
+mechanism is not involved. It refuses because **a multi-line string is not blanked at all**:
+`spanning_opener` fires on the `"""` line and blanks the rest of *that line*, then
+`blank_non_code` re-enters at `Scan::Code` for every line after it.
+
+**That is not a missing feature and it is not fixable here.** Cross-line scanning already
+ships — `literal_continuation_mask` (`src/util/text.rs:292-300`) threads `Scan` state line to
+line, and `spanning_opener` already recognises `"""`, `'''`, backticks and Rust raw strings.
+`blank_non_code` declines to use it because its input is **the lines an edit CHANGED,
+joined** — non-contiguous source, where a quote on one changed line and a quote three
+changed lines later never opened a literal in the file.
+`blank_non_code_does_not_carry_literal_state_between_lines` (`:733-742`) exists to red on
+exactly that "optimisation", and its doc comment says it reads like a correctness
+improvement and is the one change that breaks the caller. Over non-adjacent lines there is
+no coherent docstring state to track.
+
+So probe B is a **named residual**, not a bug to fix at this layer, and the refusal text now
+says so.
+
+### Which lever is safe, and why the apostrophe is not the one
+
+`scan_line_into` has two callers and they split cleanly: `blank_non_code` (`:255`) keeps the
+**mask bytes** and discards the state; `scan_line` (`:113`) keeps the **state** and discards
+the mask. The state path runs `literal_continuation_mask` → `reindent_block` / `reindent_to`
+→ **`edit_code`'s replace/insert reindentation**.
+
+The mask bytes therefore have exactly one consumer in the whole project, `find_def_keyword`
+(`src/tools/edit_file/mod.rs:97`). Changing the **filler** is invisible to `edit_code`.
+Changing the **apostrophe arm** is not — and the `'` opener earns its keep on a case its own
+comment never states. The comment defends it by naming Rust lifetimes, but lifetimes are
+handled by the end-of-line *reset* (`:225-226`), not the opener. What the opener actually
+prevents is a char literal containing a quote, `let q = '"';`: without it the inner `"` sets
+`Scan::Quoted('"')`, end-of-line promotes it to `Scan::Spanning`, and
+`literal_continuation_mask` latches for every remaining line — silently disabling
+reindentation. **No test covers that.** Narrowing the apostrophe would have removed an
+untested load-bearing behaviour while its comment appeared to explain what it was for.
 ## Workarounds
 
 - Rephrase to avoid a definition keyword directly before an apostrophe. This is what was done, and

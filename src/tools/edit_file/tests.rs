@@ -3801,6 +3801,67 @@ fn find_def_keyword_ignores_a_keyword_inside_a_string_literal() {
     );
 }
 
+/// The refusal must not name a keyword the source does not contain.
+///
+/// `blank_non_code` blanked non-code bytes with SPACES, and every needle here carries a
+/// trailing space to supply its right word boundary — so a possessive read as a string
+/// opener (`class's` -> `class` + filler) satisfied `"class "`, which appears nowhere in
+/// the input. A caller searching for what the refusal named found nothing, which reads
+/// as a broken guard rather than as an apostrophe. `5aceb817081050a3`.
+///
+/// Asserted at the UNIT here and at the guard in
+/// `guard_allows_a_possessive_in_prose_but_still_catches_a_python_definition` — the
+/// 2026-09-11 fix established that a kill at one site says nothing about the other.
+///
+/// Mutation that must kill this: restore `' '` as the mask filler in
+/// `crate::util::text`'s `scan_line_into`.
+#[test]
+fn find_def_keyword_does_not_fabricate_a_keyword_from_a_possessive() {
+    assert_eq!(
+        find_def_keyword("    each class's field is the copy", "python"),
+        None,
+        "`class's` contains no `class ` — the mask must not invent one"
+    );
+    // Opposite direction, and the reason this is a pair: a fix that simply stopped
+    // scanning would satisfy the assertion above and fail this one.
+    assert!(
+        find_def_keyword("    class Foo:", "python").is_some(),
+        "a real definition must still be caught"
+    );
+}
+
+/// The same defect at the GUARD, because that is the site it was reported at and a unit
+/// kill says nothing about the caller — the pairing the 2026-09-11 fix established.
+///
+/// The docstring is the load-bearing fixture detail, and NOT for the reason it looks.
+/// Only the `"""` opener LINE is blanked; line 3 re-enters the scanner as code, so the
+/// possessive on it is scanned exactly as if it were source. Move the prose onto the
+/// opener line and this asserts nothing.
+///
+/// What this deliberately does NOT assert: a genuine `class ` in docstring prose. That
+/// still refuses, because `blank_non_code` scans each line independently — it receives
+/// the lines an edit CHANGED, which are not contiguous source. That residual is named
+/// at the refusal site in `crate::prompts`, not narrowed here.
+#[test]
+fn guard_allows_a_possessive_in_prose_but_still_catches_a_python_definition() {
+    use super::guard_structural_rewrite;
+
+    let before = "\"\"\"Census probe.\n\nReads the ledger.\n\"\"\"\n\nX = 1\n";
+    let prose = "\"\"\"Census probe.\n\nReads the ledger. Each class's field is the copy.\n\"\"\"\n\nX = 1\n";
+    assert!(
+        guard_structural_rewrite("subject.py", before, prose).is_ok(),
+        "a possessive in prose defines nothing — the edit must be allowed"
+    );
+
+    // Same guard, opposite direction: a real definition added in new_string.
+    let smuggled =
+        "\"\"\"Census probe.\n\nReads the ledger.\n\"\"\"\n\nX = 1\n\nclass Smuggled:\n    pass\n";
+    assert!(
+        guard_structural_rewrite("subject.py", before, smuggled).is_err(),
+        "a new class definition must still refuse"
+    );
+}
+
 #[test]
 fn guard_allows_blank_line_before_unchanged_fn() {
     // spec 2026-06-16: inserting a blank line before an existing fn (ktlint).

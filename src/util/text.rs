@@ -113,14 +113,32 @@ fn scan_line(line: &str, entry: Scan) -> Scan {
     scan_line_into(line, entry, &["//"], None)
 }
 
+/// The byte written in place of every non-code byte by [`scan_line_into`].
+///
+/// **Not a space, and that is the whole point.** `find_def_keyword`'s needles carry a
+/// TRAILING SPACE to supply their right word boundary (`"class "`, `"fn "`), so while the
+/// filler was a space the mask could satisfy a needle the source never contained: a
+/// possessive read as a string opener blanked `class's` to `class` + spaces, and the guard
+/// then refused an edit naming a keyword the caller could search for and never find. A
+/// filler that cannot appear in a needle makes that unrepresentable rather than policed.
+///
+/// Requirements, all load-bearing — check them before substituting anything else: one byte
+/// in UTF-8, so the per-line byte-length guarantee survives; absent from every needle;
+/// neither alphanumeric nor `_`, so a left word-boundary test still sees a boundary; and
+/// not whitespace, so `trim_start()` in a caller's line-leading comment filter behaves as
+/// it did.
+const MASK_FILL: char = '\0';
+
 /// The scanner body, shared by [`scan_line`] and [`blank_non_code`] so the two can
 /// never disagree about where a literal begins or ends.
 ///
 /// When `out` is `Some`, every byte is written to it as it is consumed: verbatim
-/// when the scanner classifies it as code, and as a space otherwise — string-literal
+/// when the scanner classifies it as code, and as [`MASK_FILL`] otherwise — string-literal
 /// delimiters and contents, and everything from a line-comment opener to end of line.
-/// Spaces rather than removal, so byte length and column positions survive and a
-/// caller can index the mask exactly as it would index `line`.
+/// Filler rather than removal, so byte length and column positions survive and a
+/// caller can index the mask exactly as it would index `line`. That filler is deliberately
+/// NOT a space — see [`MASK_FILL`] for why a space-filled mask could manufacture the very
+/// evidence its one consumer reads.
 ///
 /// `line_comment` is a parameter rather than the hardcoded `//` it used to be:
 /// comment syntax is per-language and this scanner runs on fragments in every
@@ -131,14 +149,14 @@ fn scan_line_into(
     line_comment: &[&str],
     mut out: Option<&mut String>,
 ) -> Scan {
-    /// Spaces, not deletion — see the byte-offset guarantee above.
+    /// [`MASK_FILL`], not deletion — see the byte-offset guarantee above.
     fn push(out: &mut Option<&mut String>, seg: &str, code: bool) {
         let Some(buf) = out.as_mut() else { return };
         if code {
             buf.push_str(seg);
         } else {
             for _ in 0..seg.len() {
-                buf.push(' ');
+                buf.push(MASK_FILL);
             }
         }
     }
@@ -231,8 +249,13 @@ fn scan_line_into(
 
 /// Blank the non-code spans of every line in `block`: string-literal delimiters and
 /// contents, and everything from a line-comment opener to end of line. Code bytes
-/// survive verbatim, every other byte becomes a space, so each line keeps its byte
+/// survive verbatim, every other byte becomes [`MASK_FILL`], so each line keeps its byte
 /// length and its column positions.
+///
+/// The filler is **not a space**, and substituting one back reintroduces a shipped bug:
+/// this function's one consumer matches needles that end in a space, so space filler let
+/// the mask satisfy a needle the source did not contain. [`MASK_FILL`] carries the
+/// argument and the constraints on any replacement.
 ///
 /// Each line is scanned INDEPENDENTLY, starting in code. That is deliberate, and it
 /// is what makes the function correct for its caller rather than merely cheaper:
@@ -685,17 +708,24 @@ mod tests {
     fn blank_non_code_keeps_code_and_blanks_comments_and_literals() {
         use super::blank_non_code;
 
+        // Expectations are built from `MASK_FILL` rather than written as literals. Two
+        // reasons, and the second is new: hand-counted padding is a fixture detail that
+        // goes wrong silently and reads as a bug here, AND a literal would re-pin the
+        // filler byte, which is `MASK_FILL`'s to choose and not this test's to assert.
+        // What this test is about is WHICH SPANS are blanked, never what they become.
+        let fill = |n: usize| super::MASK_FILL.to_string().repeat(n);
+
         // Byte length per line is the contract callers index against, so assert it
         // directly rather than trusting the shapes below to imply it.
         let line = "    1 // mentions a fn";
         let masked = blank_non_code(line, &["//"]);
         assert_eq!(masked.len(), line.len(), "mask must preserve byte length");
-        assert_eq!(masked, "    1                 ");
+        assert_eq!(masked, format!("    1 {}", fill("// mentions a fn".len())));
 
         // The literal's delimiters go too — otherwise `"fn ` still reads as a word start.
         assert_eq!(
             blank_non_code(r#"assert!(s.contains("fn "));"#, &["//"]),
-            r#"assert!(s.contains(     ));"#
+            format!("assert!(s.contains({}));", fill(r#""fn ""#.len()))
         );
 
         // Code survives verbatim, including a keyword that really is one.
@@ -705,19 +735,55 @@ mod tests {
         );
 
         // The token set is a parameter: `#` is a comment in Python and an attribute in
-        // Rust, and passing the wrong set silently blanks real code. Expectations are
-        // built with `repeat` rather than written as space literals — hand-counted
-        // padding is a fixture detail that goes wrong silently and reads as a bug here.
+        // Rust, and passing the wrong set silently blanks real code.
         let py = "x = 1  # class later";
         assert_eq!(
             blank_non_code(py, &["#"]),
-            format!("x = 1  {}", " ".repeat("# class later".len())),
+            format!("x = 1  {}", fill("# class later".len())),
             "`#` opens a comment in python"
         );
         assert_eq!(
             blank_non_code(py, &["//"]),
             py,
             "`#` is NOT a comment when the token set says `//` — nothing is blanked"
+        );
+    }
+
+    /// The mask must never MANUFACTURE the evidence its caller reports.
+    ///
+    /// Blanked bytes used to be spaces, and every `find_def_keyword` needle carries a
+    /// TRAILING SPACE to supply its right word boundary — so mask spaces and source
+    /// spaces were the same byte. A possessive read as a string opener (`class's`
+    /// blanks to `class` + filler) therefore satisfied `"class "`, a sequence appearing
+    /// nowhere in the input, and the caller could search for what the refusal named and
+    /// not find it. `5aceb817081050a3`.
+    ///
+    /// The apostrophe reading itself is deliberate and stays: it is what stops a char
+    /// literal containing a quote (`let q = '"';`) latching the scanner across the rest
+    /// of a block for `edit_code`'s reindent path, which reads the STATE this function
+    /// also produces. The filler is the half that only the mask consumer sees.
+    ///
+    /// Mutation that must kill this: make the non-code branch of `push` emit `' '` again.
+    #[test]
+    fn blank_non_code_cannot_manufacture_a_word_boundary() {
+        use super::blank_non_code;
+
+        let prose = "each class's field is the authoritative copy";
+        let masked = blank_non_code(prose, &["#"]);
+        assert_eq!(
+            masked.len(),
+            prose.len(),
+            "the byte-length contract still holds"
+        );
+        assert!(
+            !masked.contains("class "),
+            "no needle may be satisfied by filler the source did not supply: {masked:?}"
+        );
+        // The opposite direction, and the reason this is a pair: a filler change that
+        // also stopped blanking would satisfy the assertion above and fail this one.
+        assert!(
+            !masked.contains("field"),
+            "everything after the apostrophe is still blanked: {masked:?}"
         );
     }
 

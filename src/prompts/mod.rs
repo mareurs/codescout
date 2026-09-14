@@ -641,9 +641,11 @@ pub fn refusal_predicate(err_family: &str) -> Option<&'static str> {
         "il2_structural_edit" => {
             "IL-2 gate condition: `edit_file` is refused when the edit spans a symbol DEFINITION \
              in a source file. Imports and config are allowed, and so is a keyword inside a \
-             string literal or a line comment — those spans are blanked before the scan. A \
-             BLOCK comment is not: `/* … */` is only skipped when it starts the line, so a \
-             keyword inside one mid-line still refuses. Structural changes go through \
+             SINGLE-LINE string literal or a line comment — those spans are blanked before the \
+             scan. Two shapes are NOT blanked and still refuse: a keyword inside a BLOCK comment \
+             (`/* … */` is only skipped when it starts the line), and one inside a MULTI-LINE \
+             string such as a Python docstring — each line is scanned on its own, so only the \
+             opening line is blanked. Structural changes go through \
              `edit_code` (action=replace|insert|remove|rename)."
         }
         "il3_pipe_to_trimmer" => {
@@ -917,6 +919,38 @@ pub fn build_onboarding_prompt(ctx: &OnboardingContext) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A SHAPE assertion, not a prose pin — the distinction is CLAUDE.md § *Testing
+    /// Discipline*'s. Pinning the sentence would red on every rewording and rightly gets
+    /// avoided, which is how this text came to claim something false for two days: it said
+    /// a keyword inside "a string literal" is blanked, while a MULTI-LINE string such as a
+    /// Python docstring is not, because `blank_non_code` scans each line on its own.
+    ///
+    /// So assert only that both residuals are still NAMED. That reds exactly on the
+    /// regression that actually happened — a residual quietly dropping out of the text a
+    /// refused caller reads — and stays green under any rewrite that keeps them.
+    ///
+    /// It cannot tell you the remedy is CORRECT. It buys arrival, not answerability.
+    #[test]
+    fn the_il2_condition_names_both_of_its_unblanked_residuals() {
+        let text = refusal_predicate("il2_structural_edit")
+            .expect("the IL-2 family must carry a condition line");
+
+        assert!(
+            text.contains("BLOCK comment"),
+            "the block-comment residual must stay named: {text}"
+        );
+        assert!(
+            text.contains("MULTI-LINE"),
+            "the multi-line-string residual must stay named: {text}"
+        );
+        // The claim that produced the false one. `single-line` is the qualifier that makes
+        // the blanking promise true; drop it and the sentence over-promises again.
+        assert!(
+            text.to_lowercase().contains("single-line string literal"),
+            "the blanking promise must stay scoped to single-line literals: {text}"
+        );
+    }
 
     #[test]
     fn build_with_project_appends_status() {
