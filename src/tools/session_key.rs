@@ -127,11 +127,23 @@ pub fn conversation_from_meta(
 /// `cluster/addressing-without-an-escape-hatch` (IC-6) asks for, in place of a
 /// claim that collision "cannot happen".
 ///
-/// That matters because `#[serde(deny_unknown_fields)]` is derived at 42 sites
-/// across this workspace, concentrated in the librarian tools. An injected key
-/// reaching a deserializer is **refused, not ignored** — so
-/// [`principal_from_arguments`] removes it rather than merely reading it, and
-/// `call_tool_inner` is the one site that sees every call.
+/// **What removing it does NOT buy, corrected 2026-09-14 by running it.** An
+/// earlier draft of this comment said an injected key reaching a deserializer is
+/// "refused, not ignored", citing 42 `deny_unknown_fields` sites. That was a
+/// count of occurrences read as a count of tool-input gates, and it is wrong in
+/// the widening direction. Measured: `doc(action="find", totallyUnknownField=…)`
+/// returns normally, and so does `doc(action="event_create", …)` — it reaches the
+/// database. The `doc` dispatcher **cannot** carry the derive (trying it broke
+/// every `doc(update)` call — see `crate::tools::param_probe`'s module doc), and
+/// `event_create::Args` gets a fresh map from `flatten_event_args` rather than
+/// the top-level blob, so a stray top-level key never reaches the strict type.
+///
+/// So the removal is **hygiene and defence in depth**, not a live-outage guard:
+/// an internal routing key has no business in a tool's input, and a tool that
+/// tightens its schema later should not turn the companion into a breaking
+/// change. Stated at its real strength, because the overstated version is what
+/// made a cross-repo deploy-order hazard look larger than it is
+/// (`context-injection-session-log:F-4`, F-5).
 pub const PRINCIPAL_ARG_KEY: &str = "dev.codescout.mcp/agentId";
 
 /// Take the principal token a companion hook stamped onto this call's arguments,
@@ -148,11 +160,13 @@ pub const PRINCIPAL_ARG_KEY: &str = "dev.codescout.mcp/agentId";
 ///
 /// **Removal is unconditional once the key is present, and the return value is
 /// not.** A non-string or whitespace value yields `None` — we do not know who is
-/// calling — but it is stripped anyway, because to `deny_unknown_fields` an
-/// unknown key of the wrong *type* is exactly as fatal as one of the right type.
-/// Returning early without removing would turn a malformed stamp into a refused
-/// tool call, which is the one outcome a best-effort identity hint must never
-/// produce.
+/// calling — but it is stripped anyway. The reason is consistency rather than
+/// rescue: a stamp we cannot read is still an internal routing key with no
+/// business in a tool's input, and leaving only the MALFORMED ones behind would
+/// make the strip's behaviour depend on the value's type, which nothing
+/// downstream expects. (An earlier draft justified this by claiming an unread
+/// stamp would be REFUSED by `deny_unknown_fields`; measured 2026-09-14, it is
+/// silently ignored at the live tool surface — see [`PRINCIPAL_ARG_KEY`].)
 ///
 /// Absent key ⇒ `None` and `input` untouched, which is every non-Claude client
 /// and every session without the companion installed. That is the parent's case
@@ -318,7 +332,7 @@ mod tests {
     /// `remove` — i.e. reading without taking — kills this and leaves the happy-path
     /// test above green.
     #[test]
-    fn a_malformed_principal_is_still_stripped_so_it_cannot_refuse_a_tool_call() {
+    fn a_malformed_principal_is_stripped_rather_than_left_in_the_arguments() {
         for bad in [
             serde_json::json!(42),
             serde_json::json!(null),

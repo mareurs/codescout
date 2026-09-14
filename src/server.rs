@@ -1245,9 +1245,12 @@ impl CodeScoutServer {
         let mut input: Value = Self::parse_input(req.arguments);
 
         // Take the companion's principal stamp BEFORE anything else reads `input`.
-        // 42 `deny_unknown_fields` sites would refuse the call outright if it
-        // survived to a deserializer, so removing it at the one site every call
-        // passes through is what keeps the injection invisible to every tool.
+        // This is the one site every call passes through, so stripping here keeps
+        // an internal routing key out of every tool's input without any tool
+        // needing to know it exists. NOT an outage guard: measured 2026-09-14, an
+        // unknown top-level key is silently IGNORED at the live tool surface. The
+        // reason is hygiene, and `session_key::PRINCIPAL_ARG_KEY` carries the
+        // measurement that corrected the stronger claim this comment used to make.
         let asserted_principal = crate::tools::session_key::principal_from_arguments(&mut input);
 
         let workspace_override = Self::extract_workspace_override(&input);

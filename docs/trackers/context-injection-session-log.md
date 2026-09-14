@@ -12,7 +12,7 @@ topic: context-injection
 entry_prefix:
   - F
   - W
-entry_high_water_F: 4
+entry_high_water_F: 5
 entry_high_water_W: 2
 ---
 
@@ -37,7 +37,8 @@ author to make.
 | F-1 | 2026-09-14 | low | plan-prose | open | TAXONOMY's `entry_prefix` tradeoff: one horn is false, the other is not a benefit |
 | F-2 | 2026-09-14 | high | plan-prose | fixed-verified | A code comment's scope qualifier was narrower than its phrasing, and it killed a viable design for two turns |
 | F-3 | 2026-09-14 | high | architectural | fixed-verified | Adopting a principal moves starvation to the parent's return leg, so the ledger map must precede the hook |
-| F-4 | 2026-09-14 | high | release-pipeline | open | The hook deploys instantly and the server does not, so shipping it now breaks every unreconnected session |
+| F-4 | 2026-09-14 | high | release-pipeline | superseded | The hook deploys instantly and the server does not, so shipping it now breaks every unreconnected session |
+| F-5 | 2026-09-14 | high | plan-prose | open | The deny_unknown_fields hazard does not exist at the tool surface — 42 occurrences read as 42 gates |
 
 ## Wins Index
 
@@ -572,7 +573,20 @@ also the order that arms it, because the server being *written* is not the serve
 commit that is green in its own repo and touches no Rust. The blast radius is other
 people's sessions, which is the part no local gate can see.
 
-**Status:** open — hook deliberately not written; the sequence above is unperformed.
+**Status:** superseded by `context-injection-session-log:F-5` — **the central premise
+below is false and was measured so within the hour.** An unknown top-level key is
+silently IGNORED at the live tool surface, not refused: `doc(action="find", …)` returns
+normally and `doc(action="event_create", …)` reaches the database. The `doc` dispatcher
+structurally cannot carry `deny_unknown_fields` — trying it once broke every
+`doc(update)` call — and `event_create::Args` receives a fresh map rather than the
+top-level blob.
+
+So there is **no cross-session outage**, and the severity below is wrong. What survives
+is the much smaller true claim: the two halves still deploy at different latencies, so a
+hook shipped before the rebuild would stamp a key that unreconnected servers ignore —
+wasted bytes and a silently inert feature until each session reconnects, not broken
+calls. Left standing rather than rewritten because the entry is the evidence for F-5,
+and an entry quietly corrected to look right teaches nothing.
 
 **Valid:** conditional — closes when every live session runs a server carrying
 `principal_from_arguments`, verified rather than assumed
@@ -587,6 +601,77 @@ time — two pieces of work that look independent, where the build order is the 
 F-3's constraint was internal to one repo and a test now guards it. This one crosses a
 repo boundary and no test can reach it, which is what makes it worth writing down rather
 than remembering.
+
+## F-5 — The deny_unknown_fields hazard does not exist at the tool surface — 42 occurrences read as 42 gates
+
+**Observed:** 2026-09-14, writing the test F-4 said would settle its one
+inferred-not-measured link. The test's **control** failed, which is the finding: the
+premise was false, and three documents asserted it.
+
+**When:** Immediately after `b43e3702`. F-4 had named the weak link honestly — *"read
+from the derive sites, not executed"* — and the first attempt to execute it inverted it.
+
+**Expected:** that an injected top-level key reaching a librarian tool would be REFUSED,
+because `deny_unknown_fields` appears at 42 sites concentrated there. That claim is in
+`PRINCIPAL_ARG_KEY`'s doc comment, in `call_tool_inner`'s comment, in
+`docs/adrs/2026-09-14-a-subagent-is-a-principal.md` (*"the strip point is forced"*), and
+is F-4's whole hazard.
+
+**Got:** it is silently ignored. Two measurements through `call_tool_inner`:
+
+- `doc(action="find", kind="tracker", totallyUnknownField="x")` → returns normally,
+  `count: 0`.
+- `doc(action="event_create", …, totallyUnknownField="x")` → reaches the **database**
+  (`FOREIGN KEY constraint failed` on a bogus id). Deserialization never objected.
+
+**Probable cause — and it was already written down where I did not look.**
+`event_create.rs`'s own doc comment says `deny_unknown_fields` *"is safe HERE while
+being unavailable on the shared `doc` schema"*: the dispatcher passes the shared
+argument blob straight down, so `action` and every sibling action's key would arrive as
+unknown fields. `param_probe`'s module doc records the attribute being tried once and
+**breaking every `doc(update)` call**. And `event_create::Args` receives a fresh map
+from `flatten_event_args`, not the top-level blob, so a stray top-level key never
+reaches the strict type at all.
+
+So my 42 was a count of **occurrences** read as a count of **tool-input gates**. They
+are config structs and nested arg types. This is `CLAUDE.md` § *Testing Discipline*'s
+*"a count of a defect population must arrive with its unit or not at all"* — I had the
+number and not the unit, and the number was doing load-bearing work in an ADR.
+
+**Workaround / corrections made:**
+
+- The test is **deleted**, not weakened. Its premise was the control; without a live
+  tool-input struct that rejects unknown top-level keys, the control cannot exist and
+  the remainder would assert only that a stamped call behaves like an unstamped one —
+  satisfied equally by stripping and by ignoring, which is the monotone trap.
+- `PRINCIPAL_ARG_KEY` and `call_tool_inner` now state the strip as **hygiene and defence
+  in depth**: an internal routing key has no business in a tool's input, and a tool that
+  tightens its schema later should not turn the companion into a breaking change.
+- `a_malformed_principal_is_still_stripped_so_it_cannot_refuse_a_tool_call` renamed —
+  its tail asserted the falsified claim.
+- The direct removal assertion in
+  `a_principal_token_is_taken_and_removed_from_the_arguments` is unaffected and remains
+  the real coverage: it checks the key is gone from the `Value`, which is observable and
+  true regardless of what any deserializer would have done.
+
+**Severity:** high — nothing broke, and that is the point. A false premise had reached an
+ADR, two code comments and a tracker entry, and it would have been quoted forward by
+every reader of any of them. F-4's hazard is materially smaller than filed.
+
+**Status:** open — F-4 and the ADR still carry the overstated form; corrected in code
+only so far.
+
+**Valid:** dated 2026-09-14
+
+**Rests on:** two live calls through `call_tool_inner` on this build, plus
+`event_create.rs`'s and `param_probe`'s own doc comments. It does **not** establish that
+NO tool anywhere rejects an unknown top-level key — only that the two `doc` actions
+tested do not, and that `doc`'s dispatcher structurally cannot.
+
+**Fix idea / Pointer:** correct F-4's severity and the ADR's *"the strip point is
+forced"* paragraph. The strip point is still right — `call_tool_inner` is the only site
+that sees every call — but it is forced by *"one site, every call"*, not by a refusal
+that does not happen.
 
 ## Template for new entries
 

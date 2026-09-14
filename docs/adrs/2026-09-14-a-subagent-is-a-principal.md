@@ -98,10 +98,16 @@ parent, not "the parent".**
 
 Three parts of that are forced rather than chosen:
 
-- **The strip point.** `deny_unknown_fields` appears at 42 sites across 17 files,
-  concentrated in the librarian tools — precisely the tools this design most needs. An
-  injected argument reaching a deserializer is refused. `call_tool_inner` is the one site
-  that sees every call, and already hosts `adopt_request_conversation()`.
+- **The strip point.** `call_tool_inner` is the one site that sees every call, and
+  already hosts `adopt_request_conversation()`. **Corrected 2026-09-14** — this bullet
+  originally read *"`deny_unknown_fields` appears at 42 sites … an injected argument
+  reaching a deserializer is refused"*. Measured, it is not: `doc(action="find", …)`
+  and `doc(action="event_create", …)` both accept an unknown top-level key, the latter
+  reaching the database. The `doc` dispatcher cannot carry the derive (it broke every
+  `doc(update)` call when tried) and `event_create::Args` receives a fresh map rather
+  than the top-level blob. 42 was a count of occurrences read as a count of gates. The
+  strip point is still forced — by *one site, every call* — and the strip itself is
+  hygiene rather than an outage guard. `context-injection-session-log:F-5`.
 - **The key shape.** `dev.codescout.mcp/agentId` contains `.` and `/`, neither of which can
   occur in a Rust identifier, so it cannot collide with any real field. That is the escape
   hatch `IC-6` requires, rather than a claim that collision "cannot happen".
