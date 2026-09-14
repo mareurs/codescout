@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 147
-entry_high_water_W: 134
+entry_high_water_F: 148
+entry_high_water_W: 135
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -51,6 +51,7 @@ entry_high_water_W: 134
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-147 | 2026-09-14 | med | cross-session | fixed-verified | **A pathspec commit captured a peer's staged edit to the same file, because I read the staged SET instead of the staged DIFF.** `git status --short` answers which paths; only `git diff --cached` answers which bytes. |
+| F-148 | 2026-09-14 | high | tooling | fixed-verified | **Ran the gate backgrounded, believed its `✓ exit 0` summary, and put a truncated file into the shared build.** The buffer that same response pointed at held `could not compile`. Backgrounding also costs the `attribute-red` hook, so nothing local raised — two failures, one trigger, not to be conflated. Fixed at `cc57cd28`; run gate commands in the FOREGROUND, or capture `EXIT=$?` in band. |
 | F-146 | 2026-09-14 | low | doc-vs-code | promoted-to-bug-tracker | **A served worked example outranked the tool schema that was in context beside it.** Wrote `F-145`/`W-134` as section-then-index-row, reproducing the capture window `8857b0b2` fixed by giving `append_entry` `index_row` + `index_after_line`. The miss was NOT missing documentation: the schema describes both parameters, their coupling and their failure mode, and was served in the tool list all session. The disagreeing surface was the worked example in `codescout-companion:reconnaissance` § Phase 3 — which I had loaded and was executing — and the example won, because a schema is read once as a field list while an example is read at call-composition time as a copyable shape. A skill's worked example is therefore a second, unversioned copy of the tool's contract that decays independently while being the copy actually executed. Tell: when a recipe and a schema name the same call and the recipe uses FEWER parameters, prefer the schema — it is generated from the code and the recipe is not. Filed as `323bdf9d76a88c55` (recipe half); this is the rank half |
 | F-145 | 2026-09-14 | med | reasoning/shared-checkout | open | **"Process-wide" activation read as machine-wide, and the premise that scoped the work went unchecked.** Declined a documented reproduction all session because `activate(read_only=true)` would supposedly disable writes for six live PEER sessions. False: `pgrep -a -f codescout` shows ~26 separate `codescout start` processes, one per CC session, so an activation reaches this session and its subagents and nobody else. The docs never said otherwise — they scope it to *"the session"* and *"another caller on **this session**"*; the bare phrase *"process-wide"* was filled in as *machine-wide* on a checkout where the filesystem, the git index, `.codescout/write.lock` and the catalog genuinely ARE shared. Survived because **nothing fires when you decline to act**: the belief was never contradicted, only reinforced by true facts about a different kind of sharing. Cost: a false safety claim in an archived bug record, a commit message and two peer messages. Tell: the premise deciding what NOT to do never got the byte-level check the premise deciding what to do got rigorously |
 | F-144 | 2026-09-14 | med | measurement | fixed-verified | **`/proc/<pid>/exe` returns a PROCFS inode, so a rebuild check over 28 servers produced 28 plausible wrong numbers.** `stat -c '%i'` without `-L` reports the magic symlink's OWN identity, from procfs's own sequence — real, stable, mutually distinct, and about nothing. The 28 clustered (`121815719`, `121830738`, …), which READS as corroboration because sibling inodes are what a directory of related files looks like, and none matched the fresh `target/release/codescout`. Straight reading: *every server including mine is stale* — the answer that prompts action, and wrong. `stat -L` returned the real image, identical to disk. Tell available one command earlier and free: **an inode matching NO file you can name is not a file identity.** What the confirmation did NOT buy: `stat -L` and `peer-sessions.sh` agreeing are **not independent** — both resolve the same link against the same filesystem — so the load-bearing evidence is `readlink` carrying no `(deleted)` plus a matching size, never the concurrence. Sibling of `F-135`, the same question (*did the rebuild take*) failing one layer up |
@@ -202,6 +203,7 @@ entry_high_water_W: 134
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-134 | 2026-09-14 | med | **A pinned throwaway project probes a security-config gate live, by behaviour rather than build metadata.** After a rebuild, `workspace(status)` reported `git_sha: 3d9cd206, git_dirty: true` — and a dirty build is exactly the case a sha cannot settle. Pinned `workspace=` at a temp project whose own `.codescout/project.toml` sets `file_write_enabled = false`: `memory(action="write")` was REFUSED with cause `ConfiguredOff`, and `memory(action="list")` through the SAME pin returned `0 topics` as the control — which is what makes the refusal a measurement rather than an unresolvable path. A `read_only`-based probe self-defeats, because `call_tool_inner` upgrades a pinned workspace to writable for write tools; the config flag is the only route that reaches the arm | One activation, one probe and one restore — plus a `read_only` probe that would have silently read as *"gate absent"*. That is the honest counterfactual, NOT the "six broken peers" first claimed and retracted in `F-145` | validated |
+| W-135 | 2026-09-14 | high | **`git status` before implementing assigned work found a peer already holding a complete uncommitted implementation of it.** The tell was a DATE in a fixture comment, not the tooling; `file-provenance.py` only confirmed afterwards and nothing in the flow would have invoked it, because the peer had honestly said the work was unclaimed — a fact about a moment, which decays with nothing announcing it | My ready draft would have overwritten a complete, tested, UNCOMMITTED implementation that `git checkout` could not have restored — silently, and I would have reported success. Theirs was also strictly better: it gated KILLED as well as SURVIVED, catching a malformed `--replace` compile failure reported as a catch, which my draft did not cover | validated |
 | W-133 | 2026-09-14 | med | **Scouted a suspected `run_command` IL-3 shell-gate defect down to the actual predicate before filing a bug.** User flagged a refusal on a shell `grep --include=*.rs` over `/c/Users/MAILINCA.BRN.002/work/claude/codescout` as contradicting the documented "external path is allowed" carve-out. Read the resolution chain (`check_source_file_access` → `segment_reads_project_source` → `path_is_within_project` in `src/util/path_security.rs`): the absolute-path branch is a plain `expanded.starts_with(project_root)`, no name heuristic. The searched path could only have tripped the gate by being (or nesting under) that session's own `project_root` — i.e. the command was a shell content-read over the project's own source, the exact case IL-3 exists to catch. | Trusting the quoted rule-of-thumb text alone, without reading the predicate it summarizes, would likely have produced a new `docs/issues/` bug duplicating the already-closed false-positive classes in `docs/issues/archive/2026-09-10-source-gate-joins-an-unexpanded-var-path-onto-the-project-root.md` and `docs/issues/archive/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md`. | validated |
 | W-132 | 2026-09-14 | med | **Re-derived a shipped probe by hand before reading the index that names it — and the redundancy is what found the probe's defect.** Recon after a `cargo rb` classified every `codescout` process by its own cmdline (`mux --socket` → MUX, else SERVER), following memory `gotchas` § *MCP Binary Symlink*, and only then consulted [`docs/PROBES.md`](../PROBES.md) — whose header reads *"Start here before answering a question with a number."* [`scripts/stale-servers.sh:39`](../../scripts/stale-servers.sh) selects with `pgrep -x codescout` and applies no cmdline filter, so it counts LSP muxes under a header saying *servers* and closes with *"Reconnect those sessions (/mcp)"* — unperformable on a mux, which has no session and self-heals at `--idle-timeout`. | Following the documented route alone returns `total=22 stale-exe=18 current=4` under the word *servers*, with nothing marking the unit as mixed — a plausible number, not an error. **Stated precisely: the probe is not silent about it.** It prints `PPID`, and the mux row's `PPID` is another row's `PID`; the tell is present and **unnamed**, so reading it needs the server/mux distinction already in hand. All four documented blind spots (`scripts/stale-servers.sh:22-29`) bound the count from *below*; the missing one bounds it from above. The rule this yields is not *re-derive everything* but **classify the population by hand once per session when a probe's answer is a count.** | validated |
 | W-131 | 2026-09-13 | med | **Scouted a test file's rule-parity section before planning a gate, and found the parser the gate reuses is already filed debt.** `tests/issue_clusters.rs` requires every `#[test]` to be declared `HOOK_OWED` / `HOOK_ONLY` / `NOT_HOOK_OWED` *with a reason*, and `the_hook_enforces_every_rule_it_declares` compares that against `scripts/pre-commit-ledger-counts.py`'s `HOOK_RULES` by **equality, not subset**. Decisive find: `no_mechanism_status_is_a_bare_verdict` already reads `OWED, not yet implemented — needs the mechanism-status parser ported`, citing open bug `ef7b2f22c40a458e` (`cluster/guard-narrower-than-its-name`) — and the planned gate reuses that same parser. | Both new tests would have redded the parity gate on first run, which is cheap and self-announcing. The expensive half is the repair that red invites: declare them `NOT_HOOK_OWED`, landing a **fourth** `OWED, not yet implemented` entry against that one bug — widening an open IC-14 instance inside a change advertising itself as closing a gate hole, invisible to a reviewer reading a green suite. **The cheap red hides the expensive decision behind it.** Scout converts it into a scope question asked before any code is written. Also derived rather than cited: **20 of 23** index rows agree with their class field; the 3 that differ are three different kinds (IC-13 real drift, IC-2 a parenthetical, IC-3 no verdict token at all), so equality reds two of them wrongly — the vocabulary is the design question, the predicate is nearly free. | validated |
@@ -15076,6 +15078,83 @@ sessions are in one file, no path-granular instrument can help and only the diff
 rather than repaired it. Seventh instance this session of a check narrower than its question —
 see [[F-141]] (a check that cannot express failure) and [[F-143]] (a sequence that cannot express
 cause).
+
+## F-148 — Ran the gate backgrounded, believed its summary, and put a truncated file into the shared build
+
+**Valid:** dated 2026-09-14
+
+**Category:** tooling · **Severity:** high · **Status:** fixed-verified
+
+**Observed:** Ran the gate's clippy step with `run_in_background: true`. The response
+summarised it `✓ exit 0`. The buffer that same response pointed at held
+`error: could not compile codescout (lib) due to 1 previous error`, naming
+`src/util/path_security.rs:2919`. I read the summary, took the gate as green, and moved on.
+The file had been truncated 4954 → 2918 lines by the `scripts/fmt-mine.sh` rustfmt write one
+step earlier, and the shared build stayed red for every session in the checkout until a peer
+(`9403d62d`) reported it to me.
+
+**Two failures share one trigger and must not be conflated.** Backgrounding cost the
+`attribute-red` hook — the documented ceiling, since `run_in_background: true` returns before an
+exit status exists to hook on — so nothing in my own session told me. Separately, the summary
+*asserted a status the payload did not contain*, which is the defect itself and was not known
+until later.
+
+**Cost:** shared build red for every peer until reported; a peer spent a hand-run of
+`file-provenance.py` to attribute it; recovery needed a `git show HEAD:` restore plus
+re-applying two edits from transcript. The gate as run reported success throughout.
+
+**Remedy, standing and cheap:** run gate commands in the **foreground**. Where backgrounding is
+genuinely wanted, capture the status **in band** — `cmd > run.log 2>&1; echo "EXIT=$?" >> run.log`
+— which is also the only channel that survives an MCP server restart. Adopted from `9403d62d`,
+who notes they had taken the habit for the unrelated `;`-ends-in-`echo` trap; it covered this one
+without its author aiming at it.
+
+**Root cause fixed** at `cc57cd28`: `format_run_command` guarded on `output_id.is_string()`,
+true of both a completed buffered result and a still-running backgrounded one, and
+`unwrap_or(0)` turned the second's absent `exit_code` into a success. Full record:
+`docs/issues/archive/2026-09-14-a-backgrounded-gate-command-was-summarised-as-exit-0-while-its-buffer-held-the-failure.md`.
+
+**Relation to existing law:** this is *not* another instance of
+`references/seam-classes.md`'s green-certifies-the-executed-path bullet. There the check ran and
+proved a narrower thing than believed; here **no check result existed and the renderer invented
+one**. A lossy renderer drops; a defaulting renderer invents. The second is the direction that
+bullet does not cover.
+
+## W-135 — git status before implementing assigned work found a peer already holding a complete uncommitted implementation
+
+**Valid:** dated 2026-09-14
+
+**Category:** shared-checkout · **Status:** validated
+
+**Observed:** My operator pointed me at the `mutation-probe.sh` `INCONCLUSIVE` guard — work a
+peer had explicitly told me they were *not* taking. Before writing I opened
+`tests/mutation-probe.sh` to match its fixture idioms, and hit a comment dated **that day**:
+*"`-- true` runs no tests, so no verdict is available. This assertion read SURVIVED until
+2026-09-14 — the suite pinned the very defect the probe exists to study."* That prompted
+`git status`, which showed both `scripts/mutation-probe.sh` and `tests/mutation-probe.sh` dirty,
+and `scripts/file-provenance.py` named sessionId `9403d62d` — the same peer. Their
+implementation was already in the tree: tee'd output with `PIPESTATUS[0]`, both `INCONCLUSIVE`
+branches, `SURVIVED` gated on a real test count.
+
+**Counterfactual, concrete.** I had a draft ready that rewrote both files, including the
+`-- true` fixtures the peer had already re-annotated. Writing it would have destroyed a
+complete, tested implementation that was **uncommitted** — so `git checkout` could not have
+restored it, the loss would have been total and silent, and I would have reported success.
+Their version was also strictly better than my draft: they gated **KILLED** as well, catching a
+malformed `--replace` that fails to compile being reported as a catch. I had reasoned only
+about the `SURVIVED` side and would have shipped that hole.
+
+**The tell was a DATE IN A COMMENT, not the tooling.** `file-provenance.py` confirmed
+afterwards; it did not catch it, and nothing in my flow would have invoked it — I had been told
+the work was unclaimed, honestly, by the peer themselves before their operator redirected them.
+**A peer's "unclaimed" is valid only at its instant**, exactly like a peer count, and decays
+without anything announcing it.
+
+**Standing remedy, one command:** before implementing anything you were pointed at on a shared
+checkout, `git status` the files you intend to write — *before* the first edit, not before the
+commit. It is the only step in this sequence that would have fired on its own. The corollary
+worth keeping: a peer's disclaimer of ownership is a fact about a moment, and the tree is the
+only thing that answers for now.
 
 ## Template for new entries
 
