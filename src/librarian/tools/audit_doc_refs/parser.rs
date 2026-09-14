@@ -43,6 +43,14 @@ pub fn parse_refs(
                         continue;
                     }
                     if let Some(kind) = classify(raw, true, syntax) {
+                        // A token the author already labelled a git patch-id is not an
+                        // artifact citation, and nothing about the token can say so —
+                        // both namespaces are 16 lowercase hex. Applied here, at the
+                        // INLINE arm, because that is the position whose band gates;
+                        // a fenced one takes `cap_code_block` and never reds.
+                        if kind == RefKind::ArtifactId && labelled_as_patch_id(text, span.start) {
+                            continue;
+                        }
                         candidates.push(RefCandidate {
                             md_file: md_file.clone(),
                             md_line: line + row,
@@ -193,6 +201,36 @@ fn classify(s: &str, in_code_context: bool, syntax: PathSyntax) -> Option<RefKin
         return Some(RefKind::ModulePath);
     }
     None
+}
+
+/// Whether the inline span starting at `span_start` is LABELLED a git patch-id.
+///
+/// `git patch-id --stable` emits 40 hex, but this corpus records it truncated to 16 — which
+/// is byte-identical to an artifact id, and `CLAUDE.md` § *Bug Tracking* MANDATES recording
+/// one beside every fix SHA. So the two namespaces collide by construction and no property
+/// of the token itself can separate them: the discriminator is the label the author already
+/// wrote, and it was sitting in the text unused.
+///
+/// Measured 2026-09-14 over `docs/**.md`: 26 such labelled tokens, and the real audit
+/// reported 10 of the work queue's 28 `ArtifactMissing` findings against records written
+/// exactly as the project requires. Tightening the band without this would red CI on
+/// compliance.
+///
+/// **The gap between label and token must contain no letters**, which is the whole
+/// precision of the rule and not a detail. The corpus writes `, patch-id `, `(patch-id `
+/// and `, patch-id **` — punctuation and markup — but it also writes *"The patch-id belongs
+/// to `d5af3d3ceff1d08c`"*, where the token is a genuine artifact id and the label is the
+/// SUBJECT of the sentence rather than a tag on the value. A proximity-only rule suppresses
+/// that one, which is the false negative this class invites: a mention about patch-ids
+/// swallowing a real citation.
+fn labelled_as_patch_id(text: &str, span_start: usize) -> bool {
+    let line_start = text[..span_start].rfind('\n').map_or(0, |i| i + 1);
+    let before = &text[line_start..span_start];
+    let Some(at) = before.to_ascii_lowercase().rfind("patch-id") else {
+        return false;
+    };
+    let gap = &before[at + "patch-id".len()..];
+    !gap.chars().any(|c| c.is_ascii_alphabetic())
 }
 
 /// Exactly 16 lowercase hex digits — a librarian artifact id.
@@ -1767,5 +1805,56 @@ Walk through `src/services/auth.rs`, then see [the sample](src/foo.py).
              corpus, so a reading far above 506 is expected and is not a defect.",
             files.len()
         );
+    }
+
+    /// The collision this guard exists for, in both directions at once.
+    ///
+    /// Asserting only the suppression would pass equally if the rule swallowed every
+    /// 16-hex token near the word "patch-id" — which is the false negative that costs a
+    /// real citation. The `belongs to` case is drawn verbatim from the corpus.
+    #[test]
+    fn a_labelled_patch_id_is_not_a_citation_but_a_sentence_about_one_still_is() {
+        let suppressed = [
+            "Fixed in `9f743091`, patch-id `92db5adf65b7a748`.",
+            "done 2026-09-01 — message half `0933bc95` (patch-id `42c3dcd17a52ed55`), rest",
+            "shipped, patch-id **`0ba7a71b3f8462e8`** and the rest",
+            "patch-id `5eb59d0d5ac2ffed` closed it",
+        ];
+        for text in suppressed {
+            let cands = parse_refs(text, Path::new("docs/trackers/t.md"), PathSyntax::NoModules).0;
+            assert!(
+                cands.iter().all(|c| c.ref_kind != RefKind::ArtifactId),
+                "labelled patch-id was claimed as an artifact id: {text}"
+            );
+        }
+
+        // The label is the SUBJECT here, not a tag on the value — the token is a real bug.
+        // Verbatim from docs/issues/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md
+        let kept = "The patch-id belongs to `d5af3d3ceff1d08c`, a different bug.";
+        let cands = parse_refs(kept, Path::new("docs/trackers/t.md"), PathSyntax::NoModules).0;
+        assert!(
+            cands
+                .iter()
+                .any(|c| c.ref_kind == RefKind::ArtifactId && c.raw_ref == "d5af3d3ceff1d08c"),
+            "a sentence ABOUT a patch-id swallowed a genuine artifact citation"
+        );
+    }
+
+    /// The gap rule is what separates the two cases above, so pin it directly rather than
+    /// only through `parse_refs` — a second level asserting about its own re-implementation
+    /// is indistinguishable from coverage until you break the thing that ships.
+    #[test]
+    fn the_patch_id_label_must_reach_the_token_through_punctuation_only() {
+        let t = "a, patch-id **`aaaaaaaaaaaaaaaa`";
+        assert!(labelled_as_patch_id(t, t.find('`').unwrap()));
+
+        let u = "the patch-id belongs to `aaaaaaaaaaaaaaaa`";
+        assert!(!labelled_as_patch_id(u, u.find('`').unwrap()));
+
+        // No label at all, and a label on a PREVIOUS line must not reach across.
+        let v = "plain `aaaaaaaaaaaaaaaa`";
+        assert!(!labelled_as_patch_id(v, v.find('`').unwrap()));
+        let w = "patch-id `bbbbbbbbbbbbbbbb`\nand then `aaaaaaaaaaaaaaaa`";
+        assert!(!labelled_as_patch_id(w, w.rfind('`').unwrap() - 16));
     }
 }
