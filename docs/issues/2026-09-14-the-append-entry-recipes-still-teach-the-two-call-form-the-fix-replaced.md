@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/doc-contradicted-by-code
 - librarian
@@ -127,7 +127,12 @@ Three surfaces state the old protocol (measured 2026-09-14, `git grep` at `HEAD`
 
 - `docs/templates/session-log.md` — 4 restatements, including the anchor comment that sits
   **inside every ledger copied from it**, so the instruction is re-served at the point of use.
-- `docs/TAXONOMY.md` — the `F-N` row, and `W-N` by reference (*"Same"*).
+- `docs/TAXONOMY.md` — **four rows, not one**: `F-N` `:108`, `R-N` `:110`, `OB-N` `:118` and
+  `IC-N` `:124`, the last three byte-identical (`Add the Index row after, with the returned
+  id.`). `W-N` `:109` inherits `F-N`'s recipe via *"Same"*. **This file undercounted by
+  three**, and the cause is this section's own claim one level up: it read the row the defect
+  was *noticed* in rather than grepping the instruction, substituting a worked instance for
+  the population.
 - `codescout-companion/skills/reconnaissance/SKILL.md` § Phase 3 — cross-repo.
 
 `get_guide("tracker-conventions")`, named in the prediction, is **not** one of them; its only
@@ -173,7 +178,8 @@ editing.
 
 ## Fix
 
-Not implemented. The change is to each recipe, not to the code:
+**Implemented 2026-09-14** — see § Fix provenance. The change is to each recipe, not to the
+code:
 
 - `docs/templates/session-log.md` — the 4 restatements, **including the anchor comment**, which
   is the one that reaches readers who open nothing else.
@@ -248,14 +254,41 @@ A check requiring every append to pass `index_row` would also be wrong — 28 of
 ledgers keep no row table. The assertion belongs on the *documentation*, in the coupling form
 above.
 
-Fix SHA: *(not yet fixed)*
-Patch-id: *(not yet fixed)*
+## Fix provenance
+
+- **SHA:** `b325129a` (`experiments`) — the three recipes, and the regression guard
+- **patch-id:** `d14c3dd7c6ceae506618dcc2267c016862d43ac7`
+- **SHA:** `d811a2dc` (`experiments`) — the guard's matcher, which a mutation probe showed was
+  decoration until it normalized markup and line wrapping
+- **patch-id:** `b45a5c6d8925ff6ca60ae37798f88f407673eeae`
+- **SHA:** `codescout-companion:e827162` (`main`) — the cross-repo skill surface
+- **patch-id:** `3c9f27849404367ae45b7e7c67ffc18f8d0d3612`
 
 ## Tests added
 
-None yet — no fix chosen, and the gate above is a proposal rather than a decision. A test now
-would pin a shape nobody has adopted.
+`prescriptive_recipes_teach_append_entrys_one_call_form` (`src/prompts/mod.rs`). It scans the
+prescriptive surfaces for the retired protocol and for the two parameter names, with the same
+population cut as its sibling `reader_docs_contain_no_retired_call_forms` — `docs/issues/` is
+excluded because this very file quotes the retired form as evidence.
 
+**Its first version was decoration, and `scripts/mutation-probe.sh` is what said so.** Reverting
+the template to the two-call form left it GREEN. The needles are plain phrases and the retired
+protocol is not: it is written `**Then**\n> add the Index …`, with bold markers *and* a line
+wrap inside the phrase, and TAXONOMY's `F-N` row wrote `*after*` mid-needle. Measured against
+the original text of all five stale sites, a raw lowercase `contains` matched **1 of 5** — and
+not either of the two surfaces that produced the incident. Normalizing emphasis, backticks,
+blockquote markers and every whitespace run makes the phrase expressible: 5 of 5, no false
+positive against the current text. Observed **KILLED (rc=101, 1 test ran)** after the repair.
+
+**What it cannot tell you**, because both halves are monotone: absence under removal, presence
+under widening. Paired they catch the two regressions that actually happened — reverting to the
+two-call form, and dropping the recipe — and they do not check the recipe is *correct*. Nothing
+reaches `index_after_line`'s two silent failure modes; those are prose, and they were found by
+reproduction rather than by any gate (`context-injection-session-log:F-9`).
+
+**The cross-repo surface is named by the guard and enforced by nothing.** The sibling-checkout
+lookup resolves `CARGO_MANIFEST_DIR.parent()`, which is absent in CI *and* wrong inside any git
+worktree, so it skips in both. Its proper home is `claude-plugins`' own suite.
 ## Workarounds
 
 Pass both parameters. One call, atomic:
@@ -264,13 +297,29 @@ Pass both parameters. One call, atomic:
 doc(action="append_entry", id=…, id_prefix="F",
     anchor_heading="## Template for new entries", title=…, body=…,
     index_row="| {id} | 2026-09-14 | med | <category> | open | **<title>** — <text> |",
-    index_after_line="|----|------|---------:|----------|--------|-------|")
+    index_after_line="<the table line your row follows>")
 ```
 
 `{id}` is a template the server fills — the caller cannot know the id beforehand.
-`index_after_line` matches the **first** such line, so a ledger with several tables needs the
-anchor chosen deliberately.
 
+**This section previously gave `index_after_line` as a literal separator, and that was wrong for
+most ledgers.** Corrected after running it against the corpus rather than transcribing it
+(`context-injection-session-log:F-9`); measured over all 20 live `docs/trackers/*session-log.md`:
+
+- **Uniqueness.** The anchor matches the **first** equal line. The `## Index` separator is the
+  first occurrence of its own byte string in **19 of 19** ledgers that have one, so `F-N` is safe
+  everywhere — but `prompt-surface-measurement-session-log.md` uses `|---|---|---|` for both
+  tables and repeats it **9 times**, so a `W-N` append anchored there resolves to `:30`, the
+  `F-N` table, and writes the row into it. No error; the entry is still created.
+- **Position.** The row is inserted *after* the match, so a separator anchor puts it at the
+  table's **top**. `bug-fix-session-log.md` is newest-first and wants that;
+  `context-injection-` and `statement-validity-` are oldest-first and want the bottom. The
+  corpus has no convention, so a literal is correct for its author's ledger and silently wrong
+  elsewhere — invisible to whoever writes it, because their own ledger confirms it.
+
+**So use a rule, not a literal: anchor on the target table's last existing row.** It is unique by
+construction, because ids are, and it lands the row at the bottom. A line that does not exist
+writes nothing at all and allocates no id — also not an error.
 ## Resume
 
 **Start at `docs/templates/session-log.md`, not at TAXONOMY.** It is the surface copied into new
