@@ -1568,7 +1568,7 @@ const SOURCE_EXTENSIONS: &str = r"\.(rs|py|ts|tsx|js|cjs|mjs|jsx|go|java|kt|kts|
 /// the guide's list from this one, so the next edit here fails the build until
 /// the guide follows.
 pub(crate) const SOURCE_ACCESS_COMMANDS: &[&str] =
-    &["cat", "head", "tail", "sed", "awk", "less", "more", "grep"];
+    &["cat", "head", "tail", "sed", "awk", "less", "more"];
 
 /// Split `s` on any separator in `seps` that appears *outside* single- or
 /// double-quoted strings. Separators are checked in order — put longer
@@ -1636,45 +1636,13 @@ fn split_outside_quotes(s: &str, seps: &[&str]) -> Vec<String> {
     segments
 }
 
-/// Extracts the pattern argument from a grep shell segment.
-/// Skips the command name, any flag tokens (starting with `-`), and numeric
-/// arguments that immediately follow value-taking flags like `-A`, `-B`, `-C`, `-m`.
-///
-/// Tokenizing with [`shell_tokens`] is what removes the quotes now. The
-/// hand-rolled `trim_matches('"').trim_matches('\'')` this used to end with
-/// stripped one character off each end of the first whitespace-delimited word,
-/// so `grep "foo bar" f` yielded `foo` — half a pattern, and the half that
-/// decides whether the caller is offered the symbol ladder or the generic hint.
-///
-/// Returns an owned `String` because the tokenizer produces owned tokens; the
-/// borrow into `segment` is no longer available.
-fn extract_grep_pattern(segment: &str) -> Option<String> {
-    let mut skip_next = false;
-    for token in shell_tokens(segment).into_iter().skip(1) {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-        if token.starts_with('-') {
-            // Short value-taking flags: -A, -B, -C, -m (numeric context/count args)
-            let flag = token.trim_start_matches('-');
-            if matches!(flag, "A" | "B" | "C" | "m") {
-                skip_next = true;
-            }
-            continue;
-        }
-        return Some(token);
-    }
-    None
-}
-
 /// Returns a hint string if `command` is a file-reading tool targeting a source file,
 /// `None` if the command is safe to execute.
 ///
 /// Two-part heuristic: both a blocked command name AND a source file extension must be
-/// present in the command string. Use codescout tools instead:
-/// - `read_file`, `symbols` for reading
-/// - `grep` for regex extraction
+/// present in the command string. Use codescout tools instead: `read_file`, `symbols` for
+/// reading. `grep` is no longer blocked here (it has its own MCP tool and is exempted
+/// command-wide, see docs/issues/2026-09-14-il3-grep-remedy-assumes-symbol-lookup-for-identifier-shaped-patterns.md).
 ///
 /// The command name is matched against the segment's first token as the *shell* sees
 /// it ([`shell_tokens`]). This closes a bypass: `'cat' src/main.rs` used to yield the
@@ -1769,22 +1737,6 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
         .next()
         .unwrap_or_default();
     let remedy: String = match first_cmd.as_str() {
-        "grep" => {
-            let pat = extract_grep_pattern(blocked.as_str()).unwrap_or_default();
-            if is_identifier_pattern(&pat) {
-                let name = pat.split('|').next().unwrap_or(pat.as_str());
-                format!(
-                    "use symbols(name='{name}') for declarations, \
-                     references(symbol='{name}') for direct callers, \
-                     call_graph(symbol='{name}', direction='callers') for transitive blast radius. \
-                     Re-run with acknowledge_risk: true if you need raw shell grep."
-                )
-            } else {
-                "use grep(pattern, path) codescout tool instead. \
-                 Re-run with acknowledge_risk: true if you need raw shell access."
-                    .to_string()
-            }
-        }
         "sed" | "awk" => "use read_file(path, start_line, end_line), symbols(path), \
                  symbols(name=..., include_body=true), or grep(regex) instead. \
                  Re-run with acknowledge_risk: true if you need raw shell access."
@@ -2013,7 +1965,10 @@ pub fn is_source_path(path: &str) -> bool {
         .is_some_and(|re| re.is_match(path))
 }
 /// Returns true if `s` is a plain identifier or pipe-alternation of identifiers.
-/// Used to decide whether to suggest symbol tools instead of grep.
+/// Used by the MCP `grep` tool (`src/tools/grep.rs`) to decide whether a zero-match
+/// query looks like a symbol name worth a `symbols(...)` suggestion. No longer used by
+/// `check_source_file_access` — shell `grep` is not blocked on source files, so there is
+/// no remedy branch left to feed.
 pub fn is_identifier_pattern(s: &str) -> bool {
     if s.is_empty() {
         return false;
@@ -3023,33 +2978,6 @@ mod tests {
     }
 
     #[test]
-    fn a_quoted_multiword_grep_pattern_survives_whole() {
-        // `trim_matches` stripped one quote character off each end of the first
-        // whitespace-delimited word, so this came back as `foo` — half a pattern,
-        // and the half that decides whether the caller is handed the symbol ladder
-        // (`foo` looks like an identifier) or the generic grep hint.
-        assert_eq!(
-            extract_grep_pattern(r#"grep "foo bar" src/main.rs"#).as_deref(),
-            Some("foo bar"),
-            "was: Some(\"foo\")"
-        );
-
-        // Unchanged.
-        assert_eq!(
-            extract_grep_pattern("grep WriteMemory src/tools/memory.rs").as_deref(),
-            Some("WriteMemory")
-        );
-        assert_eq!(
-            extract_grep_pattern("grep 'WriteMemory|ReadMemory' src/x.rs").as_deref(),
-            Some("WriteMemory|ReadMemory")
-        );
-        assert_eq!(
-            extract_grep_pattern("grep -A 3 WriteMemory src/x.rs").as_deref(),
-            Some("WriteMemory")
-        );
-    }
-
-    #[test]
     fn a_quoted_head_still_names_the_command() {
         // `is_unbounded_lhs` and `stage_trims` both key off the head token, so
         // both inherit the same evasion and the same fix.
@@ -3195,6 +3123,19 @@ mod tests {
             check_source_file_access("cat /home/u/work/otherrepo/src/main.rs", root).is_none(),
             "a sibling repo is not the active project"
         );
+    }
+
+    #[test]
+    fn grep_on_in_project_source_is_no_longer_blocked() {
+        // `grep` was removed from `SOURCE_ACCESS_COMMANDS`: it has its own MCP tool
+        // (codescout's `grep`), unlike `cat`/`sed`/`awk`, so blocking the shell
+        // command bought routing, not capability. See
+        // docs/issues/2026-09-14-il3-grep-remedy-assumes-symbol-lookup-for-identifier-shaped-patterns.md
+        assert!(check_source_file_access_at_root("grep WriteMemory src/tools/memory.rs").is_none());
+        assert!(check_source_file_access_at_root(
+            "grep -rn 'CODESCOUT_EMBEDDER_MODEL_NAME|EMBED_API_KEY' . --include=*.rs"
+        )
+        .is_none());
     }
 
     /// THE DEFECT (`bcf2c5b5507ca143`): `cat $SP/x.sh` is refused as in-project
@@ -3384,25 +3325,6 @@ mod tests {
     }
 
     #[test]
-    fn an_option_glob_still_counts_without_evidence_of_an_outside_target() {
-        // The discriminating control, and the reason the carve-out above is
-        // keyed on positive evidence rather than on "options are not paths".
-        // `grep -rn x src/ --include='*.rs'` genuinely reads project source, and
-        // the GLOB IS THE ONLY TOKEN THAT SAYS SO — `src/` carries no extension.
-        // Skipping option tokens outright would have opened exactly this hole
-        // while looking like a tidier rule.
-        let root = Path::new("/home/u/work/myproj");
-        assert!(
-            check_source_file_access("grep -rn 'x' src/ --include='*.rs'", root).is_some(),
-            "an in-project recursive grep is still a project source read"
-        );
-        assert!(
-            check_source_file_access("grep -rn 'x' --include='*.rs'", root).is_some(),
-            "no operand at all means the cwd, which is the project root"
-        );
-    }
-
-    #[test]
     fn source_file_access_allows_wc_on_source() {
         // `wc` emits a COUNT, never content. This gate exists to route content
         // reads to symbols/read_file — and codescout has no tool that returns a
@@ -3484,44 +3406,6 @@ mod tests {
             hint.contains("symbols"),
             "hint should mention symbols, got: {hint}"
         );
-    }
-
-    #[test]
-    fn grep_on_source_with_identifier_gives_symbol_ladder() {
-        let hint =
-            check_source_file_access_at_root("grep WriteMemory src/tools/memory.rs").unwrap();
-        assert!(hint.contains("symbols(name='WriteMemory')"), "got: {hint}");
-        assert!(
-            hint.contains("references(symbol='WriteMemory')"),
-            "got: {hint}"
-        );
-        assert!(
-            hint.contains("call_graph(symbol='WriteMemory'"),
-            "got: {hint}"
-        );
-    }
-
-    #[test]
-    fn grep_on_source_with_regex_gives_generic_hint() {
-        let hint = check_source_file_access_at_root("grep 'foo.*bar' src/main.rs").unwrap();
-        assert!(hint.contains("grep(pattern"), "got: {hint}");
-        // must NOT show symbol ladder for regex patterns
-        assert!(!hint.contains("call_graph"), "got: {hint}");
-    }
-
-    #[test]
-    fn grep_pipe_alternation_uses_first_part_in_hint() {
-        let hint =
-            check_source_file_access_at_root("grep 'WriteMemory|ReadMemory' src/tools/memory.rs")
-                .unwrap();
-        assert!(hint.contains("symbols(name='WriteMemory')"), "got: {hint}");
-    }
-
-    #[test]
-    fn grep_value_taking_flag_skipped_for_identifier() {
-        let hint =
-            check_source_file_access_at_root("grep -A 3 WriteMemory src/tools/memory.rs").unwrap();
-        assert!(hint.contains("symbols(name='WriteMemory')"), "got: {hint}");
     }
 
     #[test]

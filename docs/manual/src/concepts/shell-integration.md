@@ -46,14 +46,15 @@ rather than accidentally.
 <!-- audit-doc-refs:ignore — the table pairs a blocked shell command with its
      redirect. Both sides are commands the reader types, against their own files. -->
 
-`cat`, `grep`, `head`, `tail`, `sed`, and `awk` used directly on source files
+`cat`, `head`, `tail`, `sed`, and `awk` used directly on source files
 (`.rs`, `.py`, `.ts`, `.go`, `.java`, `.kt`, etc.) are blocked at the tool
-level. The error message suggests the appropriate codescout equivalent:
+level. `grep` is exempt (it has its own MCP equivalent, so blocking the
+shell command bought routing rather than capability). The error message
+suggests the appropriate codescout equivalent:
 
 | Blocked pattern | Redirect to |
 |---|---|
 | `cat src/foo.rs` | `read_file("src/foo.rs")` or `symbols("Foo")` |
-| `grep 'fn parse' src/` | `grep("fn parse", path="src/")` |
 | `head -20 main.py` | `read_file("main.py", start_line=1, end_line=20)` |
 
 This enforces token-efficient navigation. Reading an entire file to find one

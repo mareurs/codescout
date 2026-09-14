@@ -659,7 +659,8 @@ pub fn refusal_predicate(err_family: &str) -> Option<&'static str> {
         }
         "il3_shell_on_source" => {
             "IL-3 source condition: refused when a CONTENT reader \
-             (cat/head/tail/sed/awk/less/more/grep) names a source file INSIDE this project. \
+             (cat/head/tail/sed/awk/less/more) names a source file INSIDE this project. \
+             `grep` is exempt — it has its own MCP tool and no longer routes through this gate. \
              `wc` is allowed — it returns a count, not content. A path outside the project root \
              is allowed, because `symbols`/`read_file` resolve against the active project and \
              cannot serve it. `acknowledge_risk: true` bypasses."
@@ -2890,7 +2891,9 @@ mod redesign_invariants {
     /// assertion from the constant is what makes the next edit to the gate fail
     /// the build until the guide follows: when `wc` came off the list on
     /// 2026-08-16 the guide went on naming it for a day, and nothing noticed
-    /// because no test read both.
+    /// because no test read both. `grep` came off the same way on 2026-09-14 —
+    /// it has its own MCP tool, unlike the metadata commands below, but the
+    /// silent-drift risk to the guide prose is identical.
     #[test]
     fn iron_laws_detail_gate_names_every_blocked_command() {
         let body = crate::prompts::topic_body("iron-laws-detail").expect("guide registered");
@@ -2908,9 +2911,19 @@ mod redesign_invariants {
             assert!(
                 !crate::util::path_security::SOURCE_ACCESS_COMMANDS.contains(&cmd),
                 "`{cmd}` is blocked again — the guide lists it as an allowed \
-                 metadata command, so update that paragraph in the same commit"
+             metadata command, so update that paragraph in the same commit"
             );
         }
+        // `grep` is exempt for a different reason (a first-class MCP equivalent
+        // exists, unlike the metadata commands above) but the drift risk to the
+        // guide prose — the "Two gates, same words" and "Read-mode for source
+        // code is blocked" paragraphs — is the same: catch it here rather than
+        // relying on someone to notice the prose went stale.
+        assert!(
+            !crate::util::path_security::SOURCE_ACCESS_COMMANDS.contains(&"grep"),
+            "`grep` is blocked again — update iron-laws-detail.md's grep-exemption \
+         paragraphs in the same commit"
+        );
     }
 
     /// BL-26 regression: `doc(action="move")` mints a NEW id — catalog

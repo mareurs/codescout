@@ -105,12 +105,14 @@ whole pipeline, so a trimmer after it has nothing left to trim:
 `awk NR<10` and `sort -u` each drop records.
 
 **Two gates, same words — read both before concluding.** Everything
-above is the PIPE gate. `cat`, `awk`, `sed` and `grep` are bounded
-LHS here and still refused on a *source file* by the read-mode gate
-below. `grep` is the sharpest case: a filtering `grep` trims on the
-RIGHT of a pipe, a counting `grep -c` does not, it is bounded LHS on
-the left, and it is refused on a source path. A sentence about one
-gate says nothing about the other.
+above is the PIPE gate. `cat`, `awk` and `sed` are bounded LHS here
+and still refused on a *source file* by the read-mode gate below.
+`grep` used to be the sharpest case — bounded LHS on this gate, still
+refused on a source path by the other — but as of 2026-09-14 `grep`
+is exempt from the read-mode gate entirely (it has its own MCP tool,
+unlike `cat`/`sed`/`awk`), so a non-recursive `grep` on a source file
+now only has this PIPE gate's rules to satisfy. A sentence about one
+gate still says nothing about the other.
 
 **Windows note:** prefer codescout-native discovery
 (`tree(glob=...)`, `grep(pattern=...)`) over shell `find`. On
@@ -121,13 +123,21 @@ no file argument reads stdin and hangs the command.
 **Read-mode for source code is blocked — content readers, not every
 command.** Two predicates must BOTH hold within one compound segment:
 its *first token* is a content-reading command — `cat`, `head`,
-`tail`, `sed`, `awk`, `less`, `more`, `grep` — **and** the segment
-names a source-file extension. So `cat src/foo.rs` refuses with
+`tail`, `sed`, `awk`, `less`, `more` — **and** the segment names a
+source-file extension. So `cat src/foo.rs` refuses with
 `shell access to source files is blocked`, while
 `git commit -m "fix tail-50 in output_buffer.rs"` passes: `git` is not
 a content reader, even though the message contains both `tail` and
-`.rs`. Route through the codescout `symbols` / `read_file` / `grep`
-tools, or pass `acknowledge_risk: true` for genuine raw shell access.
+`.rs`. Route through the codescout `symbols` / `read_file` tools, or
+pass `acknowledge_risk: true` for genuine raw shell access.
+
+**`grep` is exempt from this gate, command-wide.** Unlike the other
+six, `grep` already has a first-class MCP equivalent (`grep(pattern,
+path)`) doing the identical job, so blocking the shell command bought
+routing, not capability — and it was the dominant source of this
+gate's friction (52 of the largest error bucket in one 3-day usage
+window). Shell `grep` on a source file no longer refuses here at all;
+it is still subject to the PIPE gate above like any other command.
 
 **Metadata commands are NOT blocked.** `wc`, `ls`, `stat`, `du` and
 `file` return a measurement *of* the content rather than the content
