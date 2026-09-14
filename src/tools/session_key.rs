@@ -119,6 +119,51 @@ pub fn conversation_from_meta(
     })
 }
 
+/// The argument key a companion hook stamps this call's principal into.
+///
+/// **The vendor namespacing is structural, not decorative.** `.` and `/` cannot
+/// occur in a Rust identifier, so this key can never collide with a real field
+/// on any tool's input struct — which is the escape hatch
+/// `cluster/addressing-without-an-escape-hatch` (IC-6) asks for, in place of a
+/// claim that collision "cannot happen".
+///
+/// That matters because `#[serde(deny_unknown_fields)]` is derived at 42 sites
+/// across this workspace, concentrated in the librarian tools. An injected key
+/// reaching a deserializer is **refused, not ignored** — so
+/// [`principal_from_arguments`] removes it rather than merely reading it, and
+/// `call_tool_inner` is the one site that sees every call.
+pub const PRINCIPAL_ARG_KEY: &str = "dev.codescout.mcp/agentId";
+
+/// Take the principal token a companion hook stamped onto this call's arguments,
+/// **removing it** so no tool ever sees it.
+///
+/// The value is treated as opaque and conversation-scoped: the hook composes it
+/// from the `session_id` and `agent_id` that its own `PreToolUse` payload
+/// carries, because the two together are what identifies a principal and either
+/// alone does not. `agent_id` alone conflates two sessions' parents — both
+/// present as "no agent id" — measured at `context-injection-session-log:W-2`.
+/// The server does not re-derive the composition: its own ledger key comes from
+/// a three-rank chain ([`resolve`]), not from one env var, so composing here
+/// would risk a key that disagrees with the one the ledger was built with.
+///
+/// **Removal is unconditional once the key is present, and the return value is
+/// not.** A non-string or whitespace value yields `None` — we do not know who is
+/// calling — but it is stripped anyway, because to `deny_unknown_fields` an
+/// unknown key of the wrong *type* is exactly as fatal as one of the right type.
+/// Returning early without removing would turn a malformed stamp into a refused
+/// tool call, which is the one outcome a best-effort identity hint must never
+/// produce.
+///
+/// Absent key ⇒ `None` and `input` untouched, which is every non-Claude client
+/// and every session without the companion installed. That is the parent's case
+/// too: a parent's `PreToolUse` payload carries no `agent_id` at all, so absence
+/// means "this session's own parent" rather than "unknown".
+pub fn principal_from_arguments(input: &mut serde_json::Value) -> Option<String> {
+    let removed = input.as_object_mut()?.remove(PRINCIPAL_ARG_KEY)?;
+    let trimmed = removed.as_str()?.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,6 +284,107 @@ mod tests {
                 "a turn-granularity key must never be probed: {key}"
             );
         }
+    }
+
+    /// The happy path, and the half that `deny_unknown_fields` depends on:
+    /// the key must be GONE from `input` afterwards, not merely read.
+    #[test]
+    fn a_principal_token_is_taken_and_removed_from_the_arguments() {
+        let mut input = serde_json::json!({
+            "pattern": "foo",
+            "dev.codescout.mcp/agentId": "sess-1/agent-a",
+        });
+        assert_eq!(
+            principal_from_arguments(&mut input),
+            Some("sess-1/agent-a".to_string())
+        );
+        assert!(
+            input.get(PRINCIPAL_ARG_KEY).is_none(),
+            "the stamp must not survive into the tool's input"
+        );
+        assert_eq!(
+            input,
+            serde_json::json!({"pattern": "foo"}),
+            "nothing but the stamp may be disturbed"
+        );
+    }
+
+    /// The case the early-return version gets wrong. A malformed stamp must not
+    /// become a REFUSED tool call: to `deny_unknown_fields` an unknown key of the
+    /// wrong type is exactly as fatal as one of the right type, so removal has to
+    /// happen before the string check, not after it.
+    ///
+    /// Mutating `principal_from_arguments` to `removed.as_str()?` *before* the
+    /// `remove` — i.e. reading without taking — kills this and leaves the happy-path
+    /// test above green.
+    #[test]
+    fn a_malformed_principal_is_still_stripped_so_it_cannot_refuse_a_tool_call() {
+        for bad in [
+            serde_json::json!(42),
+            serde_json::json!(null),
+            serde_json::json!({"nested": true}),
+            serde_json::json!(["a"]),
+        ] {
+            let mut input = serde_json::json!({"pattern": "foo"});
+            input[PRINCIPAL_ARG_KEY] = bad.clone();
+            assert_eq!(
+                principal_from_arguments(&mut input),
+                None,
+                "a {bad} stamp names no principal"
+            );
+            assert!(
+                input.get(PRINCIPAL_ARG_KEY).is_none(),
+                "a {bad} stamp must still be stripped"
+            );
+        }
+    }
+
+    /// Whitespace is "the hook said nothing", matching every other rank in this
+    /// module — and it is stripped all the same, for the reason above.
+    #[test]
+    fn a_blank_principal_names_nobody_and_is_still_stripped() {
+        for blank in ["", "   ", "\t\n"] {
+            let mut input = serde_json::json!({"dev.codescout.mcp/agentId": blank});
+            assert_eq!(principal_from_arguments(&mut input), None);
+            assert!(input.get(PRINCIPAL_ARG_KEY).is_none());
+        }
+    }
+
+    /// Every session without the companion, and every non-Claude client. The
+    /// arguments must come out byte-identical, because this is the overwhelmingly
+    /// common path and it must cost nothing and change nothing.
+    #[test]
+    fn no_stamp_leaves_the_arguments_untouched() {
+        let original = serde_json::json!({"pattern": "foo", "glob": "*.rs"});
+        let mut input = original.clone();
+        assert_eq!(principal_from_arguments(&mut input), None);
+        assert_eq!(input, original);
+
+        // A non-object body is the other silence shape, and must not panic.
+        let mut scalar = serde_json::json!("not an object");
+        assert_eq!(principal_from_arguments(&mut scalar), None);
+    }
+
+    /// Pins the collision argument the const's doc comment makes, so that a later
+    /// "tidy" rename to a plain identifier (`agentId`, `_principal`) reds here
+    /// rather than silently re-opening the IC-6 hazard. A key that CAN be spelled
+    /// as a Rust field name can collide with one.
+    #[test]
+    fn the_principal_key_cannot_be_spelled_as_a_rust_field_name() {
+        assert!(
+            PRINCIPAL_ARG_KEY.contains('.') && PRINCIPAL_ARG_KEY.contains('/'),
+            "{PRINCIPAL_ARG_KEY} must keep a character no Rust identifier may contain"
+        );
+        assert!(
+            !PRINCIPAL_ARG_KEY
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_'),
+            "{PRINCIPAL_ARG_KEY} is spellable as an identifier and could collide with a real field"
+        );
+        assert!(
+            PRINCIPAL_ARG_KEY.starts_with("dev.codescout.mcp/"),
+            "vendor prefix is what keeps this disjoint from another sender's key"
+        );
     }
 
     #[test]

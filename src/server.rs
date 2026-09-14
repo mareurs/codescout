@@ -1176,7 +1176,14 @@ impl CodeScoutServer {
         let asserted_conversation =
             crate::tools::session_key::conversation_from_meta(req.meta.as_ref().map(|m| &m.0));
 
-        let input: Value = Self::parse_input(req.arguments);
+        let mut input: Value = Self::parse_input(req.arguments);
+
+        // Take the companion's principal stamp BEFORE anything else reads `input`.
+        // 42 `deny_unknown_fields` sites would refuse the call outright if it
+        // survived to a deserializer, so removing it at the one site every call
+        // passes through is what keeps the injection invisible to every tool.
+        let asserted_principal = crate::tools::session_key::principal_from_arguments(&mut input);
+
         let workspace_override = Self::extract_workspace_override(&input);
 
         // A per-request workspace= pin is the caller's explicit, deliberate
@@ -1221,13 +1228,20 @@ impl CodeScoutServer {
         // subagent reusing this live process never updates, while the rendezvous is
         // polled on every call and tracks the conversation we are CURRENTLY serving.
         let rendezvous_session = self.poll_rendezvous();
-        // A conversation asserted on the REQUEST outranks the rendezvous slot: it
-        // is per-call rather than per-process, needs no companion hook, and is the
-        // only source that can separate a subagent's calls from its parent's.
-        // `None` on every call today — no client sends it — so this leaves the
+        // A principal or conversation asserted on the REQUEST outranks the
+        // rendezvous slot: both are per-call rather than per-process, and they are
+        // the only sources that can separate a subagent's calls from its parent's.
+        //
+        // The principal stamp outranks the `_meta` conversation because it is the
+        // one that exists: measured 2026-09-14, a subagent's `PreToolUse` payload
+        // carries `agent_id` and `agent_type` while a parent's carries neither, so
+        // the companion can compose a conversation-unique token today. The `_meta`
+        // tier is still `None` on every live call — no client sends a
+        // conversation-scoped key — and is kept as the path that needs no plugin
+        // once one does. Without the companion both are `None` and this leaves the
         // rendezvous result exactly as it was.
         let serving_session = self
-            .adopt_request_conversation(asserted_conversation)
+            .adopt_request_conversation(asserted_principal.or(asserted_conversation))
             .or(rendezvous_session);
         self.poll_guide_rearm();
 
@@ -10128,6 +10142,84 @@ mod guide_hint_tests {
         assert!(
             call(&server, Some("conv-child")).await.is_empty(),
             "re-stating the same conversation must not re-arm"
+        );
+    }
+
+    /// A principal stamped into the ARGUMENTS re-arms the ledger; re-stating the
+    /// same one does not.
+    ///
+    /// Sibling of the `_meta` test above, and it exists separately for the reason
+    /// that law keeps earning: a unit test on `principal_from_arguments` cannot
+    /// catch a `call_tool_inner` that routes around it. The extraction and the
+    /// adoption are two sites, and only this one asserts they are connected —
+    /// deleting the `principal_from_arguments` call from `call_tool_inner` leaves
+    /// every `session_key` unit test green and kills steps 3 and 4 here.
+    ///
+    /// Unlike the `_meta` tier, this path is **live**: measured 2026-09-14, a
+    /// subagent's `PreToolUse` payload carries `agent_id` and `agent_type` while a
+    /// parent's carries neither, so a companion hook can stamp a conversation-unique
+    /// token today. See `docs/adrs/2026-09-14-a-subagent-is-a-principal.md`.
+    #[tokio::test]
+    async fn a_principal_stamped_into_the_arguments_rearms_the_ledger_once() {
+        async fn call(server: &CodeScoutServer, principal: Option<&str>) -> Vec<String> {
+            let mut arguments = serde_json::Map::new();
+            arguments.insert("command".to_string(), json!("echo hi"));
+            if let Some(p) = principal {
+                arguments.insert(
+                    crate::tools::session_key::PRINCIPAL_ARG_KEY.to_string(),
+                    json!(p),
+                );
+            }
+            let params = json!({
+                "name": "run_command",
+                "arguments": Value::Object(arguments),
+            });
+            let req: CallToolRequestParams = serde_json::from_value(params).unwrap();
+            let out = server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .expect(
+                    "a stamped call must still execute — the stamp is stripped before dispatch",
+                );
+            guide_blocks(&out.content)
+        }
+
+        let (_dir, server) = make_server().await;
+
+        // 1. The opener fires on the first guide-eligible call of the session.
+        assert!(
+            !call(&server, None).await.is_empty(),
+            "the session opener must fire on the first call"
+        );
+
+        // 2. POSITIVE CONTROL. Without it, step 3 proves nothing: a guide that
+        //    fired on every call would satisfy step 3 just as well as a re-arm.
+        assert!(
+            call(&server, None).await.is_empty(),
+            "a second call from the same principal must be deduped"
+        );
+
+        // 3. A subagent's first call. Same process, same session id, same
+        //    connection — only the stamp differs, and it is the only thing that can.
+        assert!(
+            !call(&server, Some("sess-1/agent-a")).await.is_empty(),
+            "a newly asserted principal must be re-armed"
+        );
+
+        // 4. That subagent's SECOND call, which is what all its later calls look
+        //    like. Must NOT re-arm, or the ledger over-delivers on every call —
+        //    the exact failure that keying on a per-CALL token would produce.
+        assert!(
+            call(&server, Some("sess-1/agent-a")).await.is_empty(),
+            "re-stating the same principal must not re-arm"
+        );
+
+        // 5. A CONCURRENT sibling subagent. Distinct principal, so it re-arms —
+        //    and this is the case no arrival-order scheme could serve, because
+        //    agent-a is still live and interleaved with it.
+        assert!(
+            !call(&server, Some("sess-1/agent-b")).await.is_empty(),
+            "a second concurrent principal must be re-armed independently"
         );
     }
 
