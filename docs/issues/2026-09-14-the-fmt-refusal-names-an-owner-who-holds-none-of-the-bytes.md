@@ -4,7 +4,7 @@ kind: bug
 status: open
 title: 'BUG: the fmt refusal''s owner list names a session that holds none of the bytes it asks them to format'
 tags:
-- cluster/unclassified
+- cluster/gate-keyed-on-unobservable-event
 - hooks
 - shared-checkout
 - provenance
@@ -168,28 +168,36 @@ tell your row from an actionable one.
 
 ## Resume
 
-`cluster/unclassified`, and the choice is deliberate rather than lazy. Two classes were
-weighed. `IC-6` is defensible — a selector that matches too much, binding the wrong target —
-but that argues the *window* is the defect, which § *Root cause* explicitly has not
-established. `IC-14` does not fit: the guard's implementation is not a subset of its name;
-it is correct, and its message overstates.
+`cluster/gate-keyed-on-unobservable-event` (`IC-2`), **retagged from `cluster/unclassified`
+on 2026-09-14 after a sibling instance surfaced**, and the retag is a fit test rather than a
+tidy-up.
 
-**A third reading is the strongest and has no class yet.** This corpus already carries two
-flagged instances of *a diagnostic collapsing two states that take OPPOSITE repairs into one
-message*: `120e3207d427ea14` (`edit_code` reporting `TargetDropped` for a rename) and
-`a807b70cb7ee7340` (`classify()` conflating two `MalformedReason`s). Both sit in
-`cluster/unclassified` with the argument written down and the class deliberately not opened,
-on the grounds that a class opened in passing is one whose inclusion test nobody defends.
-This is **instance three, in a third subsystem** — a shell gate rather than symbol editing or
-result-cap classification — so the population now clears the ledger's own promotion bar of
-three instances across two subsystems.
+`IC-2`'s claim is *"a gate whose condition is an event outside its observation boundary
+substitutes a proxy … and the substitution fails silently, because a proxy returns a plausible
+answer rather than an error."* That is this bug exactly: the condition the remedy needs is
+**who holds the unformatted bytes**, the proxy is **who wrote this file since its last
+commit**, and the failure returned a *name* rather than an error. **Crucially it commits to
+nothing § Root cause declines to establish** — it is a claim about what the gate's inputs can
+observe, not about where a window boundary was drawn, which is precisely why `IC-6` was
+refused: *a selector matching too much* would assert the window is the defect.
 
-Opening it is the next action and is **not** taken here, for the same reason it was not taken
-the first two times: it is a ledger-wide act, and this file is the instance, not the
-adjudication. What is different now is that the count is no longer the obstacle — the
-argument is written in three places and whoever opens it inherits a defended inclusion test
-rather than having to invent one.
+**The sibling is what moved it.** `9d1e8696` filed the pre-edit `[cs-hint]` advisory firing on
+a file the session itself had just written via `edit_code(action="rename")` — whose LSP rename
+touches every referencing file — and tagged it `IC-2` with the framing *"dirtiness is the
+proxy, authorship is the event, and nothing in the hook's inputs can answer the latter."*
+Two hooks, two proxies, one unobservable event, filed the same day. Leaving this one in
+`cluster/unclassified` would have split the pair across two classes and made the query that
+finds them impossible.
 
+**What the retag does NOT settle, and the reason the original filing is not simply wrong.**
+This bug is still the third instance of a *different* shape with no class — a diagnostic
+collapsing two states that take OPPOSITE repairs into one message, after
+`120e3207d427ea14` and `a807b70cb7ee7340`. That reading is not refuted by `IC-2` fitting;
+the two pick out different halves of one defect, and only one half has a class to go to. The
+count argument is preserved on `cluster/unclassified`'s `**Members:**` line so that whoever
+opens that class inherits three instances across three subsystems rather than re-deriving
+them. A bug carries exactly one `cluster/` tag, so the choice was forced; it was not a
+judgement that the other reading is wrong.
 ## References
 
 - `scripts/fmt-mine.sh` — `refuse_not_mine`, and the `[LIVE] peer` / `SHARED` legend
