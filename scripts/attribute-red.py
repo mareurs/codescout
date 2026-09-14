@@ -49,6 +49,7 @@ USAGE
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -123,6 +124,57 @@ def dirty_paths(root: Path) -> set[str]:
         paths.add(p.strip().strip('"'))
     return paths
 
+
+def active_mutations(root: Path) -> list[dict]:
+    """Deliberate mutations currently armed in THIS tree, per their own markers.
+
+    Written by `scripts/mutation-probe.sh` at arm time, removed by it on revert.
+    A marker whose pid is gone is ignored rather than reported: a session that
+    died mid-probe leaves a file behind, and reporting it would tell a reader a
+    mutation is live when the EXIT trap had already restored the bytes. Same
+    liveness shape `doctor`'s `claim_liveness` uses on a taken bug.
+    """
+    out = []
+    d = root / ".codescout" / "mutations"
+    if not d.is_dir():
+        return out
+    for f in sorted(d.glob("*.json")):
+        try:
+            m = json.loads(f.read_text())
+        except Exception:
+            continue                      # a half-written marker is not evidence
+        pid = m.get("pid")
+        if isinstance(pid, int) and not Path(f"/proc/{pid}").exists():
+            continue
+        # An isolated probe mutates its own worktree, so nothing a reader of THIS
+        # tree sees can come from it. Reporting it would be noise, and noise is
+        # how an advisory earns being switched off.
+        if m.get("mode") != "shared":
+            continue
+        out.append(m)
+    return out
+
+
+def mutation_notes(root: Path, hits: list[str]) -> list[str]:
+    """Label a red the reader was going to see anyway. Ask for nothing.
+
+    Deliberately NOT phrased as "stand down". The prescribed-response version of
+    this notice removes the observer whose build log would have resolved the
+    arming session's own anomaly — `observer-blindness:OB-23`, measured across two
+    announced windows. The reader's build is wanted. All this buys them is that
+    they can stop bisecting for a cause that is about to revert itself.
+    """
+    marked = [m for m in active_mutations(root) if m.get("file") in hits]
+    if not marked:
+        return []
+    lines = ["", "  A DELIBERATE mutation is armed in one of these files right now:"]
+    for m in marked:
+        lines.append(f"      {m.get('file')}  armed {m.get('armed_at')} "
+                     f"by {m.get('session_id', '?')}")
+    lines.append("      So this red may be evidence someone is collecting, not a defect.")
+    lines.append("      Nothing is asked of you: your build and its log are wanted, not stood")
+    lines.append("      down. This only saves you bisecting for a cause about to revert.")
+    return lines
 
 def main(argv: list[str]) -> int:
     explain = "--explain" in argv
@@ -208,7 +260,8 @@ def main(argv: list[str]) -> int:
             lines.append(f"      written by {w}{mark}{suffix}")
             lines.extend(extra)
 
-    if not lines:
+    mut_lines = mutation_notes(root, hits)
+    if not lines and not mut_lines:
         return 0
     print("\n[codescout] this failure names files with UNCOMMITTED changes:\n")
     print("\n".join(lines))
@@ -216,6 +269,8 @@ def main(argv: list[str]) -> int:
         print("\n  Another session is holding at least one of these. Ask before editing, "
               "reverting\n  or formatting it — and do not attribute the red to them until "
               "they confirm: this\n  names who WROTE the file, never who broke the build.")
+    if mut_lines:
+        print("\n".join(mut_lines))
     print("\n  Scope: uncommitted state only, from Claude transcripts across every "
           "discovered\n  profile. Native `Bash` bypasses run_command, so a peer working "
           "through Bash can be\n  invisible here — silence is not 'nobody'.")

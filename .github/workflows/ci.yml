@@ -132,6 +132,35 @@ jobs:
           git config --global init.defaultBranch master
       - run: bash tests/count-with-members.sh
 
+  # ITS OWN JOB, same reason as the three above: `shell-tests` is a known-flaky lane
+  # and this suite's assertions are verdicts about a MECHANISM, which stop being
+  # readable the moment a red there could be lane noise.
+  #
+  # Why it is wired at all: `scripts/mutation-probe.sh` exists so that arming a
+  # mutation cannot publish a red to peers who cannot attribute it
+  # (docs/issues/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md).
+  # Two of its properties failed while it was being written and both were found by
+  # RUNNING it rather than reading it: the occurrence count used `grep -F -c`, which
+  # counts matching LINES and reported 11 for a two-line pattern occurring once; and
+  # the isolated worktree is created at HEAD, so it silently tested the COMMITTED
+  # version of a file the author had just edited. Neither errored. Both returned a
+  # plausible answer, which is the defect class the script itself serves — so the
+  # suite is the only thing standing between that class and its own tool.
+  #
+  # Needs git and python3; no Rust toolchain — the fixtures pass `-- true` as the
+  # test command, so nothing here compiles.
+  mutation-probe-tests:
+    name: mutation-probe discriminators
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Identify a committer (the suite builds throwaway git repos)
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name  CI
+          git config --global init.defaultBranch master
+      - run: bash tests/mutation-probe.sh
+
   # ITS OWN JOB, for the reason spelled out above `push-guard-tests`: `shell-tests`
   # is a known-flaky lane, and a suite whose assertions are meant to be read as
   # verdicts loses that the moment its reds are attributable to lane noise.

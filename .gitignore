@@ -13,6 +13,9 @@
 # them, with no error anywhere — the same shape as the projects/ note above.
 /.codescout/project.toml
 /.codescout/index-state.json
+# mutation-probe markers: per-session, transient, removed on revert by the
+# arming process. Never shared — a marker is only true of the tree it sits in.
+/.codescout/mutations/
 /.codescout/embeddings.db
 /.codescout/embeddings.db-wal
 /.codescout/embeddings.db-shm
@@ -47,6 +50,7 @@ crates/*/.codescout/librarian.db
 crates/*/.codescout/librarian.db-shm
 crates/*/.codescout/librarian.db-wal
 crates/*/.codescout/libraries.json
+crates/*/.codescout/mutations/
 crates/*/.codescout/peer-audit.jsonl
 crates/*/.codescout/peers.toml
 crates/*/.codescout/private-memories/

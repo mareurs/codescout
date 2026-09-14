@@ -1,7 +1,7 @@
 ---
 id: df0c18734b20fddd
 kind: bug
-status: taken
+status: fixed
 title: An armed mutation is a deliberate red, and no observer can distinguish it from a broken test
 tags:
 - cluster/transient-shared-state-lies-to-readers
@@ -65,8 +65,25 @@ discipline requires.
 
 ## Fix
 
-**Still unbuilt — but the two directions below are no longer symmetric, and the first one is now
-known to BACKFIRE.** Measured 2026-09-09 across two announced mutation windows (03:22Z, nine
+**BUILT 2026-09-14 as `scripts/mutation-probe.sh`, and it is not the marker this section spent
+two weeks designing.** What changed was a measurement, not an argument: isolating the mutation
+costs 87 s once and 11 s per run thereafter — faster than the shared tree — so the option ranked
+second only because it was assumed expensive became the default. The script isolates by
+construction, which is `OB-1`'s third position (make the correct path end in a safe state)
+rather than this section's position-two marker.
+
+**The marker still shipped, because isolation is not always available.** `--shared` exists for
+mutations whose SUBJECT is the shared checkout — `build_check.rs`'s `checkout_is_shared` returns
+false when only you are present, and `fmt-mine.sh` refuses based on other live sessions owning
+files. Neither can be tested alone in a worktree. On that path the script writes a passive
+marker at arm time, read by `scripts/attribute-red.py`, which `run_command` already materializes
+on every failure-shaped command. The marker satisfies both constraints below without being a
+separate mechanism: written unconditionally by the arming invocation, and passive in wording.
+
+**The history below is kept because it is what a later reader would act wrongly without** —
+announcement was tried, measured, and BACKFIRES, and that is not re-derivable from the current
+shape.
+ Measured 2026-09-09 across two announced mutation windows (03:22Z, nine
 mutations in an untracked file; 04:16Z, three in tracked files), four peers announced to each time.
 
 ### Announcement was tried. It labels, and it SUBTRACTS WITNESSES.
@@ -136,8 +153,30 @@ the moment it acts**. Their pre-push log has that shape and cannot be dismissed 
 because it depends on nobody else doing or not doing anything. A marker written by the arming
 session at arm time qualifies; one that depends on peers reading it does not.
 
-**Not built, and deliberately not built tonight.** Announcement is available and imperfect;
-building the marker is a design change to a shared gate surface, which is an operator's call.
+**Built 2026-09-14 — see § Fix's opening.** Both properties this subsection demanded are
+satisfied by `scripts/mutation-probe.sh`, and neither needed a mechanism of its own: the marker
+is a side effect of the arming invocation (so it cannot be defeated by anyone's compliance, and
+survives the arming session forgetting), and its text names a red the reader was going to see
+anyway while asking for nothing. What this subsection could not anticipate is that the marker
+would end up the FALLBACK rather than the answer — isolation turned out affordable, and an event
+that never reaches a peer needs no label.
+
+### Ceilings on what shipped, stated rather than left to be found
+
+- **The marker is read through `run_command` only.** `attribute-red.py` is materialized and run
+  by `src/tools/run_command/attribution.rs`; native `Bash` bypasses that path entirely, and an
+  explicit `run_in_background: true` returns before an exit status exists to hook on. A peer who
+  hits the red through either route sees no label. This is the SAME documented ceiling the
+  reader-side WIP attribution already carries — inherited, not introduced — but it means
+  `--shared` is labelled for some readers and not others, and silence there says nothing.
+- **`--shared` is a real hole and the marker only makes it legible.** Isolation removes the
+  window; the marker does not. A reader who never looks is exactly as exposed as before.
+- **The isolated worktree carries only the file under test.** Other dirty `.rs` files build at
+  HEAD, and the script says so when it detects them — but a mutation whose meaning depends on
+  two uncommitted files will be measured against a tree that exists nowhere.
+- **Nothing removes an orphaned probe worktree.** It is per-session (2.8 G) and outlives the
+  session that made it. `git worktree remove` is manual; no reaper was built and none is
+  claimed.
 ### 2026-09-13: the red did not read as BROKEN. It read as a POLICY QUESTION.
 
 Third instance, and it adds a failure kind this file does not name. Armed by sessionId
@@ -473,10 +512,28 @@ whole technique, and costs one word.
 
 ## Tests added
 
-None, and none is possible from inside the arming session: the state under test is *another
-session's reading* of a transient tree. What could be tested is a marker mechanism, once one
-exists.
+**21, in `tests/mutation-probe.sh`, wired as its own CI job** — replacing this section's
+previous *"None, and none is possible from inside the arming session."* That was true of the
+thing it was looking at: the state under test was *another session's reading* of a transient
+tree, which no test can reach. It stopped being the question once the mechanism became
+**isolation** rather than **notification** — you cannot test a peer's reading, but you can test
+that the shared tree was never written, and that is an assertion on bytes.
 
+The suite's sharpest cases are the two defects found by **running** the script rather than
+reading it, both of which returned a plausible answer instead of an error:
+
+| case | what it pins |
+|---|---|
+| 4 | a **multi-line** `--find` occurring once is ACCEPTED. `grep -F -c` counts matching LINES and returned **11** for a two-line pattern — it would have refused a good mutation, and did |
+| 6 | an isolated run succeeds on **uncommitted** text. `git worktree add` checks out HEAD, so the probe silently tested the COMMITTED version of a file just edited — a survival reported for a guard that does not exist there yet |
+| 6 | and the shared tree is **byte-identical** after, which is the whole claim, asserted on a hash rather than on the absence of complaints |
+| 7–9 | MUST-SURVIVE: a refused run arms nothing; the reader ignores an `isolated` marker; a marker whose pid is dead is not reported |
+
+**Case 8 is case 9's control, and it was earned.** Case 9 asserts EMPTY output — and an erroring
+module loader produces empty too. It passed vacuously on the first run, while a path bug meant
+the reader never loaded at all. Case 8 exercises the same loader and asserts on CONTENT, so its
+green is what makes case 9's silence attributable to the dead pid rather than to a broken
+import.
 ## References
 
 - `docs/issues/2026-09-08-a-claimed-bug-file-names-the-author-of-the-wip-that-reds-the-build.md` —
