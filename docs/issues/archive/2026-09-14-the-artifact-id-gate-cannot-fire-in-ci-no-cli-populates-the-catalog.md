@@ -1,9 +1,9 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/declared-not-wired
-closed: null
+closed: 2026-09-14
 opened: 2026-09-14
 owner: marius
 related: []
@@ -89,8 +89,38 @@ instrument used to certify the tightening was structurally incapable of expressi
 
 ## Fix
 
+**SHIPPED on `experiments` 2026-09-14**, cited by SHA *and* patch-id — the SHA is positional
+and dies at the next rebase of `experiments`, the patch-id is a content hash of the diff and
+survives rebase and cherry-pick alike.
+
+| half | commit | patch-id |
+|---|---|---|
+| stop the false reds — an empty catalog disables the id check rather than dooming every citation | `ae6dc663` | `dc984ea9668ba34ac18a38cb1c2473393bdfcc71` |
+| the remedy — commit-time gate on a developer machine (`scripts/pre-commit-dead-artifact-ids.sh`) | `3ab306a6` | `eddd04341f92e13022c53b2f8948fa30f136b2c3` |
+| its suite's discrimination fix — case 3 flipped two fields, so it isolated neither | `e43ecdb6` | `6c63cb1152d85f1b28079d2160f15749e87da38a` |
+| the rejected direction, recorded so it is not retried | `66cce698` | `568769582b622f1d76c24660147bf23a37531324` |
+
+**Verified before archiving, 2026-09-14 ~22:10, worktree at `344aff6e`.** Two checks, and they
+answer different questions rather than corroborating each other:
+
+- `bash tests/pre-commit-dead-artifact-ids.sh` → **19 passed, 0 failed** — the guard
+  discriminates. Says nothing about whether it is reached.
+- `audit-doc-refs --no-emit-tracker --fail-on high --json --project .` → **exit 0** — the class
+  this hook exists to catch is empty right now against *this machine's* catalog. That catalog,
+  not CI's, is deliberately the right population: § *Root cause* is the finding that CI's is
+  empty and cannot be seeded with the right ids, so a developer machine is the only observer
+  holding the whole namespace.
+
+**The exit code, not the findings list, is what carries that second claim.** The JSON's
+`findings` array is capped — this run reported `overflow: {shown: 50, total: 74572}` — so a
+severity histogram computed over it is a statement about the *list*. All 50 shown were `med`,
+which reads exactly like a corpus-wide all-clear and is not one (`IC-13`). The run also
+reported `scan_meta.degraded: true` for Rust (`lsp_behind_index`), a second reason a zero read
+off that array would have been worthless.
+
 The wiring half is **done**: `scripts/pre-commit-dead-artifact-ids.sh`, self-gating on staged
-`.md` from the index, wired into `scripts/pre-commit-run.sh`.
+`.md` from the index, wired into `scripts/pre-commit-run.sh:179`, with its suite as its own CI
+job at `.github/workflows/ci.yml:133`.
 
 1. ~~**Expose reindex on the CLI**, then add a step to the `Audit Doc Refs` job.~~ **BUILT,
    MEASURED, REVERTED 2026-09-14** — seeding CI's catalog mints the WRONG ids, because

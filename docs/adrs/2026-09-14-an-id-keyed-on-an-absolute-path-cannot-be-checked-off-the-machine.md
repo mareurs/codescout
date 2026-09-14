@@ -73,11 +73,18 @@ resolves cross-repo ids correctly, which no CI placement could.
 
 **Now harder.** A dead intra-repo citation can reach `master` uncaught by CI. The
 compensating placement is commit time on the machine that minted the ids, which has the
-whole namespace; that mechanism is **not yet built** and is tracked at
-`2a97a4faddc0eace`. Until it exists, this class is caught by a developer running the audit
-and by nothing else — stated plainly because a decision that quietly lowers coverage while
-reading as a clean architectural result is the failure mode this repo tracks as
-`cluster/declared-not-wired`.
+whole namespace; that mechanism **shipped 2026-09-14** as
+`scripts/pre-commit-dead-artifact-ids.sh` (`3ab306a6`, patch-id
+`eddd04341f92e13022c53b2f8948fa30f136b2c3`) and is tracked at `e0f846901a299717`.
+
+**This paragraph read *"not yet built"* until 2026-09-14 and is the reason the sentence now
+names its own limits rather than declaring the hole closed.** The hook catches the class
+before a commit exists and nothing catches it afterwards, so three states still pass
+uncaught, each named on its stderr and each passing OPEN deliberately: no runnable binary,
+an unreadable audit report, and staged bytes differing from the worktree. `--no-verify`
+and a machine whose catalog never held the ids are two more. Stated plainly because a
+decision that quietly lowers coverage while reading as a clean architectural result is the
+failure mode this repo tracks as `cluster/declared-not-wired`.
 
 ## Change scenarios absorbed
 
