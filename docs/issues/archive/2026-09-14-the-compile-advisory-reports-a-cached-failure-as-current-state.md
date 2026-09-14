@@ -237,6 +237,27 @@ Without the extraction this would have landed a guard incapable of detecting its
 Applied and reverted inside one shell invocation with a restoring `trap`, so the shared tree was
 never left holding an armed red (`df0c18734b20fddd`).
 
+**PROXIMITY IS NOT REACH, and the three blind tests are the evidence.** This is
+§ *Testing Discipline*'s *loudness is a property of a PATH* — an alarm nothing reaches is
+exactly as informative as no alarm — with one thing that statement does not say. The tests that
+failed to reach the mutant were **the three tests about the mutated mechanism**. They name
+`defer`, they exercise `pending`, they read as the coverage for exactly this line. Topical
+proximity is what made them look like reach, and a reviewer scanning names rather than call
+paths would have counted four guards where there was one. Ask which test *executes* the line,
+never which test is *about* it.
+
+**AND A SURVIVING MUTANT HAS TWO READINGS, of which the natural one is wrong here.** "No test
+killed it" means either *untested* — write the test — or ***unreachable by any test that could
+be written***, which no amount of test-writing fixes. Before the extraction this line was the
+second: `on_source_write` read `BuildCheckEnv::from_env()` internally, so no `#[test]` could
+drive its branches at all, and the module forbids `EnvGuard`. The remedy was therefore a
+**reachability** change to the production code, not a test-quality one — the mutation could not
+even be *expressed* until the code had a seam. Reading a survivor as "untested" sends you to
+write a test that cannot exist, and the failure of that attempt looks like your own
+incompetence rather than a missing seam. (Framing owed to sessionId
+`9403d62d-116b-46ea-ac9b-004acff2b1cb`, who checked their own gate against this shape on
+receiving it and found it had two levels plus an end-to-end — the right response to a law, and
+the one that tells you whether it applies to you.)
 ### Known ceiling, stated rather than left to be found
 
 `pending` is also set when `may_start` refuses for the **debounce** alone, and nothing drains
