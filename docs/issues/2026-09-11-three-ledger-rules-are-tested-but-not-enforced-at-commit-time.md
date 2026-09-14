@@ -16,7 +16,7 @@ there**. They are corpus invariants a single commit can break, and
 | rule | what it asserts | why the hook lacks it |
 |---|---|---|
 | `every_declared_class_has_an_index_row` | every `**Slug:**` declaration has an Index row | the hook parses Index rows only for counts; no count-free row parser exists there |
-| `the_index_file_holds_no_class_sections` | `docs/trackers/issue-clusters.md` holds no `## IC-N —` section | nothing; it is cheap and was grouped rather than shipped alone |
+| ~~`the_index_file_holds_no_class_sections`~~ | `docs/trackers/issue-clusters.md` holds no `## IC-N —` section | **PORTED** `05cda53e` — was: nothing; cheap, and grouped rather than shipped alone |
 | `no_mechanism_status_is_a_bare_verdict` | no `**Mechanism status:**` is a bare verdict | needs the mechanism-status parser ported to Python |
 
 **This is a declared divergence, not a silent one, and the distinction is the whole point.** Each
@@ -63,19 +63,80 @@ fixture with a known answer fed through the PYTHON implementation, so a check th
 matching is not mistaken for a clean corpus. A ported rule without one converts a Rust guard into
 a pair where one half is decoration.
 
-Fix SHA: *(not yet fixed)*
-Patch-id: *(not yet fixed)*
+**Progress: 1 of 3 ported.**
+
+| rule | state |
+|---|---|
+| `the_index_file_holds_no_class_sections` | ported — SHA `05cda53e`, patch-id `11704167c6d3947e7cab02e3371f28a132a48d55` |
+| `every_declared_class_has_an_index_row` | not started |
+| `no_mechanism_status_is_a_bare_verdict` | not started |
+
+The bug closes when all three are in `HOOK_RULES`; the file stays open until then.
+
+**One thing the port learned that the plan above does not say, and the next two rules will
+meet it too.** The Python check must be fed the **Index file alone** — `read(LEDGER, source)`,
+never the `read_ledger()` result the surrounding code already holds. `read_ledger()` returns
+the Index concatenated with every class file, and each class file opens with its own
+`## IC-N —` heading, so the joined text matches once per class on a perfectly healthy corpus.
+Mutating that one argument was one of the three kills: the hook then exits 1 on a clean tree,
+naming all 23 sections. The Rust twin reads `repo_root().join(LEDGER)` and cannot make this
+mistake; the Python one is handed the wrong value by default.
 
 ## Tests added
 
-None yet.
+For `the_index_file_holds_no_class_sections` (`05cda53e`):
+
+- `the_index_section_scan_discriminates` (`tests/issue_clusters.rs`) — feeds
+  `INDEX_SECTION_FIXTURE` to the Rust scan. Planted killers: the template placeholder
+  `## IC-N —`, a non-ASCII digit, a mid-line mention, a `### ` heading, and a two-digit id.
+- `the_hook_script_agrees_on_the_index_section_scan` (`tests/issue_clusters.rs`) — the same
+  fixture through `--fixture-index-sections`, asserting agreement **and** that the Python
+  answer is non-empty.
+
+The scan was extracted out of the corpus test into `index_class_sections` so both share one
+derivation. Three mutations run on the production path, all killed:
+
+| mutation | kill |
+|---|---|
+| drop `isascii()` in Python | parity test reds — Python alone matches `## IC-٣` |
+| pass `ledger` instead of the Index file | hook exits 1 on a clean tree, all 23 sections named |
+| `is_ascii_digit` → `is_numeric` in Rust | both new tests red, opposite direction |
+
+**A blind spot pinned rather than closed:** a titleless `## IC-8` is not a finding on either
+side, because both require the space separating id from title. Nothing writes that shape —
+`append_entry` always emits `## IC-N — <title>` — so it is pinned in the fixture to stop a
+future widening happening on one side silently.
 
 ## Resume
 
-Run the reproduction first — it takes two commands and tells you which of the three you are
-actually looking at. Then port one rule end to end (script check + `HOOK_RULES` + `HOOK_OWED` +
-discrimination test) before starting the next: the three share no code, so a partial port of all
-three is three unfinished edits rather than one finished one.
+**Next: `every_declared_class_has_an_index_row`** (the middle rule; leave
+`no_mechanism_status_is_a_bare_verdict` for last, it needs the most parser).
+
+The repro is read-only and takes one command — do not use the arming one in § Reproduction
+unless you need the consequence:
+
+    python3 scripts/pre-commit-ledger-counts.py --rules
+
+The script PRINTS `HOOK_RULES`, so the divergence is visible without writing anything to a
+shared tree. Step 1 of § Reproduction adds a `**Slug:**` to a real file, which reds
+`cargo test --test issue_clusters` for every other session until you revert it.
+
+The end-to-end shape, from the one already ported (`05cda53e` is the worked example):
+
+1. Add the rule id to `HOOK_OWED` in `tests/issue_clusters.rs` **first** and run
+   `cargo test --test issue_clusters the_hook_enforces_every_rule_it_declares` — it reds, and
+   that red is the porting contract stating itself.
+2. Implement the check in `scripts/pre-commit-ledger-counts.py`, add the id to `HOOK_RULES`,
+   and remove the `NOT_HOOK_OWED` entry.
+3. Add a `--fixture-<rule>` stdin arm and the paired discrimination test; classify that new
+   test into `NOT_HOOK_OWED` or `every_cluster_rule_is_hook_owed_or_exempt` refuses it.
+4. Mutate the Python, not the fixture.
+
+Rule 2 differs from rule 1 in one way worth knowing before starting: it needs a **count-free
+Index-row parser**, which the hook does not have — `parse_index_counts` reads rows only to
+extract counts. The Rust side already has one (`parse_index_rows` / `missing_index_rows`,
+`tests/issue_clusters.rs`), including its `unclassified` exemption, so the port is a
+translation rather than a design.
 
 ## References
 
