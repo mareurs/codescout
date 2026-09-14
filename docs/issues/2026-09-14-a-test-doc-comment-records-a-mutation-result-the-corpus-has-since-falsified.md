@@ -37,9 +37,23 @@ reach the branch, so the mutation is invisible and the coverage is decoration.
 
 That is precisely how it was used. A peer session (sessionId `6be73414-6293-4a4e-95a4-4bada8327f08`)
 cited this reasoning in `bug-fix-session-log:F-146` to argue a proposed documentation gate would be
-decoration, writing *"verified by mutation"* over a claim it had not re-run. It withdrew the claim
-on its own re-derivation. The comment is the class of evidence that stops the next person looking —
-it does not merely fail to help, it actively discourages the check that would correct it.
+decoration, and withdrew it on its own re-derivation.
+
+**It did not invent the credential — it copied one, and that distinction is the whole defect.**
+Compare the bytes:
+
+    :805-807   "...Python leaves the corpus-driven check **green**. Verified by mutation, not assumed"
+    F-146      "...Python leaves it **green** (verified by mutation, not assumed)"
+
+Near-verbatim, word order and emphasis included. Nobody can reconstruct what a session read, so
+propagation is the strong reading rather than proof — but invention is the weak one, and which
+reading holds decides the remedy: **had the credential been invented, "be careful" would be the
+fix.** It is not. Raised by the author it happened to (sessionId `6be73414-…`), against a draft of
+this file that read as though they had invented it, and superseding their own first erratum
+(`574a7282`) which had blamed a population-vs-member scope error.
+
+The comment is the class of evidence that stops the next person looking — it does not merely fail
+to help, it actively discourages the check that would correct it.
 
 ## Reproduction
 
@@ -72,8 +86,17 @@ Read-only for steps 1 and 3; step 2 writes only to a scratch copy.
 
 ## Root cause
 
-**A mutation result over a live corpus is contingent on that corpus, and was recorded as a
-permanent property of the test.**
+**A mutation result over a live corpus is contingent on that corpus, was recorded as a permanent
+property of the test, and travelled with its verification credential attached.**
+
+**The credential is the mechanism; the staleness is only the occasion.** `:805-808` does not merely
+assert — it carries a **date**, a **method**, and an **explicit denial of assumption** (*"not
+assumed"*). That package is the most quotable thing in the sentence, so it is the part that
+survives copying, and it is exactly what makes re-running feel unnecessary. **A bare assertion
+invites a check; a stamped one forecloses it.** The stamp is load-bearing in the wrong direction:
+it was honest when written, it is what a careful author is supposed to write, and it is the reason
+a careful reader did not look. Any remedy aimed at the reader's diligence is therefore aimed at the
+wrong party.
 
 `CLAUDE.md` § *Testing Discipline* already requires that a **count** of a defect population arrive
 with its unit, its instant and its tree, on the grounds that one population yielded four defensible
@@ -134,11 +157,15 @@ instant in thirteen days was the pair consistent, and at no instant did anything
 
 ## Hypotheses tried
 
-- *"The peer mis-ran the mutation."* — Falsified: re-derived independently here, same three
-  numbers. The error was in extending a **vacuity** result (`claimed` / `declared` compare empty to
-  empty, filed at `docs/issues/2026-09-13-two-of-three-parity-arms-compare-empty-to-empty.md`) to
-  `actual`, a member that result does not cover. `CLAUDE.md`'s population-vs-member law run
-  backwards.
+- *"The peer mis-ran the mutation."* — Falsified: re-derived independently here, same three numbers.
+- *"The peer extended a **vacuity** result (`claimed` / `declared` compare empty to empty, filed at
+  `docs/issues/2026-09-13-two-of-three-parity-arms-compare-empty-to-empty.md`) to `actual`, a member
+  it does not cover — `CLAUDE.md`'s population-vs-member law run backwards."* — **Superseded, and it
+  was the first account both sessions reached.** It is a clean story and the bytes do not support
+  it: the near-verbatim match above says the claim was copied from `:805`, not derived from the
+  vacuity finding at all. Recorded rather than deleted because it is the plausible-mechanism trap
+  this corpus keeps paying for — two independent sessions preferred an elegant derivation over a
+  `git show`, and the vacuity result was *genuinely true*, which is what made it attractive.
 - *"The `:1476` must-kill line is the stale one."* — Falsified: it is correct at HEAD. It was the
   wrong half on the day it was written.
 
@@ -157,6 +184,15 @@ The constraint any fix has to meet, stated so the next session does not re-deriv
   the corpus.
 - Anything stronger is a mechanism question (what could red when a doc comment's corpus premise
   goes false) and should go through the architecture skill rather than be improvised here.
+
+**One proposal on the table, recorded as its author's and NOT evaluated here.** From sessionId
+`6be73414-…`: the decayed claim **names its own population** — *"zero bug files carry a `cluster/`
+tag in flow style"* — so a test can assert that population is still zero, and it reds **the day the
+corpus moves** (2026-09-03 here) rather than thirteen days later via a reader. `:1476` then becomes
+a second gate for free, since the two comments would disagree out loud. The attraction is that it
+needs no stale-prose detection: it gates the **premise**, which is machine-checkable, instead of
+the **prose**, which is not. Not adopted here — whether to build it is an architecture question and
+this file does not answer it.
 
 Fix SHA: *(not yet fixed)*
 Patch-id: *(not yet fixed)*
