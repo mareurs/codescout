@@ -6,7 +6,7 @@ title: classify()/unclassified_decls() conflate two defect shapes under one Malf
 owners:
 - marius
 tags:
-- cluster/unclassified
+- cluster/hint-composed-without-the-request
 closed: 2026-09-13
 opened: 2026-09-03
 severity: low

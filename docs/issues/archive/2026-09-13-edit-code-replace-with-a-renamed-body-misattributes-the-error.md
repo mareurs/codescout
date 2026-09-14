@@ -1,12 +1,12 @@
 ---
-id: 120e3207d427ea14
+id: '120e3207d427ea14'
 kind: bug
 status: archived
 title: 'BUG: edit_code(action="replace")''s error for a body whose fn name differs from `symbol` misattributes the cause, sending the caller to change the body rather than the action'
 owners:
 - marius
 tags:
-- cluster/unclassified
+- cluster/hint-composed-without-the-request
 - codescout-tool
 - edit_code
 - error-messages
