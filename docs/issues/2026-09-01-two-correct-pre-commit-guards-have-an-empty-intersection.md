@@ -167,6 +167,54 @@ made against a clean tree printed neither.*
 
 ## Root cause
 
+**FREQUENCY RE-ADJUDICATED 2026-09-14 — the narrowed case is real but INFREQUENT, and the
+proportionate remedy is routing, not a cross-guard protocol.**
+
+*Unit, because two of these numbers are not comparable without it.* An **ordered pair of
+bug-file creations by different sessions into the same cluster**, whose ADD commits fall
+within a window W. Population: 517 tagged bug files, 24 clusters, 51 active days, derived
+at `5b3e8061` on 2026-09-14; session identity is the `Session-Id` trailer on the ADD commit.
+
+```
+within 30 min :  29 contended pairs   (0.3% of 9371 same-cluster pairs)
+within  2 h   :  85                   (0.9%)
+within  6 h   : 244                   (2.6%)
+within 24 h   : 747                   (8.0%)
+```
+
+And the coarse upper bound, in a **different** unit — a `(day, cluster)` pair in which at
+least one bug file was created, 263 of them:
+
+```
+monolith-era collision-eligible : 151/263  (57%)
+post-split   collision-eligible :  69/263  (26%)   narrowing factor 2.19x
+```
+
+**Read the 26% as a ceiling and the 30-minute figure as the estimate.** Same-day is not
+concurrency: two sessions filing into one cluster twelve hours apart never share an
+uncommitted state. At the realistic window the rate is **29 events across 51 days**, about
+one every other day — and only some fraction of those ever reach a commit attempt.
+
+**CEILING, stated because it cannot be closed with what this repo records:** a commit
+timestamp marks when work **ended**, not the window it occupied. True overlap needs edit
+windows nobody logs, so every figure here is a proxy. It bounds the answer; it does not
+settle it.
+
+**Contention is concentrated, which matters more than the mean.** The clusters carrying it
+are the large ones — `guard-narrower-than-its-name` (11 days with ≥2 sessions),
+`selector-narrower-than-its-population` (8), `unclassified` (8), `doc-contradicted-by-code`
+(8). A remedy that helps only the tail helps nothing.
+
+**Verdict: do NOT build a cross-guard protocol.** At ~0.6 eligible events per day, with a
+sub-fraction actually blocking, the machinery costs more than the jam. What the narrowed
+case needs is for the refusal to ROUTE — name the owner holding the contested ledger and
+say that their commit unblocks yours — which turns a two-hour choreography into one
+message, and is OB position 3's *unconditional policy tied to a trigger that happens
+anyway*: the refusal already fires. `93b30111` added exactly that routing to the pathspec
+branch of `foreign-index` today. **What is owed next is to check whether `ledger-counts`
+routes as well, and to re-measure this after a month rather than re-deriving it from the
+same 51 days.**
+
 Two guards read the **same** discriminator in **opposite** directions, and nothing composes
 them.
 
