@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 145
+entry_high_water_F: 146
 entry_high_water_W: 134
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 134
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-146 | 2026-09-14 | low | doc-vs-code | promoted-to-bug-tracker | **A served worked example outranked the tool schema that was in context beside it.** Wrote `F-145`/`W-134` as section-then-index-row, reproducing the capture window `8857b0b2` fixed by giving `append_entry` `index_row` + `index_after_line`. The miss was NOT missing documentation: the schema describes both parameters, their coupling and their failure mode, and was served in the tool list all session. The disagreeing surface was the worked example in `codescout-companion:reconnaissance` § Phase 3 — which I had loaded and was executing — and the example won, because a schema is read once as a field list while an example is read at call-composition time as a copyable shape. A skill's worked example is therefore a second, unversioned copy of the tool's contract that decays independently while being the copy actually executed. Tell: when a recipe and a schema name the same call and the recipe uses FEWER parameters, prefer the schema — it is generated from the code and the recipe is not. Filed as `323bdf9d76a88c55` (recipe half); this is the rank half |
 | F-145 | 2026-09-14 | med | reasoning/shared-checkout | open | **"Process-wide" activation read as machine-wide, and the premise that scoped the work went unchecked.** Declined a documented reproduction all session because `activate(read_only=true)` would supposedly disable writes for six live PEER sessions. False: `pgrep -a -f codescout` shows ~26 separate `codescout start` processes, one per CC session, so an activation reaches this session and its subagents and nobody else. The docs never said otherwise — they scope it to *"the session"* and *"another caller on **this session**"*; the bare phrase *"process-wide"* was filled in as *machine-wide* on a checkout where the filesystem, the git index, `.codescout/write.lock` and the catalog genuinely ARE shared. Survived because **nothing fires when you decline to act**: the belief was never contradicted, only reinforced by true facts about a different kind of sharing. Cost: a false safety claim in an archived bug record, a commit message and two peer messages. Tell: the premise deciding what NOT to do never got the byte-level check the premise deciding what to do got rigorously |
 | F-144 | 2026-09-14 | med | measurement | fixed-verified | **`/proc/<pid>/exe` returns a PROCFS inode, so a rebuild check over 28 servers produced 28 plausible wrong numbers.** `stat -c '%i'` without `-L` reports the magic symlink's OWN identity, from procfs's own sequence — real, stable, mutually distinct, and about nothing. The 28 clustered (`121815719`, `121830738`, …), which READS as corroboration because sibling inodes are what a directory of related files looks like, and none matched the fresh `target/release/codescout`. Straight reading: *every server including mine is stale* — the answer that prompts action, and wrong. `stat -L` returned the real image, identical to disk. Tell available one command earlier and free: **an inode matching NO file you can name is not a file identity.** What the confirmation did NOT buy: `stat -L` and `peer-sessions.sh` agreeing are **not independent** — both resolve the same link against the same filesystem — so the load-bearing evidence is `readlink` carrying no `(deleted)` plus a matching size, never the concurrence. Sibling of `F-135`, the same question (*did the rebuild take*) failing one layer up |
 | F-143 | 2026-09-14 | med | reasoning/shared-checkout | fixed-verified | **A red that goes away tells you nothing about why.** Classified three peer reds as stale reports; all three were correct measurements of trees that were really broken and really repaired. The instance I argued hardest for was the weakest. |
@@ -14852,6 +14853,59 @@ rather than by build metadata — which is what `stale-servers.sh`'s own rule as
 project. At n=2 this belongs in `get_guide("workspace-state")` beside the existing *"when a peer
 has activated read-only, pin — do not re-activate"* rule, which states the same mechanism for
 **avoiding** a collision and not yet for **probing**.
+
+## F-146 — A served worked example outranked the tool schema sitting in context beside it
+
+**Valid:** invariant
+
+**Severity:** low — no loss occurred; the interval was closed by a peer reading `git diff --cached`
+rather than by any guard.
+
+**Observed.** Writing `F-145` and `W-134` I used `append_entry` for the section and then a
+separate `doc(update, body_edits=…)` for the Index rows — reproducing exactly the capture window
+that `docs/issues/archive/2026-09-02-append-entry-two-call-protocol-manufactures-a-capture-window.md`
+fixed at `8857b0b2`. A peer hit the same interval on `F-144` in the same file in the same hour;
+`323bdf9d76a88c55` records the three served recipes that still teach the two-call form.
+
+**The part worth separating from that bug: I was not missing the documentation.** `append_entry`'s
+own schema — served to me in the tool list, in context for the whole session — describes both
+parameters accurately and even states the coupling and the failure mode:
+
+> `index_row`: *"index-table row, written in the SAME file write as the section; `{id}` becomes
+> the allocated id. Both-or-neither with `index_after_line`, and only with a section."*
+> `index_after_line`: *"line to insert `index_row` after — FIRST match, whitespace-trimmed,
+> usually the table separator. A line that does not exist writes nothing and allocates no id."*
+
+So the code, the tool and the schema all agree. **What disagreed was the worked example**
+(`codescout-companion:reconnaissance` § Phase 3, which I had loaded and was executing), and the
+example won. That is not the same defect as a stale doc nobody updated, and the remedy differs:
+updating the three recipes is necessary, but the transferable claim is about *rank*, not
+*coverage*.
+
+**Why the example outranks the schema, structurally rather than by carelessness.** A schema is
+read once, as a field list, when you are deciding *whether* a parameter exists. A worked example
+is read at the moment of *composing the call*, and it arrives as a complete, copyable shape. When
+the two disagree, the copyable shape wins, because copying is the cheaper operation and the
+schema has already been "read" in a sense that feels complete. Both were in this context
+simultaneously and I never compared them — there was no moment at which the comparison was the
+task.
+
+**So: when a skill ships a worked example of a tool call, the example is a second, unversioned
+copy of that tool's contract**, and it decays independently of the schema while being the copy
+that is actually executed. That is the same shape as CLAUDE.md § *Observer Blindness* position 3
+— publishing a rule again cannot help a reader who does not know the other surface exists — with
+the surfaces being *schema* and *example* rather than *doc* and *test header*.
+
+**Cheap tell, since "compare every example to its schema" is not a thing anyone will do:** when a
+recipe and a schema both name the same call and the recipe uses *fewer parameters*, prefer the
+schema — the schema is generated from the code and the recipe is not.
+
+**This entry was written with `index_row` + `index_after_line` in one call**, which is both the
+fix and the only honest way to file it.
+
+**Status:** promoted-to-bug-tracker — the recipe half is `323bdf9d76a88c55`. The rank half
+(example outranks schema) is stated here and belongs in that file's § *Root cause* if its owner
+agrees; offered, not written, since I do not hold it.
 
 ## Template for new entries
 
