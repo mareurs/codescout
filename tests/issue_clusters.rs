@@ -1993,6 +1993,120 @@ fn missing_index_rows_exempts_only_unclassified() {
     );
 }
 
+/// The known-answer input for [`the_hook_script_agrees_on_the_index_row_scan`].
+///
+/// A mini-ledger — its own `**Slug:**` declarations plus an Index table — so `valid` is derived
+/// from the fixture rather than the live corpus, and the expected answers are fixed rather than
+/// moving with the ledger. Note the two grammars: a declaration is `` `cluster/<slug>` `` and an
+/// Index row carries the BARE slug, which is why [`valid_slugs_from`] and [`parse_index_rows`]
+/// cannot share a matcher.
+///
+/// Every row is a planted mutant-killer; the assertions name which mutation each one kills.
+const INDEX_ROW_FIXTURE: &str = "\
+**Slug:** `cluster/alpha-slug`
+**Slug:** `cluster/beta-slug`
+**Slug:** `cluster/gamma-slug`
+**Slug:** `cluster/unclassified`
+
+| id | class | slug | promotes to |
+|---|---|---|---|
+| IC-1 | has a row | `alpha-slug` | — |
+| IC-2 | slug cell lost its backticks | beta-slug | — |
+| IC-3 | a non-slug backtick stands first | `not-a-slug` | `gamma-slug` |
+| note | prose naming `beta-slug` | | |
+";
+
+/// The hook script's count-free row scan agrees with this one, on a fixture the corpus cannot reach.
+///
+/// Required by the porting contract in
+/// `docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md`.
+///
+/// **This also closes a gap that predates the port.** [`the_index_row_parser_discriminates`] is
+/// named for [`parse_index_rows`] and in fact exercises [`parse_index_counts`], so until now the
+/// count-free parser had no fixture on either side — only the live corpus, where it returns 23
+/// rows whether it reads the slug cell or merely something backticked.
+///
+/// **The known-answer assertions are the load-bearing half, not the agreement one.** Two
+/// implementations that broke the same way would agree with each other perfectly; only the fixed
+/// expectations below can tell that apart, which is why they are asserted against `theirs` rather
+/// than against a value this file computes.
+#[test]
+fn the_hook_script_agrees_on_the_index_row_scan() {
+    let mut child = Command::new("python3")
+        .args([
+            "scripts/pre-commit-ledger-counts.py",
+            "--fixture-index-rows",
+        ])
+        .current_dir(repo_root())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("python3 failed to spawn");
+    child
+        .stdin
+        .take()
+        .expect("stdin piped")
+        .write_all(INDEX_ROW_FIXTURE.as_bytes())
+        .expect("write fixture");
+    let out = child.wait_with_output().expect("hook script failed");
+    assert!(out.status.success(), "script exited non-zero");
+
+    #[derive(serde::Deserialize)]
+    struct Reply {
+        rows: Vec<String>,
+        missing: Vec<String>,
+    }
+    let theirs: Reply =
+        serde_json::from_slice(&out.stdout).expect("script must emit a JSON object");
+
+    let valid = valid_slugs_from(INDEX_ROW_FIXTURE);
+    let mine_rows: Vec<String> = parse_index_rows(INDEX_ROW_FIXTURE, &valid)
+        .into_iter()
+        .collect();
+    let mine_missing = missing_index_rows(&valid, &parse_index_rows(INDEX_ROW_FIXTURE, &valid));
+
+    assert_eq!(
+        mine_rows, theirs.rows,
+        "this gate and scripts/pre-commit-ledger-counts.py disagree about which slugs have an \
+         Index row"
+    );
+    assert_eq!(
+        mine_missing, theirs.missing,
+        "this gate and scripts/pre-commit-ledger-counts.py disagree about which declared slugs \
+         are missing one"
+    );
+
+    // `IC-2`'s slug cell lost its backticks, and the `note` line names it in prose. A parser that
+    // accepted bare cells, or that treated any pipe-table line as a row, would call `beta-slug`
+    // present and report NOTHING missing — the shape this rule exists to catch, reported clean.
+    assert_eq!(
+        theirs.rows,
+        vec!["alpha-slug", "gamma-slug"],
+        "an unbackticked slug cell is not a row, and a `note` line naming a slug is not one either"
+    );
+    assert_eq!(
+        theirs.missing,
+        vec!["beta-slug"],
+        "beta-slug is declared and has no parseable row, so it must be reported missing"
+    );
+
+    // `IC-3` carries a backticked non-slug in the cell BEFORE the real one. A parser that stopped
+    // at the first backtick would drop the row and call `gamma-slug` missing.
+    assert!(
+        theirs.rows.contains(&"gamma-slug".to_owned()),
+        "the scan must read past a backticked cell that is not a known slug: {:?}",
+        theirs.rows
+    );
+
+    // The exemption, on the Python side this time. `unclassified` is declared here and has no row.
+    assert!(
+        !theirs.missing.contains(&"unclassified".to_owned()),
+        "`unclassified` has no Index row by design and must stay exempt in BOTH implementations: \
+         {:?}",
+        theirs.missing
+    );
+}
+
 /// The count scan must actually reach the archive.
 ///
 /// [`actual_counts`] walks a different population from the tag gate, so it needs its own positive
@@ -2034,6 +2148,7 @@ fn the_count_scan_reaches_the_archive() {
 /// The ids are **test names**, not neutral rule ids, so neither side needs a translation table —
 /// the surface that would itself drift.
 const HOOK_OWED: &[&str] = &[
+    "every_declared_class_has_an_index_row",
     "every_open_bug_file_declares_one_known_defect_class",
     "no_class_field_states_a_bare_n",
     "no_index_row_stores_a_count",
@@ -2081,12 +2196,6 @@ const NOT_HOOK_OWED: &[(&str, &str)] = &[
     (
         "every_cluster_rule_is_hook_owed_or_exempt",
         "asserts about this file's own declarations; the hook has nothing to compare",
-    ),
-    (
-        "every_declared_class_has_an_index_row",
-        "OWED, not yet implemented — the hook parses Index rows only for counts and has no \
-         count-free row parser; \
-         docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md",
     ),
     (
         "ls_files_index_stages_collapse_to_one_path_per_file",
@@ -2137,6 +2246,11 @@ const NOT_HOOK_OWED: &[(&str, &str)] = &[
         "the_hook_script_agrees_on_the_index_mechanism_scan",
         "cross-language parser parity over a fixture; a test OF the hook, and the only surface \
          where the Python column-count scan can return a non-empty answer",
+    ),
+    (
+        "the_hook_script_agrees_on_the_index_row_scan",
+        "a test OF the hook rather than a rule it owes; feeds one mini-ledger through both \
+         implementations of the count-free row scan",
     ),
     (
         "the_index_section_scan_discriminates",

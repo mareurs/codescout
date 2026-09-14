@@ -54,6 +54,7 @@ HOOK_RULES = [
     "no_class_field_states_a_bare_n",
     "no_index_row_stores_a_count",
     "no_index_row_stores_a_mechanism",
+    "every_declared_class_has_an_index_row",
     "the_index_file_holds_no_class_sections",
 ]
 
@@ -463,6 +464,44 @@ def parse_index_counts(ledger: str, valid: set[str]) -> dict[str, int]:
     return out
 
 
+def parse_index_rows(ledger: str, valid: set[str]) -> set[str]:
+    """Mirrors `parse_index_rows` -- which slugs have an Index row AT ALL, count-free.
+
+    The count-free twin of `parse_index_counts` above, and the two deliberately cannot be one
+    parser: the emptiness that is a PASS for `no_index_row_stores_a_count` is exactly the failure
+    mode this one exists to catch. A table nobody can read returns {} from both, which the count
+    rule reads as "no stored counts, all good".
+
+    Scans PAST a backticked cell that is not a known slug rather than stopping at the first
+    backtick -- the `promotes to` cell carries backticked ids of its own, and on a row where one
+    precedes the slug a stop-at-first parser silently drops the row.
+    """
+    out: set[str] = set()
+    for line in ledger.splitlines():
+        if not line.startswith("| IC-"):
+            continue
+        for cell in (c.strip() for c in line.split("|")):
+            if not (cell.startswith("`") and cell.endswith("`") and len(cell) > 1):
+                continue
+            inner = cell[1:-1]
+            if inner in valid:
+                out.add(inner)
+                break
+    return out
+
+
+def missing_index_rows(valid: set[str], rows: set[str]) -> list[str]:
+    """Mirrors `missing_index_rows` -- declared slugs with no row, minus the one exemption.
+
+    `unclassified` is the sanctioned escape hatch. It carries a `**Slug:**`/`**Members:**` pair so
+    CHECK 3 can track its growth like any class, but by the ledger's own design it has no numbered
+    id and no Index row. The exemption is exactly that one slug and nothing wider; the Rust side
+    pins that narrowness with `missing_index_rows_exempts_only_unclassified`, because an exemption
+    that quietly grew to "any slug missing a row" would make this rule vacuous.
+    """
+    return sorted(s for s in valid if s != "unclassified" and s not in rows)
+
+
 def index_rows_with_extra_cells(ledger: str) -> list[tuple[str, str]]:
     """Mirrors `index_rows_with_extra_cells` -- Index rows carrying a cell past `promotes to`.
 
@@ -776,6 +815,18 @@ def main() -> int:
             # `--fixture-index-mechanism` above, for the same reason.
             print(json.dumps(index_class_sections(sys.stdin.read())))
             return 0
+        elif arg == "--fixture-index-rows":
+            # Pure over stdin: a mini-ledger (its own `**Slug:**` declarations plus an Index
+            # table), so `the_hook_script_agrees_on_the_index_row_scan` can feed rows the live
+            # corpus does not contain -- an unbackticked slug cell, a non-slug backtick standing
+            # ahead of the real one, a prose line naming a slug. All three are shapes a correct
+            # ledger never holds, and each is a way a looser parser silently returns the right
+            # answer for the wrong reason.
+            fx = sys.stdin.read()
+            fv = valid_slugs(fx)
+            fr = parse_index_rows(fx, fv)
+            print(json.dumps({"rows": sorted(fr), "missing": missing_index_rows(fv, fr)}))
+            return 0
     if source not in ("index", "worktree", "head"):
         raise SystemExit(f"--source must be index|worktree|head, got {source!r}")
 
@@ -928,6 +979,53 @@ def main() -> int:
             "Do NOT edit their files. Do NOT reach for --no-verify: this same run carries the\n"
             "one-tag and growth checks your own bug files need, so silencing a refusal that is\n"
             "not yours silences two that are.",
+            file=sys.stderr,
+        )
+        _emit_sequence_tail()
+        return 1
+
+    # CHECK 6 -- every declared class has an Index row.
+    #
+    # Mirrors `every_declared_class_has_an_index_row`. Ported 2026-09-14 from the same bug file as
+    # CHECK 5; until then the hook parsed Index rows only for COUNTS and had no count-free row
+    # parser, which is the whole reason this one lagged.
+    # docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md
+    #
+    # Reads the CONCATENATION, unlike CHECK 5 above: `**Slug:**` declarations live in the per-class
+    # files and the rows live in the Index, so this rule is the one place that needs both halves.
+    #
+    # The second arm is a VACUITY guard, not a second rule. If `parse_index_rows` matched nothing
+    # -- a renamed column, a reformatted table, slug cells that stopped being backticked -- then
+    # CHECK 1's stored-count scan passes green forever over an empty map, which is zero coverage
+    # wearing a passing check's clothes (IC-16). The threshold mirrors the Rust side's.
+    index_rows = parse_index_rows(ledger, valid)
+    missing_rows = missing_index_rows(valid, index_rows)
+    if missing_rows or len(index_rows) <= 10:
+        if missing_rows:
+            head = (
+                "these classes declare a `**Slug:**` but have no parseable Index row:\n  "
+                + "\n  ".join(missing_rows)
+            )
+        else:
+            head = (
+                f"only {len(index_rows)} Index row(s) parsed out of {LEDGER} -- the table format "
+                "moved, and CHECK 1 is now asserting emptiness over a table nobody can read, "
+                "which it would pass"
+            )
+        print(
+            head + "\n\n"
+            "Either the row is absent, or its slug cell stopped being backticked. The row lives\n"
+            f"in {LEDGER}; the declaration lives in {LEDGER_DIR}/IC-N-<slug>.md, and filing a\n"
+            "class writes BOTH -- this fires when only one of the two landed.\n"
+            "\n"
+            "ON A SHARED CHECKOUT THERE IS A THIRD CASE AND IT IS NOT YOUR DEFECT: a peer is\n"
+            "mid-write. A section and its Index row are two writes, so a slug that is theirs and\n"
+            "in flight appears here until the second lands. This message cannot tell the cases\n"
+            "apart -- these two can, and the first is the one to run:\n"
+            f"    git diff HEAD -- {LEDGER}\n"
+            f"    python3 scripts/file-provenance.py {LEDGER}\n"
+            "If it is theirs, wait or ask; do NOT add the row for them and do NOT reach for\n"
+            "--no-verify, which also silences the one-tag and growth checks your own files need.",
             file=sys.stderr,
         )
         _emit_sequence_tail()
