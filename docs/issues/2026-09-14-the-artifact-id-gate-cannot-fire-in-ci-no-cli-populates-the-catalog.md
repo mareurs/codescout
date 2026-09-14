@@ -89,37 +89,55 @@ instrument used to certify the tightening was structurally incapable of expressi
 
 ## Fix
 
-Not done, and **direction 1 below has been falsified by measurement — do not build it.**
+The wiring half is **done**: `scripts/pre-commit-dead-artifact-ids.sh`, self-gating on staged
+`.md` from the index, wired into `scripts/pre-commit-run.sh`.
 
 1. ~~**Expose reindex on the CLI**, then add a step to the `Audit Doc Refs` job.~~ **BUILT,
-   MEASURED, REVERTED 2026-09-14.** `--reindex` does populate the catalog (1683 artifacts
-   from an empty workspace). It does not help, because `id = sha256(ABSOLUTE path)`: a CI
-   runner's checkout sits at a different root, so every id it mints differs from every id
-   the docs cite. Cloning this repo to a second path and auditing there gives **50 high
-   findings — the display cap, all `artifact_id`** — against 9 at the authors' own path.
-   Seeding CI's catalog moves the job from vacuous-green to capped-red and buys no true
-   positive. Full reasoning: `docs/adrs/2026-09-14-an-id-keyed-on-an-absolute-path-cannot-be-checked-off-the-machine.md`.
+   MEASURED, REVERTED 2026-09-14** — seeding CI's catalog mints the WRONG ids, because
+   `id = sha256(ABSOLUTE path)`. A clone at a second path reports 50+ where the authors'
+   path reports 9. See the ADR.
 
-2. **Gate at commit time on a developer machine**, where the catalog is machine-wide and
-   the ids resolve — including the cross-repo ones, which no CI placement can. This is now
-   the only viable direction and **remains unbuilt**; it is what this bug tracks.
+2. **Gate at commit time on a developer machine** — **SHIPPED.** The only observer with the
+   whole namespace. It reuses `audit-doc-refs --paths` rather than re-deriving the parser or
+   the exemption chain, so `archive_drop` / `issues_drop` / `code_block` apply for free; it
+   filters to `artifact_id` + `artifact_missing` + `high`, which is exactly the class CI
+   cannot reach, leaving every other finding to CI where it belongs. Cost measured: **0.16 s**
+   for two staged files against ~60 s for the full corpus.
 
-3. ~~Drop the CI step and keep the check as an MCP-time report.~~ Effectively what ships
-   today: `live_ids_or_disabled` (`ae6dc663`) disables the check where the catalog is
-   empty, so the CI step runs and correctly claims nothing.
+3. ~~Drop the CI step and keep the check as an MCP-time report.~~ Not needed — the CI step
+   stays and is honest: `live_ids_or_disabled` (`ae6dc663`) disables the id check where the
+   catalog is empty, so it runs and correctly claims nothing about ids.
 
-Until (2) lands, **do not read a green `Audit Doc Refs` as evidence about artifact-id
-citations** — and note this is now a *decision* rather than an accident, so the silence is
-correct and the missing coverage is real at the same time.
+**Three things it declines to claim, each named on stderr and each passing OPEN**, because a
+guard whose absence blocks every commit is worse than the hole it closes: no runnable
+binary; an unreadable audit report; and a file whose **staged bytes differ from the
+worktree**. That last one is the interesting one — the other checks in this hook read
+`git show :<path>`, and this one cannot, because materializing staged bytes to a temp path
+re-keys every file's own id and would flag every self-citation as dead. So it compares the
+two and audits only where they agree. Same rule the mutation probe learned the same day:
+do not render a verdict over bytes you did not examine.
 ## Tests added
 
-`an_empty_artifact_table_disables_the_id_check_rather_than_dooming_every_citation`
-(`src/librarian/tools/audit_doc_refs/mod.rs`) covers the disabling half, with a control asserting a
-populated catalog still switches the check on. Mutation-verified: replacing
-`(!ids.is_empty()).then_some(ids)` with `Some(ids)` reds it.
+`tests/pre-commit-dead-artifact-ids.sh` — **19 assertions across 8 cases**, wired as its own
+CI job. Driven through a stub binary via `CODESCOUT_BIN`, so it needs no Rust toolchain and
+no catalog; that is deliberate rather than a shortcut, since a case that skips itself for a
+missing toolchain reports success while testing nothing.
 
-**Nothing tests the wiring half, by construction** — there is no wiring to test.
+Cases 2–4 are the discrimination set: each flips exactly ONE of the three filter fields
+(`med` instead of `high`, another `ref_kind`, a `resolved` verdict) so a filter that
+silently widened to "any finding" reds here rather than on the live corpus. Case 8 pins
+that an unstaged-markdown commit prints **nothing at all** — a hook that fires on every
+commit to say nothing is how `--no-verify` gets learned.
 
+Case 1 also pins the REMEDY TEXT by shape: both branches must survive (repoint a stale
+citation, fence a deliberate mention) plus the stale-catalog case that is neither. A suite
+that tests only a guard's predicate leaves its remedy untested by construction, and here
+picking the wrong remedy destroys the record rather than merely failing.
+
+**End-to-end, measured by hand 2026-09-14** against a real binary and a populated catalog,
+since CI cannot host it: an inline dead id in a staged file REFUSES with exit 1 naming
+`doc.md:3`; the same id fenced PASSES; and a clean staged file with a dead id only in the
+worktree DECLINES and passes open.
 ## References
 
 - `docs/conventions/cross-machine-catalog-resume.md` — the catalog is machine-local and arrives

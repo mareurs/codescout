@@ -107,6 +107,31 @@ jobs:
           git config --global init.defaultBranch master
       - run: bash tests/pre-push-foreign-session-guard.sh
 
+  # ITS OWN JOB, and the reason is the reverse of the two above: this suite is the ONLY
+  # automated evidence for a guard CI structurally cannot run. `id = sha256(ABSOLUTE
+  # path)` and the librarian catalog is machine-wide, so a runner mints different ids
+  # from every id the docs cite and can never resolve them — measured 2026-09-14, a
+  # clone at a second path reported 50+ dead where the authors' path reported 9
+  # (docs/adrs/2026-09-14-an-id-keyed-on-an-absolute-path-cannot-be-checked-off-the-machine.md).
+  # The check therefore lives in pre-commit, on a developer machine.
+  #
+  # What THIS job can still verify is the half that is not about resolution: which
+  # findings refuse, which are exempt, and every degrade-open path. It drives the check
+  # through a stub binary, so it needs no Rust toolchain and no catalog — and that is
+  # deliberate rather than a shortcut, because a case that skips itself for a missing
+  # toolchain reports success while testing nothing.
+  dead-artifact-id-tests:
+    name: dead-artifact-id check discriminators
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Identify a committer (the suite builds throwaway git repos)
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name  CI
+          git config --global init.defaultBranch master
+      - run: bash tests/pre-commit-dead-artifact-ids.sh
+
   # ITS OWN JOB, same reason as `push-guard-tests` above: `shell-tests` is a known-
   # flaky lane, and this suite's assertions are verdicts about ATTRIBUTION -- the one
   # thing on a shared checkout that must not be readable as lane noise.

@@ -169,4 +169,13 @@ fi
 # spent a paragraph holding in sync between its Python hook and a Rust test.
 run "rustfmt --check (committed bytes)" scripts/pre-commit-cargo-fmt.sh
 
+# Self-gating for the same reason: it computes its own `.md` list from the index and
+# exits 0 when empty. This is the ONLY placement that can ask its question at all —
+# `id = sha256(ABSOLUTE path)` and the catalog is machine-wide, so a CI runner mints
+# different ids from every id the docs cite and can never resolve them (measured, ADR
+# 2026-09-14). It degrades open on a missing binary, an unreadable report, and a file
+# whose staged bytes differ from disk, each named on stderr.
+run "refuse a commit citing an artifact id nothing resolves" \
+    scripts/pre-commit-dead-artifact-ids.sh
+
 exit $status
