@@ -1073,6 +1073,44 @@ That it recurred within the hour, to the session that had just written the entry
 `CLAUDE.md` § *Observer Blindness* holding exactly as stated: *knowing the class prevented
 none of the four*. Recorded as a denominator, not as a second catch.
 
+**THIRD AXIS, same day: LINE WRAPPING.** Checking whether `CLAUDE.md` had absorbed F-7's
+claim, I grepped the phrase as the served copy renders it:
+
+```
+grep -c "indistinguishable from one that survived" CLAUDE.md   -> 0
+```
+
+and was one sentence from reporting that the corpus had not taken it. It had. The text sits
+at `CLAUDE.md:215-216`, wrapped mid-phrase:
+
+```
+  pattern occurs exactly once (a mutation that never applied is indistinguishable from one that
+  survived), and reverts before its process exits.
+```
+
+`grep` is line-oriented; the phrase is not. **Prose wraps at a column chosen for the line,
+not for the reader's query**, so any multi-word search over a hard-wrapped document has a
+per-query chance of straddling a break — invisible, arbitrary, and unrelated to whether the
+fact is present.
+
+The class now has three axes, and each was found by a different failure:
+
+| axis | the query assumed | the corpus did |
+|---|---|---|
+| **form** | full filename | bare slug |
+| **location** | one directory | two, in different trees |
+| **wrapping** | the phrase is on one line | it spans two |
+
+**What survives as the actual rule.** The first two both have the same repair — read one
+real instance before trusting a zero. The third does not: reading an instance shows you the
+rendered text, not the wrap points. Its repair is *make the pattern short enough that no
+wrap can split it* — here `never applied` (2 words, 1 hit) and `mutation-probe` (1 token,
+1 hit) both answered correctly while the 6-word phrase returned 0. **The shorter query is
+the more reliable one**, which inverts the usual instinct that a more specific pattern is
+a safer one.
+
+**Valid:** dated 2026-09-14
+
 ## Template for new entries
 
 <!-- New F-N / W-N entries land above this line. This heading is the anchor:
