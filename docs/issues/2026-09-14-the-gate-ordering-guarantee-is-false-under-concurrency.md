@@ -194,10 +194,13 @@ ended at 12:40:00, by a session this one cannot name.
 **MITIGATED, not fixed — direction 2 shipped, and the distinction is the point.** The race is
 untouched; what changed is that it now reads as what it is.
 
-**2. Shipped.** `assert_binary_advertises_doc()` in `tests/cli_doc.rs`, called from `run_cmd` —
-the single chokepoint all 15 tests route through. It runs `codescout doc --help` and, on failure,
-refuses with a message naming the shared-`target/` cause and a repair the reader can perform
-alone.
+**2. Shipped, then strengthened.** [`pinned_binary`] in `tests/cli_doc.rs`, used by `run_cmd` — the
+single chokepoint all 15 tests route through. It takes a **hardlink** to the built binary once,
+pinning the INODE, and checks that pinned copy advertises `doc`. Cargo replaces the binary by
+rename, so the link keeps the original inode alive for the life of the suite and **no peer can swap
+it mid-run**. Its first form was a per-call precondition, which narrowed the window to microseconds
+rather than closing it; the pin removes the class, and checking once is only correct BECAUSE of the
+pin.
 
 *Observed RED, end-to-end, in an isolated `CARGO_TARGET_DIR` so nothing shared was armed:* built
 the test target WITH `librarian` and pointed it at a genuinely `--no-default-features` binary,
@@ -215,9 +218,48 @@ Discrimination checked in both directions rather than one: `doc --help` → **rc
 build→run, the replacing write can land *mid-suite*, and a one-shot check at suite start would
 pass and leave every later test as confusing as before.
 
-**1. BLOCKED AS SPECIFIED — do not implement it from the one-line description above.** Attempted
-2026-09-14 on an operator go-ahead and stopped at the scout, for two independent reasons, either
-of which is sufficient:
+**1. SHIPPED as `scripts/gate.sh`, in the variant that dodges the symlink** — a per-session
+`CARGO_TARGET_DIR` keyed on `$CLAUDE_CODE_SESSION_ID`, wrapping the four gate commands and
+leaving `cargo rb` on the shared tree, so `~/.cargo/bin/codescout` keeps resolving to a binary
+something rebuilds. It prints the four exit codes AND **exits non-zero if any lane failed**, which
+the `;`-chained form structurally cannot, because it ends in `echo`.
+
+*Cost, measured on the first cold run rather than quoted:* **13 G** per session, 3 m 10 s cold with
+`sccache` already warm from the shared tree. Against 358 G free and a 113 G shared `target/`, four
+concurrent sessions is ~52 G. The script prints its own tree size on **every** run, so the number
+is re-derived at the point of use instead of decaying in a doc.
+
+*Verified end to end in the isolated tree:* `Running tests/cli_doc.rs
+(~/.cache/codescout-gate/<sid>/debug/deps/cli_doc-…)`, 15 passed — so the pin below works **under**
+the isolation, not merely beside it. `CLIPPY=0 LEAN=0 DEFAULT=0`. `FMT=1`, and that is the guard
+working: `fmt-mine.sh` formatted one file of this session's and **refused** a peer's unformatted
+`src/agent/mod.rs`, naming the owner. `FMT` is therefore the one ambiguous code, and the script now
+says so at the refusal site rather than leaving a bare `1` to be read as this session's failure.
+
+**Its limit, which is real and not modesty:** a session that types the four commands by hand still
+shares `target/`. It is a mechanism for whoever runs it and a **policy** for everyone else —
+§ *Observer Blindness* position 3's weaker shape. The four commands in `CLAUDE.md` stay the
+canonical statement of what runs and in what order, and stay pinned byte-for-byte by
+`claude_md_gate_lists_its_four_commands_in_the_load_bearing_order`; the script is named in a bullet
+BELOW the directive, which is why that test needed no change.
+
+**A consequence found only by building it, and it generalises past this script.** Isolating the
+target dir silently disabled a test: `src/lsp/manager.rs` resolved
+`CARGO_MANIFEST_DIR/target/debug/codescout` and **early-returned** when absent, so under a custom
+target dir it would have passed having run nothing — and the loss would be invisible in exactly the
+run that introduced it. Fixed in the same change to honour `CARGO_TARGET_DIR` (`CARGO_BIN_EXE_*` is
+not available: Cargo sets it for integration tests, and that is a unit test inside the lib).
+
+**The general form, raised by `d52899fd-…` on reading the fix:** *any test that resolves an artifact
+BY PATH and early-returns on absence converts an environment change into silent coverage loss.*
+**Which makes `tests/cli_doc.rs` load-bearing in a way that reads like noise:** it REDS rather than
+skipping when the binary is wrong, and that is the only reason this whole defect was ever visible.
+If anyone ever "fixes" that noise by adding a skip-if-absent guard, the trap goes silent and the
+multi-session window becomes undetectable. **Do not make `cli_doc` skip.**
+
+**WHY THE NAIVE FORM WAS REJECTED — a bare per-session `CARGO_TARGET_DIR` exported for the whole
+session, rather than scoped to the gate lanes.** Recorded because it is the obvious reading of
+"direction 1" and a reader would otherwise retry it. Two independent reasons, either sufficient:
 
 - **It breaks the live MCP binary, machine-wide.** `~/.cargo/bin/codescout` is a symlink to
   `<repo>/target/release/codescout`. `CARGO_TARGET_DIR` moves **both** profiles, so `cargo rb`
@@ -230,21 +272,24 @@ of which is sufficient:
   three sharing a dir: it converts a 6-way race into a 3-way one **among the sessions most likely
   to collide**, and reads as a fix.
 
-A variant dodges the first — set `CARGO_TARGET_DIR` only on the *test* lanes, via a wrapper that
-reads `$CLAUDE_CODE_SESSION_ID`, leaving `cargo rb` on the shared tree. It is not free either: it
-edits the four-command gate sentence, which is pinned byte-for-byte by
-`claude_md_gate_lists_its_four_commands_in_the_load_bearing_order` (`src/prompts/mod.rs`), and it
-is a **policy every session must adopt** rather than a mechanism — § *Observer Blindness* position
-3's weaker shape. Costs, for whoever prices it: shared `target/` is **113 G** today with 358 G
-free.
+That variant is what shipped, and building it **falsified one of the costs predicted for it here**:
+it was expected to edit the four-command gate sentence pinned by
+`claude_md_gate_lists_its_four_commands_in_the_load_bearing_order` (`src/prompts/mod.rs`). It does
+not. That test scopes between `"**Run `./scripts/fmt-mine.sh`"` and `"before completing any
+task.**"` and asserts order *within* that slice, so naming the script in a bullet BELOW the
+directive leaves it untouched and green. The prediction was made by reading the warning about the
+pin; the refutation came from reading the test. The other predicted cost stands and is not
+negotiable: it is a **policy every session must adopt** rather than a mechanism — § *Observer
+Blindness* position 3's weaker shape.
 
-**Why the mitigation is closer to sufficient than it looks.** Cargo replaces the binary by
-**rename** — inode 196951675 → 197002269 across one rebuild, measured — not by writing in place.
-And `assert_binary_advertises_doc()` runs per `run_cmd`, immediately before each test's own
-invocation, so the unguarded window is microseconds rather than the whole suite. Pinning the inode
-with a hardlink taken at suite start would close even that, and is the obvious next move if this
-recurs; it was not taken because it buys a microsecond window for a `static`, a cleanup path with
-no owner, and a 200 MB copy fallback when the temp dir is on another filesystem.
+**Why the mitigation was closer to sufficient than it looked, and what replaced it.** Cargo
+replaces the binary by **rename** — inode 196951675 → 197002269 across one rebuild, measured — not
+by writing in place. **That is what made a hardlink a fix rather than a gesture**, so the
+per-`run_cmd` check was replaced by [`pinned_binary`], which takes the link once and checks once.
+The earlier reasoning — that per-call checking left only a microsecond window and pinning was not
+worth a `static` plus a cleanup path — was overturned by the operator, correctly: a microsecond
+window is still a window, and the pin removes the class rather than narrowing it. Recorded because
+the judgement was mine and the reversal was right.
 
 **Same exposure, not addressed here:** `tests/cross_process_write_lock.rs` (`CARGO_BIN_EXE_codescout`
 — which guarantees the binary was BUILT, a different problem, and is still a path readable after

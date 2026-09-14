@@ -7,61 +7,102 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
-/// Refuse loudly if the binary under test was built WITHOUT the librarian, because that
-/// outage otherwise reads as the reader's own regression.
+/// The path every test in this file executes: a **hardlink** to the built binary, taken
+/// once, which pins the INODE so no peer can swap it mid-suite.
 ///
-/// [`Command::cargo_bin`] resolves `target/debug/codescout` at RUN time, and `target/` is
-/// shared by every session in this checkout. Measured 2026-09-14, with the control that
-/// makes it a measurement rather than a broken probe: cargo holds
-/// `target/debug/.cargo-lock` through the BUILD phase (holder pid observed on four
-/// consecutive samples) and releases it before running tests (no holder, sampled with three
-/// `cli_doc` processes alive). So a peer's `--no-default-features` build can land in the
-/// window between THIS lane's build and THIS lane's execution, **however either session
-/// orders its lanes** — which is why the gate's ordering rule cannot close it and why no
-/// amount of compliance by anyone helps.
+/// [`Command::cargo_bin`] resolves `target/debug/codescout` at RUN time and `target/` is
+/// shared by every session in this checkout, so the file at that path can be replaced
+/// between this lane's build and this lane's execution. Two measurements, 2026-09-14:
 ///
-/// Without this, the failure is 13 assertion failures on `unrecognized subcommand 'doc'`,
+/// * Cargo holds `target/debug/.cargo-lock` through the BUILD phase (holder pid observed on
+///   four consecutive samples) and **releases it before running tests** (no holder, sampled
+///   with three `cli_doc` processes alive). So a peer's `--no-default-features` build lands
+///   inside this window **however either session orders its lanes** — which is why the
+///   gate's ordering rule cannot close it and no amount of compliance by anyone helps.
+/// * Cargo replaces the binary by **rename**, not by writing in place: inode `196951675` →
+///   `197002269` across one rebuild. **That is what makes a hardlink a fix rather than a
+///   gesture** — the rename swaps the directory entry, and this link keeps the original
+///   inode alive and unmodified for the life of the suite.
+///
+/// Without this, the outage is 13 of 15 tests failing on `unrecognized subcommand 'doc'`,
 /// reading as a feature-gating regression in whatever the reader just committed. The one
-/// test that looks like it would catch it —
-/// [`the_old_artifact_subcommand_is_gone`] — keeps PASSING, because its absence assertion is
-/// monotone under losing the whole verb set rather than just the old verb.
+/// test that looks like it would catch it — [`the_old_artifact_subcommand_is_gone`] — keeps
+/// PASSING, because its absence assertion is monotone under losing the whole verb set
+/// rather than just the old verb.
 ///
-/// **This does not prevent the race and is not meant to.** It converts an outage that reads
-/// as a regression into an outage that reads as an outage — the `IC-12` remedy shape.
-/// Closing it requires the shared mutable path to stop existing (a per-session
-/// `CARGO_TARGET_DIR`), which is an operator decision and not a test's to make.
+/// The `doc`-advertised check runs **once**, here, and that is only correct BECAUSE of the
+/// pin: an unpinned path would need re-checking before every invocation and would still
+/// leave a window between the check and the exec. Pinning is what collapses a recurring race
+/// into a single precondition.
 ///
-/// Called per `run_cmd` rather than once via a `OnceLock`, deliberately: the replacing write
-/// can land mid-run, so a one-shot check at suite start would pass and leave every later
-/// test exactly as confusing as before. It costs one extra spawn of a fast subcommand.
+/// Stale pins are swept by AGE rather than by pid, which needs no `/proc` and so behaves the
+/// same on the Windows lane. A pin is one directory entry, but it holds a ~200 MB inode
+/// alive, so leaking them is not free.
 ///
 /// `cluster/transient-shared-state-lies-to-readers` —
 /// `docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md`
-fn assert_binary_advertises_doc() {
-    let out = Command::cargo_bin("codescout")
-        .unwrap()
-        .args(["doc", "--help"])
-        .output()
-        .expect("the codescout binary must be runnable");
-    assert!(
-        out.status.success(),
-        "the binary at target/debug/codescout does not advertise `doc`, so it was built \
-         WITHOUT the librarian feature. THIS IS ALMOST CERTAINLY NOT YOUR DIFF.\n\
-         `target/` is shared across every session in this checkout, and cargo releases its \
-         build lock before running tests, so a peer's `cargo test --no-default-features` can \
-         replace the binary while these tests are executing.\n\
-         REPAIR, which you can perform alone and which is also the cheapest discriminator: \
-         re-run `cargo test --test cli_doc`. The window is minutes. If it reds a second time \
-         with this same message, the binary on disk really is librarian-less — rebuild it \
-         with `cargo test --workspace`.\n\
-         binary stderr: {}",
-        String::from_utf8_lossy(&out.stderr).trim()
-    );
+fn pinned_binary() -> &'static std::path::Path {
+    static PIN: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    PIN.get_or_init(|| {
+        let src = assert_cmd::cargo::cargo_bin("codescout");
+        let dir = src
+            .parent()
+            .expect("built binary has a parent dir")
+            .to_path_buf();
+
+        // Sweep pins older than 6h. Best-effort throughout: a failure to tidy must never
+        // fail a test run.
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(6 * 3600);
+            for e in entries.flatten() {
+                let name = e.file_name();
+                let Some(name) = name.to_str() else { continue };
+                if !name.starts_with(".cli_doc-pin-") {
+                    continue;
+                }
+                if e.metadata()
+                    .and_then(|m| m.modified())
+                    .is_ok_and(|m| m < cutoff)
+                {
+                    let _ = std::fs::remove_file(e.path());
+                }
+            }
+        }
+
+        // Link into the binary's OWN directory, so the link is guaranteed to be on the same
+        // filesystem. A tempdir is not: `/tmp` is tmpfs here and `link()` would fail EXDEV.
+        let pin = dir.join(format!(".cli_doc-pin-{}", std::process::id()));
+        let _ = std::fs::remove_file(&pin);
+        if std::fs::hard_link(&src, &pin).is_err() {
+            // Cross-device, or a filesystem without links: copy instead. Costs ~200 MB once
+            // and pins the bytes just as well; only the mechanism differs.
+            std::fs::copy(&src, &pin).expect("cannot pin the codescout binary for this run");
+        }
+
+        let out = std::process::Command::new(&pin)
+            .args(["doc", "--help"])
+            .output()
+            .expect("the pinned codescout binary must be runnable");
+        assert!(
+            out.status.success(),
+            "the binary at {src:?} does not advertise `doc`, so it was built WITHOUT the \
+             librarian feature. THIS IS ALMOST CERTAINLY NOT YOUR DIFF.\n\
+             `target/` is shared across every session in this checkout, and cargo releases its \
+             build lock before running tests, so a peer's `cargo test --no-default-features` \
+             replaced the binary between this lane's build and this pin.\n\
+             REPAIR, which you can perform alone and which is also the cheapest discriminator: \
+             re-run `cargo test --test cli_doc`. The window is minutes. If it reds a second \
+             time with this message, the binary on disk really is librarian-less — rebuild it \
+             with `cargo test --workspace`.\n\
+             binary stderr: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+        pin
+    })
 }
 
 fn run_cmd(tmp: &TempDir) -> Command {
-    assert_binary_advertises_doc();
-    let mut cmd = Command::cargo_bin("codescout").unwrap();
+    let mut cmd = Command::new(pinned_binary());
     let db = tmp.path().join("cat.db");
     let ws = tmp.path().join("workspace.toml");
     std::fs::write(&ws, "").ok();

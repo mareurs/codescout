@@ -2590,8 +2590,16 @@ mod tests {
             eprintln!("Skipping: kotlin-lsp not installed");
             return;
         }
-        let codescout_bin =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/debug/codescout");
+        // Honour CARGO_TARGET_DIR. `scripts/gate.sh` points it at a per-session tree, and a
+        // hardcoded `target/` here would make this test skip SILENTLY under it — a green that
+        // never ran, which is the exact defect
+        // `docs/issues/archive/2026-08-27-cross-process-write-lock-test-passes-when-it-does-not-run.md`
+        // already cost this repo once. `CARGO_BIN_EXE_*` is not an option here: Cargo sets it
+        // for integration tests, and this is a unit test inside the lib.
+        let codescout_bin = match std::env::var_os("CARGO_TARGET_DIR") {
+            Some(dir) => std::path::PathBuf::from(dir).join("debug/codescout"),
+            None => std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/debug/codescout"),
+        };
         if !codescout_bin.exists() {
             eprintln!("Skipping: {codescout_bin:?} not built (run `cargo build --bin codescout`)");
             return;

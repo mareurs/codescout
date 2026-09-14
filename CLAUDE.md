@@ -36,6 +36,24 @@ Why each part, one line each. Every measurement, date and superseded form →
   re-deriving it means arming the shared trap on purpose while other sessions are building against
   the same `target/`. Verified 2026-09-05 — the target is `cli_doc`, it holds **15** tests, and all
   15 pass against a librarian-bearing binary.
+- **`./scripts/gate.sh` runs those four in a PER-SESSION `target/`, and is the only form that
+  closes the window above.** The bullet above says no ordering discipline can help, and that is
+  now measured rather than argued: cargo holds `target/debug/.cargo-lock` through the BUILD phase
+  and **releases it before running tests** (holder pid observed on four consecutive samples during
+  a build; none during a `cli_doc` run with three test processes alive — the control is what makes
+  the empty reading a measurement). So a peer's lean-lane build lands inside *your own* lane's run
+  phase, and a peer following the gate perfectly still writes a librarian-less binary to the shared
+  path once, mid-sequence. The script keys `CARGO_TARGET_DIR` on `$CLAUDE_CODE_SESSION_ID`, prints
+  the four exit codes, and **exits non-zero if any lane failed** — which the `;`-chained form
+  cannot, because it ends in `echo`. **It deliberately does NOT touch `cargo rb`:** that builds
+  `--release`, and `~/.cargo/bin/codescout` is a symlink into `target/release/`, so isolating that
+  profile too would point the live MCP binary at a path nothing rebuilds, for every session on
+  every profile. Outside a Claude session it exits 2 and tells you to run the four directly, which
+  is correct for a solo checkout. **Its limit, stated because it is real:** a session that types
+  the four commands by hand still shares `target/`, so this is a mechanism for whoever runs it and
+  a policy for everyone else — the four commands above stay the canonical statement of *what* runs
+  and in *what order*. Cost is per-session disk, not shared: the script prints its tree size on
+  every run rather than quoting a number here that would decay.
 - **Chain the two test lanes with `;`, never `&&`.** The guarantee above is conditional on the
   default lane running, and `&&` withdraws it *exactly when something is wrong*. Worse than a
   skipped repair: `cargo test` **builds, then runs**, so a failing lean lane has already
