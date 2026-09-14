@@ -12,7 +12,7 @@ topic: context-injection
 entry_prefix:
   - F
   - W
-entry_high_water_F: 9
+entry_high_water_F: 10
 entry_high_water_W: 4
 ---
 
@@ -43,6 +43,7 @@ author to make.
 | F-7 | 2026-09-14 | high | tooling | mitigated | A mutation that never applied is indistinguishable from a surviving mutant |
 | F-8 | 2026-09-14 | med | tooling | mitigated | A positive control validates the instrument, never the query |
 | F-9 | 2026-09-14 | med | plan-prose | mitigated | The fix plan's own workaround is wrong for most ledgers — an anchor is not a constant |
+| F-10 | 2026-09-14 | high | tooling | open | The schema is hand-written too, so "prefer the schema" rests on a false premise — and I shipped its stale claim to four surfaces |
 
 ## Wins Index
 
@@ -1153,7 +1154,7 @@ stop using `grep` to count at all.
 
 **Valid:** dated 2026-09-14
 
-**Observed:** `docs/issues/2026-09-14-the-append-entry-recipes-still-teach-the-two-call-form-the-fix-replaced.md`
+**Observed:** `docs/issues/archive/2026-09-14-the-append-entry-recipes-still-teach-the-two-call-form-the-fix-replaced.md`
 § Workarounds ships a copyable one-call snippet with a literal
 `index_after_line="|----|------|---------:|----------|--------|-------|"`. Running it against
 the live corpus **before** transcribing it into the three recipes — CLAUDE.md's
@@ -1195,6 +1196,58 @@ copied surface.
 **Status:** mitigated — all three recipes now state both hazards, and no mechanism enforces either.
 A gate would have to key on the schema's declared both-or-neither coupling, which the bug file's
 § Fix already argues for and which is still a proposal.
+
+## F-10 — The schema is hand-written too, so "prefer the schema" rests on a false premise
+
+**Valid:** dated 2026-09-14
+
+**Observed:** post-rebuild recon of the seam the day's work rests on. All three recipes fixed at
+`b325129a` / `e827162` state `index_row` and `index_after_line` are **both-or-neither**. The code
+has not said that since an explicit deferral target existed.
+
+`append_entry.rs:88-110` (`HEAD` `8fbaa7ae`, the sha the running server reports):
+
+| passed | behaviour |
+|---|---|
+| neither | no row |
+| both | explicit anchor, and it **wins** |
+| `index_row` alone | defers to the artifact's `snapshot_anchor` **frontmatter** declaration; refused **by name** if the artifact declares none |
+| `index_after_line` alone | still refused — the comment marks this arm *"NOT symmetric with the arm above"* |
+
+So the true rule is *a row needs an anchor from somewhere*, and "both-or-neither" is wrong in
+exactly one direction. `SNAPSHOT_ANCHOR_KEY` is real
+(`src/librarian/catalog/augmentation.rs:1135`, resolved by `declared_snapshot_anchor`).
+
+**The sharp half, and it falsifies a rule I helped write.**
+`docs/issues/archive/2026-09-14-the-append-entry-recipes-still-teach-the-two-call-form-the-fix-replaced.md`
+§ Root cause instructs: *"when a recipe and a schema name the same call and the recipe uses FEWER
+parameters, **prefer the schema**: it is generated from the code, the recipe is not."* The premise
+is false. The schema is a **hand-written string literal** —
+`src/librarian/tools/artifact.rs:312` — and it still reads *"Both-or-neither with
+`index_after_line`"*. It decays exactly like a recipe, and nothing couples it to
+`append_entry.rs`'s match arms.
+
+That inverts the bug file's own diagnosis one level up. It framed the defect as *rank* — a worked
+example outranking an authoritative schema. Half of it is really **two hand-written copies of one
+contract, neither generated**, and the schema won its authority by reputation rather than by
+provenance.
+
+**Cost, and it is mine:** I read that schema string in my own tool list, believed the "generated"
+claim in the file I was fixing, and propagated `both-or-neither` into **four** surfaces in one
+afternoon — `docs/templates/session-log.md`, `docs/TAXONOMY.md`,
+`codescout-companion/.../reconnaissance/SKILL.md`, and the failure message of the very guard I
+added to stop recipe drift (`src/prompts/mod.rs:2461`). The guard now asserts a stale contract in
+its own error text.
+
+**Rests on:** `8fbaa7ae`, worktree = `HEAD` for the two files read. The behaviour is read from the
+match arms and their comments, **not** exercised — no call was made with a `snapshot_anchor`-
+declaring artifact, so the `Declared` arm is verified as written, not as run.
+
+**Severity:** high — four prescriptive surfaces, two repos, now state a contract the code refuses
+to honour in one direction, and one of them is the regression guard for this exact class.
+
+**Status:** open — recorded at notice; the repair is four one-line corrections plus a decision
+about whether `artifact.rs:312` should be coupled to the arms rather than restated beside them.
 
 ## Template for new entries
 

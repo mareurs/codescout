@@ -309,8 +309,8 @@ impl Tool for Artifact {
                     "type": "string",
                     "description": "append_entry: prose ledgers — pass with `title` + `body` (all three or none; a partial set is refused naming what is missing) and the server writes `## <ID> — <title>` itself, before this heading, in the same write that records the high-water mark. Must name a heading that exists verbatim; a bad anchor writes nothing at all. Why prefer it over reserving an id: get_guide(\"tracker-conventions\") § Entry ids."
                 },
-                "index_row": { "type": "string", "description": "append_entry: index-table row, written in the SAME file write as the section; `{id}` becomes the allocated id. Both-or-neither with `index_after_line`, and only with a section." },
-                "index_after_line": { "type": "string", "description": "append_entry: line to insert `index_row` after — FIRST match, whitespace-trimmed, usually the table separator. A line that does not exist writes nothing and allocates no id." },
+                "index_row": { "type": "string", "description": "append_entry: index-table row, written in the SAME file write as the section; `{id}` becomes the allocated id. Needs an anchor: `index_after_line` per call, or a `snapshot_anchor` declared on the artifact — then pass this alone and the row lands at the block's TAIL. Neither is refused by name." },
+                "index_after_line": { "type": "string", "description": "append_entry: line to insert `index_row` after — FIRST match, whitespace-trimmed, so a non-unique line places the row in the WRONG table. A line that does not exist writes nothing and allocates no id. Optional when `snapshot_anchor` is declared, and wins over it. Refused without `index_row`." },
                 "event": {
                     "type": "object",
                     "description": "event_create: the event to append — an immutable record anchored to git, distinct from a field patch. `kind` lives inside this object so it never shares a key with the document `kind`.",
@@ -864,6 +864,57 @@ mod tests {
     }
 
     /// One catalog row, no file. `TestArtifactRowBuilder` is what `timeline.rs` tests use.
+    /// The `index_row` description must name EVERY way to anchor a row, and the one it
+    /// omitted is the one that makes the parameter usable alone.
+    ///
+    /// It read *"Both-or-neither with `index_after_line`"* long after that stopped being
+    /// true: `append_entry.rs`'s `(Some(row), None)` arm defers to the artifact's own
+    /// `snapshot_anchor` frontmatter, and `a_declared_snapshot_anchor_places_the_row_at_the_blocks_tail`
+    /// pins that behaviour — passing `index_row` alone succeeds and lands the row at the
+    /// block's tail. The arms moved; the string beside them did not.
+    ///
+    /// **Why a test rather than care, and it is this repo's own lesson turned on itself.**
+    /// `docs/issues/archive/2026-09-14-the-append-entry-recipes-still-teach-the-two-call-form-the-fix-replaced.md`
+    /// told readers that when a recipe and a schema disagree they should *prefer the schema,
+    /// because it is generated from the code*. It is not — it is the hand-written literal a
+    /// few lines above, with nothing coupling it to the arms, so it decays exactly like a
+    /// recipe while carrying a generated one's authority. On 2026-09-14 one session read it,
+    /// believed that rule, and propagated `both-or-neither` into four prescriptive surfaces
+    /// across two repos in an afternoon — including the failure text of the guard added that
+    /// same day to stop recipe drift (`context-injection-session-log:F-10`).
+    ///
+    /// **Ceiling, stated because the assertion looks stronger than it is.** This is a
+    /// presence check, monotone under widening: it cannot tell you the description is
+    /// CORRECT, only that it has not gone silent about the declared path again, and a
+    /// *third* anchor source added later would not red it. It reds on exactly the regression
+    /// that happened. The behaviour half is not duplicated here — it is pinned by the
+    /// `append_entry` sibling named above, and one test per claim is why neither reds for the
+    /// other's deletion.
+    #[tokio::test]
+    async fn index_row_description_names_every_way_to_anchor_a_row() {
+        let schema = Artifact.input_schema();
+        let desc = schema["properties"]["index_row"]["description"]
+            .as_str()
+            .expect("index_row is documented");
+
+        assert!(
+            desc.contains("snapshot_anchor"),
+            "index_row's description names no way to anchor a row except the per-call one, \
+             so a caller reads the parameter as unusable without `index_after_line`. The \
+             `(Some(row), None)` arm in append_entry.rs defers to the artifact's declared \
+             `snapshot_anchor` instead: {desc}"
+        );
+
+        assert!(
+            !desc.to_lowercase().contains("both-or-neither with"),
+            "index_row's description still claims a both-or-neither coupling with \
+             `index_after_line`. That is false in one direction and a probe says so: \
+             `a_declared_snapshot_anchor_places_the_row_at_the_blocks_tail` passes \
+             `index_row` alone and the call SUCCEEDS. Only the reverse half — \
+             `index_after_line` with no `index_row` — is still refused: {desc}"
+        );
+    }
+
     fn seed_row(ctx: &ToolContext, id: &str) {
         use crate::librarian::catalog::artifact::{upsert, TestArtifactRowBuilder};
         let cat = ctx.catalog.lock();

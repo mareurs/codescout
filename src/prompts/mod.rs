@@ -2342,7 +2342,7 @@ mod tests {
     /// three surfaces still prescribed append-then-add-the-row, and two sessions produced
     /// three index-less entries in one ledger inside twenty minutes, then nearly captured
     /// each other's work committing it — `git add <path>` stages whole files
-    /// (`docs/issues/2026-09-14-the-append-entry-recipes-still-teach-the-two-call-form-the-fix-replaced.md`).
+    /// (`docs/issues/archive/2026-09-14-the-append-entry-recipes-still-teach-the-two-call-form-the-fix-replaced.md`).
     /// The parameters were in the served tool schema throughout, so the defect was **rank,
     /// not coverage**: a worked example is read at call-composition time and a schema is not.
     ///
@@ -2376,7 +2376,16 @@ mod tests {
 
         // Matched against a lowercased copy, so these are lowercase.
         const RETIRED_PROTOCOL: &[&str] = &["add the index row after", "then add the index"];
-        const REQUIRED: &[&str] = &["index_row", "index_after_line"];
+        // `snapshot_anchor` is here because dropping it is the regression that ALREADY
+        // happened one level up: the served tool schema said "Both-or-neither with
+        // `index_after_line`" long after `append_entry.rs`'s `(Some(row), None)` arm began
+        // deferring to the artifact's own declaration, and a session copied that omission
+        // into all three of these surfaces in one afternoon
+        // (`context-injection-session-log:F-10`). A recipe naming only the per-call anchor
+        // tells a reader the parameter is unusable alone, which is false and is the more
+        // ergonomic route — a declared anchor lands every row at the block's tail with
+        // nobody choosing an anchor again.
+        const REQUIRED: &[&str] = &["index_row", "index_after_line", "snapshot_anchor"];
 
         // Both in-repo surfaces are re-served rather than merely read: the template is
         // copied verbatim into every new ledger (including its anchor HTML comment, which
@@ -2458,7 +2467,9 @@ mod tests {
             "{} append_entry recipe defect(s):\n{}\n\n\
              Passed `index_row` + `index_after_line`, `doc(action=\"append_entry\")` writes the \
              section, the ledger's high-water mark AND the index row in one `fs::write`, with \
-             `{{id}}` substituted server-side. They are both-or-neither. A recipe omitting them \
+             `{{id}}` substituted server-side. A row needs an anchor from somewhere — \
+             `index_after_line` per call, or a `snapshot_anchor` declared on the artifact, \
+             after which `index_row` goes alone. A recipe omitting them \
              leaves a complete, index-less entry on disk between two calls — and `git add \
              <path>` stages whole files, so a peer committing that ledger captures it.\n\n\
              To MENTION the retired protocol (a migration note, a bug file quoting it), keep it \

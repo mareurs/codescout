@@ -4996,8 +4996,40 @@ mod tests {
     /// strictness does not reach it. Dropping this line would have left that second
     /// site silently discarding a caller's typo — the defect being fixed, one level
     /// down. Report run 2026-09-12: TOTAL (21 tools) = 55_740, headroom 0.
+    ///
+    /// **Ratcheted UP 2026-09-14, 55_740 → 55_977 (+237), to correct `index_row` and
+    /// `index_after_line`, whose descriptions stated a `both-or-neither` coupling the code
+    /// had stopped honouring.** `append_entry.rs`'s `(Some(row), None)` arm defers a row with
+    /// no per-call anchor to the artifact's declared `snapshot_anchor`, and
+    /// `a_declared_snapshot_anchor_places_the_row_at_the_blocks_tail` pins that — so
+    /// `index_row` alone is legal and the published schema said it was not.
+    ///
+    /// DERIVATION. Baseline report run = 55_740, equal to the constant, so headroom was 0 and
+    /// gross equals net. `doc` is the only row that moves (18_581 → 18_818), all of it schema;
+    /// `desc` unchanged at 1_422. Both property descriptions measured as serialized JSON:
+    /// `index_row` 176 → 294 (**+118**) and `index_after_line` 173 → 292 (**+119**). 118 + 119
+    /// = 237, the observed total delta exactly. Report run 2026-09-14: TOTAL (21 tools) =
+    /// 55_977, headroom 0.
+    ///
+    /// **What the bytes bought is a schema that was WRONG rather than merely terse, and the
+    /// cost of leaving it is measured rather than argued.** On 2026-09-14 a session read this
+    /// string, believed a bug file's instruction to *prefer the schema, because it is generated
+    /// from the code* — it is not; it is the hand-written literal a few lines up — and
+    /// propagated `both-or-neither` into four prescriptive surfaces across two repos in one
+    /// afternoon, including the failure text of a guard added that same day to stop exactly
+    /// this drift (`context-injection-session-log:F-10`). `index_row_description_names_every_way_to_anchor_a_row`
+    /// now couples the string to the arms so the next divergence reds here.
+    ///
+    /// **Cut once after the first measurement, +575 → +237**, on the precedent two entries
+    /// above: dropped the `patch={"extra": …}` call shape (a caller can get that from the
+    /// refusal, which names it) and the *NOT symmetric* restatement, which belongs on the
+    /// sibling key and is stated there. Also deleted rather than kept: the original's *"usually
+    /// the table separator"*, which is **actively wrong** — one live ledger repeats
+    /// `|---|---|---|` nine times, so that anchor silently places a `W-N` row into the `F-N`
+    /// table (`context-injection-session-log:F-9`). That deletion is a correctness fix that
+    /// happens to save bytes, not a trim.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_740;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_977;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

@@ -22,20 +22,30 @@
 > the ledger's high-water mark, stamps `**Valid:** dated <today>` unless
 > your body declares a class, and writes `index_row` with `{id}` replaced
 > by the id it just allocated. The indexes are the eval surface, the
-> sections are the evidence. `index_row` and `index_after_line` are
-> **both-or-neither** — pass neither and you get a section with no row,
-> which is the two-call form this replaced.
+> sections are the evidence.
 >
-> **`index_after_line` fails silently in both directions, so read the
-> table before you choose it.** It inserts after the **first** line equal
-> to what you pass: a non-unique line writes your row into the wrong
+> **A row needs an anchor from SOMEWHERE, and there are two sources.**
+> Best, once per ledger: declare `snapshot_anchor` in this file's own
+> frontmatter, naming the index table's header line verbatim —
+> `doc(action="update", id=…, patch={"extra": {"snapshot_anchor": "| ID |
+> Date | … |"}})`. After that, `index_row` **alone** places every row at
+> the block's **TAIL**, which is where a newest-last ledger wants it, and
+> nobody chooses an anchor again. Otherwise pass `index_after_line` per
+> call; it WINS when both are given. They are **not** symmetric —
+> `index_after_line` with no `index_row` is refused, and passing neither
+> anchor with a row is refused by name.
+>
+> **Choosing that per-call anchor fails silently in both directions, which
+> is the reason to prefer the declaration above.** It inserts after the
+> **first** line equal to what you pass: a non-unique line writes your row into the wrong
 > table, and a line that does not exist writes nothing at all and
 > allocates no id. Neither raises an error. **Prefer the target table's
 > last existing row** — unique by construction, because ids are — over
 > the `|---|---|` separator, which anchors to the table's **top** and is
 > repeated 9 times in one live ledger. Top is right for a newest-first
 > ledger like `bug-fix-session-log.md` and wrong for the oldest-first
-> ones; the corpus does not agree, so your ledger decides.
+> ones; the corpus does not agree, so your ledger decides. A declared
+> `snapshot_anchor` sidesteps this whole paragraph.
 >
 > **Do not hand-allocate ids, and do not pre-write index rows.** A max-id
 > is a fact about an instant, and a peer session in the same checkout can
@@ -268,8 +278,11 @@ Codified so the Index column means the same thing across sessions.
      The server allocates the id, writes `## F-N — <title>` at the ledger's
      own level, records the high-water mark, stamps `**Valid:** dated
      <today>` AND writes the index row with `{id}` filled in — one write.
-     `index_row`/`index_after_line` are both-or-neither. The anchor must be
-     UNIQUE (first match wins, silently) and decides whether the row lands
-     at the table's top or its bottom — prefer the last existing row. Do
-     not hand-allocate ids; do not type the row yourself ahead of the
+     A row needs an anchor from SOMEWHERE: `index_after_line` per call, or
+     a `snapshot_anchor` declared once in this file's frontmatter, after
+     which `index_row` alone lands the row at the block's TAIL. Passing
+     `index_after_line` with no `index_row` is refused; they are not
+     symmetric. A per-call anchor must be UNIQUE (first match wins,
+     silently) and decides top vs bottom — prefer the last existing row.
+     Do not hand-allocate ids; do not type the row yourself ahead of the
      call. -->
