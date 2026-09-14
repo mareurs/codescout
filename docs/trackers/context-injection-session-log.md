@@ -810,6 +810,23 @@ cannot avoid it: it has no identity to scope the reset to.
 **Impact:** high — it converts the ADR's justification from an argument into a
 measurement, after F-6 had correctly demoted the previous one.
 
+3. **Re-derived after a rebuild, and it CONFIRMED** — published because a confirmation is
+   a denominator (`CLAUDE.md` § *Testing Discipline*: instrument the doubt, and when a
+   re-derivation confirms, say so). Datapoints 1 and 2 were taken against a server process
+   that no longer exists; the operator then rebuilt and `/mcp`-reconnected onto a HEAD that
+   had moved well past mine, including `a13b31c6`, which touched `src/server.rs` by +114
+   lines. Checked rather than assumed: all three of my commits are still ancestors of HEAD,
+   that commit's diff mentions **zero** of `adopt_request_conversation` / `parked_ledgers`
+   / `principal_from_arguments` / `base_ledger_key`, the strip is still wired at
+   `src/server.rs:1259`, and the binary postdates HEAD. One dispatch against the rebuilt
+   stack: **0 parent re-deliveries**, subagent received its own
+   `project-activation-bootstrap`.
+
+   Incidental confirmation of a documented claim nothing here set out to test: **the ledger
+   survived the `/mcp` reconnect**. The repeated parent call came back silent with no
+   re-drain needed, and only the session-opening topic re-armed — which is exactly what
+   the keyed tier promises in `get_guide("workspace-state")` § *Per-session state reset*.
+
 **Promote-when:** — **met 2026-09-14.** Both halves are measured against the shipped
 hook, so the ADR's Consequences may state the benefit in observed terms. What remains
 unmeasured is the *shape of the curve*: 1 dispatch and 2 concurrent dispatches both cost
@@ -878,6 +895,38 @@ the M1 re-run, and M2-M5 carry the same check in the other direction via
 
 **Rests on:** `sed` exiting 0 on zero matches — true of GNU sed and POSIX. Any
 find-and-replace mutation tool has the same property.
+
+**A SURVIVING MUTANT HAS THREE READINGS, NOT TWO** — noticed 2026-09-14 on reading
+`1371ba87`, committed by sessionId `f3c594ce-c424-40d3-a603-9693cfef3f63` shortly after
+this entry and arrived at independently. That record publishes two readings of "no test
+killed it": **untested** (write the test) and **unreachable by any test that could be
+written** (change production code for a seam — no amount of test-writing fixes it). Both
+presuppose the mutant EXISTED. F-7 is the third: **the mutation never applied**, so the
+green came from a world containing no mutant at all.
+
+The three take three different repairs, which is why collapsing them is expensive:
+
+| reading | what the green means | repair |
+|---|---|---|
+| untested | mutant ran, no assertion covers it | write the test |
+| unreachable | mutant ran, no writable test can drive it | give production code a seam |
+| **never applied** | **no mutant ran** | re-run with a diff between edit and test |
+
+Their entry's own warning applies recursively here: reading a survivor as "untested" sends
+you to write a test that cannot exist, and the failure of that attempt reads as your own
+incompetence rather than a missing seam. Reading a NO-OP as a survivor sends you to repair
+an assertion that was already correct — and that failure reads as the guard being
+undefeatable, which is the most convincing wrong conclusion of the three.
+
+Check the cheap branch first: a diff costs one line and eliminates the third reading
+outright, leaving their two-way decision intact and correct.
+
+**Not claimed:** that this is one promotable class with `1371ba87` and `F-143`
+(`39fd478a`, "a red that clears cannot name its own cause"). All three share a shape — two
+causes emitting one observable, with a natural reading that picks the wrong one — but that
+shape is broad enough to fit much of § *Testing Discipline* already, and a class claimed
+from three same-day entries is the kind of tally this repo has been wrong about before.
+Recorded as an adjacency to check, not a cluster.
 
 ## W-4 — reading the binary stopped a context optimisation shipping as a permission bypass
 
