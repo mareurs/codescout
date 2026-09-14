@@ -219,6 +219,46 @@ situation in which a default status would get synthesized. **Untested**, and it 
 remaining probe: background a long `cargo` build that will fail, restart the MCP server while it
 runs, and read what comes back.
 
+### Running that probe — blast radius, and DECIDE THE PASS CONDITION FIRST
+
+**Blast radius is one session, not the checkout.** The codescout MCP server is **per-session**:
+raised by sessionId `9403d62d` (who notes they had assumed the opposite until the process table
+said otherwise) and verified here by `$PPID` — this session's shell reports parent `720167`,
+which is the pid they had independently attributed to this session. Seven distinct
+`codescout start --debug` processes were live at the moment of that check, one per session. So a
+restart-mid-run probe disturbs the session running it and no peer.
+
+**Two refinements to that enumeration, because the population is not what a process name
+suggests.** `pgrep codescout` also returns **shared** LSP mux processes — one `codescout mux …
+rust-analyzer` and one `codescout mux … kotlin-lsp`, both keyed on a per-checkout socket hash and
+shared across sessions. They are a different population from the per-session servers and are not
+disturbed by one session's `/mcp`; say which population you counted. And the counts differ by
+instant, not by instrument — `9403d62d` reported eight live, this check found seven servers,
+taken minutes apart. That is ordinary churn (`CLAUDE.md` § *Reaching a Peer Session*: stamp the
+instant), not a disagreement to debug.
+
+**Pre-register the pass condition, because the two outcomes look nothing alike and only one
+reproduces this bug.** Raised by `9403d62d` and adopted here: the restart eats the handle *and*
+the process's parent — the old server dies with the run, so the new one may never have held a
+record of it at all. That predicts two distinguishable results needing different fixes:
+
+| outcome | reading | fix direction |
+|---|---|---|
+| a synthesized `✓ exit 0` | **reproduces this bug** — the summary branch defaults a status it never had | the `summary`-emitting branch |
+| the handle simply does not resolve | **a clean, honest failure** — and a genuine negative result | none; the tool is behaving |
+
+The second will *look* like a failed probe while actually being an answer. Write down which one
+you are calling a pass **before** running it, or a negative result gets discarded as a botched
+attempt.
+
+**How the restart must be performed, and why that is a constraint rather than a detail.** It has
+to come from a user-typed `/mcp`; no tool call reaches it. The alternative — a session killing
+its own server process from a shell mid-call — severs the tool access the probe is trying to
+observe through, which is both the wrong instrument and a session-level disruption. `9403d62d`
+declined to run it on exactly that ground and surfaced it to their operator instead; this
+session has done the same. **Whoever runs it needs a human at the keyboard**, which is the real
+reason this is still open rather than any difficulty in the probe itself.
+
 Still unseparated, lower-ranked: `cargo`-classified commands (`"type": "build"`) versus plain
 shell, and a trailing `2>&1`.
 
