@@ -12,7 +12,7 @@ topic: context-injection
 entry_prefix:
   - F
   - W
-entry_high_water_F: 7
+entry_high_water_F: 8
 entry_high_water_W: 4
 ---
 
@@ -41,6 +41,7 @@ author to make.
 | F-5 | 2026-09-14 | high | plan-prose | open | The deny_unknown_fields hazard does not exist at the tool surface — 42 occurrences read as 42 gates |
 | F-6 | 2026-09-14 | high | architectural | open | The end-to-end win was the shipped guide_rearm path, not this feature — Arm A was confounded |
 | F-7 | 2026-09-14 | high | tooling | mitigated | A mutation that never applied is indistinguishable from a surviving mutant |
+| F-8 | 2026-09-14 | med | tooling | mitigated | A positive control validates the instrument, never the query |
 
 ## Wins Index
 
@@ -982,6 +983,63 @@ asserting the **absence** discriminates, which is why
 **Rests on:** Claude Code 2.1.270's hook dispatcher. The field is undocumented in
 this respect, so a future version could couple them; the test reds if the
 emitted shape ever changes, which is the part that does not decay.
+
+## F-8 — a positive control validates the instrument, never the query
+
+**Valid:** dated 2026-09-14
+
+**Severity:** med
+**Status:** mitigated
+
+**Observed:** Before renaming a bug file, I checked what cited it:
+
+```
+git grep -l "2026-09-14-pre-edit-dirty-check-claims-this-session-did-not-write-its-own-rename" HEAD
+  -> 0 hits
+git grep -lc "issue-clusters.md" HEAD          # positive control
+  -> 122 hits
+```
+
+and reported the zero as conclusive, explicitly citing the control as what made it a
+measurement rather than a broken grep. `doc(action="move")` then returned
+`inbound_path_citations: ["docs/trackers/issue-clusters/IC-2-..."]` — a citation that was
+present in the working tree **and** in HEAD the whole time.
+
+**Cause:** IC-2 names its members by **bare slug**, without the date prefix:
+`` `pre-edit-dirty-check-claims-this-session-did-not-write-its-own-rename` ``. I searched
+for the full filename. The pattern and the corpus's citation form never overlapped, so the
+zero was correct about the string I typed and silent about the question I asked.
+
+**The control was real, and structurally could not catch this.** A positive control
+establishes that the **instrument** works — `git grep` reads HEAD, matches, returns hits.
+It says nothing about whether the **query** matches how the corpus actually writes the
+thing being counted, because the control uses a *different* pattern that happens to be
+well-formed. Both halves of the reasoning were sound and the pair still had a hole:
+
+| what was verified | what it covers | what it misses |
+|---|---|---|
+| control returns 122 | the tool runs, the tree is readable, the method is sound | whether *my* pattern is the form the corpus uses |
+| target returns 0 | that exact string is absent | that the same referent appears under another form |
+
+So *"a suspicious zero needs a control"* is necessary and not sufficient. The missing
+question is **what does a citation of this thing actually look like** — answered by reading
+one known citation, never by adding a control.
+
+**What caught it:** `doc(action="move")`'s `inbound_path_citations`, which **enumerates**
+rather than matching a pattern I composed. The standing lesson: when a tool already answers
+"who references this", prefer it over a grep — not because grep is unreliable, but because
+the tool's pattern is derived from the corpus and mine is derived from my belief about the
+corpus. This is IC-6's shape from the query side: I addressed the file by one of its names
+and the corpus indexes it under another.
+
+**Cost if uncaught:** the rename would have orphaned IC-2's only pointer to this member,
+leaving a cluster row naming a file that no longer exists — and `audit_doc_refs` rates an
+unresolvable backticked path `high`, so it would have reddened CI for the *next* session,
+reading as their breakage.
+
+**Rests on:** the `move` response's `inbound_path_citations` field, which exists precisely
+because path citations decay across moves. Nothing here generalises to corpora with no such
+enumerator; there, reading one real citation first is the only available check.
 
 ## Template for new entries
 

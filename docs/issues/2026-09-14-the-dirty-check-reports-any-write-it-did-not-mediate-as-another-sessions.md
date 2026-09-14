@@ -1,7 +1,7 @@
 ---
 kind: bug
-status: open
-title: 'BUG: the pre-edit dirty-check advisory asserts "this session did not write" for edits the session made via edit_code''s multi-file rename'
+status: investigating
+title: 'BUG: the pre-edit dirty-check reports any write it did not mediate as another session''s — edit_code renames and librarian writes alike'
 tags:
 - cluster/gate-keyed-on-unobservable-event
 - companion-hook
@@ -10,18 +10,32 @@ tags:
 ---
 
 ## Summary
+
 `codescout-companion`'s pre-edit dirty-check advisory opens with *"`<path>` already has
 uncommitted changes that this session did not write."* That headline asserts a negative
-authorship fact the hook cannot observe. It fires on files the **current session wrote
-moments earlier** through `edit_code(action="rename")`, whose LSP rename edits every file
-containing a reference — not only the file named in the call. The hook sees a dirty file it
-has no record of the session touching, and reports it as foreign.
+authorship fact the hook cannot observe, and it fires on files the **current session wrote
+moments earlier**.
+
+**The predicate is "the session wrote through a path the hook does not mediate" — not
+"`edit_code` renamed something".** This file was opened on the rename route and titled for
+it; that scoping was too narrow, and the correction is owed to sessionId
+`6be73414-6293-4a4e-95a4-4bada8327f08`, who measured two instances involving no rename, no
+multi-file edit, and no file the call did not name (§ *Evidence*). At least two routes
+reach the identical state:
+
+| route | why the hook has no record |
+|---|---|
+| `edit_code(action="rename")` | the LSP rename edits every file holding a reference, not only the one named in the call |
+| **`doc(action="create" / "update" / "append_entry")`** | the librarian writes the file directly, server-side; no `PreToolUse` payload ever describes the write |
+
+**On a docs-heavy session the librarian route is by far the larger of the two by call
+volume**, which inverts how this record originally read: the rename is the exotic case and
+the one the title named.
 
 The advisory's own fine print is accurate and self-limiting (*"This states only what `git
 status --porcelain` proves. It does NOT establish a peer: an earlier session of your own
 leaves the same trace."*). The defect is that the **headline over-claims relative to the
 body**, and the headline is what a reader acts on.
-
 ## Symptom (Effect)
 Renaming `is_subagent_capable_name` in `src/tools/core/types.rs` produced
 `files_changed: 2, total_edits: 10` — the second file being
@@ -49,11 +63,18 @@ Any multi-file rename reproduces it — the wider the symbol's reference set, th
 become falsely foreign for the rest of the session.
 
 ## Root cause
-Inferred, not measured beyond the two tool calls above. The hook's predicate is `git status
---porcelain` on the target path, which answers *"is this file dirty?"*. The claim it makes
-is *"this session did not write it"* — a different question, and one nothing in the hook's
-inputs can answer: it holds no record of the session's own writes, and `edit_code`'s
-multi-file edits are not announced to it.
+
+Inferred, not measured beyond the tool calls recorded in § *Evidence*. The hook's predicate
+is `git status --porcelain` on the target path, which answers *"is this file dirty?"*. The
+claim it makes is *"this session did not write it"* — a different question, and one nothing
+in the hook's inputs can answer: **it holds no record of the session's own writes**.
+
+That is the whole of it, and it is why the route does not matter. Any write that does not
+pass through a `PreToolUse` payload the hook sees is invisible to it — `edit_code`'s
+multi-file rename because the extra files are never named, the librarian's `doc(create /
+update / append_entry)` because the server writes the file itself. Enumerating routes is
+useful for reproduction and misleading as a cause: the hook is not failing to track two
+specific paths, it is tracking none.
 
 That is `cluster/gate-keyed-on-unobservable-event` (IC-2): a gate keyed on an event it
 cannot observe substitutes a proxy. Dirtiness is the proxy; authorship is the event.
@@ -65,6 +86,11 @@ it spends a ~7s scan plus a peer round trip to be told nothing, and on a checkou
 live sessions the more likely outcome is that the advisory is learned to be noise and then
 ignored on the call where it is true. The cost is the guard's credibility, not the edit.
 
+**The data is not missing from the machine, only from the advisory.** Measured the same
+hour on the same tree: `scripts/file-provenance.py` returned `MINE … written by THIS
+session`, and `attribute-red` named the session correctly on a `cargo test` red, while the
+dirty-check was calling that same session's writes foreign. Two instruments disagreeing at
+one instant, and the dirty-check is the wrong one.
 ## Evidence
 - `edit_code` rename response: `{"files_changed": 2, "total_edits": 10}` for
   `is_subagent_capable_name`.
@@ -123,20 +149,35 @@ not hold.
    `git status` in a check taken minutes before the rename.
 
 ## Fix
-*Not written.* Two candidates, in preference order:
+
+*Not written.*
+
+**Read this before scoping one — a fix aimed at the rename route will go green and leave
+the common route open.** That is this bug's own cluster turned on its record: the title
+became the spec, `edit_code` is in the tags, and § *Reproduction* drives the rename path.
+A patch that teaches the hook about `edit_code`'s extra files closes one route of at least
+two, passes every test here, and leaves the librarian route — the higher-volume one —
+firing exactly as before. **The acceptance criterion is a librarian write, not a rename:**
+call `doc(action="update")` on a clean file, then `edit_file` it, and the advisory must
+stay silent.
+
+Two candidates, in preference order:
 
 1. **Soften the headline to its predicate.** *"`<path>` has uncommitted changes"* plus the
    existing fine print, dropping the authorship claim the hook cannot support. Cheapest,
-   and loses nothing the hook actually knows.
+   and loses nothing the hook actually knows. **It is also the only candidate that is
+   route-independent** — it removes the unobservable claim rather than chasing the ways of
+   observing it, so no future write path can reopen it. That property, not the cost, is
+   the reason it leads.
 2. **Consult the same source the red-attribution hook already uses.** That hook resolves
    authorship from Claude transcripts across profiles and names this session correctly. If
    the dirty-check called it, the advisory could say *"written by THIS session"* and
    suppress itself — at the cost of a ~7s scan on every structural edit, which is probably
-   why it does not.
+   why it does not. Route-independent too, but it buys a stronger claim at a price paid on
+   every call.
 
 Option 1 is likely right: the guard's value is *"look before you commit by pathspec"*, and
 that survives dropping the authorship assertion entirely.
-
 ## Tests added
 None — fix not written. A regression test should assert the advisory string contains no
 negative authorship claim, i.e. that it names dirtiness and not a writer. Per this repo's
