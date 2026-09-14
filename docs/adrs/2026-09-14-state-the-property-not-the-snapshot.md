@@ -63,16 +63,38 @@ have redded on 2026-09-03 — and it forbids a **legitimate, deliberately suppor
 exists to prove it. A wall across a road the project paved. *This was the proposal that opened
 the question; it is rejected by the analysis it asked for.*
 
-**2. A `re-derive: <command>` annotation plus a runner.** Rejected **on uptake, measured, not on
-taste.** At `9045c56a`: **77** dated `measured YYYY-MM-DD` claims across **43** Rust files in
-`src/` and `tests/`; the reader-facing re-derive form appears in **zero** of them. The rule
-mandating it already exists in `CLAUDE.md` and has ~0 uptake on this surface. An opt-in
-annotation is opted into *by the author, at write time, when the claim is true and there is no
-reason to expect decay* — the exact party the class blinds. Machinery atop a step nobody takes.
-*(Scope: a grep for the reader-instruction form over `src/` and `tests/` for `*.rs`. A wider grep
-returns 97, but those are runtime re-derivation in code — a different population. The one correct
-instance in the repo is `scripts/pre-commit-ledger-counts.py:853`, outside that scope, and is the
-sibling of the comment that decayed.)*
+**2. A `re-derive: <command>` annotation plus a runner.** Rejected on a **structural** ground,
+with a measurement as corroboration — and the order matters, because an earlier draft of this
+ADR had them the other way round.
+
+*The structural ground, which is corpus-independent:* **the annotated set is biased away from
+the defect population.** An opt-in annotation is opted into by the author, at write time, when
+the claim is true and nothing suggests decay — so the author who annotates is the one who
+already perceives their claim as decayable, and that author is not the one who ships a decayed
+claim. The two populations are disjoint by construction. This holds at any uptake, which is why
+it, and not the count, carries the rejection.
+
+*The corroboration, and it is stronger than a forecast:* `CLAUDE.md` § *Observer Blindness*
+position 3 **already mandates** the non-mechanised half of this proposal — ship the derivation
+rather than the value. At `9045c56a` that mandate has **0** uptake across **77** dated `measured
+YYYY-MM-DD` claims in **43** Rust files under `src/` and `tests/`. Predicting low uptake for a
+new opt-in form would be a guess; observing zero uptake of an existing mandate is a **natural
+experiment** on the same mechanism. Note precisely what it measures: a mandate carried in prose,
+with **no trigger** — which is the shape `CLAUDE.md`'s rule has. *(Scope: a grep for the
+reader-instruction form over `src/` and `tests/` for `*.rs`. A wider grep returns 97, but those
+are runtime re-derivation in code — a different population. The one correct instance in the repo
+is `scripts/pre-commit-ledger-counts.py:853`, outside that scope, and is the sibling of the
+comment that decayed.)*
+
+*What this does NOT reject, stated so the ADR cannot foreclose a thing it never evaluated:* a
+**mandatory** annotation tied to a trigger that fires anyway is a different proposal. It would be
+OB position 3's second-best shape rather than an opt-in, and the selection argument above does
+not reach it — an unconditional annotation is not chosen per claim, so it cannot be chosen away
+from the defect population. It is unevaluated here. It does inherit #4's objection: the trigger
+would have to fire on all 77, many of which are fixed facts with no meaningful re-derivation
+(*"CodeRankEmbed's measured 2048-token window"* cannot be cheaply re-derived), so the cost case
+is not obviously winnable. That is an argument someone would have to make, not one this ADR has
+made for them.
 
 **3. Mutation-annotation parity (assert no two `Mutation that must kill this:` lines
 contradict).** Rejected: **it would not have fired.** The contradiction here was between free
@@ -98,13 +120,31 @@ annotation-and-runner; a session proposes pinning a corpus population to protect
 
 ## Revisit-when
 
-The `re-derive` form reaches non-trivial voluntary uptake on its own (the 0/77 is the whole
-basis for rejecting #2 — if it moves, the argument moves); or `measured-value-drift` reaches a
-DC instance that shipped a **user-visible defect** rather than misleading an author.
+**An instance where an author annotated a claim they did NOT perceive as decayable.** That is
+the only evidence that bears on #2's rejection, because it is the only thing that would show the
+selection bias failing. Or `measured-value-drift` reaches a DC instance that shipped a
+**user-visible defect** rather than misleading an author.
+
+**Explicitly NOT a trigger: the `re-derive` form gaining voluntary uptake.** An earlier version
+of this section said exactly that — *"if uptake moves, the argument moves"* — and it was a
+tripwire aimed at a signal that does not bear on the decision. Under the selection argument,
+rising uptake would not rescue #2: the bias is in **which** claims get annotated, not how many.
+Corrected 2026-09-14 on `fix-mask-keyword-fabrication`'s reading (sessionId `f0b1a4c7`), which
+also supplied the natural-experiment framing above.
 
 ## Confidence
 
-**High** on stating properties and on rejecting #1 and #3 — #1 forbids a supported form and #3
-is falsified against the case it was invented for. **Medium** on rejecting #2: the 0/77 is a
-measurement of *today's* uptake, which is itself a snapshot — and a snapshot standing in for a
-property is this ADR's own subject. The Revisit-when above is that admission made operational.
+**High** throughout, after revision.
+
+#1 forbids a supported form and #3 is falsified against the case it was invented for — both
+settled against the code rather than by judgement.
+
+**#2 was Medium until 2026-09-14 and is now High**, and the repair is this ADR's own law applied
+to itself. The first draft rejected #2 on the 0/77 count — a measurement of today's uptake, i.e.
+a **snapshot standing in for a property**, which is precisely the substitution this ADR exists
+to reject. Leading instead with the selection argument, which is a property and cannot decay,
+removes the self-contradiction and raises the confidence rather than lowering it.
+
+**What is given up, since the argument now rests on a property rather than a count:** a
+structural claim can be wrong in a way no measurement would reveal, and the clean numeric
+tripwire is gone. That is the trade this ADR is about, taken deliberately on its own terms.
