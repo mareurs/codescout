@@ -1263,7 +1263,7 @@ impl CodeScoutServer {
         // Computed ONCE and threaded to both consumers below — the pinned-residency
         // upgrade and the access gate. Deriving it twice is how the two halves of
         // this decision drift apart, which is the defect in
-        // docs/issues/2026-09-14-read-only-blocks-five-tool-names-not-the-writes-it-promises.md
+        // docs/issues/archive/2026-09-14-read-only-blocks-five-tool-names-not-the-writes-it-promises.md
         let is_write = tool.is_write(&input);
 
         // A per-request workspace= pin is the caller's explicit, deliberate

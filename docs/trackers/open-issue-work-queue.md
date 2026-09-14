@@ -90,7 +90,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-39 | 1 | the two sanctioned entry formats are not equivalent — a params-rendered index defines no citable token, so 117 BL-N citations (incl. this queue's own) resolve to nothing | done-archived | `9dc28c0860b214d9` |
 | BL-38 | 1 | the librarian guard is blind to any artifact whose frontmatter omits `id:` — 26 of 66 tracker/bug files unprotected, including the most-damaged ledger; fixed by teaching it the `entry_prefix` ledger declaration, and the plan's heading-scoped half was cut as unnecessary | done | `388290ad0f86fe03` |
 | BL-45 | 1 | Decision 1: may a process on an unlinked binary re-index? Direction 2 of the zombie-server bug, corrected — refuse BEFORE the embed pass, not at the sidecar write | **done** — `22f8b8d5`, patch-id `fd2c453b…`. Hard refusal as a `RecoverableError` naming `/mcp`; `guard_stale_binary` guards both `sync_project` and `sync_worktree` ahead of the embed pass; 5 tests, wiring mutation-checked; live from the 2026-08-29 rebuild | `8400845b81ff0475` |
-| BL-46 | 2 | Decision 2: the write-root split — RULED: refuse an unpinned write under a read-only activation; do NOT resolve to a last-writable root | **RULED 2026-09-14 — `last_writable_root` is NOT needed and the prescribed shape is superseded.** Refuse an unpinned write under a read-only activation (name the project, offer the pin); keeps lock target == write target, needs no second root and no change to `with_project_at`. Implementation not started; it is now bug `9024da758e0870ee` — `check_tool_access`'s five-name allowlist. Detail in the body section. | `9024da758e0870ee` |
+| BL-46 | 2 | Decision 2: the write-root split — RULED: refuse an unpinned write under a read-only activation; do NOT resolve to a last-writable root | **DONE 2026-09-14 — ruled and shipped.** Ruling: refuse an unpinned write under a read-only activation (name the project, offer the pin), which keeps lock target == write target; `last_writable_root` proved unnecessary and `with_project_at` was untouched (52 refs / ~10 twins / ~4,600 tests all out of scope). The remaining gap shipped as archived bug `04eb9e09fdfa0703` — `check_tool_access` now gates on `Tool::is_write` instead of a five-name allowlist — at `a13b31c6`, patch-id `16e5289ce733a192d7faae30803863f65febab88`. Three tests at three grains, each mutation-checked against production; 23 leaking write calls measured. Detail in the body section. | `04eb9e09fdfa0703` |
 | BL-47 | 1 | `tags.in` returns zero while `tags.contains` finds the same row — and the librarian guide teaches the broken form | **done** — `9e4e2d36`, patch-id `cfac211d…`. Both engines routed through `json_each`; `nin` was the worse half, returning EVERY row incl. those holding the tag; 3 tests. Live-verified post-rebuild: same call 0 → 11 in scope | `1d085bcddf13d685` |
 | BL-48 | 1 | `edit_file`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | **done** — `518549d6`, patch-id `c424f89f…`. Installed hook mirroring `librarian_guard`'s oracle; never creates a row; 8 tests, wiring mutation-checked both ways. Residual: the server-side install is covered by nothing. Bug file archived 2026-08-30 — the status flip reproduced the bug on itself, the fix not being live in this server | `013458f0acdb88b8` |
 | BL-49 | 2 | `workspace(post_compact)` flushes LSP without prewarming — next nav call pays cold start and can blow the 60s timeout, while its hint promises no disruption | **done-archived** 2026-09-13 — bug is `mitigated` + archived. Prior detail retained: **partial** — hint + manual fixed; diagnosis corrected in 3 places. Its prescribed fix (a) was a NO-OP for its own Rust repro (`PREWARM_LANGUAGES` is JVM-only), and a mux keyed by workspace keeps the server warm across sessions, so the cold window is far narrower than filed. The actually-false sentence is cross-repo (`session-start.mjs:339`) and still emitting — stays open for that. Hint fix `ff90ce41`, patch-id `9da21228d4392923`; **observed live** in the running release binary on 2026-08-30 when `workspace(post_compact=true)` returned the new text after a compaction — first sighting in the wild, so this row reports it rather than inferring it from source | `d7072ed21959aca1` |
@@ -1092,7 +1092,7 @@ read-only activation resident-but-never-default broke **14 tests**
 browse-by-activate, and the change would have forced a `workspace=` pin on every call to
 explore the repo just activated — which is not "exploring only", it is "not exploring".
 
-## RULED 2026-09-14 — refuse, do not re-resolve
+#### RULED 2026-09-14 — refuse, do not re-resolve
 
 The entry used to prescribe: *"unpinned **writes** resolve to the last writable root, while
 unpinned **reads** keep resolving to the activated one"*, needing a `last_writable_root` field
@@ -1119,10 +1119,12 @@ pinned case. The refuse form cannot produce that state: there is no second root 
   write tools mutating via interior mutability go through the **read** `with_project_at`; the
   mut/non-mut split tracks Rust borrow mutability, not write semantics.
 
-## What actually remains — `9024da758e0870ee`
+#### What actually remains — shipped as `04eb9e09fdfa0703`
 
-The ruling's behaviour is **already partly shipped, and the gap is a filed bug**:
-`docs/issues/2026-09-14-read-only-blocks-five-tool-names-not-the-writes-it-promises.md`.
+The ruling's behaviour was **already partly shipped, and the remaining gap is now fixed and
+archived**:
+`docs/issues/archive/2026-09-14-read-only-blocks-five-tool-names-not-the-writes-it-promises.md`
+— `a13b31c6`, patch-id `16e5289ce733a192d7faae30803863f65febab88`.
 
 `check_tool_access` (`src/util/path_security.rs:637-686`) refuses writes for a hand-maintained
 five-name allowlist — `approve_write | create_file | edit_file | edit_code | library` — and ends

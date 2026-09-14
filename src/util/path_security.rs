@@ -645,7 +645,7 @@ pub fn worktree_main_root(root: &Path) -> Option<PathBuf> {
 /// Two enumerations of "what is a write", and the narrower one was the one that
 /// guarded. Taking the parameter means a write tool added later is gated on the
 /// day it is added, with no list to remember.
-/// docs/issues/2026-09-14-read-only-blocks-five-tool-names-not-the-writes-it-promises.md
+/// docs/issues/archive/2026-09-14-read-only-blocks-five-tool-names-not-the-writes-it-promises.md
 pub fn check_tool_access(
     tool_name: &str,
     is_write: bool,

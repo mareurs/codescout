@@ -1,5 +1,5 @@
 ---
-id: '9024da758e0870ee'
+id: 04eb9e09fdfa0703
 kind: bug
 status: fixed
 title: 'BUG: read_only blocks five tool names, not the writes it promises — doc, memory and onboarding write through it'
