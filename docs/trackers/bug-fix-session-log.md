@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 140
+entry_high_water_F: 142
 entry_high_water_W: 133
 ---
 
@@ -50,6 +50,8 @@ entry_high_water_W: 133
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-142 | 2026-09-14 | med | cross-session | fixed-verified | **Read a doc comment's motivation clause as a live limitation and warned a peer about a defect that was fixed six lines below it.** `archive/` in the cited bug path was a second signal I walked past. |
+| F-141 | 2026-09-14 | high | measurement | fixed-verified | **A gate's precondition was checked by an instrument that could not express failure — and a 3-file scan agreed with it.** `--fail-on high` is vacuous while the verdict sits at `med`; the real population was 13, not 0. |
 | F-140 | 2026-09-14 | med | reasoning/shared-checkout | open | **A 69-second still-frame was read as a negative result, and shipped in a commit message.** Killed this session's wedged `cargo test --workspace` to release a peer's, checked the peer's log 69s later, saw no movement, and concluded the two were not deadlocking each other. The peer's gate finished `DEFAULT_EXIT=0` four minutes after the kill. A kill releases a lock instantly; the blocked binary then runs the next test before writing anything a log watcher can see — so silence is consistent with *blocked* and *unblocked-and-busy* alike, making the check no evidence rather than weak evidence. Cost two errors, not one: the false negative, and the false positive it licensed — a SIGSTOPped peer process promoted to "the lever" and recommended for a signal, falsified by the same run. Confirm on the blocked process's STATE (`ps -o stat=`, `/proc/locks`), never on its output |
 | F-139 | 2026-09-14 | med | tool-behavior | fixed-verified | **W-133 confirmed the IL-3 block's predicate but not its remedy text — the remedy was the actual defect.** |
 | F-138 | 2026-09-14 | med | measurement | fixed-verified | **A design ruling can block for a day on a population nobody derived — and the fork can have no members.** `BL-77` was blocked on "what does an absent `snapshot_anchor` mean", framed over **24** augmented trackers whose two defaults "fail in opposite directions". Derived under one rule they differ on **zero** files: only a ledger that both passes `body_keeps_snapshot` AND anchors ids in >1 table can tell them apart, and the single such ledger declares. `24` was real, correctly cited — it just counted *trackers with an augmentation* when the question was *trackers these readings can disagree about*. Tell: a fork claiming two directions should name the files each breaks. Also closed a genuine mutation hole — 1 of 3 call sites reverted silently, all 14 tests green |
@@ -14547,6 +14549,104 @@ commit message cannot be revised at all.
 showing 22 READ holders and no WRITE holder on `catalog.db` both before and after.
 
 **Status:** open
+
+## F-141 — A gate's precondition was checked below its own threshold, so the check could not fail
+
+**Valid:** dated 2026-09-14
+
+**Severity:** high · **Category:** measurement · **Status:** fixed-verified
+
+**Observed.** The plan for gating dead artifact-id citations landed `ArtifactMissing` at
+`med` deliberately, with one written precondition for tightening it to `high`: *"after
+reconciliation, `--fail-on high` exits 0 again — then and only then apply step 3."* I ran
+that check, got exit 0, ran a second "corpus-wide" derivation that also returned 0, and
+reported the precondition met. The real gating population was **13, across 3 files**, every
+one of them present and unchanged since before the reconciliation started.
+
+**Why both instruments returned 0, which is the whole entry.**
+
+- `--fail-on high` is **vacuous at the `med` band by construction**. No `ArtifactMissing`
+  finding can reach `high` to be counted, so the exit code is 0 whether the corpus is clean
+  or holds a hundred dead ids. It was not a check that passed; it was a check that could
+  not express the question.
+- The second derivation was labelled *"corpus-wide gating population, at the tool"* and its
+  output enumerated **three files**. A three-file scan reported as a corpus fact.
+
+So the corroboration was a narrow instrument agreeing with an incapable one — § *Observer
+Blindness*'s *"two instruments returning the same number is evidence only if their scopes
+differ"*, met in the exact shape the section warns about, by someone who had read it.
+
+**What actually answered it.** Applying the one-arm change in a throwaway build, running the
+release binary, and reading the exit code — then reverting. 13 findings, `exit 1`. The only
+instrument that could fail was the gate with the gate armed.
+
+**Cost.** I told my operator the precondition was met and recommended tightening. Had they
+said yes at that moment, the commit would have armed CI over 13 red findings and the failure
+would have named the scanner I was changing — the most confusing possible presentation of
+the defect.
+
+**Lesson.** **Measure a gate's precondition with the gate armed.** A threshold check run
+below its own threshold is monotone: it returns the same value for every corpus, and that
+value is the one that looks like success. And when two derivations agree, ask what each
+*could not have returned* before crediting the agreement.
+
+**Second-order, same turn.** Told a peer a formatting diff was "one blank line". My own
+control — `grep -c '^[+-]'` over the `rustfmt --check` output — printed **0** directly
+beneath visible diff text, and I treated the contradiction as noise rather than as the two
+predicates disagreeing. (`rustfmt` emits ANSI colour codes before the `-`.) It was two
+diffs. Same failure as above one level down: I held the discriminator and discarded it.
+
+**Rests on:** `docs/adrs/2026-09-14-an-event-time-guard-cannot-own-a-state-invariant.md`,
+commits `c2d9974e` and `b5a280ab`.
+
+## F-142 — A doc comment explaining why a helper exists reads exactly like one describing a live defect
+
+**Valid:** dated 2026-09-14
+
+**Severity:** med · **Category:** cross-session · **Status:** fixed-verified
+
+**Observed.** Warned a peer mid-sweep that `doc(move)`'s `inbound_path_citations` could not
+see dateless-slug citations, and told them to grep separately before committing 24 archive
+moves. The defect does not exist. `mv.rs:287-293` calls `files_mentioning` **twice** — dated
+stem, then dateless slug — six lines below the comment I quoted.
+
+**What I actually read.** `dateless_slug`'s doc comment:
+
+> `files_mentioning` searches for the dated stem alone, which cannot match a citation
+> holding only the dateless form
+
+That is the **motivation for the helper's existence**, written on the helper. It is
+byte-identical to a sentence describing a live limitation of its caller, and the caller
+immediately below it is the fix. I stopped at the clause that confirmed what I already
+suspected and never read the call site.
+
+**A second signal I walked past.** I cited the supporting bug as
+`docs/issues/archive/2026-09-13-inbound-path-citations-cannot-see-a-slug-form-citation.md`
+— typing `archive/` in the path, which means *closed*, without registering it.
+
+**The peer's refutation is the right shape and mine was not.** They moved one artifact and
+`mv.rs` reported `IC-6` as an inbound citation; `IC-6` holds **0** dated-stem occurrences of
+that slug and **1** dateless. Same in `IC-1` (0/1) and `IC-18` (0/2). A dated-stem-only scan
+could not have returned any of them. I reasoned about the code; they ran it.
+
+**Cost.** A peer nearly ran an unnecessary pre-commit grep across 24 moves on my advice. No
+bytes were harmed — their measurement caught it — but the advice pointed **away** from the
+cheaper correct path, which is worse than saying nothing.
+
+**Lesson.** **A doc comment explaining why a function exists and one describing a live
+defect are indistinguishable, and the first is far more common on a helper.** Before citing
+a comment as current behaviour, read the **call site**. And `archive/` in a cited path is a
+status claim — read it.
+
+**Symmetry worth keeping: the peer made the same class of error in the same hour, in the
+other direction.** They built a binary from this shared worktree — which carried my
+uncommitted `ArtifactMissing` Med→High change — and reported its `high` verdict as the
+branch's. Both errors are the corpus's own law: *a claim about current state needs its TREE
+named, not just its instant.* Theirs had the sharper property that **building erased the
+distinction** — nothing about `target/release/codescout` says which tree produced it.
+
+**Rests on:** `src/librarian/tools/mv.rs:287-293`; peer sessionId
+`f3c594ce-c424-40d3-a603-9693cfef3f63`.
 
 ## Template for new entries
 

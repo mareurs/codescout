@@ -14,7 +14,7 @@ pub enum RefKind {
     FileSymbol,
     ModulePath,
     Link,
-    /// A 16-hex librarian artifact id, as written in prose: `` `3f3b9e3334bb9e3d` ``.
+    /// A 16-hex librarian artifact id, as written in prose: `` `eb537287b378caf9` ``.
     ///
     /// Unlike every sibling, this one does not resolve against the filesystem —
     /// `id = sha256(abs_path)`, so the id IS the path, hashed, and the only thing

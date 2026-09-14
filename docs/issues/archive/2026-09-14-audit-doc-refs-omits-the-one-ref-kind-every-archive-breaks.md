@@ -1,15 +1,13 @@
 ---
 kind: bug
-status: taken
+status: fixed
 tags:
 - cluster/guard-narrower-than-its-name
-claimed_by: 9403d62d-116b-46ea-ac9b-004acff2b1cb
-closed: null
+closed: 2026-09-14
 opened: 2026-09-14
 owner: marius
 related: []
 severity: medium
-unverified: 'Implemented but NOT GATING. ArtifactMissing lands in the Med band while --fail-on is high, so the check reports and reds nothing; tightening is one arm in default_severity and is owed once the ~145 live instances are reconciled. Also unverified: the end-to-end run against a release binary (findings exist, count, and per-reason bands) has not been executed — the evidence so far is 15 unit tests plus two mutation kills, not an observed report.'
 ---
 
 # BUG: `audit_doc_refs` omits the one ref kind every archive breaks
@@ -158,6 +156,33 @@ escape for mention, which is `IC-6` holding about the file that records it.
    and "wire the one you have", and it inverts the fix.
 
 ## Fix
+
+**SHIPPED on `experiments` 2026-09-14.** Both halves, cited by SHA *and* patch-id —
+the SHA dies at the next rebase, the patch-id survives rebase and cherry-pick.
+
+| half | commit | patch-id |
+|---|---|---|
+| detection (`RefKind::ArtifactId`, `Verdict::ArtifactMissing`, resolver, parser) | `2ef25326` | recorded at fix time |
+| corpus reconciliation — 19 instances, 12 repointed / 7 suppressed | `c2d9974e` | `22270c89c2a3bd660e29777d9798b6f5f622a657` |
+| gating (`default_severity` → High) | `b5a280ab` | `2b14039beeb76c2816c3a90b0642f7b67892048e` |
+
+**Both `unverified:` claims are now discharged, and one of them was wrong about its own
+number.** The field said tightening was owed "once the ~145 live instances are reconciled"
+and that no end-to-end release run had been executed.
+
+- The gating population was **13**, not ~145. The larger figure counted every dead 16-hex
+  token in `docs/**`; the gating subset excludes `archive_drop`, `issues_drop` and
+  `code_block`, which is 67% of the corpus. A count without its unit.
+- The end-to-end run exists now, in both directions: **0 high over 73810 refs** on the
+  reconciled corpus, and an **observed red** — an inline dead id yields
+  `high / artifact_missing / policy_default`, exit 1, while the same id fenced exits 0.
+
+**The precondition check was vacuous when it was first read as a pass.** `--fail-on high`
+cannot return anything but 0 while `ArtifactMissing` sits at `med`, because no such finding
+can reach `high` to be counted. It agreed with a second derivation that had been scoped to
+3 files. Two instruments, one blind spot each, indistinguishable from corroboration. The
+only instrument that could fail was the release binary with the arm already moved. See
+`docs/adrs/2026-09-14-an-event-time-guard-cannot-own-a-state-invariant.md`.
 
 **Landing in `audit_doc_refs`, not in `link_scan` — this supersedes the two candidates
 this section carried when filed, and the reasoning below is why the preferred one was
