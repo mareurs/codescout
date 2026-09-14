@@ -95,8 +95,15 @@ R=$(newrepo '# D
 run "$R" "$(mkstub "$(report artifact_id artifact_missing med)")"
 eq   "2 a MED finding does not refuse (archive/fence/issues drops land here)" "$RC" "0"
 
-run "$R" "$(mkstub "$(report file_path missing high)")"
+run "$R" "$(mkstub "$(report file_path artifact_missing high)")"
 eq   "3 a high finding of another REF KIND does not refuse" "$RC" "0"
+# The verdict is deliberately `artifact_missing` here, NOT `missing`. This case read
+# `report file_path missing high` until a mutation run caught it: that payload is
+# rejected by the VERDICT filter, so the ref_kind filter did no work the test could see,
+# and deleting the ref_kind check entirely left the suite green. A case that flips two
+# fields isolates neither. Production never pairs `artifact_missing` with another
+# ref_kind, which is exactly why this input has to be synthetic — the assertion is that
+# the filter is CONJUNCTIVE, and that is what a future widening would break.
 
 run "$R" "$(mkstub "$(report artifact_id resolved high)")"
 eq   "4 a resolved artifact id does not refuse" "$RC" "0"
