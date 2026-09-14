@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 137
-entry_high_water_W: 131
+entry_high_water_W: 132
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -189,6 +189,7 @@ entry_high_water_W: 131
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-132 | 2026-09-14 | med | **Re-derived a shipped probe by hand before reading the index that names it — and the redundancy is what found the probe's defect.** Recon after a `cargo rb` classified every `codescout` process by its own cmdline (`mux --socket` → MUX, else SERVER), following memory `gotchas` § *MCP Binary Symlink*, and only then consulted [`docs/PROBES.md`](../PROBES.md) — whose header reads *"Start here before answering a question with a number."* [`scripts/stale-servers.sh:39`](../../scripts/stale-servers.sh) selects with `pgrep -x codescout` and applies no cmdline filter, so it counts LSP muxes under a header saying *servers* and closes with *"Reconnect those sessions (/mcp)"* — unperformable on a mux, which has no session and self-heals at `--idle-timeout`. | Following the documented route alone returns `total=22 stale-exe=18 current=4` under the word *servers*, with nothing marking the unit as mixed — a plausible number, not an error. **Stated precisely: the probe is not silent about it.** It prints `PPID`, and the mux row's `PPID` is another row's `PID`; the tell is present and **unnamed**, so reading it needs the server/mux distinction already in hand. All four documented blind spots (`scripts/stale-servers.sh:22-29`) bound the count from *below*; the missing one bounds it from above. The rule this yields is not *re-derive everything* but **classify the population by hand once per session when a probe's answer is a count.** | validated |
 | W-131 | 2026-09-13 | med | **Scouted a test file's rule-parity section before planning a gate, and found the parser the gate reuses is already filed debt.** `tests/issue_clusters.rs` requires every `#[test]` to be declared `HOOK_OWED` / `HOOK_ONLY` / `NOT_HOOK_OWED` *with a reason*, and `the_hook_enforces_every_rule_it_declares` compares that against `scripts/pre-commit-ledger-counts.py`'s `HOOK_RULES` by **equality, not subset**. Decisive find: `no_mechanism_status_is_a_bare_verdict` already reads `OWED, not yet implemented — needs the mechanism-status parser ported`, citing open bug `c77c15b68a60e126` (`cluster/guard-narrower-than-its-name`) — and the planned gate reuses that same parser. | Both new tests would have redded the parity gate on first run, which is cheap and self-announcing. The expensive half is the repair that red invites: declare them `NOT_HOOK_OWED`, landing a **fourth** `OWED, not yet implemented` entry against that one bug — widening an open IC-14 instance inside a change advertising itself as closing a gate hole, invisible to a reviewer reading a green suite. **The cheap red hides the expensive decision behind it.** Scout converts it into a scope question asked before any code is written. Also derived rather than cited: **20 of 23** index rows agree with their class field; the 3 that differ are three different kinds (IC-13 real drift, IC-2 a parenthetical, IC-3 no verdict token at all), so equality reds two of them wrongly — the vocabulary is the design question, the predicate is nearly free. | validated |
 | W-130 | 2026-09-12 | high | **Three readings of one cause, every one taken through the instrument that caused it.** `e69ebcbb96c28f7f` held that subagent writes reach no transcript; the cause had gone substrate → version (*"2.1.x emits none — zero across 41 versions, 1,928 dispatches"*), both counted through `scan()`'s own **non-recursive** `d.glob("*.jsonl")`. 2.1.x writes them to `<project-dir>/<parent-sid>/subagents/agent-<id>.jsonl`, one directory below reach, so every count returned zero and read as corroboration. Re-derived with `find`: **756** files, **755** carrying the flag, **192,797** records, newest same-day on **2.1.267** — inside the range cited as emitting none. | The file had queued two fixes — a controller-written sidecar per SDD task, and a working-tree substitute question — both workarounds for a substrate gap that is not there, each shipping a **second source of truth** for data the harness already writes, neither wrong in any way its own tests could show. Real fix: one glob plus a fallback correction, no parsing change. Worse, the conclusion was written into the **user-facing** refusal — *"stop looking for the owner — there is none recorded"* — while `fmt-mine.sh`'s whole remedy is *ask the named owner*: `--all` before named 10 owners, **0 of 10 live**; after, 11, the new one `[LIVE]` with a socket. **Operational form: when a count of "does the substrate contain X" returns zero, re-derive it with an instrument that does not share the first one's window.** | validated |
 | W-129 | 2026-09-12 | high | **The control fired, and what it caught was that the guard I was narrowing was load-bearing for a reason nobody had written down.** Fixing `d4db8a2d93bdced9` (fmt-mine refusing this session's own files on a mixed scan), I paired the positive assertion with *"THEIR file must be byte-untouched"*. It fired on the first draft: **`rustfmt <file>` is not per-file** — it descends into every `mod` the file declares, so formatting `$MINE` rewrote a peer's child module. Verified at the bytes on rustfmt 1.9.0-stable; `--skip-children` is nightly-only. | `ce3a628db5fa1168` — the defect the script exists to close — re-admitted **through the regression test written to close a different bug in the same script**, with every other assertion green: exit code, refusal text, peer socket, narrow command. The positive assertion passed *because* the formatter had run over everything. Second-order, and the half worth carrying: the wholesale refusal read as over-caution but was the only thing closing that door, since a peer's child can only be damaged if it too needs formatting and such a file is by construction a row in the same scan. **Before narrowing a guard that looks broader than its stated reason, ask what else its breadth is covering** — it will not be in the code, because anyone who knew would have written it. | validated |
@@ -14337,6 +14338,53 @@ render, the divergence case disappears and only the metric lesson survives.
 appears. `IC-21` (*an instrument reports presence or a count where the decision turns on
 magnitude*) is the near neighbour and is its **inverse** — that class is a count standing in
 for a magnitude; this is a magnitude standing in for content. Do not fold them.
+
+## W-132 — re-deriving a shipped probe by hand found the defect in the probe; running it would not have
+
+**Valid:** dated 2026-09-14
+
+**Observed:** After a `cargo rb` at 2026-09-14 05:42:59, recon asked which sessions were
+still on the old image. Memory `gotchas` § *MCP Binary Symlink* was read first, so the
+hand-rolled `/proc` sweep classified each `codescout` process by its own cmdline
+(`mux --socket` → MUX, else SERVER) before counting. Only afterwards was
+[`docs/PROBES.md`](../PROBES.md) consulted, which indexes
+[`scripts/stale-servers.sh`](../../scripts/stale-servers.sh) for exactly this question and
+whose own header says *"Start here before answering a question with a number."*
+
+**The redundancy is what produced the finding.** The shipped probe selects with
+`pgrep -x codescout` (`scripts/stale-servers.sh:39`) and applies no cmdline filter, so it
+counts LSP muxes under a header that says *"servers"* and closes with a remedy —
+*"Reconnect those sessions (/mcp)"* — that names an action no reader can perform on a mux
+row. Filed as
+[`docs/issues/2026-09-14-the-stale-server-probe-counts-lsp-muxes-under-a-name-that-excludes-them.md`](../issues/2026-09-14-the-stale-server-probe-counts-lsp-muxes-under-a-name-that-excludes-them.md).
+
+**Counterfactual, stated precisely rather than flatteringly.** The probe's output is not
+silent about the defect — it prints `PPID`, and the mux row's `PPID` (`2895390`) is another
+row's `PID`, which is the tell. So *"running it could not have surfaced this"* would be too
+strong. What is true is weaker and more useful: the tell is present and **unnamed**, and
+reading it requires already holding the server/mux distinction and thinking to
+cross-reference two columns of a 22-row table. Following the documented route alone returns
+`total=22 stale-exe=18 current=4` under the word *servers*, with nothing marking the unit as
+mixed — a plausible number, not an error.
+
+**What this sharpens.** `docs/PROBES.md`'s *"start here"* instruction is right and stays
+right; the cost it does not price is that an instrument's own blind-spot column is written by
+the party who cannot see the blind spot. Here all four documented blind spots
+(`scripts/stale-servers.sh:22-29`) bound the count from **below** — the one that bounds it
+from above is the missing one. So the useful rule is not *"re-derive everything"* (that
+discards the index's whole value) but: **when the probe's answer is a count, classify the
+population once by hand on the first run of a session, and compare.** One extra command, and
+it is the only step that can catch a unit error, because every downstream reader inherits the
+label.
+
+**Independence check, since this ledger's own law demands it:** the hand sweep and
+`stale-servers.sh` are *not* independent instruments — both read `/proc/<pid>/exe` over
+`pgrep -x codescout`. They agree on the deleted-inode predicate and differ only in whether
+they partition by cmdline. That is one instrument with an extra column, so the agreement on
+`STALE` counts is worth nothing as corroboration; the disagreement on the *unit* is the only
+part that carried information.
+
+**Status:** validated
 
 ## Template for new entries
 
