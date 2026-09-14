@@ -1174,6 +1174,142 @@ fn the_mechanism_basis_scan_discriminates() {
     ));
 }
 
+/// The known-answer input for [`the_hook_script_agrees_on_the_mechanism_basis_scan`].
+///
+/// Carries both halves of the rule, because they fail differently: ten `**Mechanism status:**`
+/// fields the scan must find, and a **fenced template specimen it must not**. The live ledger has/// exactly one such specimen and it is already handled correctly, so the corpus can never show
+/// the fence arm working — only this fixture can.
+///
+/// `IC-6`/`IC-7`/`IC-8` are the load-bearing rows. None of their wordings is in the verdict list,
+/// so nothing is stripped and the whole field is measured — the graceful-degradation property
+/// that a word-list formulation got backwards. Delete them and a rewrite to "match one of these
+/// six words" looks correct here, passes, and goes silent the day someone rewords the ledger.
+const MECHANISM_BASIS_FIXTURE: &str = "\
+## IC-1 — bare, the form the corpus used
+**Mechanism status:** none yet.
+
+## IC-2 — a terse but real basis, 25 characters of remainder
+**Mechanism status:** `partial` — `src/thing.rs` does it.
+
+## IC-3 — the honest not-checked answer
+**Mechanism status:** none yet — not checked against the code as of 2026-09-02
+
+## IC-4 — a parenthetical qualifier is not a basis
+**Mechanism status:** `shipped (partial)`
+
+## IC-5 — same verdict, with a basis
+**Mechanism status:** `shipped (partial)` — `scripts/build-windows.sh` prints the pinned wine version
+
+## IC-6 — a synonym the word-list formulation let through
+**Mechanism status:** unbuilt
+
+## IC-7 — another
+**Mechanism status:** TBD
+
+## IC-8 — and another
+**Mechanism status:** no mechanism yet
+
+## IC-9 — a citation form no regex enumerates
+**Mechanism status:** partial, covered in principle by the ADR above
+
+## IC-10 — a LONG parenthetical qualifier, still no basis
+**Mechanism status:** shipped (partially, on windows only)
+
+## Template for new entries
+
+```markdown
+## IC-N — <the class>
+**Mechanism status:** none yet | designed | shipped (<what>)
+```
+";
+
+/// The hook script's mechanism-basis scan and predicate agree with these, on a fixture the corpus
+/// cannot reach.
+///
+/// Required by the porting contract in
+/// `docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md`.
+///
+/// **Two arms, because the halves fail in different directions.** A broken SCAN over-collects
+/// (the fenced specimen) or under-collects, and a broken PREDICATE mis-classifies what it is
+/// handed. A single "same verdict on the live ledger" comparison would be two empty lists — the
+/// ledger has no bare verdict today, by design, which is the state this rule exists to preserve.
+///
+/// Mutation that must kill this: in the Python, drop the fence toggle, measure the whole field
+/// instead of the remainder, decide on the verdict word instead of using it to locate a prefix,
+/// or treat a `(qualifier)` as a basis.
+#[test]
+fn the_hook_script_agrees_on_the_mechanism_basis_scan() {
+    let mut child = Command::new("python3")
+        .args([
+            "scripts/pre-commit-ledger-counts.py",
+            "--fixture-mechanism-basis",
+        ])
+        .current_dir(repo_root())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("python3 failed to spawn");
+    child
+        .stdin
+        .take()
+        .expect("stdin piped")
+        .write_all(MECHANISM_BASIS_FIXTURE.as_bytes())
+        .expect("write fixture");
+    let out = child.wait_with_output().expect("hook script failed");
+    assert!(out.status.success(), "script exited non-zero");
+
+    #[derive(serde::Deserialize)]
+    struct Reply {
+        statuses: Vec<(String, String)>,
+        unbasised: Vec<String>,
+    }
+    let theirs: Reply =
+        serde_json::from_slice(&out.stdout).expect("script must emit a JSON object");
+
+    assert_eq!(
+        mechanism_statuses(MECHANISM_BASIS_FIXTURE),
+        theirs.statuses,
+        "this gate and scripts/pre-commit-ledger-counts.py disagree about which \
+         `**Mechanism status:**` fields exist, or what their bodies are"
+    );
+
+    let mine: Vec<String> = mechanism_statuses(MECHANISM_BASIS_FIXTURE)
+        .into_iter()
+        .filter(|(_, body)| is_unbasised(body))
+        .map(|(ic, _)| ic)
+        .collect();
+    assert_eq!(
+        mine, theirs.unbasised,
+        "this gate and scripts/pre-commit-ledger-counts.py disagree about which are bare verdicts"
+    );
+
+    // Known answers, which is what separates "both agree" from "both correct". Two
+    // implementations broken the same way agree perfectly.
+    assert_eq!(
+        theirs.unbasised,
+        vec!["IC-1", "IC-4", "IC-6", "IC-7", "IC-8", "IC-10"],
+        "IC-1 bare; IC-4 a parenthetical qualifier and nothing else; IC-6/7/8 verdict wordings \
+         absent from the list, which must still be caught by measuring the whole field; IC-10 the \
+         only row that exercises the parenthetical arm DISCRIMINATINGLY — its qualifier is 28 \
+         characters, so dropping the strip makes it read as a basis, where IC-4's short one is \
+         flagged either way"
+    );
+
+    // The fence arm. `## IC-N` inside the template block is a worked example, and collecting it
+    // would make the check permanently red on a ledger that is correct.
+    assert_eq!(
+        theirs.statuses.len(),
+        10,
+        "the fenced template specimen must not be collected: {:?}",
+        theirs.statuses.iter().map(|(i, _)| i).collect::<Vec<_>>()
+    );
+    assert!(
+        !theirs.statuses.iter().any(|(i, _)| i == "IC-"),
+        "an `IC-` with no digits is the template's `## IC-N` leaking past the fence: {:?}",
+        theirs.statuses
+    );
+}
+
 /// No class field states a live bare `n=` — the ledger stores no derived count.
 ///
 /// Renamed from `every_bare_n_in_a_class_field_matches_the_corpus` on 2026-09-02, when the
@@ -2153,6 +2289,7 @@ const HOOK_OWED: &[&str] = &[
     "no_class_field_states_a_bare_n",
     "no_index_row_stores_a_count",
     "no_index_row_stores_a_mechanism",
+    "no_mechanism_status_is_a_bare_verdict",
     "the_index_file_holds_no_class_sections",
 ];
 
@@ -2208,11 +2345,6 @@ const NOT_HOOK_OWED: &[(&str, &str)] = &[
          is that narrow",
     ),
     (
-        "no_mechanism_status_is_a_bare_verdict",
-        "OWED, not yet implemented — needs the mechanism-status parser ported; \
-         docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md",
-    ),
-    (
         "the_bare_n_claim_parser_discriminates",
         "feeds `parse_bare_n_claims` a fixture with known answers; proves the parser behind a \
          hook-owed rule is not vacuous, and is not itself a rule",
@@ -2246,6 +2378,11 @@ const NOT_HOOK_OWED: &[(&str, &str)] = &[
         "the_hook_script_agrees_on_the_index_mechanism_scan",
         "cross-language parser parity over a fixture; a test OF the hook, and the only surface \
          where the Python column-count scan can return a non-empty answer",
+    ),
+    (
+        "the_hook_script_agrees_on_the_mechanism_basis_scan",
+        "a test OF the hook rather than a rule it owes; feeds one document through both \
+         implementations of the mechanism scan and its basis predicate",
     ),
     (
         "the_hook_script_agrees_on_the_index_row_scan",

@@ -55,6 +55,7 @@ HOOK_RULES = [
     "no_index_row_stores_a_count",
     "no_index_row_stores_a_mechanism",
     "every_declared_class_has_an_index_row",
+    "no_mechanism_status_is_a_bare_verdict",
     "the_index_file_holds_no_class_sections",
 ]
 
@@ -566,6 +567,73 @@ def index_class_sections(index_text: str) -> list[str]:
     return out
 
 
+def mechanism_statuses(ledger: str) -> list[list]:
+    """Mirrors `mechanism_statuses` -- `[entry id, body]` for every `**Mechanism status:**`.
+
+    FENCE-AWARE, and that is not a nicety: the `## Template for new entries` block carries a
+    specimen field, and a worked example teaching the syntax is not a declaration. Collecting it
+    would make this check permanently red on a ledger that is correct -- the same rule
+    `**Valid:**` detection uses.
+
+    The id is the first whitespace token after `## IC-` with trailing non-digits trimmed, so
+    `## IC-12 — title` keys `IC-12`. `id` is never reset by a non-`IC-` heading, matching Rust:
+    a `**Mechanism status:**` under a later prose heading still belongs to the last class.
+    """
+    out: list[list] = []
+    ident: str | None = None
+    fenced = False
+    for line in ledger.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        if line.startswith("## IC-"):
+            tok = line[len("## IC-") :].split()
+            if tok:
+                end = len(tok[0])
+                while end > 0 and not (tok[0][end - 1].isascii() and tok[0][end - 1].isdigit()):
+                    end -= 1
+                ident = "IC-" + tok[0][:end]
+            else:
+                ident = "IC-"
+        elif line.startswith("**Mechanism status:**") and ident is not None:
+            out.append([ident, line[len("**Mechanism status:**") :].strip()])
+    return out
+
+
+def is_unbasised(body: str) -> bool:
+    """Mirrors `is_unbasised` -- the field states a verdict and gives no way to check it.
+
+    Length of what REMAINS once the verdict prefix is stripped, threshold 20 CHARACTERS (not
+    bytes -- the corpus is full of em dashes). Two earlier formulations were refuted by
+    measurement and are recorded in the Rust twin's doc comment; do not re-propose them here.
+
+    The verdict list LOCATES a prefix and never DECIDES. An unknown verdict word is simply not
+    stripped, the remainder is then the whole field, and the length test still applies -- so a
+    novel bare verdict (`unbuilt` -> 7) is caught while a long field passes. The failure mode
+    degrades toward flagging rather than toward silence, which is the direction a word-list
+    formulation got backwards: a word list is monotone under RENAMING, so re-wording the
+    ledger's own `none yet` would have disarmed it rather than failed it.
+    """
+    verdicts = ("none yet", "not yet", "partial", "designed", "shipped", "none")
+    s = body.strip().lstrip("*`").strip()
+    low = s.lower()
+    # Longest first: "none yet" must win over "none".
+    for v in sorted(verdicts, key=len, reverse=True):
+        if low.startswith(v):
+            s = s[len(v) :]
+            break
+    # Tolerate a parenthetical qualifier, e.g. `shipped (partial)` -- it qualifies the verdict
+    # and is not a way to check it.
+    lead = s.lstrip()
+    if lead.startswith("("):
+        _, sep, after = lead[1:].partition(")")
+        if sep:
+            s = after
+    return len(s.strip().lstrip("*`.—–-").strip()) < 20
+
+
 def actual_counts(valid: set[str], source: str) -> dict[str, int]:
     """Mirrors `actual_counts` -- seeded at 0 so a class with no members is still compared."""
     out = {s: 0 for s in valid}
@@ -827,6 +895,25 @@ def main() -> int:
             fr = parse_index_rows(fx, fv)
             print(json.dumps({"rows": sorted(fr), "missing": missing_index_rows(fv, fr)}))
             return 0
+        elif arg == "--fixture-mechanism-basis":
+            # Pure over stdin: BOTH halves of the rule in one document, because they fail
+            # differently and a fixture can hold shapes the corpus cannot. `statuses` exercises
+            # the fence-aware scan (a template specimen inside a fence must NOT be collected --
+            # the live ledger has exactly one and it is already correct, so the corpus can never
+            # show this working). `unbasised` exercises the predicate on verdict wordings the
+            # corpus does not contain -- `unbuilt`, `TBD`, `no mechanism yet` -- which are
+            # precisely the ones a word-list formulation let through, so a corpus-driven check
+            # cannot see the regression that actually happened.
+            fx = sys.stdin.read()
+            st = mechanism_statuses(fx)
+            print(json.dumps(
+                {
+                    "statuses": st,
+                    "unbasised": [ic for ic, body in st if is_unbasised(body)],
+                },
+                sort_keys=True,
+            ))
+            return 0
     if source not in ("index", "worktree", "head"):
         raise SystemExit(f"--source must be index|worktree|head, got {source!r}")
 
@@ -1026,6 +1113,50 @@ def main() -> int:
             f"    python3 scripts/file-provenance.py {LEDGER}\n"
             "If it is theirs, wait or ask; do NOT add the row for them and do NOT reach for\n"
             "--no-verify, which also silences the one-tag and growth checks your own files need.",
+            file=sys.stderr,
+        )
+        _emit_sequence_tail()
+        return 1
+
+    # CHECK 7 -- no `**Mechanism status:**` is a bare verdict.
+    #
+    # Mirrors `no_mechanism_status_is_a_bare_verdict`, the last of the three this bug file names.
+    # docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md
+    #
+    # NOT a truth check -- nothing can gate whether a sentence about the code is true. What a gate
+    # CAN require is that the sentence carry a route back to the thing it describes, so a reader
+    # re-checks it in a minute instead of re-deriving it.
+    #
+    # Measured 2026-09-01/02: three fields were checked against their code and three were wrong.
+    # Two read `none yet` over a mechanism that had already shipped, one of them over a mechanism
+    # that explicitly REFUSED the remedy the field proposed. A bare `none yet` reads as an
+    # established absence and was, in every case examined, an unexamined one.
+    bare_verdicts = [
+        f"{ic} -- `{body}`" for ic, body in mechanism_statuses(ledger) if is_unbasised(body)
+    ]
+    if bare_verdicts:
+        print(
+            "a `**Mechanism status:**` states a verdict and gives no basis:\n  "
+            + "\n  ".join(bare_verdicts)
+            + "\n\n"
+            "A bare verdict cannot be re-checked, so it is read as established. Add whatever\n"
+            "makes it checkable in one minute -- not a paragraph:\n"
+            "  `shipped`/`partial`/`designed` -> name WHERE (a path, a symbol, a SHA, a tool,\n"
+            "                                    an ADR)\n"
+            "  `none yet`                     -> say when it was last checked against the code,\n"
+            "                                    or say that it has not been\n"
+            "\n"
+            '"Not checked" is a legitimate and useful answer. It is the difference between\n'
+            "nobody having looked and there being nothing to find, and this check exists because\n"
+            "those two had the same nine characters.\n"
+            "\n"
+            f"IF THE ENTRY NAMED ABOVE IS NOT YOURS, THIS IS NOT YOUR DEFECT. The field lives in\n"
+            f"{LEDGER_DIR}/<entry>.md and only its author knows what was checked and when;\n"
+            "writing a basis you did not verify is worse than the bare verdict, because it reads\n"
+            "as established for the same reason. Ask them:\n"
+            f"    python3 scripts/file-provenance.py {LEDGER_DIR}/\n"
+            "Do NOT reach for --no-verify: this same run carries the one-tag and growth checks\n"
+            "your own bug files need.",
             file=sys.stderr,
         )
         _emit_sequence_tail()
