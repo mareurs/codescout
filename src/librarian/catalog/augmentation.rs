@@ -268,6 +268,20 @@ pub struct UpdateEntryOutcome {
     /// by hand. That is the same trap `a1ca3baa` fixed one field over, where
     /// `snapshot_missing` kept naming the id whose row the call had just written.
     pub row_resynced: bool,
+    /// True when the committed row was COMPARED to the render and found byte-identical,
+    /// so nothing needed writing.
+    ///
+    /// A third silence, added 2026-09-14 for the reason the second one exists. Folding it
+    /// into `row_resynced == false` would put it back beside "this tracker keeps no
+    /// snapshot" — and those license opposite next actions again, one step further out:
+    /// *the body is verified current* versus *nobody looked*. The field above already paid
+    /// for that lesson; widening its blind spot rather than repeating its fix would be the
+    /// same defect with a new member.
+    ///
+    /// Mutually exclusive with `row_resynced` by construction — both come from one
+    /// [`SnapshotRow`] — and both being `false` means `Undetermined`, which is exactly when
+    /// `snapshot_stale` may be `Some`.
+    pub row_already_current: bool,
 }
 
 /// The augmentation columns [`update_entry`] reads in one query:
@@ -433,7 +447,7 @@ pub fn update_entry(
     // Re-render this row in the committed table BEFORE the commit, so a failed splice
     // rolls the params write back rather than creating a new disagreement. A no-op for
     // any artifact that declares no `snapshot_anchor` — see `resync_snapshot_row`.
-    let row_resynced = resync_snapshot_row(
+    let snapshot_row = resync_snapshot_row(
         &tx,
         artifact_id,
         entry_id,
@@ -464,22 +478,23 @@ pub fn update_entry(
         .filter_map(|i| i.rsplit_once('-'))
         .filter_map(|(_, n)| n.parse::<u64>().ok())
         .collect();
-    // Suppressed when this call re-rendered the row: the body is current by
-    // construction, so the advisory would be asking for work already done — the
-    // `a1ca3baa` trap one field over, where `snapshot_missing` kept naming the id
-    // whose row the call had just written.
+    // Both silences below are EARNED, and by different observations: `Rewritten` means
+    // this call just wrote the row, `AlreadyCurrent` means the rendered row and the body
+    // row were compared and found byte-identical. Only `Undetermined` reaches the
+    // advisory, and that is the case where nothing about the cells was observed at all.
     //
-    // It has to be suppressed HERE rather than fixed inside the note, because
-    // `snapshot_stale_note` cannot tell a synced row from a stale one at all: it tests
-    // `in_body.contains(&num)` — PRESENCE — and then emits a message asserting the row
-    // "still shows the PREVIOUS field values", which is a claim about CONTENT it never
-    // checked. That is a defect in its own right and filed separately; this gate is
-    // correct regardless of how it is resolved, because a row we just wrote is current
-    // whichever way the note learns to ask.
-    let snapshot_stale = if row_resynced {
-        None
-    } else {
-        snapshot_stale_note(cat, artifact_id, entry_id, &claimed_indices)
+    // Until 2026-09-14 this was `if row_resynced`, and `AlreadyCurrent` fell through to
+    // the note — which then inferred from id PRESENCE that the row "still shows the
+    // PREVIOUS field values" and said so as fact, on a body the comparison three lines
+    // earlier had just proven current. Patching a field the template does not render hit
+    // it every time, because the rendered row cannot change and the note never sees which
+    // fields moved.
+    // docs/issues/2026-09-13-snapshot-stale-tests-row-presence-and-reports-a-content-claim.md
+    let snapshot_stale = match snapshot_row {
+        SnapshotRow::Rewritten | SnapshotRow::AlreadyCurrent => None,
+        SnapshotRow::Undetermined => {
+            snapshot_stale_note(cat, artifact_id, entry_id, &claimed_indices)
+        }
     };
     let undefined_in_body = undefined_in_body_note(cat, artifact_id, entry_id);
 
@@ -489,11 +504,12 @@ pub fn update_entry(
         entries_total,
         snapshot_stale,
         undefined_in_body,
-        row_resynced,
+        row_resynced: matches!(snapshot_row, SnapshotRow::Rewritten),
+        row_already_current: matches!(snapshot_row, SnapshotRow::AlreadyCurrent),
     })
 }
 
-/// Whether `entry_id`'s tracker keeps a body snapshot that is now behind.
+/// Whether `entry_id`'s tracker keeps a body snapshot that MAY now be behind.
 ///
 /// Gated on [`body_keeps_snapshot`] — the body must line-anchor a MAJORITY of
 /// the ids in `claimed`, not merely one of them. `render_template` is the wrong
@@ -501,6 +517,23 @@ pub fn update_entry(
 /// `librarian(context)` precisely SO the body can stay prose-only, and 26 of 28
 /// augmented trackers here declare one, so it would fire almost always and mean
 /// almost nothing.
+///
+/// **This function reads IDS and never CELLS, and every message it emits must stay inside
+/// that.** It receives `claimed` — a set of integers — and not the patched fields, so it
+/// cannot know whether a present row's values moved; it could not compare them if it
+/// wanted to. Until 2026-09-14 the present-row branch nonetheless asserted *"still shows
+/// the PREVIOUS field values — params changed, the file did not"*, a claim about content
+/// derived from a check on presence. It fired on bodies that were provably current: patch
+/// a field the template does not render and the rendered row cannot change, yet the note
+/// reported it stale every time. The wording now states the limit, because the limit is
+/// real and permanent here rather than a gap to close.
+///
+/// **The case where the answer IS knowable does not reach this function at all.** When the
+/// artifact declares a `snapshot_anchor`, `resync_snapshot_row` compares the rendered row
+/// to the body row and the caller suppresses this note on both
+/// [`SnapshotRow::Rewritten`] and [`SnapshotRow::AlreadyCurrent`]. So arriving here means
+/// nothing was observed — which is why the remedy text names declaring an anchor as the
+/// way to get a real answer rather than a warning.
 ///
 /// Best-effort throughout: an unreadable file or an unparseable id yields
 /// `None`. A missing advisory is a far smaller harm than a failed update, and
@@ -538,16 +571,21 @@ fn snapshot_stale_note(
         return None;
     }
     Some(if in_body.contains(&num) {
-        // The hard half: the row IS in the body, showing its previous values.
-        // No id comparison can see this, which is why `append_entry`'s
-        // missing-id check would have reported nothing here.
+        // PRESENCE is the whole of what this branch established. Reaching it means
+        // `resync_snapshot_row` returned `Undetermined`, so not one cell was read.
         format!(
-            "This tracker renders a snapshot in its body, and its `{entry_id}` row still shows \
-             the PREVIOUS field values — params changed, the file did not. Update the row via \
-             doc(action=\"update\", patch={{body_edits: [...]}}), or the committed table \
-             disagrees with the catalog."
+            "This tracker renders a snapshot in its body and its `{entry_id}` row is there, \
+             but this check reads IDS ONLY — it has not compared a single cell, so whether \
+             the row still shows the previous values is UNVERIFIED. If the fields you \
+             patched appear in the rendered columns, update the row via \
+             doc(action=\"update\", patch={{body_edits: [...]}}). To stop being guessed at: \
+             declare `snapshot_anchor` in this artifact's frontmatter, and the next write \
+             re-renders the row and answers this instead of warning about it."
         )
     } else {
+        // ABSENCE is a genuine id-level observation, so this branch keeps its
+        // assertion — the row is not in the body, and no cell reading is needed to
+        // know it.
         format!(
             "This tracker renders a snapshot in its body, but `{entry_id}` is not in it at all — \
              the row exists only in the catalog, which is machine-local and git-ignored. Add it \
@@ -1499,6 +1537,32 @@ fn resolve_row_anchor(doc: &str, anchor: &RowAnchor, id: &str, caller: &str) -> 
     })
 }
 
+/// What [`resync_snapshot_row`] ESTABLISHED about the committed row, as distinct from
+/// what it did.
+///
+/// It returned `bool` until 2026-09-14, and the `false` conflated two facts that license
+/// opposite advice: *"the rendered row and the body row are byte-identical"* and *"I could
+/// not check"*. The first is the answer `snapshot_stale_note` needs and cannot compute —
+/// that note receives only the id set, never the field values, so it branched on PRESENCE
+/// and worded the result as a claim about CONTENT
+/// (`docs/issues/2026-09-13-snapshot-stale-tests-row-presence-and-reports-a-content-claim.md`).
+///
+/// **The comparison was already being made and thrown away**, which is why this is a
+/// return type rather than a new render. The bug file superseded by that one priced the
+/// honest fix at *"a template evaluation on every entry write"*; on the anchor path that
+/// evaluation has already happened by the time this value is produced.
+pub(crate) enum SnapshotRow {
+    /// The body row differed from the render and was rewritten in place.
+    Rewritten,
+    /// The body row is byte-identical to what `render_template` produces for this entry.
+    /// The body is current — **observed, not inferred** — so there is nothing to advise.
+    AlreadyCurrent,
+    /// Nothing was established: no `render_template`, no declared anchor, no rendered row
+    /// for this id, or the block could not be located. The advisory is the fallback, and
+    /// must not claim more than id presence supports.
+    Undetermined,
+}
+
 /// Re-render ONE entry's row in the committed snapshot block, so a params write and
 /// the table a reader sees stop disagreeing.
 ///
@@ -1512,10 +1576,17 @@ fn resolve_row_anchor(doc: &str, anchor: &RowAnchor, id: &str, caller: &str) -> 
 /// looking like a clean sync. A row re-render touches the one line whose new content
 /// the caller just supplied, so the blast radius is exactly the write.
 ///
-/// Returns `Ok(false)` — a silent no-op, not an error — when the artifact declares no
-/// [`SNAPSHOT_ANCHOR_KEY`], carries no `render_template`, or renders no row for this
-/// id. That is the majority: most trackers keep no body snapshot, and for them this
-/// path must not change behaviour at all.
+/// Returns [`SnapshotRow::Undetermined`] — a silent no-op, not an error — when the
+/// artifact declares no [`SNAPSHOT_ANCHOR_KEY`], carries no `render_template`, or renders
+/// no row for this id. That is the majority: most trackers keep no body snapshot, and for
+/// them this path must not change behaviour at all.
+///
+/// **[`SnapshotRow::AlreadyCurrent`] is the return that exists for someone else.** Nothing
+/// here acts on it — the function's own job is done either way — but it is the only place
+/// in the codebase where "the body cell and the params value agree" is actually observed,
+/// and `snapshot_stale_note` needs it to avoid asserting the opposite. Collapsing it back
+/// into the no-op case is the defect this enum was introduced to remove, so if a future
+/// change makes the distinction inconvenient, move it rather than dropping it.
 ///
 /// **Runs INSIDE the caller's transaction, before commit**, matching
 /// [`allocate_entry_id`] — so a failed splice rolls the params write back rather than
@@ -1523,17 +1594,17 @@ fn resolve_row_anchor(doc: &str, anchor: &RowAnchor, id: &str, caller: &str) -> 
 /// from the comment below the call site, which argues the body signal is advisory and
 /// "must never be able to fail the mutation the caller asked for": true of a REPORT,
 /// and the wrong bargain for a WRITE, where a half-applied pair is worse than a
-/// refused one. The departure is bounded by the `None` cases above — an artifact that
-/// has not opted in cannot reach the new failure mode.
+/// refused one. The departure is bounded by the `Undetermined` cases above — an artifact
+/// that has not opted in cannot reach the new failure mode.
 fn resync_snapshot_row(
     tx: &rusqlite::Transaction<'_>,
     artifact_id: &str,
     entry_id: &str,
     params: &Value,
     render_template: Option<&str>,
-) -> Result<bool> {
+) -> Result<SnapshotRow> {
     let Some(tmpl) = render_template else {
-        return Ok(false);
+        return Ok(SnapshotRow::Undetermined);
     };
     let abs_path: Option<String> = tx
         .query_row(
@@ -1543,14 +1614,14 @@ fn resync_snapshot_row(
         )
         .optional()?;
     let Some(abs_path) = abs_path else {
-        return Ok(false);
+        return Ok(SnapshotRow::Undetermined);
     };
     let Ok(doc) = std::fs::read_to_string(&abs_path) else {
-        return Ok(false);
+        return Ok(SnapshotRow::Undetermined);
     };
     let (fm, _) = crate::librarian::frontmatter::parse(&doc).unwrap_or((None, doc.as_str()));
     let Some(anchor) = declared_snapshot_anchor(fm.as_ref()) else {
-        return Ok(false);
+        return Ok(SnapshotRow::Undetermined);
     };
 
     // Render the FULL template and pick this id's line out of it, rather than
@@ -1569,29 +1640,27 @@ fn resync_snapshot_row(
     let Some(new_row) = rendered.lines().find(|l| row_re.is_match(l)) else {
         // The template emits no row for this id. Not an error: an entry can exist in
         // params and be deliberately excluded from the rendered table by a filter.
-        return Ok(false);
+        return Ok(SnapshotRow::Undetermined);
     };
 
     // Locate the block, then the row WITHIN it. Scanning the whole document for the
     // id would reach a row in an unrelated table, which is the defect
     // `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`
     // reports and the reason the anchor is declared rather than inferred.
-    let Some(block_last) = snapshot_block_last_line(&doc, &anchor) else {
-        return Ok(false);
+    let Some((start, end)) = snapshot_block_range(&doc, &anchor) else {
+        return Ok(SnapshotRow::Undetermined);
     };
     let lines: Vec<&str> = doc.lines().collect();
-    let start = lines.iter().position(|l| l.trim() == anchor.trim());
-    let end = lines.iter().rposition(|l| *l == block_last);
-    let (Some(start), Some(end)) = (start, end) else {
-        return Ok(false);
-    };
     let Some(idx) = (start..=end).find(|i| row_re.is_match(lines[*i])) else {
         // The id has no row in this block yet. Adding one is `append_entry`'s job with
         // an `index_row`; inventing a row here would place it by guess.
-        return Ok(false);
+        return Ok(SnapshotRow::Undetermined);
     };
     if lines[idx] == new_row {
-        return Ok(false);
+        // THE ONE PLACE THE BODY AND `params` ARE ACTUALLY COMPARED. Reported rather
+        // than folded into the no-op above, because `snapshot_stale_note` otherwise
+        // infers the opposite from id presence and states it as fact.
+        return Ok(SnapshotRow::AlreadyCurrent);
     }
 
     // The empty-cell guard, and it exists for a specific default: MiniJinja renders an
@@ -1629,7 +1698,7 @@ fn resync_snapshot_row(
              {abs_path} failed: {e} — the params change was rolled back"
         ))
     })?;
-    Ok(true)
+    Ok(SnapshotRow::Rewritten)
 }
 
 /// Splice a [`PendingSection`] — and its optional index row — into `doc`, returning the

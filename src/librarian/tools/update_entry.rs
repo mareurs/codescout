@@ -88,6 +88,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if outcome.row_resynced {
         out["row_resynced"] = json!(true);
     }
+    // The THIRD silence, and it is here for the same argument as the second. A caller
+    // seeing neither `snapshot_stale` nor `row_resynced` would otherwise be reading one
+    // response for two facts that license opposite actions: the row was compared and is
+    // current, versus nothing about this tracker's body was ever looked at. Reporting
+    // only the written case and calling the rest silence is what let the note assert a
+    // content claim it had not checked in the first place.
+    if outcome.row_already_current {
+        out["row_already_current"] = json!(true);
+    }
     // The citation half, and independent of the row half above: `snapshot_stale` is
     // satisfied by an index row showing current values, while a row defines no token at
     // all. An entry can be perfectly in-sync and still be uncitable.
@@ -190,12 +199,27 @@ mod tests {
     }
 
     /// docs/issues/archive/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
+    /// docs/issues/2026-09-13-snapshot-stale-tests-row-presence-and-reports-a-content-claim.md
     ///
-    /// The sub-shape no id comparison can see: the row IS in the body, showing
-    /// its previous values. `append_entry`'s missing-id check would report
-    /// nothing here, which is why this path needed its own signal.
+    /// The present-row branch: the id IS in the body, and the note must say so **without
+    /// claiming the cells moved**, because on this path nothing compared them. The fixture
+    /// declares no `snapshot_anchor`, so `resync_snapshot_row` returns `Undetermined` and the
+    /// advisory is genuinely the only signal available — the majority case today.
+    ///
+    /// **Renamed 2026-09-14 from `..._says_the_committed_table_now_disagrees`, and the old name
+    /// was the defect in miniature.** "The committed table now disagrees" is precisely the
+    /// unverified assertion, and a test named after a claim will be restored to that claim by
+    /// the next person reading the name for intent. The old body asserted
+    /// `note.contains("PREVIOUS")` — pinning the rhetoric of a claim rather than its warrant.
+    ///
+    /// Asserts three things and deliberately not the sentence: that this is the present-row
+    /// branch, that the message marks its own claim unverified, and that it names the action
+    /// which would make it verifiable. The last is § *Testing Discipline*'s remedy-shape rule —
+    /// a guard's predicate collects assertions and its remedy text collects none, so pin the
+    /// SHAPE: cheap, survives rewording, reds exactly on the deletion that matters.
     #[tokio::test]
-    async fn patching_a_rendered_row_says_the_committed_table_now_disagrees() {
+    async fn patching_a_rendered_row_without_an_anchor_flags_it_without_asserting_the_cells_moved()
+    {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("queue.md");
         let ctx = mk_ctx();
@@ -218,12 +242,24 @@ mod tests {
         assert_eq!(result["changed_fields"], json!(["status"]));
         let note = result["snapshot_stale"]
             .as_str()
-            .expect("a rendered row that changed value must say so");
+            .expect("a body that renders this row is still owed a signal when params move");
+
         assert!(
-            note.contains("PREVIOUS"),
-            "the row is present but outdated — that is the distinguishing case: {note}"
+            note.contains("T-1") && !note.contains("not in it at all"),
+            "must be the PRESENT-row branch, not the absent one — the two license different \
+         actions, edit the row versus add it: {note}"
         );
-        assert!(note.contains("T-1"), "{note}");
+        assert!(
+            note.contains("UNVERIFIED"),
+            "the note reads ids and never cells, so it must mark its claim unchecked rather \
+         than assert the row is behind. Dropping this marker reintroduces \
+         `2459a3965d98170b`, which fired on bodies that were provably current: {note}"
+        );
+        assert!(
+            note.contains("snapshot_anchor"),
+            "a message that admits it cannot answer must name what would — otherwise the \
+         reader learns only that nobody looked, with no way to change that: {note}"
+        );
     }
 
     /// Seeds a tracker that DOES render a snapshot: a `render_template`, plus a
@@ -394,6 +430,66 @@ mod tests {
                 .contains("| T-3 | done |"),
             "and nothing may be written: with no row for T-3 inside the block, \
              `resync_snapshot_row` must decline rather than place one by guess"
+        );
+    }
+
+    /// REPRODUCTION for `2459a3965d98170b`: the advisory asserts the body is behind when
+    /// it is byte-identical to what the template renders.
+    ///
+    /// `snapshot_stale_note` branches on `in_body.contains(&num)` — PRESENCE — and then
+    /// emits a sentence about CONTENT: *"still shows the PREVIOUS field values — params
+    /// changed, the file did not."* It never receives the patched fields, so it could not
+    /// compare them as written.
+    ///
+    /// **Patching a field the template does not render is the sharpest case**, because the
+    /// rendered row cannot have changed: `owner` appears nowhere in the template, so the
+    /// body is current by construction and no wording of "may be behind" is true either.
+    /// It also shows the defect survives anchor adoption — `resync_snapshot_row` renders
+    /// the row, finds `lines[idx] == new_row`, and returns `Ok(false)`, so the
+    /// `row_resynced` suppression at the call site never fires and the note runs anyway.
+    ///
+    /// Measured live by a peer session the same day: three consecutive `update_entry`
+    /// calls, each advising the body was behind while the body was current because they
+    /// had copied the params value out of it. They read the advisory and disbelieved it,
+    /// which is the cost — an advisory that cries wolf is worse than no advisory.
+    #[tokio::test]
+    async fn patching_an_unrendered_field_does_not_claim_the_body_is_behind() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        seed_rendered(
+            &ctx,
+            "art1",
+            &path,
+            "---\nkind: tracker\nsnapshot_anchor: '| ID | status |'\n---\n\n# Q\n\n\
+             | ID | status |\n| T-1 | open |\n\ntail\n",
+            // `owner` is deliberately absent from the template: the column set is the
+            // whole point. Add it here and the patch below becomes a real change to the
+            // rendered row, and this test stops discriminating.
+            "| ID | status |\n{% for t in tasks %}| {{ t.id }} | {{ t.status }} |\n{% endfor %}",
+            json!([{"id": "T-1", "status": "open", "owner": "a"}]),
+        );
+
+        let before = std::fs::read_to_string(&path).unwrap();
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "tasks",
+                   "entry_id": "T-1", "fields": {"owner": "b"}}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            before,
+            "precondition: the rendered row is unaffected by an `owner` patch, so the body \
+             is current BY CONSTRUCTION — without this the assertion below would rest on a \
+             claim about the template rather than an observation of the file"
+        );
+        assert!(
+            result.get("snapshot_stale").is_none(),
+            "the body renders exactly what params now say, so there is nothing to advise \
+             about — and the message actually emitted asserts the opposite as fact: {result}"
         );
     }
 
