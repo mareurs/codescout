@@ -75,6 +75,47 @@ ignored on the call where it is true. The cost is the guard's credibility, not t
   work`. So the session's own writes *are* derivable from the transcript scan; the
   dirty-check advisory simply does not consult it.
 
+
+### Two further instances — 2026-09-14, and NEITHER is an `edit_code` rename
+
+From session `6be73414-6293-4a4e-95a4-4bada8327f08`. They are worth adding not as a count but
+because **neither involved a rename, a multi-file edit, or any file the call did not name** —
+which is the trigger § *Summary* and § *Root cause* identify.
+
+| file | how this session had written it, minutes earlier | advisory on the next `edit_file` |
+|---|---|---|
+| `docs/issues/archive/2026-09-03-il4-deny-hook-will-deadlock-markdown-reads-after-the-fold.md` | `doc(action="update")` — one file, one call | *"already has uncommitted changes that this session did not write"* |
+| `docs/issues/2026-09-14-read-only-blocks-five-tool-names-not-the-writes-it-promises.md` | `doc(action="create")`, then `doc(action="update")` | same |
+
+`scripts/file-provenance.py` was run at the time on both and returned
+**`MINE … written by THIS session (6be73414)`**. So this is not a reader's belief against a
+gate: it is two instruments disagreeing on one tree at one instant, and the dirty-check is the
+wrong one.
+
+**What this changes — the trigger is wider than the title.** § *Root cause* attributes the blind
+spot to `edit_code`'s LSP rename touching files beyond the one named in the call. That is a real
+route and it is not the only one. A **single-file write through the librarian** reaches the same
+state: `doc(action="create" / "update")` mutates the file directly and the hook holds no record
+of it either. So the predicate is not *"the session wrote a file it did not name"* — it is
+*"the session wrote through a path the hook does not mediate"*, and on a docs-heavy session the
+librarian is by far the larger of those paths by call volume.
+
+The title and § *Summary* still scope this to `edit_code`'s rename. **Left unrewritten — that is
+the owner's call, not a passing contributor's** — but flagged here because a fix scoped to the
+rename path would close one route of at least two and the suite would go green.
+
+**Consistent with this section's last bullet, on a third surface.** That bullet notes the
+attribution hook derives authorship correctly from the transcript scan while the dirty-check
+does not consult it. The same held here in the same hour: `attribute-red` named this session
+correctly on a `cargo test` red (*"written by THIS session (6be73414) — your own uncommitted
+work"*) while the dirty-check was calling that session's own writes foreign. The data the
+advisory needs is not missing from the machine; it is missing from the advisory.
+
+**Not claimed, and no fix attempted here** — these are observations handed to whoever picks the
+record up. Offered via `attach-alias-advisory-anyhow`, who retagged this record into
+`cluster/gate-keyed-on-unobservable-event` and correctly declined to write into a file they do
+not hold.
+
 ## Hypotheses tried
 1. **Hypothesis:** a peer genuinely edited the file in the interval. **Test:** read the
    full `git diff` for the path and compare against the rename's reported edit count and
