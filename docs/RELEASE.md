@@ -168,10 +168,16 @@ is an extractor regression wearing the costume of a docs improvement.
 not establish that what the code *says* is useful — and it does nothing for any other
 session. Every Claude Code window already holding a codescout server keeps executing the
 binary it started from, serving that build's guides, prompt surfaces and guide routing,
-until it is reconnected. Measured 2026-08-21: **21 of 26 servers on this machine were
-running a deleted binary, the oldest 17 days old.** Nothing raises — the commits are on the
+until it is reconnected. Measured 2026-08-21: **21–22 of 26 codescout PROCESSES on this
+machine were running a deleted binary, the oldest 17 days old** — the range and the unit
+are both deliberate. That run predates the server/mux split, so it counted LSP muxes
+alongside MCP servers, and the two surfaces that recorded it disagree by one with the
+table long gone. Nothing raises — the commits are on the
 branch, the binary on disk is current, the suite is green, and only `/proc` disagrees.
-Count it with [`scripts/stale-servers.sh`](../scripts/stale-servers.sh); the reconnect is
+Count it with [`scripts/stale-servers.sh`](../scripts/stale-servers.sh), which now reports
+servers and muxes separately and prints no combined total; **only the server count is what
+this section is about**, because a mux has no session to reconnect and exits on its own.
+The reconnect is
 not hygiene, it is the difference between one session and all of them. For any change to tool-facing **output** — warnings, hints,
 completeness notes, summaries, rendered text — invoke the tool once against this repository
 and read the bytes before the cherry-pick.

@@ -160,6 +160,30 @@ jobs:
       - run: rustup component add rustfmt
       - run: bash tests/fmt-mine.sh
 
+  # ITS OWN JOB, same reason as the three above: `shell-tests` is a known-flaky lane, and
+  # a suite whose assertions are verdicts about a COUNT'S UNIT is the last thing that
+  # should be readable as lane noise.
+  #
+  # Cheapest job in this file — bash and coreutils, nothing else. It spawns no processes,
+  # needs no git identity (it builds no repo), and drives `scripts/stale-servers.sh`
+  # through its `--classify` and `--remedy` seams plus one live invocation. That live case
+  # is population-independent by construction: on a runner with no codescout process at
+  # all, both counters print zero and every assertion still holds.
+  #
+  # Why it is wired at all: the probe counted LSP muxes as MCP servers under a header that
+  # said "servers", and closed with a remedy a mux cannot obey. A mux exists only while a
+  # language server is warm, so the defect was absent from most runs — which is exactly the
+  # intermittency that would make a hand-run check evidence about one instant. Mutation
+  # run at fix time, on the production path: 4 of 4 killed, each by the case named for it
+  # (narrow the classifier to `*mux*` -> 1 case; stub it to always answer `server` -> 4;
+  # delete the remedy's mux branch -> 3; reinstate a combined `total=` -> 1).
+  stale-servers-tests:
+    name: stale-servers partition
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/stale-servers.sh
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
