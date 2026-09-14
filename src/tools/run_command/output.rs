@@ -412,37 +412,53 @@ pub(crate) async fn handle_successful_output(
 /// Format a compact one-liner summary of a run_command result for `format_compact`.
 pub(crate) fn format_run_command(result: &Value) -> String {
     let mut s = if result["output_id"].is_string() {
-        let exit = result["exit_code"].as_i64().unwrap_or(0);
-        let check = if exit == 0 { "✓" } else { "✗" };
         let output_id = result["output_id"].as_str().unwrap_or("");
-        match result["type"].as_str() {
-            Some("test") => {
-                let passed = result["passed"].as_u64().unwrap_or(0);
-                let failed = result["failed"].as_u64().unwrap_or(0);
-                let ignored = result["ignored"].as_u64().unwrap_or(0);
-                let mut s = format!("{check} exit {exit} · {passed} passed");
-                if failed > 0 {
-                    s.push_str(&format!(" · {failed} FAILED"));
+        match result["exit_code"].as_i64() {
+            // A backgrounded job that has not exited carries NO `exit_code` — the payload is
+            // `output_id`, `hint`, `stdout` and nothing else. This arm used to be
+            // `unwrap_or(0)`, which made that absence indistinguishable from a clean exit and
+            // rendered `✓ exit 0` for a run that had already failed to compile. Absence is a
+            // third state, not a default: say "running" and assert nothing.
+            // docs/issues/2026-09-14-a-backgrounded-gate-command-was-summarised-as-exit-0-while-its-buffer-held-the-failure.md
+            None => format!("… running  (query {output_id})"),
+            Some(exit) => {
+                let check = if exit == 0 { "✓" } else { "✗" };
+                match result["type"].as_str() {
+                    Some("test") => {
+                        let passed = result["passed"].as_u64().unwrap_or(0);
+                        let failed = result["failed"].as_u64().unwrap_or(0);
+                        let ignored = result["ignored"].as_u64().unwrap_or(0);
+                        let mut s = format!("{check} exit {exit} · {passed} passed");
+                        if failed > 0 {
+                            s.push_str(&format!(" · {failed} FAILED"));
+                        }
+                        if ignored > 0 {
+                            s.push_str(&format!(" · {ignored} ignored"));
+                        }
+                        s.push_str(&format!("  (query {output_id})"));
+                        s
+                    }
+                    Some("build") => {
+                        let errors = result["errors"].as_u64().unwrap_or(0);
+                        if errors > 0 {
+                            format!("{check} exit {exit} · {errors} errors  (query {output_id})")
+                        } else {
+                            format!("{check} exit {exit}  (query {output_id})")
+                        }
+                    }
+                    _ => format!("{check} exit {exit}  (query {output_id})"),
                 }
-                if ignored > 0 {
-                    s.push_str(&format!(" · {ignored} ignored"));
-                }
-                s.push_str(&format!("  (query {output_id})"));
-                s
             }
-            Some("build") => {
-                let errors = result["errors"].as_u64().unwrap_or(0);
-                if errors > 0 {
-                    format!("{check} exit {exit} · {errors} errors  (query {output_id})")
-                } else {
-                    format!("{check} exit {exit}  (query {output_id})")
-                }
-            }
-            _ => format!("{check} exit {exit}  (query {output_id})"),
         }
     } else if result["timed_out"].as_bool().unwrap_or(false) {
         "✗ timed out".to_string()
     } else {
+        // NOTE: this `unwrap_or(0)` is the same defaulting the branch above was fixed for, and
+        // is deliberately left. An inline result is by construction a COMPLETED one, so there
+        // is no caller that reaches here with an absent `exit_code`; adding a branch nothing
+        // reaches would be decoration, and untestable decoration at that (CLAUDE.md
+        // § Testing Discipline — loudness is a property of a PATH). If an inline shape ever
+        // gains a pending state, this is the second site and it needs the same treatment.
         let exit = result["exit_code"].as_i64().unwrap_or(0);
         let stdout_lines = result["stdout"]
             .as_str()

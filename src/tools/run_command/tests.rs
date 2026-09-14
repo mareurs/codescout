@@ -4893,3 +4893,57 @@ async fn a_red_attaches_wip_authors_on_the_buffer_only_arm() {
         "the early-return arm must attach the hint too; got: {who}"
     );
 }
+
+/// A backgrounded, STILL-RUNNING result carries no `exit_code` — it is `output_id`, `hint`,
+/// `stdout` and nothing else. The compact renderer must not turn that absence into a success
+/// claim.
+///
+/// **Asserting `✓` versus `✗` cannot catch this, which is how it shipped.** Both checkmarks
+/// describe a *completed* run, so a third state rendered as the first is invisible on that
+/// axis however many completed cases are added. One predicate (`output_id.is_string()`) was
+/// separating three states — passed, failed, still-running — and collapsed the third onto the
+/// first. The assertion that bites is that the still-running shape produces NEITHER checkmark
+/// and names no exit status at all.
+///
+/// docs/issues/2026-09-14-a-backgrounded-gate-command-was-summarised-as-exit-0-while-its-buffer-held-the-failure.md
+#[test]
+fn a_still_running_background_result_never_asserts_an_exit_status() {
+    let rendered = super::output::format_run_command(&serde_json::json!({
+        "output_id": "@bg_00000001",
+        "hint": "Process running. Output captured in @bg_00000001",
+        "stdout": "error: could not compile `codescout` (lib) due to 1 previous error",
+    }));
+
+    assert!(
+        !rendered.contains('✓'),
+        "an absent exit status must not render as success — this is the defect verbatim, a \
+         failed gate reported as a pass: {rendered}"
+    );
+    assert!(
+        !rendered.contains('✗'),
+        "nor as failure: the state is UNKNOWN, and guessing the other direction is the same \
+         defect mirrored rather than fixed: {rendered}"
+    );
+    assert!(
+        !rendered.contains("exit "),
+        "a payload carrying no exit_code must not name one: {rendered}"
+    );
+}
+
+/// The sibling of the test above, and the reason it is not redundant: a COMPLETED buffered
+/// result does carry `exit_code`, and must still render its status. A fix that silenced the
+/// status for every `output_id`-bearing shape would satisfy the still-running assertions and
+/// destroy the reporting this function exists for.
+#[test]
+fn a_completed_buffered_result_still_reports_its_exit_status() {
+    let rendered = super::output::format_run_command(&serde_json::json!({
+        "output_id": "@cmd_00000001",
+        "exit_code": 101,
+        "stdout": "boom",
+    }));
+
+    assert!(
+        rendered.contains('✗') && rendered.contains("exit 101"),
+        "a completed result must still report its real status: {rendered}"
+    );
+}
