@@ -111,7 +111,7 @@ which is the trigger § *Summary* and § *Root cause* identify.
 | file | how this session had written it, minutes earlier | advisory on the next `edit_file` |
 |---|---|---|
 | `docs/issues/archive/2026-09-03-il4-deny-hook-will-deadlock-markdown-reads-after-the-fold.md` | `doc(action="update")` — one file, one call | *"already has uncommitted changes that this session did not write"* |
-| `docs/issues/2026-09-14-read-only-blocks-five-tool-names-not-the-writes-it-promises.md` | `doc(action="create")`, then `doc(action="update")` | same |
+| `docs/issues/archive/2026-09-14-read-only-blocks-five-tool-names-not-the-writes-it-promises.md` | `doc(action="create")`, then `doc(action="update")` | same |
 
 `scripts/file-provenance.py` was run at the time on both and returned
 **`MINE … written by THIS session (6be73414)`**. So this is not a reader's belief against a
