@@ -352,8 +352,13 @@ pub(crate) async fn run_command_inner(
             "disabled" => {
                 return Err(RecoverableError::with_hint(
                     "shell commands are disabled",
-                    "Set security.shell_command_mode = \"warn\" or \"unrestricted\" in .codescout/project.toml",
-                ).into());
+                    format!(
+                        "Set security.shell_command_mode = \"warn\" or \"unrestricted\" in \
+                         .codescout/project.toml. {}",
+                        crate::config::project::CONFIG_IS_CACHED_REMEDY
+                    ),
+                )
+                .into());
             }
             "unrestricted" | "warn" | "" => {} // allowed
             other => {

@@ -256,8 +256,12 @@ impl Tool for IndexProject {
                     Some(IndexConfirm { confirm: false }) => {
                         return Err(crate::tools::RecoverableError::with_hint(
                             "Indexing aborted — user did not confirm the scope",
-                            "Activate a more specific project root, or raise \
-                             security.max_index_bytes in .codescout/project.toml, then retry.",
+                            format!(
+                                "Activate a more specific project root — that takes effect \
+                                 immediately. Raising security.max_index_bytes in \
+                                 .codescout/project.toml does not, on its own: {}",
+                                crate::config::project::CONFIG_IS_CACHED_REMEDY
+                            ),
                         )
                         .into());
                     }
@@ -266,8 +270,12 @@ impl Tool for IndexProject {
                         // For this guard, the safe default is to refuse — never silently proceed.
                         return Err(crate::tools::RecoverableError::with_hint(
                             "index_project needs confirmation but client does not support elicitation",
-                            "Raise security.max_index_bytes in .codescout/project.toml, \
-                             or activate a narrower project root, then retry.",
+                            format!(
+                                "Activate a narrower project root — that takes effect \
+                                 immediately. Raising security.max_index_bytes in \
+                                 .codescout/project.toml does not, on its own: {}",
+                                crate::config::project::CONFIG_IS_CACHED_REMEDY
+                            ),
                         )
                         .into());
                     }

@@ -660,8 +660,10 @@ pub fn check_tool_access(
         // `WriteBlockCause` precedence: state the cause whose remedy works.
         "semantic_search" | "index" if !config.indexing_enabled => {
             bail!(
-                    "Indexing tools are disabled. Set security.indexing_enabled = true in .codescout/project.toml to enable."
-                );
+                "Indexing tools are disabled by security.indexing_enabled = false in \
+                 .codescout/project.toml. {}",
+                crate::config::project::CONFIG_IS_CACHED_REMEDY
+            );
         }
         _ if is_write && !config.file_write_enabled => {
             // State the cause when it is known. The hedged single message this
@@ -2675,6 +2677,64 @@ mod tests {
                 tool
             );
         }
+    }
+    /// The two config-off refusals in this file prescribe DIFFERENT remedies, and the
+    /// difference is load-bearing rather than editorial.
+    ///
+    /// Both are defeated by the same staleness — `project.toml` is read once when a project
+    /// becomes resident and cached for the life of the process — but the escapes available
+    /// differ. Indexing-off leaves writes ON, so editing the config through codescout's own
+    /// `edit_file` triggers `Agent::reload_config_if_project_toml_for` and genuinely works.
+    /// Writes-off does not: `edit_file` is unreachable precisely because writes are the thing
+    /// disabled, which leaves the restart as the only route.
+    ///
+    /// So the regression this guards is a TIDY-UP. Unifying the two onto the shared
+    /// `CONFIG_IS_CACHED_REMEDY` would hand the write refusal an escape its reader cannot
+    /// take — a message that is confidently wrong rather than merely unhelpful. Every other
+    /// test here reads one message alone, so nothing else can express the difference.
+    #[test]
+    fn the_write_refusal_withholds_the_edit_file_escape_the_indexing_refusal_offers() {
+        let indexing_off = PathSecurityConfig {
+            indexing_enabled: false,
+            ..PathSecurityConfig::default()
+        };
+        let indexing_err = check_tool_access("semantic_search", false, &indexing_off)
+            .expect_err("indexing is off, this must refuse")
+            .to_string();
+
+        let writes_off = PathSecurityConfig {
+            file_write_enabled: false,
+            write_block: Some(WriteBlock {
+                root: PathBuf::from("/work/locked"),
+                cause: WriteBlockCause::ConfiguredOff,
+            }),
+            ..PathSecurityConfig::default()
+        };
+        let write_err = check_tool_access("create_file", true, &writes_off)
+            .expect_err("writes are off, this must refuse")
+            .to_string();
+
+        assert!(
+            indexing_err.contains("edit_file"),
+            "indexing-off CAN be cleared through codescout's own editor, and must say so: \
+             {indexing_err}"
+        );
+        assert!(
+            !write_err.contains("edit_file"),
+            "writes-off must NOT offer the edit_file escape — writes being disabled is exactly \
+             what makes it unreachable: {write_err}"
+        );
+
+        // Neither may stop at "edit the config": that is the step the cache swallows, and
+        // both must name the restart that does re-read it.
+        assert!(
+            indexing_err.contains("/mcp"),
+            "indexing refusal must name a remedy that re-reads the config: {indexing_err}"
+        );
+        assert!(
+            write_err.contains("/mcp"),
+            "write refusal must name a remedy that re-reads the config: {write_err}"
+        );
     }
 
     #[test]

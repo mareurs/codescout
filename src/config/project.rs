@@ -4,6 +4,23 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// Owed by every refusal whose remedy is an edit to `.codescout/project.toml`.
+///
+/// The config is loaded when a project becomes resident and cached for the life of the
+/// process; only codescout's own write tools re-read it, via
+/// `Agent::reload_config_if_project_toml_for`. So "edit the config and retry" is silently
+/// inert for an edit made in an editor, by `Bash`, or by any other process — the call
+/// re-runs and prints the byte-identical refusal, which reads as the remedy not having
+/// been performed. See
+/// `docs/issues/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`.
+///
+/// **The `file_write_enabled` refusal must NOT use this** — it needs a stricter remedy,
+/// because the `edit_file` escape offered here is unreachable exactly when writes are the
+/// thing turned off. That message names the restart alone, in `util::path_security`.
+pub const CONFIG_IS_CACHED_REMEDY: &str = "That file is cached for the life of this process: \
+     make the edit with codescout's own edit_file, which reloads the config — or edit it any \
+     other way and restart the MCP server (`/mcp`).";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectConfig {
     pub project: ProjectSection,
