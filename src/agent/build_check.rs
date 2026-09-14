@@ -176,6 +176,17 @@ pub(crate) struct SessionBuildState {
     pub state: BuildCheckState,
     /// When the last check started, for [`debounce_elapsed`].
     pub last_started: Option<Instant>,
+    /// A write arrived when no check could start — set by [`Self::defer`], drained by
+    /// [`Self::drain_pending`].
+    ///
+    /// **Without this the repair is the write most likely to be lost.** [`Self::may_start`]
+    /// is false for the whole duration of a running check (~7 s for the `--all-targets`
+    /// incremental this module measures, against a 1500 ms debounce), and a break is
+    /// normally repaired inside that window. The repairing write was therefore discarded
+    /// with no record, nothing re-checked, and the check that began BEFORE the repair wrote
+    /// its failure down afterwards — which is the whole of
+    /// `docs/issues/2026-09-14-the-compile-advisory-reports-a-cached-failure-as-current-state.md`.
+    pub pending: bool,
 }
 
 impl SessionBuildState {
@@ -196,6 +207,32 @@ impl SessionBuildState {
     pub(crate) fn may_start(&self, now: Instant, window: Duration) -> bool {
         !matches!(self.state, BuildCheckState::Running)
             && debounce_elapsed(self.last_started, now, window)
+    }
+
+    /// Remember that a write could not start a check, so whatever is in flight knows its
+    /// answer is already out of date.
+    ///
+    /// Idempotent: an edit burst inside one check window defers once, and the single
+    /// re-check that follows reads the whole accumulated [`Self::edits`] set.
+    pub(crate) fn defer(&mut self) {
+        self.pending = true;
+    }
+
+    /// Take a deferred write, if there is one, and re-arm for an immediate re-check.
+    ///
+    /// Returns the edit set the re-check should use — read fresh from [`Self::edits`]
+    /// rather than reusing the caller's clone, because the whole point is that the set
+    /// grew after that clone was taken.
+    ///
+    /// Called only where a check has just finished, which is the one moment
+    /// [`Self::may_start`] would refuse and no later write is guaranteed to arrive.
+    pub(crate) fn drain_pending(&mut self, now: Instant) -> Option<HashSet<PathBuf>> {
+        if !std::mem::take(&mut self.pending) {
+            return None;
+        }
+        self.state = BuildCheckState::Running;
+        self.last_started = Some(now);
+        Some(self.edits.clone())
     }
 }
 
@@ -460,6 +497,58 @@ pub(crate) fn live_sessions() -> Vec<LiveSession> {
     Vec::new()
 }
 
+/// The synchronous decision half of [`on_source_write`]: does this write start a check,
+/// and over what.
+///
+/// Split out, and takes `env` and `now` rather than reading them, for exactly the reason
+/// [`run_once`] does — this module's header forbids `EnvGuard`
+/// (`docs/conventions/test-env-isolation.md` marks it NOT VIABLE), so a branch that reads
+/// the environment is a branch no test can drive. Every gate below was unreachable from a
+/// test while it lived inside the spawning function, which is how the deferral this fixes
+/// came to be a bare `return` that nothing could catch.
+///
+/// `None` does **not** mean nothing happened: the deferral branch records a refused write
+/// in [`SessionBuildState::pending`], and that record is the fix for
+/// `docs/issues/2026-09-14-the-compile-advisory-reports-a-cached-failure-as-current-state.md`.
+pub(crate) fn decide_start(
+    st: &mut SessionBuildState,
+    root: &Path,
+    path: &Path,
+    env: &BuildCheckEnv,
+    now: Instant,
+) -> Option<HashSet<PathBuf>> {
+    // Recorded BEFORE the `enabled` gate, deliberately. `edits` answers "what did this
+    // session write", which is true whether or not we go on to check it — and keeping
+    // the record unconditional is what lets the wiring test assert on it without
+    // reading the environment. A test that branched on `enabled` would carry a
+    // skip-guard, and a skip-guard is monotone under the very deletion it exists to
+    // catch (measured on this repo 2026-09-09, `59112612`).
+    if !st.note_write(path) {
+        return None;
+    }
+    if !env.enabled {
+        st.state = BuildCheckState::Skipped(SkipReason::Disabled);
+        return None;
+    }
+    if !st.may_start(now, env.debounce) {
+        // NOT a bare return. `may_start` is false for the whole of a running check, and
+        // the write it refuses most often is the one REPAIRING the break that started
+        // that check — so a bare return discarded the repair, left nothing to replay, and
+        // let the in-flight check write its pre-repair failure down afterwards.
+        st.defer();
+        return None;
+    }
+    // Only reached when a check is actually about to start, so the enumeration — which
+    // reads several JSON files — stays off the hot path of an ordinary edit.
+    if !checkout_is_shared(&live_sessions(), root) {
+        st.state = BuildCheckState::Skipped(SkipReason::NotShared);
+        return None;
+    }
+    st.state = BuildCheckState::Running;
+    st.last_started = Some(now);
+    Some(st.edits.clone())
+}
+
 /// Called by a write tool after it successfully writes a source file.
 ///
 /// Cheap gates first, in the order that costs least — the same staging discipline
@@ -474,39 +563,34 @@ pub(crate) fn on_source_write(
     let env = BuildCheckEnv::from_env();
     let edits = {
         let Ok(mut st) = slot.lock() else { return };
-        // Recorded BEFORE the `enabled` gate, deliberately. `edits` answers "what did this
-        // session write", which is true whether or not we go on to check it — and keeping
-        // the record unconditional is what lets the wiring test assert on it without
-        // reading the environment. A test that branched on `enabled` would carry a
-        // skip-guard, and a skip-guard is monotone under the very deletion it exists to
-        // catch (measured on this repo 2026-09-09, `59112612`).
-        if !st.note_write(path) {
+        let Some(e) = decide_start(&mut st, root, path, &env, Instant::now()) else {
             return;
-        }
-        if !env.enabled {
-            st.state = BuildCheckState::Skipped(SkipReason::Disabled);
-            return;
-        }
-        if !st.may_start(Instant::now(), env.debounce) {
-            return;
-        }
-        // Only reached when a check is actually about to start, so the enumeration —
-        // which reads several JSON files — stays off the hot path of an ordinary edit.
-        if !checkout_is_shared(&live_sessions(), root) {
-            st.state = BuildCheckState::Skipped(SkipReason::NotShared);
-            return;
-        }
-        st.state = BuildCheckState::Running;
-        st.last_started = Some(Instant::now());
-        st.edits.clone()
+        };
+        e
     };
 
     let slot = slot.clone();
     let root = root.to_path_buf();
     tokio::spawn(async move {
-        let outcome = run_once(&root, &edits, &env).await;
-        if let Ok(mut st) = slot.lock() {
-            st.state = outcome;
+        let mut edits = edits;
+        loop {
+            let outcome = run_once(&root, &edits, &env).await;
+            // Scoped so the guard is dropped before the next `await` — a `MutexGuard` held
+            // across one would make this future non-`Send` and stall the next writer.
+            let next = {
+                let Ok(mut st) = slot.lock() else { return };
+                st.state = outcome;
+                match st.drain_pending(Instant::now()) {
+                    // Nothing arrived while we ran: this outcome still describes the tree.
+                    None => return,
+                    // A write landed mid-check, so `outcome` above describes a tree that no
+                    // longer exists. It is published anyway and immediately superseded:
+                    // holding `Running` instead would strand the session with no verdict at
+                    // all if this second check is then skipped for a held cargo lock.
+                    Some(e) => e,
+                }
+            };
+            edits = next;
         }
     });
 }
@@ -914,6 +998,207 @@ mod tests {
             delivered: false,
         };
         assert_eq!(take_notice(&mut st), None);
+    }
+
+    // ---- defer / drain_pending ----
+    //
+    // The three below are one law from three directions: a write that could not start a
+    // check must still cause one. Under-firing loses the repair (the bug); over-firing
+    // re-checks forever, which is why the middle test is a MUST-SURVIVE rather than a
+    // second way of saying the first.
+
+    /// The defect, at the one branch that owns it.
+    ///
+    /// `may_start` is false for the whole of a running check, and a break is normally
+    /// repaired inside that window — so this is the repair's own write arriving and being
+    /// refused. Before `drain_pending` existed the refusal was a bare `return`: no record,
+    /// nothing to replay, and the in-flight check then wrote its pre-repair failure down
+    /// afterwards.
+    #[test]
+    fn a_write_refused_by_a_running_check_is_replayed_when_that_check_finishes() {
+        let mut st = SessionBuildState {
+            state: BuildCheckState::Running,
+            last_started: Some(Instant::now()),
+            ..Default::default()
+        };
+        st.note_write(Path::new("/w/broke.rs"));
+
+        // The repair lands while the check is still running.
+        assert!(
+            !st.may_start(Instant::now(), Duration::from_millis(1500)),
+            "precondition: a running check must refuse a start, or this test proves nothing"
+        );
+        st.defer();
+        st.note_write(Path::new("/w/repair.rs"));
+
+        // The check that began BEFORE the repair now reports its stale failure.
+        st.state = BuildCheckState::Done {
+            my_break: Some("  /w/broke.rs:1  boom".to_string()),
+            delivered: false,
+        };
+
+        let replay = st.drain_pending(Instant::now()).expect(
+            "a write refused while a check ran must re-arm one; without this the stale \
+             Done is what take_notice delivers, minutes or hours later",
+        );
+        assert!(
+            replay.contains(&canonical(Path::new("/w/repair.rs"))),
+            "the replay must carry the repairing write: {replay:?}"
+        );
+        assert_eq!(
+            st.state,
+            BuildCheckState::Running,
+            "draining must arm the re-check, not merely report that one is owed"
+        );
+    }
+
+    /// MUST-SURVIVE. Nothing was refused, so nothing may be replayed.
+    ///
+    /// Without this, `drain_pending` returning `Some` unconditionally would satisfy the
+    /// test above and loop the checker forever on a quiet tree — a mutation the
+    /// under-firing test is monotone under, since it only ever asks for `Some`.
+    #[test]
+    fn a_check_that_refused_nothing_replays_nothing() {
+        let mut st = SessionBuildState::default();
+        st.note_write(Path::new("/w/only.rs"));
+        st.state = BuildCheckState::Done {
+            my_break: None,
+            delivered: false,
+        };
+
+        assert_eq!(
+            st.drain_pending(Instant::now()),
+            None,
+            "no write was refused, so re-arming would be an unprompted second check"
+        );
+        assert_eq!(
+            st.state,
+            BuildCheckState::Done {
+                my_break: None,
+                delivered: false
+            },
+            "a drain that finds nothing must leave the completed state alone"
+        );
+    }
+
+    /// Draining twice yields nothing the second time — the trigger is consumed, not peeked.
+    ///
+    /// Same reason `take_notice` takes `&mut`: a drain that left the flag set would re-arm
+    /// a check at the end of every subsequent one.
+    #[test]
+    fn a_deferred_write_is_consumed_by_the_drain_that_replays_it() {
+        let mut st = SessionBuildState::default();
+        st.note_write(Path::new("/w/a.rs"));
+        st.defer();
+
+        assert!(st.drain_pending(Instant::now()).is_some());
+        assert_eq!(
+            st.drain_pending(Instant::now()),
+            None,
+            "the deferred trigger must be consumed by its own replay"
+        );
+    }
+
+    // ---- decide_start: the production path, which is where the defect lived ----
+
+    fn test_env() -> BuildCheckEnv {
+        // Constructed literally, never from the environment — this module's header forbids
+        // `EnvGuard` and that is the reason `decide_start` takes `env` as an argument.
+        BuildCheckEnv {
+            enabled: true,
+            timeout: Duration::from_secs(120),
+            debounce: Duration::from_millis(1500),
+        }
+    }
+
+    /// THE REGRESSION. Mutating `st.defer()` back to a bare `return` reds exactly here.
+    ///
+    /// The three `drain_pending` tests above cover the mechanism and would all stay green
+    /// under that mutation, because none of them reaches the branch that calls it — which
+    /// is the same gap that let the bare `return` ship in the first place.
+    #[test]
+    fn a_write_arriving_during_a_running_check_is_deferred_not_discarded() {
+        let mut st = SessionBuildState {
+            state: BuildCheckState::Running,
+            last_started: Some(Instant::now()),
+            ..Default::default()
+        };
+
+        let started = decide_start(
+            &mut st,
+            Path::new("/w"),
+            Path::new("/w/repair.rs"),
+            &test_env(),
+            Instant::now(),
+        );
+
+        assert_eq!(
+            started, None,
+            "a check is already running, so this write must not start a second one"
+        );
+        assert!(
+            st.pending,
+            "the refused write must be RECORDED. Without this nothing replays it, and the \
+             check now in flight — which began before this write — publishes its stale \
+             verdict afterwards and is never superseded."
+        );
+        assert!(
+            st.edits.contains(&canonical(Path::new("/w/repair.rs"))),
+            "the refused write still belongs to this session's edit set"
+        );
+    }
+
+    /// MUST-SURVIVE. A write that legitimately starts a check defers nothing.
+    ///
+    /// Without this, `defer()` called unconditionally would satisfy the test above and
+    /// make every check re-run exactly once for no reason.
+    #[test]
+    fn a_write_that_starts_a_check_defers_nothing() {
+        let mut st = SessionBuildState::default();
+        // `Idle` with no `last_started`: the first write of a session, never debounced.
+        let env = test_env();
+        assert!(st.may_start(Instant::now(), env.debounce));
+
+        // `decide_start` consults `checkout_is_shared` past this point, which reads the
+        // session registry, so the outcome here depends on the machine. The assertion is
+        // on `pending` alone — true on either branch, and the only thing this test claims.
+        let _ = decide_start(
+            &mut st,
+            Path::new("/w"),
+            Path::new("/w/first.rs"),
+            &env,
+            Instant::now(),
+        );
+
+        assert!(
+            !st.pending,
+            "nothing was refused, so nothing may be queued for replay"
+        );
+    }
+
+    /// A non-Rust write defers nothing either — the cheapest gate must stay first.
+    #[test]
+    fn a_non_rust_write_is_neither_checked_nor_deferred() {
+        let mut st = SessionBuildState {
+            state: BuildCheckState::Running,
+            last_started: Some(Instant::now()),
+            ..Default::default()
+        };
+
+        let started = decide_start(
+            &mut st,
+            Path::new("/w"),
+            Path::new("/w/notes.md"),
+            &test_env(),
+            Instant::now(),
+        );
+
+        assert_eq!(started, None);
+        assert!(
+            !st.pending,
+            "a markdown write cannot break `cargo check`, so deferring one would queue a \
+             re-check that can only ever confirm the previous answer"
+        );
     }
 
     /// A skip is not a clean bill of health, and must not print one. This is the
