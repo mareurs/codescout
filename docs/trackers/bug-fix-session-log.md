@@ -14670,7 +14670,7 @@ other two.**
 | # | what I saw | what it actually was |
 |---|---|---|
 | 1 | `the_hook_enforces_every_rule_it_declares`, 7-vs-6 rule sets | the script really declared 6 at that instant; the +98-line edit was half-landed |
-| 2 | lean lane, `could not compile … due to 15 previous errors` | `a13b31c6` took `check_tool_access` from 2 params to 3; **every** caller broke, and the owner fixed ~16 call sites |
+| 2 | `cargo test --no-default-features` printed `could not compile … due to 15 previous errors` | `a13b31c6` took `check_tool_access` from 2 params to 3; **every** caller broke, and the owner fixed ~16 call sites |
 | 3 | one invocation: lean RED, default GREEN | the port's second half landed between the two lanes |
 
 Every one was **correct at its own instant**, on a tree that was genuinely inconsistent then
@@ -14681,6 +14681,17 @@ you read it and **stays** wrong with no further input — the repairing write wa
 a pre-repair outcome was written down afterwards. A moved corpus produces two correct
 readings that disagree because the tree changed between them. No re-run can make the first
 right; nothing is *wrong* about the second.
+
+**Two correct counts for instance 2, and the disagreement is this entry's own subject.** The
+owner (`6be73414`) measured **14** and asked that it replace my 15, on the ground that theirs
+was taken at the tree. So was mine. They are different instruments at different instants of a
+repair in progress: cargo's own tally in a `--no-default-features` invocation said **15**, while
+the `on_source_write` advisory said *"showing 3 of 14"*. An error count taken DURING a ~16-site
+caller fix is a moving quantity, so both readings are right and neither is *the* number.
+Recorded as a pair with instruments named, rather than reconciled to one figure — this repo
+already requires a count to arrive with its unit, instant and tree, and a count taken mid-repair
+needs all three most. Reconciling to either would have manufactured a false precision and lost
+the only fact that matters: the quantity was in motion.
 
 **Lesson.** **A red that goes away tells you nothing about why.** Repair and staleness emit an
 identical sequence — red, then green, no action by me — and the fact that separates them
@@ -14694,6 +14705,14 @@ both the red and the green. It proves nothing of the sort — it proves the tree
 between two lanes, which is exactly what a two-phase edit looks like. **The instance I argued
 hardest for was the one I had least reason to trust**, because its apparent self-sufficiency
 replaced the question rather than answering it.
+
+**Why the shortcut is attractive rather than lazy** (`6be73414`'s addition, and it is the half
+I could not supply): *"red then green, no action by me"* is a **complete and coherent story**. It
+explains everything observed and leaves no loose end prompting a second look. Meanwhile the cost
+of going to find the owner is **paid before you know whether there is anything to find** — you
+spend the round trip on the live chance that the answer is "yes, transient, nothing here". That
+asymmetry is the mechanism: a sufficient explanation arrives free, and the only thing that can
+falsify it is bought up front at unknown value.
 
 **Cost.** Nearly widened another session's defect population by 3 with instances of a
 different mechanism — the failure mode that file exists to warn about. Caught because the
@@ -14938,16 +14957,38 @@ not the way this entry first said it.** Two of that test's three arms do compare
 the reason: `no_index_row_stores_a_count` and `no_class_field_states_a_bare_n` exist precisely
 to hold those two populations at zero.
 
-**CORRECTED 2026-09-14 — I extended that observation to a member outside its population.**
+**CORRECTED 2026-09-14 — and the first correction got the MECHANISM wrong; this is the second.**
 `cluster_tags` feeds `actual`, the one arm that is **not** empty (24 rows), so this entry's
 original claim — that dropping the inline-`[a, b]` arm from the Python leaves the test green —
 is **false**. Re-derived at `c9561e1b` by diffing a mutated copy's `--json` against the
 unmutated one (cheaper than a cargo run and it isolates the parser): three counts move,
 `doc-contradicted-by-code` 39→38, `selector-narrower-than-its-population` 43→42, `unclassified`
 28→27 — which breaks the equality assertion. The test's own doc comment names that mutation as
-one it must kill, and today it does. This is § *Testing Discipline*'s population-vs-member law
-run backwards: I took an aggregate **vacuity** result and applied it to a member the aggregate
-did not cover. The peer refused to propagate it for exactly this reason and was right to.
+one it must kill, and today it does.
+
+**Where the claim actually came from — supersedes this entry's first correction and `574a7282`'s
+commit message, both of which blamed a scope error I did not make.** I did not extend the
+two-empty-arms result to a non-member, and I did not write *"verified by mutation"* over a gap of
+my own. The claim is **in the repo**, at `tests/issue_clusters.rs:802-808`, as a dated measured
+fact: *"measured 2026-09-01, **zero** bug files carry a `cluster/` tag in flow style (`tags: [a,
+b]`), so deleting the inline arm from the Python leaves the corpus-driven check **green**. Verified
+by mutation, not assumed."* This entry's original wording — *"(verified by mutation, not assumed)"*
+— is that sentence near-verbatim, which is strong evidence of propagation rather than invention,
+though what I read is not something I can prove. It was **true when written** and decayed: the
+first flow-style tag landed 2026-09-03. Filed by a peer as `33efc480b2da9ac3`, which adds the
+half I could not see — the same commit (`3be0088e`) shipped `tests/issue_clusters.rs:1476`
+asserting the **opposite**, so the file has carried both halves of a self-contradiction for
+thirteen days and neither half reds.
+
+**So the law below is not an insight I drew from the failure — it is the mechanism that caused
+it, and I wrote it up as a novel finding while misdiagnosing my own case as something else.**
+That is the part worth keeping. A stale claim is survivable; this one travelled **with its
+verification credential attached** — a date, a method, and the words *not assumed* — and the
+credential is precisely what made re-running feel unnecessary. A bare assertion invites a check;
+a stamped one forecloses it.
+
+**The reason it is false is worth more than the claim was.** The corpus carries **3** files with
+flow-style `cluster/` tags today, so the inline arm is exercised *incidentally* —
 
 **The reason it is false is worth more than the claim was.** The corpus carries **3** files with
 flow-style `cluster/` tags today, so the inline arm is exercised *incidentally* —
