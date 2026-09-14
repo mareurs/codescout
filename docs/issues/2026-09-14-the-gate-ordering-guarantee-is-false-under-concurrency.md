@@ -97,6 +97,40 @@ checkout"* — was adjacency reasoning with a mechanism's shape, offered before 
 compared. It happened to name the right class and the wrong session, and it was falsified by the
 peer volunteering the data rather than accepting the attribution.
 
+Measured 2026-09-14 by sessionId held at registry name `codescout-b7`, by polling the mtime of
+`target/debug/codescout`:
+
+| window | duration | commits | writes to `target/debug/codescout` |
+|---|---|---|---|
+| 12:37:26 – 13:11:46 | 34m | 7 | **3** (12:37:26, 12:46:13, 13:11:46) |
+| 13:11:46 – 15:56:05 | 2h44m | 5 | **0** |
+
+**The rate is bursty, and that is worse for this bug rather than better.** A uniform low rate
+would make a collision unlikely — a background hazard anyone might hit at random. What the data
+shows instead is that writes concentrate exactly when two sessions run lanes at once, which is
+precisely the activity that creates the build→run window. Exposure and hazard share a cause, so
+the collision is likely *conditional* on the activity, and **the denominator is concurrent gate
+runs, not wall-clock minutes.** That reframing is `codescout-b7`'s and is the substantive half of
+this measurement.
+
+Three caveats, stated because the number is softer than it looks:
+
+1. `commits` is a **proxy** for gate runs, not a measure of them. Five commits with zero rebuilds
+   most likely means those sessions ran no full gate — or ran one before 13:11:46, and mtime
+   cannot distinguish the two.
+2. mtime shows only the **last** write, so "zero since 13:11:46" is solid (mtime is monotonic)
+   and nothing earlier is reconstructable from it.
+3. The monitor watching this died with a reboot and took its log with it. **The mtime outlived
+   the instrument** and answered a longer question than the instrument was built to ask — the
+   inverse of this corpus's usual failure, where the instrument survives and the thing it
+   measured has moved.
+
+Partial closure on caveat 1, from this session's own lane timestamps: gates ran 12:35:20–12:37:26,
+12:38:18–12:40:00, ~13:0x, plus two later full gates — one of them in an isolated worktree with its
+own `CARGO_TARGET_DIR`, which by construction wrote nothing to the shared binary. So at least two
+of the first window's three writes are plausibly this session's, and the three writes are **not**
+three distinct sessions.
+
 ## Hypotheses tried
 
 - *"The lean lane left it and the default lane had not rebuilt yet."* Falsified by the clock: this

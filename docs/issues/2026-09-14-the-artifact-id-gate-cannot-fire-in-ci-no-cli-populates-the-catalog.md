@@ -52,19 +52,27 @@ python3 -c "import sqlite3;print(sqlite3.connect('$tmp/data/librarian/catalog.db
 
 ## Root cause
 
-**There is no CLI path that writes the `artifact` table.** Measured 2026-09-14 against the release
-binary:
+**There is no CLI path that writes the `artifact` table**, and more importantly there is no
+path that would write the *right* ids. Measured 2026-09-14 against the release binary:
 
 | tried | result |
 |---|---|
 | seed a real `[[roots]]` entry instead of an empty workspace | 0 artifacts — the audit does not reindex |
 | `codescout index` | 0 artifacts — populates the **semantic** index (`added=5348`), not the catalog |
 | `codescout doc find/get/create/…` | no reindex verb |
-| `audit-doc-refs --help` | no reindex knob |
+| a purpose-built `--reindex` flag | 1683 artifacts — **and 50+ false positives at a foreign path** |
 
-`librarian(action="reindex")` is an **MCP tool only**. A CI job that runs the binary as a CLI cannot
-reach it.
+`librarian(action="reindex")` is an **MCP tool only**. That was the first reading of this
+bug and it was the shallow one: the missing CLI verb is real and fixing it changes nothing,
+because the blocking property is that ids are keyed on an absolute path rather than on
+anything a second checkout shares.
 
+Two further facts found while measuring, each of which defeated an experiment before the
+clone finally answered it: `reindex` refuses a root under a temp path
+(`reindex_refuses_temp_root_into_real_catalog`), and it **skips linked git worktrees**
+outright — *"skipping index of linked git worktree … index its main worktree instead"*. So
+neither a temp dir nor a worktree can stand in for a foreign checkout; only a real clone at
+a real path can.
 ## Evidence
 
 The empty-catalog case was named in the code's own comment at
@@ -81,18 +89,28 @@ instrument used to certify the tightening was structurally incapable of expressi
 
 ## Fix
 
-Not done. The disabling half shipped at `ae6dc663`; the wiring half needs a decision:
+Not done, and **direction 1 below has been falsified by measurement — do not build it.**
 
-1. **Expose reindex on the CLI** (`codescout librarian reindex`, or `audit-doc-refs --reindex`), then
-   add a step to the `Audit Doc Refs` job. Restores the gate's meaning. Costs a new subcommand plus
-   the CI minutes to index ~1680 artifacts.
-2. **Leave it vacuous in CI and gate locally** via the pre-commit hook, where the catalog is real.
-   Cheap, and moves a CI-time guard to commit time — the direction
-   `docs/trackers/test-escape-hardening.md` argues for generally.
-3. **Drop the CI step** and keep the check as an MCP-time report. Honest, and abandons the gate.
+1. ~~**Expose reindex on the CLI**, then add a step to the `Audit Doc Refs` job.~~ **BUILT,
+   MEASURED, REVERTED 2026-09-14.** `--reindex` does populate the catalog (1683 artifacts
+   from an empty workspace). It does not help, because `id = sha256(ABSOLUTE path)`: a CI
+   runner's checkout sits at a different root, so every id it mints differs from every id
+   the docs cite. Cloning this repo to a second path and auditing there gives **50 high
+   findings — the display cap, all `artifact_id`** — against 9 at the authors' own path.
+   Seeding CI's catalog moves the job from vacuous-green to capped-red and buys no true
+   positive. Full reasoning: `docs/adrs/2026-09-14-an-id-keyed-on-an-absolute-path-cannot-be-checked-off-the-machine.md`.
 
-Until one lands, **do not read a green `Audit Doc Refs` as evidence about artifact-id citations.**
+2. **Gate at commit time on a developer machine**, where the catalog is machine-wide and
+   the ids resolve — including the cross-repo ones, which no CI placement can. This is now
+   the only viable direction and **remains unbuilt**; it is what this bug tracks.
 
+3. ~~Drop the CI step and keep the check as an MCP-time report.~~ Effectively what ships
+   today: `live_ids_or_disabled` (`ae6dc663`) disables the check where the catalog is
+   empty, so the CI step runs and correctly claims nothing.
+
+Until (2) lands, **do not read a green `Audit Doc Refs` as evidence about artifact-id
+citations** — and note this is now a *decision* rather than an accident, so the silence is
+correct and the missing coverage is real at the same time.
 ## Tests added
 
 `an_empty_artifact_table_disables_the_id_check_rather_than_dooming_every_citation`

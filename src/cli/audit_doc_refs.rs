@@ -49,6 +49,26 @@ pub struct AuditArgs {
     #[arg(long = "tracker-id")]
     pub tracker_id: Option<String>,
 
+    // THERE IS DELIBERATELY NO `--reindex`, AND ADDING ONE IS THE TRAP THIS NOTE EXISTS
+    // TO CLOSE. It was built, measured, and removed on 2026-09-14.
+    //
+    // The reasoning looks airtight until you run it: the `ArtifactId` check resolves cited
+    // 16-hex ids against the librarian catalog, CI's catalog is empty, so seed it first.
+    // What that misses is that `id = sha256(ABSOLUTE path)`. A citation written on a
+    // developer machine names an id that exists only where the checkout sits at the SAME
+    // absolute path, and a CI runner never does —
+    // `/home/runner/work/codescout/codescout/docs/TAXONOMY.md` hashes to a different id
+    // than the same file under any author's home.
+    //
+    // Measured, by cloning this repo to a second path and auditing it there:
+    //   same path as the citing authors:  1683 artifacts indexed ->   9 high findings
+    //   a clone at a DIFFERENT path:      1682 artifacts indexed -> 50+ (the display cap)
+    // and all 9 of the first set were cross-repo ids — live on the machine, absent from
+    // any single-repo catalog. So reindexing in CI moves the job from vacuous-green to
+    // capped-red, and there are no true positives on either side of that trade.
+    //
+    // The guard belongs where the ids were minted. See
+    // `docs/adrs/2026-09-14-an-id-keyed-on-an-absolute-path-cannot-be-checked-off-the-machine.md`.
     #[command(flatten)]
     pub common: CommonOpts,
 }
