@@ -139,6 +139,61 @@ settles it the other way. Recorded because the weaker reading is the one that so
 rigorous, and accepting it would have sent the investigation somewhere there was nothing to
 find.
 
+## Probe 2026-09-14 — restart-spanning FALSIFIED, and the defect localized to the summarizer
+
+Run with a human at the keyboard, against the pass condition pre-registered in § *Resume*
+**before** the probe — so the reading below is not a goalpost that moved. A throwaway crate
+outside the checkout, `build.rs` sleeping 90 s, a lib with a deliberate `E0308`; `cargo build`
+backgrounded with the status captured **in band** (`> log 2>&1; echo "EXIT=$?"`); the operator
+typed `/mcp` inside the sleep window.
+
+**Result: outcome 2 — the clean, honest failure. This bug did NOT reproduce.**
+
+```
+background job ref not found: @bg_00000006
+hint: Buffer refs expire when the session resets. Re-run the original command to get a fresh handle.
+```
+
+No status was synthesized. The error is explicit, names the cause, and gives a remedy. Ground
+truth from the in-band log was `EXIT=101`, so a real failure existed to be misreported and was
+not — the tool declined to answer rather than answering wrongly. **Six non-reproductions now**
+(three here, two by `9403d62d`, and this one aimed directly at the sharpest surviving
+hypothesis), and *a process in flight across a restart* is eliminated as the trigger.
+
+**Two predictions died, and the second is the useful one.**
+
+*The process survives the restart.* `9403d62d`'s reasoning was that the old server dies with the
+run, so the new one may never have held a record of it. Measured otherwise: pids `832995` (sh),
+`832996` (cargo) and `833791` (build-script-build) were all still alive **after** the reconnect,
+and the build ran to completion and wrote its own exit status. The job is orphaned and
+reparented, not killed. So the handle's death is **bookkeeping in the server**, not the process
+going away — which is why the honest error is both correct and cheap.
+
+*The backgrounding path was never the defect.* This is the localization, and it rests on
+evidence quoted into the transcript before the buffers expired. The overflow buffer
+`@tool_9ffd17c9` — the **buffered response object** of the clippy call — contained:
+
+```
+  "output_id": "@bg_00000001",
+  "hint": "Process running. Output captured in @bg_00000001 — use run_command(\"tail -50 @bg_00000001\") …",
+```
+
+That is the **correct** shape — the same one all six non-reproductions returned. The response
+`run_command` produced was right. The `✓ exit 0` lived in the **`summary` rendered for that
+buffered response**, not in the response itself.
+
+So the defect sits in the **progressive-disclosure summarizer**, on the path where a
+`run_command`-shaped payload is too large to inline and gets summarized: it emits a status glyph
+and `exit 0` for a payload containing no exit status at all. That is `9403d62d`'s structural
+inference (*"synthesized by whichever branch emits `summary` instead of `hint`"*) confirmed and
+narrowed to a named branch. It also explains every non-reproduction at once: none of the six
+produced a response large enough to overflow, so none of them ever reached the summarizer.
+
+**Caveat on the evidence, stated because it cannot be re-read.** Both `@bg_00000006` and
+`@tool_9ffd17c9` are now expired — confirmed by trying, each returning the same explicit
+`Buffer refs expire when the session resets`. The quotation above was transcribed from a live
+read earlier in the session. That is one level below a re-derivable artifact, and is exactly why
+the handle-durability note below exists.
 ## Hypotheses tried
 
 1. **Hypothesis:** the buffer was overwritten and I am quoting a later run.
@@ -200,6 +255,28 @@ bug.
 
 ## Resume
 
+**THE PROBE HAS RUN — see § *Probe 2026-09-14*.** Outcome 2, the honest failure. *In flight
+across a restart* is eliminated, and the defect is localized to the progressive-disclosure
+**summarizer** rather than to `run_command`'s backgrounding path. Everything below this
+paragraph is retained as the state of the inquiry *before* that probe, because the
+pre-registered pass condition is what makes its result readable.
+
+**What is worth doing now, in order:**
+
+1. **Read the summarizer's status-rendering branch.** The claim to check at the bytes: given a
+   `run_command`-shaped payload with no exit-status field, what makes it emit `✓ exit 0` rather
+   than decline? A default-on-absent is the obvious shape and would be a one-line fix — confirm
+   it before assuming it.
+2. **Reproduce through the summarizer, not through backgrounding.** The trigger is a response
+   that **overflows the inline budget** (~10 KB — `get_guide("progressive-disclosure")`). All six
+   non-reproductions stayed inline. Aim at a backgrounded command emitting >10 KB into the
+   response itself; note the `seq 1 80000` variant did **not** achieve this, because its `stdout`
+   was capped before the response was built — so output volume alone is not the lever.
+3. **Then write the regression test**, impossible while the trigger was unknown and now
+   straightforward: a summarizer given a payload with no exit status must not assert one.
+
+---
+
 Find the discriminating variable. Per § *Root cause* the search is now scoped to **the branch
 that emits `summary` instead of `hint`** for a backgrounded command — that is where a status is
 synthesized, and no other path has one to get wrong.
@@ -212,7 +289,9 @@ call this session"*, plus a `no project has been explicitly activated` workspace
 looked like the trigger. It is not sufficient: the **fast fail** repro carried the *same* two
 markers and returned the correct `Process running` shape.
 
-*Sharpened — a process that SPANS a restart.* The distinction the above leaves standing is that
+*Sharpened — a process that SPANS a restart.* **— FALSIFIED 2026-09-14 by the probe above;
+retained because the pre-registration is what makes that result a measurement.** The distinction
+the above leaves standing is that
 the fast-fail repro was *launched after* the restart, whereas the clippy run was in flight
 across one. A server that comes back unable to reap a process it no longer tracks is exactly the
 situation in which a default status would get synthesized. **Untested**, and it is the cheapest
