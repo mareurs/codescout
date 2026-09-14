@@ -1,13 +1,14 @@
 ---
+kind: bug
 status: open
-opened: 2026-09-14
-closed:
-severity: medium
-owner: marius
-related: []
 tags:
 - cluster/gate-keyed-on-unobservable-event
-kind: bug
+closed: null
+opened: 2026-09-14
+owner: marius
+related: []
+severity: medium
+unverified: 'PARTIAL FIX LANDED 2026-09-14 at b21ad3b4 (patch-id cad267e7e761b85c94ae66c764e64b3ff044cfe8) — Fix direction 2 only, the remedy text. The refusal now names a restart instead of an edit that cannot work in-process. Direction 1, observing the file so the cache cannot go stale, is NOT implemented, so the SILENT direction is untouched: a project resident with file_write_enabled = true, flipped to false on disk, still accepts writes with no error. Record stays open for that half. Deliberately not archived.'
 ---
 
 # BUG: an out-of-band `project.toml` edit never invalidates the cached config, and the write refusal's own remedy is that edit
@@ -134,12 +135,35 @@ Not implemented. Two candidate directions, not adjudicated:
 The second is strictly cheaper and addresses the half that misleads a human. It does **not**
 address the silent direction, where nothing is printed to fix.
 
+**Direction 2 IMPLEMENTED 2026-09-14 (`b21ad3b4`). Direction 1 is NOT, and this record stays
+open for it.** The `ConfiguredOff` refusal at `src/util/path_security.rs` no longer ends in
+*"change the config"* — it now states that the config is cached for the life of the process,
+that editing the file and retrying will not work either, and names the restart that does.
+
+What that does **not** buy, stated plainly so nobody reads the commit as a close: the cache is
+unchanged, so the **silent direction is exactly as broken as before**. A project resident with
+`file_write_enabled = true`, flipped to `false` on disk, still accepts writes and prints
+nothing. No message exists on that path to correct, which is why the cheap repair cannot reach
+it — and it is the direction an operator would care about more, since it fails toward
+permitting writes rather than refusing them. § *Resume*'s question is unchanged.
+
 ## Tests added
 
-None yet — the bug is filed, not fixed. A regression test must drive the **out-of-band** edit
-(write the file with `std::fs`, not through `edit_file`), or it re-triggers the reload it is
-meant to prove absent and passes vacuously.
+**For the loud half, added 2026-09-14** — two assertions on the existing
+`configured_off_refusal_rejects_the_reactivation_remedy`
+(`src/util/path_security.rs`): one that the message does **not** contain `— change the config.`,
+one that it **does** name `/mcp`. Both were mutation-verified in an isolated worktree via
+`scripts/mutation-probe.sh`, because an assertion's existence is not coverage — reverting the
+message to its old wording kills the first (panic at `:2609`), and removing `/mcp` while leaving
+the rest intact kills the second independently (panic at `:2617`). Gate green on both lanes,
+9778 passed / 0 failed; the test is present in the lean lane as well as the default one, so it
+is not vacuous under `--no-default-features`.
 
+**For the silent half — still none, and this is the part that matters.** A regression test there
+must drive the **out-of-band** edit (write `project.toml` with `std::fs`, not through
+`edit_file`), or it re-triggers the very reload it is meant to prove absent and passes
+vacuously. That test cannot be written against today's code, because there is no seam that
+re-reads; it belongs with whatever Direction 1 ships.
 ## Workarounds
 
 Pass `workspace=` per call to a project whose cached config already says what you want, or
@@ -160,3 +184,12 @@ field carries a security decision, since the same staleness would reach those to
 - `src/util/path_security.rs:692` — the `ConfiguredOff` message whose remedy is the broken one
 - `docs/issues/archive/2026-09-14-read-only-blocks-five-tool-names-not-the-writes-it-promises.md`
   — the sibling defect in the same gate; its fix is what made this one reachable by `memory`
+
+## Fix provenance
+
+**Partial — the loud direction only. This bug is NOT closed by it.**
+
+- **SHA:** `b21ad3b4` (experiments) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `cad267e7e761b85c94ae66c764e64b3ff044cfe8` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id.
