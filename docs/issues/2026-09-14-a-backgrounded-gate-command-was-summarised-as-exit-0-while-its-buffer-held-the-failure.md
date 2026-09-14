@@ -67,6 +67,13 @@ with **no exit claim at all**, which is the documented and correct shape:
 | slow fail | `echo starting; sleep 3; echo failing >&2; exit 7` | `Process running`, no exit claim |
 | fast fail | `echo out; echo err >&2; exit 7` | `Process running`, no exit claim |
 | large output + fail | `seq 1 80000; echo boom >&2; exit 7` | `Process running`, no exit claim |
+| cargo, cold compile, type error | `cargo build` in a throwaway crate | `Process running`, errors inline in `stdout`, no exit claim |
+| cargo, cached, fails instantly | same crate, second run | `Process running`, errors inline in `stdout`, no exit claim |
+
+The last two are sessionId `9403d62d`'s, run at this file's request against the probe
+§ *Resume* originally named — deliberately through codescout's `run_command` rather than the
+native `Bash` backgrounding they normally use, so the two of us were exercising the same path.
+**Five non-reproductions across two sessions and two backgrounding habits.**
 
 The third was chosen to test the one variable visibly different about the clippy call — its
 response was an **overflow envelope** (`output_id` + `summary` + `buffered_bytes`, 363 KB)
@@ -90,6 +97,25 @@ correctly — and a foreground `cargo test` chain in the same session correctly 
 the inquiry — the failure mode this corpus already pays for. What is measured is the outcome:
 a summary field asserted success while the buffer it pointed at held a compile failure.
 
+**But the five non-reproductions establish something the observation alone could not, and it
+narrows the search rather than merely failing to.** Raised by sessionId `9403d62d` and verified
+here independently against this session's own three variants: **the correct response shape
+carries no exit-status field at all.** Not a wrong one — absent. It is `output_id`, `hint`,
+`stdout`, and nothing else.
+
+So `✓ exit 0` **cannot be a misread exit code, because there is no exit code in that response to
+misread.** It has to be *synthesized* by whichever branch emits `summary` instead of `hint`. That
+changes the shape of the defect from *"a status was read wrong"* to **"a completion-shaped
+response fabricates a default status"**, and it points the search at the summary-emitting path
+rather than at process reaping — two places that would have cost very different amounts to
+search.
+
+**The corollary is the part with teeth, and it is true of the CORRECT path too:** a backgrounded
+command's exit status is simply **not available** through this tool, even when everything works.
+The honest shape declines to assert one; the defect asserts a false one. Anything gating on a
+backgrounded command's success must therefore capture the status **in band** — see
+§ *Workarounds*. This is not a mitigation for the bug, it is the standing contract the bug
+violates.
 ## Evidence
 
 The bracket is worth more than the headline, because it is a **positive** identification rather
@@ -156,19 +182,61 @@ costs you the attribution channel (measured, documented), and — once — also 
 that was not one. Do not conflate them; the first is established and the second is one
 observation.
 
+**If you must background something you intend to gate on, capture the status IN BAND.** Per
+§ *Root cause*, no backgrounded response carries an exit status even when the tool is behaving,
+so reading one out of a summary is unsound whether or not this bug fires. Write it from inside
+the same shell and read it back:
+
+```
+cargo test --workspace > run.log 2>&1; echo "EXIT=$?" >> run.log
+```
+
+Then `grep EXIT= run.log`. Credit to sessionId `9403d62d`, whose gate results survived this
+entire incident for exactly this reason — and note their own framing, that it was **not**
+foresight about this bug: they had adopted it for the unrelated `;`-ends-in-`echo` trap
+(`CLAUDE.md` § *Reaching a Peer Session*), and it happened to be immune to this one too. A habit
+that survives a failure mode its author had not imagined is worth more than one aimed at a known
+bug.
+
 ## Resume
 
-Find the discriminating variable. Candidates not yet separated: `cargo`-classified commands
-(`"type": "build"`) versus plain shell; a trailing `2>&1`; a process whose exit races the
-response render; proximity to an MCP server restart. The cheapest next probe is a backgrounded
-`cargo` command that fails to compile, in a throwaway crate, with and without `2>&1`.
+Find the discriminating variable. Per § *Root cause* the search is now scoped to **the branch
+that emits `summary` instead of `hint`** for a backgrounded command — that is where a status is
+synthesized, and no other path has one to get wrong.
 
-**Note on the evidence's durability:** `@bg_*` handles are **recycled**. The three repro
-variants above were issued in this same session and the second of them was assigned
-`@bg_00000001` — the very handle that held the clippy evidence. The buffer quoted in
-§ *Symptom* was read and transcribed **before** that happened, but it no longer exists to
-re-read. Anyone re-deriving this must capture the buffer to a file, not to a handle.
+**One candidate is sharpened and one is falsified, both from this session's own transcript.**
 
+*Falsified — restart PROXIMITY alone.* The response carrying `✓ exit 0` also carried the
+signature of an MCP server restart (a `project-activation-bootstrap` guide hint reading *"first
+call this session"*, plus a `no project has been explicitly activated` workspace notice). That
+looked like the trigger. It is not sufficient: the **fast fail** repro carried the *same* two
+markers and returned the correct `Process running` shape.
+
+*Sharpened — a process that SPANS a restart.* The distinction the above leaves standing is that
+the fast-fail repro was *launched after* the restart, whereas the clippy run was in flight
+across one. A server that comes back unable to reap a process it no longer tracks is exactly the
+situation in which a default status would get synthesized. **Untested**, and it is the cheapest
+remaining probe: background a long `cargo` build that will fail, restart the MCP server while it
+runs, and read what comes back.
+
+Still unseparated, lower-ranked: `cargo`-classified commands (`"type": "build"`) versus plain
+shell, and a trailing `2>&1`.
+
+**Note on the evidence's durability — `@bg_*` handles do not survive an MCP server restart.**
+The original claim here was that handles are "recycled", which was right about the consequence
+and vague about when. Refined by sessionId `9403d62d`, whose handles ran `@bg_00000001` →
+`@bg_00000002` monotonically within one uninterrupted session, against this session's
+`@bg_00000009` → `@bg_00000001` — and that reset falls exactly on a restart, identified by the
+same two markers listed above. **The counter appears to reset on server restart rather than
+handles being reused arbitrarily.** Treat as an inference from four observations across two
+sessions, not as a read of the source; neither of us has checked the counter's lifetime in the
+code.
+
+The practical rule is unchanged but now has a *when*: a captured handle goes stale **across a
+restart**, which is precisely when you are least likely to notice, because the restart is not
+announced in the response you are about to read. Capture buffers to a file, not to a handle.
+The buffer quoted in § *Symptom* was transcribed before its handle was reissued; it no longer
+exists to re-read.
 ## References
 
 - `docs/issues/archive/2026-09-14-the-fmt-refusal-names-an-owner-who-holds-none-of-the-bytes.md` —
