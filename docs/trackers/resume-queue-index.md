@@ -41,7 +41,7 @@ overstate every row. Treat it as "how much is in there", never "how much is left
 
 | tracker | prefix | entries | holds | verified |
 |---|---|---|---|---|
-| `docs/trackers/resume-artifact-chunk-grain-retrieval.md` | `AC` | 3 | (a)-vs-stale-vector decomposition; `7695ad877b44e96a` reconciliation; AE-11/AE-12 suite repair | ✅ authored here |
+| `docs/trackers/resume-artifact-chunk-grain-retrieval.md` | `AC` | 3 | (a)-vs-stale-vector decomposition; `c77fb370f61fc309` reconciliation; AE-11/AE-12 suite repair | ✅ authored here |
 | `docs/trackers/resume-cross-machine-catalog-restore.md` | `CM` | 10 | what a cross-machine resume restores, decides against, permanently loses | ✅ read |
 | `docs/trackers/resume-get-guide-section-grain-phases-2-3.md` | `GG` | 10 | `get_guide` section grain, phases 2 and 3 | ✅ read |
 | `docs/trackers/resume-statement-validity-layers-3-5.md` | `SV` | 6 | statement validity, layers 3c/5b | ✅ read |

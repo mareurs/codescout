@@ -37,7 +37,7 @@ topic: embedding-backend-selection
 - **`#[async_trait::async_trait]`** on every trait and impl used as `dyn` — native `async fn` in traits is not dyn-compatible.
 - **Do NOT write env-mutating tests.** ~~Env-mutating tests use `EnvGuard` + `#[serial]`.~~
   **Corrected 2026-08-11 during Task 6:** that pattern is banned crate-wide by
-  `docs/conventions/test-env-isolation.md` (post-`a656f8cec220d347`). An earlier draft of this
+  `docs/conventions/test-env-isolation.md` (post-`d4ab34c71d668020`). An earlier draft of this
   plan mandated it in three places. Test precedence and parsing as **pure functions** taking
   their inputs as arguments — e.g. `merge_env_over_project(env, project)` and
   `parse_model_dim(raw)` — so no test touches process env at all. This is not pedantry: the

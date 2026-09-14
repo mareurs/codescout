@@ -43,7 +43,7 @@ A. **Accept env values as explicit arguments — this is the rule.** The
    that shape.
 
 B. ~~Return an `EnvGuard` (RAII) plus `#[serial_test::serial]`.~~
-   **NOT VIABLE.** `a656f8cec220d347` established this empirically and
+   **NOT VIABLE.** `d4ab34c71d668020` established this empirically and
    fixed the class project-wide. `#[serial]` coordinates only among
    *annotated* tests: it takes a lock that non-annotated tests never ask
    for, so any untagged test elsewhere in the suite that reads or writes
@@ -79,7 +79,7 @@ they can run in parallel, which the B pattern explicitly could not.
 
 **The two `EnvGuard` exemplars this section used to list are gone.** They
 lived in `src/librarian/mod.rs::tests` and `src/server.rs::guide_hint_tests`;
-`a656f8cec220d347` removed them along with the rest of the class. If you
+`d4ab34c71d668020` removed them along with the rest of the class. If you
 arrived here from an older link expecting to copy one, that is the bug this
 rewrite closes.
 
@@ -114,7 +114,7 @@ recreates the bug — see option B.
 
 ## Known gaps (open)
 
-**Closed 2026-07-27 by `a656f8cec220d347`.** The deferred option 2 —
+**Closed 2026-07-27 by `d4ab34c71d668020`.** The deferred option 2 —
 "move resolution off process-global env and onto explicit arguments" —
 shipped, and it is now the rule above rather than a proposal.
 

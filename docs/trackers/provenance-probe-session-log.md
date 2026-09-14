@@ -1156,7 +1156,7 @@ than a plausible one. That entry cites this one by commit (`6c31ef0f`, *"an mtim
 nothing"*) as the shortcut it declined to take.
 
 **Confirmed here the same day, unplanned.** Closing the `symbols` header bug
-(`0649a087dabaee59`, fixed by a peer in `8898aa7b`) I re-ran the exact query that had filed it:
+(`7ec9bf3ea062c87c`, fixed by a peer in `8898aa7b`) I re-ran the exact query that had filed it:
 `symbols(name="scan", path="src/librarian/", kind="function", limit=5)` returned `57 matches in
 4 files` before and `57 matches in 11 files` after. The old build **cannot** print `11` on a
 five-row page — that number is the defect's absence — so the fix check identified the running

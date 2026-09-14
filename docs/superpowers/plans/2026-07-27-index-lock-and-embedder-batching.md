@@ -585,7 +585,7 @@ with an explicit pathspec.
 > means test and production builds execute **different function bodies**, so no test exercises
 > the production env read: mutate the variable name in the `cfg(not(test))` arm and every test
 > still passes while the documented operator escape hatch silently does nothing. Injection keeps
-> one code path, and it matches the remedy bug `a656f8cec220d347` applied project-wide — that fix
+> one code path, and it matches the remedy bug `d4ab34c71d668020` applied project-wide — that fix
 > drove `set_var`/`remove_var` in the default test build from 119 to 0, and its postmortem
 > explicitly records that `#[serial]` is NOT a viable alternative.
 >

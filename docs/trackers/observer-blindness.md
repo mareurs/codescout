@@ -2687,7 +2687,7 @@ can represent.
   test references, so the notice could never have reached a response and no mutation row would have
   said so. Closed by `6e178e5c`, whose two wiring mutations each kill exactly one test.
 - **A probe floor counted per key rather than per action-key pair** (`b80a27d4`,
-  `4bfec00edf979204`). `librarian`'s `scope` declares four actions in one label and is probed for
+  `190955a99d482631`). `librarian`'s `scope` declares four actions in one label and is probed for
   one; `checked` increments per key, so a four-action key counts as 1 and the floor stays satisfied
   at any coverage. 7 declared pairs, 2 probed.
 

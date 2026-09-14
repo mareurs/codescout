@@ -136,15 +136,15 @@ and note F-23: that rule is a **push**-event rule. A `pull_request` run tests
 
 Three were filed today from the PR #10 review and are the newest:
 
-- `feb6a21337316dfb` — the dangerous-command gate tokenizes with `split_whitespace` while
+- `db805a4a7f9bbacb` — the dangerous-command gate tokenizes with `split_whitespace` while
   commands execute under a POSIX shell; `posix_tokenize` was written for this and has **zero
   production callers**.
-- `14f61fb867874a5b` — **the sharpest one.** `is_buffer_only` only recognises `/`-bearing
+- `356b30b9214842b7` — **the sharpest one.** `is_buffer_only` only recognises `/`-bearing
   words, so `cat @cmd_x && rm -rf ~` classifies as buffer-only and skips the dangerous-command
   gate *and* the source-file block entirely. Verified at the bytes
   (`output_buffer.rs:618`, `inner.rs:288`). Pre-existing on Unix; PR #10 makes it live on
   Windows by replacing `cmd.exe`, where `~` was literal.
-- `f95e6841030e4e9c` — doctor's outside-roots sample is an unranked prefix and the 281 elided
+- `148cf04fedaf5f80` — doctor's outside-roots sample is an unranked prefix and the 281 elided
   rows are unreachable by any parameter (`limit=100` accepted, silently ignored, byte-identical
   result).
 
@@ -1302,7 +1302,7 @@ with no path — the pointer existed and was simply not where a reader or a quer
 
 **Expected:** the uncommitted change was fresh work whose only gap was a missing test, and completing it was mine to do.
 
-**Got (scouted, far too late):** `docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md` (`a8c0361cec54e6e2`, `status: open`, `severity: high`) already specified this exact change as **Fix candidate 1** — verbatim *"Introduce `AST_CHUNK_MIN` (~200-300 chars) and coalesce consecutive inner declarations below it into one chunk, keeping the container header."* I implemented 250. The same file carried two constraints I violated:
+**Got (scouted, far too late):** `docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md` (`c157bac9ef052351`, `status: open`, `severity: high`) already specified this exact change as **Fix candidate 1** — verbatim *"Introduce `AST_CHUNK_MIN` (~200-300 chars) and coalesce consecutive inner declarations below it into one chunk, keeping the container header."* I implemented 250. The same file carried two constraints I violated:
 
 1. *"Any of these should be validated against the retrieval benchmark (`docs/research/2026-05-06-retrieval-stack-benchmark.md`) before landing — smaller chunks were chosen deliberately for precision, so a floor trades recall sharpness for cost and **must be measured, not assumed**."* No benchmark was run.
 2. An explicit sequencing decision in its Resume: *"the throughput work lands first because it leaves vectors byte-identical and needs no score re-validation, whereas this change does."* That ordering was jumped.
@@ -1311,7 +1311,7 @@ Second consequence, same root cause: I filed `docs/issues/archive/2026-08-06-aud
 
 **Probable cause:** the `project-activation-bootstrap` guide was **auto-injected into the first tool response of the session** and states, verbatim: *"Bug or regression work: `artifact(action=\"find\", kind=\"bug\", status=\"open\")` — the known-bug ledger. Don't re-file a filed bug as new; mark a rediscovery KNOWN and cite the ledger path."* The guidance was present, positioned at Phase 0, and still missed. The reason is the trigger shape: the rule fires on **task category** ("bug or regression work"), and I had classified the session as *documentation + merge prep*. A category-triggered rule cannot fire for someone who has categorised their task differently — and "am I doing bug work?" is exactly the question a merge-prep framing answers "no" to, right up until it edits a file that has an open bug against it.
 
-**Workaround:** `a8c0361cec54e6e2` updated in place rather than archived — records that candidate 1 is implemented at `ca442498` with a green 5-config gate, that the benchmark precondition is **unmet**, that the sequencing was jumped, and the explicit criteria to close. The two `audit_doc_refs` bugs now cite each other, mine noting the earlier filing has priority and carrying the `graft` command to fold them.
+**Workaround:** `c157bac9ef052351` updated in place rather than archived — records that candidate 1 is implemented at `ca442498` with a green 5-config gate, that the benchmark precondition is **unmet**, that the sequencing was jumped, and the explicit criteria to close. The two `audit_doc_refs` bugs now cite each other, mine noting the earlier filing has priority and carrying the `graft` command to fold them.
 
 **Severity:** high — a corpus-invalidating change (chunk ids are content-addressed, so every boundary change re-embeds everything) landed out of its planned sequence with no evidence that recall held. Cherry-picking `ca442498` to `master` would force a full re-index on every consumer while the question its own bug file raises stays unanswered. The duplicate ledger entry is the minor half.
 
@@ -2813,7 +2813,7 @@ Both failed on first run, and neither was a test bug:
 ## F-28 — Three bug files in a row, three wrong Root causes; each was fixed only after reading the function
 
 **Observed:** 2026-08-08, round 22. Working the tool-surface cluster
-(`63279f39570cd44a`, `9f823aabb84378a0`, `14e944e4bc0821cc`) back to back.
+(`27c69239416f3667`, `dce1189f5b382c92`, `14e944e4bc0821cc`) back to back.
 
 **Expected (each bug file):** the Root cause section names the mechanism, so the fix is
 implementation work.

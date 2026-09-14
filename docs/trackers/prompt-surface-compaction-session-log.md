@@ -39,7 +39,7 @@ entry_prefix:
 > **What is open elsewhere** (each carries its own `## Resume`, so nothing is owed here):
 > the rendezvous latch bug `54a70b49f6f26681`, which this session's `4800c297` **widened**
 > by voiding its `/mcp` workaround; `run_command` rewriting pipes inside heredocs
-> (`d5cb0c41335b2610`); `grep`'s silent zero on an absolute glob (`8036fbf1666e1603`).
+> (`0de2778e6adac220`); `grep`'s silent zero on an absolute glob (`a23bdded8539b234`).
 > `librarian(action="doctor")` now reports 8 `terminal_status_with_caveat` findings — that
 > list is the fastest way back into this work.
 >
@@ -57,7 +57,7 @@ entry_prefix:
 > pipe-rewrite is **fixed and archived** — new id `0de2778e6adac220`, fix `4ea33d15`,
 > patch-id `50691255eccd`. The `d5cb0c41335b2610` above was re-keyed by that move and no
 > longer resolves. Still open: the rendezvous latch bug and `grep`'s silent zero on an
-> absolute glob (`8036fbf1666e1603`).
+> absolute glob (`a23bdded8539b234`).
 > **Update 2 (2026-08-19, later) — supersedes the update above.** Of the three bugs the
 > header names, **two are now fixed and archived**: the heredoc pipe-rewrite
 > (`0de2778e6adac220`, fix `4ea33d15`) and `grep`'s absolute-glob silent zero

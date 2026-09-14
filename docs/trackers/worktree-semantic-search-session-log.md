@@ -13,7 +13,7 @@ tags: [worktree, retrieval, semantic-search, sdd, session-log]
 > (`claude-plugins`, **unpushed**).
 >
 > Originating bug: `docs/issues/2026-08-13-enter-worktree-desyncs-codescout-and-strands-semantic-search.md`
-> (`77414bb91dc734d9`, still `investigating` — half 2 fixed, halves 1 and 3 open).
+> (`ccc1b1e49f0eeb4b`, still `investigating` — half 2 fixed, halves 1 and 3 open).
 > Full per-task detail, every finding and every ruling, lives in the run ledger at
 > `.superpowers/sdd/2026-08-13-worktree-semantic-search/progress.md` (gitignored,
 > kept deliberately).

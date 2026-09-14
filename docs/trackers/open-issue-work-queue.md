@@ -47,13 +47,13 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-2 | 1 | grep: stop printing a self-refuting "Showing N of N" when collection hit the cap | done-archived | `8e665c2d041ebb04` |
 | BL-3 | 1 | Tool schemas: stop advertising conditionally-required params as optional | done-archived | `02d2d9d8a7eeec2e` |
 | BL-4 | 1 | usage.db: derive the backfill gate from the taxonomy, not a hand-maintained integer | done-archived | `fc00c33f2403ae8a` |
-| BL-5 | 1 | librarian: split `tracker_design` so its guidance arrives inline | done | `3f88d49c38ced0c1` |
-| BL-6 | 1 | read_file: give the buffered full-read summary an incompleteness signal | done | `a9644b964edac789` |
-| BL-7 | 1 | Write-scope denial should name `approve_write` | done | `0a15c81150c4cce7` |
-| BL-8 | 2 | `truncate_compact` cuts from the tail, destroying the overflow signal | done | `c320b6564d1cb003` |
+| BL-5 | 1 | librarian: split `tracker_design` so its guidance arrives inline | done | `9ea19e403dc550b5` |
+| BL-6 | 1 | read_file: give the buffered full-read summary an incompleteness signal | done | `07529c63f88bd713` |
+| BL-7 | 1 | Write-scope denial should name `approve_write` | done | `26a793b432e0f29c` |
+| BL-8 | 2 | `truncate_compact` cuts from the tail, destroying the overflow signal | done | `3226924940fb30ce` |
 | BL-9 | 2 | `server_instructions` arrives truncated mid-word, dropping the guide pointers | done-archived | `be057e5e9d7c4c16` |
 | BL-37 | 2 | Kotlin warnings / workspace table / Custom Instructions cannot fit the 2048-char instructions channel — ordering fixes the common case (shipped `30f3df81`); the two oversized blocks need a new carrier | done | `e3437bd1ec116dec` |
-| BL-10 | 2 | `audit_doc_refs` reads bare comment markers as file paths | done | `772fff5739620581` |
+| BL-10 | 2 | `audit_doc_refs` reads bare comment markers as file paths | done | `1c57379181202ff7` |
 | BL-11 | 2 | `context`/`workspace_state_at`/`link_scan` never dedup the worktree overlay | done | `d31233700ca979c2` |
 | BL-12 | 2 | worktree divergence guard covers writes but not reads | done | `c611a3dce4f05d45` |
 | BL-35 | 2 | `guard_worktree_write` is dead code in production (startup cwd sets the flag it gates on) | done-archived | `a742a50ea6723daf` |
@@ -62,14 +62,14 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-15 | 3 | Read-only metadata commands (wc/ls/stat) blocked on source paths | done | `6902806f459fcf62` |
 | BL-16 | 3 | Worktree activation diverges memory set and sub-project topology (topology CLOSED `1869adcb`; memories = option 1, a semantic call) | open → **done-archived** 2026-09-13 — bug is `mitigated` + archived. **Pointer repaired in the same pass:** the old id `403e3fad0356f171` resolved to nothing (`unknown artifact id`), orphaned when the file was archived, since `id = sha256(abs_path)` | `3df245c295e3833d` |
 | BL-17 | 4 | Reconcile a bug sitting in `archive/` while still marked `status: open` | done | — |
-| BL-18 | 1 | `artifact(create)`: `augment` silently discarded five of its seven fields | done | `29f1ddf259562b7f` |
+| BL-18 | 1 | `artifact(create)`: `augment` silently discarded five of its seven fields | done | `c75dbf6291fc5876` |
 | BL-19 | 1 | Overflow envelopes with no compact summary waste a whole call | done-archived | `3d733b00b134634c` |
 | BL-20 | 1 | params merge-patch wipes entry arrays wholesale — no guard, no report, no git backup; gave entries an update path (`update_entry`) + always-on counts | done-archived | `36eda0c2634dbea9` |
 | BL-21 | 1 | edit_file's replace_all + batch paths write librarian-managed artifacts with no guard | done-archived | `e52abced30ff1dbc` |
 | BL-22 | 1 | reindex re-keys moved artifacts and cascade-deletes their events — `move` breaks the `id == hash(abs_path)` invariant, so the next reindex destroyed 11 events of history while reporting removed: 0 | done-archived | `18a637f59289192c` |
 | BL-23 | 3 | a moved artifact's frontmatter still asserts its pre-move id | done-archived | `61e2360408cb206b` |
 | BL-24 | 2 | usage.db records a sha that need not describe the built code, and drops the dirty bit | done-archived | `0cd1fe818951b232` |
-| BL-25 | 1 | the 2200-byte cap evicts rules into `get_guide` topics nothing triggers — 7 of 10 guides (~46 KB) have no trigger at all | done | `cfcbee6f7d047a55` |
+| BL-25 | 1 | the 2200-byte cap evicts rules into `get_guide` topics nothing triggers — 7 of 10 guides (~46 KB) have no trigger at all | done | `38e45994a0919313` |
 | BL-26 | 2 | `get_guide("librarian-runtime")` says a move preserves the id; a move mints a new one — 2d8c7f39 repaired 3 of 4 copies | done-archived | `5d8584d109d876ea` |
 | BL-27 | 3 | `update_entry`'s entry-param guard only fires when `fields` is absent; send both and `entry` is dropped silently | done-archived | `d082f963f57bd76b` |
 | BL-28 | 3 | a directory named `--help` holding an initialised codescout project sits untracked in the repo root | done-archived | `ba6ab341eab97416` |
@@ -124,7 +124,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
 > archived, and `doc(action="move")` re-keys, so params carried the new ids while
-> this snapshot still cited `db02045fdbaaf860` / `ea21099f9d39f734` — neither of which
+> this snapshot still cited `5d8584d109d876ea` / `d082f963f57bd76b` — neither of which
 > resolves any more. Three rows had drifted (BL-2, BL-26, BL-27) and BL-31 was missing
 > entirely.
 >
@@ -2207,7 +2207,7 @@ characters get reverted. What remains is running the arms in `prompt-engineering
 deciding anything here.
 
 **Verify-open pass run on the two rows whose bugs were absent from the open-bug query.**
-BL-16 (`403e3fad0356f171`) and BL-29 (`879b1b18243f20b2`) are both genuinely `mitigated`,
+BL-16 (`3df245c295e3833d`) and BL-29 (`879b1b18243f20b2`) are both genuinely `mitigated`,
 not zombie-open — clean, against this project's measured 75% zombie rate.
 
 ### 2026-08-16 — opened
@@ -2226,7 +2226,7 @@ and `params`; the `render_template`, `params_schema` and `entry_collection` pass
 were silently discarded, and the call still returned success. Both had to be re-applied with a
 follow-up `artifact_augment(merge=true)`.
 
-Filed as `29f1ddf259562b7f` and queued as BL-18. It is a recurrence of a class already fixed once in
+Filed as `c75dbf6291fc5876` and queued as BL-18. It is a recurrence of a class already fixed once in
 the same file (`artifact(create)` dropping `topic`, archived 2026-07-13), and it is compounded by
 `tracker_design`'s own Final step listing `params_schema` and `render_template` among the fields to
 pass to `create` — guidance followed exactly here, with both fields lost.

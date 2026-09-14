@@ -83,7 +83,7 @@ topic: local-onnx-embedding
 
 **Observed:** Task 6, by the implementer.
 
-**Got:** the plan's Global Constraints said env-mutating tests use `EnvGuard` + `#[serial]`. `docs/conventions/test-env-isolation.md` bans that pattern crate-wide (post-`a656f8cec220d347`) and names the alternative. The plan repeated the instruction in three places.
+**Got:** the plan's Global Constraints said env-mutating tests use `EnvGuard` + `#[serial]`. `docs/conventions/test-env-isolation.md` bans that pattern crate-wide (post-`d4ab34c71d668020`) and names the alternative. The plan repeated the instruction in three places.
 
 **Probable cause:** written from memory of the convention rather than from the convention. Memory `conventions` still carried the older form.
 

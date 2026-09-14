@@ -428,7 +428,7 @@ hours old, and both were mine:
 
 - **BL-10 / `772fff57`** — fixed in `148aabe6`; its bug file still read *"Not implemented"*
   **four commits later**. Code shipped, paperwork did not.
-- **BL-25 / `cfcbee6f7d047a55`** — all three parts shipped and verified live; the bug file
+- **BL-25 / `38e45994a0919313`** — all three parts shipped and verified live; the bug file
   and the queue row were both still `open` when I went to answer "what's open?".
 
 A third, inverted: I archived the conditionally-required-params bug recording *"Class B —
@@ -2176,7 +2176,7 @@ them from a bug-fix session, not a hygiene sweep.
 **Update, same day — one of the two is closed, and the check was right about it.**
 `2026-09-02-a-test-fixture-interpolates-a-path-into-json.md` was worked from its reproduction
 and archived on 2026-09-11 (now `docs/issues/archive/…`, id `29ad7fe92aa61e79`, was
-`2fbf7181f0621794`). The fix had landed **nine days earlier** — `52cb0930` and `0dd22d9f`, both
+`29ad7fe92aa61e79`). The fix had landed **nine days earlier** — `52cb0930` and `0dd22d9f`, both
 on `experiments` — with CI verification and a mutation-checked regression test already written
 into the record; all that was missing was `status: fixed`, a `closed:` date and a structured
 `## Fix provenance` carrying the patch-ids. That is precisely the state
@@ -2258,7 +2258,7 @@ time.
 **Further recon entries from the same session were BLOCKED, parked, and have since landed.**
 `append_entry` refuses while the target ledger has unpushed commits — and the blocking commit
 was this sweep's own, so a session following the documented workflow blocks itself on its
-second append. That is a live instance of `cd808780d9ea2db9`. Parked in the repo rather than a
+second append. That is a live instance of `9c7c5bc9168404be`. Parked in the repo rather than a
 session scratchpad deliberately: the refusal's own fallback (*"note the entry somewhere
 worktree-local"*) converts a blocked write into an **untracked** one, and nothing would have
 noticed if they were never folded in. **The deferral held** — the holding file grew from two

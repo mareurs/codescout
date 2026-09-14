@@ -18,7 +18,7 @@ topic: path-display-and-output-fidelity
 # Design — Field-aware project-root stripping at the `call_content` chokepoint
 
 **Bug:** `docs/issues/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md`
-(`ece908f37854e557`)
+(`34aea1d30360c0f8`)
 **Status:** active — shipped on `experiments` in the cohort beginning `40fbf565`
 (see `CHANGELOG.md` § Unreleased for the entry; the closing commits are docs and
 test hardening, so no end SHA is pinned here — one would go stale the moment a
@@ -235,7 +235,7 @@ synthetic-`Value` unit test in `src/tools/core/path_strip.rs` / `src/tools/core/
 actual `workspace` or `artifact` tool. For what actually shipped — the real file names
 and test names, per source — see the bug file's `## Tests added` section
 (`docs/issues/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md`,
-`ece908f37854e557`).
+`34aea1d30360c0f8`).
 ## 8. Key inventory — discharged 2026-08-09
 
 Run during planning (`grep`/AST sweep of `src/tools/**` and `src/librarian/tools/**`
