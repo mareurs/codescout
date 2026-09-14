@@ -85,6 +85,19 @@ pub struct ResolveCtx<'a> {
     /// absence is the normal state. `None` disables the cap (every ref is treated
     /// as tracked), which is the behaviour tests get unless they opt in.
     pub gitignore: Option<TrackedIgnore>,
+    /// Every artifact id the catalog currently resolves. Built once per audit run in
+    /// `mod.rs::call`, the same way `basename_index` is.
+    ///
+    /// This is the one lookup in this module that the filesystem cannot answer. Every
+    /// other [`RefKind`] asks "does this path exist"; an artifact id asks "does the
+    /// catalog still key this", and after `doc(action="move")` those two disagree —
+    /// the file is right there, under a name whose hash is different.
+    ///
+    /// `None` disables the check, treating every id as resolved. That is what keeps
+    /// the 27 existing resolver tests behaviourally unchanged without editing their
+    /// expectations, and it mirrors `gitignore` above. A caller that wants the check
+    /// must opt in, which for the real audit is `mod.rs::call`.
+    pub live_artifact_ids: Option<std::collections::HashSet<String>>,
 }
 
 pub fn resolve_ref(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
@@ -94,7 +107,46 @@ pub fn resolve_ref(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         RefKind::FileSymbol => resolve_file_symbol(c, ctx),
         RefKind::ModulePath => resolve_module_path_v1(c, ctx),
         RefKind::Link => resolve_link(c, ctx),
+        RefKind::ArtifactId => resolve_artifact_id(c, ctx),
     }
+}
+
+/// Resolve a 16-hex artifact id against the catalog.
+///
+/// The only resolver here that never touches the filesystem. `id = sha256(abs_path)`
+/// means the file a dead id names is usually still on disk — it just lives at a new
+/// path now, so its hash changed. Asking the filesystem would answer the wrong
+/// question and answer it reassuringly.
+///
+/// Mirrors `link_scan::resolve::resolve`'s `CitationKind::ArtifactId` arm, including
+/// the self-citation carve-out: a document that quotes its OWN id is labelling itself,
+/// not pointing at something missing, and every tracker that records its artifact id in
+/// its own header would otherwise report as broken.
+fn resolve_artifact_id(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
+    let resolved = || Resolution {
+        verdict: Verdict::Resolved,
+        severity: Severity::Low,
+        severity_reason: SeverityReason::PolicyDefault,
+        notes: None,
+    };
+    // No id set supplied: the check is switched off for this run, not passing.
+    let Some(live) = ctx.live_artifact_ids.as_ref() else {
+        return resolved();
+    };
+    if live.contains(&c.raw_ref) {
+        return resolved();
+    }
+    let own = crate::librarian::ids::artifact_id_from_abs(&ctx.repo_root.join(&c.md_file));
+    if own == c.raw_ref {
+        return resolved();
+    }
+    verdict_with_drops_for_ref(
+        Verdict::ArtifactMissing,
+        &c.raw_ref,
+        Path::new(&c.md_file),
+        c.position,
+        ctx,
+    )
 }
 
 fn resolve_file_path(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
@@ -614,7 +666,7 @@ fn verdict_with_drops(
     memory_globs: &[globset::Glob],
 ) -> Resolution {
     let base = severity::default_severity(verdict);
-    let (sev, reason) = severity::apply_drops(md_file, base, memory_globs);
+    let (sev, reason) = severity::apply_drops(verdict, md_file, base, memory_globs);
     Resolution {
         verdict,
         severity: sev,
@@ -665,7 +717,7 @@ fn verdict_with_drops_for_ref(
     ctx: &ResolveCtx<'_>,
 ) -> Resolution {
     let base = severity::default_severity(verdict);
-    let (sev, reason) = severity::apply_drops(md_file, base, ctx.memory_globs);
+    let (sev, reason) = severity::apply_drops(verdict, md_file, base, ctx.memory_globs);
     let (sev, reason) =
         severity::cap_inferred_path(verdict, path_evidence(raw_ref, ctx), sev, reason);
     let (sev, reason) = severity::cap_code_block(verdict, position, sev, reason);
@@ -821,6 +873,7 @@ mod tests {
 
     fn ctx<'a>(root: &'a Path, globs: &'a [globset::Glob]) -> ResolveCtx<'a> {
         ResolveCtx {
+            live_artifact_ids: None,
             repo_root: root,
             memory_globs: globs,
             lsp: None,
@@ -912,6 +965,7 @@ mod tests {
         };
         let globs: [globset::Glob; 0] = [];
         let ctx_gi = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &globs,
             lsp: None,
@@ -976,6 +1030,7 @@ mod tests {
         };
         let globs: [globset::Glob; 0] = [];
         let ctx_gi = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &globs,
             lsp: None,
@@ -1043,6 +1098,7 @@ mod tests {
         };
         let globs: [globset::Glob; 0] = [];
         let ctx_gi = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &globs,
             lsp: None,
@@ -1109,6 +1165,7 @@ mod tests {
         };
         let globs: [globset::Glob; 0] = [];
         let ctx_gi = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &globs,
             lsp: None,
@@ -1368,6 +1425,7 @@ mod tests {
         let r = resolve_ref(
             &c,
             &ResolveCtx {
+                live_artifact_ids: None,
                 repo_root: tmp.path(),
                 memory_globs: &[],
                 lsp: Some(lsp),
@@ -1385,6 +1443,7 @@ mod tests {
         std::fs::write(tmp.path().join("foo.rs"), "pub fn bar() {}\n").unwrap();
         let c = cand("foo.rs:bar", "docs/spec.md", RefKind::FileSymbol);
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: None,
@@ -1420,6 +1479,7 @@ mod tests {
         ] {
             std::fs::write(tmp.path().join(file), "x\n").unwrap();
             let ctx = ResolveCtx {
+                live_artifact_ids: None,
                 repo_root: tmp.path(),
                 memory_globs: &[],
                 lsp: None,
@@ -1455,6 +1515,7 @@ mod tests {
         let lsp = MockLspProvider::with_client(MockLspClient::new());
         let c = cand("foo.rs:bar", "docs/spec.md", RefKind::FileSymbol);
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: Some(lsp),
@@ -1513,6 +1574,7 @@ mod tests {
         let lsp = MockLspProvider::with_client(MockLspClient::new());
         let c = cand("foo.rs:bar", "docs/spec.md", RefKind::FileSymbol);
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: Some(lsp),
@@ -1559,6 +1621,7 @@ mod tests {
         let r = resolve_ref(
             &c,
             &ResolveCtx {
+                live_artifact_ids: None,
                 repo_root: tmp.path(),
                 memory_globs: &[],
                 lsp: Some(lsp),
@@ -1611,6 +1674,7 @@ mod tests {
             detail: None,
         };
         let ctx_for = |lsp| ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: Some(lsp),
@@ -1721,6 +1785,7 @@ mod tests {
             )],
         );
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: None,
@@ -1759,6 +1824,7 @@ mod tests {
             vec![std::path::PathBuf::from("src/lsp/mux/process.rs")],
         );
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: None,
@@ -1789,6 +1855,7 @@ mod tests {
             vec![std::path::PathBuf::from("src/tiny.rs")],
         );
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: None,
@@ -1818,6 +1885,7 @@ mod tests {
             ],
         );
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: None,
@@ -1852,6 +1920,7 @@ mod tests {
             ],
         );
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: None,
@@ -1875,6 +1944,7 @@ mod tests {
     fn resolver_file_symbol_still_reports_file_missing_when_no_file_matches() {
         let tmp = TempDir::new().unwrap();
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: None,
@@ -1904,6 +1974,7 @@ mod tests {
         index: std::collections::HashMap<String, Vec<std::path::PathBuf>>,
     ) -> ResolveCtx<'a> {
         ResolveCtx {
+            live_artifact_ids: None,
             repo_root,
             memory_globs: &[],
             lsp: None,
@@ -2021,6 +2092,7 @@ mod tests {
             ],
         );
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: None,
@@ -2072,6 +2144,7 @@ mod tests {
             ],
         );
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: None,
@@ -2107,6 +2180,7 @@ mod tests {
             vec![std::path::PathBuf::from("src/somewhere/only_one.j2")],
         );
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: None,
@@ -2139,6 +2213,7 @@ mod tests {
             vec![std::path::PathBuf::from("src/elsewhere/b.j2")],
         );
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: None,
@@ -2183,6 +2258,7 @@ mod tests {
             vec![std::path::PathBuf::from("docs/elsewhere/target.md")],
         );
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: None,
@@ -2217,6 +2293,7 @@ mod tests {
             vec![std::path::PathBuf::from("docs/elsewhere/target.md")],
         );
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: None,
@@ -2239,6 +2316,7 @@ mod tests {
     fn resolver_still_missing_when_basename_not_in_index() {
         let tmp = TempDir::new().unwrap();
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: None,
@@ -2324,6 +2402,7 @@ mod tests {
             vec![std::path::PathBuf::from("other/place/bar.py")],
         );
         let ctx = ResolveCtx {
+            live_artifact_ids: None,
             repo_root: tmp.path(),
             memory_globs: &[],
             lsp: None,
@@ -2515,5 +2594,248 @@ mod tests {
             &ctx(tmp.path(), &[]),
         );
         assert_eq!(r.verdict, Verdict::Missing);
+    }
+
+    // ---- RefKind::ArtifactId -------------------------------------------------
+    //
+    // These resolve against a SET, never the filesystem, so each one supplies its own
+    // `live_artifact_ids`. The sibling `ctx()` helper passes `None`, which disables the
+    // check — that asymmetry is the point of `artifact_id_none_disables_the_check`
+    // below, and it is why adding this verdict did not need any existing test edited.
+
+    const DEAD: &str = "403e3fad0356f171";
+    const LIVE: &str = "3df245c295e3833d";
+
+    fn ids(list: &[&str]) -> Option<std::collections::HashSet<String>> {
+        Some(list.iter().map(|s| (*s).to_string()).collect())
+    }
+
+    fn id_ctx<'a>(
+        root: &'a Path,
+        globs: &'a [globset::Glob],
+        live: Option<std::collections::HashSet<String>>,
+    ) -> ResolveCtx<'a> {
+        ResolveCtx {
+            repo_root: root,
+            memory_globs: globs,
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
+            gitignore: None,
+            live_artifact_ids: live,
+        }
+    }
+
+    fn id_cand(raw: &str, md_file: &str, position: RefPosition) -> RefCandidate {
+        RefCandidate {
+            md_file: md_file.to_string(),
+            md_line: 1,
+            raw_ref: raw.to_string(),
+            ref_kind: RefKind::ArtifactId,
+            position,
+        }
+    }
+
+    #[test]
+    fn artifact_id_in_the_catalog_resolves() {
+        let tmp = TempDir::new().unwrap();
+        let r = resolve_ref(
+            &id_cand(LIVE, "docs/trackers/t.md", RefPosition::InlineSpan),
+            &id_ctx(tmp.path(), &[], ids(&[LIVE])),
+        );
+        assert_eq!(r.verdict, Verdict::Resolved);
+    }
+
+    #[test]
+    fn artifact_id_absent_from_the_catalog_is_artifact_missing() {
+        let tmp = TempDir::new().unwrap();
+        // NOT `docs/trackers/…` — `trackers` is in `DEFAULT_HISTORICAL_DIRS`, so a
+        // tracker takes `historical_drop` and lands a band lower. Discovered by this
+        // test failing against a plan that asserted the opposite.
+        let r = resolve_ref(
+            &id_cand(DEAD, "docs/conventions/x.md", RefPosition::InlineSpan),
+            &id_ctx(tmp.path(), &[], ids(&[LIVE])),
+        );
+        assert_eq!(r.verdict, Verdict::ArtifactMissing);
+        // Med, not High: the verdict reports before it gates. When the live corpus is
+        // reconciled and `default_severity` moves this to the `High` arm, THIS assertion
+        // is the one that must be updated — deliberately, and in the same commit.
+        assert_eq!(r.severity, Severity::Med);
+        assert_eq!(r.severity_reason, SeverityReason::PolicyDefault);
+    }
+
+    /// The filesystem must not be consulted, and this is the test that proves it.
+    ///
+    /// `repo_root` is an empty tempdir, so `docs/trackers/t.md` does not exist. A
+    /// resolver that fell back to "does the file exist" would have to report something
+    /// about that absence; the id's fate depends only on the set.
+    #[test]
+    fn artifact_id_resolution_never_touches_the_filesystem() {
+        let tmp = TempDir::new().unwrap();
+        assert!(!tmp.path().join("docs/trackers/t.md").exists());
+        let r = resolve_ref(
+            &id_cand(LIVE, "docs/trackers/t.md", RefPosition::InlineSpan),
+            &id_ctx(tmp.path(), &[], ids(&[LIVE])),
+        );
+        assert_eq!(r.verdict, Verdict::Resolved);
+    }
+
+    /// A document quoting its OWN id is labelling itself, not citing something gone.
+    ///
+    /// Load-bearing because trackers routinely carry their artifact id in a header, and
+    /// the id of a file is a pure function of its path — so without this carve-out every
+    /// such header reports broken the moment the check is switched on.
+    #[test]
+    fn artifact_id_self_citation_resolves_even_when_absent_from_the_set() {
+        let tmp = TempDir::new().unwrap();
+        let rel = "docs/trackers/self.md";
+        let own = crate::librarian::ids::artifact_id_from_abs(&tmp.path().join(rel));
+        let r = resolve_ref(
+            &id_cand(&own, rel, RefPosition::InlineSpan),
+            &id_ctx(tmp.path(), &[], ids(&[])),
+        );
+        assert_eq!(r.verdict, Verdict::Resolved);
+
+        // Discriminator: the SAME id cited from a DIFFERENT file is not a self-citation
+        // and must still report. Without this, a carve-out that resolved everything
+        // would pass the assertion above.
+        let elsewhere = resolve_ref(
+            &id_cand(&own, "docs/trackers/other.md", RefPosition::InlineSpan),
+            &id_ctx(tmp.path(), &[], ids(&[])),
+        );
+        assert_eq!(elsewhere.verdict, Verdict::ArtifactMissing);
+    }
+
+    /// `None` means "this run did not load the catalog", which must not become "every
+    /// id is dead". The audit runs in a gated CI job; a catalog read that did not happen
+    /// would otherwise red it with hundreds of confident, wrong findings.
+    #[test]
+    fn artifact_id_none_disables_the_check() {
+        let tmp = TempDir::new().unwrap();
+        let r = resolve_ref(
+            &id_cand(DEAD, "docs/trackers/t.md", RefPosition::InlineSpan),
+            &id_ctx(tmp.path(), &[], None),
+        );
+        assert_eq!(r.verdict, Verdict::Resolved);
+    }
+
+    /// The sanctioned escape for writing a dead id deliberately.
+    ///
+    /// Both halves are asserted together because the pair IS the claim: a fence drops the
+    /// band, inline backticks do not. Asserting only the fence would pass equally if the
+    /// cap had been written to fire on every position.
+    #[test]
+    fn a_fenced_dead_id_is_capped_and_an_inline_one_is_not() {
+        let tmp = TempDir::new().unwrap();
+        let fenced = resolve_ref(
+            &id_cand(DEAD, "docs/conventions/x.md", RefPosition::FencedBlock),
+            &id_ctx(tmp.path(), &[], ids(&[])),
+        );
+        let inline = resolve_ref(
+            &id_cand(DEAD, "docs/conventions/x.md", RefPosition::InlineSpan),
+            &id_ctx(tmp.path(), &[], ids(&[])),
+        );
+        assert_eq!(fenced.verdict, Verdict::ArtifactMissing);
+        assert_eq!(inline.verdict, Verdict::ArtifactMissing);
+        // At the CURRENT Med band `cap_code_block` is inert by construction — it only
+        // fires on `High`. So this test pins the wiring, and the assertion that the cap
+        // actually BITES cannot be written until the tightening step. Recorded here
+        // rather than left as a silent gap: see `cap_code_block_bites_artifact_missing`.
+        assert_eq!(fenced.severity, Severity::Med);
+        assert_eq!(inline.severity, Severity::Med);
+    }
+
+    /// The tightening step's regression guard, written now while the reasoning is live.
+    ///
+    /// Calls `cap_code_block` directly with `High` — the band `ArtifactMissing` will carry
+    /// once `default_severity` is moved — so the escape hatch is proven to work BEFORE the
+    /// change that makes it load-bearing, rather than discovered broken afterwards.
+    /// The plan for this feature asserted the cap applied "for free"; it did not, because
+    /// the cap is verdict-guarded and did not name this verdict.
+    #[test]
+    fn cap_code_block_bites_artifact_missing() {
+        let (sev, reason) = severity::cap_code_block(
+            Verdict::ArtifactMissing,
+            super::super::RefPosition::FencedBlock,
+            Severity::High,
+            SeverityReason::PolicyDefault,
+        );
+        assert_eq!(sev, Severity::Med);
+        assert_eq!(reason, SeverityReason::CodeBlock);
+
+        // Discriminator: an inline id at the same band is untouched.
+        let (sev_inline, _) = severity::cap_code_block(
+            Verdict::ArtifactMissing,
+            super::super::RefPosition::InlineSpan,
+            Severity::High,
+            SeverityReason::PolicyDefault,
+        );
+        assert_eq!(sev_inline, Severity::High);
+    }
+
+    /// Location drops are keyed on the citing file, not the verdict, so they SHOULD
+    /// already cover a new verdict. Asserted rather than assumed — that is the whole
+    /// difference between inheriting behaviour and believing you inherited it. Two of
+    /// the four did; the historical one needed an exemption, found by this test failing.
+    #[test]
+    fn archive_and_issues_drops_apply_to_artifact_missing() {
+        let tmp = TempDir::new().unwrap();
+        let at = |f: &str| {
+            resolve_ref(
+                &id_cand(DEAD, f, RefPosition::InlineSpan),
+                &id_ctx(tmp.path(), &[], ids(&[])),
+            )
+        };
+        assert_eq!(
+            at("docs/issues/archive/2026-01-01-x.md").severity_reason,
+            SeverityReason::ArchiveDrop
+        );
+        assert_eq!(
+            at("docs/issues/2026-01-01-x.md").severity_reason,
+            SeverityReason::IssuesDrop
+        );
+        // A tracker keeps the FULL band despite `trackers` being in
+        // `DEFAULT_HISTORICAL_DIRS`, because `ArtifactMissing` is exempt from that one
+        // drop. Without the exemption this is `HistoricalDrop`, and the 132 instances in
+        // `docs/trackers/**` and `docs/superpowers/**` — including every one of the work
+        // queue's 22, the defect that motivated the check — could never red the gate.
+        assert_eq!(
+            at("docs/trackers/t.md").severity_reason,
+            SeverityReason::PolicyDefault
+        );
+        assert_eq!(
+            at("docs/conventions/x.md").severity_reason,
+            SeverityReason::PolicyDefault
+        );
+    }
+
+    /// The historical exemption is scoped to `ArtifactMissing` and must not leak.
+    ///
+    /// This is the test that makes the exemption honest. Asserting only that an id keeps
+    /// its band in a tracker would pass equally if `historical_drop` had been deleted
+    /// outright — which would silently re-band every path, line and symbol citation in
+    /// `docs/plans/`, `docs/superpowers/` and `docs/trackers/` at once. A missing PATH in
+    /// the same file must still drop, and for a reason that does not apply to ids: a path
+    /// that moved is precisely the history this drop exists to tolerate, whereas a dead
+    /// id means the file is still there and its key changed.
+    #[test]
+    fn the_historical_exemption_does_not_leak_to_other_ref_kinds() {
+        let tracker = Path::new("docs/trackers/t.md");
+        let (_, id_reason) =
+            severity::apply_drops(Verdict::ArtifactMissing, tracker, Severity::High, &[]);
+        let (_, path_reason) =
+            severity::apply_drops(Verdict::Missing, tracker, Severity::High, &[]);
+        assert_eq!(id_reason, SeverityReason::PolicyDefault);
+        assert_eq!(path_reason, SeverityReason::HistoricalDrop);
+
+        // And the exemption is historical-only: an id in an ARCHIVED file still drops,
+        // because there the citing document really is retired.
+        let (_, archived) = severity::apply_drops(
+            Verdict::ArtifactMissing,
+            Path::new("docs/issues/archive/2026-01-01-x.md"),
+            Severity::High,
+            &[],
+        );
+        assert_eq!(archived, SeverityReason::ArchiveDrop);
     }
 }

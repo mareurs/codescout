@@ -24,6 +24,9 @@ pub fn default_severity(verdict: Verdict) -> Severity {
     match verdict {
         Missing | FileMissing => High,
         SymbolMissing | AnchorMissing | LineOob | AmbiguousBasename => Med,
+        // Report-before-gate. Move this to the `High` arm above once the live corpus is
+        // reconciled — that one edit is the whole tightening step.
+        ArtifactMissing => Med,
         Unknown | ResolvedBasename => Low,
         Resolved | External => Low,
     }
@@ -126,7 +129,7 @@ pub fn cap_code_block(
 ) -> (Severity, SeverityReason) {
     if matches!(
         verdict,
-        Verdict::Missing | Verdict::FileMissing | Verdict::SymbolMissing
+        Verdict::Missing | Verdict::FileMissing | Verdict::SymbolMissing | Verdict::ArtifactMissing
     ) && position == super::RefPosition::FencedBlock
         && sev == Severity::High
     {
@@ -249,6 +252,7 @@ pub fn cap_released_history(
 
 /// Apply path-based drop rules. Returns `(severity, reason)`.
 pub fn apply_drops(
+    verdict: Verdict,
     md_file: &Path,
     base: Severity,
     memory_globs: &[globset::Glob],
@@ -262,7 +266,25 @@ pub fn apply_drops(
     if matches_issues(md_file) {
         return (drop_one(base), SeverityReason::IssuesDrop);
     }
-    if matches_historical(md_file) {
+    // `ArtifactMissing` is deliberately exempt from the HISTORICAL drop alone.
+    //
+    // The other three drops survive because they are about the citing document being
+    // retired: an archived file, a bug record, a machine-local memory. `historical` is
+    // about the document being a *dated, point-in-time record* — true of `docs/plans/`
+    // and `docs/superpowers/`, and false of the live ledgers that share the directory
+    // list. `docs/trackers/open-issue-work-queue.md` is an index whose artifact ids are
+    // working pointers, not a snapshot of what was once true.
+    //
+    // The distinction only bites for this verdict, which is why the exemption is scoped
+    // to it rather than fixing `DEFAULT_HISTORICAL_DIRS`: for a PATH citation the drop is
+    // right even in a live tracker, because a path that moved is exactly the history the
+    // drop exists to tolerate. For an ID it is wrong, because the whole failure mode is
+    // that the file still exists and the key changed.
+    //
+    // Measured 2026-09-14: without this, 132 of the 506 extracted id citations — and
+    // every one of the work queue's 22, the defect that motivated the check — drop below
+    // the gate and can never red it.
+    if !matches!(verdict, Verdict::ArtifactMissing) && matches_historical(md_file) {
         return (drop_one(base), SeverityReason::HistoricalDrop);
     }
     (base, SeverityReason::PolicyDefault)

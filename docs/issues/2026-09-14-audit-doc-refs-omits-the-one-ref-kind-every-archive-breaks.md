@@ -1,13 +1,15 @@
 ---
 kind: bug
-status: open
+status: taken
 tags:
 - cluster/guard-narrower-than-its-name
+claimed_by: 9403d62d-116b-46ea-ac9b-004acff2b1cb
 closed: null
 opened: 2026-09-14
 owner: marius
 related: []
 severity: medium
+unverified: 'Implemented but NOT GATING. ArtifactMissing lands in the Med band while --fail-on is high, so the check reports and reds nothing; tightening is one arm in default_severity and is owed once the ~145 live instances are reconciled. Also unverified: the end-to-end run against a release binary (findings exist, count, and per-reason bands) has not been executed — the evidence so far is 15 unit tests plus two mutation kills, not an observed report.'
 ---
 
 # BUG: `audit_doc_refs` omits the one ref kind every archive breaks
@@ -157,20 +159,65 @@ escape for mention, which is `IC-6` holding about the file that records it.
 
 ## Fix
 
-Not yet implemented. Two candidates, and they are not alternatives — the second is cheap
-and the first is the one that closes it:
+**Landing in `audit_doc_refs`, not in `link_scan` — this supersedes the two candidates
+this section carried when filed, and the reasoning below is why the preferred one was
+wrong.**
 
-- **Wire the existing signal.** `link_scan`'s `dangling` already carries `kind:
-  "ArtifactId"`. A gate over *live* (non-archive) docs, seeded at today's 34 files so it
-  reds on growth rather than demanding a 34-file sweep first, costs no new detector.
-  Archive paths must stay exempt for the same reason `audit_doc_refs` has `archive_drop`:
-  a retired document citing a retired id is the historical record.
-- **Give `audit_doc_refs` an `ArtifactId` variant** so the CI linter can express the
-  reference at all. Larger, and it duplicates detection `link_scan` already performs.
+The original argument was "wire the detector that exists rather than build one". That
+reads the cost backwards. Detection is the cheap half: a 16-hex lookup against the
+artifact table, about ten lines. The expensive half is **exemption and gating**, and
+`audit_doc_refs` already owns all of it — a 13-variant severity-reason chain, a
+`--fail-on` threshold, and a live CI job. `link_scan` has none of it: no CLI, no exit
+code, and no path exemption at all. Wiring `link_scan` would have rebuilt the severity
+model to reuse ten lines.
 
-**Neither should sweep the 245.** Most are in archived files where the dead id is correct
-history, and the mention/citation ambiguity above means a mechanical repass would rewrite
-sentences whose subject *is* a dead id.
+`librarian(action="doctor")` was considered and rejected for a reason worth recording,
+because it is this file's own defect one level up: doctor is referenced by zero CI jobs,
+zero hooks and zero tests, so a check there fires only when someone runs the tool.
+
+### What shipped
+
+- `RefKind::ArtifactId` + `Verdict::ArtifactMissing`.
+- `resolve_artifact_id` resolves against the **catalog**, never the filesystem. That is
+  the whole point: a dead id's file is usually still on disk, at a path whose hash
+  differs, so asking the filesystem answers the wrong question reassuringly.
+- `ResolveCtx.live_artifact_ids`, built once per run like `basename_index`, and **failing
+  open** — `None` disables the check. An empty set would mark every id dead and turn one
+  unreadable catalog into hundreds of confident wrong findings on a gated job.
+- Self-citation carve-out: a document quoting its own id is labelling itself.
+
+### Two guards had to be TAUGHT the new verdict, in opposite directions
+
+Filed here because the class generalises past this change. A new enum variant meeting a
+`matches!`-guarded composition can be wrong **either** way, and the two are
+indistinguishable from the call site:
+
+| guard | what happened | cost |
+|---|---|---|
+| `cap_code_block` | under-applied — did not name the new verdict | fencing was not an escape |
+| `apply_drops` historical branch | over-applied — named no verdict at all | trackers could not gate |
+| `cap_inferred_path` | under-applied | harmless; cannot floor an id to `Low` |
+| `apply_drops` archive/issues | inherited correctly | — |
+
+The over-application is the quieter failure: it produces **fewer** findings, which reads
+as a clean corpus. `docs/trackers` sits in `DEFAULT_HISTORICAL_DIRS` beside `plans` and
+`superpowers`, so without an exemption 132 of 506 extracted citations — including every
+one of the work queue's 22, the defect that motivated this file — drop below the gate
+permanently. The exemption is scoped to `ArtifactMissing` alone: for a **path** citation
+the historical drop is right even in a live ledger, because a path that moved is exactly
+the history it exists to tolerate; for an **id** it is wrong, because the failure mode is
+that the file still exists and its key changed.
+
+Both gaps surfaced as failing tests, not review — one from a regression guard written
+against the band the verdict will carry *after* tightening, before that band was live.
+
+### Landing at `Med`, tightening later
+
+`default_severity` puts `ArtifactMissing` in the `Med` arm, so the check reports without
+gating. Tightening is moving it one arm up. The backlog to reconcile first is ~145
+instances; a gate that reds on day one over an untriaged backlog gets waived, and the
+waiver outlives the backlog. Same sequence `ci.yml` records for this job's own
+`never` → `high` move.
 
 ## Tests added
 

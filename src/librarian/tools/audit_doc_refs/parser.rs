@@ -161,6 +161,13 @@ impl PathSyntax {
 }
 
 fn classify(s: &str, in_code_context: bool, syntax: PathSyntax) -> Option<RefKind> {
+    // Checked first because the shape is unambiguous and cheap: exactly 16 lowercase
+    // hex digits, nothing else. No sibling classifier can claim it — `looks_like_path`
+    // ends at `has_known_ext` for a token with no `/` and no `.`, so a bare id
+    // classified as `None` before this arm existed.
+    if is_artifact_id(s) {
+        return Some(RefKind::ArtifactId);
+    }
     // Try Rust-style `path::symbol` first so the trailing colon doesn't leak
     // into the path part. Fall back to single `:` for python-style and line
     // refs (file.py:cmd, file.rs:42, file.rs:42-99).
@@ -187,6 +194,25 @@ fn classify(s: &str, in_code_context: bool, syntax: PathSyntax) -> Option<RefKin
     }
     None
 }
+
+/// Exactly 16 lowercase hex digits — a librarian artifact id.
+///
+/// The length is the whole discriminator, and it is why a **40**-hex git SHA does not
+/// match: this is called on a token the tokenizer already split on word boundaries, so
+/// a SHA arrives whole and fails the length test rather than contributing a 16-char
+/// prefix. `link_scan` gets the same property from `\b[0-9a-f]{16}\b`'s anchors
+/// (`link_scan::extract::id_re`); stated differently here because there is no regex,
+/// and re-derived rather than assumed — verified against a 40-hex literal on the way in.
+///
+/// Uppercase is rejected on purpose. Ids are minted lowercase by
+/// `crate::librarian::ids::artifact_id_from_abs`, so an uppercase 16-hex run is
+/// something else — a truncated hash in a fixture, a colour table, a test vector.
+fn is_artifact_id(s: &str) -> bool {
+    s.len() == 16
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 fn is_symbol_suffix(s: &str) -> bool {
     !s.is_empty()
         && s.chars()
@@ -1601,5 +1627,145 @@ Walk through `src/services/auth.rs`, then see [the sample](src/foo.py).
         assert_eq!(cands.len(), 1);
         assert_eq!(cands[0].ref_kind, RefKind::FileLine);
         assert_eq!(cands[0].raw_ref, "src/tools/core/types.rs:238-246");
+    }
+
+    // ---- artifact ids --------------------------------------------------------
+
+    #[test]
+    fn a_sixteen_hex_token_classifies_as_an_artifact_id() {
+        let cands = parse_refs(
+            "the queue cites `403e3fad0356f171` for this row\n",
+            Path::new("docs/trackers/q.md"),
+            PathSyntax::NoModules,
+        )
+        .0;
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].ref_kind, RefKind::ArtifactId);
+        assert_eq!(cands[0].raw_ref, "403e3fad0356f171");
+        assert_eq!(cands[0].position, RefPosition::InlineSpan);
+    }
+
+    /// A 40-hex git SHA must not contribute a 16-char prefix.
+    ///
+    /// Both identifiers are lowercase hex and they sit side by side throughout this
+    /// corpus — every archived bug file cites a fix SHA and an artifact id within a few
+    /// lines of each other. The length test is the whole discriminator, and it works only
+    /// because the tokenizer hands over whole words; a substring scan would split every
+    /// SHA into two and a half false artifact ids.
+    #[test]
+    fn a_forty_hex_git_sha_is_not_an_artifact_id() {
+        let cands = parse_refs(
+            "fixed in `0123456789abcdef0123456789abcdef01234567`\n",
+            Path::new("docs/issues/x.md"),
+            PathSyntax::NoModules,
+        )
+        .0;
+        assert!(
+            cands.iter().all(|c| c.ref_kind != RefKind::ArtifactId),
+            "a 40-hex SHA classified as an artifact id: {cands:?}"
+        );
+    }
+
+    #[test]
+    fn near_misses_are_not_artifact_ids() {
+        for raw in [
+            "403e3fad0356f17",   // 15
+            "403e3fad0356f1711", // 17
+            "403E3FAD0356F171",  // uppercase — ids are minted lowercase
+            "403e3fad0356f17g",  // non-hex
+        ] {
+            let text = format!("see `{raw}` here\n");
+            let cands = parse_refs(&text, Path::new("docs/x.md"), PathSyntax::NoModules).0;
+            assert!(
+                cands.iter().all(|c| c.ref_kind != RefKind::ArtifactId),
+                "{raw} was classified as an artifact id"
+            );
+        }
+    }
+
+    /// A fenced id is still EXTRACTED — the fence is not an extraction filter, it is a
+    /// severity cap (`cap_code_block`). Pinned because the two are easy to conflate, and
+    /// conflating them would make someone "fix" the escape hatch by dropping the
+    /// candidate, which silently removes it from the report as well as the gate.
+    #[test]
+    fn a_fenced_artifact_id_is_extracted_and_marked_fenced() {
+        let cands = parse_refs(
+            "```\n403e3fad0356f171\n```\n",
+            Path::new("docs/trackers/q.md"),
+            PathSyntax::NoModules,
+        )
+        .0;
+        let hit = cands
+            .iter()
+            .find(|c| c.ref_kind == RefKind::ArtifactId)
+            .expect("fenced artifact id should still be extracted");
+        assert_eq!(hit.position, RefPosition::FencedBlock);
+    }
+
+    /// Non-vacuity: the classifier fires on the real corpus.
+    ///
+    /// A FLOOR, never a ratchet. `tests/doc_tool_refs.rs` already settled this for a docs
+    /// population — the count grows with the corpus, so a ceiling reds on ordinary
+    /// writing. What a floor catches is the failure that actually matters here: the
+    /// classifier silently ceasing to fire, which looks exactly like a clean report.
+    ///
+    /// Measured 2026-09-14: 506 extracted artifact-id citations across `docs/**.md`.
+    /// The floor sits far below that on purpose.
+    #[test]
+    fn the_artifact_id_classifier_is_not_vacuous_on_the_real_corpus() {
+        fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "md") {
+                    out.push(p);
+                }
+            }
+        }
+        let docs = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs");
+        let mut files = Vec::new();
+        walk(&docs, &mut files);
+        assert!(
+            files.len() > 100,
+            "corpus walk found only {} markdown files — the walk is broken, not the corpus",
+            files.len()
+        );
+        // STOPS AT THE FLOOR instead of totalling the corpus, and the difference is not
+        // cosmetic: parsing every file took >60s, which the harness flagged and which
+        // every session would have paid on every gate run. A floor only needs enough
+        // evidence to clear itself, so the healthy case reads a handful of files.
+        //
+        // The unhealthy case still walks everything and is slow — correct trade: a broken
+        // classifier should cost time once, not a working one cost it every run.
+        const FLOOR: usize = 100;
+        let mut total = 0usize;
+        let mut parsed = 0usize;
+        for f in &files {
+            let Ok(t) = std::fs::read_to_string(f) else {
+                continue;
+            };
+            parsed += 1;
+            total += parse_refs(&t, f, PathSyntax::NoModules)
+                .0
+                .iter()
+                .filter(|c| c.ref_kind == RefKind::ArtifactId)
+                .count();
+            if total > FLOOR {
+                break;
+            }
+        }
+        assert!(
+            total > FLOOR,
+            "only {total} artifact-id citations found after parsing all {parsed} of \
+             {} markdown files; measured 506 on 2026-09-14. A collapse to double digits \
+             means the classifier or the walk stopped working, not that the corpus was \
+             cleaned. This is a FLOOR, never a ratchet — the population grows with the \
+             corpus, so a reading far above 506 is expected and is not a defect.",
+            files.len()
+        );
     }
 }

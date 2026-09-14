@@ -272,6 +272,87 @@ shape does not reach a *channel* that was never instrumented.
 Raised by `05841db2-4ba0-4cb2-a22f-c0bc2f771e20`; observed and written up by
 `8bd791df-5ff4-40fe-af30-69cc3fefc2f7`. Neither party is at fault in a way a rule would have
 prevented, which is the point.
+## The window is not bounded by your own process — a shared build lock hands the tree on
+
+Everything above treats the hazard as an OBSERVER problem: a peer cannot tell your deliberate
+red from a real one, and the remedy is to announce the mutation before arming it. That remedy
+is right and it fixes **attribution**. It does nothing about the **window**, and the window is
+wider than the arming session can see.
+
+Measured 2026-09-14, on this checkout, with three `cargo test --workspace` runs contending:
+
+```
+your cargo test exits        -> releases the shared build-directory lock
+peer's queued cargo acquires -> begins compiling CURRENT source
+your revert runs             -> too late; their build already read the mutated file
+```
+
+The construction that looks safe is `cargo test ... ; cp original back` — unconditional, same
+command, revert guaranteed. It bounds the mutation's lifetime **within the arming process** and
+that is not the property that matters. `cargo test` returning is *the same event as* the lock
+freeing, so the gap between the test finishing and the `cp` landing is not randomly placed
+relative to a queued peer: **it is the precise instant they are waiting for.** Queueing does not
+make a peer miss the window, it aims them at it.
+
+The fix costs nothing — revert before the process exits, not after the test does:
+
+```sh
+cargo test ...; rc=$?; cp "$orig" "$target"; exit $rc
+```
+
+Raised by `8bd791df-5ff4-40fe-af30-69cc3fefc2f7`, who was the queued peer, from their own
+process state (`pgrep -c rustc` = 0 while their run had been alive 16 minutes and silent for 13
+— proof it had not compiled anything yet and would compile whatever the tree held when the lock
+freed). Not inferred from a red they saw; derived before one could happen.
+
+## A mutation that never applied is indistinguishable from one that survived
+
+A second failure in the same session, and the one with the worse blast radius, because it
+corrupts the *result* rather than a bystander's reading of it.
+
+A patch script stored a literal source string; `cargo fmt` reformatted the target's match arms
+between the string being written and the patch being run; the patch no longer matched. The test
+run that followed compiled **unmutated** source and reported:
+
+```
+AssertionError                <- the patcher, three lines up
+test result: ok. 178 passed
+[exited with code 0]
+```
+
+`178 passed` is exactly what *"the mutant survived, this guard is untested"* looks like. The
+conclusion it invites — go write the missing test — is wrong, and the test already exists. With
+a bare `str.replace()` instead of an assertion the patcher would have no-opped **silently** and
+produced the identical output with no traceback at all.
+
+**The general rule, and it is a triage rule rather than a checklist** (`8bd791df`, whose
+formulation this is): **a mutation's GREEN is two propositions, a mutation's RED is one.** A red
+cannot be produced by a mutation that never applied, since the unmutated tree was green a moment
+earlier. So a conclusion resting on an observed kill needs no applied-ness check, and only a
+conclusion resting on a **survival** does. *Audit your greens, not your reds.*
+
+When a survival is load-bearing, verify applied-ness at the bytes, either side, independent of
+what the test runner says:
+
+```
+patcher asserts the pattern occurs exactly once     (a bare replace is the silent failure)
+grep the mutated file   -> expect 0 of the original
+grep after the revert   -> expect 1
+```
+
+**And the reformat race is specific to this repo rather than incidental**, which is why it
+belongs in the record: step 1 of the mandated four-command gate formats Rust, every session runs
+it, and `fmt-mine.sh` formats whatever `file-provenance.py` attributes to the caller. So any
+mutation script here that stores a literal source string has a live race against **any peer's
+gate step 1**, on a practice `CLAUDE.md` actively mandates. Store a pattern that survives
+reformatting, or re-read the target immediately before patching.
+
+One more from the same hour, same family, caught the cheap way: a post-revert check grepped a
+function *name* and expected 3 call sites, got 16, because `grep -c` counts lines mentioning the
+name including doc comments. Harmless only because the number came back too large. It was caught
+because the expected value had been written down **before** the command ran — which is the
+whole technique, and costs one word.
+
 ## Tests added
 
 None, and none is possible from inside the arming session: the state under test is *another

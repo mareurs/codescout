@@ -14,6 +14,20 @@ pub enum RefKind {
     FileSymbol,
     ModulePath,
     Link,
+    /// A 16-hex librarian artifact id, as written in prose: `` `3f3b9e3334bb9e3d` ``.
+    ///
+    /// Unlike every sibling, this one does not resolve against the filesystem —
+    /// `id = sha256(abs_path)`, so the id IS the path, hashed, and the only thing
+    /// that can answer whether it still names something is the catalog. That is why
+    /// [`resolver::ResolveCtx`] carries a set of live ids rather than the resolver
+    /// reaching for a file.
+    ///
+    /// It exists because archiving re-keys an artifact, orphaning every citation of
+    /// the old id **silently**: the token stays well-formed, so nothing looks wrong
+    /// until someone dereferences it. `link_scan` already classifies these
+    /// (`link_scan::extract::CitationKind::ArtifactId`) and gates nothing; this
+    /// linter gates CI and could not express the reference at all.
+    ArtifactId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +80,19 @@ pub enum Verdict {
     /// Basename fallback matched more than one file. The reference is not
     /// broken per se, but it's ambiguous — the doc should specify the path.
     AmbiguousBasename,
+    /// A 16-hex artifact id that the catalog no longer resolves.
+    ///
+    /// Almost always an archive move: `id = sha256(abs_path)`, so
+    /// `doc(action="move")` re-keys the artifact and every citation of the old id
+    /// goes dead without changing shape.
+    ///
+    /// Deliberately lands in the **`Med`** band in [`severity::default_severity`]
+    /// rather than beside `Missing`, so the check reports before it gates. The live
+    /// corpus held 110 of these in 41 files the day it shipped, and the job it runs
+    /// in gates at `--fail-on high`. Tightening to `High` is a one-arm change, and
+    /// it is owed once that set is reconciled — the same sequence `ci.yml` records
+    /// for this gate's own `never` → `high` move.
+    ArtifactMissing,
     Unknown,
     External,
 }
@@ -519,6 +546,27 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         matcher,
     });
 
+    // Every id the catalog currently keys, for `RefKind::ArtifactId`.
+    //
+    // FAILS OPEN, and that is the load-bearing property: `None` disables the check,
+    // whereas an empty set would mark every cited id dead and turn one unreadable
+    // catalog into hundreds of confident, wrong findings on a gated job. A catalog
+    // read that did not happen must not be able to red CI.
+    //
+    // Deliberately unscoped. The catalog is machine-wide, and an id minted in a
+    // sibling repo is a LIVE id — narrowing this to the current project would invent
+    // dangling citations out of cross-repo references that resolve perfectly well.
+    let live_artifact_ids: Option<std::collections::HashSet<String>> = {
+        let cat = ctx.catalog.lock();
+        cat.conn
+            .prepare("SELECT id FROM artifact")
+            .and_then(|mut st| {
+                st.query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<std::result::Result<std::collections::HashSet<_>, _>>()
+            })
+            .ok()
+    };
+
     let resolve_ctx = resolver::ResolveCtx {
         repo_root: &repo_root,
         memory_globs: &memory_globs,
@@ -526,6 +574,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         degraded_languages: Default::default(),
         basename_index,
         gitignore,
+        live_artifact_ids,
     };
 
     let mut all_findings: Vec<Finding> = Vec::new();
@@ -1070,7 +1119,11 @@ fn bucket(verdict: Verdict) -> Bucket {
         | Verdict::SymbolMissing
         | Verdict::LineOob
         | Verdict::AnchorMissing
-        | Verdict::AmbiguousBasename => Bucket::Broken,
+        | Verdict::AmbiguousBasename
+        // Broken, not Unknown: the catalog is authoritative about its own keyspace, so a
+        // miss here is a fact rather than an absence of information. This is what makes
+        // the finding count toward `--fail-on`, which reads the bucket and not the band.
+        | Verdict::ArtifactMissing => Bucket::Broken,
         Verdict::Unknown => Bucket::Unknown,
     }
 }
