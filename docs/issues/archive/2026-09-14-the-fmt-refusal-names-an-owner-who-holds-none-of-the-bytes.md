@@ -1,7 +1,7 @@
 ---
-id: d0a73cab82b9708c
+id: 7cfeab41eec4d813
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the fmt refusal''s owner list names a session that holds none of the bytes it asks them to format'
 tags:
 - cluster/gate-keyed-on-unobservable-event
@@ -153,13 +153,21 @@ Note the ordering: the text repair is strictly safe, and the mechanism could ove
 untracked file (no HEAD copy to diff against), which is the case the script is most careful
 about elsewhere.
 
+**Implemented 2026-09-14 — option 1 only (the cheapest, safe one).** The `[LIVE] peer`
+remedy line no longer asserts the named session "can perform it"; it points the reader at
+`git diff -- <path>` to check whose bytes are actually dirty before acting on the row. The
+second option (intersecting provenance with a HEAD diff inside the script itself) is not
+built — still a judgement call for whoever owns the script, per the note above about
+untracked files.
+
 ## Tests added
 
-None — capture-on-notice record. Worth stating what a test here could and could not buy:
-asserting the remedy still names a *check* is the cheap shape-assertion `CLAUDE.md`
-§ *Testing Discipline* endorses, and it reds on deletion. Asserting the addressee can
-*perform* the action is not expressible — which is the whole content of `OB-20`.
-
+One assertion, added to the existing PEER case in `tests/fmt-mine.sh` (the same block the
+file's own note anticipated): `has "PEER remedy does not overclaim the peer can perform it"
+"$OUT" "does not guarantee they hold anything to format"`. This is exactly the cheap
+shape-assertion this section originally said a test here *could* buy — it reds on deletion
+of the corrected wording, and does not attempt to assert performability, which stays
+unverifiable per `OB-20`. `bash tests/fmt-mine.sh`: 43 passed, 0 failed.
 ## Workarounds
 
 Read `git diff -- <path>` before believing an owner list is a list of people who can act. If
@@ -204,3 +212,10 @@ judgement that the other reading is wrong.
 - `scripts/file-provenance.py` — `last_commit_time`, and the window line it prints
 - `docs/trackers/observer-blindness.md` — `OB-20`, and its measured answerability ceiling
 - `docs/issues/archive/2026-09-09-the-documented-gates-first-command-rewrites-every-peers-uncommitted-rust.md` — why `fmt-mine.sh` exists at all
+
+## Fix provenance
+
+- **SHA:** `a427e90c` (experiments) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `e77c8b0ffa12f59dea75074270082b5724aa970a` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id.
