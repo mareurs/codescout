@@ -7,7 +7,60 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
+/// Refuse loudly if the binary under test was built WITHOUT the librarian, because that
+/// outage otherwise reads as the reader's own regression.
+///
+/// [`Command::cargo_bin`] resolves `target/debug/codescout` at RUN time, and `target/` is
+/// shared by every session in this checkout. Measured 2026-09-14, with the control that
+/// makes it a measurement rather than a broken probe: cargo holds
+/// `target/debug/.cargo-lock` through the BUILD phase (holder pid observed on four
+/// consecutive samples) and releases it before running tests (no holder, sampled with three
+/// `cli_doc` processes alive). So a peer's `--no-default-features` build can land in the
+/// window between THIS lane's build and THIS lane's execution, **however either session
+/// orders its lanes** — which is why the gate's ordering rule cannot close it and why no
+/// amount of compliance by anyone helps.
+///
+/// Without this, the failure is 13 assertion failures on `unrecognized subcommand 'doc'`,
+/// reading as a feature-gating regression in whatever the reader just committed. The one
+/// test that looks like it would catch it —
+/// [`the_old_artifact_subcommand_is_gone`] — keeps PASSING, because its absence assertion is
+/// monotone under losing the whole verb set rather than just the old verb.
+///
+/// **This does not prevent the race and is not meant to.** It converts an outage that reads
+/// as a regression into an outage that reads as an outage — the `IC-12` remedy shape.
+/// Closing it requires the shared mutable path to stop existing (a per-session
+/// `CARGO_TARGET_DIR`), which is an operator decision and not a test's to make.
+///
+/// Called per `run_cmd` rather than once via a `OnceLock`, deliberately: the replacing write
+/// can land mid-run, so a one-shot check at suite start would pass and leave every later
+/// test exactly as confusing as before. It costs one extra spawn of a fast subcommand.
+///
+/// `cluster/transient-shared-state-lies-to-readers` —
+/// `docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md`
+fn assert_binary_advertises_doc() {
+    let out = Command::cargo_bin("codescout")
+        .unwrap()
+        .args(["doc", "--help"])
+        .output()
+        .expect("the codescout binary must be runnable");
+    assert!(
+        out.status.success(),
+        "the binary at target/debug/codescout does not advertise `doc`, so it was built \
+         WITHOUT the librarian feature. THIS IS ALMOST CERTAINLY NOT YOUR DIFF.\n\
+         `target/` is shared across every session in this checkout, and cargo releases its \
+         build lock before running tests, so a peer's `cargo test --no-default-features` can \
+         replace the binary while these tests are executing.\n\
+         REPAIR, which you can perform alone and which is also the cheapest discriminator: \
+         re-run `cargo test --test cli_doc`. The window is minutes. If it reds a second time \
+         with this same message, the binary on disk really is librarian-less — rebuild it \
+         with `cargo test --workspace`.\n\
+         binary stderr: {}",
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
+}
+
 fn run_cmd(tmp: &TempDir) -> Command {
+    assert_binary_advertises_doc();
     let mut cmd = Command::cargo_bin("codescout").unwrap();
     let db = tmp.path().join("cat.db");
     let ws = tmp.path().join("workspace.toml");

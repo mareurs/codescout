@@ -1,8 +1,9 @@
 ---
 kind: bug
-status: open
+status: taken
 tags:
 - cluster/transient-shared-state-lies-to-readers
+claimed_by: f0b1a4c7-e991-4478-bf22-b088483b6821
 closed: null
 opened: 2026-09-14
 owner: marius
@@ -139,9 +140,36 @@ three distinct sessions.
 - *"A stale test binary."* Falsified by the error text — `unrecognized subcommand 'doc'` is the
   shipped binary's own clap output, not a test-harness artifact.
 
-### OPEN — is the window build→run inside ONE lane, rather than lean→default across two?
+### SETTLED 2026-09-14 — the window IS build→run inside ONE lane. `aa272bed` was right.
 
-Raised by `aa272bed` and **not settled**, recorded here rather than resolved by plausibility.
+Raised by `aa272bed` and left open here. Settled by measurement, by a different route than the
+one this section proposed — the proposed route (stamp the binary's mtime around a default lane)
+is opportunistic and needs a peer to write during the window; the lock itself is observable
+directly and needs nobody's cooperation.
+
+**Cargo holds `target/debug/.cargo-lock` through the BUILD phase and releases it before running
+tests.** Sampled with `lsof -t`:
+
+| phase | sample | `lock_holders` |
+|---|---|---|
+| `cli_doc` **run** (3 test processes alive) | 3 consecutive | `[]` |
+| `cargo check --workspace` **build** (control) | 4 consecutive | `[3353947]` |
+
+**The control is what makes the empty result a measurement rather than a broken probe** — without
+it, `lsof` returning nothing is indistinguishable from `lsof` not seeing flock holders at all.
+Confirmed a third time, independently and by accident: a later `cargo test --test cli_doc` printed
+`Blocking waiting for file lock on build directory` while a peer's cargo held it.
+
+**So the exposure is not "a peer who ran a lean lane recently".** Any peer cargo can take the lock
+and replace `target/debug/codescout` *at any instant inside your own run phase*. A peer following
+the gate **perfectly** still writes a librarian-less binary to the shared path once, mid-sequence,
+and your `cli_doc` can execute in that instant. **Their compliance cannot help you and neither can
+yours** — which is what makes *"provided both lanes actually run"* a condition every party
+satisfies while the guarantee fails.
+
+One consequence worth stating because it reads backwards: `cli_doc` declares
+`required-features = ["librarian"]`, so the **lean lane never runs it**. The lean lane only ever
+WRITES the hazard; only a default lane can READ it.
 
 `cargo test` builds, then runs. This session's default lane built a librarian-bearing binary and
 executed `cli_doc` ~86s later against a librarian-less one. If the vulnerable interval is
@@ -154,29 +182,52 @@ correctly.
 rather than through `CARGO_BIN_EXE_*`, so cargo offers no freshness guarantee between the build and
 the execution. That is consistent with the refinement and does not establish it.
 
-**What would settle it:** whether anything wrote `target/debug/codescout` between this lane's build
-and its `cli_doc` execution. **That evidence is gone** — the file's mtime had been overwritten by
-12:46:13 when the question was asked. It is answerable prospectively, by stamping the binary's mtime
-immediately before and after a default lane, and not retrospectively from this incident.
+**What settled it:** not the mtime stamp proposed here — that needs a peer to write inside the
+window and is therefore opportunistic. Observing the lock directly answers the same question
+deterministically, needs no cooperation, and took one command plus its control.
 
 One adjacent observation, which supports concurrency generally and the refinement not at all:
 `target/debug/codescout` was written at **12:46:13**, six minutes after this session's last lane
 ended at 12:40:00, by a session this one cannot name.
 ## Fix
 
-None yet. Three directions, none costed:
+**MITIGATED, not fixed — direction 2 shipped, and the distinction is the point.** The race is
+untouched; what changed is that it now reads as what it is.
 
-1. **Isolate the resource** — a per-session `CARGO_TARGET_DIR`. Removes the class outright; costs
-   disk and every session's warm-cache rebuild.
-2. **Make the reader assert what it got** — have `cli_doc` check the binary advertises `doc` and
-   emit *"this binary was built without the librarian; another session's lean lane is mid-flight"*
-   instead of 13 assertion failures. Does not prevent it; converts an outage that reads as a
-   regression into an outage that reads as an outage, which is the IC-12 remedy shape.
-3. **State the premise in CLAUDE.md.** Cheapest and weakest: the guarantee is currently read as
-   unconditional-given-compliance, and a reader who hits this concludes their own diff broke the
-   build. Note that the sentence is pinned byte-for-byte by
-   `claude_md_gate_lists_its_four_commands_in_the_load_bearing_order` (`src/prompts/mod.rs`), so
-   editing it moves that test too.
+**2. Shipped.** `assert_binary_advertises_doc()` in `tests/cli_doc.rs`, called from `run_cmd` —
+the single chokepoint all 15 tests route through. It runs `codescout doc --help` and, on failure,
+refuses with a message naming the shared-`target/` cause and a repair the reader can perform
+alone.
+
+*Observed RED, end-to-end, in an isolated `CARGO_TARGET_DIR` so nothing shared was armed:* built
+the test target WITH `librarian` and pointed it at a genuinely `--no-default-features` binary,
+which is the incident exactly. **15 of 15 fail and all 15 name the cause**, against the recorded
+baseline of 13 of 15 failing on raw `unrecognized subcommand 'doc'`. Going 13→15 is the
+improvement: the two that used to PASS include
+[`the_old_artifact_subcommand_is_gone`], whose absence assertion is monotone under losing the
+whole verb set — so the one test that looks like it would catch a librarian-less binary was
+structurally the one that could not.
+
+Discrimination checked in both directions rather than one: `doc --help` → **rc=2**
+(`unrecognized subcommand 'doc'`) on the lean binary, **rc=0** on the librarian-bearing one.
+
+**Called per `run_cmd`, not once behind a `OnceLock`** — now that the window is known to be
+build→run, the replacing write can land *mid-suite*, and a one-shot check at suite start would
+pass and leave every later test as confusing as before.
+
+**1. Still the only closure, and it is an operator decision rather than a test's.** A per-session
+`CARGO_TARGET_DIR` removes the shared mutable path outright. Two costs now measured rather than
+asserted: an isolated **debug** target for this crate cost **3.7 G** and a 48 s cold build
+(measured here today while reproducing), and a prior session measured the **release**/worktree
+form at 87 s + 2.8 G once, then **11 s per run — faster than the shared tree**, because the shared
+`target/` is 108 G and contended. So *"costs disk and every session's warm-cache rebuild"* is real
+on disk and **falsified on time**. Not actioned here: it changes every session's environment and
+belongs to the operator.
+
+**3. Retired as insufficient.** Stating the premise in `CLAUDE.md` cannot help when no behaviour
+change by any party closes the window — which is now measured, not argued. It has been written
+anyway (the `CLAUDE.md` gate-order bullet now carries it), and it is worth having for the reader
+who hits this; it is simply not a fix.
 
 ## Attribution
 
