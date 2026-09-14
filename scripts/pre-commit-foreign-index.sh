@@ -117,7 +117,7 @@ me="${CLAUDE_CODE_SESSION_ID:-}"
 # with P.txt and Q.txt both staged, `git commit -- Q.txt` builds a temp index whose
 # `git diff --cached --name-only` is Q.txt ALONE. The temp index holds only the named
 # paths, so the loop below never sees P.txt and the false-positive case cannot arise.
-# docs/issues/2026-09-02-a-pathspec-commit-does-capture-staged-content-and-both-guards-stand-down.md
+# docs/issues/archive/2026-09-02-a-pathspec-commit-does-capture-staged-content-and-both-guards-stand-down.md
 idx="${GIT_INDEX_FILE:-}"
 pathspec=0
 case "${idx##*/}" in

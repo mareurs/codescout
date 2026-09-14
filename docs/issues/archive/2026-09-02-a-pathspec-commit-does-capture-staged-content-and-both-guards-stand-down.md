@@ -1,11 +1,11 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/gate-keyed-on-unobservable-event
 - git-hooks
 - shared-checkout
-closed: null
+closed: 2026-09-14
 opened: 2026-09-02
 owner: marius
 related: []
@@ -87,27 +87,56 @@ guard that looks is asking a different question. Neither errs; both pass.
 
 ## Fix
 
-Plan, not yet implemented. The `next-index-*` exit should become conditional: a
-pathspec commit needs no guard for the paths it does **not** name, and needs one for
-the paths it does. The check is available — intersect the commit's named paths with
-the stage-log rows for the **staged blob** of each (see below), and refuse when a
-named path's staged entry belongs to another session.
+**Fixed** — `93b30111` on `experiments`, patch-id `17e3f8ea697573b65e8c4b9f00d0abff064ccebd`.
+Change lives in `scripts/pre-commit-foreign-index.sh` (the `next-index-*` block and the
+refusal message) and `tests/hooks-discrimination.sh` § 1.
 
-**Query by blob, never by path** — `prompt-surface-headline` aside, this is
-`prompt-surface-measurement-session-log:F-51`: the log carries one row per blob a
-path has held, and a path-keyed lookup returns `retained` pre-image rows that read
-as current.
+**The plan above overestimated the work, and the reason is worth keeping.** It proposed
+intersecting the commit's named paths with stage-log rows keyed by staged blob. No such
+intersection was needed: **the temp index already contains exactly the named paths**
+(verified — with `P.txt` and `Q.txt` both staged, `git commit -- Q.txt` yields a temp index
+whose `git diff --cached --name-only` is `Q.txt` alone), and the guard's existing loop
+already reads `git diff --cached --raw`, which honours `GIT_INDEX_FILE`, and already keys
+the lookup by `(blob, path)`. So the plan's *"query by blob, never by path"* was already
+satisfied by shipped code. The fix DELETED a stand-down rather than adding a check.
 
-Also fix the comment at `:95-97`. A false premise stated confidently above a
-`exit 0` is worse than no comment, because it answers the next reader's question
-before they form it.
+**What did need building was the message, and it was not in the plan at all.** The bare
+form's remedy is *"commit by pathspec"*. Making the guard fire on pathspec commits without
+touching the text would have printed that to someone whose pathspec commit had just been
+refused — routing them back into the failure, which is how `--no-verify` gets taught. The
+`next-index-*` discriminator is therefore **kept, with its meaning inverted**: it now
+selects the remedy branch instead of standing the guard down. The pathspec branch says the
+contested path cannot be narrowed away, offers the remaining paths if any, routes to the
+owner, and warns against `git checkout` / `git stash` on that path — their work is in the
+working tree and uncommitted, so discarding it is worse than the mislabelling.
 
+The comment at `:95-97` is replaced: the false premise is quoted, marked false, and the
+measurement that refutes it recorded inline.
 ## Tests added
 
-None yet. `tests/hooks-discrimination.sh` is the right home — it already covers all
-four arms of the sequencer stand-down, and the missing case is *"pathspec commit
-naming a path another session staged → refuses"*.
+`tests/hooks-discrimination.sh` § 1 — five cases, four loud and one silent:
 
+- `pathspec capturing a peer's path -> refuse`
+- `pathspec refusal names the captured path`
+- `pathspec refusal does not prescribe the refused form` — asserts the REMEDY, not the
+  predicate; no assertion about *who* is refused would have caught the wrong text
+- `pathspec refusal warns against discarding their work`
+- `pathspec naming only my own path -> silent` — the discrimination, without which the four
+  above pass against a guard that refuses unconditionally
+
+**A pre-existing test was renamed, and that is itself part of the fix.** `pathspec commit ->
+silent` pointed `GIT_INDEX_FILE` at a **nonexistent** file, so it exercised an empty index
+and passed identically before and after this change. Its name read as a general claim about
+pathspec commits and was cited as one. Now `empty pathspec index -> silent`, annotated as
+inert so nobody credits it with coverage it does not provide.
+
+**RED observed by mutating the production path**, in a copied tree so the shared checkout
+was never mutated: restoring `exit 0` reds 4 of the 5 new assertions plus one pre-existing
+one. Both silent controls stay GREEN under that mutation — which is what shows the new
+cases discriminate rather than merely track the change.
+
+Gate: fmt 0, clippy 0, lean 0, default 0, read from the markers rather than the run's exit
+code; 9777 passed, 92 ignored. `hooks-discrimination`: 101 passed, 0 failed.
 ## Workarounds
 
 Before a pathspec commit, check that no named path is staged by someone else:
@@ -123,12 +152,12 @@ Any id that is not yours means that path's staged content is not yours to commit
 
 ## Resume
 
-Make the `next-index-*` exit at `scripts/pre-commit-foreign-index.sh:99-102`
-conditional on the intersection described under *Fix*, and add the
-`tests/hooks-discrimination.sh` case. Do not widen it to refuse every pathspec
-commit — that would fire on ordinary sequential work by one session, which is the
-failure mode the sequencer stand-down was written to avoid.
+N/A — fixed and archived.
 
+One thing deliberately NOT done, so nobody reads its absence as an oversight: the sibling
+`pre-commit-unreviewed-content.sh` was left alone. It covers the INTRA-path axis (the
+working tree moving under a pathspec commit after you staged) and that axis was never
+broken. § 4 of the suite states the division; this fix restores the CROSS-path axis only.
 ## References
 
 - `scripts/pre-commit-foreign-index.sh:95-102` — the premise and the exit

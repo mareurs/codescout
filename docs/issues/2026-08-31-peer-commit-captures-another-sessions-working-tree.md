@@ -495,7 +495,7 @@ trailer; the captured side by the harness making the session id a path component
 Neither side was reconstructed from a commit range.
 
 **`ffb95976` has captured this same file before, by this same mechanism.**
-`docs/issues/2026-09-02-a-pathspec-commit-does-capture-staged-content-and-both-guards-stand-down.md`
+`docs/issues/archive/2026-09-02-a-pathspec-commit-does-capture-staged-content-and-both-guards-stand-down.md`
 records `cffc3cf2` — *"a pathspec commit, `Session-Id: ffb95976`"* — taking three staged citation
 re-points from `docs/trackers/bug-fix-session-log.md`, and that bug file exists because of it. Two
 occurrences, same session, same file, same route: a pathspec commit naming a shared ledger commits

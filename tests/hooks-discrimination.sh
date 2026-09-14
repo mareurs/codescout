@@ -134,7 +134,7 @@ has "empty pathspec index -> silent" \
 # is a peer's whenever a peer is editing that file. The guard exited 0 here until
 # 2026-09-14 on the premise that it could not, and the case above is why that went
 # unnoticed: an empty index passes whether the guard works or is deleted.
-# docs/issues/2026-09-02-a-pathspec-commit-does-capture-staged-content-and-both-guards-stand-down.md
+# docs/issues/archive/2026-09-02-a-pathspec-commit-does-capture-staged-content-and-both-guards-stand-down.md
 cp .git/index .git/next-index-2.lock
 pout="$(CLAUDE_CODE_SESSION_ID="$A" GIT_INDEX_FILE=".git/next-index-2.lock" \
     bash "$SRC/pre-commit-foreign-index.sh" 2>&1; echo "EXIT=$?")"
