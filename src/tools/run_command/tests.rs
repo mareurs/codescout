@@ -2635,20 +2635,29 @@ fn run_command_format_compact_test_result() {
 /// `CLAUDE.md` § *Testing Discipline*: "a field this function does not read reaches
 /// nobody". Every other test for this fix asserts about the summarizer's return value,
 /// which is upstream of this and identical whether the key arrives or not.
+///
+/// The absence is checked BEFORE the value, and that ordering is load-bearing: written
+/// as `rebuilt["stderr"].as_str().unwrap()` the mutation panics on `unwrap` at this
+/// line and the explanatory message never renders, so the failure says
+/// `called Option::unwrap() on a None value` — true, and silent about which field went
+/// and why anyone cares. Measured when the mutation below was first run.
 #[test]
 fn rebuild_buffered_summary_preserves_the_test_envelopes_stderr() {
+    let verdict = "mutation-probe: INCONCLUSIVE — the runner selected 0 tests\n";
     let raw = json!({
         "type": "test",
         "exit_code": 0,
         "passed": 0,
-        "stderr": "mutation-probe: INCONCLUSIVE — the runner selected 0 tests\n",
+        "stderr": verdict,
     });
     let rebuilt = crate::tools::run_command::output::rebuild_buffered_summary(raw, "@cmd_abc123");
-    assert_eq!(
-        rebuilt["stderr"].as_str().unwrap(),
-        "mutation-probe: INCONCLUSIVE — the runner selected 0 tests\n",
-        "the verdict must survive the field reordering; got {rebuilt}"
+    let got = rebuilt["stderr"].as_str();
+    assert!(
+        got.is_some(),
+        "rebuild_buffered_summary dropped the `stderr` key, so a wrapper's verdict cannot \
+         reach the caller even though the summarizer emitted it; got {rebuilt}"
     );
+    assert_eq!(got.unwrap(), verdict);
     assert_eq!(rebuilt["output_id"], "@cmd_abc123");
 }
 
