@@ -469,7 +469,7 @@ fn ls_files_index_stages_collapse_to_one_path_per_file() {
 /// the mechanism column carries digits of its own (`**10 share one layer**`), so a
 /// scan-for-a-number parser would return a plausible wrong value rather than failing.
 ///
-/// Pure over `text` so [`the_index_row_parser_discriminates`] can feed it a table whose right
+/// Pure over `text` so [`the_index_count_parser_discriminates`] can feed it a table whose right
 /// answers are known — a parser that only ever runs against the live file cannot be shown to
 /// read the right cell.
 fn parse_index_counts(text: &str, valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
@@ -1548,7 +1548,7 @@ fn the_hook_script_agrees_on_the_cluster_parsers() {
 ///
 /// **Vacuity.** This is an absence assertion and is monotone under parser failure — a
 /// [`parse_index_counts`] that matched nothing would pass it green forever. What stands against
-/// that is [`the_index_row_parser_discriminates`], which feeds a fixture with known answers and
+/// that is [`the_index_count_parser_discriminates`], which feeds a fixture with known answers and
 /// proves the parser still finds a count that IS there. Its sibling
 /// [`every_declared_class_has_an_index_row`] separately proves the rows are still being parsed
 /// at all, over a count-free parser, so a table that stopped matching cannot hide here.
@@ -1624,7 +1624,7 @@ fn index_rows_with_extra_cells(text: &str) -> Vec<(String, String)> {
 /// [`index_rows_with_extra_cells`] that matched nothing passes forever. Two existing guards stand
 /// against that and are reused rather than reimplemented: [`every_declared_class_has_an_index_row`]
 /// asserts more than ten rows still parse off the same `| IC-` anchor, and
-/// [`the_index_row_parser_discriminates`] proves that parser is not vacuous. The second assertion
+/// [`the_index_count_parser_discriminates`] proves that parser is not vacuous. The second assertion
 /// here covers the other direction — a header that still advertises the column.
 ///
 /// The fenced template block in the Index file carries no specimen `| IC-` row (verified at
@@ -2136,7 +2136,7 @@ fn the_hook_script_reads_stdin_as_utf8_whatever_the_locale_says() {
 /// taking any numeric cell in the row (`42` sits one column past the count), and treating a
 /// non-`IC-` line that happens to mention a slug as a row.
 #[test]
-fn the_index_row_parser_discriminates() {
+fn the_index_count_parser_discriminates() {
     let valid: BTreeSet<String> = ["alpha-slug", "beta-slug", "gamma-slug"]
         .iter()
         .map(|s| (*s).to_owned())
@@ -2218,7 +2218,7 @@ const INDEX_ROW_FIXTURE: &str = "\
 /// Required by the porting contract in
 /// `docs/issues/archive/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md`.
 ///
-/// **This also closes a gap that predates the port.** [`the_index_row_parser_discriminates`] is
+/// **This also closes a gap that predates the port.** [`the_index_count_parser_discriminates`] is
 /// named for [`parse_index_rows`] and in fact exercises [`parse_index_counts`], so until now the
 /// count-free parser had no fixture on either side — only the live corpus, where it returns 23
 /// rows whether it reads the slug cell or merely something backticked.
@@ -2473,7 +2473,7 @@ const NOT_HOOK_OWED: &[(&str, &str)] = &[
          rewrite would get wrong",
     ),
     (
-        "the_index_row_parser_discriminates",
+        "the_index_count_parser_discriminates",
         "feeds the row parser a fixture with known answers; supports a hook-owed rule without \
          being one",
     ),

@@ -56,7 +56,7 @@ an empty population is vacuous for every member, and reads as coverage.
 
 The two parsers are **not** unguarded. `the_ledger_parsers_agree_on_a_fixture` drives both across
 the language boundary over a synthetic ledger with known non-empty answers, and
-`the_index_row_parser_discriminates` and `the_bare_n_claim_parser_discriminates` prove each is not
+`the_index_count_parser_discriminates` and `the_bare_n_claim_parser_discriminates` prove each is not
 vacuous. So the coverage exists; what is misleading is the *live-corpus* test, which reads as a
 third, independent confirmation and is not one.
 

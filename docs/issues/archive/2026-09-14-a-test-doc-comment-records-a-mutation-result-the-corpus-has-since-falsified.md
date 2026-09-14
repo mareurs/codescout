@@ -248,6 +248,6 @@ Open. Filed on notice during a peer exchange; not scheduled.
 - `07b7819c`, `81416a3e`, `9f5c1785` — the three filings that moved the corpus
 - `docs/issues/2026-09-13-two-of-three-parity-arms-compare-empty-to-empty.md` — the vacuity result
   this was wrongly extended from
-- `docs/issues/2026-09-14-the-append-entry-recipes-still-teach-the-two-call-form-the-fix-replaced.md`
+- `docs/issues/archive/2026-09-14-the-append-entry-recipes-still-teach-the-two-call-form-the-fix-replaced.md`
   — § Fix, where the withdrawn claim was recorded and then flipped
 - `bug-fix-session-log:F-146` — the peer's entry, corrected in place by its author

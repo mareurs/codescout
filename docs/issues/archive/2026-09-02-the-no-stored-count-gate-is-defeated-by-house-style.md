@@ -140,7 +140,7 @@ corpus evidence that the house style already wraps prose rather than tokens.
 `no_class_field_states_a_bare_n` is an absence assertion, so it is monotone under parser
 failure: a `bare_n_values` matching nothing yields an empty list and passes green
 forever. The two fixture-driven discriminators — `the_bare_n_claim_parser_discriminates`
-and `the_index_row_parser_discriminates` — were deliberately kept when those assertions
+and `the_index_count_parser_discriminates` — were deliberately kept when those assertions
 inverted, precisely to stand against that, and they do that job: they run over
 adversarial fixtures with known answers and prove the parser **can** find a bare `n=`
 that is there.

@@ -6,7 +6,7 @@ tags:
 - librarian
 - trackers
 - shared-checkout
-closed: null
+closed: 2026-09-14
 opened: 2026-09-14
 owner: marius
 related: []
@@ -24,9 +24,11 @@ append, then add the row in a later call — and none mentions the parameters. S
 the recipe, and every one of them reproduces the interval the fix was built to remove.
 
 **The schema is NOT one of the stale surfaces, and saying so is load-bearing.** `append_entry`'s
-served tool description carries both parameters, their both-or-neither coupling and their failure
-mode, and did so in both affected sessions' context throughout. This is not a documentation gap;
-it is a **worked example outranking a schema at call-composition time**. See § Root cause — a
+served tool description carries both parameters and their failure mode, and did so in both
+affected sessions' context throughout. This is not a documentation gap; it is a **worked example
+outranking a schema at call-composition time**. (It also claimed the two were *both-or-neither*;
+that half was false and is retracted in § *Root cause* — `index_row` alone succeeds when the
+artifact declares a `snapshot_anchor`.) See § Root cause — a
 reader who fixes the three recipes without learning that could reasonably conclude the parameters
 were undocumented.
 
@@ -110,12 +112,27 @@ duplicates a parser on purpose and *"this test is what stops it becoming drift."
 is the same duplication with no such test, and fixing the three recipes below does not address it:
 the next skill to ship an example acquires the liability on day one.
 
-**WHICH SURFACE TO TRUST WHEN THEY DISAGREE — and the tell is cheap, because "diff every example
-against its schema" is not a thing anyone will do.** When a recipe and a schema name the same
-call and **the recipe uses FEWER parameters, prefer the schema**: it is generated from the code,
-the recipe is not. Stated here because a reader who fixes the three recipes and never learns the
-schema was right could reasonably conclude the parameters were undocumented — they were not, and
-the archived fix's own worked example used them.
+**WHICH SURFACE TO TRUST WHEN THEY DISAGREE — RETRACTED 2026-09-14, and the retraction cost more
+than the claim was worth.** This section said: when a recipe and a schema name the same call and
+the recipe uses FEWER parameters, **prefer the schema, because it is generated from the code**.
+The second half is **false**. The served schema is a **hand-written literal** in
+`src/librarian/tools/artifact.rs`, a few lines above the arms it describes, with nothing coupling
+it to them — so it decays exactly like a recipe **while carrying a generated one's authority**,
+which is strictly worse than a surface that admits it is prose.
+
+Measured: the coupling this file kept citing as the schema's virtue — *"both-or-neither"* — was
+itself already false. `append_entry.rs`'s `(Some(row), None)` arm defers to the artifact's own
+`snapshot_anchor` frontmatter, so `index_row` alone **succeeds**; only the reverse half is
+refused. One session read the rule above, believed it, and propagated `both-or-neither` into four
+prescriptive surfaces across two repos in an afternoon — including the failure text of the guard
+added that same day to stop recipe drift (`context-injection-session-log:F-10`). Raised by
+sessionId `aa272bed-…`, who found it from the code side and pinned it with
+`index_row_description_names_every_way_to_anchor_a_row`.
+
+**What survives is the RANK finding, which never depended on it:** a worked example outranks a
+schema at call-composition time. What does not survive is any rule of the form *trust surface X
+over surface Y* — the right question is which surface has a test coupling it to the arms, and on
+2026-09-14 the answer was **neither**.
 
 **On the class:** `cluster/doc-contradicted-by-code` fits the *recipe* half — a recipe teaching a
 superseded form denies a capability the code has. It does **not** describe the rank half, and no
@@ -209,6 +226,17 @@ on an omission, not a subset — but hand-picked: a human had to know *"index ro
 trigger phrase. Deriving the trigger from the schema's own declared coupling generalises to
 every coupled pair without anyone choosing phrases, and carries a *"say why"* escape, which is
 the forcing function `NOT_HOOK_OWED` already uses in this repo.
+
+**CEILING, added 2026-09-14 after the premise was falsified.** That gate takes the schema's
+*declared* coupling as ground truth, and this very pair proves a declared coupling can be
+**false**: the description said `index_row` and `index_after_line` were both-or-neither long
+after `append_entry.rs`'s `(Some(row), None)` arm began deferring to `snapshot_anchor`. So the
+gate would have enforced a coupling that does not exist — propagating the schema's error into
+every recipe instead of catching drift. **It checks agreement between two hand-written surfaces,
+not either one against the arms**, which is the same shape as the parser-parity precedent it was
+built to improve on. The missing test is the one `aa272bed-…` actually wrote:
+`index_row_description_names_every_way_to_anchor_a_row`, which asserts the DESCRIPTION against
+the behaviour, and it is a different instrument from anything proposed here.
 
 **Both of the precedent's failure modes are real, and one is verifiable in a single command.**
 `python3 scripts/pre-commit-ledger-counts.py --source=worktree --json` returns

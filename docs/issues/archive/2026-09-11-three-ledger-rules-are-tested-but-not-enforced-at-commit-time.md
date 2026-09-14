@@ -101,12 +101,13 @@ files confirmed byte-identical by `sha256sum -c`.
 
 - `the_hook_script_agrees_on_the_index_row_scan`, fixture `INDEX_ROW_FIXTURE` (a mini-ledger, so
   `valid` is derived from the fixture rather than the live corpus).
-- **Closes a gap that predates the port:** `the_index_row_parser_discriminates` is named for
-  `parse_index_rows` and in fact exercises `parse_index_counts`, so the count-free parser had no
-  fixture on either side — only the live corpus, where it returns 23 rows whether it reads the
-  slug cell or merely something backticked. **The misleading test name is still there** and is
-  the one loose end this bug leaves; renaming it touches `NOT_HOOK_OWED` and was judged out of
-  scope rather than forgotten.
+- **Closes a gap that predates the port:** `the_index_count_parser_discriminates` exercises
+  `parse_index_counts`, so the count-free `parse_index_rows` had no fixture on either side — only
+  the live corpus, where it returns 23 rows whether it reads the slug cell or merely something
+  backticked. **That fixture's NAME was the one loose end this bug left:** it was named for the
+  row parser while exercising the count one, and renaming it touches `NOT_HOOK_OWED`, so it was
+  judged out of scope here rather than forgotten. Closed later the same day on an operator
+  go-ahead — the name above is current, and the `NOT_HOOK_OWED` entry moved with it.
 
 | mutation | kill |
 |---|---|
