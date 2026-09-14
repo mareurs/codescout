@@ -1033,7 +1033,7 @@ def main() -> int:
     # Mirrors `the_index_file_holds_no_class_sections`. Ported 2026-09-14; until then it was a
     # Rust-only rule, so a commit that left the section behind passed the commit path and redded
     # `cargo test --test issue_clusters` for every other session sharing the checkout.
-    # docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md
+    # docs/issues/archive/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md
     #
     # Placed above CHECK 3 for the reason CHECK 4 gives: CHECK 3 exits early on three paths, so
     # anything below it is unreachable on most commits.
@@ -1076,7 +1076,7 @@ def main() -> int:
     # Mirrors `every_declared_class_has_an_index_row`. Ported 2026-09-14 from the same bug file as
     # CHECK 5; until then the hook parsed Index rows only for COUNTS and had no count-free row
     # parser, which is the whole reason this one lagged.
-    # docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md
+    # docs/issues/archive/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md
     #
     # Reads the CONCATENATION, unlike CHECK 5 above: `**Slug:**` declarations live in the per-class
     # files and the rows live in the Index, so this rule is the one place that needs both halves.
@@ -1121,7 +1121,7 @@ def main() -> int:
     # CHECK 7 -- no `**Mechanism status:**` is a bare verdict.
     #
     # Mirrors `no_mechanism_status_is_a_bare_verdict`, the last of the three this bug file names.
-    # docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md
+    # docs/issues/archive/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md
     #
     # NOT a truth check -- nothing can gate whether a sentence about the code is true. What a gate
     # CAN require is that the sentence carry a route back to the thing it describes, so a reader

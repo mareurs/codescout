@@ -130,10 +130,13 @@ up three more diverging rules**: `every_declared_class_has_an_index_row`,
 `the_index_file_holds_no_class_sections`, `no_mechanism_status_is_a_bare_verdict`. All three are
 corpus invariants a single commit can break, and none is in the hook. They carry
 `OWED, not yet implemented` and name
-`docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md` rather
+`docs/issues/archive/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md`
+rather
 than a false `exempt`, which would close the question. A declared divergence pointing at a tracked
 bug is not the silence this file is about — but it is not closure either, and the distinction is
-why that bug exists rather than a comment.
+why that bug exists rather than a comment. **All three were ported 2026-09-14 (`05cda53e`,
+`05dc2a4a`, `47f31b1c`), so the divergence this file made visible is now closed rather than
+merely declared.**
 
 **The rename was done, and § Fix's prohibition is why it was safe to do.** That prohibition is
 against renaming *alone* — it would remove the surface a reader wrongly trusts without closing
@@ -182,9 +185,10 @@ test and reports `0 passed; N filtered out` with **exit 0**.
 
 Fixed and archived. Two threads continue elsewhere:
 
-- `docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md` — the
-  three rules the new declaration exposed. Read it with this file: closing this one without that
-  one would read as the divergence being gone rather than merely visible.
+- `docs/issues/archive/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md` — the
+  three rules the new declaration exposed, **all three ported and that bug archived 2026-09-14**.
+  Read it with this file: closing this one without that one would read as the divergence being
+  gone rather than merely visible.
 - `docs/issues/archive/2026-09-11-edit-file-reads-a-keyword-in-prose-as-a-symbol-definition.md` — filed
   while writing the hook's new check, whose comment could not be written through `edit_file`
   because the prose contains the word `class`. Fixed 2026-09-12 in `c9c03a74`; archived, hence

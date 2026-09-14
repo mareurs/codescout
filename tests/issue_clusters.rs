@@ -1227,7 +1227,7 @@ const MECHANISM_BASIS_FIXTURE: &str = "\
 /// cannot reach.
 ///
 /// Required by the porting contract in
-/// `docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md`.
+/// `docs/issues/archive/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md`.
 ///
 /// **Two arms, because the halves fail in different directions.** A broken SCAN over-collects
 /// (the fenced specimen) or under-collects, and a broken PREDICATE mis-classifies what it is
@@ -1752,7 +1752,7 @@ fn the_index_mechanism_scan_discriminates() {
 /// The hook script's column-count scan agrees with this one, on a fixture the corpus cannot reach.
 ///
 /// Required by the porting contract in
-/// `docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md`:
+/// `docs/issues/archive/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md`:
 /// *"Each ported rule owes its own discrimination test … a fixture with a known answer fed
 /// through the PYTHON implementation, so a check that silently stops matching is not mistaken
 /// for a clean corpus. A ported rule without one converts a Rust guard into a pair where one
@@ -2022,7 +2022,7 @@ fn the_index_section_scan_discriminates() {
 /// The hook script's section scan agrees with this one, on a fixture the corpus cannot reach.
 ///
 /// Required by the porting contract in
-/// `docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md`:
+/// `docs/issues/archive/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md`:
 /// *"Each ported rule owes its own discrimination test … a fixture with a known answer fed
 /// through the PYTHON implementation, so a check that silently stops matching is not mistaken for
 /// a clean corpus. A ported rule without one converts a Rust guard into a pair where one half is
@@ -2155,7 +2155,7 @@ const INDEX_ROW_FIXTURE: &str = "\
 /// The hook script's count-free row scan agrees with this one, on a fixture the corpus cannot reach.
 ///
 /// Required by the porting contract in
-/// `docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md`.
+/// `docs/issues/archive/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md`.
 ///
 /// **This also closes a gap that predates the port.** [`the_index_row_parser_discriminates`] is
 /// named for [`parse_index_rows`] and in fact exercises [`parse_index_counts`], so until now the
