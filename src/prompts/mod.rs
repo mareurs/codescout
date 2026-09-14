@@ -2681,9 +2681,16 @@ mod tests {
     ///
     /// Mutations it must die on, all demonstrated rather than assumed:
     /// swapping the last two commands (ordering assertion), deleting the
-    /// directive line outright (the `expect` on START), and reverting step 1 to
-    /// `cargo fmt` (the GATE[0] needle) — three distinct failures, because "the gate
-    /// line is missing" must never read as "the order is fine".
+    /// directive line outright (the `expect` on START), reverting step 1 to
+    /// `cargo fmt` (the GATE[0] needle), and — added 2026-09-14 — dropping
+    /// `./scripts/gate.sh` from the head of the directive so it leads with the four
+    /// bare commands again (also START). That last one is the subtle member: the
+    /// four commands would still be present, still in the right order, and every
+    /// other assertion here would pass — while the headline once again prescribed
+    /// the form that shares `target/` and so arms the `cli_doc` window for every
+    /// other session mid-sequence. Four distinct failures, because "the gate line
+    /// is missing" must never read as "the order is fine", and "the order is fine"
+    /// must never read as "the prescribed form is safe to follow".
     #[test]
     fn claude_md_gate_lists_its_four_commands_in_the_load_bearing_order() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/CLAUDE.md");
@@ -2691,16 +2698,21 @@ mod tests {
             std::fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
 
         // Scope first — see trap 2 above.
-        const START: &str = "**Run `./scripts/fmt-mine.sh`";
+        const START: &str = "**Run `./scripts/gate.sh`";
         const END: &str = "before completing any task.**";
 
         let start = claude_md.find(START).unwrap_or_else(|| {
             panic!(
                 "CLAUDE.md has no gate directive: expected a run beginning {START:?}. \
                  The gate is the contract every session pays on every task, so if it \
-                 moved, move this test with it — do not delete it. If step 1 was reverted \
-                 to bare `cargo fmt`, that is the regression this needle exists to catch: \
-                 it rewrites every peer's uncommitted Rust."
+                 moved, move this test with it — do not delete it. Two regressions this \
+                 needle catches, and they are different: the directive was REVERTED to \
+                 lead with the four bare commands (the script is the only form that keeps \
+                 them out of the shared `target/`, so a headline without it prescribes the \
+                 form that arms the window — CLAUDE.md § Observer Blindness position 3), \
+                 or the gate line is gone entirely. If step 1 was reverted to bare \
+                 `cargo fmt`, that is GATE[0] below, not this: it rewrites every peer's \
+                 uncommitted Rust."
             )
         });
         let rest = &claude_md[start..];
@@ -2769,11 +2781,22 @@ mod tests {
         let claude_md = std::fs::read_to_string(format!("{root}/CLAUDE.md"))
             .unwrap_or_else(|e| panic!("cannot read CLAUDE.md: {e}"));
 
-        // Same scoping discipline as the sibling test: find the gate section first.
+        // Same scoping discipline as the sibling tests: find the gate section first.
         // Anchor updated 2026-09-09 with the directive's step 1 (`cargo fmt` ->
-        // `./scripts/fmt-mine.sh`); this is the "move this test with it" its own panic
-        // message asks for, and there are TWO tests anchored on that sentence, not one.
-        const START: &str = "**Run `./scripts/fmt-mine.sh`";
+        // `./scripts/fmt-mine.sh`), and again 2026-09-14 when `./scripts/gate.sh` was
+        // promoted to the head of the directive. This is the "move this test with it"
+        // its own panic message asks for.
+        //
+        // DO NOT hardcode how many tests share this anchor. Earlier revisions of this
+        // comment said TWO, then THREE, and the 2026-09-14 edit was made by a session
+        // that went by the test names it already knew and missed this one entirely --
+        // the accurate count was sitting in the sibling comment, unread. Derive it:
+        //
+        //     grep -c '\*\*Run `\./scripts/' src/prompts/mod.rs
+        //
+        // Every hit is a START anchor that must move together, in one commit, or the
+        // gate reds for everyone sharing the checkout.
+        const START: &str = "**Run `./scripts/gate.sh`";
         const END: &str = "The gate sentence above is pinned byte-for-byte by";
 
         let start = claude_md.find(START).unwrap_or_else(|| {
@@ -2848,9 +2871,10 @@ mod tests {
         let claude_md = std::fs::read_to_string(format!("{root}/CLAUDE.md"))
             .unwrap_or_else(|e| panic!("cannot read CLAUDE.md: {e}"));
 
-        // Same scoping anchors as the two sibling tests — there are now THREE tests
-        // anchored on this sentence, not two.
-        const START: &str = "**Run `./scripts/fmt-mine.sh`";
+        // Same scoping anchors as the sibling tests. For how many share this anchor,
+        // and why the number is derived rather than written down, see the comment on
+        // `claude_md_gate_section_names_the_server_stack_blind_spot_and_its_live_guard`.
+        const START: &str = "**Run `./scripts/gate.sh`";
         const END: &str = "The gate sentence above is pinned byte-for-byte by";
 
         let start = claude_md.find(START).unwrap_or_else(|| {

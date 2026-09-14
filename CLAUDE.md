@@ -6,7 +6,7 @@ You are a proficient Rust developer. You follow all known good/scalable patterns
 
 ## Development Commands
 
-**Run `./scripts/fmt-mine.sh`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test --workspace` before completing any task.** **The lean lane runs THIRD and the default one LAST, and the order is load-bearing.**
+**Run `./scripts/gate.sh`, which runs `./scripts/fmt-mine.sh`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test --workspace` in a per-session `target/`, before completing any task.** **The lean lane runs THIRD and the default one LAST, and the order is load-bearing.** Typing the four directly is still correct, and they remain the canonical statement of *what* runs and in *what order* — the script just keeps them out of the shared `target/`, which is the only thing that stops a correctly-followed gate arming the window for someone else. **That is why the script leads this line rather than sitting in a bullet below it:** the remedy has to be on the surface that creates the need for it, or compliance with the first thing a reader does still leaves the trap armed (§ *Observer Blindness*, position 3). Outside a Claude session the script exits 2 and tells you to run the four directly, which is correct for a solo checkout.
 
 Why each part, one line each. Every measurement, date and superseded form →
 [`docs/conventions/gate-ordering.md`](docs/conventions/gate-ordering.md).
