@@ -12,7 +12,7 @@ topic: context-injection
 entry_prefix:
   - F
   - W
-entry_high_water_F: 8
+entry_high_water_F: 9
 entry_high_water_W: 4
 ---
 
@@ -42,6 +42,7 @@ author to make.
 | F-6 | 2026-09-14 | high | architectural | open | The end-to-end win was the shipped guide_rearm path, not this feature — Arm A was confounded |
 | F-7 | 2026-09-14 | high | tooling | mitigated | A mutation that never applied is indistinguishable from a surviving mutant |
 | F-8 | 2026-09-14 | med | tooling | mitigated | A positive control validates the instrument, never the query |
+| F-9 | 2026-09-14 | med | plan-prose | mitigated | The fix plan's own workaround is wrong for most ledgers — an anchor is not a constant |
 
 ## Wins Index
 
@@ -1147,6 +1148,53 @@ repairs are correspondingly structural: shorten the pattern until no wrap can sp
 stop using `grep` to count at all.
 
 **Valid:** dated 2026-09-14
+
+## F-9 — The fix plan's own workaround is wrong for most ledgers — an anchor is not a constant
+
+**Valid:** dated 2026-09-14
+
+**Observed:** `docs/issues/2026-09-14-the-append-entry-recipes-still-teach-the-two-call-form-the-fix-replaced.md`
+§ Workarounds ships a copyable one-call snippet with a literal
+`index_after_line="|----|------|---------:|----------|--------|-------|"`. Running it against
+the live corpus **before** transcribing it into the three recipes — CLAUDE.md's
+*run the reproduction before reading the fix plan* — falsified it on two independent axes.
+
+**Axis 1 — the anchor is not unique, and first-match wins silently.** Measured over all 20
+`docs/trackers/*session-log.md` on 2026-09-14, worktree: the `## Index` separator is the
+**first** occurrence of its own byte string in **19 of 19** ledgers that have an Index table, so
+the F-N case is safe everywhere. The `## Wins Index` separator is **not**:
+`prompt-surface-measurement-session-log.md` uses a 3-column `|---|---|---|` for both tables and
+repeats that exact string **9 times** (`:30 :86 :406 :490 :669 :2699 :3392 :4147 :4227`). A W-N
+append anchored on it resolves to `:30` — the **F-N Index table** — and writes the Wins row there.
+No error; the entry is still created; the row is simply in the wrong table.
+
+**Axis 2 — the anchor decides POSITION, and the corpus has no convention.** `index_after_line`
+inserts *after* the match, so a separator anchor puts the new row at the table's **top**.
+`bug-fix-session-log.md` is newest-first (`F-147` at `:53`, `F-52` at `:158`) and wants that.
+`context-injection-session-log.md` and `statement-validity-session-log.md` are oldest-first and
+want the **bottom**. The snippet is correct for its author's ledger and wrong for others — which is
+invisible to whoever wrote it, because their own ledger confirms it.
+
+**Cost had it shipped as written:** the recipe replacing a silently-wrong two-call form would have
+been a silently-wrong one-call form, on a surface copied into every new ledger. The remedy in all
+three recipes is therefore not a literal but a **rule**: prefer the target table's last existing
+row, which is unique by construction because ids are, and which lands the row at the bottom.
+
+**Secondary, same reproduction:** the bug file states TAXONOMY has one stale row (`F-N`, with
+`W-N` inheriting via *"Same"*). It has **four** — `F-N` `:108`, `R-N` `:110`, `OB-N` `:118`,
+`IC-N` `:124`, the last three byte-identical (`Add the Index row after, with the returned id.`).
+The undercount came from reading the row the defect was *noticed* in rather than grepping the
+instruction.
+
+**Rests on:** the 20-ledger sweep being the whole population — `ls docs/trackers/*session-log.md`,
+not a catalog query, so a ledger outside that glob is not counted.
+
+**Severity:** med — no failed call and no data loss; it would have shipped a wrong recipe onto a
+copied surface.
+
+**Status:** mitigated — all three recipes now state both hazards, and no mechanism enforces either.
+A gate would have to key on the schema's declared both-or-neither coupling, which the bug file's
+§ Fix already argues for and which is still a proposal.
 
 ## Template for new entries
 

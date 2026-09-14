@@ -11,15 +11,31 @@
 > ```
 > doc(action="append_entry", id="<artifact id>", id_prefix="F",
 >          anchor_heading="## Template for new entries",
->          title="<one-line title>", body="**Observed:** ...")
+>          title="<one-line title>", body="**Observed:** ...",
+>          index_row="| {id} | <date> | <sev> | <cat> | open | **<title>** — … |",
+>          index_after_line="<the table line your row goes AFTER>")
 > ```
 >
-> One call, one write: the server allocates the next id, formats the
-> heading as `## F-N — <title>` (the only shape `link_scan` accepts as a
-> definition), records the ledger's high-water mark, and stamps
-> `**Valid:** dated <today>` unless your body declares a class. **Then**
-> add the Index / Wins Index row, using the id the call returned — the
-> indexes are the eval surface, the sections are the evidence.
+> One call, one write — **and the index row belongs in that same call.**
+> The server allocates the next id, formats the heading as `## F-N —
+> <title>` (the only shape `link_scan` accepts as a definition), records
+> the ledger's high-water mark, stamps `**Valid:** dated <today>` unless
+> your body declares a class, and writes `index_row` with `{id}` replaced
+> by the id it just allocated. The indexes are the eval surface, the
+> sections are the evidence. `index_row` and `index_after_line` are
+> **both-or-neither** — pass neither and you get a section with no row,
+> which is the two-call form this replaced.
+>
+> **`index_after_line` fails silently in both directions, so read the
+> table before you choose it.** It inserts after the **first** line equal
+> to what you pass: a non-unique line writes your row into the wrong
+> table, and a line that does not exist writes nothing at all and
+> allocates no id. Neither raises an error. **Prefer the target table's
+> last existing row** — unique by construction, because ids are — over
+> the `|---|---|` separator, which anchors to the table's **top** and is
+> repeated 9 times in one live ledger. Top is right for a newest-first
+> ledger like `bug-fix-session-log.md` and wrong for the oldest-first
+> ones; the corpus does not agree, so your ledger decides.
 >
 > **Do not hand-allocate ids, and do not pre-write index rows.** A max-id
 > is a fact about an instant, and a peer session in the same checkout can
@@ -28,6 +44,12 @@
 > written ahead of their sections consume the ids they name — which is why
 > codescout's `statement-validity-session-log` starts at `statement-validity-session-log:F-2`/`statement-validity-session-log:W-3`
 > rather than `statement-validity-session-log:F-1`/`statement-validity-session-log:W-1` (see `statement-validity-session-log:F-3` there).
+>
+> **`index_row` is not a pre-written row, and that warning does not reach
+> it.** The server substitutes `{id}` after allocating, in the same write
+> as the section, so no instant exists at which the row names an id the
+> section does not. The warning is about a row you type yourself ahead of
+> the append — that one still consumes the id it names.
 >
 > **`edit_markdown` is not the append path**, though it works at first.
 > This template ships without frontmatter, so a fresh copy is directly
@@ -239,9 +261,15 @@ Codified so the Index column means the same thing across sessions.
 
      doc(action="append_entry", id="<artifact id>", id_prefix="F",
               anchor_heading="## Template for new entries",
-              title="<one-line title>", body="**Observed:** ...")
+              title="<one-line title>", body="**Observed:** ...",
+              index_row="| {id} | <date> | <sev> | <cat> | open | **<t>** — … |",
+              index_after_line="<the table line your row goes AFTER>")
 
      The server allocates the id, writes `## F-N — <title>` at the ledger's
-     own level, records the high-water mark and stamps `**Valid:** dated
-     <today>` — one write. Then add the Index / Wins Index row with the id
-     it returned. Do not hand-allocate; do not pre-write the row. -->
+     own level, records the high-water mark, stamps `**Valid:** dated
+     <today>` AND writes the index row with `{id}` filled in — one write.
+     `index_row`/`index_after_line` are both-or-neither. The anchor must be
+     UNIQUE (first match wins, silently) and decides whether the row lands
+     at the table's top or its bottom — prefer the last existing row. Do
+     not hand-allocate ids; do not type the row yourself ahead of the
+     call. -->

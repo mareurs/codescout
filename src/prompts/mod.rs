@@ -2329,6 +2329,117 @@ mod tests {
         );
     }
 
+    /// The prescriptive ledger recipes must teach `append_entry`'s ONE-CALL form —
+    /// `index_row` + `index_after_line` — and never the two-call form it replaced.
+    ///
+    /// **This is a retired PROTOCOL, not a retired tool name, which is why
+    /// `reader_docs_contain_no_retired_call_forms` above walks both these files and cannot
+    /// see it.** That gate scans for names of tools that no longer exist; every call form
+    /// here names `doc(action="append_entry")`, which exists and is correct. What decayed is
+    /// the number of calls the recipe tells you to make — invisible to a name-based scan.
+    ///
+    /// `index_row` + `index_after_line` shipped 2026-09-05 (`8857b0b2`). Nine days later
+    /// three surfaces still prescribed append-then-add-the-row, and two sessions produced
+    /// three index-less entries in one ledger inside twenty minutes, then nearly captured
+    /// each other's work committing it — `git add <path>` stages whole files
+    /// (`docs/issues/2026-09-14-the-append-entry-recipes-still-teach-the-two-call-form-the-fix-replaced.md`).
+    /// The parameters were in the served tool schema throughout, so the defect was **rank,
+    /// not coverage**: a worked example is read at call-composition time and a schema is not.
+    ///
+    /// **Population: prescriptive surfaces only**, for the same reason the gate above
+    /// excludes `docs/issues/` — the bug file quotes the retired protocol as evidence, so
+    /// rooting the directory here would red permanently. Same cut, same reasoning, a
+    /// different retired thing.
+    ///
+    /// **What this CANNOT tell you, stated because both halves look stronger than they
+    /// are.** The absence half is monotone under removal — deleting the recipe outright
+    /// satisfies it — and the presence half is monotone under widening, so a sentence
+    /// reading "never pass `index_row`" satisfies that one. Paired, they catch the two
+    /// regressions that actually happened (reverting to the two-call form; dropping the
+    /// recipe) and they do **not** check the recipe is correct. Nothing here reaches
+    /// `index_after_line`'s two silent failure modes — a non-unique anchor writes the row
+    /// into the wrong table, a non-existent one writes nothing and allocates no id — which
+    /// live in prose and were themselves found by reproduction, not by a gate
+    /// (`context-injection-session-log:F-9`).
+    #[test]
+    fn prescriptive_recipes_teach_append_entrys_one_call_form() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+
+        // Matched against a lowercased copy, so these are lowercase.
+        const RETIRED_PROTOCOL: &[&str] = &["add the index row after", "then add the index"];
+        const REQUIRED: &[&str] = &["index_row", "index_after_line"];
+
+        // Both in-repo surfaces are re-served rather than merely read: the template is
+        // copied verbatim into every new ledger (including its anchor HTML comment, which
+        // reaches a reader who opens nothing else), and TAXONOMY is the one-page index
+        // CLAUDE.md tells every session to start at.
+        let mut files: Vec<std::path::PathBuf> = vec![
+            root.join("docs/templates/session-log.md"),
+            root.join("docs/TAXONOMY.md"),
+        ];
+
+        // The third surface is cross-repo and skips when the sibling checkout is absent —
+        // the pattern `companion_surfaces_reference_only_real_tools` (src/server.rs) uses.
+        // Recorded rather than shrugged at: this is the surface that produced the incident
+        // (a session was executing its worked example when it wrote the index-less entry),
+        // so CI checking two of three is a real gap whose proper home is the companion
+        // repo's own suite.
+        let skill = root
+            .parent()
+            .map(|p| p.join("claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md"));
+        match skill {
+            Some(p) if p.is_file() => files.push(p),
+            _ => eprintln!(
+                "prescriptive_recipes_teach_append_entrys_one_call_form: sibling \
+                 claude-plugins checkout not present — checking in-repo surfaces only"
+            ),
+        }
+
+        let mut bad: Vec<String> = Vec::new();
+        for p in &files {
+            let text = std::fs::read_to_string(p)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", p.display()));
+            let rel = p.strip_prefix(root).unwrap_or(p).display().to_string();
+
+            // NON-VACUITY, per file, and keyed on the subject rather than on a byte floor:
+            // a file that no longer mentions `append_entry` is no longer the recipe surface
+            // this gate claims to police, and it would satisfy every `contains` below by
+            // holding nothing at all.
+            assert!(
+                text.contains("append_entry"),
+                "{rel} never mentions `append_entry` — it is not the recipe surface this \
+                 gate names, and an emptied or moved file passes the assertions below in \
+                 silence."
+            );
+
+            let lower = text.to_lowercase();
+            for &needle in RETIRED_PROTOCOL {
+                if lower.contains(needle) {
+                    bad.push(format!("  {rel}  teaches the two-call form: \"{needle}\""));
+                }
+            }
+            for &param in REQUIRED {
+                if !text.contains(param) {
+                    bad.push(format!("  {rel}  never names `{param}`"));
+                }
+            }
+        }
+
+        assert!(
+            bad.is_empty(),
+            "{} append_entry recipe defect(s):\n{}\n\n\
+             Passed `index_row` + `index_after_line`, `doc(action=\"append_entry\")` writes the \
+             section, the ledger's high-water mark AND the index row in one `fs::write`, with \
+             `{{id}}` substituted server-side. They are both-or-neither. A recipe omitting them \
+             leaves a complete, index-less entry on disk between two calls — and `git add \
+             <path>` stages whole files, so a peer committing that ledger captures it.\n\n\
+             To MENTION the retired protocol (a migration note, a bug file quoting it), keep it \
+             out of these files: they are prescriptive and copied verbatim.",
+            bad.len(),
+            bad.join("\n")
+        );
+    }
+
     /// Retired tool names must not survive as CALL FORMS in RUNTIME strings — the text
     /// codescout hands an agent while it runs.
     ///
