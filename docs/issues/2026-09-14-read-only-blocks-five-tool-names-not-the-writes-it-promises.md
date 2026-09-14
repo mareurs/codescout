@@ -49,27 +49,35 @@ A reader takes that as an illustration.
 
 ## Reproduction
 
-**NOT RUN, deliberately — and the reason is the finding's own subject matter.** The probe is:
+**RUN 2026-09-14 — as an automated end-to-end test rather than by hand, and the substitution is
+the point rather than a compromise.**
 
-1. `workspace(action="activate", path=<any>, read_only=true)`
-2. `create_file(...)` → expect refusal (the control: proves the gate is armed)
-3. `doc(action="create", rel_path=<an existing path>)` → the discriminator. A read-only
-   refusal means the gate covers it; a *"file already exists"* validation error means the call
-   reached the tool body.
+The manual form needs a process-wide `workspace(action="activate", read_only=true)`, and this
+checkout carried **six live peer sessions** (21 sockets machine-wide) throughout. Flipping the
+default read-only would have disabled writes for all six mid-task — which is the precise hazard
+the refusal message *this bug is about* spends four lines warning against. Running the probe by
+hand would have been an instance of the class it was meant to confirm.
 
-Step 3 mutates nothing either way, which is what makes it a safe discriminator. **Step 1 is
-the problem:** activation is process-wide, and this checkout had a live peer
-(pid `2596854`, profile `~/.claude-sdd`, 20 sockets on the machine) at the time of writing.
-Flipping the default read-only under a working peer is the exact hazard
-`docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`
-records, and the refusal message this bug is about warns about it in its own text. So the claim
-here is **code-derived, not probe-derived**, and it is a two-line read of a 50-line pure
-function rather than an inference chain: `doc` and `memory` appear in neither guarded arm, and
-the final arm is `_ => {}`.
+`a_read_only_activation_refuses_an_unpinned_write_end_to_end` (`src/server.rs`) reaches the same
+two calls against a private server, through `call_tool_inner` — the dispatch every real call
+takes, not a reimplementation of it:
 
-Run the probe on a checkout with no live peer, or from a fresh server with a throwaway project
-root, and record the result here.
+1. `workspace(action="activate", path=<tmp>, read_only=true)` — asserted to succeed, or step 2
+   proves nothing.
+2. `memory(action="write", topic=…, content=…)`, **unpinned**, with **valid** params. Invalid
+   ones would be refused either way and the two outcomes would be indistinguishable.
 
+**Observed under the five-name gate (production mutated back, 2026-09-14): step 2 returned
+`"ok"`.** Not *"was not refused"* — `ok`, the memory written, into a project activated read-only
+one call earlier. That is the end-to-end symptom, and it is exactly what the manual probe would
+have shown at the cost of six peers' write access.
+
+With the fix: `is_error: true`, and the text is the write refusal naming the project —
+*"File writes are disabled: the active project is `<root>` and it was activated read-only…"*.
+
+`memory` rather than `doc` deliberately: the librarian is off under `--no-default-features`, so a
+`doc`-based probe would silently not exist in the lean lane. `memory` is core, so this runs in
+both.
 ## Environment
 
 codescout `experiments` @ `36eec498`, worktree dirty. Read at
@@ -245,32 +253,33 @@ same commit. IC-14 is safe either way: it cites the **slug**, which survives the
 
 ## Tests added
 
-Two, deliberately at different grains — a readable statement and a population guard.
+Three, deliberately at different grains — a readable statement, a population guard, and an
+end-to-end probe. **Each was mutation-tested against the PRODUCTION path**, never against its own
+inputs.
 
 - **`a_write_tool_outside_the_legacy_name_list_is_still_refused`**
-  (`src/util/path_security.rs`) — asserts `doc`, `librarian`, `memory`, `onboarding` are
-  refused. **Observed RED before the fix**, panicking on `doc`, with `1 failed; 0 passed; 5530
-  filtered out` — the filtered count is quoted because a filter matching nothing reports
-  success here (`docs/issues/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md`),
-  so a bare `ok` would not have shown the test ran.
+  (`src/util/path_security.rs`) — asserts `doc`, `librarian`, `memory`, `onboarding` are refused.
+  **Observed RED before the fix**, panicking on `doc`, with `1 failed; 0 passed; 5530 filtered
+  out` — the filtered count is quoted because a filter matching nothing reports success here
+  (`docs/issues/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md`), so a bare
+  `ok` would not have shown the test ran.
 - **`every_write_call_is_refused_under_a_write_block`** (`src/server.rs`) — walks the real
-  registry, takes each tool's own `is_write` as the oracle and each tool's own `action` enum as
-  the inputs. A name list here would drift exactly as the production list did and stay green
-  while a new write tool went unguarded, so it deliberately has none. Carries anti-vacuity
-  assertions in **both** directions: `refused >= 10` (a truncated registry cannot pass) and
-  `reads_allowed > 0` (a gate that refused reads too would strand a caller inside a read-only
-  project — the deadlock above).
+  registry, taking each tool's own `is_write` as the oracle and its own `action` enum as the
+  inputs. A name list here would drift exactly as the production list did and stay green while a
+  new write tool went unguarded, so it deliberately has none. Anti-vacuity assertions in **both**
+  directions: `refused >= 10` (a truncated registry cannot pass) and `reads_allowed > 0` (a gate
+  refusing reads too cannot pass — that regression would make `activate(read_only: false)`
+  unreachable from inside a read-only project). Under mutation it enumerated all 23 leaking
+  calls, which is where § *Blast radius* comes from.
+- **`a_read_only_activation_refuses_an_unpinned_write_end_to_end`** (`src/server.rs`) — the
+  § *Reproduction* probe, on the real dispatch path. Under mutation it returned `"ok"`: the only
+  one of the three that shows the **symptom** rather than the gate's verdict.
 
-**The population guard was mutation-tested against the PRODUCTION path, not its own inputs.**
-Reverting the arm to the five-name list turned it RED and enumerated all 23 leaking calls
-(§ *Evidence*). That is what the § *Blast radius* table is derived from — the number is a
-by-product of demanding an observed red, not a separate count.
-
-**Gate:** all four commands green in the documented order, `;`-chained with per-command exit
-codes (`FMT_EXIT=0 CLIPPY_EXIT=0 LEAN_EXIT=0 DEFAULT_EXIT=0`). The explicit echoes are not
-decoration: the gate ends in `echo`, so a chained exit status reads 0 whatever happened. Both
-new tests were read out **by name** from the default lane rather than inferred from a total, and
-both appear twice — they compile in the lean lane too, unlike librarian code.
+**The three are not redundant, and the split is the useful part.** The unit test states the claim
+readably; the population guard catches a write tool added *tomorrow*; the end-to-end test is the
+only one that would still fail if `check_tool_access` were correct but no longer *reached* from
+`call_tool_inner` — the `ListFunctions`/`ListDocs` failure mode CLAUDE.md § *Testing Discipline*
+records, where a correct implementation sat behind a passing suite that no caller reached.
 ## Workarounds
 
 Do not rely on `read_only: true` to protect catalog or memory state. It protects
@@ -278,9 +287,13 @@ Do not rely on `read_only: true` to protect catalog or memory state. It protects
 
 ## Resume
 
-**The cost of the new refusals is counted: zero documented workflows break.** § *Fix* predicted
-this would surface as new refusals in cross-repo flows. Swept the skills, plugin docs and specs
-for foreign activation followed by a write, 2026-09-14 — every one that writes already passes
+**Nothing outstanding on this bug.** Root cause addressed, three regression tests at different
+grains, each mutation-tested against production; gate green in the documented order; § *Fix
+provenance* carries the SHA + patch-id pair; the § *Reproduction* probe has been run.
+
+**The cost of the new refusals was counted before shipping: zero documented workflows break.**
+§ *Fix* predicted new refusals in cross-repo flows. Swept the skills, plugin docs and specs for
+foreign activation followed by a write, 2026-09-14 — every path that writes already passes
 `read_only=false`, and every one that does not is read-only by design:
 
 | workflow | state |
@@ -290,24 +303,17 @@ for foreign activation followed by a write, 2026-09-14 — every one that writes
 | both generated `onboarding-prompt.md` | `read_only=false` |
 | `explore-project` | `read_only: true` + *"Do NOT write or modify any files"* — the change **enforces** what its spec already instructs |
 
-The tracker-hygiene entry is the load-bearing one: `claude-plugins:docs/trackers/prompt-hamsa-audit-log.md`
-records that a foreign read-only activation already blocked a hygiene sweep's Phase 5, and the
-skill was amended to activate writable. That block was hit on a **file** tool during the ledger
-bootstrap, not on the librarian — consistent with only the five names being gated — and it means
-the one workflow that would have been affected had already adapted for a different reason.
+The tracker-hygiene row is the load-bearing one: `claude-plugins:docs/trackers/prompt-hamsa-audit-log.md`
+records a foreign read-only activation already blocking a hygiene sweep's Phase 5, and the skill
+was amended to activate writable. That block was hit on a **file** tool during the ledger
+bootstrap, not on the librarian — consistent with only the five names being gated — so the one
+workflow that would have been affected had already adapted, for a different reason.
 
 **Scope of that sweep, so the zero is readable:** grep for `read_only` across this repo's docs,
 `../claude-plugins/`, and the plugin caches. It cannot see a workflow that activates foreign and
 writes without ever writing `read_only` down — an agent improvising rather than following a
 skill. That is the residual, and it is bounded by the refusal being informative: it names the
 project and offers the pin.
-
-**Still not run:** the § *Reproduction* probe. It needs a process-wide read-only activation and
-the checkout had a live peer throughout (pid `2596854`, `~/.claude-sdd`), plus a peer holding the
-write lock for ~2 minutes mid-session. The fix is verified by **mutation** instead — stronger for
-the gate's own behaviour, weaker for the end-to-end claim: it proves the gate refuses, not that a
-real `activate(read_only=true)` session reaches that gate. Run it on a peerless checkout and
-record the result here.
 ## References
 
 - `docs/trackers/open-issue-work-queue.md` § `BL-46` — the write-root split. The 2026-09-14

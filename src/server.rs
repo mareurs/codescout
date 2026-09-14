@@ -8155,6 +8155,108 @@ mod tests {
         );
     }
 
+    /// End-to-end on the REAL dispatch path: a read-only activation must refuse an
+    /// unpinned write, not merely fail `check_tool_access`'s unit tests.
+    ///
+    /// **This exists as a test because the manual probe is unsafe on this repo, and
+    /// that is a property of the defect rather than an accident.** The bug record's
+    /// § *Reproduction* asks for `activate(read_only=true)` followed by a write.
+    /// Activation is process-wide, and this checkout carried **six live peer
+    /// sessions** when the fix landed — running it by hand would have disabled
+    /// writes for every one of them mid-task, which is the exact hazard the refusal
+    /// message itself warns about. Driving `call_tool_inner` reaches the same two
+    /// calls against a private server, costs nobody anything, and unlike a manual
+    /// probe it runs again tomorrow.
+    ///
+    /// **What makes this fail:** reverting `check_tool_access` to the five literal
+    /// tool names. `memory` is not among them, so step 2 would reach the tool body
+    /// and write the topic.
+    ///
+    /// `memory` rather than `doc` on purpose: the librarian is off under
+    /// `--no-default-features`, so a `doc`-based probe would silently not exist in
+    /// the lean lane — the vacuity CLAUDE.md § *Development Commands* warns about.
+    /// `memory` is core, so this runs in both.
+    ///
+    /// Step 2 sends VALID params. An invalid call would be refused either way and
+    /// the two outcomes would be indistinguishable; with valid params, a gate that
+    /// fails to refuse actually writes, so the assertion has something to catch.
+    #[tokio::test]
+    async fn a_read_only_activation_refuses_an_unpinned_write_end_to_end() {
+        let (_home, server) = make_server().await;
+        let browsed = tempdir().unwrap();
+        std::fs::create_dir_all(browsed.path().join(".codescout")).unwrap();
+        let root = std::fs::canonicalize(browsed.path()).unwrap();
+
+        // 1. Activate it read-only — the call the record's § Reproduction names.
+        let activate = CallToolRequestParams::new("workspace").with_arguments(
+            serde_json::from_value(serde_json::json!({
+                "action": "activate",
+                "path": root.to_string_lossy(),
+                "read_only": true,
+            }))
+            .unwrap(),
+        );
+        let activated = server
+            .call_tool_inner(
+                activate,
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(
+            activated.is_error,
+            Some(true),
+            "the activation itself must succeed, or step 2 proves nothing"
+        );
+
+        // 2. An UNPINNED write, through the same dispatch every real call takes.
+        let write = CallToolRequestParams::new("memory").with_arguments(
+            serde_json::from_value(serde_json::json!({
+                "action": "write",
+                "topic": "read-only-probe",
+                "content": "if this lands, the gate did not refuse",
+            }))
+            .unwrap(),
+        );
+        let result = server
+            .call_tool_inner(
+                write,
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        let text = result
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .unwrap_or("")
+            .to_string();
+
+        assert_eq!(
+            result.is_error,
+            Some(true),
+            "memory(action=write) is is_write=true; a read-only activation must refuse it. \
+             Got: {text}"
+        );
+        assert!(
+            text.contains("File writes are disabled"),
+            "the refusal must be the WRITE refusal, not some other failure: {text}"
+        );
+        // The refusal has to NAME the project. A session that believes it is working
+        // in one repo and is refused by another has its diagnosis in one line — and
+        // the remedy this bug's ruling prescribes is per-call pinning, which is
+        // unusable if you cannot tell which project answered.
+        assert!(
+            text.contains(&root.display().to_string()),
+            "the refusal must name the read-only project so the caller can pin past it: {text}"
+        );
+    }
+
     // `artifact` only registers with the librarian feature on.
     #[cfg(feature = "librarian")]
     #[tokio::test]
