@@ -2069,6 +2069,57 @@ mod tests {
             );
         }
     }
+    /// The `tracker-conventions` guide must state every token `doctor`'s fix-anchor check
+    /// enforces, because a session writing a bug record reads the guide and never the check.
+    ///
+    /// The defect this pins shipped and was measured 2026-09-14: `doctor`'s
+    /// `terminal_status_without_fix_anchor` refused records lacking a `## Fix provenance`
+    /// pointer, ~150 bug files already used the format, and the guide `CLAUDE.md` calls the
+    /// controlling convention mentioned **none** of it — 0 occurrences against 50 in
+    /// `doctor.rs`. The guide said to record a SHA and a patch-id, at length, and never said
+    /// where or in what shape, so a record written to its spec was flagged and the grammar had
+    /// to be reverse-engineered from `doctor.rs`'s test fixtures.
+    /// docs/issues/2026-09-14-the-fix-anchor-grammar-is-enforced-by-doctor-and-defined-in-no-guide.md
+    ///
+    /// **This is the cheap half of a cross-surface contract, and it is only available because
+    /// both halves are in one repo.** The same shape across a repo boundary —
+    /// `principal-stamp.mjs`'s key against `session_key::PRINCIPAL_ARG_KEY` — can be checked
+    /// only on a machine holding both checkouts, and is enforced by no gate anywhere. Here the
+    /// enforcer and the documentation compile together, so the coupling costs one test.
+    ///
+    /// **Tokens, not prose.** Asserting the guide still NAMES each token reds exactly on the
+    /// regression that happened — the block going missing, or the format changing in
+    /// `doctor.rs` without the guide following — while leaving every rewording free. Pinning
+    /// sentences here would red on legitimate edits, which is the failure mode
+    /// § *Testing Discipline* names for remedy text.
+    ///
+    /// **What it deliberately does NOT check:** that the guide's description is CORRECT. A
+    /// token present beside a wrong explanation passes. That half is unreachable from a string
+    /// search and is left to review rather than faked with a stricter-looking assertion.
+    #[test]
+    fn tracker_conventions_states_the_fix_anchor_grammar_doctor_enforces() {
+        let guide = include_str!("guides/tracker-conventions.md");
+        // Every token is a literal the checker or its parser depends on:
+        // `structured_fix_pointers` strips exactly the two bullet prefixes, the heading is
+        // what the refusal text names, and `no_fix_commit` is the frontmatter escape that
+        // discharges the check for a record that closed without a commit.
+        for &token in &[
+            "## Fix provenance",
+            "- **SHA:**",
+            "- **patch-id:**",
+            "no_fix_commit",
+        ] {
+            assert!(
+                guide.contains(token),
+                "tracker-conventions guide no longer states `{token}`, which doctor's \
+                 terminal_status_without_fix_anchor enforces. A session writing a bug record \
+                 reads this guide and never the check, so dropping the token restores the \
+                 defect filed at \
+                 docs/issues/2026-09-14-the-fix-anchor-grammar-is-enforced-by-doctor-and-defined-in-no-guide.md"
+            );
+        }
+    }
+
     /// The `params` ⚠ in `CLAUDE.md` must keep naming its one exception.
     ///
     /// The rule reads *"never hand-build a params array"*, and its original justification —
