@@ -54,7 +54,7 @@ Two prior mitigations exist and neither carries identity. `guide_rearm` (`Subage
 hook → per-`(pid, agent_id)` request file) reaches the live in-memory ledger, but
 `GuideRearmInbox::poll` returns `Vec<String>` — topics only, so the server learns *reset
 these* and never *for whom*. The `agent-guide-snapshot` / `agent-guide-restore` bracket
-edits the on-disk ledger, which the running process never re-reads.
+edits the on-disk ledger, which the running process never re-reads.\n\n**Corrected 2026-09-14 by running it, and this supersedes how the table above reads.**\nThose bugs are **archived**, and `guide_rearm` is why: measured end-to-end on a rebuilt\nserver, a subagent receives `project-activation-bootstrap` *with or without* a principal\nstamp, because the `SubagentStart` hook re-arms the shared ledger before the subagent's\nfirst call lands. Subagent guide-starvation is therefore **already mitigated in\npractice**, and an earlier draft of this Context implied otherwise.\n\nWhat survives is narrower and still real: `guide_rearm` is a broadcast **reset**, never a\nrestore. It carries no identity, so it cannot distinguish two concurrent subagents and\ncannot return a principal to its own prior state. The value of this ADR is **precision**,\nnot delivery — and precision is currently **unmeasured**. Read the table as evidence that\nthe class recurs, never as evidence that subagents are starved today.\n`context-injection-session-log:F-6`.
 
 **There is also a decoy.** `ToolContext::is_subagent_capable()` resolves to
 `name.is_some_and(|n| n.to_lowercase().contains("claude"))` — a substring test on

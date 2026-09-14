@@ -12,7 +12,7 @@ topic: context-injection
 entry_prefix:
   - F
   - W
-entry_high_water_F: 5
+entry_high_water_F: 6
 entry_high_water_W: 2
 ---
 
@@ -39,6 +39,7 @@ author to make.
 | F-3 | 2026-09-14 | high | architectural | fixed-verified | Adopting a principal moves starvation to the parent's return leg, so the ledger map must precede the hook |
 | F-4 | 2026-09-14 | high | release-pipeline | superseded | The hook deploys instantly and the server does not, so shipping it now breaks every unreconnected session |
 | F-5 | 2026-09-14 | high | plan-prose | open | The deny_unknown_fields hazard does not exist at the tool surface — 42 occurrences read as 42 gates |
+| F-6 | 2026-09-14 | high | architectural | open | The end-to-end win was the shipped guide_rearm path, not this feature — Arm A was confounded |
 
 ## Wins Index
 
@@ -672,6 +673,69 @@ tested do not, and that `doc`'s dispatcher structurally cannot.
 forced"* paragraph. The strip point is still right — `call_tool_inner` is the only site
 that sees every call — but it is forced by *"one site, every call"*, not by a refusal
 that does not happen.
+
+## F-6 — The end-to-end win was the shipped guide_rearm path, not this feature — Arm A was confounded
+
+**Observed:** 2026-09-14, first end-to-end run of the principal feature against a live
+rebuilt server, with a disposable prototype of the companion hook stamping
+`dev.codescout.mcp/agentId`.
+
+**When:** Immediately after `cargo rb` + `/mcp`. The parent had just consumed
+`project-activation-bootstrap` on the fresh server process — precisely the precondition
+under which a shared ledger starves a subagent.
+
+**Expected:** Arm A (hook ON) — the subagent receives the guide, because it is adopted as
+a new principal and the ledger re-arms. That is what happened.
+
+**Got:** Arm B (hook OFF, otherwise identical, same server process) — **the subagent
+received the guide anyway.** So Arm A's delivery is not attributable to the stamp, and
+Arm A measures nothing about this feature.
+
+**Probable cause — a shipped mechanism I had read and then argued past.** The companion's
+`SubagentStart` hook writes a re-arm request; `poll_guide_rearm()` drains it on the next
+request, one line below `adopt_request_conversation` in `call_tool_inner`. It has been in
+the tree since August, and its own doc comment cites
+`docs/issues/archive/2026-08-31-subagents-receive-guides-their-parent-already-holds.md`
+— **archive**, i.e. already fixed. I quoted that same bug as live motivation in the ADR.
+
+**What this does and does not overturn.**
+
+- It does **not** show the feature is wrong or the class imaginary. `guide_rearm` carries
+  no identity — it is a broadcast *reset*, never a restore — so it cannot distinguish
+  concurrent subagents and cannot return a principal to its own state. True before this
+  measurement, still true.
+- It **does** overturn the claimed benefit. Subagent guide-starvation is already
+  mitigated in practice, so the remaining value is **precision**, not delivery — and I
+  have not measured precision. The honest position is that the user-visible improvement
+  is *unquantified*, not *demonstrated*.
+- A live question I have **not** measured: `poll_guide_rearm` runs immediately AFTER
+  adoption, so a stamped subagent call adopts its own ledger and then has that ledger
+  re-armed by the inbox. Benign on this evidence, unexamined in general.
+
+**Workaround:** none — nothing is broken. The prototype hook is removed, the tree is
+unchanged, and no committed behaviour depends on Arm A.
+
+**Severity:** high — not for a defect, but because an ADR and several commits rest on a
+motivation stated more strongly than the evidence supports, and I would have shipped the
+hook citing Arm A as proof.
+
+**Status:** open — the ADR's Context still reads as though those bugs are live, and the
+precision benefit is unmeasured.
+
+**Valid:** dated 2026-09-14
+
+**Rests on:** two subagent dispatches differing only in whether the stamp hook was
+installed, on one server process, with the parent having consumed the topic beforehand.
+The instrument was separately controlled: three synthetic payloads piped through the hook
+showed it stamps for an agent in this session and emits **nothing** for the parent or for
+another session's id — so a silently-dead hook would not have been mistaken for Arm B.
+
+**Fix idea / Pointer:** the replacement experiment measures PRECISION, not delivery —
+whether a parent is re-delivered topics after a subagent runs, and whether two concurrent
+subagents can be served without cross-suppression. `guide_rearm` can do neither by
+construction, so that is where a difference must show if one exists. Until it is run, the
+ADR should say the class is archived-but-recurring and the benefit is precision, rather
+than implying subagents are starved today.
 
 ## Template for new entries
 
