@@ -2627,6 +2627,31 @@ fn run_command_format_compact_test_result() {
     assert!(text.contains("passed"), "got: {text}");
 }
 
+/// REACH, not logic. `summarize_test_output` now emits a `stderr` key; this asserts it
+/// survives the one function standing between that key and the caller.
+///
+/// `rebuild_buffered_summary` reorders an envelope by copying fields into three named
+/// groups, so a key it does not enumerate is dropped silently — the exact shape of
+/// `CLAUDE.md` § *Testing Discipline*: "a field this function does not read reaches
+/// nobody". Every other test for this fix asserts about the summarizer's return value,
+/// which is upstream of this and identical whether the key arrives or not.
+#[test]
+fn rebuild_buffered_summary_preserves_the_test_envelopes_stderr() {
+    let raw = json!({
+        "type": "test",
+        "exit_code": 0,
+        "passed": 0,
+        "stderr": "mutation-probe: INCONCLUSIVE — the runner selected 0 tests\n",
+    });
+    let rebuilt = crate::tools::run_command::output::rebuild_buffered_summary(raw, "@cmd_abc123");
+    assert_eq!(
+        rebuilt["stderr"].as_str().unwrap(),
+        "mutation-probe: INCONCLUSIVE — the runner selected 0 tests\n",
+        "the verdict must survive the field reordering; got {rebuilt}"
+    );
+    assert_eq!(rebuilt["output_id"], "@cmd_abc123");
+}
+
 #[test]
 fn run_command_format_compact_short_output() {
     let tool = RunCommand;

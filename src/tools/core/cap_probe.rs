@@ -990,6 +990,30 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/tools/command_summary.rs --
     ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 202 stderr lines against `STDERR_SUMMARY_LINE_BUDGET` 20. The sibling
+        // BYTE budget does NOT bind there (202 short `Compiling …` lines, ~500 B kept of a
+        // 2,000 B ceiling), so the line cap is what this row's evidence isolates. Marker
+        // written by production in `summarize_stderr`.
+        id: "command_summary.stderr_tail_lines",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("--- stderr TAIL:"),
+            mutation: Mutation::Killed,
+            cited_test: "summarized_stderr_keeps_the_tail_and_drops_the_head",
+        },
+    },
+    ProbeRow {
+        // BOUND: the cited test seeds ONE 200 KB line, which satisfies the 20-line budget
+        // outright — so only the byte ceiling can bind, and the two caps are isolated from
+        // each other by construction rather than by argument.
+        id: "command_summary.stderr_tail_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("--- stderr TAIL:"),
+            mutation: Mutation::Killed,
+            cited_test: "summarized_stderr_bounds_a_single_enormous_line_by_bytes",
+        },
+    },
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
         // test seeds 250 lines against a 90-LINE budget (`BUFFER_QUERY_INLINE_CAP` 100
         // minus 10 lines already taken by stderr). The sibling BYTE budget was checked
         // separately and does NOT bind here (9,060 B available vs 5,760 B kept), so the

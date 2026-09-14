@@ -23,6 +23,50 @@ const HEAD_LINES: usize = 20;
 /// Number of lines to keep from the bottom in generic summaries.
 const TAIL_LINES: usize = 10;
 
+/// Lines of `stderr` carried inline in a summarized `test` / `build` envelope.
+///
+/// Deliberately the same number as `STDERR_BUDGET` in `run_command`'s
+/// buffer-query branch (`run_command/output.rs`): that is the same question —
+/// "how much stderr is worth inlining beside an elided stdout" — and two
+/// independently-chosen answers to it would drift apart silently.
+// cap-class: RESULT_CAP command_summary.stderr_tail_lines — probed
+const STDERR_SUMMARY_LINE_BUDGET: usize = 20;
+
+/// Byte ceiling on that same field.
+///
+/// A line budget alone does not bound a field, because a line has no length
+/// bound: one 200 KB line satisfies `take(20)` and pushes the envelope past
+/// `TOOL_OUTPUT_BUFFER_THRESHOLD`. That re-buffers the whole response and
+/// replaces it with `format_run_command`'s one-line summary — which carries no
+/// stderr — so an unbounded field hides the verdict one layer up instead of
+/// delivering it, defeating the field's only purpose.
+///
+/// **This is the normal path for a workspace test run, not an edge case.**
+/// `needs_summary` is `(stdout.len() + stderr.len()) / 4 > MAX_INLINE_TOKENS` —
+/// it sums BOTH streams, and on any real `cargo test --workspace` the first term
+/// settles it alone: measured 2026-09-14, one gate run buffered 831,766 B across
+/// 10,263 lines, 83× the threshold. So this summarizer is entered on every such
+/// run, including every green one, whatever the stderr size. A narrowly filtered
+/// run (`--lib <name>`, ~4.5 KB) stays under and is returned inline with its
+/// stderr intact — which is why the loss looked intermittent, and why the
+/// `type: "test"` classification looked like the discriminator when the real
+/// gate is combined output volume.
+///
+/// Sizing follows from that: the field is the routine rendering path for the
+/// repo's most-run command, so it is bounded tightly rather than generously.
+/// Raising the threshold instead would not work — the input is unbounded and
+/// the threshold is not.
+// cap-class: RESULT_CAP command_summary.stderr_tail_bytes — probed
+const STDERR_SUMMARY_BYTE_BUDGET: usize = 2000;
+
+/// Leading token of the marker prefixed to a `stderr` field that was cut.
+///
+/// Distinct from `summarize_generic`'s `--- N lines omitted ---`, and the
+/// distinction is the point: that marker elides a MIDDLE, this one drops a
+/// HEAD. A reader who mistakes which end was cut goes looking for the missing
+/// lines in the wrong place — and both markers sit in the same envelope.
+pub(crate) const STDERR_TAIL_MARKER: &str = "--- stderr TAIL:";
+
 // ---------------------------------------------------------------------------
 // CommandType
 // ---------------------------------------------------------------------------
@@ -176,6 +220,86 @@ pub fn needs_summary(stdout: &str, stderr: &str) -> bool {
     (stdout.len() + stderr.len()) / 4 > crate::tools::MAX_INLINE_TOKENS
 }
 
+/// Clip `s` to at most `max` bytes, on a `char` boundary.
+fn clip_to_bytes(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// Render the `stderr` field for a summarized envelope: the LAST lines, bounded
+/// in both lines and bytes, behind an explicit marker when anything was cut.
+///
+/// **Tail, not head, and that choice is the whole point of the field.** A
+/// wrapper script writes its verdict *after* the command it wraps has finished,
+/// so its verdict is the last thing on stderr; a compiler writes its diagnostics
+/// first. The head is already mined by the type-specific extractors
+/// (`first_error`, `failures`), both of which read stderr as part of `combined`
+/// — so taking the head here would re-report what is already covered and drop
+/// the only thing that is not.
+///
+/// Returns `None` for empty stderr so the key is omitted rather than rendered
+/// empty, matching [`summarize_generic`].
+fn summarize_stderr(stderr: &str) -> Option<String> {
+    if stderr.is_empty() {
+        return None;
+    }
+    let lines: Vec<&str> = stderr.lines().collect();
+    let total = lines.len();
+
+    // Walk backwards, so when the byte ceiling binds it drops the OLDEST line
+    // kept rather than the newest. Forwards, a long compile log would spend the
+    // whole budget on `Compiling …` and cut off exactly the verdict.
+    let mut kept: Vec<&str> = Vec::new();
+    let mut bytes = 0usize;
+    let mut clipped = false;
+    for line in lines.iter().rev().take(STDERR_SUMMARY_LINE_BUDGET) {
+        let needed = line.len() + 1; // +1 for the '\n' rejoining it
+        if bytes + needed > STDERR_SUMMARY_BYTE_BUDGET {
+            // A single line wider than the entire budget is still carried, clipped:
+            // an elided verdict beats an absent one. This is the only branch that can
+            // reach an empty-ish field on non-empty input, and it is why `clipped` is
+            // tracked separately from the dropped-line count — with `total == 1` the
+            // count is zero and the marker would otherwise claim nothing was lost.
+            if kept.is_empty() {
+                kept.push(clip_to_bytes(line, STDERR_SUMMARY_BYTE_BUDGET));
+                clipped = true;
+            }
+            break;
+        }
+        bytes += needed;
+        kept.push(line);
+    }
+    kept.reverse();
+
+    let dropped = total - kept.len();
+    if dropped == 0 && !clipped {
+        // Nothing lost: hand back the stream verbatim, trailing newline and all, so a
+        // complete small stderr renders byte-identically to `summarize_generic`'s.
+        return Some(stderr.to_string());
+    }
+
+    let mut notes: Vec<String> = Vec::new();
+    if dropped > 0 {
+        notes.push(format!("{dropped} earlier line(s) dropped"));
+    }
+    if clipped {
+        notes.push("last line clipped to the byte ceiling".to_string());
+    }
+    Some(format!(
+        "{STDERR_TAIL_MARKER} {notes}; {shown} of {total} line(s) shown. \
+         Full stderr is NOT in the @cmd_* buffer — buffer reads return stdout only. ---\n{body}",
+        notes = notes.join("; "),
+        shown = kept.len(),
+        body = kept.join("\n"),
+    ))
+}
+
 /// Produce a structured summary of test-runner output.
 ///
 /// Parses cargo-test-style result lines, sums across multiple test binaries,
@@ -216,6 +340,13 @@ pub fn summarize_test_output(stdout: &str, stderr: &str, exit_code: i32) -> Valu
     }
     if let Some(f) = failures {
         result["failures"] = Value::String(f);
+    }
+    // A test harness writes its RESULTS to stdout, so a test run's stderr is the
+    // compiler's diagnostics and any wrapper script's commentary — exactly what a
+    // reader wants when the news is bad, and until 2026-09-14 the only shape that
+    // never carried it. BUG docs/issues/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md
+    if let Some(err) = summarize_stderr(stderr) {
+        result["stderr"] = Value::String(err);
     }
 
     result
@@ -265,6 +396,12 @@ pub fn summarize_build_output(stdout: &str, stderr: &str, exit_code: i32) -> Val
     }
     if let Some(err) = first_error {
         result["first_error"] = Value::String(err);
+    }
+    // Same omission, same fix. `first_error` mines the HEAD of the combined stream;
+    // this carries the TAIL, which is where a wrapper's verdict and the final
+    // `error: could not compile` line both live.
+    if let Some(err) = summarize_stderr(stderr) {
+        result["stderr"] = Value::String(err);
     }
 
     result
@@ -688,6 +825,133 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         let summary = summarize_generic("", "err\n", 1);
         assert!(summary.get("stdout").is_none() || summary["stdout"].is_null());
         assert_eq!(summary["stderr"].as_str().unwrap(), "err\n");
+    }
+
+    // -- summarized stderr on the test / build shapes --
+    //
+    // BUG docs/issues/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md
+    //
+    // What these guard is a DIRECTION, not a presence. A wrapper's verdict is the
+    // LAST thing on stderr, so a fix that carried the head would satisfy every
+    // "stderr is present" assertion and still drop the only line the bug is about.
+    // Each test below therefore asserts a presence AND an absence.
+
+    #[test]
+    fn summarize_test_output_carries_the_wrapper_verdict_on_stderr() {
+        let stdout = "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n";
+        let stderr = "mutation-probe: INCONCLUSIVE — the runner selected 0 tests\n";
+        let summary = summarize_test_output(stdout, stderr, 0);
+        // The regression: `passed: 0` + `exit_code: 0` is the byte-identical rendering of
+        // a SURVIVED mutant, so without this field the envelope supplies a plausible
+        // WRONG verdict rather than an obviously missing one.
+        assert_eq!(summary["passed"], 0);
+        assert_eq!(summary["exit_code"], 0);
+        assert!(
+            summary["stderr"].as_str().unwrap().contains("INCONCLUSIVE"),
+            "the verdict must survive the test envelope; got {:?}",
+            summary.get("stderr")
+        );
+    }
+
+    #[test]
+    fn summarize_test_output_omits_empty_stderr() {
+        let summary = summarize_test_output("running 0 tests\n", "", 0);
+        assert!(summary.get("stderr").is_none() || summary["stderr"].is_null());
+    }
+
+    #[test]
+    fn summarize_build_output_carries_stderr_beside_first_error() {
+        let stderr = "error[E0308]: mismatched types\n --> src/main.rs:5:20\nerror: could not compile `x` (lib) due to 1 previous error\n";
+        let summary = summarize_build_output("", stderr, 1);
+        // `first_error` mines the HEAD; the new field carries the TAIL. Both, not either:
+        // the closing `could not compile` line is absent from `first_error`'s block.
+        assert!(summary["first_error"].as_str().unwrap().contains("E0308"));
+        assert!(summary["stderr"]
+            .as_str()
+            .unwrap()
+            .contains("could not compile"));
+    }
+
+    /// The load-bearing one: `summarize_stderr` keeps the END of the stream.
+    ///
+    /// The absence half is what discriminates — a head-biased implementation passes
+    /// every other test in this block.
+    #[test]
+    fn summarized_stderr_keeps_the_tail_and_drops_the_head() {
+        let mut stderr = String::from("HEAD_COMPILING_NOISE\n");
+        // LOAD-BEARING: these lines are SHORT on purpose, ~6 bytes each, so 200 of them
+        // total ~1.2 KB — comfortably under STDERR_SUMMARY_BYTE_BUDGET. Lengthen them and
+        // the byte ceiling starts binding too, at which point raising the LINE budget to
+        // infinity leaves this test green: the sibling cap would silently do the dropping
+        // instead, and the head would still be absent. Two caps rescuing each other reads
+        // exactly like coverage (CLAUDE.md § Testing Discipline — "two aggregates can be
+        // worse than one"). Keeping them short is what makes the line cap the only
+        // mechanism that can produce this result.
+        for i in 1..=200 {
+            stderr.push_str(&format!("c-{i}\n"));
+        }
+        stderr.push_str("WRAPPER_VERDICT: INCONCLUSIVE\n");
+        assert!(
+            stderr.len() < 2000,
+            "fixture must stay under the BYTE budget or it stops isolating the LINE budget; \
+             got {} bytes",
+            stderr.len()
+        );
+
+        let summary = summarize_test_output("running 0 tests\n", &stderr, 0);
+        let rendered = summary["stderr"].as_str().unwrap();
+
+        assert!(
+            rendered.contains("WRAPPER_VERDICT: INCONCLUSIVE"),
+            "the last line must survive"
+        );
+        assert!(
+            !rendered.contains("HEAD_COMPILING_NOISE"),
+            "the head must be dropped, not the tail — this is the whole direction claim"
+        );
+        // The cut is announced rather than silent: an unmarked tail is the same
+        // `cluster/capped-result-presented-as-complete` shape the bug itself is.
+        assert!(rendered.contains("--- stderr TAIL:"));
+        assert!(rendered.contains("earlier line(s) dropped"));
+    }
+
+    #[test]
+    fn summarized_stderr_returns_a_short_stream_verbatim_with_no_marker() {
+        let summary = summarize_test_output("running 0 tests\n", "a\nb\nc\n", 0);
+        let rendered = summary["stderr"].as_str().unwrap();
+        assert_eq!(rendered, "a\nb\nc\n");
+        assert!(!rendered.contains("--- stderr TAIL:"));
+    }
+
+    /// One enormous line satisfies a LINE budget and defeats it.
+    ///
+    /// The envelope re-buffers once `(stdout + stderr) / 4 > MAX_INLINE_TOKENS` —
+    /// **~10 KB combined**, bracketed 2026-09-14 at 9,024 B inline / 14,304 B buffered.
+    /// Past it the response is `format_run_command`'s one-line summary, which carries no
+    /// stderr, so an unbounded field hides the verdict one layer up. A line-only budget
+    /// reproduces that here, and `summarize_test_output` is reached by every `cargo test`
+    /// this repo's gate runs — a few crates' worth of diagnostics clears 10 KB, so the
+    /// common case is the one at risk, not a pathological one.
+    #[test]
+    fn summarized_stderr_bounds_a_single_enormous_line_by_bytes() {
+        let huge = format!("{}\n", "x".repeat(200_000));
+        let summary = summarize_test_output("running 0 tests\n", &huge, 0);
+        let rendered = summary["stderr"].as_str().unwrap();
+        assert!(
+            rendered.len() < 4_000,
+            "one 200 KB line must not reach the envelope; got {} bytes",
+            rendered.len()
+        );
+        assert!(rendered.contains("--- stderr TAIL:"));
+        assert!(rendered.contains("clipped to the byte ceiling"));
+    }
+
+    #[test]
+    fn summarized_stderr_clips_on_a_char_boundary() {
+        // A multi-byte char straddling the ceiling must not panic or emit invalid UTF-8.
+        let huge = format!("{}\n", "é".repeat(200_000));
+        let summary = summarize_test_output("running 0 tests\n", &huge, 0);
+        assert!(summary["stderr"].as_str().unwrap().contains("é"));
     }
 
     // -- helpers --
