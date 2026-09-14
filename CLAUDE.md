@@ -206,6 +206,17 @@ premise that every addition falsifies.
   discriminator is usually already in the output, unused, while both parties reach for a number.
   (Two remedies falsified before the third worked, measured 2026-09-02 →
   [`docs/conventions/what-green-is-evidence-for.md`](docs/conventions/what-green-is-evidence-for.md).)
+  **Do not hand-roll the mutation on this checkout — `./scripts/mutation-probe.sh` exists, and
+  the reason is not convenience.** A mutation in the shared tree publishes a red to every other
+  session's `cargo test`, byte-identical to a real regression, and the window is not bounded by
+  your own process: `cargo test` returning *is* the shared build lock freeing, so a queued peer
+  is aimed at the instant your revert runs. The script mutates an isolated worktree instead —
+  measured 87 s + 2.8 G once, then **11 s per run, faster than the shared tree** — asserts the
+  pattern occurs exactly once (a mutation that never applied is indistinguishable from one that
+  survived), and reverts before its process exits. **Read `SURVIVED` as two readings with
+  opposite repairs:** untested (write the test), or *unreachable by any test you could write*
+  (the code needs a seam first) — the natural reading is the first, and it sends you to write a
+  test that cannot exist. Index row and every caveat → [`docs/PROBES.md`](docs/PROBES.md).
 ## Bug Tracking
 
 **Per-file bug tracking lives in `docs/issues/`.** Every bug noticed during work gets its own file, copied from `docs/issues/_TEMPLATE.md`. Path, slug, the `status:` vocabulary (`open | taken | investigating | fixed | mitigated | wontfix | zombie`), and the archive flow are documented in **`get_guide("tracker-conventions")` § Bug files**.

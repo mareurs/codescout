@@ -404,6 +404,53 @@ operator decides over, and file attribution on a shared checkout.
 specified-but-unbuilt mechanism is exactly what this tracker consumes, per CLAUDE.md
 § *Observer Blindness* — *"a row reading `**Mechanism status:** none yet` is a design worklist item"*.
 Left in the session log it was a lesson; here it is a worklist item.
+
+### I-11 — Isolate the mutation rather than announce it (armed-mutation-indistinguishable-from-regression)
+
+**Layer:** mutation-at-ship · **Mechanical:** yes · **Status:** done · **Shipped:** `9433feb3`
+(patch-id `90d4b2215b3ee26745e5d50de24a8ee3c1f86056`)
+
+**The defect this closes.** `I-3` put mutation testing in the ship sequence and `I-8` widened
+what to mutate. Neither asked *where*. On a shared checkout the answer was "in the tree every
+other session is building", so a deliberate red was published to peers **byte-identical to a
+real regression** — and the window is not bounded by the arming process, because `cargo test`
+returning *is* the shared build lock freeing, which aims a queued peer at exactly the instant
+your revert runs.
+
+**Why this is a mechanism and not the notice it replaces.** The prior remedy was to announce
+before arming. That is `OB-23`: the prescribed response is *stand down*, and complying removes
+the observer whose build log would have resolved the arming session's own anomaly — measured
+across two announced windows, where a peer held off building and their held-back log was the
+one piece of evidence needed. Announcement is an intervention on the population it needs as
+instruments. Isolation asks nobody for anything.
+
+**What unblocked it was a measurement, not an argument.** Isolation had been ranked second for
+two weeks on an *unmeasured* assumption that it cost a cold `target/`. Measured 2026-09-14 with
+predictions written first: **87 s + 2.8 G once, then 11 s per run — faster than the shared
+tree's 13.8 s**, because a small uncontended `target/` beats a 108 G one five sessions fight
+over. An unmeasured cost attached to an option you DECLINE is self-sealing: declining produces
+no evidence, so nothing can contradict it. That is the transferable half.
+
+**The escape hatch is named, not left open.** `--shared` exists for mutations whose SUBJECT is
+the shared checkout — `build_check.rs`'s `checkout_is_shared` returns false when only you are
+present; `fmt-mine.sh` refuses based on *other* live sessions owning files. Neither can be
+tested alone in a worktree. There the script writes a **passive** marker (labels, asks nothing)
+at arm time, read by `attribute-red.py`. Both constraints the bug file demanded — written
+unconditionally by the arming invocation, passive in wording — are satisfied as a side effect
+rather than by a second mechanism.
+
+**Two of its own guards were defects, both found by RUNNING it.** `grep -F -c` counts matching
+LINES, so a two-line `--find` occurring once reported **11**; and `git worktree add` checks out
+HEAD, so an isolated probe silently tested the **committed** version of a just-edited file.
+Neither errored. Both returned a plausible answer — the class the probe exists to study,
+reproduced inside it. Cases 4 and 6 of `tests/mutation-probe.sh` are their regressions.
+
+**Ceilings**, in
+`docs/issues/archive/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`
+rather than softened here: the marker is read through `run_command` only, so native `Bash` and
+backgrounded commands see no label; `--shared` remains a real hole the marker only makes
+legible; the worktree carries only the file under test; and nothing reaps an orphaned probe
+worktree.
 ## History
 
 ### 2026-08-16 — I-7 opened and shipped same day (tracker-hygiene sweep → verify-open → fix)
