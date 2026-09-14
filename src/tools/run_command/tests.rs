@@ -9,7 +9,7 @@ use crate::prompts::builders::{
 };
 #[cfg(unix)]
 use crate::tools::command_summary::BUFFER_QUERY_INLINE_CAP;
-use crate::tools::core::types::is_subagent_capable_name;
+use crate::tools::core::types::client_name_can_spawn_subagents;
 use crate::tools::onboarding::{
     gather_project_context, onboarding_version_stale, Onboarding, ONBOARDING_VERSION,
 };
@@ -111,14 +111,14 @@ fn prompt_refresh_subagent_prompt_contains_memory_reads() {
 }
 
 #[test]
-fn is_subagent_capable_detects_claude() {
-    assert!(is_subagent_capable_name(Some("claude-code")));
-    assert!(is_subagent_capable_name(Some("Claude Code")));
-    assert!(is_subagent_capable_name(Some("claude-code-ide")));
-    assert!(!is_subagent_capable_name(Some("cursor")));
-    assert!(!is_subagent_capable_name(Some("copilot")));
-    assert!(!is_subagent_capable_name(Some("windsurf")));
-    assert!(!is_subagent_capable_name(None));
+fn client_name_can_spawn_subagents_detects_claude_family_only() {
+    assert!(client_name_can_spawn_subagents(Some("claude-code")));
+    assert!(client_name_can_spawn_subagents(Some("Claude Code")));
+    assert!(client_name_can_spawn_subagents(Some("claude-code-ide")));
+    assert!(!client_name_can_spawn_subagents(Some("cursor")));
+    assert!(!client_name_can_spawn_subagents(Some("copilot")));
+    assert!(!client_name_can_spawn_subagents(Some("windsurf")));
+    assert!(!client_name_can_spawn_subagents(None));
 }
 
 #[test]

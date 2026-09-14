@@ -465,7 +465,7 @@ impl Tool for Onboarding {
             let rel_path = ".codescout/tmp/onboarding-prompt.md";
             let sections = build_heading_map(prompt);
 
-            let subagent = ctx.is_subagent_capable();
+            let subagent = ctx.client_can_spawn_subagents();
 
             // Determine which instruction builder based on whether this is a
             // version refresh (has stored_version) or full onboarding.

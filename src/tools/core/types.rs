@@ -455,7 +455,7 @@ pub struct ClientIdentity {
 
 /// Policy: does a client `name` indicate Claude-Code-style subagent-spawning
 /// capability? Conservative — only the Claude family today. Pure + testable.
-pub(crate) fn is_subagent_capable_name(name: Option<&str>) -> bool {
+pub(crate) fn client_name_can_spawn_subagents(name: Option<&str>) -> bool {
     name.is_some_and(|n| n.to_lowercase().contains("claude"))
 }
 
@@ -485,9 +485,20 @@ impl ToolContext {
         self.client_identity().map(|c| c.name)
     }
 
-    /// Whether the connected client supports subagent spawning (Claude family).
-    pub fn is_subagent_capable(&self) -> bool {
-        is_subagent_capable_name(self.client_name().as_deref())
+    /// Whether the connected CLIENT PRODUCT can spawn subagents (Claude family).
+    ///
+    /// **Not a principal check, and the old name said otherwise.** This was
+    /// `is_subagent_capable` until 2026-09-14, which at a call site reads as
+    /// "is this call from a subagent?". It is not: the value is derived from
+    /// `clientInfo.name` and is therefore constant for the whole connection,
+    /// identical for a parent and every subagent it spawns.
+    ///
+    /// To identify the calling principal, use the agent id the companion
+    /// injects per call — `docs/adrs/2026-09-14-a-subagent-is-a-principal.md`.
+    /// A subagent's `PreToolUse` payload carries `agent_id` and `agent_type`;
+    /// a parent's carries neither, measured 2026-09-14.
+    pub fn client_can_spawn_subagents(&self) -> bool {
+        client_name_can_spawn_subagents(self.client_name().as_deref())
     }
 }
 
