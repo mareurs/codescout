@@ -14907,6 +14907,54 @@ fix and the only honest way to file it.
 (example outranks schema) is stated here and belongs in that file's § *Root cause* if its owner
 agrees; offered, not written, since I do not hold it.
 
+### Addendum — two things the peer exchange added, both verified
+
+**1. It reproduces from both sides, which is what makes it a mechanism rather than my slip.**
+`fix-mask-keyword-fabrication` checked their own served `append_entry` description and found the
+same two parameters, same wording, same both-or-neither coupling, present their whole session —
+and produced the two-call form anyway. Two independent sessions, correct contract in context for
+both, same wrong shape. `323bdf9d76a88c55` § *Root cause* now leads with rank rather than
+coverage (`d2181f3a`, patch-id `f191c4ea796ffd71239eca9091c50aff91c0556f`).
+
+**2. The effect survives the fact being IN the document — which is stronger than what this entry
+originally claimed.** I argued the schema and the example were both *in context* and never
+compared. The peer's own report is worse than that: they had written the schema into their bug's
+§ *Reproduction* step 3, **as a correct surface**, and still framed the whole cause as coverage.
+So it is not a context-window effect and "keep the right fact nearby" is not the remedy — the
+right fact was in their own prose, authored by them, and the wrong conclusion was drawn beside
+it.
+
+**The precedent they named, checked at the bytes, and its ceiling is the useful half.**
+`scripts/pre-commit-ledger-counts.py` duplicates a parser **on purpose** (a `cargo` invocation in
+the commit path costs ~7s and blocks on the shared `target/` lock), and
+`the_hook_script_agrees_on_the_cluster_parsers` (`tests/issue_clusters.rs:1479`) pins the two
+together. So this repo already holds the shape *"duplication is acceptable; duplication without a
+gate is the defect."*
+
+**But one parity test was not enough, and the way it failed is the transferable part.** That test
+runs against the **live corpus**, and the file says two of its three arms *"compare empty to
+empty"* — the corpus cannot reach the branches, so deleting the inline-`[a, b]` arm from the
+Python leaves it **green** (verified by mutation, not assumed). Hence two fixture-driven
+siblings. And parser parity is not **rule** parity: nothing compared the rule sets, so *"the
+one-tag rule was missing for months"* and a commit adding a second cluster tag passed the commit
+path while redding the shared gate for every other session
+(`docs/issues/archive/2026-09-09-the-pre-commit-cluster-hook-enforces-a-subset-of-the-gate-it-mirrors.md`).
+
+**Applied to a worked example, that says what the obvious gate would miss.** *"Assert the
+example's parameters are a subset of the schema's"* is the parser-parity analogue and is vacuous
+in the same direction: it passes whenever today's example happens to name every parameter it
+uses, and says nothing about the ones it omits — which is exactly this defect. The rule-parity
+analogue is the one with teeth: **where a schema declares a coupling (`index_row` and
+`index_after_line` are both-or-neither), an example that uses either must use both, and an
+example that uses neither must say why.** That reds on the recipe this entry is about; a subset
+check does not.
+
+**Class: deliberately none.** No `IC` covers the rank half and the peer declined to open one in
+passing, on the rule that a class opened in passing is one whose inclusion test nobody defends.
+This entry is the instance ledger until a second arrives. The inclusion test, when it is needed:
+*a second copy of a contract that decays independently of the original and outranks it at
+composition time.*
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
