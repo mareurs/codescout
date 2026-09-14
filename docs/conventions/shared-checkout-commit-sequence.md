@@ -49,7 +49,7 @@ The drift ran source-correct / summary-wrong, which is the dangerous direction: 
 summary is what a session reads mid-refusal, and the source is what someone reads when
 deciding whether to change a step. Now gated by
 `the_tail_teaches_separate_calls_never_a_chained_commit`
-(`docs/issues/2026-09-13-the-commit-sequence-tail-teaches-a-read-step-that-cannot-fail.md`).
+(`docs/issues/archive/2026-09-13-the-commit-sequence-tail-teaches-a-read-step-that-cannot-fail.md`).
 
 Deliberately **not** a `get_guide` topic. That route was designed, then refuted — see
 § *Why not guide injection* below. The short version: it cannot be built, and it fails

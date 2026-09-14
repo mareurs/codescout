@@ -90,7 +90,7 @@ fn the_shared_commit_sequence_tail_is_present_and_non_trivial() {
 /// verified; `--exit-code` gives 1, and would then refuse every legitimate commit — so no
 /// input makes the middle step fail, the chain always reaches the commit, and the step
 /// reads as a gate while being a print.
-/// `docs/issues/2026-09-13-the-commit-sequence-tail-teaches-a-read-step-that-cannot-fail.md`
+/// `docs/issues/archive/2026-09-13-the-commit-sequence-tail-teaches-a-read-step-that-cannot-fail.md`
 ///
 /// **Two groups of assertion, doing different jobs, and the split is what the mutation run
 /// corrected.** The `&&`-with-`git commit` check is the specific defect. The line-initial

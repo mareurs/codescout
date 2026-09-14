@@ -1,15 +1,14 @@
 ---
-id: c9dcd5eb0d20b09e
+id: a29b6c1857744da4
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: the shared commit-sequence tail teaches a read step that cannot fail'
 tags:
 - cluster/assertion-that-cannot-fail
 - commit-sequence
 - hooks
 - shared-checkout
-claimed_at: 2026-09-14
-claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
+closed: 2026-09-14
 ---
 
 # BUG: the shared commit-sequence tail teaches a read step that cannot fail, and three of four hooks print only that
@@ -145,6 +144,37 @@ only thing that tells you the situation exists at all. Their words, and worth ke
 tail presents step 4 as the redundant half of a belt-and-braces pair: *"neither alone would have
 told me your pair was there AND that I was safe."*
 
+### E5 — the corrected form, observed catching a live index shift, inside the hour it shipped
+
+Every datapoint above is evidence *against* the batched form. This one is the other
+polarity, and it is the only one: the repaired step 4 working, in the wild, reported by
+sessionId `f0b1a4c7` — who read `scripts/commit-sequence-tail.txt` while it was still
+**dirty in the worktree**, so what they followed was the uncommitted fix rather than the
+committed `&&` one-liner.
+
+2026-09-14, in the ~90 seconds before `3835dd18` landed:
+
+| | |
+|---|---|
+| ~06:03 | reads the dirty tail; follows the separate-call form |
+| 06:03:5x | `git add <3 paths>`, then `git diff --cached --name-only` **as its own call** → 3 files, all theirs |
+| next call | `git diff --cached --numstat` → **7** files. Four of mine had entered the shared index between their two calls |
+| 06:04:31 | `3835dd18` — 4 files, exactly mine |
+| 06:05:10 | `b4e2206b` — 3 files, exactly theirs, by pathspec |
+
+No capture in either direction. The index shifted *between two consecutive reads by one
+session*, which is the condition a chained form cannot surface in time: `&&` gates on exit
+status, and nothing about a peer's four files arriving produces a non-zero one.
+
+**The limit of the claim, stated by the reporter and preserved because it is the honest
+shape:** *"I don't know whether I'd have noticed the four extra files in a chained diff's
+output before typing the commit. The counterfactual is that the check would have been
+structurally too late, not that I'd certainly have been captured."* That is the right
+reading. This entry establishes that the corrected form **put the information in front of a
+reader while it could still change the outcome** — which is the whole of what a read step
+can offer, and precisely what the chained form removes. It does not establish that a capture
+was averted, and it is not recorded as if it did.
+
 ## Hypotheses tried
 
 **"The `&&` is harmless because a human sees all three outputs anyway."** False for the
@@ -158,24 +188,53 @@ refuse every legitimate commit.
 
 ## Fix
 
-Not implemented; filed on notice. Two candidate halves, and they are independent:
+**Fixed in `3835dd18`** (patch-id `e086a01511c9f5577667c2f53aad473264ed0e54`). Both halves
+landed in one edit, which is why the second was cheap: the tail now shows the four-line
+block **and** carries the reason, so the hooks that previously printed only the vector print
+the correction too.
 
-1. **Rewrite step 4's example as separate invocations**, matching the wording the
-   unreviewed-content hook already uses. One file, four readers, no sweep.
-2. **Move the *"not one batched command"* sentence into the shared tail**, so the three
-   hooks that currently show only the vector also show the correction.
+**The fix was to match the source, not to invent guidance.** `docs/conventions/shared-checkout-commit-sequence.md`
+§ 4 had the separate-line block correct throughout — and cites `1b40dabd` for precisely this
+failure. So the drift ran source-correct / summary-wrong, which is the dangerous direction:
+the summary is what a session reads mid-refusal, the source is what someone reads when
+deciding whether to change a step. That made the change low-risk in a way § *Fix* did not
+anticipate when it held both halves for a go-ahead.
 
-Both are edits to shared commit-path infrastructure that every session's commits pass
-through, so neither is a drive-by. Held for an operator's go-ahead rather than shipped
-alongside the bug that surfaced it.
+**Verified end to end, not by grep.** `--fixture-growth-refusal` drives a real refusal
+through the ledger hook; the emitted text now carries four separate command lines and zero
+`&& git commit`. The pre-existing `every_refusing_hook_emits_the_shared_tail` greps for the
+call site and deliberately does not execute, so the greps prove reachability and this run
+proves the bytes.
 
+**Two stale counts repaired in passing**, both reading *"three refusing hooks"* where
+`every_refusing_hook_emits_the_shared_tail` enumerates four. Replaced with a pointer to that
+test rather than the number — the set has already grown once, when the cargo-fmt hook
+replaced a framework entry that could not emit the tail at all.
 ## Tests added
 
-None — capture-on-notice record. Note that the first half is testable cheaply and the
-second is not: *"the tail contains no `&&`-chained `git commit`"* is a shape assertion
-that reds on exactly the regression, whereas *"every emitting hook shows the correction"*
-requires knowing which hooks emit the tail, which is the thing that drifted.
+`the_tail_teaches_separate_calls_never_a_chained_commit` in `tests/hook_config.rs`, beside
+the two tests that already guard the tail's existence and its emission.
 
+**Four mutations on the production path — the tail itself, never the test's inputs.**
+
+| mutation | result |
+|---|---|
+| rejoin the commit onto a `&&` chain | RED — and the message reproduced the defect line verbatim |
+| delete step 4's command block | RED — this is the half that keeps the first honest |
+| drop the `--name-only` read | RED |
+| chain `git add` to the READ | **RED, and it was predicted to SURVIVE** |
+
+The first three are ordinary. **The fourth existed to check OVER-firing and falsified the
+test's own doc comment rather than the test.** That comment claimed the gate was scoped to
+the commit alone and that chaining add-to-read would pass; it does not, because the joined
+line no longer *starts with* the read. The test is right and the comment was wrong — this
+gate is about the TAIL'S TEXT, which must display each command on its own line so the
+separateness it teaches is legible. It says nothing about what a session may type: `git add`
+plus the read in one call is fine and is the form `9403d62d` measured working (§ *E4*).
+
+Recorded because a kill count never reports over-firing. Three kills read as full coverage;
+only the mutation written to survive showed the scope was wrong, and what it corrected was
+prose a later reader would have trusted.
 ## Workarounds
 
 Four separate calls, as `scripts/pre-commit-unreviewed-content.sh` says. Read the diff's
@@ -185,16 +244,27 @@ screen and read it as confirmation that staging worked.
 
 ## Resume
 
-Found while writing Instance 13 of the capture ledger, which is downstream of it. The
-sharp thing is not that guidance was wrong — it is that this guidance was **printed
-unprompted at the moment of need, repeatedly, to a reader who had quoted its neighbouring
-steps aloud**, and the failure survived all of that. If a documentary remedy were going
-to work, those are the conditions under which it would. That is the strongest evidence
-available for the unbuilt time-of-check/time-of-use guard
-(`scripts/pre-commit-foreign-index.sh` § *the remedy for that half*: record each path's
-blob at `git add`, re-hash at pre-commit, refuse if it moved), because it is evidence
-*against the alternative* rather than for the remedy.
+Found while writing Instance 13 of the capture ledger, which is downstream of it. The sharp
+thing was never that guidance was wrong — it is that this guidance was **printed unprompted
+at the moment of need, repeatedly, to a reader who had quoted its neighbouring steps aloud
+minutes earlier**, and the failure survived all of that. If a documentary remedy were going
+to work, those are the conditions under which it would.
 
+**So the fix here does not close the mechanism, and should not be read as closing it.** A
+correct tail makes the right thing easier to copy; it cannot make a chained one-liner
+impossible, and the next session to batch for efficiency will get no warning. The remedy
+that would is still unbuilt and still designed, in `scripts/pre-commit-foreign-index.sh`
+§ *the remedy for that half*: record each path's blob at `git add`, re-hash at pre-commit,
+refuse if it moved. This bug's whole evidential contribution is **against the alternative**
+rather than for that remedy — which is the more useful direction, and the reason § *E1* and
+§ *E4* are kept in full.
+
+**One live datapoint from the fix's own commit, worth more than the fix.** Staging
+`3835dd18` and then reading `git diff --cached --name-only` as a separate call surfaced
+three foreign paths a peer had staged in the interval — including
+`docs/trackers/issue-clusters.md`, the known hot file. A bare `git commit` would have taken
+all three. The step this bug is about caught something on its first use after being
+repaired, in the arm the old text would not have produced.
 ## References
 
 - `scripts/commit-sequence-tail.txt` — step 4
