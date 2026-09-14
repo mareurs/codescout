@@ -476,6 +476,8 @@ one, the docs must not demonstrate the general one for a narrow task.
 
 
 ### T-22 — A gate that approves the tool name is not a gate on the operation
+<!-- audit-doc-refs:ignore-refs `abc513d3ee0f0b50` — the sentence's own subject: it says outright this is "an id that resolves to nothing". Repointing would rewrite the claim into its own contradiction. -->
+
 
 I needed one row out of the queue tracker. `read_file` on it was refused by the IL4 gate,
 which named `read_markdown` as the fix; `read_markdown` then **succeeded**. Both are wrong

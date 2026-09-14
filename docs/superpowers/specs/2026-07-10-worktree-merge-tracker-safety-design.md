@@ -35,6 +35,8 @@ The whole reconciliation is **intra-database** — there is no cross-DB import
 (`graft`) within one catalog.
 
 ## Motivation — what breaks today
+<!-- audit-doc-refs:ignore-refs `e44f81b1eea2eac4` — a real artifact id, but for `single-stage-cpsat-spike.md`, which is not in THIS repo's catalog. Cross-repo, so no local lookup can resolve it and no move re-keyed it — absent here is its correct state, not a defect. -->
+
 
 A concrete instance lives in the repo right now: artifact
 `e44f81b1eea2eac4` (`single-stage-cpsat-spike.md`) has

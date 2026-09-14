@@ -915,6 +915,8 @@ method note asks the next author to query the catalog for prior art before propo
 asks them to open the **context type** before declaring a check needs no design.
 
 ## W-6 — Diff a tool's report against the baseline a document recorded — the deltas are the findings
+<!-- audit-doc-refs:ignore-refs `aeece182252e710d` — an artifact in a LINKED WORKTREE (a backend-kotlin plan), quoted as the observed subject of a `worktree_scoped_row` finding. A record of what doctor reported, not a pointer to follow; the id is correct for the tree it was seen in. -->
+
 
 **Observed:** 2026-08-19, verifying that a newly-shipped `doctor` check (`f632e7ef`) was
 live on the rebuilt binary after `/mcp` reconnect.

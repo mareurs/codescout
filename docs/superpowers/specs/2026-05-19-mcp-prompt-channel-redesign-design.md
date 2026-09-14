@@ -482,7 +482,7 @@ boundary of what landed in Surface B.
 
 - Evidence base: `docs/architecture/mcp-channel-caps.md`
 - Friction trackers: `docs/trackers/skill-frictions.md`,
-  `docs/trackers/tool-usage-patterns.md` (artifact `b3fa993849ac83ab`)
+  `docs/trackers/tool-usage-patterns.md` (artifact `f2ecdd76a6189efb`)
 - Current prompt source: `src/prompts/source.md`
 - Composition site: `src/server.rs::from_parts`
 - Resource composition site: `src/server.rs::build_resource_registry`

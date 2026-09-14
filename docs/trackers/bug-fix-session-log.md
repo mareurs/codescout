@@ -188,6 +188,8 @@ entry_high_water_W: 133
 | F-90 | 2026-09-01 | med | self-friction | fixed-verified | Published "the worktree guard MANDATES `git -C`, so the two guards are in direct tension" to five surfaces — three commit messages, a bug file, and a source comment — without probing it. One command refutes it: `git add --dry-run <path>` exits 0, unblocked. The guard refuses only commit-family verbs; both my blocked commands merely CONTAINED `git commit`. Attribution is recorded at STAGING time, so no tension exists on the path that matters. Population inflated too: `-C` is 32 of 1586 real `git add` calls (2.0%), not the mandated form. Being blocked twice felt like having tested it — refusal establishes what a guard refuses, never what it permits |
 
 ## Wins Index
+<!-- audit-doc-refs:ignore-refs `1f8784f932f042bc` — a CATALOG DIGEST, not an artifact id — the sentence reads "4786 rows, digest ...". Sixteen lowercase hex, same shape, different namespace. -->
+
 
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |

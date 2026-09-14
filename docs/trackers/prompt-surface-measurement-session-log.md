@@ -1291,6 +1291,8 @@ a count is only evidence once you know its denominator.
 **Status:** mitigated
 
 ## F-14 — Offering a hedge channel made every run add a false positive it had previously excluded
+<!-- audit-doc-refs:ignore-refs `513cbba30d360c42` — an EVAL FIXTURE hash, sitting between `checker` and `binary` identifiers in the same sentence. Another 16-hex namespace that is not the catalog's. -->
+
 
 **Valid:** dated 2026-08-25
 

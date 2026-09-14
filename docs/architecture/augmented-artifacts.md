@@ -53,7 +53,7 @@ carries four things, and a reader — human or LLM — gets all of them at once:
 Read one way it is a **time-aware log** (face 4) you can replay; read another it
 is an **on-demand skill** (face 3) the agent loads just-in-time. Two living
 proofs carry all four faces: `tool-usage-patterns` (id `f2ecdd76a6189efb`) and
-`doc-ref-audit` (id `fc97be512112fea4`).
+`doc-ref-audit` (id `f1312ba0f324b049`).
 
 **Why state this explicitly.** Usage telemetry across two independent codebases
 shows the capability is *undiscovered at the point of use*: agents hand-maintain
@@ -268,7 +268,7 @@ lifecycle state; the body heading is the entry's identity. See
 
 ## Worked examples
 
-### `doc-ref-audit` — id `fc97be512112fea4`
+### `doc-ref-audit` — id `f1312ba0f324b049`
 
 - **Body** (`docs/trackers/doc-ref-audit.md`): 187 bytes. Just the auto-
   managed message "Auto-managed by `librarian(audit_doc_refs)`."
@@ -357,5 +357,5 @@ Do NOT augment when:
 - Schema: `params_schema` is enforced on every merge via `merge_params`
   (see `src/librarian/catalog/augmentation.rs::merge_params`)
 - Templates: MiniJinja syntax with `params` as the sole top-level binding
-- Two reference artifacts: `fc97be512112fea4` (doc-ref-audit),
+- Two reference artifacts: `f1312ba0f324b049` (doc-ref-audit),
   `f2ecdd76a6189efb` (tool-usage-patterns)

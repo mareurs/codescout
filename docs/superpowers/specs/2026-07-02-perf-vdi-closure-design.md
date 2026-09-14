@@ -101,7 +101,7 @@ dominates; 38 calls/month makes this lowest priority.
   `docs/trackers/windows-platform-support.md` (id `52451519052d207c`): rebuild
   `issues` params from the 26-row table via the `params_path` route (>9KB),
   set `entry_collection="issues"`, fix both in-body references to the dead id
-  `42dfdfc8b1522192`.
+  `52451519052d207c`.
 
 ### Track 3 — Build loop (Linux dev)
 

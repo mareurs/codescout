@@ -22,7 +22,7 @@ Merge commit `3765e1b`: 18 files, +2092 lines. 267 lib tests passing.
 | Phase | Title | Status | Notes |
 |------:|-------|--------|-------|
 |     0 | v1 augmentation feature | done | Merged `3765e1b` on 2026-05-01. |
-|     1 | `render_template` + `params_schema` | done | All 5 acceptance criteria met 2026-05-02. A2 commit `b1431a5`, A5 dogfood on artifact `79a6276776a1b5da`. |
+|     1 | `render_template` + `params_schema` | done | All 5 acceptance criteria met 2026-05-02. A2 commit `b1431a5`, A5 dogfood on artifact `aabef87ec988dc1d`. |
 |   1.5 | `tracker_design` teaching tool | done | All 6 acceptance criteria verified 2026-05-02. |
 |     2 | `refresh_stale` discovery tool | done | Shipped as `refresh_stale.rs`; registered, 6 tests. Verified 2026-05-02. |
 |     3 | `GatherSource::ConfigValue` | done | Implemented 2026-05-02 — commit `00e57f7`. TOML/YAML/JSON + git blame annotation. |
@@ -179,7 +179,7 @@ Render flow in `librarian_context` for a tracker with template:
 - [x] `artifact_update_params` rejects merge-patches violating schema — `merge_params()` validates against `params_schema` at catalog layer (commit `b1431a5`).
 - [x] `librarian_context` renders state table — template rendered + injected in `context.rs`.
 - [?] Refresh cycle — `artifact_refresh` returns params separately; body untouched. Params update still needs a separate `artifact_update` call.
-- [x] At least one tracker in `docs/` ships with template+schema (dogfood) — augmentation-followups tracker (`79a6276776a1b5da`) augmented 2026-05-02; renders live phase table via `librarian_context`.
+- [x] At least one tracker in `docs/` ships with template+schema (dogfood) — augmentation-followups tracker (`aabef87ec988dc1d`) augmented 2026-05-02; renders live phase table via `librarian_context`.
 
 ## Phase 1.5 — `tracker_design` teaching tool (DONE)
 

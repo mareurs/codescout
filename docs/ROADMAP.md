@@ -170,7 +170,7 @@ being locally-scoped per-tracker (no fix — system correctly declines to guess)
 (332) breaks into (a) `T-N` tokens that exist only as augmented-artifact `params` rows,
 invisible to link_scan's heading-based detector by design (both now documented in
 `.codescout/memories/gotchas.md`), (b) a real but already-tracked stale-id drift
-(`42dfdfc8b1522192` in `windows-platform-support.md`, F-2 in
+(`52451519052d207c` in `windows-platform-support.md`, F-2 in
 `perf-windows-session-log.md`, fix owned by `docs/superpowers/plans/2026-07-02-perf-vdi-closure.md`
 Track 3 — not duplicated here), (c) legacy `BUG-NNN`/forward R-N references, low-value
 cleanup. Full gate green (3034 tests, clippy clean, MCP live-verified with both fixes).
