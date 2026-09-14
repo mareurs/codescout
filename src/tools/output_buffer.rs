@@ -283,6 +283,33 @@ impl OutputBuffer {
         self.get_with_refresh_flag(id).map(|(entry, _)| entry)
     }
 
+    /// Resolve `id` and return **the stream the handle names**, applying the `.err`
+    /// policy once so a caller cannot forget it.
+    ///
+    /// [`get`] returns the whole [`BufferEntry`] because several consumers legitimately
+    /// want `exit_code`, `command`, `timestamp` or `truncated`. The cost of that shape is
+    /// that **stream selection became every caller's job, and they did not agree**:
+    /// measured 2026-09-14 across the five resolvers of a buffer handle, four distinct
+    /// policies were in force — select-on-suffix (the interpolation path), `.stdout`
+    /// unconditionally (`read_file`, `grep`), attach-stderr-separately
+    /// (`run_command/output.rs`), and concatenate-both (`peer/server.rs`). Two of those
+    /// **accepted** a `.err` token, resolved it, and answered from stdout with no error.
+    ///
+    /// This does not make the wrong path unavailable — `get()` still exists and must.
+    /// It makes the right one shorter, and `stream_selection_is_not_reinvented_per_caller`
+    /// (`tests/buffer_stream_policy.rs`) is what actually reds when a new site
+    /// reintroduces the omission.
+    ///
+    /// BUG docs/issues/2026-09-14-read-file-and-grep-accept-a-err-handle-and-silently-answer-from-stdout.md
+    pub fn get_stream(&self, id: &str) -> Option<String> {
+        let entry = self.get(id)?;
+        if id.ends_with(".err") {
+            Some(entry.stderr)
+        } else {
+            Some(entry.stdout)
+        }
+    }
+
     /// Like [`get`], but also returns whether the entry was refreshed from disk.
     /// Only `@file_*` entries with `source_path` set can refresh; all others return `false`.
     pub fn get_with_refresh_flag(&self, id: &str) -> Option<(BufferEntry, bool)> {

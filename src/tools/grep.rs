@@ -962,16 +962,12 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let raw = ctx
-        .output_buffer
-        .get(raw_path)
-        .ok_or_else(|| {
-            RecoverableError::with_hint(
-                format!("buffer reference not found: '{raw_path}'"),
-                "Buffer refs expire when the session resets. Re-run the command to get a fresh ref.",
-            )
-        })?
-        .stdout;
+    let raw = ctx.output_buffer.get_stream(raw_path).ok_or_else(|| {
+        RecoverableError::with_hint(
+            format!("buffer reference not found: '{raw_path}'"),
+            "Buffer refs expire when the session resets. Re-run the command to get a fresh ref.",
+        )
+    })?;
 
     let text = if raw_path.starts_with("@tool_") {
         serde_json::from_str::<serde_json::Value>(&raw)
@@ -2619,6 +2615,68 @@ mod tests {
         assert!(
             r.get("suggestion").is_none(),
             "no suggestion expected when matches exist, got: {r:?}"
+        );
+    }
+
+    /// A `.err` handle must answer from STDERR, and the stdout control is what makes that a
+    /// measurement rather than a coincidence.
+    ///
+    /// Asserts on `total`, not on a substring of the rendered response. The first draft used
+    /// `format!("{r:?}").contains(...)` and failed against correct code: grep's `suggestion`
+    /// field ECHOES THE PATTERN back ("Consider: symbols(name='STDOUT_ONLY_TOKEN')"), so the
+    /// blob contains the token on a zero-match response. The discriminator was already in the
+    /// output, unused, while the test reached for a proxy for it.
+    ///
+    /// BUG docs/issues/2026-09-14-read-file-and-grep-accept-a-err-handle-and-silently-answer-from-stdout.md
+    #[tokio::test]
+    async fn grep_on_an_err_handle_searches_stderr_not_stdout() {
+        let ctx = test_ctx().await;
+        let buf_id = ctx.output_buffer.store(
+            "failing".to_string(),
+            "STDOUT_ONLY_TOKEN\n".to_string(),
+            "STDERR_ONLY_TOKEN\n".to_string(),
+            1,
+        );
+        let err_handle = format!("{buf_id}.err");
+
+        let hit = Grep
+            .call(
+                json!({ "pattern": "STDERR_ONLY_TOKEN", "path": err_handle.clone() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            hit["total"], 1,
+            "a .err handle must search stderr; got {hit:?}"
+        );
+
+        // The direction that actually failed: stdout must NOT be reachable through .err.
+        // Without this the fix is indistinguishable from concatenating both streams, which
+        // would satisfy the assertion above and still mislead every caller.
+        let miss = Grep
+            .call(
+                json!({ "pattern": "STDOUT_ONLY_TOKEN", "path": err_handle }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            miss["total"], 0,
+            "stdout must not be reachable through a .err handle; got {miss:?}"
+        );
+
+        // And the bare handle still answers from stdout — the contract this fix must not move.
+        let bare = Grep
+            .call(
+                json!({ "pattern": "STDOUT_ONLY_TOKEN", "path": buf_id }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            bare["total"], 1,
+            "a bare handle must still answer from stdout; got {bare:?}"
         );
     }
 

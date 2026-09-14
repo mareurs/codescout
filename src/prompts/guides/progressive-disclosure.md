@@ -60,6 +60,29 @@ other tools. Both are addressable by any tool that accepts a path.
 covers both dangerous commands and out-of-scope writes: re-invoke the tool with
 the handle to acknowledge and proceed.
 
+### Reading the stderr of a buffered command: the `.err` suffix
+
+A `@cmd_*` handle holds **both streams**, and the bare handle answers from
+**stdout only**. Append `.err` to read the stderr instead:
+
+```
+grep "error" @cmd_abc.err                  # search the stderr
+read_file("@cmd_abc.err")                  # read it
+run_command("tail -20 @cmd_abc.err")       # slice it
+```
+
+**A bare-handle search that finds nothing has not shown the command did not
+print it** — it may have gone to stderr. That distinction matters most for a
+wrapper script, which writes its own verdict to stderr while the program it
+wraps writes to stdout.
+
+Line numbers are per-stream: `@cmd_abc` numbers stdout, `@cmd_abc.err` numbers
+stderr, so a slice of one is never an offset into the other.
+
+`.err` is rejected on `@bg_*` handles, which capture both streams into one log
+file — use the bare handle there. On `@file_*` and `@tool_*` it resolves but
+finds nothing, because those kinds carry no stderr.
+
 
 
 ## Path-relative annotation

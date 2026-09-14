@@ -274,16 +274,12 @@ fn strip_buffer_ref_quotes(path: &str) -> &str {
 /// numbers, with the slice parked under a `@file_*` handle so it stays
 /// greppable.
 fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Value> {
-    let raw = ctx
-        .output_buffer
-        .get(path)
-        .ok_or_else(|| {
-            RecoverableError::with_hint(
-                format!("buffer reference not found: '{}'", path),
-                "Buffer refs expire when the session resets. Re-run the command to get a fresh ref.",
-            )
-        })?
-        .stdout;
+    let raw = ctx.output_buffer.get_stream(path).ok_or_else(|| {
+        RecoverableError::with_hint(
+            format!("buffer reference not found: '{}'", path),
+            "Buffer refs expire when the session resets. Re-run the command to get a fresh ref.",
+        )
+    })?;
 
     // Navigation params this buffer ref cannot honor must fail loudly, not be
     // silently ignored (which masks caller misuse). `toml_key` is never valid
@@ -1599,6 +1595,50 @@ mod tests {
             body.contains("line 150") && body.contains("line 160"),
             "buffer midpoint read should include lines 150-160, got: {body:?} from {result}"
         );
+    }
+
+    /// A `.err` handle must be READ from stderr, with a stdout control both ways.
+    ///
+    /// The shipped defect served 4001 lines of stdout for a `.err` handle with no error, so
+    /// "the stderr token is present" alone would not discriminate — a fix that concatenated
+    /// both streams satisfies it and still misleads. Each stream carries a token the other
+    /// does not, and the absence is asserted as well as the presence.
+    ///
+    /// BUG docs/issues/2026-09-14-read-file-and-grep-accept-a-err-handle-and-silently-answer-from-stdout.md
+    #[tokio::test]
+    async fn read_file_err_handle_reads_stderr_not_stdout() {
+        let ctx = test_ctx().await;
+        let buf_id = ctx.output_buffer.store(
+            "failing".to_string(),
+            "STDOUT_ONLY_TOKEN\n".to_string(),
+            "STDERR_ONLY_TOKEN\n".to_string(),
+            1,
+        );
+
+        let via_err = ReadFile
+            .call(json!({ "path": format!("{buf_id}.err") }), &ctx)
+            .await
+            .unwrap();
+        let err_text = format!("{via_err:?}");
+        assert!(
+            err_text.contains("STDERR_ONLY_TOKEN"),
+            "a .err handle must read stderr; got {err_text}"
+        );
+        assert!(
+            !err_text.contains("STDOUT_ONLY_TOKEN"),
+            "stdout must not leak through a .err handle; got {err_text}"
+        );
+
+        // The bare handle keeps its existing contract — stdout, and stdout only. Buffer line
+        // numbering is stdout-relative for a bare handle and `sed -n 'N,Mp' @cmd_x` callers
+        // depend on it, so this fix must not move it.
+        let bare = ReadFile
+            .call(json!({ "path": buf_id }), &ctx)
+            .await
+            .unwrap();
+        let bare_text = format!("{bare:?}");
+        assert!(bare_text.contains("STDOUT_ONLY_TOKEN"));
+        assert!(!bare_text.contains("STDERR_ONLY_TOKEN"));
     }
 
     #[tokio::test]
