@@ -215,14 +215,40 @@ Discrimination checked in both directions rather than one: `doc --help` → **rc
 build→run, the replacing write can land *mid-suite*, and a one-shot check at suite start would
 pass and leave every later test as confusing as before.
 
-**1. Still the only closure, and it is an operator decision rather than a test's.** A per-session
-`CARGO_TARGET_DIR` removes the shared mutable path outright. Two costs now measured rather than
-asserted: an isolated **debug** target for this crate cost **3.7 G** and a 48 s cold build
-(measured here today while reproducing), and a prior session measured the **release**/worktree
-form at 87 s + 2.8 G once, then **11 s per run — faster than the shared tree**, because the shared
-`target/` is 108 G and contended. So *"costs disk and every session's warm-cache rebuild"* is real
-on disk and **falsified on time**. Not actioned here: it changes every session's environment and
-belongs to the operator.
+**1. BLOCKED AS SPECIFIED — do not implement it from the one-line description above.** Attempted
+2026-09-14 on an operator go-ahead and stopped at the scout, for two independent reasons, either
+of which is sufficient:
+
+- **It breaks the live MCP binary, machine-wide.** `~/.cargo/bin/codescout` is a symlink to
+  `<repo>/target/release/codescout`. `CARGO_TARGET_DIR` moves **both** profiles, so `cargo rb`
+  would write into the session's private dir while the symlink kept pointing at a path nothing
+  rebuilds — permanently stale, for every session on every profile. `cargo rb` + `/mcp` is the
+  documented live-MCP loop, so this is not a side effect, it is the loop.
+- **The only available lever is per-PROFILE, not per-session.** All three profiles carry an `env`
+  block in `settings.json`, which is the mechanism — but 3 of the 4 sessions in this checkout ran
+  under `.claude-sdd` at the time of measurement. A profile-level `CARGO_TARGET_DIR` leaves those
+  three sharing a dir: it converts a 6-way race into a 3-way one **among the sessions most likely
+  to collide**, and reads as a fix.
+
+A variant dodges the first — set `CARGO_TARGET_DIR` only on the *test* lanes, via a wrapper that
+reads `$CLAUDE_CODE_SESSION_ID`, leaving `cargo rb` on the shared tree. It is not free either: it
+edits the four-command gate sentence, which is pinned byte-for-byte by
+`claude_md_gate_lists_its_four_commands_in_the_load_bearing_order` (`src/prompts/mod.rs`), and it
+is a **policy every session must adopt** rather than a mechanism — § *Observer Blindness* position
+3's weaker shape. Costs, for whoever prices it: shared `target/` is **113 G** today with 358 G
+free.
+
+**Why the mitigation is closer to sufficient than it looks.** Cargo replaces the binary by
+**rename** — inode 196951675 → 197002269 across one rebuild, measured — not by writing in place.
+And `assert_binary_advertises_doc()` runs per `run_cmd`, immediately before each test's own
+invocation, so the unguarded window is microseconds rather than the whole suite. Pinning the inode
+with a hardlink taken at suite start would close even that, and is the obvious next move if this
+recurs; it was not taken because it buys a microsecond window for a `static`, a cleanup path with
+no owner, and a 200 MB copy fallback when the temp dir is on another filesystem.
+
+**Same exposure, not addressed here:** `tests/cross_process_write_lock.rs` (`CARGO_BIN_EXE_codescout`
+— which guarantees the binary was BUILT, a different problem, and is still a path readable after
+replacement) and `tests/librarian/mcp_integration.rs` (`cargo_bin("librarian-mcp")`).
 
 Direction 3 is retired as insufficient: stating the premise in `CLAUDE.md` cannot help when no
 behaviour change by any party closes the window — which is now measured, not argued. It has been
