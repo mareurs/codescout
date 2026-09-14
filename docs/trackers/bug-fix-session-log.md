@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 155
-entry_high_water_W: 135
+entry_high_water_W: 136
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -50,6 +50,7 @@ entry_high_water_W: 135
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| W-136 | 2026-09-14 | — | verification | validated | **A confirming run that never entered the code path it was confirming — caught before reporting.** Post-rebuild recon verified three live fixes (buffer-query stderr, `.err` on `grep`/`read_file`, the `type:"test"` envelope). My first probe used a 1-test filter and returned the verdict in full — but 1 test is ~2 KB, `needs_summary` is false, so it took the **inline** path, which was never broken. The envelope defect lives only above the ~10 KB gate, and **a broken world returns byte-identical output for that run**. Re-ran wide (179 tests, `type:"test"`, 177/2) and only then did it prove anything. `F-150`'s own mechanism recurring inside the verification of `F-150`'s bug — the class did not stop, but the entry existed, so *"which side of the gate did this land on?"* was already loaded. |
 | F-155 | 2026-09-14 | med | cross-session | open | **A peer attributed a staged changeset to me by TOPIC, and topic adjacency survives an explicit handoff.** `codescout-e7` named *"your `.err` changeset"*; the `.err` read-side is peer `40130`'s (sid `9403d62d`), handed to them by me in writing that evening. **Their size figure was right and an earlier revision of this row wrongly corrected it** — 541/6 at 21:41:53 and 23/1 at 21:42:5x are the same instrument at two instants, across a commit that landed between them; see the entry. No harm — they committed by pathspec and left it alone — but a sweep would have landed it under my name. `CLAUDE.md` § *Reaching a Peer Session* names only **diff** adjacency (*"`git diff --stat` names insertions and names no author"*); this attributed by **who is associated with the subject**, a reading that never touches the tree. **A handoff is visible only to its parties** — I told `40130`, not the room — and no tool records a transfer: `file-provenance.py` returned `UNKNOWN`, and the socket route answers who *sent a message*, not who *owns a changeset*. Tell: announce a handoff to the room, and say *"is this yours?"* rather than *"your changeset"*. |
 | F-154 | 2026-09-14 | med | reasoning/citation-resolution | open | **Refuted a peer's citation by finding a sound match in a file they never named — verification succeeded, on the wrong object.** They said "the hook's `four`" meaning `codescout-companion/hooks/pre-edit-dirty-check.mjs:118`, a **runtime advisory** claiming "Four such captures are recorded in" a file whose highest instance is now **14**. I checked `scripts/pre-commit-foreign-index.sh:144`, found "all four arms" (test arms, sound, not stale), and sent a correction that was itself the error it described. **A confirming match terminates a search**, so finding a *sound* "four" was worse than finding none — it converted an unfinished search into a confident refutation. Distinct from `F-150` (region of input space), `F-151` (shape of search) and `F-153` (right command, wrong pair): this is the right command, correctly run, on the **wrong artifact**, resolved by token rather than referent. Tell: quote the file:line you checked back to the other party *before* concluding — the mismatch is visible with no further reading. Their hook also contradicts itself in place ("Four such captures" four lines above "instance 5"), so it was never once-true. |
 | F-153 | 2026-09-14 | med | cross-session | open | **Ran the bytes check `F-147` prescribes, pointed at the wrong PAIR — and its output is smallest exactly when the capture is worst.** `2aec3cd4` carried peer `codescout-e7`'s whole `## F-152` section plus their `entry_high_water_F` bump. I ran `git diff -- <file>` after committing, read `1 insertion`, and reported the peer's work safe. `git diff` is worktree↔index; the question was index↔HEAD. Their section was already absorbed into my index, so the calm number was the *signature* of the capture, not evidence against it. Second instance in one day by the author of `F-147`, three commits after committing `F-147`'s own text into the captured file. Nothing lost (`432e379f` holds the index row). Tell: *"what am I about to commit?"* is answered only by `git diff --cached`; `git diff` answers *"what am I leaving behind?"*, and that answer shrinks as the capture grows. |
@@ -15360,6 +15361,33 @@ No harm done on the attribution either — `codescout-e7` committed by pathspec 
 **Tell, and it is one line for the author rather than a check for the reader:** **announce a handoff to the room, not only to the recipient.** A third party attributing staged work has no channel that carries it otherwise. The cheaper half, for the attributing side: when the staged work is topically someone's but you have not seen them write it, say *"is this yours?"* rather than *"your changeset"* — `codescout-e7` did step around it correctly, so the sentence cost nothing here and would have cost a commit under the wrong name if they had not.
 
 **Rests on:** `.err` read-side ownership staying with `40130`. If it returns to me the instance stands as history and the mechanism is unaffected.
+
+## W-136 — A confirming result from the wrong branch — the verification nearly proved itself on a path that was never broken
+
+**Valid:** dated 2026-09-14
+
+**Status:** validated
+
+**Context.** After `cargo rb` + `/mcp`, three fixes from this evening became live for the first time, all previously observed only through unit tests: `9b6f4713` (a buffer query below `needs_summary` carries the entry's stored stderr), peer `9403d62d`'s `.err` read-side on `grep`/`read_file`, and peer `9c2b542f`'s `type: "test"` envelope carrying stderr. Scouted all three through the shipping path.
+
+**Confirmed, and published as a confirmation rather than absorbed** — `CLAUDE.md` § *Testing Discipline*: *"when a re-derivation confirms, publish the confirmation. That is a denominator, never a catch."*
+
+| surface | before | after |
+|---|---|---|
+| `run_command` `grep -c TOKEN @cmd_x` (2 bytes) | no `stderr` key | `stderr: "STDERR_ONLY_TOKEN\n"` |
+| `grep(path="@cmd_x.err")` | `4000: stdout line 4000` | `1: STDERR_ONLY_TOKEN` |
+| `read_file("@cmd_x.err")` | 4000 lines of stdout | `1 line / STDERR_ONLY_TOKEN` |
+| `mutation-probe` via `type:"test"` envelope | no `stderr` key; verdict derived from the exit code | `KILLED (rc=101, 179 test(s) ran)` verbatim |
+
+**The win is not the table. It is the run I nearly reported it from.** My first probe after the rebuild used a narrow filter — one test — and its verdict arrived in full. Reading that as *"the envelope fix works"* would have been wrong: one test produces ~2 KB of combined output, `needs_summary` is false, and the response takes the **inline** path, which was never broken. The envelope defect lives only above the ~10 KB gate. **A broken world produces a byte-identical result for a 1-test run.**
+
+Caught before reporting, by asking which *branch* the observation took rather than whether the *value* was right. Re-ran with the wide filter — 179 tests, `type: "test"`, `passed: 177 / failed: 2` — and only then did the verdict line prove anything about the envelope.
+
+**Counterfactual.** Without that question I would have reported three fixes verified on evidence that touched two of them, and the `type: "test"` envelope — the defect that started this entire thread — would have been marked confirmed by a run that never entered its code path. It would have read as the strongest possible evidence: the *exact tool*, the *exact command*, the *exact verdict string* I was looking for.
+
+**Why this is a `W-N` and not another `F-N`.** This is `F-150`'s mechanism — an observation taken at one point on a thresholded axis, where *"no mechanism"* and *"mechanism not reached"* emit identical bytes — recurring inside the **verification of the fix for the bug `F-150` was written about**. The class did not stop occurring. What changed is that the entry existed, so *"which side of the gate did this land on?"* was already loaded. That is the only thing a ledger can actually buy, and it is worth recording that it paid once.
+
+**Rests on:** `needs_summary` remaining a combined-size gate at `MAX_INLINE_TOKENS`. If the envelope's branch predicate changes, the threshold above is stale but the discipline is not.
 
 ## Template for new entries
 
