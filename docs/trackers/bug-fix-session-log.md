@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 137
-entry_high_water_W: 132
+entry_high_water_F: 139
+entry_high_water_W: 133
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -50,7 +50,9 @@ entry_high_water_W: 132
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
-| F-136 | 2026-09-13 | high | design-gap | open | **A fix direction recorded as "settled" can be settled on the CHOICE and silent on the DEFAULT, and the default is where the whole corpus lands.** `BL-77`'s plan closes both alternatives with measurements and an ADR ruling, then never says what an ABSENT `snapshot_anchor` means — which on day one is all **24** augmented trackers, since the field does not exist yet. The two candidate defaults produce opposite wrong answers over the same 24 rows (whole-body scan preserves the exact false negative the bug was filed to remove; empty-set silences `snapshot_drift` corpus-wide via `body_keeps_snapshot`'s empty early-return), and neither is visible at unit-test grain because fixtures get written to whichever assumption the implementer held. Found by scouting the seam before typing, not by the plan being wrong about anything it addressed. |
+| F-139 | 2026-09-14 | med | tool-behavior | fixed-verified | **W-133 confirmed the IL-3 block's predicate but not its remedy text — the remedy was the actual defect.** |
+| F-138 | 2026-09-14 | med | measurement | fixed-verified | **A design ruling can block for a day on a population nobody derived — and the fork can have no members.** `BL-77` was blocked on "what does an absent `snapshot_anchor` mean", framed over **24** augmented trackers whose two defaults "fail in opposite directions". Derived under one rule they differ on **zero** files: only a ledger that both passes `body_keeps_snapshot` AND anchors ids in >1 table can tell them apart, and the single such ledger declares. `24` was real, correctly cited — it just counted *trackers with an augmentation* when the question was *trackers these readings can disagree about*. Tell: a fork claiming two directions should name the files each breaks. Also closed a genuine mutation hole — 1 of 3 call sites reverted silently, all 14 tests green |
+| F-136 | 2026-09-13 | high | design-gap | fixed-verified | **A fix direction recorded as "settled" can be settled on the CHOICE and silent on the DEFAULT, and the default is where the whole corpus lands.** `BL-77`'s plan closes both alternatives with measurements and an ADR ruling, then never says what an ABSENT `snapshot_anchor` means — which on day one is all **24** augmented trackers, since the field does not exist yet. The two candidate defaults produce opposite wrong answers over the same 24 rows (whole-body scan preserves the exact false negative the bug was filed to remove; empty-set silences `snapshot_drift` corpus-wide via `body_keeps_snapshot`'s empty early-return), and neither is visible at unit-test grain because fixtures get written to whichever assumption the implementer held. Found by scouting the seam before typing, not by the plan being wrong about anything it addressed. |
 | F-135 | 2026-09-11 | med | verification/shared-checkout | open | **A shared-checkout rebuild maps to no commit, and POSITIVE BINARY IDENTIFICATION identifies the CHANGE, never the BUILD.** `cargo rb` relinked at 20:50:14 with zero code commits on HEAD since the previous build, while three peer-owned source files sat dirty. I read that as "their work is compiled in" and the mtimes refuted it — all three were written 1m33s to 2m51s AFTER the link, so the binary holds an intermediate state of them that is in no commit and no longer on disk. Both natural inferences are wrong in opposite directions. Puts a ceiling on `W-125`: its remedy answers *"does this binary contain my fix?"* and says nothing about what else is in there, and on a solo checkout those two questions coincide, which is why the gap is invisible from inside the practice. The specific wire claim survives because `src/tools/core/types.rs` is unmodified since 17:17:40, before the link — a property of that verification, not of the method. See `F-135` below. |
 | F-137 | 2026-09-14 | med | measurement | fixed-verified | **A length delta between two stores is blind to SUBSTITUTION, and the reflex fix it licenses is the destructive one.** A peer ranked the work-queue's `task` column by byte delta and reported five rows where "body is fuller", remedy *"copy the body into params"*. The set re-derived exactly — and two of the five were **divergent**, each store holding text the other lacked, which a magnitude cannot distinguish from truncation. The copy would have deleted `BL-38`'s *"26 of 66 tracker/bug files are unprotected"* (a measured defect population) and two thirds of `BL-20`'s symptom triple. Fixed by writing the **union** into both stores: body-fuller 5 → 0, nothing lost. This is § *Testing Discipline*'s monotonicity law arriving in a measurement rather than a test. Two smaller instances of the same shape in one pass: the peer's `bug=10` measured the template's em-dash for an absent key (withdrawn), and my own first script reported 67 disagreements that were a trailing `` ` |`` left by my cell split. See `F-137` below. |
 | F-134 | 2026-09-11 | med | design/scope | open | **A bug's own stated fix preference can conflict with a design invariant its author didn't check against the actual code.** `b75d2660ef37198c` recommended oversampling grep's context mode the way simple mode does; the actual code (`grep.rs:121`) documents that simple mode's oversample is display-capped by `cap_grouped` and context mode has no equivalent cap, so following the recommendation verbatim would have shipped a 4x output-size regression alongside the fix. Took the bug's own second, more conservative option instead. See `F-134` below. |
@@ -189,6 +191,7 @@ entry_high_water_W: 132
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-133 | 2026-09-14 | med | **Scouted a suspected `run_command` IL-3 shell-gate defect down to the actual predicate before filing a bug.** User flagged a refusal on a shell `grep --include=*.rs` over `/c/Users/MAILINCA.BRN.002/work/claude/codescout` as contradicting the documented "external path is allowed" carve-out. Read the resolution chain (`check_source_file_access` → `segment_reads_project_source` → `path_is_within_project` in `src/util/path_security.rs`): the absolute-path branch is a plain `expanded.starts_with(project_root)`, no name heuristic. The searched path could only have tripped the gate by being (or nesting under) that session's own `project_root` — i.e. the command was a shell content-read over the project's own source, the exact case IL-3 exists to catch. | Trusting the quoted rule-of-thumb text alone, without reading the predicate it summarizes, would likely have produced a new `docs/issues/` bug duplicating the already-closed false-positive classes in `docs/issues/archive/2026-09-10-source-gate-joins-an-unexpanded-var-path-onto-the-project-root.md` and `docs/issues/archive/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md`. | validated |
 | W-132 | 2026-09-14 | med | **Re-derived a shipped probe by hand before reading the index that names it — and the redundancy is what found the probe's defect.** Recon after a `cargo rb` classified every `codescout` process by its own cmdline (`mux --socket` → MUX, else SERVER), following memory `gotchas` § *MCP Binary Symlink*, and only then consulted [`docs/PROBES.md`](../PROBES.md) — whose header reads *"Start here before answering a question with a number."* [`scripts/stale-servers.sh:39`](../../scripts/stale-servers.sh) selects with `pgrep -x codescout` and applies no cmdline filter, so it counts LSP muxes under a header saying *servers* and closes with *"Reconnect those sessions (/mcp)"* — unperformable on a mux, which has no session and self-heals at `--idle-timeout`. | Following the documented route alone returns `total=22 stale-exe=18 current=4` under the word *servers*, with nothing marking the unit as mixed — a plausible number, not an error. **Stated precisely: the probe is not silent about it.** It prints `PPID`, and the mux row's `PPID` is another row's `PID`; the tell is present and **unnamed**, so reading it needs the server/mux distinction already in hand. All four documented blind spots (`scripts/stale-servers.sh:22-29`) bound the count from *below*; the missing one bounds it from above. The rule this yields is not *re-derive everything* but **classify the population by hand once per session when a probe's answer is a count.** | validated |
 | W-131 | 2026-09-13 | med | **Scouted a test file's rule-parity section before planning a gate, and found the parser the gate reuses is already filed debt.** `tests/issue_clusters.rs` requires every `#[test]` to be declared `HOOK_OWED` / `HOOK_ONLY` / `NOT_HOOK_OWED` *with a reason*, and `the_hook_enforces_every_rule_it_declares` compares that against `scripts/pre-commit-ledger-counts.py`'s `HOOK_RULES` by **equality, not subset**. Decisive find: `no_mechanism_status_is_a_bare_verdict` already reads `OWED, not yet implemented — needs the mechanism-status parser ported`, citing open bug `c77c15b68a60e126` (`cluster/guard-narrower-than-its-name`) — and the planned gate reuses that same parser. | Both new tests would have redded the parity gate on first run, which is cheap and self-announcing. The expensive half is the repair that red invites: declare them `NOT_HOOK_OWED`, landing a **fourth** `OWED, not yet implemented` entry against that one bug — widening an open IC-14 instance inside a change advertising itself as closing a gate hole, invisible to a reviewer reading a green suite. **The cheap red hides the expensive decision behind it.** Scout converts it into a scope question asked before any code is written. Also derived rather than cited: **20 of 23** index rows agree with their class field; the 3 that differ are three different kinds (IC-13 real drift, IC-2 a parenthetical, IC-3 no verdict token at all), so equality reds two of them wrongly — the vocabulary is the design question, the predicate is nearly free. | validated |
 | W-130 | 2026-09-12 | high | **Three readings of one cause, every one taken through the instrument that caused it.** `e69ebcbb96c28f7f` held that subagent writes reach no transcript; the cause had gone substrate → version (*"2.1.x emits none — zero across 41 versions, 1,928 dispatches"*), both counted through `scan()`'s own **non-recursive** `d.glob("*.jsonl")`. 2.1.x writes them to `<project-dir>/<parent-sid>/subagents/agent-<id>.jsonl`, one directory below reach, so every count returned zero and read as corroboration. Re-derived with `find`: **756** files, **755** carrying the flag, **192,797** records, newest same-day on **2.1.267** — inside the range cited as emitting none. | The file had queued two fixes — a controller-written sidecar per SDD task, and a working-tree substitute question — both workarounds for a substrate gap that is not there, each shipping a **second source of truth** for data the harness already writes, neither wrong in any way its own tests could show. Real fix: one glob plus a fallback correction, no parsing change. Worse, the conclusion was written into the **user-facing** refusal — *"stop looking for the owner — there is none recorded"* — while `fmt-mine.sh`'s whole remedy is *ask the named owner*: `--all` before named 10 owners, **0 of 10 live**; after, 11, the new one `[LIVE]` with a socket. **Operational form: when a count of "does the substrate contain X" returns zero, re-derive it with an instrument that does not share the first one's window.** | validated |
@@ -14196,7 +14199,24 @@ So a naive equality gate reds on all three, two of them wrongly, and would be ri
 
 **Valid:** invariant
 
-**Severity:** high · **Status:** open · **Category:** design-gap
+**Severity:** high · **Status:** fixed-verified · **Category:** design-gap
+
+> **CORRECTED 2026-09-14 — the GAP was real, the SIZING was not, and the title above still
+> carries the wrong number.** The heading and the argument below both say the defaults "produce
+> opposite wrong answers over the same 24 rows". Derived under a single rule they differ on
+> **zero** files. The two readings can only disagree about a ledger that *both* passes
+> `body_keeps_snapshot` *and* anchors its ids in **more than one table**; with one table the block
+> IS the document, and with no row anchors the majority gate already returns `false`. Of 13
+> params-backed ledgers, **4** pass the gate and exactly **one** is multi-table — and it declares.
+> So absent-⇒-whole-body is a no-op everywhere, and absent-⇒-no-block would have silenced three
+> working advisories to fix nothing observable. Ruling taken on that measurement; shipped.
+>
+> **The `24` was not careless** — it is `doc(action="find", kind="tracker", augmented=true)`,
+> correctly run and correctly cited with its tree. It answers *"how many trackers carry an
+> augmentation"*, and the question was *"how many trackers can these two readings disagree
+> about"*. Both are counts of augmented trackers; nothing in the citation marks which. The
+> heading is left standing rather than rewritten, because what this entry is now worth is the
+> pair — the gap it found and the number it sized it with. → `F-138`.
 
 **Observed:** `BL-77` / `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`
 records its fix direction as **settled** — *"the augmentation gains a `snapshot_anchor` field holding
@@ -14385,6 +14405,88 @@ they partition by cmdline. That is one instrument with an extra column, so the a
 part that carried information.
 
 **Status:** validated
+
+## F-138 — A design ruling blocked for a day on a population nobody derived — and the fork had no members
+
+**Valid:** dated 2026-09-14
+
+**Severity:** med · **Status:** fixed-verified · **Category:** measurement
+
+**Observed.** Bug `e9bea0ed3ff9927a` / `open-issue-work-queue:BL-77` sat `blocked` for a
+day, its `next` reading *"BLOCKED ON A RULING, not on typing"*. The ruling owed: what does
+an **absent** `snapshot_anchor` mean for `body_snapshot_row_indices`? The file framed it as
+*"on day one that is every augmented tracker — **24** of them … the two available defaults
+fail in opposite directions over the same 24 rows."* Two named defaults, plus a third
+offered in good faith (emit the undeclared state as a `doctor` finding so the 24 become a
+worklist that drains).
+
+**Derived 2026-09-14 under a single rule, before writing any code.** The two defaults can
+only differ on a ledger that *both* passes `body_keeps_snapshot` *and* anchors its ids in
+**more than one table**. With one table the block IS the document and both readings agree
+by construction; with no row anchors the majority gate already returns `false` and the
+advisory is silent either way. Over this repo's 13 params-backed ledgers: **4** pass the
+gate (`prompt-hamsa-audit-log` 39/39, `windows-platform-support` 35/35,
+`2026-08-16-iron-law-gate-firing-audit` 8/8, `open-issue-work-queue` 77/77), and of those
+four exactly **one** is multi-table — the one that declares. **The two defaults differ on
+zero files.** The rejected one would have silenced three working advisories to fix nothing
+observable; the third option would have emitted **12 findings with 0 actionable** (9 of the
+12 ledgers have no rows to anchor at all).
+
+**The lesson, and why it is not "check harder".** `24` was a real number, correctly
+derived, correctly cited with its tree — `doc(action="find", kind="tracker",
+augmented=true)`. It answers *"how many trackers carry an augmentation"*. The ruling needed
+*"how many trackers can these two readings disagree about"*. Both are counts of augmented
+trackers, both are defensible, and nothing in the citation marks which one it is. This is
+§ *Testing Discipline*'s *"a count of a defect population must arrive with its unit or not
+at all"* landing on a **design decision** rather than a bug report: the cost was not a
+wrong ruling, it was a ruling nobody could make, because the number framing it silently
+answered a different question. **The tell is available in advance:** a fork whose branches
+"fail in opposite directions" should name the files each branch breaks. If that list cannot
+be produced, the fork may have no members.
+
+**A second, separable finding — mutation per SITE found a real hole.** The law says mutate
+once per guarded site, not once per feature. Three call sites consume the narrowed read.
+Mutating the shared function killed tests for two of them incidentally (`append_entry`, 1
+test; `scan_snapshot_drift`, 5 tests). For the third, `snapshot_stale_note`, reverting its
+wiring from `snapshot_rows_in_declared_block` back to `body_snapshot_row_indices` left
+**all 14 tests in its module green** — a silent revert. Both readings emit an advisory
+there, so an `is_some()` assertion could not have discriminated either; the wide read tells
+the reader their row *"still shows the PREVIOUS field values"* and sends them to edit a row
+that is not in the block. Closed by
+`a_stray_row_in_another_table_cannot_mask_a_row_missing_from_the_declared_block`, asserting
+on **which** message the system names rather than on a computed proxy, and verified by an
+observed red rather than by its own existence.
+
+**Rests on:** the 13-ledger derivation (catalog is gitignored — re-derive, never cite);
+`body_keeps_snapshot`'s majority threshold; the three consumers staying three.
+
+## W-133 — Suspected run_command IL-3 shell-gate defect scouted as correct-by-design before filing a bug
+
+**Valid:** dated 2026-09-14
+
+**Observed:** user flagged a `run_command` refusal as a likely defect: `grep -rn "...env-var names..." /c/Users/MAILINCA.BRN.002/work/claude/codescout --include=*.rs -l` was blocked with `shell access to source files is blocked`, and the quoted IL-3 rule text says a path *outside* the project root should be allowed.
+
+**Scout:** read the three-function chain in `src/util/path_security.rs` — `check_source_file_access` → `segment_reads_project_source` → `path_is_within_project`. The absolute-path branch of `path_is_within_project` is a direct `expanded.starts_with(project_root)`; there is no substring/name heuristic. For the block to have fired, the searched path (`/c/Users/MAILINCA.BRN.002/work/claude/codescout` — the same username as this repo's git author) must literally equal or nest under that session's resolved `project_root`. The command was therefore a recursive shell `grep --include=*.rs` over the project's **own** source tree — exactly the case IL-3 exists to catch — not an external path wrongly classified as internal.
+
+**Verdict:** not a defect. Gate behaved as designed; the returned hint (identifier pattern detected → suggested `symbols`/`references`/`call_graph`) was the correct remedy. No F-N filed.
+
+**Counterfactual:** without reading the resolution chain (vs. trusting the quoted rule-of-thumb text alone), this would likely have been filed as a new `docs/issues/` bug duplicating the already-closed class in `docs/issues/archive/2026-09-10-source-gate-joins-an-unexpanded-var-path-onto-the-project-root.md` and `docs/issues/archive/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md`, which cover the actual (already-fixed) false-positive shapes of this gate.
+
+**Status:** validated
+
+## F-139 — W-133 confirmed the IL-3 block's predicate but not its remedy text — the remedy was the actual defect
+
+**Valid:** dated 2026-09-14
+
+**Observed:** `W-133` (this file) concluded a `run_command` IL-3 refusal was "not a defect... the returned hint... was the correct remedy" after verifying only that the block itself (path-inside-project) was correctly triggered. The user then corrected the framing: the actual complaint was never about the block being wrong — it was that the block's *remedy hint* pointed at tools that cannot solve the request.
+
+**Gap:** I verified the predicate (`path_is_within_project`) but not the remedy-selection logic downstream of it. `check_source_file_access`'s `"grep" =>` arm picks between two remedy texts using `is_identifier_pattern(&pat)` — pure lexical shape, no index lookup. For the reported pattern (`CODESCOUT_EMBEDDER_MODEL_NAME|EMBED_API_KEY|...`, an alternation of env-var-name literals), that branch suggests only `symbols`/`references`/`call_graph` and never `grep(pattern, path)`. Checked: `symbols(name="CODESCOUT_EMBEDDER_MODEL_NAME")` → 0 matches (not a declared symbol); `grep(pattern="CODESCOUT_EMBEDDER_MODEL_NAME|EMBED_API_KEY|CODESCOUT_MODEL_DIM", glob="*.rs", mode="files")` → 50 matches, 13 files, immediately. The suggested remedy was unperformable; the omitted one worked instantly.
+
+**Cost:** filed a tracker entry (`W-133`) asserting the tool behaved correctly when only half of its behavior (the block) had been checked — the other half (the remedy text) was wrong. Caught in the same conversation before it propagated further, but it is exactly the "confirmed too early" shape this tracker's own `F-109`/`F-122` entries warn about.
+
+**Fix:** filed `docs/issues/2026-09-14-il3-grep-remedy-assumes-symbol-lookup-for-identifier-shaped-patterns.md` (`92a7c607d7ce7aee`), tagged `cluster/hint-composed-without-the-request` (IC-22) — the remedy is composed from the pattern's lexical shape, not from what the request was actually for.
+
+**Lesson:** "the gate fired correctly" and "the gate's remedy is correct" are two separate claims with two separate code paths (the predicate vs. the `match` that composes the hint string); verifying one is not evidence for the other.
 
 ## Template for new entries
 
