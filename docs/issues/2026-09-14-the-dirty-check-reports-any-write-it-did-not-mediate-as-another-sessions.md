@@ -176,6 +176,25 @@ written by something that can resolve an artifact id to a path, or the hook shel
 Option 2 (consult the transcript-scanning attribution source) remains available and
 unattempted. It would buy a stronger claim — *"written by THIS session"* and suppression —
 at a ~7s scan on every structural edit.
+## Fix provenance
+
+- **SHA:** `claude-plugins:9169527`
+- **patch-id:** `f909298548df5b1631c84a2ac281d1cca4468e3d`
+
+Cross-repo: the hook lives in `claude-plugins`, the record here. Released as
+`codescout-companion` 1.20.10 and seeded into all three profile caches
+2026-09-14 — a commit alone would not have reached a running session, since each
+profile loads the plugin from its own cache copy rather than the working tree.
+
+**`mitigated`, not `fixed`** — see § *Fix*. The unobservable authorship claim is
+gone; the advisory still fires on a session's own unmediated writes, and silence
+on the librarian route is not reachable from this hook.
+
+The `844d952b` appearing elsewhere in this record is the commit the bug was
+OBSERVED at, not a fix. It is named here because `doctor`'s
+`terminal_status_without_fix_anchor` found it and said the quiet part: a record
+with a loose hash in its prose does not merely lack an anchor, it **reads as
+anchored**, so a reader scanning for provenance finds one and stops looking.
 ## Tests added
 
 Two suites cover this hook, in different trees, and the first search found only one —
