@@ -192,7 +192,21 @@ there is no verdict line to read.
    **Verdict:** rejected — `0` against a control of `1`.
 3. **Hypothesis:** stderr is never captured for test-type runs.
    **Test:** read the buffer's head.
-   **Verdict:** rejected — cargo's own `Compiling …` lines are stderr and are present.
+   **Verdict:** rejected — but **the reason first recorded here was void, and it survived two
+   passes of correcting this file.** It read *"cargo's own `Compiling …` lines are stderr and are
+   present."* `scripts/mutation-probe.sh:233` pipes `( cd "$TREE" && "$@" ) 2>&1 | tee`, so those
+   bytes **were stdout** by the time they reached the buffer; their presence is evidence about
+   stdout and says nothing about stderr. The verdict stands on other grounds, which are stronger
+   than the hypothesis it rejected: `raw_stderr` is captured in full and handed to the summarizer,
+   which simply never rendered it. Generalised as `context-injection-session-log:F-11` — *a control
+   whose subject was relabelled in transit*.
+
+   **That this line outlived the correction is the third instance of one shape in this file**, and
+   worth more than the correction. § *Root cause* was rewritten to the established mechanism and
+   § *Reproduction* gained a visible CORRECTION block; both were done by a reader acting on the
+   file, and neither pass reached § *Hypotheses tried*, where the same claim sat unqualified. A
+   section is corrected where it is being USED, and a rejected hypothesis is the section nobody
+   returns to. `OB-12` / `OB-26`.
 
 ## Fix
 
@@ -369,3 +383,17 @@ Do not re-derive the "overflow drops stderr" hypothesis — it is rejected above
 - `docs/issues/archive/2026-09-14-the-append-entry-recipes-still-teach-the-two-call-form-the-fix-replaced.md`
   — the task this was found during; the probe run whose verdict was lost was checking that file's
   regression guard, which turned out to be decoration.
+- `context-injection-session-log:F-11` — the void reason above, generalised: a control whose
+  subject was **relabelled in transit**, so the bytes examined were no longer the stream named.
+- `context-injection-session-log:F-12` — § *Reproduction*'s layer inheritance, generalised, with
+  its own consolidation **retracted**: it grouped three mechanisms under a claim broad enough to
+  cover most mistakes, which is this repo's claim-shaped-never-topic-shaped rule failing on the
+  entry asserting it.
+- `observer-blindness:OB-26` — this file is its fourth measured instance, and its § *Who can see
+  it* predicted the observer by role before the exchange happened: *"the party who tries to FIX
+  from the stated mechanism. Not a more careful reader — a reader with a different job."* The
+  confirming instance is recorded there rather than absorbed, per `CLAUDE.md` § *Testing
+  Discipline*: a re-derivation that confirms is a **denominator**, never a catch.
+- `context-injection-session-log:W-5` — why this file drew six corrections and a vaguer one would
+  have drawn none. **A record with no corrections against it is indistinguishable between *right*
+  and *unfalsifiable*.**
