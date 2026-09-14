@@ -1,6 +1,6 @@
 ---
 kind: plan
-status: draft
+status: done
 title: Parameter alias collapse — implementation plan
 owners:
 - marius
@@ -1203,6 +1203,83 @@ the three wire probes. Consult `docs/TAXONOMY.md` for the exact call and artifac
 - [ ] **Step 5: Final full gate, then commit**
 
 ---
+
+## Execution Record — completed 2026-09-11
+
+All nine tasks executed 2026-09-10/11 via `superpowers:subagent-driven-development`, verified on
+the live wire, and shipped to `origin/experiments`.
+
+**The checkboxes below are NOT ticked, deliberately, and that is the honest state rather than an
+oversight.** Steps were executed by dispatched subagents whose completion evidence is the commit
+diff, the observed RED, and the four-number gate counts in each task's report — not a tick. Back-
+filling 49 boxes now would assert per-step completion nobody re-verified, converting a record into
+a claim. Read the commits below as the execution record; read the boxes as the plan's original
+shape.
+
+### What shipped
+
+| commit | patch-id | what |
+|---|---|---|
+| `13859878` | — | five measured alias/schema gaps repaired |
+| `d5a1fea2` | — | `Scope::parse` refuses unrecognized values instead of silently defaulting to `Project` |
+| `8b396343` | `d2cdcc3c…` | `symbols` four name params → two, mode resolved with the pattern |
+| `4d78c48a` | `8899f54a…` | a declared alias may never name a parameter in `required`, plus the gate |
+| `295a928e` | `7432ae74…` | the advisory announced on the ERROR path too |
+| `70c5e02a` | — | `count-with-members.sh` (intervention `I-10`, routed from `bug-fix-session-log:F-133`) |
+
+Tasks 1–8 (the normalizer, `Tool::param_aliases`, the render paths, the file and symbol tool
+collapses, the coupled doc surfaces, the gate replacement, the budget ratchet) landed across
+earlier commits on `experiments`.
+
+### Four places reality contradicted this plan, each verified rather than assumed
+
+1. **"All three render paths" was wrong — there are four.** The Architecture paragraph above, the
+   governing ADR's Consequences, and three separate task reviews all enumerated three. Every
+   advisory consumption site sits below the `?` on `self.call(input, ctx).await`, so an `Err`
+   returns before the advisory is attached. Filed as `50ac8439bae8b9bf`, fixed at `295a928e`,
+   archived as `50ac8439bae8b9bf`. **The enumeration itself was the blind spot** — every review
+   checked that three were covered and none asked whether three was the right number. Its residue
+   is still open as `de47783b45cb4d09`: the fix closes the path for `RecoverableError` and not for
+   a plain `anyhow` error, which is the same sentence failing on the other of two error types.
+
+2. **`symbols` was explicitly out of scope and was collapsed anyway.** Self-Review below records
+   *"`symbols` and `librarian` appear in no task"*, and Task 9 Step 1 asserted their params were
+   still present so scope could not leak silently — that guard worked as designed. The collapse
+   happened later, under a separate operator directive, and fixed a verified defect the plan never
+   knew about: `is_name_path` read key PRESENCE while `pattern` resolved by PRECEDENCE, so a key
+   that lost the race still flipped the match mode, suppressed the regex refusal, and discarded
+   `kind`. A second live defect surfaced with it — the mirrored LSP predicate was unconditionally
+   the substring branch, so exact name-path lookups never reached the project-wide path at all.
+
+3. **The `required`/alias contract was not in the plan and is a real hole.** A client validates
+   `required` BEFORE the server normalizes, so any parameter that is the canonical of a declared
+   alias must not appear in `required` — otherwise a validating client rejects exactly the calls
+   the alias exists to repair. Two live violations: `edit_code` (`symbol`, aliased from
+   `name_path`) and `grep` (`pattern`, aliased from both `query` and `regex`). Fixed and pinned by
+   `no_declared_alias_canonicalises_to_a_required_param`.
+
+4. **`required` is not client-enforced here, and an earlier note in this work stream said it was.**
+   Verified on the wire: `grep(path="Cargo.toml")` with no `pattern` reaches the server and returns
+   a server-side `RecoverableError`. So the `scope` `oneOf` bought documentation rather than
+   refusal, which is why the real fix went into `Scope::parse` (`d5a1fea2`) rather than the schema.
+
+### Open, each with a stated reason rather than neglect
+
+- `de47783b45cb4d09` — the advisory still does not reach a plain `anyhow` error. `route_tool_error`'s
+  narrowness there is a deliberate security property (an error oracle over HTTP leaks filesystem
+  layout); `Context` prepends over the tool's own message and `format!` drops the `.source()` chain.
+- `1e11cf9357136e0e` — the buffered envelope drops a tool's OWN `corrections`, so whether a caller
+  learns their request was reinterpreted depends on how big the answer was.
+- `cb19a7d83a727403` — the smoke scripts call `get_symbols_overview`, registered nowhere, five times
+  each; a no-name `symbols` call returns a directory listing rather than failing, so
+  `assert_symbols_found` went green against scenery.
+
+### Not owed
+
+This run has **no deferred-minors doc and never owed one.** The `sdd-ruling-log` ruling *"Preserve
+the run's deferred minors in a committed doc before the workspace is deleted"* belongs to the
+**get-guide-section-grain** run (2026-08-27), not to this one — checked against that log's own run
+headings. A whole-branch review of this work therefore starts from the diff, not from a list.
 
 ## Self-Review
 
