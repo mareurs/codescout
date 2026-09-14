@@ -380,6 +380,49 @@ observed **kill**, not a survival, so by this file's own triage rule (*a mutatio
 propositions, a mutation's RED is one*) no applied-ness audit was owed at all. Three prescriptions
 followed, three held. The one that failed is the one whose remedy does not follow from its
 diagnosis.
+
+#### MEASURED 2026-09-14 — the cost was wrong by an order of magnitude, and the remedy is cheap
+
+Predictions and a decision rule were written down **before** any run (the technique this file
+teaches two sections down), then measured on this machine at load 3.28 with **zero** competing
+`cargo`/`rustc` processes:
+
+| | predicted | **measured** |
+|---|---|---|
+| **A** main checkout, warm, `cargo test --lib agent::build_check` | 20–60 s | **13.8 s** |
+| **B** fresh worktree, cold, same command | 5–20 min | **87 s** |
+| **C** that worktree, second run, no edits | 1–5 s | **11 s** |
+| **D** worktree `target/` after B | 3–8 G | **2.8 G** |
+
+The rule fixed in advance was *"if B ≤ ~3 min, 'real money' is FALSE and the worktree remedy is
+cheap enough to prescribe."* **B came in at 87 s.** The claim is falsified, by a criterion set
+before the data existed rather than one chosen after seeing it.
+
+**And C is the number that actually matters, because it beats the shared tree.** A kept mutation
+worktree runs the same command in **11 s** against the main checkout's **13.8 s** — faster,
+because its `target/` is small and uncontended while the shared one is 108 G and fought over by
+five sessions. So the isolated tree is not a sacrifice bought for safety; it is cheaper per run,
+after 87 s and 2.8 G paid once.
+
+**Non-vacuity checked, because a fast green is what a build that ran nothing also looks like:**
+both worktree runs report `running 33 tests` / `33 passed`. An empty filter would have produced
+the same `rc=0` in less time.
+
+**Why the estimate was out by ~10x, which is the transferable part.** It was anchored on the
+only quantity to hand: the main `target/` is 108 G and the existing worktree's is 6.7 G — so,
+"big artifacts, long build". Those totals accumulate across every profile, feature set and
+integration binary the repo has ever produced. The command a mutation actually runs is
+`cargo test --lib`: one profile, one crate's tests, no integration targets, `mold` linking. The
+estimate substituted a **measurable adjacent quantity** for the one that mattered — the same
+proxy move this corpus keeps filing, arriving in a *cost* rather than a predicate, where nothing
+downstream type-checks it.
+
+**What this does NOT establish, stated so nobody inherits a wider claim than the run supports:**
+one machine, one instant, one command. A mutation needing `--workspace --all-targets` would cost
+more and was not measured; under real contention B would be larger; and adopting this means
+**keeping** a worktree (2.8 G standing), since the probe's was removed after measuring. What it
+does establish is that *"too expensive, an operator's call"* was never a finding — it was a guess
+that gated the remedy, and the remedy is affordable.
 ## A mutation that never applied is indistinguishable from one that survived
 
 A second failure in the same session, and the one with the worse blast radius, because it
