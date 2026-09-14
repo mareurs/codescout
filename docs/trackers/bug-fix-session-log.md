@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 139
+entry_high_water_F: 140
 entry_high_water_W: 133
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 133
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-140 | 2026-09-14 | med | reasoning/shared-checkout | open | **A 69-second still-frame was read as a negative result, and shipped in a commit message.** Killed this session's wedged `cargo test --workspace` to release a peer's, checked the peer's log 69s later, saw no movement, and concluded the two were not deadlocking each other. The peer's gate finished `DEFAULT_EXIT=0` four minutes after the kill. A kill releases a lock instantly; the blocked binary then runs the next test before writing anything a log watcher can see — so silence is consistent with *blocked* and *unblocked-and-busy* alike, making the check no evidence rather than weak evidence. Cost two errors, not one: the false negative, and the false positive it licensed — a SIGSTOPped peer process promoted to "the lever" and recommended for a signal, falsified by the same run. Confirm on the blocked process's STATE (`ps -o stat=`, `/proc/locks`), never on its output |
 | F-139 | 2026-09-14 | med | tool-behavior | fixed-verified | **W-133 confirmed the IL-3 block's predicate but not its remedy text — the remedy was the actual defect.** |
 | F-138 | 2026-09-14 | med | measurement | fixed-verified | **A design ruling can block for a day on a population nobody derived — and the fork can have no members.** `BL-77` was blocked on "what does an absent `snapshot_anchor` mean", framed over **24** augmented trackers whose two defaults "fail in opposite directions". Derived under one rule they differ on **zero** files: only a ledger that both passes `body_keeps_snapshot` AND anchors ids in >1 table can tell them apart, and the single such ledger declares. `24` was real, correctly cited — it just counted *trackers with an augmentation* when the question was *trackers these readings can disagree about*. Tell: a fork claiming two directions should name the files each breaks. Also closed a genuine mutation hole — 1 of 3 call sites reverted silently, all 14 tests green |
 | F-136 | 2026-09-13 | high | design-gap | fixed-verified | **A fix direction recorded as "settled" can be settled on the CHOICE and silent on the DEFAULT, and the default is where the whole corpus lands.** `BL-77`'s plan closes both alternatives with measurements and an ADR ruling, then never says what an ABSENT `snapshot_anchor` means — which on day one is all **24** augmented trackers, since the field does not exist yet. The two candidate defaults produce opposite wrong answers over the same 24 rows (whole-body scan preserves the exact false negative the bug was filed to remove; empty-set silences `snapshot_drift` corpus-wide via `body_keeps_snapshot`'s empty early-return), and neither is visible at unit-test grain because fixtures get written to whichever assumption the implementer held. Found by scouting the seam before typing, not by the plan being wrong about anything it addressed. |
@@ -14487,6 +14488,55 @@ observed red rather than by its own existence.
 **Fix:** filed `docs/issues/2026-09-14-il3-grep-remedy-assumes-symbol-lookup-for-identifier-shaped-patterns.md` (`92a7c607d7ce7aee`), tagged `cluster/hint-composed-without-the-request` (IC-22) — the remedy is composed from the pattern's lexical shape, not from what the request was actually for.
 
 **Lesson:** "the gate fired correctly" and "the gate's remedy is correct" are two separate claims with two separate code paths (the predicate vs. the `match` that composes the hint string); verifying one is not evidence for the other.
+
+## F-140 — a 69-second still-frame was read as a negative result, and shipped in a commit message
+
+**Valid:** dated 2026-09-14
+
+**Severity:** med — the wrong claim reached two commit messages, which are not amendable on a
+shared tree, so the correction can only ever be a later document pointing back at them.
+
+**Observed:** Two `cargo test --workspace` runs — this session's and a peer's — were wedged
+simultaneously on the shared production catalog, each with 21 threads in `do_epoll_wait` and one
+in `__futex_wait`, neither log advancing for ~12 minutes. This session killed its own run at
+06:46:40 to release the peer, then checked the peer's gate log at **06:47:49 — sixty-nine seconds
+later**. No movement. That was written down as *"killing mine did NOT free the peer, so the two
+were not deadlocking each other"*, reported to the operator, and carried into the commit messages
+of `122ea357` and `6b2a6b0d`.
+
+The peer's gate resumed and finished `DEFAULT_EXIT=0` at **06:51:00** — four minutes after the
+kill, three minutes after the check.
+
+**The error is not impatience, it is a category slip.** A kill releases a lock immediately; a test
+binary that acquires it then has to *run the rest of the suite* before it writes anything a log
+watcher can see. So the observable (log mtime) lags the event (lock release) by however long the
+next test takes. Sixty-nine seconds of silence is consistent with *"still blocked"* and with
+*"unblocked and busy"* in equal measure — the check could not distinguish them, which makes its
+result not weak evidence but **no evidence**, exactly the shape § *Testing Discipline* names: ask
+whether a broken world and a working one produce the same reading, and this one does.
+
+**What it cost, beyond the wrong sentence.** It promoted a second hypothesis to a recommendation.
+Having "ruled out" mutual deadlock, the SIGSTOPped process (a `claude` suspended since 2026-09-10
+holding a shared lock) became the named lever, and the operator was told resuming or killing it
+was the remaining move. That was falsified by the same run that falsified the first claim: it held
+its lock throughout and the peer's gate completed anyway. **One premature reading produced one
+false negative and one false positive**, and the false positive is the expensive half — it pointed
+at a destructive action on another session's process.
+
+**The rule, cheap and specific:** when killing X to unblock Y, the confirming observation is Y's
+*state*, not Y's *output* — `ps -o stat=` on the blocked process, or its lock rows in
+`/proc/locks`, both of which change at release rather than at next-write. If only output is
+available, the wait must exceed the longest plausible gap between resumption and the next write,
+which for a test suite is minutes, not a minute. Better still: say *"checked at T+69s, no movement
+yet"* and leave the verdict open. A dated observation costs nothing to revise; a conclusion in a
+commit message cannot be revised at all.
+
+**Rests on:** the peer gate log at
+`/tmp/claude-1000/-home-marius-work-claude-codescout/8bd791df-.../scratchpad/gate.log` — mtime
+06:34:15 when checked at 06:47:49, final mtime 06:51:00 carrying `DEFAULT_EXIT=0`; `/proc/locks`
+showing 22 READ holders and no WRITE holder on `catalog.db` both before and after.
+
+**Status:** open
 
 ## Template for new entries
 

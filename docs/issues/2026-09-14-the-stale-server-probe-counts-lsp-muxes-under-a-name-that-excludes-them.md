@@ -158,7 +158,8 @@ fingerprint of this bug and is **not** established — see Hypotheses tried #2.
 
 ## Fix
 
-Not started. Sketch, smallest first:
+Shipped. The sketch below is kept as written, because the order it proposed is the order it was
+done in and a reader comparing plan to outcome should see both:
 
 1. `scripts/stale-servers.sh:39-41` — read `/proc/$p/cmdline` once per pid and classify on
    `mux --socket`. Memory `gotchas` verified that partition against every live mux and
@@ -190,11 +191,27 @@ point (5529 lines, no `test result` block), main thread futex-parked, killed aft
 of zero output. `cargo test --workspace` opens the real
 `/home/marius/.local/share/librarian/catalog.db` with 14-17 fds — not an isolated fixture — and
 22 processes hold POSIX advisory READ locks on it with no WRITE lock anywhere, one of them a
-codescout server SIGSTOPped since 2026-09-10 whose parent `claude` is also stopped. A peer's gate
-wedged identically and did **not** resume when this session's run was killed, so the two were not
-deadlocking each other. The mechanism is **not established** and is a separate question from this
-bug. `fmt-mine.sh` also refused (exit 1) on two peer-owned unformatted files, correctly and
-unrelatedly; this change contains no Rust. clippy 0, lean 0.
+codescout server SIGSTOPped since 2026-09-10 whose parent `claude` is also stopped.
+
+**CORRECTED 2026-09-14 07:20, and the correction is the useful part.** The two sentences that
+stood here — *"a peer's gate wedged identically and did not resume when this session's run was
+killed, so the two were not deadlocking each other"* — are **false**, and they also went into the
+commit messages of `122ea357` and `6b2a6b0d`, which are not amendable on a shared tree. What
+actually happened: this session's run was killed at 06:46:40; the peer's gate log was checked at
+**06:47:49, sixty-nine seconds later**, showed no movement, and that still-frame was written down
+as a negative result. The peer's gate then resumed and finished `DEFAULT_EXIT=0` at 06:51:00.
+
+So the two runs **were** deadlocking each other, in all likelihood, and killing one freed the
+other — stated at its real strength, the timing is consistent rather than proven. What **is**
+proven is the falsification of the hypothesis this file pointed at: the SIGSTOPped process held
+its shared lock throughout and the peer's run completed anyway, so it was never the cause.
+(`bug-fix-session-log:F-140`.)
+
+**Also checked, and NOT a defect:** `fmt-mine.sh` refused (exit 1) during this gate run, naming
+two peer-owned files. Both are now `rustfmt --check`-clean and match HEAD — peer commit
+`d311762a` landed them — so that refusal was correct when it fired and is merely stale. Run fresh
+it refuses on a *different* peer's file, because the refusal set rotates with whoever is holding
+uncommitted Rust. This change contains no Rust. clippy 0, lean 0.
 
 ## Tests added
 
@@ -244,14 +261,18 @@ Rows the script marks STALE that appear as `MUX` need no action.
 ## Resume
 
 **One step owed, and it is the archive blocker:** run `cargo test --workspace` to completion and
-confirm it is green, then archive via `doc(action="move", …)` — never a bare `git mv`. That run
-cannot currently complete on this machine; the state is described under § Fix. It is **not** a
-symptom of this change (both wedges predate the commit, and one predates the peer's gate that ran
-alongside it), and it is worth its own bug file if it recurs after the catalog is unwedged.
+confirm it is green, then archive via `doc(action="move", …)` — never a bare `git mv`.
 
-The lever nobody in-session should pull: PID 3031162, a `claude` SIGSTOPped since 2026-09-10 with
-a codescout child holding a shared lock on the production catalog. Resuming or terminating
-another session's process is the operator's call, not a peer's.
+At 07:17 that lane failed in 37 lines for a reason unrelated to both this fix and the earlier
+wedge: a peer's uncommitted `src/util/path_security.rs` references `extract_grep_pattern`, which
+does not exist yet (5 × `E0425`). `run_command`'s `wip_authors` hook named the holder
+automatically. That is ordinary shared-checkout churn — ask, never fix — and it clears when they
+land. Retry then.
+
+**Do not chase the SIGSTOPped process this section used to name as the lever.** That hypothesis is
+falsified; see § Fix. The earlier wedge is best explained by two concurrent `cargo test
+--workspace` runs on the shared production catalog, and the cheap avoidance is not to start one
+while another session's gate is running — `pgrep -a -f 'cargo test'` answers that in one call.
 
 Nothing about the fix itself is outstanding. If a second instance of the defect CLASS appears,
 the roster's `cluster/unclassified` `**Members:**` field is where the adjudication is parked —
