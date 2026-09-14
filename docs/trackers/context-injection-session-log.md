@@ -888,11 +888,29 @@ matches nothing exits 0 and prints nothing, so the instrument reports success fo
 having done nothing. Same shape as the laws it sits beside: the refuting outcome
 leaves no artifact.
 
-**Mitigation, cheap and structural:** print `diff <orig> <mutated>` between the
-edit and the test run. A no-op mutation shows an empty diff; a real one shows the
-hunk. One line, and it converts an invisible failure into a visible one. Used for
-the M1 re-run, and M2-M5 carry the same check in the other direction via
-`file identical to pre-mutation` after restore.
+**Mitigation — SUPERSEDED THE SAME DAY, and the replacement is a tool rather than a
+habit.** This entry originally prescribed printing `diff <orig> <mutated>` between the edit
+and the test run. The reasoning holds and the method does not: **`scripts/mutation-probe.sh`
+exists** (committed 12:17, made reachable from `CLAUDE.md` at 12:30 by `82df49ca`), and
+`CLAUDE.md` § *Testing Discipline* now prohibits hand-rolling a mutation in the shared tree
+outright. Reach for the script.
+
+It answers this entry by construction — `scripts/mutation-probe.sh:147` refuses unless the
+pattern occurs **exactly once**, and its own comment at `:187` states F-7's claim verbatim.
+So the check is no longer a thing to remember between the edit and the run; it is a
+precondition of the run happening.
+
+And it closes a cost this entry never priced. Every mutation recorded here was applied to
+the **shared checkout**, which publishes a red byte-identical to a real regression to every
+other session's `cargo test` — and the window is not bounded by my process, because
+`cargo test` returning *is* the build lock freeing, so a queued peer is aimed at the
+instant the revert runs. The script mutates an isolated worktree: measured 87 s + 2.8 G
+once, then **11 s per run, faster than the shared tree**. The safer path is also the
+quicker one, which is why this is a straight supersession and not a tradeoff.
+
+**The original diff mitigation is kept above only as the reasoning.** Do not follow it as a
+procedure — following it means hand-rolling in the shared tree, which is the practice the
+corpus moved past between this entry being written and being read.
 
 **Rests on:** `sed` exiting 0 on zero matches — true of GNU sed and POSIX. Any
 find-and-replace mutation tool has the same property.
@@ -911,7 +929,7 @@ The three take three different repairs, which is why collapsing them is expensiv
 |---|---|---|
 | untested | mutant ran, no assertion covers it | write the test |
 | unreachable | mutant ran, no writable test can drive it | give production code a seam |
-| **never applied** | **no mutant ran** | re-run with a diff between edit and test |
+| **never applied** | **no mutant ran** | re-run under `scripts/mutation-probe.sh`, which refuses a pattern that does not occur exactly once |
 
 Their entry's own warning applies recursively here: reading a survivor as "untested" sends
 you to write a test that cannot exist, and the failure of that attempt reads as your own
@@ -1108,6 +1126,25 @@ wrap can split it* — here `never applied` (2 words, 1 hit) and `mutation-probe
 1 hit) both answered correctly while the 6-word phrase returned 0. **The shorter query is
 the more reliable one**, which inverts the usual instinct that a more specific pattern is
 a safer one.
+
+**INDEPENDENTLY CORROBORATED, which is what takes the third axis from anecdote to class.**
+`scripts/mutation-probe.sh` counts occurrences with Python's `str.count` rather than
+`grep -F -c`, and says why at `:95-103`:
+
+> `grep -c` counts matching LINES, so it is wrong … Given a single-line one it still counts
+> lines, so a line holding the pattern twice counts once.
+
+Same root, reached from the opposite direction. I hit it as **one phrase spanning two
+lines**; that author hit it as **two occurrences on one line**. Neither case is about
+patterns or corpora — both are `grep` being line-oriented while the thing being counted is
+not, so the line is a unit the question never asked for.
+
+That pairing is worth more than either instance alone. A single "my grep missed it" reads
+as carelessness and invites *look harder*, which is the wrong instrument. Two independent
+discoveries in one codebase on one day, in different contexts, by parties who never
+compared notes, make it a property of the **tool** rather than of the reader — and the
+repairs are correspondingly structural: shorten the pattern until no wrap can split it, or
+stop using `grep` to count at all.
 
 **Valid:** dated 2026-09-14
 
