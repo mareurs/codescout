@@ -49,14 +49,33 @@ A reader takes that as an illustration.
 
 ## Reproduction
 
-**RUN 2026-09-14 — as an automated end-to-end test rather than by hand, and the substitution is
-the point rather than a compromise.**
+> **CORRECTION 2026-09-14, same session, after the fix shipped.** The paragraph below
+> originally justified not running the manual probe on the grounds that activation is
+> *"process-wide"* and would have **disabled writes for six live peer sessions mid-task**.
+> **That is false and is retracted** (`bug-fix-session-log:F-145`). Measured after a `/mcp`
+> reconnect: `pgrep -a -f codescout` shows **~26 separate `codescout start` processes**, one per
+> Claude Code session, and `workspace(action="status")` reports this session's own
+> `server.pid`. Each peer drives its **own** server with its **own** active project; an
+> activation here reaches this session and its subagents and nobody else.
+>
+> The docs never claimed otherwise — `get_guide("workspace-state")` scopes it to *"the
+> session"* and the refusal text to *"another caller on **this session**"*. The bare phrase
+> *"process-wide"* was read as *machine-wide*, on a checkout where the filesystem, the git
+> index, `.codescout/write.lock` and the catalog genuinely **are** shared machine-wide. True
+> surrounding facts, wrong inference — and the premise that decided what NOT to do was the one
+> premise never checked at the bytes.
+>
+> **The test below is still the right instrument**, for the reasons in § *Tests added*: it is
+> automatable, repeatable, and it exercises a cause no activation can produce. Only its stated
+> justification was wrong. Left visible rather than edited away because a reader who inherits
+> *"activation is machine-wide"* will decline probes that are in fact free.
 
-The manual form needs a process-wide `workspace(action="activate", read_only=true)`, and this
-checkout carried **six live peer sessions** (21 sockets machine-wide) throughout. Flipping the
-default read-only would have disabled writes for all six mid-task — which is the precise hazard
-the refusal message *this bug is about* spends four lines warning against. Running the probe by
-hand would have been an instance of the class it was meant to confirm.
+**RUN 2026-09-14 — as an automated end-to-end test rather than by hand.**
+
+The manual form needs `workspace(action="activate", read_only=true)`, which replaces the default
+project for this session's own server and every caller sharing it, and would have had to be
+restored afterwards. The test reaches the same two calls against a private server with no shared
+state to disturb and no restore step — which is why it is preferable, not merely safer.
 
 `a_read_only_activation_refuses_an_unpinned_write_end_to_end` (`src/server.rs`) reaches the same
 two calls against a private server, through `call_tool_inner` — the dispatch every real call

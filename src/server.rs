@@ -8158,15 +8158,19 @@ mod tests {
     /// End-to-end on the REAL dispatch path: a read-only activation must refuse an
     /// unpinned write, not merely fail `check_tool_access`'s unit tests.
     ///
-    /// **This exists as a test because the manual probe is unsafe on this repo, and
-    /// that is a property of the defect rather than an accident.** The bug record's
-    /// § *Reproduction* asks for `activate(read_only=true)` followed by a write.
-    /// Activation is process-wide, and this checkout carried **six live peer
-    /// sessions** when the fix landed — running it by hand would have disabled
-    /// writes for every one of them mid-task, which is the exact hazard the refusal
-    /// message itself warns about. Driving `call_tool_inner` reaches the same two
-    /// calls against a private server, costs nobody anything, and unlike a manual
-    /// probe it runs again tomorrow.
+    /// **Why a test and not the manual probe.** The bug record's § *Reproduction*
+    /// asks for `activate(read_only=true)` followed by a write. That replaces the
+    /// default project for this session's own server and every caller sharing it
+    /// (subagents included), and would have to be restored afterwards; driving
+    /// `call_tool_inner` reaches the same two calls against a private server with
+    /// no shared state to disturb, no restore step, and it runs again tomorrow.
+    ///
+    /// An earlier version of this comment said the manual probe would have
+    /// disabled writes for six live PEER sessions. That was wrong and is retracted
+    /// (`bug-fix-session-log:F-145`): `pgrep -a -f codescout` shows ~26 separate
+    /// `codescout start` processes, one per Claude Code session, so activation
+    /// reaches this session and its subagents and nobody else. The preference for
+    /// a test stands on repeatability, not on peer safety.
     ///
     /// **What makes this fail:** reverting `check_tool_access` to the five literal
     /// tool names. `memory` is not among them, so step 2 would reach the tool body

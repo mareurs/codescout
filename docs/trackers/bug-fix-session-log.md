@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 143
-entry_high_water_W: 133
+entry_high_water_F: 145
+entry_high_water_W: 134
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -50,6 +50,8 @@ entry_high_water_W: 133
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-145 | 2026-09-14 | med | reasoning/shared-checkout | open | **"Process-wide" activation read as machine-wide, and the premise that scoped the work went unchecked.** Declined a documented reproduction all session because `activate(read_only=true)` would supposedly disable writes for six live PEER sessions. False: `pgrep -a -f codescout` shows ~26 separate `codescout start` processes, one per CC session, so an activation reaches this session and its subagents and nobody else. The docs never said otherwise — they scope it to *"the session"* and *"another caller on **this session**"*; the bare phrase *"process-wide"* was filled in as *machine-wide* on a checkout where the filesystem, the git index, `.codescout/write.lock` and the catalog genuinely ARE shared. Survived because **nothing fires when you decline to act**: the belief was never contradicted, only reinforced by true facts about a different kind of sharing. Cost: a false safety claim in an archived bug record, a commit message and two peer messages. Tell: the premise deciding what NOT to do never got the byte-level check the premise deciding what to do got rigorously |
+| F-144 | 2026-09-14 | med | measurement | fixed-verified | **`/proc/<pid>/exe` returns a PROCFS inode, so a rebuild check over 28 servers produced 28 plausible wrong numbers.** `stat -c '%i'` without `-L` reports the magic symlink's OWN identity, from procfs's own sequence — real, stable, mutually distinct, and about nothing. The 28 clustered (`121815719`, `121830738`, …), which READS as corroboration because sibling inodes are what a directory of related files looks like, and none matched the fresh `target/release/codescout`. Straight reading: *every server including mine is stale* — the answer that prompts action, and wrong. `stat -L` returned the real image, identical to disk. Tell available one command earlier and free: **an inode matching NO file you can name is not a file identity.** What the confirmation did NOT buy: `stat -L` and `peer-sessions.sh` agreeing are **not independent** — both resolve the same link against the same filesystem — so the load-bearing evidence is `readlink` carrying no `(deleted)` plus a matching size, never the concurrence. Sibling of `F-135`, the same question (*did the rebuild take*) failing one layer up |
 | F-143 | 2026-09-14 | med | reasoning/shared-checkout | fixed-verified | **A red that goes away tells you nothing about why.** Classified three peer reds as stale reports; all three were correct measurements of trees that were really broken and really repaired. The instance I argued hardest for was the weakest. |
 | F-142 | 2026-09-14 | med | cross-session | fixed-verified | **Read a doc comment's motivation clause as a live limitation and warned a peer about a defect that was fixed six lines below it.** `archive/` in the cited bug path was a second signal I walked past. |
 | F-141 | 2026-09-14 | high | measurement | fixed-verified | **A gate's precondition was checked by an instrument that could not express failure — and a 3-file scan agreed with it.** `--fail-on high` is vacuous while the verdict sits at `med`; the real population was 13, not 0. |
@@ -197,6 +199,7 @@ entry_high_water_W: 133
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-134 | 2026-09-14 | med | **A pinned throwaway project probes a security-config gate live, by behaviour rather than build metadata.** After a rebuild, `workspace(status)` reported `git_sha: 3d9cd206, git_dirty: true` — and a dirty build is exactly the case a sha cannot settle. Pinned `workspace=` at a temp project whose own `.codescout/project.toml` sets `file_write_enabled = false`: `memory(action="write")` was REFUSED with cause `ConfiguredOff`, and `memory(action="list")` through the SAME pin returned `0 topics` as the control — which is what makes the refusal a measurement rather than an unresolvable path. A `read_only`-based probe self-defeats, because `call_tool_inner` upgrades a pinned workspace to writable for write tools; the config flag is the only route that reaches the arm | One activation, one probe and one restore — plus a `read_only` probe that would have silently read as *"gate absent"*. That is the honest counterfactual, NOT the "six broken peers" first claimed and retracted in `F-145` | validated |
 | W-133 | 2026-09-14 | med | **Scouted a suspected `run_command` IL-3 shell-gate defect down to the actual predicate before filing a bug.** User flagged a refusal on a shell `grep --include=*.rs` over `/c/Users/MAILINCA.BRN.002/work/claude/codescout` as contradicting the documented "external path is allowed" carve-out. Read the resolution chain (`check_source_file_access` → `segment_reads_project_source` → `path_is_within_project` in `src/util/path_security.rs`): the absolute-path branch is a plain `expanded.starts_with(project_root)`, no name heuristic. The searched path could only have tripped the gate by being (or nesting under) that session's own `project_root` — i.e. the command was a shell content-read over the project's own source, the exact case IL-3 exists to catch. | Trusting the quoted rule-of-thumb text alone, without reading the predicate it summarizes, would likely have produced a new `docs/issues/` bug duplicating the already-closed false-positive classes in `docs/issues/archive/2026-09-10-source-gate-joins-an-unexpanded-var-path-onto-the-project-root.md` and `docs/issues/archive/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md`. | validated |
 | W-132 | 2026-09-14 | med | **Re-derived a shipped probe by hand before reading the index that names it — and the redundancy is what found the probe's defect.** Recon after a `cargo rb` classified every `codescout` process by its own cmdline (`mux --socket` → MUX, else SERVER), following memory `gotchas` § *MCP Binary Symlink*, and only then consulted [`docs/PROBES.md`](../PROBES.md) — whose header reads *"Start here before answering a question with a number."* [`scripts/stale-servers.sh:39`](../../scripts/stale-servers.sh) selects with `pgrep -x codescout` and applies no cmdline filter, so it counts LSP muxes under a header saying *servers* and closes with *"Reconnect those sessions (/mcp)"* — unperformable on a mux, which has no session and self-heals at `--idle-timeout`. | Following the documented route alone returns `total=22 stale-exe=18 current=4` under the word *servers*, with nothing marking the unit as mixed — a plausible number, not an error. **Stated precisely: the probe is not silent about it.** It prints `PPID`, and the mux row's `PPID` is another row's `PID`; the tell is present and **unnamed**, so reading it needs the server/mux distinction already in hand. All four documented blind spots (`scripts/stale-servers.sh:22-29`) bound the count from *below*; the missing one bounds it from above. The rule this yields is not *re-derive everything* but **classify the population by hand once per session when a probe's answer is a count.** | validated |
 | W-131 | 2026-09-13 | med | **Scouted a test file's rule-parity section before planning a gate, and found the parser the gate reuses is already filed debt.** `tests/issue_clusters.rs` requires every `#[test]` to be declared `HOOK_OWED` / `HOOK_ONLY` / `NOT_HOOK_OWED` *with a reason*, and `the_hook_enforces_every_rule_it_declares` compares that against `scripts/pre-commit-ledger-counts.py`'s `HOOK_RULES` by **equality, not subset**. Decisive find: `no_mechanism_status_is_a_bare_verdict` already reads `OWED, not yet implemented — needs the mechanism-status parser ported`, citing open bug `ef7b2f22c40a458e` (`cluster/guard-narrower-than-its-name`) — and the planned gate reuses that same parser. | Both new tests would have redded the parity gate on first run, which is cheap and self-announcing. The expensive half is the repair that red invites: declare them `NOT_HOOK_OWED`, landing a **fourth** `OWED, not yet implemented` entry against that one bug — widening an open IC-14 instance inside a change advertising itself as closing a gate hole, invisible to a reviewer reading a green suite. **The cheap red hides the expensive decision behind it.** Scout converts it into a scope question asked before any code is written. Also derived rather than cited: **20 of 23** index rows agree with their class field; the 3 that differ are three different kinds (IC-13 real drift, IC-2 a parenthetical, IC-3 no verdict token at all), so equality reds two of them wrongly — the vocabulary is the design question, the predicate is nearly free. | validated |
@@ -14698,6 +14701,157 @@ owner of #2 was asked directly, by a third party who thought to ask.
 **Rests on:** `a13b31c6`; peer sessionIds `f3c594ce-c424-40d3-a603-9693cfef3f63` and
 `6be73414-6293-4a4e-95a4-4bada8327f08`. Sibling of [[F-141]] — that one is a check that
 cannot express failure, this one is a sequence that cannot express cause.
+
+## F-144 — `/proc/<pid>/exe` returns a PROCFS inode, so a rebuild check over 28 servers produced 28 plausible wrong numbers
+
+**Valid:** dated 2026-09-14
+
+**Severity:** med · **Category:** measurement · **Status:** fixed-verified
+
+**Observed.** Verifying that a `cargo rb` had taken, I read each live server's image with
+`stat -c 'inode=%i' /proc/<pid>/exe` across 28 `codescout` processes. It returned 28 distinct
+numbers in a tight cluster (`121815719`, `121830738`, `121848618`, …), none of them matching
+the freshly built `target/release/codescout` (`195048282`). Read straight, that says *every
+server including mine is running a stale image* — and the clustering reads as corroboration,
+because sibling inodes are exactly what a directory of related files looks like.
+
+**Cause.** `/proc/<pid>/exe` is a magic symlink with **its own procfs inode**. `stat` without
+`-L` reports the LINK's identity, which procfs allocates from its own sequence — so the numbers
+are real, stable, mutually distinct, and about nothing. `stat -L` dereferences to the actual
+image: my server (pid 3618991) then returned `195048282`, byte-identical to the file on disk,
+and `readlink /proc/<pid>/exe` carried no `(deleted)` suffix.
+
+**Why it is worth an entry rather than a shrug.** The failure returns a *plausible answer, not
+an error*, and its wrongness is invisible in the direction a reader is looking: I set out to
+check "did the rebuild take", and the malformed reading said **no** — the answer that prompts
+action. A correct-looking negative is the expensive direction here, because the next step is to
+go debug a build that is fine, or to tell five peers their servers are stale.
+
+The tell available in advance, and it is cheap: **an inode that does not match ANY file you can
+name is not a file identity.** I had `195048282` in hand from `stat` on the path one command
+earlier and did not compare the two shapes.
+
+**What this establishes and what it does not.** `stat -L` and `scripts/peer-sessions.sh`'s
+`REPLACED` column agreed that my server is current — but they are **not independent**: both
+resolve the same `/proc/<pid>/exe` link against the same filesystem. That agreement rules out a
+transcription slip and says nothing about a shared misreading of procfs, which is the failure
+that just happened. The load-bearing evidence is the `readlink` with no `(deleted)` plus the
+matching size (`65053600`), not the concurrence of two instruments over one source.
+
+**Fix.** `stat -L -c '%i %s %y' /proc/<pid>/exe` for the image; `readlink /proc/<pid>/exe` for
+the cheaper yes/no — a replaced image is suffixed `(deleted)` and needs no inode arithmetic at
+all. `scripts/peer-sessions.sh` already does this correctly and should be preferred over a
+hand-rolled loop.
+
+## F-145 — "Process-wide" activation read as machine-wide, and the premise that scoped the work went unchecked
+
+**Valid:** invariant
+
+**Severity:** med — no wrong code shipped, but a false safety claim was written into an archived
+bug record, a commit message and two peer messages, and it was the stated reason a documented
+reproduction went unrun.
+
+**Observed.** I declined to run a documented reproduction all session on the grounds that
+`workspace(action="activate", …, read_only=true)` is *"process-wide"* and would *"disable writes
+for six live peer sessions mid-task"*. **That is false.** Measured 2026-09-14 after a `/mcp`
+reconnect: `pgrep -a -f codescout` shows **~26 separate `codescout start` processes**, one per
+Claude Code session, and `workspace(action="status")` reports `server.pid: 3616790` — my own.
+Each peer session drives its **own** codescout server with its **own** active project. An
+activation in my process reaches me and my subagents, and nobody else.
+
+**The docs never said otherwise, which is the point.** `get_guide("workspace-state")` says *"the
+MCP server is shared state across **the session**"*, and the refusal text says *"every caller
+sharing **this process** … if a subagent or **another caller on this session** activated it
+read-only"*. Both scope it to one session. I read the bare phrase *"process-wide"* and supplied
+*machine-wide* from context — a checkout with six live peers, a cross-process write lock, and a
+shared catalog, all of which really are machine-wide. The surrounding facts were true and the
+inference from them was not.
+
+**Why it survived so long:** every consequence I predicted was unobservable. Nothing fires when
+you *don't* take an action, so the belief was never contradicted, and it kept getting
+*reinforced* by real evidence of a different kind — a peer genuinely held the cross-process
+`write.lock` for ~2 minutes mid-session, which is machine-wide sharing, just not of this.
+
+**What was actually shared, checked rather than assumed:** the filesystem, the git index
+(a peer's staged files appeared in mine twice), `.codescout/write.lock`, and the librarian
+catalog. **Not** the active project.
+
+**Cost.** The claim is load-bearing in
+`docs/issues/archive/2026-09-14-read-only-blocks-five-tool-names-not-the-writes-it-promises.md`
+§ *Reproduction*, in commit `ba998539`'s message, and in two messages to
+`attach-alias-advisory-anyhow`. All three present a *convenience* as a *safety necessity*. The
+substitute I built instead (`W-N` above, the pinned-config probe) is still the better instrument
+— automatable, repeatable, and it exercises `ConfiguredOff` which no activation can — so the
+work is not wasted, but its stated justification was wrong and a reader would inherit the wrong
+model of the blast radius.
+
+**The tell, for next time.** I never ran the one command that settles it. The claim was about
+process topology; `pgrep` answers it in one call and I did not make that call until after the
+work was committed. CLAUDE.md § *Project Activation Bootstrap* Phase 2 is exactly this — *"a
+claim about how a TOOL behaves needs the call run once"* — and I applied it rigorously to
+`check_tool_access` while exempting the claim I was using to *scope the whole investigation*. A
+premise that decides what you will not do deserves the same byte-level check as a premise that
+decides what you will.
+
+**Status:** open — corrections owed: the archived record's § *Reproduction*, and a message to
+the peer who received the claim twice.
+
+## W-134 — A pinned throwaway project probes a security-config gate live, by behaviour rather than build metadata
+
+**Valid:** invariant
+
+**Observed.** After a rebuild + `/mcp` reconnect, the question was whether the shipped
+`check_tool_access` change (gate on `Tool::is_write`, not a five-name allowlist) was live in the
+**running binary**. Metadata could not answer it: `workspace(action="status")` reported
+`git_sha: 3d9cd206, git_dirty: true`, and a dirty build is the exact case
+`2026-09-11-the-written_by-check-compares-shas-only-so-two-dirty-builds-at-one-commit-are-equal.md`
+says a sha cannot settle. `git merge-base --is-ancestor a13b31c6 3d9cd206` proved the *commit*
+was in the build and still could not prove the *bytes* were.
+
+**Pattern.** Exercise the gate through a **per-call `workspace=` pin** at a throwaway project
+whose own `.codescout/project.toml` sets `security.file_write_enabled = false`:
+
+```
+mkdir -p <tmp>/.codescout
+printf '[project]\nname = "ro-probe"\n\n[security]\nfile_write_enabled = false\n' > <tmp>/.codescout/project.toml
+memory(action="write", topic=…, content=…, workspace="<tmp>")   → REFUSED, cause ConfiguredOff
+memory(action="list",                        workspace="<tmp>") → 0 topics   ← the control
+```
+
+`memory` is the right probe tool: `is_write == true`, **not** in the retired five-name list, and
+core rather than librarian, so it exists in every feature configuration.
+
+**Why the config flag rather than `read_only` — this is the non-obvious half.** `call_tool_inner`
+upgrades a *pinned* workspace to writable on first residency for write tools
+(`ensure_resident(root, Some(false))`), so a pin can never exhibit `ActivatedReadOnly`; a probe
+built on `read_only` self-defeats and reads as *"gate absent"*. `file_write_enabled` comes from
+the project's own TOML, which that upgrade does not touch, and `WriteBlockCause::classify` gives
+config-off precedence anyway. So the pin reaches the same `!config.file_write_enabled` arm by the
+other cause.
+
+**The control is half the pattern.** A refusal alone is also what an unresolvable pin produces.
+The read through the **same** pin returning `0 topics` is what makes the refusal a measurement:
+the pin resolves, and the write was refused *because it is a write*.
+
+**Counterfactual — and stated smaller than I first wrote it.** I originally justified this as
+avoiding harm to six live peer sessions. **That justification is false and is retracted in
+`F-145`:** activation is process-wide within *one session's own server process*, not
+machine-wide, so an activation probe would have disturbed only me and my subagents. What the pin
+genuinely buys is narrower and still real: it needs no activation at all, so it does not flip my
+own session's default mid-task and need restoring; it is the only route that exercises the
+`ConfiguredOff` cause, which no activation can produce; and it is two calls with no cleanup. The
+honest counterfactual is *"one activation, one probe, one restore, and a `read_only`-based probe
+that would have silently self-defeated"* — not *"six broken peers"*.
+
+**Generalises:** any gate keyed on per-project security config (`file_write_enabled`,
+`indexing_enabled`) can be exercised live against the running binary this way, by behaviour
+rather than by build metadata — which is what `stale-servers.sh`'s own rule asks for.
+
+**Status:** validated
+**Promote-when:** a second session probes a security-config gate through a pinned throwaway
+project. At n=2 this belongs in `get_guide("workspace-state")` beside the existing *"when a peer
+has activated read-only, pin — do not re-activate"* rule, which states the same mechanism for
+**avoiding** a collision and not yet for **probing**.
 
 ## Template for new entries
 
