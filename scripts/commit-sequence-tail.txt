@@ -11,8 +11,18 @@ on this checkout — the sequence, not the rules, is what nobody had written dow
   3. Decide the COUPLING before you stage. A count and its member, a citation
        and its target, commit together or not at all: every partial state is a
        red tree for every other session.
-  4. Stage, then read the diff, then commit by pathspec.
-       git add <paths> && git diff --cached && git commit -m "..." -- <paths>
+  4. Stage, read the diff, then commit by pathspec — in SEPARATE calls.
+       git add <paths>
+       git diff --cached --name-only   # the index is SHARED: are these all yours?
+       git diff --cached               # read the content; that is the whole point
+       git commit -m "..." -- <paths>
+       SEPARATE is load-bearing, not layout. Chained with && the diff reaches you
+       only AFTER the commit has run — a record of what happened, not a check on
+       whether it should — and the transcript still reads as a review followed by
+       a commit. && chains on EXIT STATUS while this check is you reading content,
+       and `git diff` exits 0 whatever it prints, so && never stops anything.
+       Measured: 21258b4b captured four files that way; 1b40dabd took a peer's
+       whole ledger entry, the check having run and changed nothing.
        Staging is what satisfies the unreviewed-content check; the pathspec is
        not. And -m goes BEFORE --, or git reads it as a pathspec.
   5. Verify the INDEX, not the exit code. `git add` can fail on a contended

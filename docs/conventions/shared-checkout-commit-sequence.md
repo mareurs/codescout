@@ -34,8 +34,22 @@ collision costs a round-trip to another session.
 
 **That is a summary and its source, not two copies** — the same split as `CLAUDE.md`'s
 gate sentence against [`gate-ordering.md`](gate-ordering.md). The terse copy is emitted by
-**all three** refusing hooks from one file, so those three cannot drift apart; this page is
+**every** refusing hook from one file, so those cannot drift apart; this page is
 the only place a rationale lives, so there is nowhere for a rationale to drift *to*.
+The emitting set is enumerated in `tests/hook_config.rs`'s
+`every_refusing_hook_emits_the_shared_tail` and deliberately not counted here — it has
+already grown once, when the cargo-fmt hook replaced a framework entry that could not emit
+the tail at all.
+
+**A summary can still drift from its source in ONE direction, and did.** Until 2026-09-14
+the terse copy's step 4 read `git add <paths> && git diff --cached && git commit`, while
+§ *4* below had the separate-line block throughout — so the copy actually PRINTED at the
+moment of need carried the chained form that this page's own step 4 cites `1b40dabd` for.
+The drift ran source-correct / summary-wrong, which is the dangerous direction: the
+summary is what a session reads mid-refusal, and the source is what someone reads when
+deciding whether to change a step. Now gated by
+`the_tail_teaches_separate_calls_never_a_chained_commit`
+(`docs/issues/2026-09-13-the-commit-sequence-tail-teaches-a-read-step-that-cannot-fail.md`).
 
 Deliberately **not** a `get_guide` topic. That route was designed, then refuted — see
 § *Why not guide injection* below. The short version: it cannot be built, and it fails

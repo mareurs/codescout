@@ -1,13 +1,15 @@
 ---
 id: c9dcd5eb0d20b09e
 kind: bug
-status: open
+status: taken
 title: 'BUG: the shared commit-sequence tail teaches a read step that cannot fail'
 tags:
 - cluster/assertion-that-cannot-fail
 - commit-sequence
 - hooks
 - shared-checkout
+claimed_at: 2026-09-14
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 ---
 
 # BUG: the shared commit-sequence tail teaches a read step that cannot fail, and three of four hooks print only that

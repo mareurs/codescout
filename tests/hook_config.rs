@@ -25,12 +25,15 @@ fn repo_root() -> PathBuf {
 }
 /// The shared commit-sequence tail exists and says something.
 ///
-/// **Why this needs a gate at all.** All three refusing hooks read
+/// **Why this needs a gate at all.** Every refusing hook reads
 /// `scripts/commit-sequence-tail.txt` **best-effort** — bash guards with `[ -r … ]`, Python
 /// swallows `OSError` — because a missing tail must never turn a hook's own verdict into a
 /// crash. That is the right failure mode and it is also a silent one: delete the file and
-/// every refusal quietly reverts to its pre-2026-09-02 text, all three at once, with no
-/// error anywhere and every test still green.
+/// every refusal quietly reverts to its pre-2026-09-02 text, all of them at once, with no
+/// error anywhere and every test still green. (The emitting set is enumerated in
+/// [`every_refusing_hook_emits_the_shared_tail`] and is not restated as a number here — it
+/// has already grown once, when the cargo-fmt hook replaced a framework entry that could
+/// not emit the tail at all.)
 ///
 /// This is CLAUDE.md § *Testing Discipline*'s loudness law read from the other side: an
 /// alarm nothing reaches is as informative as no alarm, and a best-effort read whose
@@ -67,6 +70,104 @@ fn the_shared_commit_sequence_tail_is_present_and_non_trivial() {
         text.contains("docs/conventions/shared-checkout-commit-sequence.md"),
         "the tail is the summary and that page is its source — without the pointer a \
          reader who just tripped a hook has no route to the reasoning"
+    );
+}
+/// Step 4 teaches SEPARATE calls, never a `&&`-chained commit.
+///
+/// **A regression gate on a shipped defect, not style policing.** Until 2026-09-14 this
+/// file's step 4 read `git add <paths> && git diff --cached && git commit -m "..." --
+/// <paths>` — the batched form `scripts/pre-commit-unreviewed-content.sh`'s own header
+/// documents as a measured capture vector, and which that hook's refusal body answers with
+/// *"FOUR SEPARATE calls. Not one batched command."* The source page this tail summarises
+/// (`docs/conventions/shared-checkout-commit-sequence.md` § 4) had the block form correct
+/// throughout, so the drift ran one way only: the copy actually PRINTED at the moment of
+/// need carried the form its own source names as a capture, and three of the four emitting
+/// hooks show the tail without that hook's correction.
+///
+/// **Why `&&` cannot work here, which is what makes this a property rather than a
+/// preference.** `&&` chains on EXIT STATUS; the check is a human or a model reading
+/// CONTENT. `git diff --cached` exits 0 whether the staged content is yours or a peer's —
+/// verified; `--exit-code` gives 1, and would then refuse every legitimate commit — so no
+/// input makes the middle step fail, the chain always reaches the commit, and the step
+/// reads as a gate while being a print.
+/// `docs/issues/2026-09-13-the-commit-sequence-tail-teaches-a-read-step-that-cannot-fail.md`
+///
+/// **Two groups of assertion, doing different jobs, and the split is what the mutation run
+/// corrected.** The `&&`-with-`git commit` check is the specific defect. The line-initial
+/// checks require the canonical four-line block, and they exist to keep the first honest —
+/// *no line chains them* is monotone under REMOVAL, so a deleted step 4 satisfies it
+/// perfectly and forever.
+///
+/// **The second group is stricter than the operational rule, deliberately, and an earlier
+/// draft of this comment denied it.** That draft claimed the gate was scoped to the commit
+/// alone and that chaining `git add` to the read would pass. A mutation written to prove
+/// exactly that — join `git add <paths> && git diff --cached --name-only` — was predicted
+/// to survive and came back RED, because the joined line no longer *starts with* the read.
+/// The prediction was wrong, not the test: this gate is about the TAIL'S TEXT, which must
+/// display each command on its own line so the separateness it teaches is legible, matching
+/// `pre-commit-unreviewed-content.sh`'s refusal body and § 4 of the source page. It says
+/// nothing about what a session may type — compressing `git add` and the read into one call
+/// is fine and is the form measured to work: sessionId `9403d62d` used it for seven commits
+/// and caught a peer's staged pair on the seventh, having caught nothing across four
+/// commits of the fully-batched form. Chaining the COMMIT is the thing that cannot work, in
+/// the tail or at the keyboard.
+///
+/// Recorded rather than smoothed over, because the comment was the artefact that was wrong
+/// and only running the must-survive mutation revealed it — a check on over-firing, which
+/// is the half a kill-count never reports.
+///
+/// Mutations that must kill this: rejoin the commit onto a `&&` chain with either read;
+/// delete step 4's command block; drop either read from it.
+#[test]
+fn the_tail_teaches_separate_calls_never_a_chained_commit() {
+    let path = repo_root().join("scripts/commit-sequence-tail.txt");
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "cannot read {}: {e} — see \
+             the_shared_commit_sequence_tail_is_present_and_non_trivial for why a missing \
+             tail is silent rather than loud",
+            path.display()
+        )
+    });
+
+    let chained: Vec<&str> = text
+        .lines()
+        .filter(|l| l.contains("&&") && l.contains("git commit"))
+        .collect();
+    assert!(
+        chained.is_empty(),
+        "step 4 chains the commit to the read, which is the defect this gate exists for:\n  \
+         {}\n\n\
+         `&&` chains on exit status; this check is a person reading content, and \
+         `git diff --cached` exits 0 whatever it prints — so the chain always reaches the \
+         commit and the diff arrives as a record of what happened rather than a check on \
+         whether it should. Measured: 21258b4b captured four files that way, 1b40dabd a \
+         peer's whole ledger entry. Write the commands on separate lines. Chaining `git \
+         add` to the READ is fine and is the form measured to work; it is the COMMIT that \
+         must stand alone.",
+        chained.join("\n  ")
+    );
+
+    for cmd in ["git add", "git diff --cached --name-only", "git commit"] {
+        assert!(
+            text.lines().any(|l| l.trim_start().starts_with(cmd)),
+            "step 4's command block no longer shows `{cmd}` as a command of its own. \
+             Without this the check above is vacuous — it is an absence assertion, and a \
+             deleted block satisfies it perfectly."
+        );
+    }
+
+    let reads = text
+        .lines()
+        .filter(|l| l.trim_start().starts_with("git diff --cached"))
+        .count();
+    assert_eq!(
+        reads, 2,
+        "step 4 must show BOTH reads: `--name-only` answers *which files* — the shared-index \
+         question — and the bare diff answers *whose lines*. The narrower one alone is its \
+         own recorded capture: in Instance 8 of the working-tree-capture ledger a session \
+         ran only `--name-only`, correctly excluded five foreign paths from its pathspec, \
+         and learned nothing whatever about the three it kept."
     );
 }
 
