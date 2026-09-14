@@ -326,6 +326,77 @@ mod tests {
         );
     }
 
+    /// The `snapshot_stale_note` wiring, and it was **unguarded until this test existed**.
+    ///
+    /// Measured 2026-09-14 while mutation-testing `e9bea0ed3ff9927a`: reverting
+    /// `snapshot_stale_note`'s call from `snapshot_rows_in_declared_block` back to the
+    /// whole-document `body_snapshot_row_indices` left all 14 tests in this module green.
+    /// The other two consumers were covered incidentally — the same revert at
+    /// `append_entry` and `scan_snapshot_drift` reds six pre-existing tests — so the gap
+    /// was in exactly one of three sites, which is § *Testing Discipline*'s "mutate once
+    /// per guarded SITE, not once per feature" arriving as a real hole rather than a
+    /// maxim.
+    ///
+    /// **Both readings produce a note, so a `is_some()` assertion would not discriminate.**
+    /// The narrowed read cannot see `T-3` and says it is *absent from the table*; the wide
+    /// read finds `T-3` in the unrelated table below and says its row *shows previous
+    /// values* — advice that sends the reader to edit a row that is not there. Asserting
+    /// on which of the two the system names is the discriminator, and it is already in the
+    /// output rather than something this test has to compute.
+    ///
+    /// Fixture details that are load-bearing, both of them: `T-3`'s row sits under a
+    /// DIFFERENT header (`| ref | note |`) behind a blank line, so the contiguity walk
+    /// cannot legitimately reach it; and `params` claims three ids while the block renders
+    /// two, because 2-of-3 is what clears `body_keeps_snapshot`'s majority — drop to one
+    /// rendered row and the gate returns false, the advisory goes silent for an unrelated
+    /// reason, and this test passes while testing nothing.
+    #[tokio::test]
+    async fn a_stray_row_in_another_table_cannot_mask_a_row_missing_from_the_declared_block() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        seed_rendered(
+            &ctx,
+            "art1",
+            &path,
+            "---\nkind: tracker\nsnapshot_anchor: '| ID | status |'\n---\n\n# Q\n\n\
+             | ID | status |\n| T-1 | open |\n| T-2 | open |\n\n\
+             prose\n\n| ref | note |\n| T-3 | discussed in the 2026-08 review |\n",
+            "| ID | status |\n{% for t in tasks %}| {{ t.id }} | {{ t.status }} |\n{% endfor %}",
+            json!([{"id": "T-1", "status": "open"}, {"id": "T-2", "status": "open"},
+                   {"id": "T-3", "status": "open"}]),
+        );
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "tasks",
+                   "entry_id": "T-3", "fields": {"status": "done"}}),
+        )
+        .await
+        .unwrap();
+
+        let note = result["snapshot_stale"].as_str().unwrap_or_else(|| {
+            panic!(
+                "the block renders 2 of 3 claimed ids, so the majority \
+                                       gate passes and an advisory is owed: {result}"
+            )
+        });
+        assert!(
+            note.contains("is not in it at all"),
+            "T-3 has no row in the DECLARED block, so the advisory must say the row is \
+             absent. Saying it 'still shows the PREVIOUS field values' means the stray \
+             `| T-3 |` under `| ref | note |` was counted as a snapshot row, and sends the \
+             reader to edit a row that does not exist: {note}"
+        );
+        assert!(
+            !std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("| T-3 | done |"),
+            "and nothing may be written: with no row for T-3 inside the block, \
+             `resync_snapshot_row` must decline rather than place one by guess"
+        );
+    }
+
     /// The negative control, and the majority case: an artifact that declares no
     /// `snapshot_anchor` behaves exactly as before — body untouched, advisory fires.
     ///

@@ -4340,14 +4340,18 @@ fn scan_snapshot_drift(
 ) -> Result<Vec<Violation>> {
     let mut out = Vec::new();
     for ledger in params_backed_ledgers(conn)? {
-        // ROW anchors only, in both the gate and the subtraction below. A
-        // heading is not a snapshot row, and counting it as one broke this check
-        // in both directions at once: a headings-only body was told its
-        // non-existent table lagged, and a body whose headings covered every id
-        // masked a table that genuinely lagged — `claimed.difference(in_body)`
-        // came out empty and the check `continue`d on a real finding.
-        // See `body_snapshot_row_indices`.
-        let in_body = crate::librarian::catalog::augmentation::body_snapshot_row_indices(
+        // ROW anchors only, and only rows inside the ledger's DECLARED snapshot
+        // block. A heading is not a snapshot row, and counting it as one broke
+        // this check in both directions at once: a headings-only body was told
+        // its non-existent table lagged, and a body whose headings covered every
+        // id masked a table that genuinely lagged — `claimed.difference(in_body)`
+        // came out empty and the check `continue`d on a real finding. A row in an
+        // UNRELATED table masks the same way, one level over, which is why the
+        // block bound is read here too. `ledger.body` is the whole file as
+        // `read_to_string` returned it, frontmatter included, so the anchor is in
+        // reach without a second read.
+        // See `snapshot_rows_in_declared_block`.
+        let in_body = crate::librarian::catalog::augmentation::snapshot_rows_in_declared_block(
             &ledger.body,
             &ledger.prefix,
         );

@@ -524,10 +524,13 @@ fn snapshot_stale_note(
         .ok()
         .flatten()?;
     let body = std::fs::read_to_string(&abs_path).ok()?;
-    // ROW anchors only. Every message below speaks of "the row" and "the
-    // committed table", so a body whose ids live in section headings has no
-    // snapshot for this note to be about. See `body_snapshot_row_indices`.
-    let in_body = body_snapshot_row_indices(&body, prefix);
+    // ROW anchors only, and only rows inside the DECLARED block. Every message
+    // below speaks of "the row" and "the committed table", so a body whose ids
+    // live in section headings has no snapshot for this note to be about — and a
+    // row in an unrelated table is not the table being spoken of either. Falls
+    // back to the whole document when nothing is declared; see
+    // `snapshot_rows_in_declared_block`.
+    let in_body = snapshot_rows_in_declared_block(&body, prefix);
     // Majority coverage, not mere presence: a params-canonical tracker mentions
     // a few ids in unrelated tables without maintaining a snapshot, and telling
     // it that its rows are missing on every write is noise, not a signal.
@@ -721,7 +724,7 @@ pub fn append_entry(
     // `tool-usage-patterns` (0 table rows) to update a table it does not have.
     let body_rows = body_text
         .as_deref()
-        .map(|b| body_snapshot_row_indices(b, id_prefix))
+        .map(|b| snapshot_rows_in_declared_block(b, id_prefix))
         .unwrap_or_default();
 
     let params_next = next_index(&existing_ids, id_prefix);
@@ -1116,26 +1119,27 @@ pub(crate) fn declared_snapshot_anchor(
     }
 }
 
-/// The last line of the contiguous `|`-anchored block headed by `anchor` — the line
-/// a new row must be inserted AFTER to land at the block's tail.
+/// The inclusive line range `(header, last)` of the contiguous `|`-anchored block
+/// headed by `anchor`.
 ///
 /// **Refuses rather than guesses, in both directions.** `None` when the anchor
 /// matches no line (the declaration has drifted from the body) and `None` when it
 /// matches more than one (the declaration does not identify a block). Silently
 /// picking the first match is the defect this whole mechanism exists to avoid: it is
-/// what `body_snapshot_row_indices` does today, and why a row in an unrelated table
-/// counts as a snapshot row.
+/// what `body_snapshot_row_indices` does on its own, and why a row in an unrelated
+/// table counts as a snapshot row.
 ///
 /// Walking **down** from a known header is the mirror of `doctor`'s
 /// `table_is_about_status`, which walks **up** from a known data row to find its
-/// header. Same contiguity rule, opposite direction; neither returns a range, which
-/// is why this returns the tail line rather than `(start, end)` — `insert_index_row`
-/// addresses by line text, so a range would have to be converted back anyway.
+/// header. Same contiguity rule, opposite direction.
 ///
-/// Returns the line VERBATIM (minus its newline, as `str::lines` yields it) because
-/// `insert_index_row` compares trimmed — a caller that reconstructed the text would
-/// risk a whitespace mismatch against the very line it just read.
-pub(crate) fn snapshot_block_last_line(doc: &str, anchor: &str) -> Option<String> {
+/// **Returns the range because two consumers want different halves of one walk**, and
+/// deriving either from the other reintroduces the ambiguity this module exists to
+/// end: [`snapshot_block_last_line`] wants the tail line's TEXT, since
+/// `insert_index_row` addresses by line text; [`snapshot_rows_in_declared_block`]
+/// wants the bounds to scan between. Recovering bounds from the text means
+/// `rposition`-ing a line that a second table may repeat verbatim.
+pub(crate) fn snapshot_block_range(doc: &str, anchor: &str) -> Option<(usize, usize)> {
     let needle = anchor.trim();
     if needle.is_empty() {
         return None;
@@ -1164,7 +1168,21 @@ pub(crate) fn snapshot_block_last_line(doc: &str, anchor: &str) -> Option<String
             break;
         }
     }
-    Some(lines[last].to_string())
+    Some((start, last))
+}
+
+/// The last line of the contiguous `|`-anchored block headed by `anchor` — the line
+/// a new row must be inserted AFTER to land at the block's tail.
+///
+/// Returns the line VERBATIM (minus its newline, as `str::lines` yields it) because
+/// `insert_index_row` compares trimmed — a caller that reconstructed the text would
+/// risk a whitespace mismatch against the very line it just read.
+///
+/// A projection of [`snapshot_block_range`]; every refusal case is that function's,
+/// and the tests below exercise the walk through this wrapper.
+pub(crate) fn snapshot_block_last_line(doc: &str, anchor: &str) -> Option<String> {
+    let (_, last) = snapshot_block_range(doc, anchor)?;
+    doc.lines().nth(last).map(str::to_string)
 }
 
 /// Allocate the next `<id_prefix>-N` for a **ledger**: an artifact that declares
@@ -1874,6 +1892,57 @@ pub(crate) fn body_snapshot_row_indices(
     re.captures_iter(body)
         .filter_map(|c| c[1].parse::<u64>().ok())
         .collect()
+}
+
+/// [`body_snapshot_row_indices`], narrowed to the artifact's DECLARED snapshot block
+/// when it declares one.
+///
+/// Takes the whole document rather than a body slice because it needs both halves —
+/// the frontmatter to read [`SNAPSHOT_ANCHOR_KEY`], the body to locate the block —
+/// and all three consumers already hold the file exactly as `read_to_string` returned
+/// it, so this costs no caller an extra read.
+///
+/// **An absent, drifted or ambiguous anchor falls back to the whole-document scan**,
+/// byte for byte today's behaviour. That is the asymmetry
+/// `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`
+/// already names: a **read** may fall back, a **write** may not — which is why
+/// [`resync_snapshot_row`], the write, returns `Ok(false)` on the very same input
+/// instead of guessing a block.
+///
+/// **Measured 2026-09-14 before wiring, and the population is why the fallback is a
+/// ruling rather than a compromise.** Of 13 params-backed ledgers in this repo, **4**
+/// pass [`body_keeps_snapshot`] — `prompt-hamsa-audit-log` (39/39),
+/// `windows-platform-support` (35/35), `2026-08-16-iron-law-gate-firing-audit` (8/8)
+/// and `open-issue-work-queue` (77/77). Of those four, exactly **one** anchors its ids
+/// in more than one table, and it is the one that declares. For the other three the
+/// block IS the document, so both readings agree by construction. The two defaults the
+/// bug file weighed therefore differ on **zero** files: absent-⇒-whole-body changes
+/// nothing anywhere, while absent-⇒-no-block would silence three working advisories to
+/// fix nothing observable. Re-derive before citing — the catalog is gitignored.
+pub(crate) fn snapshot_rows_in_declared_block(
+    doc: &str,
+    id_prefix: &str,
+) -> std::collections::BTreeSet<u64> {
+    let whole = || body_snapshot_row_indices(doc, id_prefix);
+    let Ok((fm, _)) = crate::librarian::frontmatter::parse(doc) else {
+        return whole();
+    };
+    let Some(anchor) = declared_snapshot_anchor(fm.as_ref()) else {
+        return whole();
+    };
+    let Some((start, end)) = snapshot_block_range(doc, &anchor) else {
+        return whole();
+    };
+    // Feed the primitive the block alone. Re-running the same regex over a slice keeps
+    // ONE definition of what a snapshot row looks like; a second regex scoped by line
+    // number would be a copy free to drift from it.
+    let block = doc
+        .lines()
+        .skip(start)
+        .take(end - start + 1)
+        .collect::<Vec<_>>()
+        .join("\n");
+    body_snapshot_row_indices(&block, id_prefix)
 }
 
 /// Every `<id_prefix>-N` index an artifact's markdown body **defines as a citable
@@ -2895,6 +2964,115 @@ mod tests {
         assert!(
             body_snapshot_row_indices(body, "F").is_empty(),
             "no `|` row anchors, so there is no table to fall behind"
+        );
+    }
+
+    /// The narrowing itself: a declared anchor confines the set to ITS block, so a
+    /// `PREFIX-N` row sitting in an unrelated table further down is not a snapshot
+    /// row. This is `e9bea0ed3ff9927a` /
+    /// `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`.
+    ///
+    /// **The first assertion is the control and it is what makes the second one
+    /// evidence.** Without it, a fixture whose second table simply failed to match
+    /// would satisfy the narrowing assertion while the narrowing did nothing —
+    /// § *Testing Discipline*'s "a broken world produces the same result".
+    ///
+    /// Fixture detail that is load-bearing: `| A-9 | z |` lives under a DIFFERENT
+    /// header (`| Other | T |`) separated by a blank line. Move it adjacent to the
+    /// first table and the contiguity walk swallows it legitimately, leaving this
+    /// test green and no longer discriminating.
+    ///
+    /// Mutation that reds here and nowhere else: pass `doc` instead of the sliced
+    /// `block` to `body_snapshot_row_indices`.
+    #[test]
+    fn snapshot_rows_in_declared_block_cannot_reach_an_unrelated_table() {
+        let doc = "---\nkind: tracker\nsnapshot_anchor: '| ID | X |'\n---\n\n\
+                   | ID | X |\n|----|---|\n| A-1 | a |\n| A-2 | b |\n\n\
+                   prose\n\n| Other | T |\n|---|---|\n| A-9 | z |\n";
+        assert_eq!(
+            body_snapshot_row_indices(doc, "A"),
+            [1, 2, 9].into_iter().collect(),
+            "precondition: the un-narrowed scan DOES reach the second table — without \
+             this the assertion below would pass on a fixture that never had a stray"
+        );
+        assert_eq!(
+            snapshot_rows_in_declared_block(doc, "A"),
+            [1, 2].into_iter().collect(),
+            "the declared block stops at the blank line; A-9 is in another table"
+        );
+    }
+
+    /// The ruling, pinned as a test: **an artifact that declares no anchor keeps
+    /// today's whole-document behaviour**, byte for byte.
+    ///
+    /// Measured 2026-09-14 over this repo's 13 params-backed ledgers, 4 of which pass
+    /// `body_keeps_snapshot`: exactly one of those four anchors ids in more than one
+    /// table, and it declares. So the rejected alternative (absent ⇒ no block) would
+    /// have silenced three working advisories — `prompt-hamsa-audit-log`,
+    /// `windows-platform-support`, `2026-08-16-iron-law-gate-firing-audit` — to fix
+    /// nothing observable.
+    ///
+    /// Mutation that reds here and nowhere else: return `Default::default()` from the
+    /// `declared_snapshot_anchor` `None` arm instead of `whole()`.
+    #[test]
+    fn snapshot_rows_in_declared_block_without_an_anchor_scans_the_whole_document() {
+        let doc = "---\nkind: tracker\n---\n\n\
+                   | ID | X |\n|----|---|\n| A-1 | a |\n\nprose\n\n\
+                   | Other | T |\n|---|---|\n| A-9 | z |\n";
+        assert_eq!(
+            snapshot_rows_in_declared_block(doc, "A"),
+            body_snapshot_row_indices(doc, "A"),
+            "no declaration means no narrowing — identical to the primitive, not empty"
+        );
+        assert_eq!(
+            snapshot_rows_in_declared_block(doc, "A"),
+            [1, 9].into_iter().collect(),
+            "and the un-narrowed set is genuinely wider than one table, so the \
+             equality above is not two empties agreeing"
+        );
+        assert_eq!(
+            snapshot_rows_in_declared_block("| A-1 | a |\n", "A"),
+            [1].into_iter().collect(),
+            "a document with no frontmatter block at all falls back too, rather than \
+             failing to parse into an empty set"
+        );
+    }
+
+    /// A declaration the body no longer answers to — drifted, or ambiguous — falls
+    /// back to the whole document rather than reporting an empty snapshot.
+    ///
+    /// This is the READ half of the asymmetry the bug file names: a read may fall
+    /// back, a write may not. `resync_snapshot_row` takes the same two inputs and
+    /// returns `Ok(false)`, declining to write, because guessing a block to SPLICE
+    /// into is unrecoverable in a way guessing a block to COUNT is not.
+    ///
+    /// Mutation that reds here and nowhere else: return `Default::default()` from the
+    /// `snapshot_block_range` `None` arm instead of `whole()`.
+    #[test]
+    fn snapshot_rows_in_declared_block_falls_back_when_the_anchor_does_not_identify_one() {
+        let drifted = "---\nkind: tracker\nsnapshot_anchor: '| Gone | Y |'\n---\n\n\
+                       | ID | X |\n|----|---|\n| A-1 | a |\n";
+        assert_eq!(
+            snapshot_rows_in_declared_block(drifted, "A"),
+            [1].into_iter().collect(),
+            "an anchor matching no line is a stale declaration, not an empty table"
+        );
+
+        // Two lines answer to this anchor, so `snapshot_block_range` refuses. The
+        // read must still report what it can see rather than going silent.
+        let ambiguous = "---\nkind: tracker\nsnapshot_anchor: '| ID | X |'\n---\n\n\
+                         | ID | X |\n|----|---|\n| A-1 | a |\n\nprose\n\n\
+                         | ID | X |\n|----|---|\n| A-9 | z |\n";
+        assert_eq!(
+            snapshot_block_range(ambiguous, "| ID | X |"),
+            None,
+            "precondition: the range walk genuinely refuses this input"
+        );
+        assert_eq!(
+            snapshot_rows_in_declared_block(ambiguous, "A"),
+            [1, 9].into_iter().collect(),
+            "an ambiguous anchor falls back to the wide read — the pre-fix behaviour, \
+             which is a false negative and never a false silence"
         );
     }
 

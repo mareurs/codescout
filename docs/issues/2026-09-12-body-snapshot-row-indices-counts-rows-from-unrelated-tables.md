@@ -1,8 +1,9 @@
 ---
 kind: bug
-status: investigating
+status: taken
 tags:
 - cluster/addressing-without-an-escape-hatch
+claimed_by: 8bd791df-5ff4-40fe-af30-69cc3fefc2f7
 closed: null
 opened: 2026-09-12
 owner: marius
@@ -163,66 +164,87 @@ trusting it on a tracker whose body holds more than one `| PREFIX-N |` table.
 
 ## Resume
 
-Blocks BL-29's third option (`docs/trackers/open-issue-work-queue.md`): defaulting
-`index_after_line` to the last snapshot row requires knowing which rows are snapshot
-rows, which is exactly what this defect denies.
+**THE RULING IS DISCHARGED — and not by deciding it. The blocker was a wrong POPULATION.**
 
-**BLOCKED ON ONE RULING before implementation — `bug-fix-session-log:F-136` (2026-09-13).** The
-fix direction above is settled on the CHOICE and silent on the DEFAULT: it never says what an
-**absent** `snapshot_anchor` means, and on day one that is every augmented tracker — **24** of them
-(`doc(action="find", kind="tracker", augmented=true)`, tree `2e8a8361`; the catalog is gitignored, so
-re-derive rather than cite). The two available defaults fail in opposite directions over the same 24
-rows:
+This section previously said the fix was blocked because the two candidate defaults
+*"fail in opposite directions over the same 24 rows"*. Derived 2026-09-14 under a single
+rule, they differ on **zero files**, and the 24 was never the population — it counted
+augmented trackers, when the question only reaches a tracker that (a) passes
+`body_keeps_snapshot` and (b) anchors its ids in **more than one** table. With one table
+the block IS the document and both defaults agree by construction; with none, the majority
+gate already returns `false` and the advisory is silent either way.
 
-- **absent ⇒ scan the whole body** (today's behaviour) preserves the exact false negative this bug
-  was filed to remove, for every tracker, until someone hand-declares an anchor — the fix ships
-  without fixing anything observable;
-- **absent ⇒ no snapshot block** makes `body_snapshot_row_indices` empty, so `body_keeps_snapshot`
-  early-returns `false` and `snapshot_drift` goes silent across all 24 at once — the
-  `tool-usage-patterns` false-positive direction, inverted and corpus-wide.
+Measured over this repo's **13** params-backed ledgers (catalog is gitignored — re-derive,
+do not cite):
 
-Neither is visible at unit-test grain: fixtures get written to whichever assumption the implementer
-holds, and the suite then confirms it (§ *Testing Discipline*'s population-vs-member law).
+| ledger | prefix | claimed | in body | cov | gate | tables | anchor |
+|---|---|---:|---:|---:|---|---:|---|
+| `prompt-hamsa-audit-log` | A | 39 | 39 | 100% | KEEPS | 1 | — |
+| `windows-platform-support` | WIN | 35 | 35 | 100% | KEEPS | 1 | — |
+| `2026-08-16-iron-law-gate-firing-audit` | GF | 8 | 8 | 100% | KEEPS | 1 | — |
+| `open-issue-work-queue` | BL | 77 | 77 | 100% | KEEPS | 6 | **yes** |
+| `provenance-subsystem` | PV | 68 | 10 | 15% | silent | 4 | — |
+| 8 others | — | — | 0 | 0% | silent | 0 | — |
 
-**A third option the list above does not carry**, offered for the ruling rather than assumed:
-*absent ⇒ scan the whole body **and** emit the undeclared state as a `doctor` finding*, so the 24
-become a worklist that drains instead of a silent default. Backward-compatible, makes the gap
-countable, and respects the ADR asymmetry this bug already cites — a **read** may fall back, a
-**write** may not.
+**4** pass the gate; of those **1** is multi-table, and it is the one that declares. So:
 
-**CORRECTED 2026-09-13 — the shape below was wrong, and the primitive is ALREADY BUILT.**
-`snapshot_anchor` shipped at `59e8c970` (12:29 that day) as a **frontmatter `extra` key**, read by
-`declared_snapshot_anchor()` (`src/librarian/catalog/augmentation.rs:1110`) — deliberately not a
-typed field and not a DB column, *"so a caller declares this with the same `doc(action="update",
-patch={extra: …}`) surface that already exists."* There is **no migration to write**: the
-`ALTER TABLE` / 14th-field / positional-`row_from_sql` plan this section previously carried answered
-a question nobody had. It is struck rather than deleted because it is exactly the wrong turn the
-next reader would otherwise take.
+- **absent ⇒ scan the whole body** — a no-op on all 13 today. **Chosen.**
+- **absent ⇒ no snapshot block** — would silence `prompt-hamsa-audit-log`,
+  `windows-platform-support` and `2026-08-16-iron-law-gate-firing-audit`, three advisories
+  that work, to fix nothing observable. Rejected on the measurement, not on taste.
+- **the third option** (emit undeclared as a `doctor` finding) — would produce a worklist
+  of 12 ledgers of which **9 have no rows to anchor**, 1 is 15%-coverage prose, and 3 are
+  single-table where an anchor buys nothing. **12 findings, 0 actionable.** Withdrawn; it
+  was offered by the same reasoning that produced the 24.
 
-~~`column_exists`-guarded `ALTER TABLE artifact_augmentation ADD COLUMN snapshot_anchor TEXT`; a
-14th field on `AugmentationRow`; `row_from_sql` is positional, so `row.get(13)` and every `SELECT`
-must move in step.~~
+That the ruling dissolved rather than resolved is the reusable part: it had sat blocked
+for a day on a fork whose two branches have no members. § *Testing Discipline*'s
+*"a count of a defect population must arrive with its unit or not at all"* — the cost here
+was not a wrong decision, it was a decision nobody could make because the number framing
+it answered a different question.
 
-**What is actually left**, verified at the bytes: `body_snapshot_row_indices` still takes
-`(body, id_prefix)` and still scans the whole document with `(?m)^\|` — unchanged at `1864-1877`.
-The defect is live. Threading the existing anchor into that **read** path, plus its three consumers
-(`augmentation.rs:530` `snapshot_stale_note`, `augmentation.rs:724` `append_entry`,
-`doctor.rs:4350` `scan_snapshot_drift`), is the whole remaining job — and `resync_snapshot_row`
-(`:1534`) is the worked example of how to read it and what absent means: `Ok(false)`, a silent
-no-op, falling back to the advisory.
+## What shipped
 
-**THE REAL BLOCKER IS NOT THE RULING, IT IS ADOPTION.** `grep -rln '^snapshot_anchor:'
-docs/trackers/` returns **nothing** — no tracker in this repo declares one. Both halves of `BL-29`'s
-remedy shipped 2026-09-13 (`dd5c58b5`, `59e8c970`) are inert corpus-wide, including on
-`open-issue-work-queue.md`, the tracker `BL-29` was filed about. Wiring this read path without
-arming any anchor produces a mechanism that is correct and reaches nothing — CLAUDE.md § *Testing
-Discipline*'s *"loudness is a property of a PATH"*, in advance rather than in hindsight. Decide
-adoption and wiring together. (Corpus grep by sessionId `8bd791df-5ff4-40fe-af30-69cc3fefc2f7`.)
+- `snapshot_block_range(doc, anchor) -> Option<(usize, usize)>` — the walk, now returning
+  its range. `snapshot_block_last_line` becomes a projection of it, keeping its four
+  existing tests as the walk's guard.
+- `snapshot_rows_in_declared_block(doc, id_prefix)` — `body_snapshot_row_indices` narrowed
+  to the declared block, falling back to the whole document when the anchor is absent,
+  drifted or ambiguous. The primitive is unchanged and still feeds the narrowed call, so
+  there is **one** definition of what a snapshot row looks like.
+- Wired at all three consumers: `augmentation.rs` `snapshot_stale_note`,
+  `augmentation.rs` `append_entry`, `doctor.rs` `scan_snapshot_drift`.
 
-**Claim released deliberately:** worked 2026-09-13 by sessionId
-`9403d62d-116b-46ea-ac9b-004acff2b1cb` and set back to `investigating` rather than left `taken`,
-because no live session holds it — the ruling is the blocker, not the typing.
+**A correction to this file's own earlier citation:** `augmentation.rs:724` is **not** the
+id allocator. Allocation reads `body_claimed_indices` (headings *and* rows, deliberately
+wide, so a heading claiming `F-33` still blocks reissuing it); `:724` feeds `snapshot_missing`
+alone. The narrowing therefore cannot affect id assignment in any direction — a smaller
+blast radius than the text here previously implied.
 
+**Adoption — the blocker this file called the real one — is discharged.**
+`open-issue-work-queue.md` declares `snapshot_anchor` as of `6a0c2597`, and
+`update_entry` returns `row_resynced: true` against it live. The mechanism reaches
+something before this read path was wired, which is the order that section asked for.
+
+## Resume
+
+Mutation-verify the three guarded sites, then gate. Each test names in its own doc comment
+the single production mutation it must red on:
+
+1. `snapshot_rows_in_declared_block_cannot_reach_an_unrelated_table` — pass `doc` instead
+   of the sliced `block`.
+2. `..._without_an_anchor_scans_the_whole_document` — return `Default::default()` from the
+   `declared_snapshot_anchor` `None` arm.
+3. `..._falls_back_when_the_anchor_does_not_identify_one` — return `Default::default()`
+   from the `snapshot_block_range` `None` arm.
+
+One kill per site, not one per feature. **Not yet done at the time of writing**: the shared
+lib does not compile, from another session's in-flight `audit_doc_refs` work
+(`RefKind::ArtifactId` / `Verdict::ArtifactMissing` arms), so a red cannot be attributed to
+an injected mutation. Holder informed; parked, not abandoned.
+
+Then the four-command gate, chained with `;`. Read `librarian::` test names out of the
+**default** lane — the lean lane compiles no librarian code, so its green says nothing here.
 ## References
 
 - `docs/issues/archive/2026-08-28-body-keeps-snapshot-counts-headings-as-a-table.md` —
