@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 148
+entry_high_water_F: 149
 entry_high_water_W: 135
 ---
 
@@ -15155,6 +15155,55 @@ checkout, `git status` the files you intend to write — *before* the first edit
 commit. It is the only step in this sequence that would have fired on its own. The corollary
 worth keeping: a peer's disclaimer of ownership is a fact about a moment, and the tree is the
 only thing that answers for now.
+
+## F-149 — The recommended fix cited a working sibling; the sibling had the same defect, latent
+
+**Valid:** dated 2026-09-14
+
+**Observed:** `docs/issues/2026-09-14-run-commands-test-envelope-drops-the-stderr-….md`
+proposed the obvious fix: *"carry `stderr` in the `test` envelope as the `generic` one
+does."* One sibling in the same three-way `match`, already working, already shipping the
+field. Copying it is a four-line change.
+
+Measuring the sibling first killed it. `summarize_generic`'s stderr is **unbounded**. A
+command emitting 227 KB of stderr returns
+
+```json
+{"output_id": "@tool_a0a59213", "summary": "✓ exit 0  (query @cmd_a0a59211)", "buffered_bytes": 230994}
+```
+
+— the envelope exceeded `TOOL_OUTPUT_BUFFER_THRESHOLD` and was re-buffered into
+`format_run_command`'s one-line summary, which carries no stderr. The `generic` path has
+the *same defect it was being cited as the cure for*, latent because nobody had produced
+enough stderr on it. Copied into the `test` path, it would have shipped a field that exists
+and a verdict that still does not arrive — on every `cargo test` with a large compile log,
+which is this repo's most common command.
+
+**Why it was invisible from the reading.** `summarize_generic` is correct *as a function*:
+it returns what it was asked for. The bound it lacks belongs to a **caller's** constraint —
+the MCP boundary's byte threshold — that no reader of the function can see, because the
+threshold is in a different module and the re-buffer is silent. Reading the sibling is not
+enough; the sibling has to be **driven past the caller's limit**, which is a different act.
+
+**Cost if missed:** the defect ships a second time under a fix for itself, with a test suite
+green (every "stderr is present" assertion passes at small sizes) and a bug file closed.
+
+**Lesson, general form:** *when a fix is "do what the working sibling does", the sibling is
+a claim about behaviour at the sizes it has met, not a specification.* Drive it past the
+bound that worries you before copying it. The tell is cheap: the sibling's field has no cap
+and the envelope has a threshold, so the two facts only ever meet at a size nobody happened
+to reach.
+
+**Severity:** high — would have merged a same-shape regression behind a passing suite and a
+closed bug.
+
+**Category:** architectural
+
+**Status:** fixed-verified
+
+**Promote-when:** a second instance of "copied a sibling's shape and inherited its
+unmeasured bound" appears in any subsystem. Two instances make it an `IC-N`, not an F-N;
+`cluster/capped-result-presented-as-complete` is the likely home.
 
 ## Template for new entries
 

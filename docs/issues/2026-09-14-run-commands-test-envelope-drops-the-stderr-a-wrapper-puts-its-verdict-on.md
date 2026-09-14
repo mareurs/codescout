@@ -1,7 +1,7 @@
 ---
 id: c079fb93eb7fece8
 kind: bug
-status: open
+status: fixed
 title: 'BUG: run_command''s test envelope drops the stderr a wrapper puts its verdict on, and the surviving fields read as a different verdict'
 tags:
 - cluster/capped-result-presented-as-complete
@@ -84,10 +84,30 @@ Two runs, same session, differing only in classification:
    (`@cmd_a03ab2f5`, `@cmd_a03e0638`, `@cmd_a03fc2b2`, `@cmd_a0432d57`, `@cmd_a04504ad`): **no
    `stderr` key present in any of them.**
 
-The wrapper's lines are absent from the `@cmd_*` buffer too, not merely from the envelope:
+The wrapper's lines are absent from the `@cmd_*` buffer as well:
 `grep -c mutation-probe @cmd_a03ab2f5` → `0`, with `grep -c 'running 0 tests' @cmd_a03ab2f5` →
-`1` as the control proving the buffer is non-empty and the selector works. Cargo's *own* stderr
-(`Compiling …`) **is** in that buffer, so the loss is not "stderr is never captured".
+`1` as the control proving the buffer is non-empty and the selector works.
+
+> **CORRECTION, 2026-09-14, applied in place rather than appended.** This paragraph originally
+> read *"absent from the `@cmd_*` buffer **too**"* and closed *"Cargo's own stderr (`Compiling
+> …`) **is** in that buffer, so the loss is not 'stderr is never captured'."* Every measurement
+> above is real and reproduces. Both inferences drawn from them were wrong, for two different
+> reasons, in adjacent sentences:
+>
+> 1. **That `too` is a layer change wearing a continuation.** The runs above differ only in
+>    classification, and classification genuinely explains the ENVELOPE difference. It does not
+>    explain this one: `read_from_buffer` (`src/tools/read_file.rs`) and `grep`'s buffer branch
+>    resolve `.stdout` alone, for every classification. A `generic` run whose envelope carries
+>    the stderr line IN FULL still answers `0` here — the control nobody had a reason to
+>    construct, because the section's framing gave none. Filed as `2546172a20a4751e`.
+> 2. **The closing sentence's premise was relabelled in transit.** `mutation-probe.sh` runs its
+>    command as `( cd "$TREE" && "$@" ) 2>&1 | tee`, so cargo's `Compiling …` lines are the
+>    SCRIPT's stdout by the time anything stores them. They prove nothing about stderr capture.
+>    The verdict it supported (§ *Hypotheses tried* 3) still stands on other grounds; the reason
+>    given here does not.
+>
+> Left visible rather than silently rewritten: three sessions read classification as the
+> discriminator for both layers, and the wording that carried them there is the artifact.
 
 ## Environment
 
@@ -97,13 +117,38 @@ The wrapper's lines are absent from the `@cmd_*` buffer too, not merely from the
 
 ## Root cause
 
-**Not established, and the file deliberately stops short of naming one.** What is established is
-the discrimination: the `generic` renderer preserves stderr under overflow and the `test`
-renderer emits no stderr field. Whether the `test` path drops the stream, parses only the
-harness-shaped portion, or stops capturing when the inner command exits, is a question for
-whoever reads `format_run_command` and the classifier beside it — three readings consistent with
-these observations, and choosing between them from the outside would be a guess wearing a
-finding's clothes.
+**Established 2026-09-14 by the session that fixed it, and it is NOT one of the three readings
+this file first offered** — those are kept below because ruling them out is what located this one.
+
+The `test` path does not drop the stream, does not cease capture, and does not parse only the
+harness-shaped portion. `raw_stderr` is captured in full and stored
+(`ctx.output_buffer.store(cmd, raw_stdout, raw_stderr, exit_code)`), and `summarize_test_output`
+receives it and reads it — but only to sum cargo's count lines out of a `combined` string. It
+emits derived counts and never the stream. `summarize_generic`, reached from the same three-way
+`match`, does emit it. The loss is **one missing field in two of the three summarizers**, not a
+stream that went anywhere.
+
+**A second, larger loss sits underneath it, and it is why hypothesis 2 measured the way it did.**
+`BufferEntry` carries a `stderr` field; every reader of a `@cmd_*` handle takes `.stdout` alone —
+`src/tools/grep.rs` and `read_file.rs`'s `read_from_buffer`. Reproduced with a synthetic script
+(4000 stdout lines plus one marked stderr line):
+
+| classification | envelope carries stderr | `grep -c MARKER @cmd_*` | stdout control |
+|---|---|---|---|
+| `generic` | **yes**, in full | **0** | 1 |
+| `test`    | no                | **0** | 1 |
+
+So the buffer-level loss applies to `generic` too — unnoticed only because `generic` also puts
+stderr in the envelope. `BufferEntry.stderr` is written by `store()` and read by nobody:
+`CLAUDE.md` § *Testing Discipline*, "loudness is a property of a PATH". Filed separately rather
+than folded in here — different defect, different blast radius.
+
+**A correction to § Hypotheses tried, hypothesis 3.** Its rejection reasoned that cargo's
+`Compiling …` lines are stderr and were present in the buffer, so stderr must be captured. The
+premise is right and the inference does not follow: `mutation-probe.sh` runs its command as
+`( cd "$TREE" && "$@" ) 2>&1 | tee`, so cargo's stderr arrives as the **script's stdout**. The
+buffer held it for that reason, not because buffer reads return stderr — they do not. The
+verdict stands; the stated reason does not.
 
 **What does not need the mechanism, because it is a composition rather than a bug in either
 part.** `mutation-probe.sh` keeps its verdict out of the exit status on purpose and for good
@@ -151,26 +196,151 @@ there is no verdict line to read.
 
 ## Fix
 
-Not implemented, and the cheap form is likely right: carry `stderr` in the `test` envelope as the
-`generic` one does. It is small by construction — a harness writes its results to stdout, so the
-stderr of a test run is the wrapper's commentary and the compiler's, which is what a reader wants
-when the news is bad.
+**Implemented 2026-09-14.** `summarize_test_output` and `summarize_build_output` now emit a
+`stderr` field, via a shared `summarize_stderr` helper in `src/tools/command_summary.rs`.
 
-A second, independent mitigation belongs to the script rather than the tool, and does not depend
-on this being fixed: **`mutation-probe.sh` could echo its verdict line to stdout as well.** That
-survives any renderer, costs one line, and does not disturb the deliberate decision to keep the
-verdict out of the exit code. Whoever owns the script should decide; it is not obviously theirs
-to pay for another tool's rendering.
+| commit | patch-id | what |
+|---|---|---|
+| `9c2b542f` | `04b8696314d0fcb6fc72923406ff8b490b40e475` | the fix, its tests, and the two cap-probe rows |
+| `a5238dc2` | `1cc77378276a0c62d2777ef24462466494904aec` | the reach test asserts absence before value, so its own message renders |
+| `4388dd1e` | `835d6f84ca7bb65b77973468663d263f02eae213` | `--strict` on `mutation-probe.sh`, the independent mitigation below |
 
-Do **not** answer this by teaching agents to re-run failed probes with `-- true`. That changes the
-command whose behaviour is in question.
+The patch-id is the durable half: `experiments` is rebased after every ship, so a
+cherry-picked commit's original SHA is orphaned while the content hash survives both rebase
+and cherry-pick.
 
+**The cheap form named here — "carry `stderr` as the `generic` one does" — was wrong as
+written, and the measurement that shows it is the reason this section is not a one-liner.**
+`summarize_generic`'s stderr is **unbounded**, and the envelope has a threshold it does not
+know about: `needs_summary` is `(stdout.len() + stderr.len()) / 4 > MAX_INLINE_TOKENS`, so
+past **~10 KB combined** the whole response is re-buffered into `format_run_command`'s
+one-line summary, which carries no stderr.
+
+Bracketed 2026-09-14 on the `generic` path — the derivation rather than a single number,
+because the number is what misleads:
+
+| combined stdout+stderr | result |
+|---|---|
+| 9,024 B | inline, `stderr` field in full |
+| 14,304 B | `{"output_id": "@tool_…", "summary": "✓ exit 0  (query @cmd_…)"}`, no stderr |
+
+**~10 KB is a Tuesday, not a pathology.** Any `cargo` run touching a few crates clears it
+in diagnostics — which is most runs of the exact command this field exists for. So copying
+`summarize_generic`'s shape into the `test` path would have dropped the verdict on the
+common case, with the field present and a suite green at small sizes. It also rules out the
+repair a larger figure would invite: no threshold-raise works, because the input is
+unbounded and the threshold is not. Bounding the field is the only answer.
+
+(An earlier draft of this section cited a single 227 KB datapoint. That was true and priced
+the defect about four orders of magnitude too rare. Corrected after sessionId
+aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66 re-derived the bracket by a different method; both
+sides re-measured here before the change. Recoverable at any size via
+`read_file(@tool_*, json_path="$.stderr")`, and loud rather than silent — but not a fix.)
+
+**THE TABLE VARIES THE WRONG AXIS, and saying so is worth more than the table.** The
+condition sums **both** streams. Every reproduction in this file is synthetic with ~0
+stdout, so all of them measured the stderr-only edge of a two-term predicate. On the command
+this bug is actually about, the first term settles it alone: this session's gate run buffered
+**831,766 B across 10,263 lines**, 83× the threshold, and a peer's default lane measured
+515,322 B. stdout busts it before stderr is consulted at all. So for a workspace-scale
+`cargo test` the summarizer is entered on **every** run, including every green one, whatever
+the stderr size — "above ~10 KB of stderr" never described the real population.
+
+**And the boundary is the part that explains the confusion.** A narrowly filtered run stays
+under the threshold and is returned inline, stderr and all — `cargo test --lib …
+command_summary` (49 tests, ~4.5 KB) came back this session with its `stderr` field carrying
+cargo's `Compiling` lines, and § E1's `-- true` probe likewise returned its verdict inline.
+That is why `mutation-probe.sh` verdicts arrived sometimes and vanished other times, and why
+the `type: "test"` classification looked like the discriminator: it is not the gate. The gate
+is **combined output volume**; classification only chooses *which* summarizer runs once that
+gate has already been crossed, and two of the three then dropped the field.
+
+This lands on the bounded, tail-biased design rather than qualifying it. If the summarizer is
+entered on every workspace run, the `stderr` field is not an edge-case rescue — it is the
+normal rendering path for the repo's most-run command, which is the load a 20-line tail is
+right for and an unbounded copy would have been worst at. (Consequence identified by
+sessionId aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66; the inline-boundary half measured here, and
+it bounds their stronger claim that every `cargo test` is affected — filtered ones are not,
+and never were.)
+
+So the field is **bounded and tail-biased**:
+
+- `STDERR_SUMMARY_LINE_BUDGET = 20`, deliberately the same number as `STDERR_BUDGET` in
+  `run_command`'s buffer-query branch — same question, and two independent answers would drift.
+- `STDERR_SUMMARY_BYTE_BUDGET = 2000`, because a line budget alone bounds nothing: one 200 KB
+  line satisfies `take(20)`.
+- **Tail, not head.** A wrapper writes its verdict *after* the command it wraps finishes; a
+  compiler writes its diagnostics first, and the head is already mined by `first_error` and
+  `failures`. A head-biased fix would satisfy every "stderr is present" assertion and drop the
+  only line this bug is about.
+- Anything cut is announced by a `--- stderr TAIL: … ---` marker naming what was dropped and
+  noting that the `@cmd_*` buffer does not hold the rest. An unmarked tail would be this bug's
+  own cluster one layer down.
+
+**What is deliberately NOT fixed here.** The buffer-reader half (§ *Root cause*) — `grep` and
+`read_file` on a `@cmd_*` handle return `.stdout` only, for every classification. It is a
+separate defect with a wider blast radius and its own file; folding it in would have meant
+changing a contract three tools depend on inside a fix for a missing field.
+
+**The second, independent mitigation shipped too**, and does not depend on this: `--strict` on
+`mutation-probe.sh` maps INCONCLUSIVE to exit 3. The exit code is the only channel that
+survives every renderer, build and harness, so the two fixes are complements rather than
+alternatives — an agent on an older binary still gets a usable signal. Off by default;
+SURVIVED and KILLED keep their own statuses. See `docs/PROBES.md`.
+
+Still true: do **not** answer this by teaching agents to re-run failed probes with `-- true`.
+That changes the command whose behaviour is in question.
 ## Tests added
 
-None. The observation is about a rendering path this session did not read, and a test pinning a
-shape before anyone has chosen it would be the thing `docs/adrs/2026-09-14-state-the-property-not-the-snapshot.md`
-argues against.
+Seven in `src/tools/command_summary.rs`, one in `src/tools/run_command/tests.rs`, four in
+`tests/mutation-probe.sh`.
 
+Each guards a **direction**, not a presence — a head-biased implementation satisfies every
+"stderr is present" assertion while dropping the verdict, so each asserts a presence AND an
+absence:
+
+- `summarize_test_output_carries_the_wrapper_verdict_on_stderr` — the reported defect.
+- `summarized_stderr_keeps_the_tail_and_drops_the_head` — the direction claim.
+- `summarized_stderr_bounds_a_single_enormous_line_by_bytes` — the re-buffer hazard above.
+- `summarized_stderr_clips_on_a_char_boundary`, `…_returns_a_short_stream_verbatim_…`,
+  `summarize_test_output_omits_empty_stderr`, `summarize_build_output_carries_stderr_…`.
+- `rebuild_buffered_summary_preserves_the_test_envelopes_stderr` — **REACH, not logic.**
+  That function reorders an envelope by copying fields into three named groups, so a key it
+  does not enumerate is dropped silently. Every other test here asserts on the summarizer's
+  return value, which is upstream and identical whether the key arrives or not.
+
+**Mutations run** (`./scripts/mutation-probe.sh`, isolated worktree, one per guarded SITE):
+
+| site | mutation | result |
+|---|---|---|
+| `STDERR_SUMMARY_LINE_BUDGET` | `20` → `20000` | **KILLED** — *"the head must be dropped, not the tail"* |
+| `STDERR_SUMMARY_BYTE_BUDGET` | `2000` → `2000000` | **KILLED** — *"got 200001 bytes"* |
+| `rebuild_buffered_summary` | exclude `"stderr"` from the copy loop | **KILLED** — message below |
+
+The third was owed rather than done at first pass: the probe carries exactly one file into
+its worktree, and the test lived in `run_command/tests.rs`, still uncommitted — so 0 tests
+were selected and the probe returned INCONCLUSIVE. It said so because this session's other
+fix put the verdict where it could be read. Run against `9c2b542f`, it kills.
+
+**And running it found a defect in the test itself.** The first kill printed `called
+Option::unwrap() on a None value` — true, and silent about which field went or why anyone
+cares. Written as `rebuilt["stderr"].as_str().unwrap()` inside `assert_eq!`, the `unwrap`
+panics before the explanatory message is reached, so the remedy text was unreachable by the
+failure it explains. Fixed at `a5238dc2` (assert the absence first); the mutation now prints
+
+```
+rebuild_buffered_summary dropped the `stderr` key, so a wrapper's verdict cannot reach the
+caller even though the summarizer emitted it; got
+{"type":"test","exit_code":0,"output_id":"@cmd_abc123","passed":0}
+```
+
+— whose rendered envelope is this bug's own reported shape.
+
+**A fixture detail is load-bearing and annotated as such.** The 200 stderr lines in the
+direction test are ~6 bytes each on purpose, so the whole fixture stays under the BYTE budget.
+Lengthen them and both caps bind, at which point mutating the LINE budget to infinity leaves
+the test green — the sibling cap does the dropping instead and the head is still absent. Two
+caps rescuing each other reads exactly like coverage.
 ## Workarounds
 
 Read the `@cmd_*` buffer rather than the envelope, and **do not treat a `type: "test"` envelope's
@@ -196,6 +366,6 @@ Do not re-derive the "overflow drops stderr" hypothesis — it is rejected above
   the verdict branches, all of which write to stderr.
 - `docs/PROBES.md` — the `mutation-probe.sh` row, whose closing instruction this defect makes
   unfollowable through `run_command`.
-- `docs/issues/2026-09-14-the-append-entry-recipes-still-teach-the-two-call-form-the-fix-replaced.md`
+- `docs/issues/archive/2026-09-14-the-append-entry-recipes-still-teach-the-two-call-form-the-fix-replaced.md`
   — the task this was found during; the probe run whose verdict was lost was checking that file's
   regression guard, which turned out to be decoration.
