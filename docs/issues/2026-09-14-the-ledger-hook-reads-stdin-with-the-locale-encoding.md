@@ -93,6 +93,8 @@ for _stream in (sys.stdin, sys.stdout, sys.stderr):
 
 One site rather than seven, and it covers the write direction the fixture tests cannot reach.
 
+**Fixed on `experiments` at `f4dc25f9`**, patch-id `f0aa110f73306c3f6e105a3c63277aa12577d8ea`.
+
 ## Tests added
 
 `the_hook_script_reads_stdin_as_utf8_whatever_the_locale_says` (`tests/issue_clusters.rs`) —

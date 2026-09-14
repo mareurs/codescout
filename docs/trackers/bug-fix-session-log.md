@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 146
+entry_high_water_F: 147
 entry_high_water_W: 134
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 134
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-147 | 2026-09-14 | med | cross-session | fixed-verified | **A pathspec commit captured a peer's staged edit to the same file, because I read the staged SET instead of the staged DIFF.** `git status --short` answers which paths; only `git diff --cached` answers which bytes. |
 | F-146 | 2026-09-14 | low | doc-vs-code | promoted-to-bug-tracker | **A served worked example outranked the tool schema that was in context beside it.** Wrote `F-145`/`W-134` as section-then-index-row, reproducing the capture window `8857b0b2` fixed by giving `append_entry` `index_row` + `index_after_line`. The miss was NOT missing documentation: the schema describes both parameters, their coupling and their failure mode, and was served in the tool list all session. The disagreeing surface was the worked example in `codescout-companion:reconnaissance` § Phase 3 — which I had loaded and was executing — and the example won, because a schema is read once as a field list while an example is read at call-composition time as a copyable shape. A skill's worked example is therefore a second, unversioned copy of the tool's contract that decays independently while being the copy actually executed. Tell: when a recipe and a schema name the same call and the recipe uses FEWER parameters, prefer the schema — it is generated from the code and the recipe is not. Filed as `323bdf9d76a88c55` (recipe half); this is the rank half |
 | F-145 | 2026-09-14 | med | reasoning/shared-checkout | open | **"Process-wide" activation read as machine-wide, and the premise that scoped the work went unchecked.** Declined a documented reproduction all session because `activate(read_only=true)` would supposedly disable writes for six live PEER sessions. False: `pgrep -a -f codescout` shows ~26 separate `codescout start` processes, one per CC session, so an activation reaches this session and its subagents and nobody else. The docs never said otherwise — they scope it to *"the session"* and *"another caller on **this session**"*; the bare phrase *"process-wide"* was filled in as *machine-wide* on a checkout where the filesystem, the git index, `.codescout/write.lock` and the catalog genuinely ARE shared. Survived because **nothing fires when you decline to act**: the belief was never contradicted, only reinforced by true facts about a different kind of sharing. Cost: a false safety claim in an archived bug record, a commit message and two peer messages. Tell: the premise deciding what NOT to do never got the byte-level check the premise deciding what to do got rigorously |
 | F-144 | 2026-09-14 | med | measurement | fixed-verified | **`/proc/<pid>/exe` returns a PROCFS inode, so a rebuild check over 28 servers produced 28 plausible wrong numbers.** `stat -c '%i'` without `-L` reports the magic symlink's OWN identity, from procfs's own sequence — real, stable, mutually distinct, and about nothing. The 28 clustered (`121815719`, `121830738`, …), which READS as corroboration because sibling inodes are what a directory of related files looks like, and none matched the fresh `target/release/codescout`. Straight reading: *every server including mine is stale* — the answer that prompts action, and wrong. `stat -L` returned the real image, identical to disk. Tell available one command earlier and free: **an inode matching NO file you can name is not a file identity.** What the confirmation did NOT buy: `stat -L` and `peer-sessions.sh` agreeing are **not independent** — both resolve the same link against the same filesystem — so the load-bearing evidence is `readlink` carrying no `(deleted)` plus a matching size, never the concurrence. Sibling of `F-135`, the same question (*did the rebuild take*) failing one layer up |
@@ -14975,7 +14976,7 @@ b]`), so deleting the inline arm from the Python leaves the corpus-driven check 
 by mutation, not assumed."* This entry's original wording — *"(verified by mutation, not assumed)"*
 — is that sentence near-verbatim, which is strong evidence of propagation rather than invention,
 though what I read is not something I can prove. It was **true when written** and decayed: the
-first flow-style tag landed 2026-09-03. Filed by a peer as `33efc480b2da9ac3`, which adds the
+first flow-style tag landed 2026-09-03. Filed by a peer as `b2b4078e23e0516d`, which adds the
 half I could not see — the same commit (`3be0088e`) shipped `tests/issue_clusters.rs:1476`
 asserting the **opposite**, so the file has carried both halves of a self-contradiction for
 thirteen days and neither half reds.
@@ -15021,6 +15022,60 @@ passing, on the rule that a class opened in passing is one whose inclusion test 
 This entry is the instance ledger until a second arrives. The inclusion test, when it is needed:
 *a second copy of a contract that decays independently of the original and outranks it at
 composition time.*
+
+## F-147 — Reading the staged set instead of the staged diff let a pathspec commit capture a peer
+
+**Valid:** dated 2026-09-14
+
+**Severity:** med · **Category:** cross-session · **Status:** fixed-verified
+
+**Observed.** My commit `331d2c0f` carries **26 insertions of `6be73414`'s F-146 second
+correction under my sessionId**, alongside my own 20. I did not notice until they reported it.
+Nothing was lost — the bytes are intact and complete — and the branch is shared, so per the
+never-repair rule I am not resetting or amending to fix an attribution.
+
+**How a correctly-scoped pathspec commit captured a peer.** Both of us were editing
+`docs/trackers/bug-fix-session-log.md`. Their correction was written through `doc()` into the
+**working tree** and staged. Then:
+
+- `git add -- <path>` takes the working-tree file **whole**, so my stage swallowed their edit.
+- `git commit -- <path>` takes the **working-tree** version of the pathspec and never consults
+  the index at all.
+- The guard `refuse an index commit carrying another session's staged paths` is **path-granular**.
+  Two sessions editing ONE path present no foreign *path* to refuse, so it had nothing to fire on.
+
+**The peer called this a gap in the documented sequence rather than in my use of it. That is too
+generous and the distinction matters.** Step 4 of the shared-checkout sequence is *"stage, read
+the diff, then commit by pathspec"*. I read the staged **SET**, not the staged **DIFF** — every
+commit this session:
+
+    git status --short | grep -E '^[A-Z]'     answers WHICH PATHS      <- what I ran
+    git diff --cached                          answers WHICH BYTES      <- what step 4 says
+
+`git diff --cached` would have shown 46 insertions where I had written about 20, and the foreign
+block in the third hunk, in one call. **The prescribed check would have caught it; I substituted
+a cheaper one that answers a narrower question and reads as the same diligence.**
+
+**What IS a real gap, separately from my shortcut:** the index guard cannot express this case.
+It discriminates by path, and the failure lives inside a path. Two sessions editing one file
+cannot both commit by pathspec without one capturing the other, and the guard that catches the
+index case is structurally blind to this one. The *sequence* covers it; the *mechanism* does not
+— which is § *Observer Blindness* position 3, where the standing policy exists and the automated
+check does not.
+
+**Cost.** A peer's authored content published under the wrong sessionId on a shared branch,
+unrecoverable without a history rewrite nobody should do. Attribution only; no data loss, no
+behaviour change.
+
+**Lesson.** **Read the staged DIFF, never the staged SET.** A path list answers "did I scope the
+commit correctly" and cannot answer "are these bytes mine" — and on a shared checkout those are
+different questions with the same comfortable-looking answer. The tell is a shared path: when two
+sessions are in one file, no path-granular instrument can help and only the diff can.
+
+**Rests on:** `331d2c0f`; peer sessionId `6be73414-6293-4a4e-95a4-4bada8327f08`, who reported it
+rather than repaired it. Seventh instance this session of a check narrower than its question —
+see [[F-141]] (a check that cannot express failure) and [[F-143]] (a sequence that cannot express
+cause).
 
 ## Template for new entries
 

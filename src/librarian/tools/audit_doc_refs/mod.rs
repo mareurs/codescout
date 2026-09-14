@@ -483,6 +483,34 @@ pub const DEFAULT_AUDIT_EXCLUDES: &[&str] = &[
 // cap-class: RESULT_CAP audit_doc_refs.files — probed
 pub const MAX_FILES_DEFAULT: usize = 10_000;
 
+/// Live artifact ids for this run, or `None` when the catalog cannot answer the question.
+///
+/// **An empty artifact table is `None`, not an empty set**, and that distinction is the whole
+/// function. The catalog is machine-local and gitignored, so a checkout never indexed on this
+/// host holds zero artifacts — indistinguishable, from here, from a catalog that could not be
+/// read at all. The caller already refuses to let an unreadable catalog red CI; this is that
+/// same rule for the case where the read succeeds and returns nothing.
+///
+/// **Measured, not hypothetical.** 2026-09-14: `Audit Doc Refs` reported 50 `artifact_missing`
+/// findings at `high` against a CI catalog holding 0 artifacts — CI seeds an empty workspace
+/// and no CLI surface populates the catalog. All 37 distinct ids resolved on a developer
+/// machine with their files on disk: 100% false positives. Reconciling the corpus could never
+/// have cleared it, because the count only reaches zero if every artifact-id citation leaves
+/// live prose.
+///
+/// **The cost, stated because it is real:** where the catalog is empty this check is VACUOUS,
+/// not passing. It reports nothing and gates nothing. A CI job that needs it to bite must
+/// populate the catalog first — which today needs a reindex surface the CLI does not expose.
+///
+/// Deliberately NOT placed in `resolver::resolve_artifact_id`: that function answers "is this
+/// id live", where an empty set honestly means "none are", and three of its tests use exactly
+/// that as their fixture. The claim here is about the catalog, so it lives at the catalog read.
+fn live_ids_or_disabled(
+    ids: std::collections::HashSet<String>,
+) -> Option<std::collections::HashSet<String>> {
+    (!ids.is_empty()).then_some(ids)
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let args: AuditArgs = serde_json::from_value(args).map_err(|e| {
         LibrarianRecoverableError::with_hint(
@@ -565,6 +593,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     .collect::<std::result::Result<std::collections::HashSet<_>, _>>()
             })
             .ok()
+            .and_then(live_ids_or_disabled)
     };
 
     let resolve_ctx = resolver::ResolveCtx {
@@ -1643,6 +1672,35 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result["exit_code"], 1);
+    }
+
+    /// An empty artifact table disables the id check rather than dooming every citation.
+    ///
+    /// The failure this guards is not theoretical and not small: 2026-09-14, `Audit Doc Refs`
+    /// reported 50 `artifact_missing` findings at `high` against a CI catalog holding 0
+    /// artifacts. All 37 distinct ids resolved on a developer machine with their files on
+    /// disk. The gate was unpassable by any corpus change — a citation can only stop being
+    /// "missing" against an empty table by ceasing to exist.
+    ///
+    /// Mutation that must kill this: drop the `!ids.is_empty()` in [`live_ids_or_disabled`],
+    /// or stop calling it from `call()`.
+    #[test]
+    fn an_empty_artifact_table_disables_the_id_check_rather_than_dooming_every_citation() {
+        assert!(
+            live_ids_or_disabled(std::collections::HashSet::new()).is_none(),
+            "a catalog with zero artifacts cannot tell a live id from a dead one, so it must \
+             disable the check — an empty SET would mark every cited id dead instead"
+        );
+
+        // The control, and it is what makes the assertion above evidence rather than a
+        // function that always returns None: one real id must still switch the check ON.
+        let one: std::collections::HashSet<String> =
+            std::iter::once("3df245c295e3833d".to_string()).collect();
+        assert_eq!(
+            live_ids_or_disabled(one.clone()),
+            Some(one),
+            "a populated catalog must enable the check and pass its ids through untouched"
+        );
     }
 
     #[test]

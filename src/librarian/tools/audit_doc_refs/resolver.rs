@@ -130,6 +130,13 @@ fn resolve_artifact_id(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         notes: None,
     };
     // No id set supplied: the check is switched off for this run, not passing.
+    //
+    // An EMPTY set is deliberately NOT treated as "switched off" here, and the placement is
+    // the point: this function answers "is this id live", so an empty set honestly means
+    // "none are", which is what three sibling tests use as their fixture. The policy that an
+    // empty ARTIFACT TABLE means "the catalog was never built on this host" is a fact about
+    // the catalog read, not about set membership, and it lives at that read —
+    // `mod.rs::live_ids_or_disabled`.
     let Some(live) = ctx.live_artifact_ids.as_ref() else {
         return resolved();
     };
