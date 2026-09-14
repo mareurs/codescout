@@ -2474,10 +2474,20 @@ pub async fn run(
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{
-        make_server, make_server_no_project, make_server_with_project_toml, test_env,
-    };
+    use super::test_support::{make_server, make_server_no_project, make_server_with_project_toml};
     use super::*;
+    // `test_env` and `Agent` reach exactly four consumers in this module — the
+    // `#[cfg(unix)]` `peer_tool_*` tests below — because `peer` delegation is
+    // Unix-domain-socket based and `peer_enabled_at_runtime` is gated to match.
+    // Ungated here, they become `unused_imports` the moment that arm is erased,
+    // which is `-D warnings` in the `windows-gnu` cross lane and invisible to
+    // every command the local gate runs. Same cfg boundary as
+    // `peer_enabled_at_runtime_tests` below, one severity down: an ungated `use`
+    // there is E0432 and fails the build outright, so it could never ship — this
+    // half only warns, so it did.
+    #[cfg(unix)]
+    use super::test_support::test_env;
+    #[cfg(unix)]
     use crate::agent::Agent;
     use tempfile::tempdir;
 

@@ -2074,6 +2074,62 @@ fn the_hook_script_agrees_on_the_index_section_scan() {
     );
 }
 
+/// The hook script reads stdin as UTF-8 whatever the locale says.
+///
+/// **Every other fixture test here is a Linux-only measurement of a cross-platform parser.**
+/// `sys.stdin` takes its encoding from the locale — UTF-8 here, cp1252 on Windows — so the two
+/// derivations can agree about every rule and still disagree about the bytes one of them was
+/// handed. Measured 2026-09-14 (run 34825264309): an unreconfigured stdin gave the Python side
+/// `â€”` where the file holds `—`, reddening [`the_hook_script_agrees_on_the_index_section_scan`]
+/// and `the_hook_script_agrees_on_the_mechanism_basis_scan` on all three windows-latest lanes
+/// while every Linux lane stayed green. A silent mis-parse, never an error.
+///
+/// `PYTHONIOENCODING` sets the std-stream encoding on every platform, so the Windows read is
+/// reproducible from the local gate and this guard no longer waits for a push to fire.
+///
+/// Mutation that must kill this: delete the `reconfigure(encoding="utf-8")` loop at the top of
+/// `scripts/pre-commit-ledger-counts.py`.
+#[test]
+fn the_hook_script_reads_stdin_as_utf8_whatever_the_locale_says() {
+    // Load-bearing precondition, asserted rather than trusted: under cp1252 an all-ASCII fixture
+    // round-trips perfectly, so an ASCII-ifying tidy-up of INDEX_SECTION_FIXTURE would leave this
+    // test green and no longer discriminating — the one change no assertion below can catch.
+    assert!(
+        !INDEX_SECTION_FIXTURE.is_ascii(),
+        "this test measures nothing unless the fixture carries non-ASCII; INDEX_SECTION_FIXTURE \
+         must keep its em dashes and its `٣`"
+    );
+
+    let mut child = Command::new("python3")
+        .args([
+            "scripts/pre-commit-ledger-counts.py",
+            "--fixture-index-sections",
+        ])
+        .current_dir(repo_root())
+        .env("PYTHONIOENCODING", "cp1252")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("python3 failed to spawn");
+    child
+        .stdin
+        .take()
+        .expect("stdin piped")
+        .write_all(INDEX_SECTION_FIXTURE.as_bytes())
+        .expect("write fixture");
+    let out = child.wait_with_output().expect("hook script failed");
+    assert!(out.status.success(), "script exited non-zero");
+
+    let theirs: Vec<String> =
+        serde_json::from_slice(&out.stdout).expect("script must emit a JSON array of strings");
+    assert_eq!(
+        index_class_sections(INDEX_SECTION_FIXTURE),
+        theirs,
+        "under a non-UTF-8 locale the hook must still read stdin as UTF-8 — a mismatch here is \
+         mojibake in the transport, not a disagreement about the rule"
+    );
+}
+
 /// The row parser reads the right cell, and only real rows.
 ///
 /// Feeds a table whose answers are known, covering the two ways a looser parser goes wrong:
@@ -2403,6 +2459,12 @@ const NOT_HOOK_OWED: &[(&str, &str)] = &[
         "the_hook_script_agrees_on_the_index_section_scan",
         "a test OF the hook rather than a rule it owes; feeds one fixture through both \
          implementations of the class-section scan",
+    ),
+    (
+        "the_hook_script_reads_stdin_as_utf8_whatever_the_locale_says",
+        "a test OF the hook rather than a rule it owes; drives its stdin under a non-UTF-8 \
+         locale, which is a transport property of the script and not a shape any ledger rule \
+         can express",
     ),
     (
         "the_index_mechanism_scan_discriminates",

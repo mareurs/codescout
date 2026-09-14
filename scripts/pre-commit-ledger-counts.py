@@ -39,6 +39,33 @@ import pathlib
 import subprocess
 import sys
 
+# The std streams take their encoding from the LOCALE, and on Windows that locale is cp1252
+# rather than UTF-8. Every `--fixture-*` mode below reads its corpus from stdin and this ledger's
+# headings carry em dashes (`## IC-7 — ...`), so an unreconfigured stdin hands the parsers `â€”`
+# where the file holds `—`. That is a silent mis-parse, not an error: the two derivations agree
+# about every rule and disagree only about the bytes one of them was given. Measured 2026-09-14 —
+# it reds `the_hook_script_agrees_on_the_index_section_scan` and
+# `the_hook_script_agrees_on_the_mechanism_basis_scan` on all three windows-latest lanes while
+# every Linux lane stays green. Reproduce the Windows read from anywhere:
+#   printf '## IC-7 — t' | PYTHONIOENCODING=cp1252 python3 scripts/pre-commit-ledger-counts.py \
+#     --fixture-index-sections
+#
+# stdout and stderr are reconfigured for the WRITE direction, which fails differently and in two
+# ways depending on the character — measured, because the obvious guess is wrong on both counts:
+#   `—` IS in cp1252 (0x97), so a refusal naming a heading does not raise. It emits one cp1252
+#   byte where the reader expects UTF-8, so the message a committer must act on arrives mangled
+#   with nothing reporting that it was.
+#   A character cp1252 lacks — `→`, `✓` — raises UnicodeEncodeError on stdout, whose handler is
+#   `strict`, killing the hook mid-refusal. stderr's is `backslashreplace` and degrades instead.
+# The JSON path is immune either way (`json.dumps` escapes non-ASCII by default), so no fixture
+# test can observe this half; it is verified by reading the streams' `.encoding` directly.
+#
+# File reads already pass `encoding="utf-8"` explicitly (see `read`). The streams are the sites
+# that have no call-site parameter to pass one to.
+for _stream in (sys.stdin, sys.stdout, sys.stderr):
+    if _stream is not None:
+        _stream.reconfigure(encoding="utf-8")
+
 # Every rule this hook enforces, as a closed set, emitted by `--rules`.
 #
 # **The ids are the Rust TEST NAMES on purpose** -- a neutral id would need a translation table
