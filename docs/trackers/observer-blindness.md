@@ -2876,6 +2876,45 @@ the session that had just **corrected the same error in someone else's file**, i
 hour, and it repeated the shape immediately. Knowing the class prevented nothing — which is
 this ledger's founding finding, arriving at the ledger's own subject matter.
 
+**FOURTH INSTANCE, 2026-09-14 — a CONFIRMATION, published as one.** Deliberately not folded
+into the dated table above: that measurement is *three instances in one day on one chain*, and
+silently growing it to four across two days would destroy the thing it measures. Per `CLAUDE.md`
+§ *Testing Discipline*, a re-derivation that **confirms** is a **denominator**, never a catch —
+absorbing it as one makes the population look self-correcting.
+
+| bug | § Reproduction asserted | actual mechanism | refuted by |
+|---|---|---|---|
+| `c079fb93eb7fece8` — `run_command`'s test envelope drops stderr | the discriminator is the **classification**: *"`type: "generic"` → stderr in full"* vs *"`type: "test"` → no stderr key"* | the gate is **volume**: `needs_summary` is `(stdout.len() + stderr.len()) / 4 > MAX_INLINE_TOKENS` (`command_summary.rs:218`). Classification only chooses *which* summarizer runs once that gate is crossed, and two of the three then dropped the field | sessionId `9403d62d`, writing the fix |
+
+**What makes this a confirmation rather than an anecdote: § *Who can see it* named the observer
+before the fact.** It reads *"the party who tries to FIX from the stated mechanism. Not a more
+careful reader — a reader with a different job,"* and *"each surfaced within a day."* Both held:
+the refuter was writing the fix, not reviewing the file, and it surfaced the next day. The filer
+(sessionId `aa272bed`) had run the reproduction, which is the mandated first step, and it worked —
+and supplied exactly the confidence this entry describes.
+
+**It also sharpens the blindness by one notch, in the filer's favour and against them.** § *Root
+cause* was **correctly hedged** — it said *"not established, and the file deliberately stops short
+of naming one,"* listed three candidate readings and declined to choose. So the hedge did its job
+and the file still misled, because § *Reproduction* had already framed the contrast in terms of
+the classification and § *Hypotheses tried* rejected a rival on that framing. **The asserting
+section need not be § Summary.** Any section that *demonstrates* rather than *claims* carries the
+same force, and is less likely to be re-read against the hedge precisely because it looks like
+evidence rather than argument.
+
+**And the falsifier was inside the same file, authored by the filer.** § E1 reads *"With `-- true`
+**(no buffering)** the identical script returned its verdict inline."* The parenthetical is
+correct and it **is** the explanatory variable — spent as an aside about the setup, three sections
+below the framing that rested on something else. That is `OB-12` holding simultaneously, which is
+why these two entries keep co-occurring and neither subsumes the other: `OB-12` is about the
+signal a falsifying sibling fails to emit, `OB-26` about the licence the reproduction grants.
+
+**One process finding, owned by both parties.** Neither grepped this tracker before deriving what
+they took to be a new class from three instances; the duplicate surfaced only when `9403d62d`
+went looking for one. § *the third position* says to grep for a population's name before any
+campaign over it — **and proposing a class is a campaign**. The filer's instance ledger is
+`context-injection-session-log:F-12`, which carries the retraction.
+
 **Mechanism status:** `none yet`. The shape that would work is **template**, not vigilance,
 and it is cheap: § *Summary* states the **symptom and its blast radius**, and any mechanism
 claim lives in § *Root cause* where the confidence marker is structurally adjacent to it. A

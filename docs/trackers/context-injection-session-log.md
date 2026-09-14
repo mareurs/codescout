@@ -1327,34 +1327,57 @@ also supplied the bound my own overreach needed: a narrowly filtered `cargo test
 under the threshold and returns inline with stderr intact, so *"every `cargo test`"* was wrong
 and *"every workspace-scale run"* is right.
 
-**The consolidation, which is the point.** Three instances, three surfaces, one day:
+**THE CONSOLIDATION BELOW IS RETRACTED — it grouped three mechanisms under one claim, and the
+class already existed.** Both corrections from sessionId `9403d62d`, verified here before
+accepting. Kept rather than deleted because the retraction is the entry's whole value now.
+
+**Retraction 1 — only this entry is the class.** As filed:
 
 | | the falsifier | where it was |
 |---|---|---|
 | `F-8` | the phrase spanned a wrapped line | `CLAUDE.md:215-216`, on screen |
-| `F-11` | `2>&1` relabelled the stream | a comment 4 lines above the command, file already opened twice |
+| `F-11` | `2>&1` relabelled the stream | a comment 4 lines above the command |
 | this | the gate is volume, not type | **my own § E1**, three sections below my framing |
 
-Each falsifier was **present, cheap, and in hand** — and in the third case authored by me, in the
-document making the claim. So the common factor is not access to evidence and not care: it is
-that nothing forced a **cross-read** between two parts of one artifact. "Look harder" is the
-wrong instrument for all three, which is `CLAUDE.md` § *Observer Blindness*'s own test.
+Only the third row is *artifact-vs-itself*. `F-11`'s comment was **correct and consistent with
+the code** — nothing contradicted anything; an explanatory variable went unconsulted. `F-8` is a
+reading error, where no second part of the artifact disagreed with a first. My binding claim —
+*"nothing forced a cross-read between two parts of one artifact"* — is true of all three only
+because it is broad enough to be true of most mistakes, **which is the tell**. That is this
+repo's own rule about slugs being claim-shaped and never topic-shaped, failing on an entry I
+wrote while citing the ledger that states it.
 
-**What a mechanism would have to do**, stated because a class with no mechanism is a worklist
-item: catch a document whose § Evidence contradicts its § Root cause. No gate in this repo reads
-two sections of one file against each other — `audit_doc_refs` checks citations against the
-filesystem, `doctor` checks records against the catalog, and both are artifact-vs-world. This is
-artifact-vs-itself and is unguarded by construction. Not proposed as a build here: the inclusion
-test is not defensible on three self-selected instances, all mine, all noticed after the fact.
+**Retraction 2 — this is a CONFIRMATION of an existing class, not a candidate for a new one.**
+`OB-12` (*a section that falsifies a sibling emits no signal, and the falsifying author is the
+blind party*) and `OB-26` (*a bug file's § Summary asserts the mechanism its § Root cause
+hedges, and running the reproduction is what licenses it*) both exist. `OB-26` is this almost
+line for line, and **its § Who can see it predicted this exchange before it happened**: *"the
+party who tries to FIX from the stated mechanism. Not a more careful reader — a reader with a
+different job."* That is `9403d62d`, writing the fix from my stated mechanism, refuting it
+within a day — which is also `OB-26`'s own measured pattern (*"each surfaced within a day"*).
+So this is a **fourth instance, next day, different filer, predicted observer**, and it belongs
+as a row on `OB-26` rather than as a new class. Per `CLAUDE.md` § *Testing Discipline*, a
+confirming re-derivation gets published: it is a **denominator**, never a catch.
+
+**Retraction 3, and it is the cheap one both of us missed.** Neither party grepped
+`observer-blindness.md` before deriving a class from three instances. `CLAUDE.md` § *Observer
+Blindness* position 3 says to grep `tests/`, `scripts/` and the docs for a population's name
+before any campaign over it — **and a class is a campaign**. The duplicate was found only when
+`9403d62d` went looking for one. Shared, not theirs.
+
+**What survives as a mechanism note:** nothing in this repo reads two sections of one file
+against each other — `audit_doc_refs` checks citations against the filesystem, `doctor` checks
+records against the catalog, both artifact-vs-world. `OB-26` already names the better remedy and
+it is template, not vigilance: § *Summary* states symptom and blast radius, and any mechanism
+claim lives in § *Root cause* beside its confidence marker.
 
 **Rests on:** `command_summary.rs:218` read at `13a36537`; the `F-8`/`F-11` rows as filed.
 
 **Severity:** med — no wrong artifact shipped. Each was caught, two by a peer, within hours.
 
-**Status:** open — recorded as a candidate `OB-N` if a fourth arrives from a different author.
-Deliberately **not** promoted here: three instances by one session in one day is a broken
-observer, not a demonstrated class, and this corpus's standard for a class opened in passing is
-that nobody defends its inclusion test.
+**Status:** mitigated — retracted in place above, with the surviving claim narrowed to this entry
+alone and routed to `OB-26` as a confirming instance. The row on that tracker is the remaining
+work.
 
 ## Template for new entries
 
