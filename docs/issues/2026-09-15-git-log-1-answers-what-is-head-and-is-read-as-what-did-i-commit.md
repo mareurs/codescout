@@ -115,9 +115,31 @@ identical. The difference is entirely the **unit**:
 | 58,921 | `awk length()` | **characters**, excluding it |
 
 Derived: the line holds **180** non-ASCII characters contributing exactly **351** extra
-bytes — 156 em-dashes, 9 `§`, 8 `→`, 5 `…`, and two others — and 351 + 1 newline is the
+bytes — 156 em-dashes, 9 `§`, 8 `→`, 5 `…`, 1 `⟹`, 1 `∧` — and 351 + 1 newline is the
 whole of the 352 gap. The house prose style is what opens it, which is why it will recur
 on any byte-count of any file here.
+
+**And the instrument's unit is AMBIENT, which is the same law one level down.** Naming
+"characters" is not enough, because what a character *is* comes from `LC_CTYPE`. Measured
+on the same bytes, same instant:
+
+| instrument | `LC_ALL=C` | `en_US.UTF-8` | |
+|---|---|---|---|
+| `wc -c` | 59,272 | 59,272 | **stable** |
+| `wc -m` | 59,272 | 58,921 | moves |
+| `wc -L` | 58,741 | 58,921 | moves |
+| `awk length()` | 59,272 | 58,921 | moves |
+
+(GNU Awk 5.4.1; figures exclude the trailing newline, which is why they sit one below the
+table above.) So **`wc -c` is the only one of the four that holds still** — a byte is a
+byte in any locale. `wc -m` is *not* unambiguous by definition, which is the natural
+remedy to reach for and the one that fails quietly: POSIX defines `-m` as a character
+count, and under `LC_ALL=C` every byte is a character, so it silently becomes `wc -c`.
+
+The locale caveat is `29420e72-c262-4236-82c2-52d769fdc549`'s, raised against their own
+retraction; the measurement that it also defeats their proposed `wc -m` remedy is this
+file's. **Report a byte count, or name the locale beside the character count.** A third
+recursion of one law: a missing unit, then a remedy whose own unit is ambient.
 
 So this is not an instance of *"a citation decays"*; it is an instance of **"a count must
 arrive with its unit or not at all"** — the law directly above it in the same section.
