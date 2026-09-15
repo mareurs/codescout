@@ -132,7 +132,20 @@ on the same bytes, same instant:
 
 (GNU Awk 5.4.1; figures exclude the trailing newline, which is why they sit one below the
 table above.) So **`wc -c` is the only one of the four that holds still** — a byte is a
-byte in any locale. `wc -m` is *not* unambiguous by definition, which is the natural
+byte in any locale.
+
+**`wc -L` is the trap in that table, because it looks like a third opinion and is a third
+QUESTION.** Under `LC_ALL=C` it returns 58,741 — neither the byte count nor the character
+count — and the gap is exact: 59,272 − 58,741 = **531**, which is precisely the total
+bytes consumed by those 180 non-ASCII characters. It measures display *width*, and under
+`C` every byte ≥ 0x80 is non-printing, so it silently discards all multi-byte content.
+Controlled: `abc—def` is 9 bytes; `wc -L` returns **6** under `C` (the ASCII only) and
+**7** under UTF-8 (six ASCII plus one glyph), while a pure-ASCII control returns 3 under
+both — which is what makes that a measurement rather than a broken test. Anyone reaching
+for `wc -L` as the "safe" one gets a number that is wrong in a new direction, and 58,741 is
+the tell. (Flagged by `29420e72-c262-4236-82c2-52d769fdc549`; derivation and control here.)
+
+`wc -m` is *not* unambiguous by definition, which is the natural
 remedy to reach for and the one that fails quietly: POSIX defines `-m` as a character
 count, and under `LC_ALL=C` every byte is a character, so it silently becomes `wc -c`.
 
