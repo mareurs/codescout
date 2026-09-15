@@ -1262,12 +1262,16 @@ const ARTIFACT_VEC_MIGRATE_ENV: &str = "LIBRARIAN_ARTIFACT_VEC_MIGRATE";
 /// `artifact_vec_v2_cascade_delete` trigger lives on `artifact_chunk` and names
 /// this table only in its body, so it stays valid across the drop + recreate.
 ///
-/// Backup mirrors the v6-migration `backup_db` pattern: a timestamped sibling
-/// file, `catalog.db.pre-vec-v2-dim-bak.<unix_ts>` — deliberately not v1's
-/// `pre-vec-dim-bak` name, so a backup that actually rebuilt the searched table is
-/// distinguishable from one taken by the v1 migration, which never did. In-memory
-/// catalogs (`conn.path()` empty, i.e. [`Catalog::open_in_memory`]) skip the
-/// backup — there is no file to copy.
+/// Backup is a timestamped sibling file, `catalog.db.pre-vec-v2-dim-bak.<unix_ts>`
+/// — deliberately not v1's `pre-vec-dim-bak` name, so a backup that actually rebuilt
+/// the searched table is distinguishable from one taken by the v1 migration, which
+/// never did. It is written by [`snapshot_catalog`], **not** by `fs::copy`; that
+/// function's doc comment explains why the distinction is load-bearing on a WAL
+/// catalog. (`catalog::backup_db`, the v6-migration backup, still copies — it runs
+/// before this process opens its own connection, so it is exposed only to another
+/// process's uncheckpointed WAL rather than guaranteed to miss its own. Same class,
+/// smaller window; tracked separately.) In-memory catalogs (`conn.path()` empty,
+/// i.e. [`Catalog::open_in_memory`]) skip the backup — there is no file to snapshot.
 fn rebuild_artifact_vec_v2_at_dim(conn: &rusqlite::Connection, new_dim: usize) -> Result<()> {
     if let Some(path) = conn.path().filter(|p| !p.is_empty()) {
         let ts = std::time::SystemTime::now()
@@ -1276,7 +1280,7 @@ fn rebuild_artifact_vec_v2_at_dim(conn: &rusqlite::Connection, new_dim: usize) -
             .as_secs();
         let db_path = std::path::Path::new(path);
         let bak = db_path.with_extension(format!("db.pre-vec-v2-dim-bak.{ts}"));
-        std::fs::copy(db_path, &bak).with_context(|| {
+        snapshot_catalog(conn, &bak).with_context(|| {
             format!(
                 "backing up catalog before artifact_vec_v2 dimension migration: {} -> {}",
                 db_path.display(),
@@ -1293,6 +1297,44 @@ fn rebuild_artifact_vec_v2_at_dim(conn: &rusqlite::Connection, new_dim: usize) -
          CREATE VIRTUAL TABLE artifact_vec_v2 USING vec0(id TEXT PRIMARY KEY, embedding FLOAT[{new_dim}]);"
     ))
     .context("rebuilding artifact_vec_v2 at new dimension")?;
+    Ok(())
+}
+
+/// Write a consistent snapshot of the catalog to `dest`.
+///
+/// **Deliberately not `std::fs::copy`.** `Catalog::open` sets
+/// `journal_mode = WAL`, so the main `.db` file holds only what has been
+/// CHECKPOINTED; everything committed since lives in the `-wal` sidecar, which a
+/// single-file copy leaves behind. Measured 2026-09-15 against a WAL catalog in
+/// this shape: **51** rows visible to the live connection, **1** row in the copy.
+/// The loss is not the vectors — those regenerate from `backfill-chunks` — it is
+/// every artifact, event and augmentation committed since the last checkpoint, and
+/// augmentations are not in git.
+///
+/// **`PRAGMA wal_checkpoint(TRUNCATE)` before a copy is NOT the fix, which is why
+/// it is named here rather than left as the obvious thing to try.** It reports
+/// `busy = 1` in its result row instead of failing when any other connection holds
+/// a read lock, and `catalog.db` is shared by every codescout process on the
+/// machine — so busy is the ORDINARY case here, not the edge one (measured: one
+/// concurrent reader was enough). Checkpoint-then-copy therefore returns the same
+/// stale backup through a call that looks like it succeeded.
+///
+/// `VACUUM INTO` takes a read transaction and writes a snapshot that includes WAL
+/// content, unblocked by concurrent readers — verified 51/51 with a reader holding
+/// a transaction open. It refuses to run inside an open transaction, and that error
+/// is propagated rather than falling back to a copy **on purpose**: this backup is
+/// the only thing between an operator and destroyed vectors, so the caller must not
+/// proceed on a backup that cannot restore.
+fn snapshot_catalog(conn: &rusqlite::Connection, dest: &std::path::Path) -> Result<()> {
+    conn.execute("VACUUM INTO ?1", rusqlite::params![dest.to_string_lossy()])
+        .with_context(|| {
+            format!(
+                "VACUUM INTO {} — a WAL-mode catalog cannot be backed up by copying \
+                 the .db file alone; if this failed because a transaction is open, the \
+                 rebuild is refused rather than run against a backup that cannot restore",
+                dest.display()
+            )
+        })?;
     Ok(())
 }
 
@@ -3211,6 +3253,74 @@ kind = "memory"
             backups.len(),
             1,
             "exactly one backup file must be created before the migration"
+        );
+    }
+
+    /// The migration backup must contain rows that were COMMITTED but not yet
+    /// CHECKPOINTED — rows living only in the `-wal` sidecar when the backup runs.
+    ///
+    /// LOAD-BEARING, both of them: the `wal_checkpoint(TRUNCATE)` and the artifact
+    /// upserted *after* it. Without that pair every row sits in the main `.db` file,
+    /// a bare `fs::copy` backup passes, and this test discriminates nothing — which
+    /// is precisely how the defect shipped. Do not "simplify" by dropping the
+    /// checkpoint.
+    ///
+    /// Its sibling `write_embeddings_v2_migration_backs_up_file_backed_catalog`
+    /// asserts only that a file with the right NAME appeared; it never opens it, so
+    /// it is green for a 0-byte, stale, or truncated backup. That is an existence
+    /// assertion, monotone under the backup being empty — this test is the other
+    /// direction, and neither covers the other.
+    #[test]
+    fn the_migration_backup_contains_rows_still_in_the_wal() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("catalog.db");
+        let cat = Catalog::open(&db_path).unwrap();
+
+        // Pin the v2 table width, then force everything so far into the main .db.
+        write_embeddings_v2_with(&cat, &[("c1".into(), vec![0.1f32; 768])], true).unwrap();
+        cat.conn
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .unwrap();
+
+        // Commit an artifact that now exists ONLY in the -wal sidecar.
+        artifact::upsert(
+            &cat,
+            &crate::librarian::catalog::artifact::TestArtifactRowBuilder::new("in-wal")
+                .with_abs_path("/test/in-wal.md")
+                .with_kind("tracker")
+                .with_status("active")
+                .with_file_sha256("x")
+                .build(),
+        )
+        .unwrap();
+
+        // A width change triggers the migration, which takes the backup first.
+        write_embeddings_v2_with(&cat, &[("c2".into(), vec![0.2f32; 3072])], true).unwrap();
+
+        let bak = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .find(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .contains("pre-vec-v2-dim-bak")
+            })
+            .expect("a backup file must be created before the migration");
+
+        // Raw connection, not `Catalog::open` — opening through the catalog would
+        // run migrations against the backup and mutate the thing under test.
+        let restored = rusqlite::Connection::open(bak.path()).unwrap();
+        let n: i64 = restored
+            .query_row(
+                "SELECT COUNT(*) FROM artifact WHERE id = 'in-wal'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            n, 1,
+            "the backup must hold rows committed after the last checkpoint; a bare \
+             fs::copy of a WAL-mode catalog leaves them behind in the -wal sidecar"
         );
     }
 

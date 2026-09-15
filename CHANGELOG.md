@@ -371,6 +371,19 @@ All notable changes to codescout are documented here.
 
 ### Fixed
 
+- **The dimension-migration backup was a `fs::copy` of a WAL-mode catalog, so it silently
+  omitted everything committed since the last checkpoint.** `catalog.db` is opened
+  `journal_mode = WAL`; the main `.db` file holds only checkpointed pages, and the rest lives
+  in the `-wal` sidecar a single-file copy leaves behind. Measured on a catalog in this shape:
+  51 rows visible to the live connection, **1** in the copy. The lost rows are not the
+  vectors — those regenerate — but the artifacts, events and augmentations committed since,
+  and augmentations are not in git. The backup now uses `VACUUM INTO`, which snapshots WAL
+  content and is not blocked by concurrent readers. `PRAGMA wal_checkpoint(TRUNCATE)` before a
+  copy is **not** an equivalent fix: it reports `busy = 1` rather than failing when any other
+  connection holds a read lock, and this catalog is shared by every codescout process on the
+  machine. The pre-existing test asserted only that a file with the right *name* appeared;
+  the new one opens the backup and reads a post-checkpoint row out of it.
+
 - **`LIBRARIAN_ARTIFACT_VEC_MIGRATE=1` rebuilt a table search no longer reads.** After
   switching to an embedding model with a different width, every `doc(find, semantic=)`
   failed with `Expected 768 dimensions but received 3072`. The migration backed up the
