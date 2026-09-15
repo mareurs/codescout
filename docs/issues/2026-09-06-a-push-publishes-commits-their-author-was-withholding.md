@@ -615,6 +615,57 @@ is the same shape as the ask-before-pushing discipline one paragraph up: it work
 somebody performs it and binds nobody. What the datapoint establishes is only that the remedy is
 **cheap** — one message, no authority transferred, no round trip to anyone's operator — which is
 the argument for wiring it, not evidence that it is wired.
+
+### Instance 2026-09-15 — it got wired, fired on its first real use, and NOTIFIED rather than prevented
+
+**This is the sequel to the sentence that closes the instance above.** It got wired. `ab735e4a`
+shipped earlier the same day and changed the pre-push guard from printing a **count** of foreign
+commits plus a sentence that every author remained uncleared — true, actionless, and by its own
+reader's account *"I read it approvingly and told nobody"* — to printing the **sessionIds** and
+stating that they have not been told. The push below was its first real use; it named six sessions
+and the pusher worked the list.
+
+**What happened.** SessionId `9403d62d-…`, on its operator's explicit instruction (*"lets push
+ALL!"*), merged and pushed `506924f2` to `experiments` at 14:11 — range `17c9a338..506924f2`, 22
+commits across 7 sessions, 17 of them foreign to the pusher. It then messaged the affected
+sessions. This session (`29420e72-…`) received one naming its four commits and, load-bearingly,
+telling it to **verify that list itself rather than accept it** — with the reason stated: a peer's
+count of another session's work had been wrong by 7 the last time this happened.
+
+**The verification the sid-naming made possible, and that a count cannot.** Re-derived by trailer
+— `git log 17c9a338..506924f2 --format='%h %(trailers:key=Session-Id,valueonly)'` — exactly four
+commits carry this session's sid (`85642b1b`, `f21ca670`, `7245a39c`, `8c217e1a`), matching the
+peer's list, and 22 in range, matching their count. All four are **ancestors of
+`origin/experiments`**, which is the positive check that the pusher merged rather than rebased: a
+rebase would have minted new shas and the local ones would not be ancestors. They chose the merge
+deliberately so that no peer's sha changed, because shas cited in bug files committed that morning
+depend on them.
+
+**What the wired mechanism did NOT do, which is the whole of the remaining gap.** It notified; it
+did not prevent, and by its position after the push it could not have. The four commits were
+published **uncleared** and are exactly as uncleared now as before they moved. This session's state
+was the one `OB-20` records as unrepresentable by the binary question: **neither withheld nor
+cleared** — its operator had approved *committing*, explicitly, and was never asked about
+*pushing*, because *"push only when the user asks"* means an author who was never asked holds
+nothing to give. So `ab735e4a` lands squarely on the **reporting** half of this file's claim and
+leaves the clearance-state half untouched: nothing yet records, at push time, that an author's
+commits were never cleared.
+
+**Why it is still progress, and the measurement that says so.** The 2026-09-13 (third) datapoint
+established the remedy was cheap — one message, no authority transferred — and called it a policy
+binding nobody. Two days later the same act was performed by a mechanism, on a push where a
+hand-rolled notice would have had to enumerate six sessions by hand. The difference between the two
+guard texts is exactly the remedy-text law in `CLAUDE.md` § *Testing Discipline*: the count form
+named a **fact**, the sid form names an **addressee**, and only the second yields a message anyone
+can act on. The receiving session did three things a count makes impossible — verified the claim
+independently, answered the pusher's open question about a conflicted ledger (not its own; it named
+the two sessions whose it is, resolved by trailer) and surfaced the unsanctioned-push fact to its
+own operator.
+
+**Disposition.** Nothing lost and nothing rewritten — a merge, not a rebase; `experiments`, never
+`master`; all four shas resolve unchanged. No repair proposed or wanted: undoing a shared-branch
+push is destructive and § *Workarounds* already says so. Recorded as a **denominator** for the
+notification half and as an open instance for the clearance half.
 ## Hypotheses tried
 
 1. **Hypothesis:** reading `git log origin/<branch>..HEAD --stat` before pushing
