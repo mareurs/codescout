@@ -6,7 +6,7 @@ owners: ["marius"]
 tags: ["embeddings", "retrieval", "docker", "gpu"]
 topic: embedder stack ops
 entry_prefix: ["F", "W"]
-entry_high_water_F: 2
+entry_high_water_F: 5
 entry_high_water_W: 1
 ---
 
@@ -67,6 +67,9 @@ entry_high_water_W: 1
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-08-29 | high | infra-diagnosis | fixed-verified | Asserted VRAM-contention root cause before measuring; real cause was a host reboot |
 | F-2 | 2026-08-29 | high | monitoring | fixed-verified | Docker reported the whole GPU stack healthy for 15 hours while every inference request hung |
+| F-3 | 2026-09-15 | high | tooling | open | `/code-review` given a PR number reviewed the local working tree instead, returning 14 findings about peers' uncommitted code and none about the PR |
+| F-4 | 2026-09-15 | med | shared-checkout | open | The foreign-index guard's remedy ("re-stage by explicit path") is a git no-op after a blanket add, and only the action it warns against clears it |
+| F-5 | 2026-09-15 | high | ledger-integrity | open | Merging a ledger-touching PR leaves the local id allocator stale, so the next append mints a colliding id rather than erroring |
 
 ## Wins Index
 
@@ -386,6 +389,65 @@ misleading, so go to `curl` and `dmesg` first.
 One confirmed datapoint; promote-when threshold (2 datapoints) not yet reached.
 
 **Rests on:** `docs/issues/archive/2026-08-29-stale-model-dir-env-masked-by-shell.md` — the bug file this win's counterfactual is built on.
+
+## F-3 — `/code-review` given a PR number reviewed the local working tree instead
+
+**Valid:** dated 2026-09-15
+
+**Observed:** 2026-09-15, invoked `/code-review` with args `20 high` to review pull request #20. The skill reported its own scope as `git diff @{upstream}...HEAD` (14 commits) + `git diff HEAD` + untracked files — i.e. the LOCAL branch and peers' uncommitted work — not the pull request. Its 14 findings were in `src/tools/output_buffer.rs`, `src/tools/run_command/*`, `scripts/pre-push-foreign-session-guard.sh` and an untracked `AGENTS.md`. PR #20 touches **none** of those files; it is entirely under `src/librarian/`.
+
+**Impact:** the pass consumed 203k subagent tokens / 35 tool calls / 618s and returned **zero** findings about the target. That is worse than an empty result, because the findings are *real defects in other sessions' in-flight code* — so the output reads as a substantive review and invites editing a peer's uncommitted Rust, which this repo files as its own defect (`docs/issues/2026-09-03-the-gates-first-step-reformats-every-peers-uncommitted-rust.md`).
+
+**Cost had it been trusted:** PR #20 carried a load-bearing defect — `std::fs::copy` of a WAL-mode catalog as the sole backup before a destructive vector rebuild, measured at 51 committed rows live / 1 in the copy. A reviewer reporting "review found nothing in the PR" on the strength of this pass would have merged it unreviewed. It was caught by a manual read running in parallel, not by the skill.
+
+**Why it is hard to notice:** the skill *does* print its scope, but as a statement of fact rather than as an echo of the argument it was given. A caller who passes `20` and reads back `@{upstream}...HEAD` must spot that the two disagree; nothing errors, and a PR number is not rejected as unsupported. Same shape as this corpus's recurring *plausible answer rather than an error*.
+
+**Status:** open. `/code-review` is a Claude Code built-in, not a project surface, so the repair is upstream and not ours to make. Recorded here so the next session reviewing a PR does not spend a full pass rediscovering it — and, if using it on a PR, reads the findings' file paths against the PR's own file list before drawing any conclusion.
+
+## F-4 — The foreign-index guard's remedy is a git no-op in exactly the case it is printed for
+
+**Valid:** dated 2026-09-15
+
+**Observed:** 2026-09-15, in an isolated worktree with its **own** index and **no peer involvement at all** (verified: `git rev-parse --git-path index` resolved to `.git/worktrees/pr20-review/index`, and zero other sessions had that worktree as cwd). Staged four of my own files with `git add -A`, then committed. `pre-commit-foreign-index.sh` refused, listing three of the four under `theirs:` with cause *"blanket add — the staging command did not NAME these paths"*, and printing the remedy: **"Re-stage by explicit path and the bare commit passes."**
+
+Ran exactly that — `git add` naming all four paths. **The refusal was identical.** Re-staging changed nothing.
+
+**Mechanism, read rather than inferred:** `scripts/post-index-change-stage-log.sh`'s own header states that ownership is keyed on the pair *(staged blob, path)*, so *"a later index write that does not change the content … introduces no new pair and reassigns nothing."* A blanket add stamps `-` deliberately (`names_path` refuses directory/`-A` forms on purpose — claiming a subtree would hand a session its peers' files). So after a blanket add the rows are unowned, and the one action the guard names to reclaim them is, by the recorder's own design, a git no-op.
+
+**Only `git reset` clears it** — and the same guard's text says *"Do NOT `git checkout` or `git stash`"*, with the surrounding sequence warning that `git reset` on a shared checkout takes a peer's work out of the index. Correct advice for the shared index; in a private worktree it is the sole route, and nothing distinguishes the two cases for the reader.
+
+**Not a rediscovery, and the distinction is the point.** `docs/issues/archive/2026-09-02-a-refused-pathspec-commit-stamps-your-own-content-unowned.md` names this mechanism verbatim — *"they cannot reclaim them, because re-`git add`ing byte-identical content is not an index write, so `post-index-change` never fires"* — and is `status: fixed` (`cd1b138e`, patch-id `c374900d02eb47a131fc18c5e802e321ebf3dca4`). But that fix closed the **temp-index** route: the recorder now exits early when `GIT_INDEX_FILE` is not the shared index. The **blanket-add** route still produces `-` rows by design and reaches the identical unreclaimable state. A residual of a fixed bug via a second route, not a re-file.
+
+**Class:** this is a REMEDY-TEXT defect, which CLAUDE.md § *Testing Discipline* names as untested by construction — every assertion is about *who is refused*, none about *where the refusal sends you*. The predicate here is right (a blanket add genuinely is the capture case). The remedy names an action that cannot produce the state it promises. The shape test would pass: the message names an addressee and an action.
+
+**Cost:** two refused commits and a full re-stage cycle. Low in isolation; the concern is that a session reading the remedy and seeing it fail has no reason to suspect the remedy rather than themselves, and `--no-verify` is one keystroke away and explicitly the wrong habit.
+
+**Status:** open. Owed a bug file against the remedy text — a candidate wording is to branch on whether the index is shared: private worktree → say `git reset` then re-add by name; shared index → say a pathspec commit, and say that a blanket add cannot be reclaimed in place.
+
+## F-5 — Merging a PR that touches a ledger leaves the local id allocator stale, and it mints a colliding id
+
+**Valid:** dated 2026-09-15
+
+**Observed:** 2026-09-15, immediately after merging PR #20 (which added `W-2` to **this ledger**) into `origin/experiments`. Preparing to append a `W` entry here, `doc(action="get")` reported `entry_high_water_W: 1`. Verified at the bytes:
+
+| | local working tree | `origin/experiments` |
+|---|---|---|
+| `entry_high_water_W` | **1** | **2** |
+| `W-` index rows | 1 | 2 |
+
+The local checkout was 15 commits behind origin and carried peers' uncommitted work, so it had not taken the merge. `append_entry` allocates from the **local** file — `max(frontmatter high-water, body max + 1)` — so a `W` append at that moment would have minted **`W-2` a second time**, colliding with the entry already merged.
+
+**Why it is this corpus's recurring shape:** the allocator would have returned a *plausible id, not an error*. Two `## W-2 — …` sections are both valid markdown; `link_scan` would bind the token to two definers and report Ambiguous; nothing fires at write time. The condition is invisible from inside the allocator, which is reading its file correctly — the file is simply older than the fact.
+
+**The trigger is SUCCESS, which is what makes it easy to walk into.** Merging the PR is what desynchronised the allocator from its own ledger. The riskiest moment to append to a ledger is right after landing a change that touched it — precisely when a session is most likely to be writing up that work. Nothing in the merge path, the ledger, or `append_entry` notes the staleness.
+
+**Detected only because the scout read the high-water mark before appending** rather than after. Had the `W` been written first and verified after, the collision would have been durable and would have surfaced as an Ambiguous citation later, far from its cause.
+
+**Scope, stated rather than assumed:** `F` was unaffected here — both sides sat at 2, so `F-3` was safe either way, and F-3/F-4/F-5 were written on that basis. This is not a property of `F`; it is a coincidence of this ledger's two namespaces advancing independently. A merge touching the `F` half would poison `F` identically.
+
+**Narrowest seam for a mechanism:** `append_entry` already knows the artifact's path and the repo. Comparing the ledger's blob against its upstream counterpart (or simply refusing when `git rev-list --count HEAD..@{upstream} -- <ledger path>` is non-zero) would turn a silent collision into a refusal naming the pull that clears it. Cheaper alternative with no git dependency: have the merge path mark touched ledgers stale in the catalog.
+
+**Status:** open. The `W` entry this scout was written for is deliberately **unwritten** and held until the local checkout is reconciled — reconciling a shared tree carrying peers' live edits is not a call this session should make unilaterally.
 
 ## Template for new entries
 
