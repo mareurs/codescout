@@ -1374,7 +1374,7 @@ mod tests {
             temp_guard: crate::librarian::tools::TempGuardEnv::from_env(),
             progress: None,
             embedding: Some(svc),
-            // Exercise the semantic path against the in-memory artifact_vec via
+            // Exercise the semantic path against the in-memory artifact_vec_v2 via
             // the sqlite-vec backend (no Qdrant daemon in tests).
             artifact_store: Some(Arc::new(
                 crate::librarian::artifact_store::SqliteVecArtifactStore::new(Arc::clone(&catalog)),
@@ -2178,8 +2178,8 @@ mod tests {
     ///
     /// **CHUNK-KEYED since Task 8.** `knn` reads `artifact_vec_v2`, whose ids
     /// are chunk ids, and `semantic_find` resolves each back to its artifact
-    /// through `artifact_chunk`. Seeding `artifact_vec` — or seeding v2 under an
-    /// ARTIFACT id — leaves every candidate unresolvable, and the failure shows
+    /// through `artifact_chunk`. Seeding v2 under an ARTIFACT id leaves every
+    /// candidate unresolvable, and the failure shows
     /// up as an empty page rather than an error, so it reads like a ranking bug.
     fn seed_vec(cat: &Catalog, id: &str, axis: usize) {
         let built = crate::librarian::catalog::chunk::build_chunks(id, "# T\n\nbody\n", 2048, 0);

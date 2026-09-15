@@ -2148,9 +2148,9 @@ fn reseat_worktree(
 /// Delete every catalog row anchored under a dead repo `root`: `artifact` rows
 /// whose `abs_path` is `root` or under `root/`, and `commits` rows whose
 /// `git_root` is `root` or under `root/`. Runs through codescout's own
-/// (vec0-linked, trusted-schema) connection, so the `artifact_vec` cascade
-/// trigger and the FK `ON DELETE CASCADE`s (augmentation / links / events) all
-/// fire — a bare `sqlite3` CLI cannot (7ca71bf7). Returns (artifact_rows,
+/// (vec0-linked, trusted-schema) connection, so the FK `ON DELETE CASCADE`s
+/// (augmentation / links / events / chunks) and the `artifact_vec_v2` cascade
+/// trigger they reach all fire — a bare `sqlite3` CLI cannot (7ca71bf7). Returns (artifact_rows,
 /// commit_rows) removed.
 fn prune_dead_root(conn: &rusqlite::Connection, root: &std::path::Path) -> Result<(usize, usize)> {
     let root_fwd = format!("{}", crate::util::fs::RepoPath::from_path(root));

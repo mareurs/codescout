@@ -7,7 +7,7 @@ tags: ["embeddings", "retrieval", "docker", "gpu"]
 topic: embedder stack ops
 entry_prefix: ["F", "W"]
 entry_high_water_F: 5
-entry_high_water_W: 1
+entry_high_water_W: 2
 ---
 
 # Session Log — Embedder Stack Ops
@@ -76,6 +76,7 @@ entry_high_water_W: 1
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-08-29 | high | test-via-real-invocation-path | .env's stale CODESCOUT_MODEL_DIR would have stayed masked indefinitely, first breaking on the unit's own first real boot | validated |
+| W-2 | 2026-09-14 | high | call-graph-before-recommending-removal | Would have recommended mirroring v1's dimension-migration machinery for v2 (doubling it) instead of retargeting and deleting v1 | validated |
 
 ---
 
@@ -448,6 +449,59 @@ The local checkout was 15 commits behind origin and carried peers' uncommitted w
 **Narrowest seam for a mechanism:** `append_entry` already knows the artifact's path and the repo. Comparing the ledger's blob against its upstream counterpart (or simply refusing when `git rev-list --count HEAD..@{upstream} -- <ledger path>` is non-zero) would turn a silent collision into a refusal naming the pull that clears it. Cheaper alternative with no git dependency: have the merge path mark touched ledgers stale in the catalog.
 
 **Status:** open. The `W` entry this scout was written for is deliberately **unwritten** and held until the local checkout is reconciled — reconciling a shared tree carrying peers' live edits is not a call this session should make unilaterally.
+
+## W-2 — Pre-decision scout confirmed artifact_vec (v1) is dead in production before recommending its removal
+
+**Valid:** dated 2026-09-14
+
+**Observed:** 2026-09-14, asked "can we remove v1 (`artifact_vec`)? is it still needed?" —
+prompted by docs/issues/2026-09-14-artifact-vec-v2-hardcoded-768-dim-no-migration-path.md's own
+closing suggestion ("consider whether artifact_vec is still read by anything").
+
+**Pattern:** Before answering an architecture removal question from a hunch or from the bug
+file's own speculation, scouted the actual call graph: `call_graph(write_embeddings,
+direction="callers")` and `call_graph(write_embeddings_with, direction="callers")` in
+`src/librarian/indexer.rs` — both return **zero non-test callers** (3 and 8 edges respectively,
+every one inside `#[test]` functions). Read `SqliteVecArtifactStore::knn`'s body directly
+(`src/librarian/artifact_store.rs:530-554`) — its SQL targets `artifact_vec_v2` only, despite the
+method's own doc comment two lines above still describing the schema in terms of `artifact_vec`
+(v1) — a live instance of this project's own `cluster/doc-contradicted-by-code` tag. The
+project's own regression test `the_sqlite_store_writes_a_chunk_id_into_v2_and_never_into_v1`
+(same file) independently asserts the same thing. Cross-checked against
+`docs/adrs/2026-07-20-artifact-vec-shared-catalog-boundary.md` (predates chunk-grain retrieval;
+decided to keep the *sqlite-vec backend* as a permanent no-Qdrant escape hatch — a decision this
+finding does not disturb) and `docs/superpowers/specs/2026-09-02-artifact-chunk-grain-retrieval-design.md`
+(the migration that introduced v2 and the "keeping both alive avoids a dark window" bridge
+comment at `catalog/mod.rs:262` — a comment describing a cutover period, not a permanent
+coexistence).
+
+**Counterfactual:** Without the call-graph scout, the natural answer to the 2026-09-14 bug's own
+"mirror v1's mechanism for v2" suggested fix would have been to build a **second**,
+near-duplicate `rebuild_artifact_vec_v2_at_dim` alongside v1's existing
+`rebuild_artifact_vec_at_dim` — permanently maintaining two dimension-migration paths for a table
+(v1) that turns out to have no production writer or reader at all. The scout changes the fix
+shape entirely: retarget the one existing migration path at v2 and delete v1's copy (table,
+trigger, `write_embeddings`/`write_embeddings_with`, `gc::migrate_vec_id`, and the three
+per-catalog-open orphan-`DELETE`s in `catalog/mod.rs`) in the same change, rather than doubling
+the machinery.
+
+**Confirming data points:**
+1. `write_embeddings` — 3 callers, all in `#[test] fn`s (`embeds_artifact_into_vec_table`,
+   `write_embeddings_is_idempotent_on_same_id` ×2).
+2. `write_embeddings_with` — 8 direct callers, all `#[test] fn`s, plus the `write_embeddings`
+   wrapper (itself test-only).
+3. `SqliteVecArtifactStore::{upsert,delete,refile,knn}` — all four target `artifact_vec_v2`
+   exclusively; `upsert`'s own comment says so explicitly ("`artifact_vec_v2` is keyed by
+   `chunk_id`").
+4. `gc::migrate_vec_id` (v1's id-rehome helper) still has one real production caller (the
+   catalog-level artifact-rehome path, `catalog/gc.rs`), but is a guaranteed no-op there today
+   since nothing ever writes a row into v1 under any id.
+
+**Impact:** high — prevented recommending a parallel-implementation fix for an open, filed bug
+(the 2026-09-14 hardcoded-dimension issue) that would have doubled long-lived migration machinery
+around a table with zero production traffic in either direction.
+
+**Promote-when:** N/A — single-decision scout, not a recurring pattern proposal.
 
 ## Template for new entries
 
