@@ -5998,6 +5998,42 @@ fn structured_fix_pointers(content: &str) -> Vec<(String, Option<String>)> {
     }
     out
 }
+/// Whether the file carries a `Fix provenance` heading at all, outside any fence.
+///
+/// **This exists because [`structured_fix_pointers`] never looks at headings.** It sweeps the
+/// whole file for two bullet forms, so "no section was written" and "the section was written
+/// and nothing in it parses" are different states that produced one identical sentence —
+/// *"no `## Fix provenance` pointer is declared"* — and the second reads as a flat
+/// contradiction to an author looking straight at the section.
+/// docs/issues/2026-09-13-fix-anchor-check-reports-absent-when-it-means-unparseable.md
+///
+/// Any heading LEVEL counts. Level is irrelevant to whether the pointers parse, so refusing a
+/// `### Fix provenance` here would send its author to fix the one thing that was never the
+/// problem. Fenced lines are skipped for [`structured_fix_pointers`]'s reason: a worked example
+/// quoting the section is a quotation, not a declaration.
+fn declares_fix_provenance_heading(content: &str) -> bool {
+    let mut fence = crate::util::markdown_fence::FenceState::new();
+    for line in content.lines() {
+        let t = line.trim_start();
+        if fence.feed(t) {
+            continue;
+        }
+        if fence.in_fence() {
+            continue;
+        }
+        let Some(rest) = t.strip_prefix('#') else {
+            continue;
+        };
+        if rest
+            .trim_start_matches('#')
+            .trim()
+            .eq_ignore_ascii_case("fix provenance")
+        {
+            return true;
+        }
+    }
+    false
+}
 
 /// `archived_fix_sha_unresolvable`: an archived bug file whose declared fix SHA no longer
 /// names an object in this repo.
@@ -6281,47 +6317,68 @@ fn scan_terminal_status_without_fix_anchor(
             }
         }
 
-        let decoys = commit_like_hashes(&content);
-        const DECOYS_SHOWN: usize = 4;
-        let misleading = if decoys.is_empty() {
-            String::new()
-        } else {
-            let shown: Vec<String> = decoys
-                .iter()
-                .take(DECOYS_SHOWN)
-                .map(|h| format!("`{h}`"))
-                .collect();
-            let more = decoys.len().saturating_sub(DECOYS_SHOWN);
-            let tail = if more > 0 {
-                format!(" (+{more} more)")
-            } else {
-                String::new()
-            };
-            format!(
-                " It does not merely lack an anchor, it READS as anchored: {} commit-like \
-                 hash(es) sit in its prose — {}{} — none declared as the fix. Where this was \
-                 measured, the hash was the commit the bug was OBSERVED at, so a reader \
-                 scanning for provenance finds one and stops looking.",
-                decoys.len(),
-                shown.join(", "),
-                tail
-            )
-        };
         if !scope.admit("terminal_status_without_fix_anchor", id, abs_path) {
             continue;
         }
+        // Two branches, because two different states reached this line. The decoy sentence
+        // belongs to exactly one of them: it asserts the hashes are probably the commit the
+        // bug was OBSERVED at, which is measured and right for a file with no section — and
+        // wrong for a file whose author wrote a provenance section, where the hashes in it
+        // are most likely the real fix, merely unparsed. Reusing it there would name a
+        // confident wrong cause, which is what this check refuses to do elsewhere.
+        let detail = if declares_fix_provenance_heading(&content) {
+            format!(
+                "status is `{status}` and a `Fix provenance` section IS present, but nothing \
+                     in it parses as a pointer, so nothing records which commit closed this. The \
+                     section's existence is not what is checked — two labelled bullets are, \
+                     outside any fence: `- **SHA:** ` followed by a backticked sha, and \
+                     `- **patch-id:** ` followed by a backticked id from \
+                     `git show <sha> | git patch-id --stable`. Prose naming those same two \
+                     hashes satisfies nothing, and a declaration inside a fence is read as a \
+                     quotation rather than a claim. If the fix had no commit, say so in \
+                     `no_fix_commit:` instead."
+            )
+        } else {
+            let decoys = commit_like_hashes(&content);
+            const DECOYS_SHOWN: usize = 4;
+            let misleading = if decoys.is_empty() {
+                String::new()
+            } else {
+                let shown: Vec<String> = decoys
+                    .iter()
+                    .take(DECOYS_SHOWN)
+                    .map(|h| format!("`{h}`"))
+                    .collect();
+                let more = decoys.len().saturating_sub(DECOYS_SHOWN);
+                let tail = if more > 0 {
+                    format!(" (+{more} more)")
+                } else {
+                    String::new()
+                };
+                format!(
+                    " It does not merely lack an anchor, it READS as anchored: {} commit-like \
+                         hash(es) sit in its prose — {}{} — none declared as the fix. Where this \
+                         was measured, the hash was the commit the bug was OBSERVED at, so a \
+                         reader scanning for provenance finds one and stops looking.",
+                    decoys.len(),
+                    shown.join(", "),
+                    tail
+                )
+            };
+            format!(
+                "status is `{status}` but no `## Fix provenance` pointer is declared, so \
+                     nothing records which commit closed this.{misleading} Record both lines — \
+                     the SHA, and the patch-id from `git show <sha> | git patch-id --stable` — \
+                     which the guide requires AT archive time; once the SHA orphans on a rebase, \
+                     recovery measured 2-153 ambiguous candidates. If the mitigation had no \
+                     commit, say that in `no_fix_commit:` rather than leaving it ambiguous."
+            )
+        };
         out.push(Violation::new(
             "terminal_status_without_fix_anchor",
             Some(id.clone()),
             abs_path.clone(),
-            format!(
-                "status is `{status}` but no `## Fix provenance` pointer is declared, so \
-                 nothing records which commit closed this.{misleading} Record both lines — \
-                 the SHA, and the patch-id from `git show <sha> | git patch-id --stable` — \
-                 which the guide requires AT archive time; once the SHA orphans on a rebase, \
-                 recovery measured 2-153 ambiguous candidates. If the mitigation had no \
-                 commit, say that in `no_fix_commit:` rather than leaving it ambiguous."
-            ),
+            detail,
         ));
     }
     Ok(out)
@@ -9240,6 +9297,88 @@ mod tests {
             "a file with no hashes is plainly unanchored and must NOT borrow the stronger \
              wording — the two findings differ in what a reader should do: {}",
             silent.detail
+        );
+    }
+    /// Regression for
+    /// `docs/issues/2026-09-13-fix-anchor-check-reports-absent-when-it-means-unparseable.md`.
+    ///
+    /// A record carrying `## Fix provenance` verbatim, at `##` level, preceded by a blank line,
+    /// with BOTH correct hashes written as a sentence, was told *"no `## Fix provenance` pointer
+    /// is declared"* — a flat contradiction of the file its author was looking at. Measured on
+    /// the real record it happened to: three repair attempts, the check's own count 1 → 1 → 1 →
+    /// 0, and only the third (bullets) cleared it.
+    ///
+    /// **Asserting that the check FIRES is not the discriminating test, and that is the trap
+    /// this fixture exists to avoid.** It fires on the prose file in BOTH worlds — before and
+    /// after this fix — because prose still parses to nothing and the record still owes an
+    /// anchor. What changed is which of the two states the message names, so a test counting
+    /// findings is monotone under the defect and passes either way. The bug file's own § Tests
+    /// added says exactly this; the assertions below are on message content for that reason.
+    ///
+    /// The no-section record is the control: without it, a message that said "unparseable"
+    /// unconditionally would satisfy every assertion here.
+    #[tokio::test]
+    async fn terminal_status_without_fix_anchor_distinguishes_unparseable_from_absent() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "prose",
+            "fixed",
+            "",
+            "## Fix provenance\n\nFixed on `experiments` — SHA `344aff6e2e28`, patch-id \
+             `2ab7a09a05ea`.\n",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "absent",
+            "fixed",
+            "",
+            "Nothing here names a commit.\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
+            scan_terminal_status_without_fix_anchor(&mut scope, &cat.conn).unwrap()
+        };
+        assert_eq!(v.len(), 2, "both records still owe an anchor: {v:#?}");
+        let prose = v.iter().find(|x| x.path.contains("prose")).unwrap();
+        let absent = v.iter().find(|x| x.path.contains("absent")).unwrap();
+
+        assert!(
+            prose.detail.contains("IS present"),
+            "a written-but-unparsed section must be named as written, not reported absent: {}",
+            prose.detail
+        );
+        assert!(
+            !prose
+                .detail
+                .contains("no `## Fix provenance` pointer is declared"),
+            "the absence sentence contradicts the section the author is looking straight at: {}",
+            prose.detail
+        );
+        assert!(
+            absent
+                .detail
+                .contains("no `## Fix provenance` pointer is declared"),
+            "a record with no section must still get the absence message — the two branches \
+             send a reader to different edits: {}",
+            absent.detail
+        );
+        // The decoy sentence asserts the hashes are probably the commit the bug was OBSERVED
+        // at. That is measured and right for the absent case, and WRONG here, where a
+        // provenance section exists and its hashes are most likely the real fix, merely
+        // unparsed. Attaching a cause that does not apply is the confident wrong answer this
+        // module refuses to give elsewhere.
+        assert!(
+            !prose.detail.contains("OBSERVED at"),
+            "the decoy explanation must not ride along on the unparseable branch: {}",
+            prose.detail
         );
     }
 
