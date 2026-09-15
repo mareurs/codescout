@@ -2717,7 +2717,7 @@ fn format_read_memory_renders_the_shadow_warning_at_the_head() {
 }
 
 /// Regression for
-/// `docs/issues/2026-09-14-a-workspace-pin-to-an-unparseable-config-silently-reads-the-default-project.md`.
+/// `docs/issues/archive/2026-09-14-a-workspace-pin-to-an-unparseable-config-silently-reads-the-default-project.md`.
 ///
 /// A `workspace=` pin at a project whose `.codescout/project.toml` fails to parse used to
 /// answer with the SESSION DEFAULT project's memories — no error, no warning, and no scope

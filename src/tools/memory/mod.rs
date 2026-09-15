@@ -476,7 +476,7 @@ async fn resolve_memory_dirs(input: &Value, ctx: &ToolContext) -> anyhow::Result
     // error AND refuses a non-resident pin. This is the read half catching up; the two
     // halves of one parameter disagreeing about what an unparseable config means is the
     // filed defect.
-    // docs/issues/2026-09-14-a-workspace-pin-to-an-unparseable-config-silently-reads-the-default-project.md
+    // docs/issues/archive/2026-09-14-a-workspace-pin-to-an-unparseable-config-silently-reads-the-default-project.md
     if let Some(root) = ctx.workspace_override.as_deref() {
         ctx.agent
             .ensure_resident(root.to_path_buf(), None)
