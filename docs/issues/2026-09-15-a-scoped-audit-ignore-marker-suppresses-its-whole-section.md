@@ -83,7 +83,15 @@ suppressed span. Reproduced independently in this tree: 29 → 28 broken, 162 �
 said it was.** `Audit Doc Refs` succeeded on run `34977620213`, but that run's head is `8ee8e4e2`,
 which **predates** this repair: it scanned the *suppressed* file at 36 refs. So CI's green is
 established for the **before** state — and is precisely the green-for-the-wrong-reason this record
-is about — while the 207-ref state is verified only locally and by one peer's independent re-run.
+is about — while the 207-ref state is verified by **one instrument run three times**, which is not
+the same as three confirmations. **Corrected again, later the same day:** an earlier revision of this
+paragraph called the peer's re-run *"independent"*. It was independent of the **operator**, not of
+the **method** — this session locally, sessionId `9403d62d-…` on their side, and the run that
+produced the 28 all executed `audit_doc_refs` against the same tree. `CLAUDE.md` § *Reaching a Peer
+Session*: **check independence, not agreement** — two instruments sharing a scope agree *because* of
+the shared blind spot, and at the point of use that is indistinguishable from corroboration. If the
+parser holds a second defect in this same region, all three runs report the same clean 28 and none
+of the three can see it. The accurate statement is **one method, three runs, zero CI**.
 **The 171-ref jump is untested by CI until a run first carries `f3f79c1a`.** Raised by sessionId
 `9403d62d-116b-46ea-ac9b-004acff2b1cb`. The distinction is timing rather than substance, and it is
 exactly the difference between a check that ran and a check that *would* have — which is this bug's
