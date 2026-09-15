@@ -438,7 +438,7 @@ Ran exactly that — `git add` naming all four paths. **The refusal was identica
 | `entry_high_water_W` | **1** | **2** |
 | `W-` index rows | 1 | 2 |
 
-The local checkout was 15 commits behind origin and carried peers' uncommitted work, so it had not taken the merge. `append_entry` allocates from the **local** file — `max(frontmatter high-water, body max + 1)` — so a `W` append at that moment would have minted **`W-2` a second time**, colliding with the entry already merged.
+The local checkout was 5 commits behind origin (`8c217e1a..17c9a338`, derived at that instant) and carried peers' uncommitted work, so it had not taken the merge. `append_entry` allocates from the **local** file — `max(frontmatter high-water, body max + 1)` — so a `W` append at that moment would have minted **`W-2` a second time**, colliding with the entry already merged.
 
 **Why it is this corpus's recurring shape:** the allocator would have returned a *plausible id, not an error*. Two `## W-2 — …` sections are both valid markdown; `link_scan` would bind the token to two definers and report Ambiguous; nothing fires at write time. The condition is invisible from inside the allocator, which is reading its file correctly — the file is simply older than the fact.
 
@@ -535,7 +535,7 @@ around a table with zero production traffic in either direction.
 
 **Valid:** dated 2026-09-15
 
-**Observed:** 2026-09-15. After PR #20 merged to `origin/experiments` at 13:22, the operator ran `cargo rb` at 14:08 and `/mcp` to pick up the fix. **The binary did not contain it.** At 14:08 local `HEAD` was `8c217e1a`, and `git merge-base --is-ancestor cbbfb7be 8c217e1a` is false — the local checkout was still 15 commits behind origin, carrying peers' uncommitted work, so `cargo rb` compiled a tree three minutes short of the reconciling push that landed at 14:11.
+**Observed:** 2026-09-15. After PR #20 merged to `origin/experiments` at 13:22, the operator ran `cargo rb` at 14:08 and `/mcp` to pick up the fix. **The binary did not contain it.** At 14:08 local `HEAD` was `8c217e1a`, and `git merge-base --is-ancestor cbbfb7be 8c217e1a` is false — the local checkout was 5 commits behind origin at that instant (`8c217e1a..17c9a338`; the figure read **15** until 2026-09-15 and was simply wrong, caught by sessionId `f0b1a4c7-e991-4478-bf22-b088483b6821`, who also measured **7** against `506924f2` — a different comparand, and correct for its own question. A bare count with no comparand is what made two right answers look like a disagreement), carrying peers' uncommitted work, so `cargo rb` compiled a tree three minutes short of the reconciling push that landed at 14:11.
 
 **Every available signal said the rebuild was current.** `cargo rb` exited 0. The binary's mtime updated. `~/.cargo/bin/codescout` resolved correctly through the symlink. `codescout --version` returned `0.15.0` — unchanged by the merge, so it discriminated nothing. `codescout doc --help` succeeded, which only proves the librarian is compiled in, not which schema it carries. Nothing anywhere reported "you built a tree that does not contain what you merged."
 
@@ -548,7 +548,13 @@ LIBRARIAN_DB=<scratch> codescout doc find --kind tracker
 
 After a second `cargo rb` on the reconciled tree (`HEAD` = `506924f2`): `13`, no v1 table. That is a one-command discriminator and it is the only check that answered the question.
 
-**The inspection route failed, and its failure is the instructive half.** `strings ~/.cargo/bin/codescout | grep -c 'DROP TABLE IF EXISTS artifact_vec'` returned **0** — the correct verdict, reached by a method that could not support it. The control proves it: `LIBRARIAN_ARTIFACT_VEC_MIGRATE` also returned **0**, and that constant exists in *both* pre- and post-PR source. Rust merges string literals into large `.rodata` blobs, so a line-oriented search over a release binary cannot express the question. Without the control, a correct conclusion would have been published on evidence that did not establish it — and the same probe would have returned 0 for a binary that *did* carry the fix.
+**The inspection route failed, and its failure is the instructive half.** `strings ~/.cargo/bin/codescout | grep -c 'DROP TABLE IF EXISTS artifact_vec'` returned **0** — the correct verdict, reached by a method that did not establish it. The control proves that much: `LIBRARIAN_ARTIFACT_VEC_MIGRATE` also returned **0** on that binary, and that constant exists in *both* pre- and post-PR source, so the probe was under-reporting regardless of which answer it gave.
+
+**NARROWED 2026-09-15 by sessionId `f0b1a4c7-e991-4478-bf22-b088483b6821`, who ran the control I did not.** This entry first explained the 0 as *"Rust merges literals into large `.rodata` blobs, so a line-oriented search over a release binary cannot express the question."* That is **wrong as a general claim**. On the post-rebuild binary both `LIBRARIAN_ARTIFACT_VEC_MIGRATE` and `rebuilding artifact_vec_v2 at new dimension` are **found, 1 hit each** — verified here independently, and identical under `strings`, `strings -a` and `strings -n 6` (`-a` and the default emit the same 372,081 lines on this file, so the flag is not the variable either).
+
+**Why the difference cannot be attributed, which is itself the finding.** The two binaries differ in content *and* in feature set — 65,061,280 bytes with `local-embed` then, 42,560,784 without it now — and **the 62 MB binary no longer exists**, overwritten by the rebuild. So the original 0 is **not reproducible**, and "the build merged those literals differently" and "my probe was flawed in a way I can no longer reconstruct" are both live explanations. Recording that rather than picking the flattering one.
+
+**The correct claim is the peer's, and it is sharper than the original:** a method whose reliability varies per build is **worse than one reliably broken**, because nothing tells you which regime you are in — a **0 is uninterpretable, a 1 is sound**. Asymmetric, not absent. The standing instruction is unchanged and is the reason this entry exists: **ask the binary what it does, not what it is.**
 
 **Same shape one step later, worth recording together.** Verifying `local-embed` had actually left a subsequent build, `strings` reported `onnxruntime: 7` — merged-blob hits that say nothing about linkage. `ldd` answers in one call (`no onnxruntime in the link map`), corroborated by the 62 MB -> 40 MB size drop. Three text-search probes in one session, each returning a plausible number none of them could support.
 
