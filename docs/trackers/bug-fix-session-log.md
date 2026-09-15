@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 162
-entry_high_water_W: 139
+entry_high_water_W: 140
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -355,6 +355,7 @@ entry_high_water_W: 139
 | W-91 | 2026-09-01 | high | **Re-read the substrate before a claim enters a DURABLE, queryable record** — the filesystem for a claim about the filesystem, the implementation for a claim that a capability is missing. Recorded as a **recurrence** of the reconnaissance skill's already-promoted current-state law, not as a new pattern, per that skill's § *Every promotion audits the promoted set* | Two catches. (1) A bug file's `## Residual — still open` said `.worktrees/bench` retains an orphaned gitdir; `ls .worktrees/` shows only `audit-trail-t1`. I was one call from writing a queryable `unverified:` field asserting an open residual that does not exist — into the single file tagged `cluster/record-asserts-an-unchecked-completion`. (2) I had begun drafting a bug asserting `unverified:` is unreachable by any query, on two true pieces of evidence (`find` → `unknown field`, and the librarian guide's "`extra` is NOT catalog-indexed"); `scan_terminal_status_with_caveat` is the deliberate reader and reports **65** records. Both false claims were backed by real evidence about something narrower than the sentence it was licensing. `outgrown` signal (n=1) on the promoted text: it names *fixes* and *prohibitions*, not **filed defect records** — the costliest surface, since a fix assuming a missing capability fails loudly at the call site while a filed bug is durable and nothing re-checks it. **Promote-when FIRED same-day on a MISS** — a filed bug claimed two parsers lacked a fence guard they already had; shipped in `claude-plugins` `b74c730` / codescout-companion 1.19.11 | promoted-to-permanent-docs |
 | W-138 | 2026-09-15 | high | **A deferral rationale that names a CAUSE is checkable against what the code can OBSERVE — widen the cause, not the effort.** *"The trigger is a lock race, not reducible to a deterministic script"* scoped the failure to a cause `append_entry` never sees; it sees `tx.commit()` return `Err`. A **deferred foreign-key violation** is the one SQLite failure that surfaces at COMMIT rather than at the statement, so every statement — including the `fs::write` — succeeds and only the commit fails, with no timing | The named cause could not have worked here at all: `journal_mode = WAL` + `BEGIN IMMEDIATE` takes the write lock up front, so a competing writer blocks at BEGIN and never at COMMIT. The three live alternatives were a test that cannot fire, a `#[cfg(test)]`-only hook exercising a path the shipped binary lacks, or shipping untested — which the sibling fix did (`update.rs` still carries `NOT REACHED BY ANY UNIT TEST` at its call site). The widened cause produced a first RED showing the retry allocate `F-2` and write a SECOND section, then three production-path mutations each KILLED. The technique was **already in-tree** at `create.rs`'s `RAISE(ABORT)` orphan-file test, so the repo held the capability while the rationale asserted it did not. Recurrence of `R-95`/`R-92`, recorded as a denominator rather than a new law | validated |
 | W-139 | 2026-09-15 | med | **Run the positive control before believing a probe's zero — especially when the zero ALARMS.** The law is usually cited against a *reassuring* zero; a zero saying *your fix is missing* reads as a finding rather than as an instrument failure, so nothing about it prompts you to check the tool. Alarm reads as diligence | Probing the freshly rebuilt release binary for three strings unique to `85642b1b` returned **0/0/0** — which says the rebuild did not take, and sends you either to re-run `cargo rb` or to tell the operator that their own rebuild silently failed. The control (three strings that MUST be in any codescout binary) returned `0/0/0` **as well**, which is impossible, and the impossibility is the entire signal. With `-a`: control `2`, all three fix strings `1`. **Instrument fact:** `grep` here is **ugrep 7.8.4**, which on a binary without `-a` prints nothing and exits **1** — indistinguishable from "no match" at both stdout and exit status, where GNU grep would at least print `Binary file … matches`. Any freshness probe of a built artifact needs `-a` or `strings`. Stronger and string-free: `readlink /proc/<pid>/exe` returning the live path with no `(deleted)` suffix proves the running image IS the file on disk — identity rather than ordering | validated |
+| W-140 | 2026-09-15 | med | **An instrument's verdict has two consumers — the decision it feeds and the audience it reaches — and gating protects only the first.** I gated a `file-provenance.py` SHARED verdict on the tree (read the hunks; all mine) so it decided nothing, then PUBLISHED it as evidence to my operator and a peer. A published false attribution becomes another session's premise, which `29420e72` then hit from the other end. `f0b1a4c7` argued a porcelain-gated caller is structurally safe — true of decisions, silent on reporting — and withdrew it once the split was named: their five runs returned `UNKNOWN`, and a `SHARED` would have been published identically. OB candidate, deliberately not minted: the admission test asks whether a careful party could have caught it, and one could. | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -15979,6 +15980,70 @@ reading the staged diff in a SEPARATE call before committing rather than chainin
 is the same argument the pre-commit guard makes when it refuses a batched review, and the
 same one § *Observer Blindness* position 3 makes for putting the check on the path rather
 than in the reader.
+
+## W-140 — An instrument's verdict has two consumers, and gating protects only one
+
+**Valid:** dated 2026-09-15
+
+**Observed:** `scripts/file-provenance.py` called `src/librarian/catalog/mod.rs` `SHARED`
+and named a peer. I did not act on that verdict — I read the three hunks, found all were
+mine, and staged on that basis. My decision was gated on the tree, so the verdict decided
+nothing.
+
+I then **published** it — to my operator, and to a peer — as evidence.
+
+Separately, `d725fa54d387d55d` established that the same tool records phantom writes:
+`RELOCATORS` carries a bare `mv` bounded by `\b`, which matches inside the filename
+`mv.rs`, and the operand capture spans newlines so it lifts a `--` pathspec from a later
+command. Reproduced against the production function with controls — `update.rs` returns
+`[]`, `mv a b` still returns both operands. **Two of the phantom records for `mv.rs` were
+created under my own sid by my own read-only diagnostics** (`git status --short`,
+`git diff --stat`), run while checking whether the file was safe to format.
+
+**The win:** `f0b1a4c7` argued that a caller gating on `git status --porcelain` is
+structurally out of reach of the pollution, because it only ever *adds* ownership records
+— it can turn `UNKNOWN` into a name, never a name into `UNKNOWN`. That is correct and it
+covers **decisions**. Pushing on it produced the split: an instrument's verdict has two
+consumers — **the decision it feeds and the audience it reaches** — and gating elsewhere
+protects only the first. The second has no gate at all.
+
+A published false attribution is worse than a bad decision in one specific way: it becomes
+**another session's premise**. `29420e72` hit exactly that from the other end, refused by
+`fmt-mine` on an attribution naming a session that held nothing.
+
+`f0b1a4c7` then applied it to themselves and withdrew their own structural claim: their
+five runs all returned `UNKNOWN`, and had one come back `SHARED` they would have published
+it identically. Their reporting exposure was mine; the outcome differed by what the tool
+happened to return.
+
+**Counterfactual:** without the split, both of us would have recorded "gated on the tree,
+therefore unaffected" as a structural property. It was a property of the verdicts we
+happened to receive.
+
+**OB candidate, deliberately not minted.** This looks like an `OB` — the blind party is the
+publisher, whose own correctness check (*did the verdict decide anything?*) returns a clean
+answer while saying nothing about the other consumer. But `observer-blindness.md`'s
+admission test asks whether a more careful version of the same party would have caught it,
+and a careful publisher *could* notice a verdict has two audiences. Too close to mint
+`OB-27` on at the end of a long session; left here for someone with fresh eyes to promote
+or refuse.
+
+**Method note worth more than the finding:** one paragraph in that bug file was narrowed
+three times today, alternating between two sessions, and **each narrowing was only visible
+from the outside of the previous one**. Not carelessness — at no point could the party who
+had just written it see the next. That is the cheapest available argument that peer review
+is a *different instrument* rather than a redundancy, and it costs nothing but sending the
+message.
+
+**Severity:** n/a (win)
+
+**Status:** validated
+
+**Rests on:** `docs/issues/2026-09-15-file-provenance-reads-mv-inside-a-filename-and-attributes-a-write.md`
+(`d725fa54d387d55d`), and CLAUDE.md § *Testing Discipline* — *when a re-derivation confirms,
+publish the confirmation*. Both this and `f0b1a4c7`'s five `UNKNOWN` runs are individually
+worthless and only mean something as a pair, which is the mechanism by which a denominator
+normally goes unrecorded.
 
 ## Template for new entries
 
