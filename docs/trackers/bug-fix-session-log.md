@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 163
-entry_high_water_W: 142
+entry_high_water_W: 143
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -383,6 +383,7 @@ entry_high_water_W: 142
 | W-139 | 2026-09-15 | med | **Run the positive control before believing a probe's zero — especially when the zero ALARMS.** The law is usually cited against a *reassuring* zero; a zero saying *your fix is missing* reads as a finding rather than as an instrument failure, so nothing about it prompts you to check the tool. Alarm reads as diligence | Probing the freshly rebuilt release binary for three strings unique to `85642b1b` returned **0/0/0** — which says the rebuild did not take, and sends you either to re-run `cargo rb` or to tell the operator that their own rebuild silently failed. The control (three strings that MUST be in any codescout binary) returned `0/0/0` **as well**, which is impossible, and the impossibility is the entire signal. With `-a`: control `2`, all three fix strings `1`. **Instrument fact:** `grep` here is **ugrep 7.8.4**, which on a binary without `-a` prints nothing and exits **1** — indistinguishable from "no match" at both stdout and exit status, where GNU grep would at least print `Binary file … matches`. Any freshness probe of a built artifact needs `-a` or `strings`. Stronger and string-free: `readlink /proc/<pid>/exe` returning the live path with no `(deleted)` suffix proves the running image IS the file on disk — identity rather than ordering | validated |
 | W-140 | 2026-09-15 | med | **An instrument's verdict has two consumers — the decision it feeds and the audience it reaches — and gating protects only the first.** I gated a `file-provenance.py` SHARED verdict on the tree (read the hunks; all mine) so it decided nothing, then PUBLISHED it as evidence to my operator and a peer. A published false attribution becomes another session's premise, which `29420e72` then hit from the other end. `f0b1a4c7` argued a porcelain-gated caller is structurally safe — true of decisions, silent on reporting — and withdrew it once the split was named: their five runs returned `UNKNOWN`, and a `SHARED` would have been published identically. OB candidate REFUSED same day by `f0b1a4c7`, on a population rather than an argument: two count failures, two sessions, two mechanisms, and BOTH had channels — mine unreached, theirs stale. Zero structural blindness across the pair, so `F-N`/`W-N` is the right home. Do not re-open without a case that fails `:1126`. | validated |
 | W-141 | 2026-09-15 | med | **Two bounds fixing one symptom guard each other's cases and neither's site — and the TDD red is the one configuration that cannot show it.** A two-part regex fix (`(?=\s)` verb boundary, `\n` in the operand tail) plus the bug file's own prescribed test pair: RED observed, GREEN after, 4 assertions. Mutating each bound **separately** — both **SURVIVED**, 129/0. Each bound independently prevents the composite failure the assertions describe, so the pair guards the **conjunction** and neither **site**; either could be silently reverted with the suite green. TDD cannot reach it, because the red is observed in the pre-fix state — the one configuration where BOTH are absent. | Would have shipped `b59a035d` with both sites unguarded, citing a green suite and an observed red as the evidence. Closed by one case per site, each shaped so the other bound cannot rescue it: a path standing *beside* the verb-shaped filename (no line end for `\n` to stop at) kills A; a **real** relocation followed by a `--`-bearing command (lookahead satisfied, irrelevant) kills B, asserting both directions since the unbounded tail *replaces* the relocation's own operands rather than merely adding the victim. Ask it whenever a fix makes **N > 1 changes addressing one symptom**. Denominator for `mutate once per guarded SITE`, not a new law — I had read it and wrote the conjunction-guarded pair anyway. | validated |
+| W-143 | 2026-09-15 | high | **A mutation result DECAYS — adding a bound can un-guard a site an older bound still owns, with everything green.** Four hours after `W-141` concluded *guard each site*, a third bound (command-position) was added to the same regex. Re-running the full per-site set: the new bound KILLED, the `\n` bound KILLED, and **`(?=\s)` SURVIVED** — the case written that morning *specifically to isolate it*, which had killed its own mutation. Both its inputs put the verb-shaped filename after a `/`, which the new anchor rejects **earlier**, for its own reason; so the older bound stopped being why those inputs pass, and nothing said so. | `W-141`'s law is necessary, not sufficient: a case guards a *behaviour on one input*, never a *bound*, and a later bound refusing that input first silently transfers ownership. Invisible to the suite, the diff, review and CI. **After adding ANY bound to a predicate, re-run the per-site mutation set for EVERY bound** — a mutation set is a measurement that decays, not a fixture you extend. Restored by an input satisfying every *other* bound and failing only the one under test (verb-shaped token OPENING a line). Fourth mutation worth its own line: *widening* the position class was killed by the heredoc pair — no `drop the bound` mutation reaches the over-broad direction, so ask for both polarities on any character-class bound. Counterfactual: `2f32faa3` ships with `(?=\s)` unguarded, four hours after a commit entirely about not doing that, with `W-141` cited as evidence the site was covered. | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -16295,6 +16296,61 @@ otherwise this entry collects its own catches and looks self-correcting.
 **Rests on:** `W-142` (the recovery), `84efa618`, `9b251426`, and `observer-blindness:OB-22`
 for case 3. The pairing of cases 1 and 2 was proposed by sessionId
 `9403d62d-116b-46ea-ac9b-004acff2b1cb`, who held the one expectation that worked.
+
+## W-143 — A mutation result decays — adding a bound can un-guard a site an older bound still owns, with everything green
+
+**Valid:** dated 2026-09-15
+
+**Observed.** `W-141` (same day, same file) concluded: guard each **site**, not the feature.
+I then added a third bound to the same regex — a command-position anchor — wrote a case for
+it, and re-ran the full per-site mutation set. The new bound's case KILLED. The `\n` bound's
+case KILLED. **The `(?=\s)` bound's case SURVIVED** — the one I had written that morning
+*specifically to isolate it*, which had KILLED its mutation four hours earlier.
+
+**Mechanism.** Both cases isolating `(?=\s)` put the verb-shaped filename after a `/`
+(`git diff --stat -- src/mv.rs …`). The new position anchor rejects that input **earlier**,
+for its own reason. So with `(?=\s)` deleted, position alone still refuses both cases, both
+assertions stay green, and the bound they were written to guard is now guarded by nothing.
+
+**The law `W-141` gives is necessary and not sufficient.** A test case does not guard a
+*bound*; it guards a *behaviour on one input*. When a later bound refuses the same input
+first, the older bound stops being the reason that input passes — and every signal available
+says nothing happened. The suite was green, the new bound's own case was green, and the
+coverage loss is invisible to the diff, to review, and to CI.
+
+**Operational form, which is the whole value of the entry: after adding ANY bound to a
+predicate, re-run the per-site mutation set for EVERY bound, not a new case for the new
+one.** A mutation set is not a fixture you extend; it is a measurement whose result decays
+when the code around it changes. `W-141` established that a bound needs its own case; this
+establishes that **the case's continued validity is not inherited**.
+
+**The restored isolation, recorded because the shape generalises.** The discriminating input
+must satisfy every *other* bound and fail only on the one under test. Here: a verb-shaped
+token at the **start of a line** inside a heredoc body — position is satisfied, so only
+`(?=\s)` can refuse it. KILLED, 2 assertions. Its control (a real relocation opening a line
+still resolves) is what stops the case being satisfied by refusing all line-initial verbs.
+
+**Fourth mutation, worth its own line.** *Widening* the position class to admit `.` `"` `/`
+was KILLED by the heredoc pair. No `drop the bound` mutation reaches the over-broad
+direction, so a class that can be quietly relaxed needs a mutation that relaxes it. Ask for
+both polarities on any character-class bound.
+
+**Counterfactual.** `2f32faa3` would have shipped with `(?=\s)` unguarded, four hours after
+a commit whose entire message was about not shipping unguarded bounds — and the regression
+that removes it would land green, with `W-141` cited in the file as evidence the site was
+covered.
+
+**Corpus check that the fix was real, not merely green:** previous shipped version against
+this one over 943 transcript files / 927,720 records / 60,528 shell calls — **866** records
+withdrawn over 448 targets, **0** added. Both directions computed; an unmeasured zero is not
+evidence for a subtractive-only claim.
+
+**Rests on:** `docs/issues/archive/2026-09-15-file-provenance-matches-a-relocating-verb-that-is-not-a-command.md`
+(`bb794aff72744ead`) § *Tests added*, which carries the four-row mutation table; fix
+`2f32faa3`, patch-id `d24cade6bdd1633ffb186d5be27960e53d12b0b3`; and `W-141`, which this
+entry extends rather than corrects.
+
+**Status:** validated
 
 ## Template for new entries
 
