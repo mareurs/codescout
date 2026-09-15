@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 159
+entry_high_water_F: 160
 entry_high_water_W: 137
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 137
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-160 | 2026-09-15 | med | documentation | fixed-verified | **A record's own "same exposure, not addressed here" list was a HYPOTHESIS SET published as a worklist — neither named file was an instance.** Written while holding the mechanism (*resolves a binary by path*), which both files genuinely match; never checked whether the mechanism has a CONSEQUENCE at either site. One is `#[ignore]`d against a deleted binary; the other runs in both lanes so it passes against a lean one (measured, 5.04s). A grep-shaped observation published as a worklist inherits the grep's blindness and loses the qualifier, because by the time a reader arrives only the conclusion is there. Retracted in `ca7edebc`. |
 | F-159 | 2026-09-15 | med | tooling | fixed-verified | **A wait-loop whose predicate matched itself, so its exit condition was unreachable by construction.** `until ! pgrep -f "scripts/gate.sh"; do sleep 10; done` — `pgrep -f` scans the full command line, and the waiter's own contains the pattern. Proven bare with no `gate.sh` running: `pgrep -c -f "scripts/gate.sh"` → `1`, and that 1 is the pgrep. Two such shells ran overnight and were **mutually** sustaining. Survived a day of careful verification because the failure mode is **silence**, which is byte-identical to "still running" — and the work had actually completed, read out of the `@bg_*` buffers, so nothing was wrong enough to notice. Distinct from this ledger's prior `pgrep` finding (a miscount from build processes): same over-match family, but that one inflates a number and this one makes a loop immortal. Tell: before arming an `until`-loop, ask whether the condition can observe the loop — a predicate over the process table always can. |
 | W-137 | 2026-09-15 | — | reproduction-before-plan | validated | **The reproduction refuted the record's own root-cause lead in BOTH particulars, before any code was read.** `f73130523241a666` led with *"around `Agent::ensure_resident`, with a fallback to `default_workspace_root`"* and § *Resume* said to start there. `ensure_resident` does not fall back — it correctly returns `Err`; nothing falls back to `default_workspace_root`. Following the plan means hunting a fallback that does not exist inside a function behaving correctly. The defect is one layer up in `resolve_memory_dirs`, which DISCARDS that `Err` with `let _ =` and routes the resulting `None` into a branch meant for "no pin was requested". What the repro bought that reading could not: the read/write asymmetry, which shows the two halves are not enforcing different policies — one resolves through `with_project_at` (propagates residency AND refuses a non-resident lookup) and the other does not. **Also carries a CONFIRMATION as a denominator, not a catch**: the four-step probe re-run against the rebuilt binary confirmed the fix end to end, covering what the unit test cannot reach — `is_err()` says nothing about whether the refusal a caller receives names the pin, the cause and two actions. |
 | W-136 | 2026-09-14 | — | verification | validated | **A confirming run that never entered the code path it was confirming — caught before reporting.** Post-rebuild recon verified three live fixes (buffer-query stderr, `.err` on `grep`/`read_file`, the `type:"test"` envelope). My first probe used a 1-test filter and returned the verdict in full — but 1 test is ~2 KB, `needs_summary` is false, so it took the **inline** path, which was never broken. The envelope defect lives only above the ~10 KB gate, and **a broken world returns byte-identical output for that run**. Re-ran wide (179 tests, `type:"test"`, 177/2) and only then did it prove anything. `F-150`'s own mechanism recurring inside the verification of `F-150`'s bug — the class did not stop, but the entry existed, so *"which side of the gate did this land on?"* was already loaded. |
@@ -15601,6 +15602,52 @@ the refusal a *caller* receives names the pin, the cause, and two actions they c
 **Not generalisable as "always re-run live":** it was affordable here only because the user's
 `/mcp` had just put the new binary in front of the tools. Without a rebuild there is nothing
 live to probe, and the unit test remains the whole of the evidence.
+
+## F-160 — A "same exposure, not addressed here" list is a hypothesis set, and it aged into false work in one day
+
+**Valid:** dated 2026-09-15
+
+**Observed:** `cfa7296bdbf9b4d9` § *Fix* carried a paragraph headed *"Same exposure, not addressed
+here"*, naming `tests/cross_process_write_lock.rs` and `tests/librarian/mcp_integration.rs` as
+holding the by-path defect the pin had just closed in `tests/cli_doc.rs`. I wrote it, and picked it
+up a day later as the obvious next work item — my own record handing me a task. **Neither file was
+an instance.**
+
+- `tests/librarian/mcp_integration.rs` is
+  `#[ignore = "requires standalone librarian binary which no longer exists post-dissolution"]`, and
+  `cargo_bin("librarian-mcp")` names a binary `Cargo.toml` declares no target for. `tests/librarian/main.rs`
+  already annotates it inert **and states the count** — *"19 tests, 17 of which run"*.
+- `tests/cross_process_write_lock.rs` declares no `required-features`, so it runs in **both** lanes
+  and therefore passes against a librarian-less binary by design. Measured in an isolated tree:
+  `write_lock_contention_produces_recoverable_error ... ok`, 5.04s. **That run IS the condition a
+  mid-run swap creates**, which is what makes it a measurement rather than an argument.
+
+**Why it aged into false work in one day.** The paragraph was written while holding the *mechanism*
+— "resolves a binary by path" — and on that predicate both files genuinely match. What it never
+asked is whether the mechanism has a **consequence** at either site, which is a question about the
+surrounding test rather than about the line that matched. A grep-shaped observation published as a
+worklist inherits the grep's blindness **and loses the qualifier**: by the time a reader arrives,
+only the conclusion is there, phrased as work.
+
+**What checking bought that the retraction alone does not convey.** Exactly three test files in the
+corpus execute a binary by path. A test that runs in **both** lanes passes in both, so it is blind
+to a lane swap **by construction**; only a `required-features = ["librarian"]` target is asymmetric
+enough to notice. Of the three gated targets — `audit_doc_refs`, `cli_doc`, `librarian` — `cli_doc`
+is the only one that both executes the binary and executes at all. So `cli_doc` is not one detector
+among several, it is the **only one this corpus can have**, and the property that makes it the sole
+detector is the same property that makes it poisonable. That turns *"Do not make `cli_doc` skip"*
+from a preference into a structural fact, which is a stronger claim than the paragraph it replaced.
+
+**The residue, stated because inert-by-accident is not fixed.** The by-path mechanism does still sit
+in `cross_process_write_lock.rs`. It is harmless only because that test asserts nothing a lean binary
+fails; one librarian-gated assertion added there inherits the full defect silently.
+
+**Tell:** a *"same exposure"* / *"not addressed here"* list is a **hypothesis set**, not a worklist.
+Before publishing one, say which half you checked — that the mechanism matches, or that the
+consequence follows. They are different claims, and the second is the one a reader will act on.
+
+**Rests on:** the corpus holding three by-path test files and one gated target that executes a
+binary; a fourth would not change the tell but would change *"the only one this corpus can have"*.
 
 ## Template for new entries
 
