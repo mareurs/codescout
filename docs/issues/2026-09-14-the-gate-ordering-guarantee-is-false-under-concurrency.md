@@ -300,8 +300,17 @@ behaviour change by any party closes the window — which is now measured, not a
 written anyway (the `CLAUDE.md` gate-order bullet now carries it), and it is worth having for the
 reader who hits this; it is simply not a fix.
 
-Fix SHA: `412415bd`
-Patch-id: `213ec5cc5d2f4ddd77a56e1022a7407d79ba2b08`
+**Two commits, and the second SUPERSEDES the first's mechanism — cite both, or a reader chasing
+one SHA lands on the approach this file already records as overturned.**
+
+- `412415bd` — patch-id `213ec5cc5d2f4ddd77a56e1022a7407d79ba2b08`. Made `cli_doc` say whose outage
+  it is, via a per-`run_cmd` check that the binary advertises `doc`, and settled the window with
+  the `lsof` measurement above. **The diagnosis it carries stands; the mechanism it shipped does
+  not** — see the paragraph above on why the pin replaced it.
+- `58b6bafc` — patch-id `cd244fa46a481105e2c9f2b5de9b64ef38649f31`. What runs today: [`pinned_binary`]
+  (hardlink taken once, checked once — link count 3 observed, so it shares the inode rather than
+  copying), `scripts/gate.sh`, and the `src/lsp/manager.rs` silent-skip that the isolation itself
+  would otherwise have introduced.
 
 **Deliberately NOT archived.** The mitigation is verified and the gate is green, but the defect
 this record names is still live and its only closure is an operator decision. Archiving would
