@@ -151,23 +151,46 @@ some later migration drops carries this same property.
 
 ## Fix
 
-Not decided. The candidates, cheapest first:
+**Ruled 2026-09-15: option 3.** The reasoning matters more than the choice, because it
+**eliminates** rather than ranks.
 
-1. **Make the retirement idempotent too** — have v13 (or a successor) drop the objects
-   unconditionally on open rather than once, or move the drop out of the versioned ladder
-   into the bootstrap beside the `CREATE`s it supersedes. Keeps the two halves in one file
-   where a reader compares them.
-2. **Refuse to open a catalog whose `schema_version` exceeds the binary's own.** Addresses
-   the general case rather than this instance, and is the only option that also protects
-   against a stale binary writing rows a newer schema has constraints for. Its cost is real:
-   a session mid-task would be locked out by a peer's rebuild.
-3. **Report rather than prevent** — a `doctor` check asserting that no object a past
-   migration dropped is present. Cheap, and it is the option that assumes the mixed fleet is
-   permanent rather than an accident.
+**The re-creation is performed by the OLD binary.** Nothing shipped in a new binary can stop
+an old one from executing its own `schema.sql` on open. Prevention is therefore not available
+at the layer that would have to ship it, and two of the three candidates were never really
+prevention.
 
-Option 2 is the only one that makes the record trustworthy rather than supplementing it, and
-is also the only one with a cost a user would feel. Worth a ruling before code.
+1. ~~**Make the retirement idempotent too**~~ — **does not prevent; it oscillates.** Dropping
+   the objects on every open means the new binary re-drops, the old binary re-creates on its
+   next open, and the state flips with whoever opened last. On this pair that is harmless —
+   the table is empty, the old binary needs it, the new one ignores it — but harmless **by
+   accident**, and it would not survive a retirement whose object held rows.
+2. ~~**Refuse to open a catalog whose `schema_version` exceeds the binary's own**~~ —
+   **withdrawn on cost, by the operator's own reading of the population.** It is the only
+   true prevention, and it prevents by locking out the **new** binary. Mixed binary versions
+   are *routine on this machine* and *rare on a stable install*, so the entire cost lands on
+   the one population that has the condition while the benefit accrues to the one that does
+   not. On a shared checkout a peer's rebuild would lock a session out mid-task, which is a
+   denial of the dominant workflow here rather than a guard on it.
+3. **A `doctor` check — ADOPTED.** Assert that no object named by a past *retirement* `DROP`
+   is present at a `schema_version` at or above the migration that dropped it. It matches the
+   population exactly: `doctor` is run by the people who have this condition, on the machine
+   that has it, and costs a stable install nothing. One entry today (`artifact_vec`,
+   `artifact_vec_cascade_delete`, v13), and it arms itself for every retirement added later.
 
+**Scope, measured rather than assumed: v13's is the ladder's ONLY retirement `DROP`.** Every
+other one is rebuild-in-place — `DROP TABLE events` then `ALTER TABLE events_new RENAME TO
+events`, and the same shape for `artifact` and `commits` — so the object returns by design
+inside the same transaction and an old binary's `CREATE ... IF NOT EXISTS` is a **no-op**
+against all of them. **There is no backlog.** What there is, is a template: every future
+retirement inherits this property, and there would be nothing to notice.
+
+**The operator's constraint changes the RISK, not the severity.** The empty table still costs
+nothing. But if mixed binaries are routine here and rare elsewhere, this machine's catalog
+progressively diverges from every other install's **while `schema_version` reports they
+match** — so a bug reproduced here runs against a schema nobody else has, and the version
+number says otherwise. That is a reproduction-fidelity hazard rather than a runtime one, and
+it is exactly what `doctor` exists for: what is true of *this* machine's catalog that should
+not be.
 ## Tests added
 
 None yet. The test this needs is the one the existing suite cannot express: reopen with a
@@ -184,10 +207,30 @@ possible and pointless while any pre-`cbbfb7be` binary can still open the file.
 
 ## Resume
 
-Decide between the three fix options above — the choice is a ruling about whether mixed
-binary versions on one catalog are an accident to be prevented or a condition to be
-tolerated, and the code follows from it.
+Ruling made (§ *Fix*, option 3). What is left is the check itself, in
+`src/librarian/tools/doctor.rs`: a `Check` variant asserting that no object named by a past
+retirement `DROP` is present at or above the `schema_version` that dropped it, seeded with
+`artifact_vec` + `artifact_vec_cascade_delete` at v13.
 
+Two things to settle while writing it, both of which this file has an opinion about:
+
+- **Defect or informational?** `Check::is_informational`'s stated bar is that *the emitted
+  row's own first word tells a reader it is not a defect, and there is no edit to the repo
+  that would make it stop firing*. There is no such edit here — the repair is a `DROP`
+  against a machine-local database, not a change to this repo — which argues informational.
+  Against that, `claim_unresolvable_here`'s precedent turns on the reader having to **go
+  check another host** first, which does not apply: this is checkable and fixable right here.
+  Read that doc comment before choosing. It silently moves `summary.defects` and the CLI exit
+  code, and by its own admission neither the compiler nor `summary_total_partitions_by_check`
+  can notice.
+- **The retirement list needs one home.** Deriving it by grepping the ladder for `DROP`
+  re-finds every rebuild-in-place and is the wrong population — that is the § *Fix*
+  measurement above, and a check built on the grep would report four objects where one is
+  meant. A literal list beside the migrations, which a future retirement must append to, is
+  the shape that cannot silently under-report. **It is also an instance of this file's own
+  class if nothing checks that it was appended to**, so the list wants a test that fails when
+  a new `DROP` lands without a matching entry, not a comment asking the next author to
+  remember.
 ## References
 
 - `cbbfb7be` — the retirement and schema v13
