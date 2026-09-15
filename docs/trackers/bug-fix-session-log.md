@@ -41,8 +41,8 @@ entry_high_water_W: 142
 > verified unique in this file:
 >
 > ```
-> F-N -> index_after_line="|----|------|---------:|----------|--------|-------|"   (## Index)
-> W-N -> index_after_line="|----|------|-------:|---------|----------------|--------|"   (## Wins Index)
+> F-N -> index_after_line="|----|------|---------:|----------|--------|-------|"   (the Index table)
+> W-N -> index_after_line="|----|------|-------:|---------|----------------|--------|"   (the Wins Index table)
 > ```
 >
 > **Do not declare a `snapshot_anchor` here.** It lands rows at the block's
@@ -16307,8 +16307,15 @@ for case 3. The pairing of cases 1 and 2 was proposed by sessionId
            index_after_line="|----|------|---------:|----------|--------|-------|")
 
      `index_after_line` selects the TABLE, and the two differ:
-       F-N -> "|----|------|---------:|----------|--------|-------|"        (## Index)
-       W-N -> "|----|------|-------:|---------|----------------|--------|"  (## Wins Index)
+       F-N -> "|----|------|---------:|----------|--------|-------|"        (the Index table)
+       W-N -> "|----|------|-------:|---------|----------------|--------|"  (the Wins Index table)
+
+     Written WITHOUT the leading `## ` deliberately: this file documents its own
+     headings, so a scan that anchors by substring rather than by whole line
+     resolves "## Index" to these instructions instead of the real heading and
+     reports every row as being in the other table. Same remedy as the template's
+     `F-<n>` placeholder rows -- make the example structurally unable to match the
+     thing it describes, rather than asking the reader to tell them apart.
 
      Omitting index_row/index_after_line silently gives you the retired two-call
      form: the section lands, the row does not, and nothing reports it. That is
