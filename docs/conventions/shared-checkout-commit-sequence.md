@@ -189,6 +189,17 @@ all. Note what you are accepting: that check does not run for that commit.
 **Tell the other session.** Their work is still uncommitted in a tree you have been writing to,
 and they may not know you touched the file.
 
+**This case is NOT in the served tail, and the reader who needs it is the one who cannot see
+it.** § *Where this text lives* splits the tail (the six steps, terse, for anyone who just
+tripped a hook) from this page (the rationale, for anyone deciding whether to change one). This
+section is not a seventh step — it is the case where two of the six stop applying — so it does
+not belong in that list. But it is reached by tripping `refuse a pathspec commit carrying
+unstaged content` on a file a peer is also editing, which puts its reader squarely in the tail's
+audience and not in this page's. Left unresolved deliberately rather than fixed by appending to
+a surface every refusing hook emits: one instance is thin evidence for changing what six guards
+print. Whoever meets it a second time should decide, and the cheapest form is probably one line
+in the tail pointing here rather than the construction itself.
+
 **If you get the reconstruction wrong, their content may still be recoverable.** `git add`
 leaves a complete tree in the object store and `git restore --staged` only un-references it, so
 `git fsck --unreachable` recovers it byte-exact — which is how 35 lines deleted during exactly
