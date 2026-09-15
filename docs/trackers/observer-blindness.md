@@ -643,8 +643,8 @@ which moved the population statement into `issue-clusters.md` beside the sentenc
 defended only freshness.
 ## OB-2 — the session that arms a shared-state trap gets no signal
 
-**Valid:** conditional — reopens if the gate's command order changes, or if a second
-terminal command is appended after the default-features lane
+**Valid:** conditional — reopens if any gate form documented in `CLAUDE.md`
+§ *Development Commands* writes `target/debug/codescout` anywhere but last
 
 **Rests on:** `docs/issues/archive/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`
 
@@ -680,7 +680,30 @@ Two limits kept deliberately, because an overstated fix is its own `OB`:
   *structure* — an appended build step is one more proposition that can silently not
   have run, which is the same class again.
 
-**Cite:** `73066479`, `d92f5f9c`, and the bug file above.
+**A second form shipped 2026-09-15, and it reaches the safe state by different means.**
+`CLAUDE.md`'s headline is now `./scripts/gate.sh`, which runs the same four commands in the
+same order (`scripts/gate.sh:69-75`) but exports `CARGO_TARGET_DIR` to a per-session path
+outside the repo (`:61`). **Neither of its lanes writes `target/debug/codescout`.** The
+ordering guarantee above is untouched and still governs the four-command fallback, which
+still shares `target/` — so the two documented forms are now safe for unrelated reasons: the
+fallback by *sequence*, the script by *isolation*.
+
+The half nobody was buying deliberately: a gate run used to **disarm** the shared binary as a
+side effect, whoever had armed it. A `gate.sh` run does not. The guarantee itself did not
+weaken — arming is reachable only from a hand-typed lean lane, and the reorder still bounds
+that window by the same session's own default lane — but the pool of *incidental* repairers
+shrinks as the headline does its job, so that window is now closed by the arming session or
+by nobody.
+
+**Why the condition above was re-declared.** It read *"reopens if the gate's command order
+changes, or if a second terminal command is appended after the default-features lane"* — two
+ways its author could picture a gate changing. The gate changed in a third: it stopped
+touching the artifact this class is about. Re-checking both named triggers agrees that nothing
+has happened, and keeps agreeing, because the enumeration was drawn from one model of the
+subject. That is `OB-22` on `OB-2`'s own record, and it is why the replacement names the
+**artifact** and the surface that documents it rather than a list of mutations.
+
+**Cite:** `73066479`, `d92f5f9c`, `38827548`, and the bug file above.
 
 **Status:** validated — mechanism shipped and verified by running it (0 verbs after the
 lean lane, all 8 after the default lane)
