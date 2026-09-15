@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 162
-entry_high_water_W: 140
+entry_high_water_W: 141
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -380,6 +380,7 @@ entry_high_water_W: 140
 | W-138 | 2026-09-15 | high | **A deferral rationale that names a CAUSE is checkable against what the code can OBSERVE — widen the cause, not the effort.** *"The trigger is a lock race, not reducible to a deterministic script"* scoped the failure to a cause `append_entry` never sees; it sees `tx.commit()` return `Err`. A **deferred foreign-key violation** is the one SQLite failure that surfaces at COMMIT rather than at the statement, so every statement — including the `fs::write` — succeeds and only the commit fails, with no timing | The named cause could not have worked here at all: `journal_mode = WAL` + `BEGIN IMMEDIATE` takes the write lock up front, so a competing writer blocks at BEGIN and never at COMMIT. The three live alternatives were a test that cannot fire, a `#[cfg(test)]`-only hook exercising a path the shipped binary lacks, or shipping untested — which the sibling fix did (`update.rs` still carries `NOT REACHED BY ANY UNIT TEST` at its call site). The widened cause produced a first RED showing the retry allocate `F-2` and write a SECOND section, then three production-path mutations each KILLED. The technique was **already in-tree** at `create.rs`'s `RAISE(ABORT)` orphan-file test, so the repo held the capability while the rationale asserted it did not. Recurrence of `R-95`/`R-92`, recorded as a denominator rather than a new law | validated |
 | W-139 | 2026-09-15 | med | **Run the positive control before believing a probe's zero — especially when the zero ALARMS.** The law is usually cited against a *reassuring* zero; a zero saying *your fix is missing* reads as a finding rather than as an instrument failure, so nothing about it prompts you to check the tool. Alarm reads as diligence | Probing the freshly rebuilt release binary for three strings unique to `85642b1b` returned **0/0/0** — which says the rebuild did not take, and sends you either to re-run `cargo rb` or to tell the operator that their own rebuild silently failed. The control (three strings that MUST be in any codescout binary) returned `0/0/0` **as well**, which is impossible, and the impossibility is the entire signal. With `-a`: control `2`, all three fix strings `1`. **Instrument fact:** `grep` here is **ugrep 7.8.4**, which on a binary without `-a` prints nothing and exits **1** — indistinguishable from "no match" at both stdout and exit status, where GNU grep would at least print `Binary file … matches`. Any freshness probe of a built artifact needs `-a` or `strings`. Stronger and string-free: `readlink /proc/<pid>/exe` returning the live path with no `(deleted)` suffix proves the running image IS the file on disk — identity rather than ordering | validated |
 | W-140 | 2026-09-15 | med | **An instrument's verdict has two consumers — the decision it feeds and the audience it reaches — and gating protects only the first.** I gated a `file-provenance.py` SHARED verdict on the tree (read the hunks; all mine) so it decided nothing, then PUBLISHED it as evidence to my operator and a peer. A published false attribution becomes another session's premise, which `29420e72` then hit from the other end. `f0b1a4c7` argued a porcelain-gated caller is structurally safe — true of decisions, silent on reporting — and withdrew it once the split was named: their five runs returned `UNKNOWN`, and a `SHARED` would have been published identically. OB candidate REFUSED same day by `f0b1a4c7`, on a population rather than an argument: two count failures, two sessions, two mechanisms, and BOTH had channels — mine unreached, theirs stale. Zero structural blindness across the pair, so `F-N`/`W-N` is the right home. Do not re-open without a case that fails `:1126`. | validated |
+| W-141 | 2026-09-15 | med | **Two bounds fixing one symptom guard each other's cases and neither's site — and the TDD red is the one configuration that cannot show it.** A two-part regex fix (`(?=\s)` verb boundary, `\n` in the operand tail) plus the bug file's own prescribed test pair: RED observed, GREEN after, 4 assertions. Mutating each bound **separately** — both **SURVIVED**, 129/0. Each bound independently prevents the composite failure the assertions describe, so the pair guards the **conjunction** and neither **site**; either could be silently reverted with the suite green. TDD cannot reach it, because the red is observed in the pre-fix state — the one configuration where BOTH are absent. | Would have shipped `b59a035d` with both sites unguarded, citing a green suite and an observed red as the evidence. Closed by one case per site, each shaped so the other bound cannot rescue it: a path standing *beside* the verb-shaped filename (no line end for `\n` to stop at) kills A; a **real** relocation followed by a `--`-bearing command (lookahead satisfied, irrelevant) kills B, asserting both directions since the unbounded tail *replaces* the relocation's own operands rather than merely adding the victim. Ask it whenever a fix makes **N > 1 changes addressing one symptom**. Denominator for `mutate once per guarded SITE`, not a new law — I had read it and wrote the conjunction-guarded pair anyway. | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -16124,6 +16125,67 @@ message.
 publish the confirmation*. Both this and `f0b1a4c7`'s five `UNKNOWN` runs are individually
 worthless and only mean something as a pair, which is the mechanism by which a denominator
 normally goes unrecorded.
+
+## W-141 — Two bounds fixing one symptom guard each other's cases and neither's site — and the TDD red is the one configuration that cannot show it
+
+**Valid:** dated 2026-09-15
+
+**Observed.** `76c83a43c2d1752f` prescribed a two-part fix to one regex: a `(?=\s)` verb
+boundary and an `\n` in the operand tail's negated class. It also prescribed the test pair —
+assert a read-only command naming a verb-shaped filename yields nothing, assert a real
+relocation still yields both operands. I wrote both halves, wrote that pair plus a
+cross-command case, watched them go RED before the fix and GREEN after. Four assertions, a
+textbook cycle.
+
+Then mutated each bound **separately** in an isolated copy. Both **SURVIVED**, 129/0 each.
+
+**Why, and it is not a weak test — it is a structural property of a two-bound fix.** Each
+bound *independently* prevents the composite failure the assertions describe: with `(?=\s)`
+alone the verb never matches inside the filename, so there is no tail to overrun; with `\n`
+alone the tail stops at the line end, so the overrun cannot reach a later `--`. The pair
+therefore guards the **conjunction** and neither **site**. Either bound could be silently
+reverted — by a refactor, a merge, a well-meaning simplification — with the whole suite green.
+
+**The part worth carrying: TDD structurally cannot surface this.** The red is observed in the
+*pre-fix* state, which is the one configuration where **both** bounds are absent — precisely
+the configuration that cannot distinguish them. "I watched it fail" is true, and is evidence
+about the conjunction only. The RED gives real assurance and it is assurance about the wrong
+proposition.
+
+**What closes it** is one case per site, each shaped so the *other* bound cannot rescue the
+failure:
+
+- isolating `(?=\s)` — one line, one command, a real path standing *beside* the verb-shaped
+  filename, so there is no line end for `\n` to stop at. Kills mutation A (2 assertions).
+- isolating `\n` — a **real** relocation, so the lookahead is satisfied and irrelevant,
+  followed by another command carrying `--`. Kills mutation B (3 assertions). Both directions
+  asserted here, because the unbounded tail does not merely *add* the victim, it **replaces**
+  the relocation's own operands with it.
+
+After: A KILLED, B KILLED, both-absent KILLED (9), control 129/0 before and after each run.
+
+**Counterfactual.** Without the per-site mutation I would have shipped `b59a035d` with both
+sites unguarded, and with a green 4-assertion suite and an observed red as the stated
+evidence — which is exactly how a fix's guard rots without anyone doing anything wrong. The
+predecessor bug file would also have kept its prescription, which I had copied, so the next
+reader inherits it.
+
+**Generalisation, offered narrowly.** Ask it whenever a fix has **N > 1 changes addressing
+one symptom**: *does each change have a case the others cannot satisfy?* That is
+`CLAUDE.md` § *Testing Discipline*'s `mutate once per guarded SITE, not once per feature`
+holding at N=2 in one expression rather than across N call sites — the form where "site" is
+easiest to read as "the fix" and hardest to see as two.
+
+**Denominator, not a new law.** Recorded per *when a re-derivation confirms, publish the
+confirmation*: the law was already in `CLAUDE.md`, I had read it, and I still wrote the
+conjunction-guarded pair first. Knowing the class prevented nothing; running the cheap
+mechanical check caught it — the same finding as `F-162`/`W-139`, third instance.
+
+**Rests on:** `docs/issues/archive/2026-09-15-file-provenance-reads-mv-inside-a-filename-and-attributes-a-write.md`
+(`76c83a43c2d1752f`) § *Tests added*, which carries the mutation table; fix `b59a035d`,
+patch-id `574120f8573a2f60aa00f6fd64d312d75b3bbbf7`; and `CLAUDE.md` § *Testing Discipline*.
+
+**Status:** validated
 
 ## Template for new entries
 
