@@ -279,7 +279,7 @@ impl Tool for RunCommand {
         // went. Attaching state here is what makes the supervisor's observation
         // reachable; without it the job record would be written and never read.
         //
-        // docs/issues/2026-09-13-background-command-loses-terminal-status.md
+        // docs/issues/archive/2026-09-13-background-command-loses-terminal-status.md
         let job_states = ctx.output_buffer.job_states_in(command);
         if !job_states.is_empty() {
             if let Ok(ref mut val) = result {

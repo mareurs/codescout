@@ -225,7 +225,7 @@ Shipped in one change, because each part makes the previous one non-vacuous:
 
 **Verification.** Gate green on all four lanes (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`), own test names read out of the default lane rather than the total. **Three mutations, each KILLED** in an isolated worktree: eviction predicate → FIFO (2 tests red), `status.code()` → `Some(0)` (red, `last seen: "exited 0"`), `job_states_in(command)` → `job_states_in("")` (red). Mutating the production path, not test inputs.
 
-**Not committed at time of writing.** Closes `7a17adf0a2766a96` and `7ca1aa2451dd57a8` and removes the pid hazard in `b7b85f7e2da1ba37` — none archived yet, since archiving needs the fix SHA and its stable patch-id. Scouting friction recorded as `architecture-boundary-session-log:F-2`; an instrument limitation found on the way as `a0dd1c43aeef41de`.
+**Committed 2026-09-15** in `f098069a` — patch-id `8658a129d49444e33a6fce955a2f8b498bb743d1`. Archived with it: `b9935bb5470a799c` (background command loses terminal status) and `52f03908f97a948a` (eviction unlinks a running job's log), both carrying a killed mutation; and `d44b0a9aa38738f5` (the raw-pid kill guard), archived on the weaker basis that its remedy was deletion, so no regression test is possible — its **Tests added** section names what would re-introduce it. Scouting friction recorded as `architecture-boundary-session-log:F-2`; an instrument limitation found on the way as `a0dd1c43aeef41de`.
 ## Bounded baseline and verdict — 2026-09-13
 
 **Status:** review evidence collected; recommendations below are proposals, not approved runtime changes.
@@ -262,7 +262,7 @@ Architecture-probe defects:
 
 Not an instrument defect:
 
-- [Background command loses terminal status](../issues/2026-09-13-background-command-loses-terminal-status.md) — `7a17adf0a2766a96`. A `run_command` defect, surfaced by the live workflow checks below.
+- [Background command loses terminal status](../issues/archive/2026-09-13-background-command-loses-terminal-status.md) — `b9935bb5470a799c`. A `run_command` defect, surfaced by the live workflow checks below. **Fixed and archived 2026-09-15** in `f098069a`.
 
 The last two probe defects are the pair that invalidated the earlier static
 totals, and both carry `cluster/addressing-without-an-escape-hatch` (`IC-6`) —
@@ -360,7 +360,7 @@ Raw calls, returned content and timings: `.codescout/measurements/architecture-b
 
 - In a disposable Rust fixture, symbols returned answer() = 41 and cargo test failed with actual 41 / expected 42. Missing-target edit returned a recovery hint; valid replacement returned success; cargo test then passed its one test. No project source was edited for this demonstration.
 - The missing-target call took **134,088 ms**; the following successful edit took **156 ms**. This is an observed outlier, **not** a measured steady-state latency or proven cold-LSP cause. Repetition with separated startup/miss costs is still owed before diagnosing it.
-- Background `exit 7` returned “Process running” after **5,183 ms**, without a terminal code. Reading its empty log returned the **reader's** exit code 0. An explicit-marker control exposed FIXTURE_EXIT=7 after **5,166 ms**, but the response still said running. Source inspection of `spawn_background_command` confirms Child is dropped and the message is unconditional. Filed as [background terminal status](../issues/2026-09-13-background-command-loses-terminal-status.md).
+- Background `exit 7` returned “Process running” after **5,183 ms**, without a terminal code. Reading its empty log returned the **reader's** exit code 0. An explicit-marker control exposed FIXTURE_EXIT=7 after **5,166 ms**, but the response still said running. Source inspection of `spawn_background_command` confirms Child is dropped and the message is unconditional. Filed as [background terminal status](../issues/archive/2026-09-13-background-command-loses-terminal-status.md).
 - A 300-line command stayed inline; a 3,000-line command produced a buffer handle. A targeted follow-up returned exactly lines 1500, 1501, 1502. The initial buffered text-content blocks measured **246 UTF-8 bytes**, the follow-up **54 bytes**. This characterizes successful disclosure, not a token-cost saving against a counterfactual model run.
 - Pinned Cargo.toml reads returned harness-contract-fixture for the temporary root and codescout for home. This verifies those pinned calls. No process-wide activation race was deliberately induced in the shared MCP.
 

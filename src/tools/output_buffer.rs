@@ -119,7 +119,7 @@ pub enum PendingAck {
 /// model had nowhere to record an outcome, so the response asserted a running
 /// state it had never checked.
 ///
-/// docs/issues/2026-09-13-background-command-loses-terminal-status.md
+/// docs/issues/archive/2026-09-13-background-command-loses-terminal-status.md
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobState {
     /// Spawned; the supervisor has not observed it exit.
@@ -674,7 +674,7 @@ impl OutputBuffer {
     /// the owning process and the OS tempdir to deal with. Losing addressability
     /// is recoverable; unlinking a live log is not.
     ///
-    /// docs/issues/2026-09-15-background-log-eviction-deletes-a-running-jobs-log.md
+    /// docs/issues/archive/2026-09-15-background-log-eviction-deletes-a-running-jobs-log.md
     pub fn store_background(&self, job: BackgroundJob) -> String {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.counter = inner.counter.wrapping_add(1);
@@ -1971,7 +1971,7 @@ mod tests {
         // When every retained job is still running there is no safe file to
         // delete. The handle may go; the file may not — the process still holds
         // it open and unlinking strands its output.
-        // docs/issues/2026-09-15-background-log-eviction-deletes-a-running-jobs-log.md
+        // docs/issues/archive/2026-09-15-background-log-eviction-deletes-a-running-jobs-log.md
         let buf = OutputBuffer::new(10);
         let dir = tempfile::tempdir().unwrap();
 

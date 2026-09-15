@@ -1,7 +1,7 @@
 ---
-id: '7a17adf0a2766a96'
+id: b9935bb5470a799c
 kind: bug
-status: open
+status: fixed
 title: Background command completion is not observable through its log handle
 owners:
 - marius
@@ -9,6 +9,7 @@ tags:
 - agent-harness
 - run-command
 - cluster/unclassified
+closed: 2026-09-15
 opened: 2026-09-13
 severity: medium
 ---
@@ -45,12 +46,19 @@ Missing terminal observation rather than command success: confirmed by explicit 
 
 ## Fix
 
-Not implemented. Candidate: retain job lifecycle state and expose terminal result/cancellation through a job handle, independent of log buffering. Even before that boundary, do not assert a running state that was not observed.
+**FIXED 2026-09-15** in `f098069a` — patch-id `8658a129d49444e33a6fce955a2f8b498bb743d1`.
 
+Shipped as slice 1 of `docs/trackers/architecture-boundary-measurement.md`. The candidate in the original filing was right about the shape and understated the cause: the exit status is not merely unrecorded, it is **destroyed**. `drop(child)` hands the process to tokio's orphan reaper, and there is no other channel the status exists on — so this could never have been a smaller fix than a job record.
+
+- `OutputBuffer::background_jobs` holds `BackgroundJob { log_path, command, state }` instead of a bare `PathBuf`. `JobState` is `Running | Exited { code } | Failed`, and `Exited { code: None }` reports a signal death as absent rather than as `0`.
+- A supervisor task owns the `Child`, awaits `wait()`, and writes the observed state. It outlives the tool call deliberately, so cancelling the call does not discard the outcome.
+- The status reaches the caller through the **response envelope** (`OutputBuffer::job_states_in` attaches a `jobs` array to any command naming the handle). It cannot travel the `@bg_` channel: that resolves by textual substitution to a filename, which is exactly why a `tail @bg_x` returned the reader's exit code.
+- The unconditional `Process running.` string is gone, and so is the 5s warm-up. The call returns at spawn time, which makes the running state true **by construction** at emit time rather than a claim made after a wait.
 ## Tests added
 
-Recorded live characterization and control; no production regression or fix yet.
+`a_failed_background_job_reports_its_exit_code_through_the_envelope` and `the_readers_exit_code_and_the_jobs_outcome_are_reported_separately` (`src/tools/run_command/tests.rs`). The second exists because the reader's exit code and the job's outcome are different numbers that must not be conflated — `cat` succeeds while the job it reads failed, the exact pair that made this defect invisible.
 
+**Both confirmed by an observed RED, not by existing.** Mutating the supervisor's `status.code()` to `Some(0)` killed the first with `last seen: "exited 0"` — the defect verbatim. Mutating `job_states_in(command)` to `job_states_in("")` killed the second. Run in an isolated worktree, so no red was published to the shared tree. Gate green on all four lanes (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`).
 ## Workarounds
 
 Wrap important background commands to print explicit exit markers, and distinguish wrapper/read exit codes from each underlying command. This does not provide general cancellation or lifecycle state.

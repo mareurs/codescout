@@ -1,7 +1,7 @@
 ---
-id: b7b85f7e2da1ba37
+id: d44b0a9aa38738f5
 kind: bug
-status: open
+status: fixed
 title: BackgroundKillGuard holds a raw pid across drop(child), and its SAFETY comment states the wrong worst case
 owners:
 - marius
@@ -9,6 +9,7 @@ tags:
 - run-command
 - cancellation
 - cluster/addressing-without-an-escape-hatch
+closed: 2026-09-15
 opened: 2026-09-15
 severity: low
 ---
@@ -74,16 +75,20 @@ None — found by reading during the architecture-boundary slice-1 design review
 
 ## Fix
 
-Not implemented. Retaining the `Child` and killing through it (rather than through a
-bare pid) removes the ambiguity entirely, and is what the slice-1 supervisor-task
-proposal requires for the exit status anyway — so this is likely fixed as a side
-effect rather than on its own. If the guard stays pid-based, the SAFETY comment must
-at minimum name the reuse case instead of claiming a no-op.
+**FIXED 2026-09-15** in `f098069a` — patch-id `8658a129d49444e33a6fce955a2f8b498bb743d1`.
 
+Fixed by **deletion**, and as a side effect rather than deliberately. Slice 1 needed the `Child` retained to get at the exit status at all, so a supervisor task now owns it for the job's whole life. With nothing dropped there is no detached interval, no 5s warm-up to cancel inside, and no reason to hold a bare pid — `BackgroundKillGuard` and its `Drop` impl are gone entirely, along with the SAFETY comment whose worst case was wrong.
+
+This is the third remedy available to `IC-6` after *escape* and *disambiguator*: **stop using the ambiguous address.**
+
+**Behavior change this carries, recorded because it is a real loss and not only a removal:** cancelling a `run_in_background` call within its first 5 seconds no longer SIGKILLs the child. Backgrounding now means the job runs. That is defensible — it is what the caller asked for — but it is a change, not a no-op.
 ## Tests added
 
-None.
+**None, and that is a gap rather than an oversight — read it before archiving.**
 
+The remedy was deleting the code, so there is nothing left to assert against and no mutation that could produce an observed RED. This file is therefore archived on a weaker basis than its siblings, which carry killed mutations: the defect is gone because its implementation is gone, verified by reading the diff, not by a guard.
+
+**What would re-introduce it**, since no test will say so: any future change that kills or signals a background child by a pid retained across the point where the `Child` handle is released. If that is ever added back, the disambiguator must come with it — kill through the `Child`, or through the process group (`shell_command_configured` already puts the child in its own group via `process_group(0)` on unix), never a bare recycled pid.
 ## Workarounds
 
 None needed at observed frequency.

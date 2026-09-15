@@ -69,7 +69,7 @@ fn resolve_work_dir(root: &Path, cwd_param: Option<&str>) -> anyhow::Result<std:
 /// by construction at emit time; the outcome arrives later, through the envelope
 /// of any command that names the handle (`OutputBuffer::job_states_in`).
 ///
-/// docs/issues/2026-09-13-background-command-loses-terminal-status.md
+/// docs/issues/archive/2026-09-13-background-command-loses-terminal-status.md
 /// docs/trackers/architecture-boundary-measurement.md — slice 1
 async fn spawn_background_command(
     resolved_command: &str,

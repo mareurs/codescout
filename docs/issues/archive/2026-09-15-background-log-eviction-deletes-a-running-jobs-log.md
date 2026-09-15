@@ -1,7 +1,7 @@
 ---
-id: '7ca1aa2451dd57a8'
+id: 52f03908f97a948a
 kind: bug
-status: open
+status: fixed
 title: Background job log eviction deletes the log of a job that is still running
 owners:
 - marius
@@ -9,6 +9,7 @@ tags:
 - run-command
 - output-buffer
 - cluster/truncated-window-ordered-by-the-wrong-key
+closed: 2026-09-15
 opened: 2026-09-15
 severity: medium
 ---
@@ -77,18 +78,20 @@ by a failing call.
 
 ## Fix
 
-Not implemented. Subsumed by the job-record proposal for slice 1 of
-`docs/trackers/architecture-boundary-measurement.md` (`c61d542269b5c6de`): once a job
-carries terminal state, eviction can prefer terminated jobs and refuse to unlink a
-live one. A narrower standalone fix is to skip `remove_file` when the job has not been
-observed to exit — but with the current `PathBuf` model there is nothing to observe.
+**FIXED 2026-09-15** in `f098069a` — patch-id `8658a129d49444e33a6fce955a2f8b498bb743d1`.
 
+Fixed as predicted, by the type rather than at the eviction branch: once `background_jobs` holds a `BackgroundJob` carrying `JobState`, eviction has a liveness predicate to consult, which it previously could not have had even in principle.
+
+`store_background` now takes the oldest **terminated** job and unlinks its log. When every retained job is still running there is no safe file to delete, so it drops the oldest **handle** and leaves the log on disk for the owning process and the OS tempdir. Losing addressability is recoverable; unlinking a live log is not.
+
+**Residue, stated rather than silently accepted:** a live job whose handle was evicted leaks its log file, because the supervisor's `set_job_state` no-ops on a handle that is gone and nothing then owns cleanup. That needs >20 concurrent live background jobs to reach, and it is strictly better than the corruption it replaces.
 ## Tests added
 
-None yet. A regression test can sit entirely on `OutputBuffer` with no process: store
-`max_pending + 1` background paths against real temp files and assert the first is
-still present when its job is marked live.
+`eviction_never_unlinks_a_live_jobs_log` and `eviction_prefers_a_terminated_job_over_an_older_running_one` (`src/tools/output_buffer.rs`).
 
+**Confirmed by an observed RED.** Mutating the liveness predicate back to FIFO (`is_none_or(|_| true)`) killed both — `a LIVE job's log must survive eviction of its handle` and `the terminated job should have been evicted`. Run in an isolated worktree. Gate green on all four lanes.
+
+The fixture helper carries an annotation saying why its state is `Exited`: a `Running` default would route every unrelated `@bg_` test through the live-job eviction branch and mask a regression there.
 ## Workarounds
 
 Keep fewer than 20 background jobs alive per session, or redirect important background
@@ -97,5 +100,6 @@ output to a path you chose yourself rather than relying on the managed log.
 ## Resume
 
 Decide alongside slice-1 retention policy. Related: the sibling `@bg_` defect
-`docs/issues/2026-09-13-background-command-loses-terminal-status.md`
-(`7a17adf0a2766a96`) — same missing job record, different visible failure.
+`docs/issues/archive/2026-09-13-background-command-loses-terminal-status.md`
+(`b9935bb5470a799c`) — same missing job record, different visible failure, fixed in
+the same commit.

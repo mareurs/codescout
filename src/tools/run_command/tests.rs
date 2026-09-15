@@ -1676,7 +1676,7 @@ async fn run_in_background_returns_bg_handle() {
 /// through the envelope, because the `@bg_` substitution channel expands to a
 /// filename and cannot carry a status.
 ///
-/// docs/issues/2026-09-13-background-command-loses-terminal-status.md
+/// docs/issues/archive/2026-09-13-background-command-loses-terminal-status.md
 #[tokio::test]
 async fn a_failed_background_job_reports_its_exit_code_through_the_envelope() {
     let (_dir, ctx) = project_ctx().await;
