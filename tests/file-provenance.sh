@@ -243,6 +243,62 @@ out="$(run --all src/readonly.rs)"
 has "git log/diff are not writes" "$out" "UNKNOWN"
 hasnt "and name no author" "$out" "$PEER"
 
+# ... and they must not fire on a FILENAME that merely CONTAINS one. src/librarian/tools/mv.rs
+# is a real file here, and a read-only command naming it is by far the commonest way it is
+# ever mentioned. Observed 2026-09-15: the attribution hook named a peer as the author of
+# that file off two `git diff --stat` calls, while it held one hunk written entirely by the
+# reader -- and every command run to ask "did I write mv.rs?" added another such record, so
+# the wrong answer gained confidence with investigation.
+#
+# TWO commands in one body is load-bearing, not padding. ONE read yields the harmless
+# fragment `.rs`, which resolves to no file; it takes a SECOND `--` for the first verb's
+# operand tail to run past the line end and honour it. A single-command fixture passes
+# against the unfixed tool and would have guarded nothing.
+#
+# Both assertions below are ABSENCE assertions, monotone under removal -- deleting relocator
+# support entirely would satisfy them. What makes them a discrimination is the positive mv/cp
+# block ~20 lines above, which runs against the same $B session: if you remove that, these
+# stop being evidence of anything.
+bash_cmd "$B" 'cargo fmt --check -- src/mv.rs
+git diff --stat -- src/mv.rs'
+out="$(run --all src/mv.rs)"
+has "a verb inside a FILENAME is not a relocation" "$out" "UNKNOWN"
+hasnt "and the mentioned file names no author" "$out" "$PEER"
+
+# The same tail overrun aimed elsewhere: the lifted path need not be the one that triggered
+# the match. Neither command here can write anything, and the victim is a THIRD file named
+# only by the second of them.
+bash_cmd "$B" 'cargo fmt --check -- src/mv.rs
+git diff --stat -- src/lifted.rs'
+out="$(run --all src/lifted.rs)"
+has "a later command's operand is not this one's destination" "$out" "UNKNOWN"
+hasnt "and the lifted path names no author" "$out" "$PEER"
+
+# The two cases above guard the CONJUNCTION of the two bounds in RELOCATORS and neither
+# bound alone: measured 2026-09-15, restoring `\b` with the `\n` bound in place SURVIVED
+# them, and so did dropping the `\n` bound with `(?=\s)` in place. Each needs its own
+# case, because each is its own site.
+#
+# Site 1, the `(?=\s)` lookahead: one line, one command, and a SECOND path after the
+# verb-shaped filename, so there is no line end for the other bound to rescue. `\b` reads
+# `mv.rs` as a relocation and hands back `.rs` plus the innocent sibling.
+bash_cmd "$B" 'git diff --stat -- src/mv.rs src/sibling.rs'
+out="$(run --all src/sibling.rs)"
+has "a path beside a verb-shaped filename is not its destination" "$out" "UNKNOWN"
+hasnt "and the sibling names no author" "$out" "$PEER"
+
+# Site 2, the `\n` in the negated class: a REAL relocation, so the lookahead is satisfied
+# and cannot help. Unbounded, the tail runs into the next command and _operands() honours
+# ITS `--`. Note both directions are asserted -- the unbounded form does not merely ADD the
+# victim, it REPLACES the mv's own operands with it, so the second assertion fails too and
+# a false negative cannot hide behind a passing false positive.
+bash_cmd "$B" 'mv src/relocated_from.txt src/relocated_to.txt
+git diff --stat -- src/victim.rs'
+out="$(run --all src/victim.rs)"
+has "a real mv does not annex the next command's operand" "$out" "UNKNOWN"
+hasnt "and the next command's path names no author" "$out" "$PEER"
+has "and the mv's own destination is still attributed" "$(run --all src/relocated_to.txt)" "$PEER"
+
 echo
 echo "== artifact() writes are addressed by ID, and must still resolve to a path =="
 # Found by DOGFOODING: three files this session had just edited reported UNKNOWN, because

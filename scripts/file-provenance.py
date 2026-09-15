@@ -196,8 +196,19 @@ BASH_WRITE_PATTERNS = [
 # Relocating verbs need operand POSITION, not a single capture: `cp a b` writes only b,
 # while `mv a b` writes b AND empties a. A pattern that yielded every operand would make
 # an author of everyone who ever copied FROM a file.
+#
+# Two bounds carry the weight, and both are about MENTION rather than position.
+# `(?=\s)`, not `\b`: a word boundary holds between `v` and `.`, so `\bmv\b` matches
+# inside the filename `mv.rs` -- and this repo HAS src/librarian/tools/mv.rs, so every
+# read-only command naming it was recorded as a write of something. A real invocation
+# always has whitespace before its operands, so nothing legitimate is lost.
+# `\n` in the negated class: the tail must stop at the end of ITS OWN command. Unbounded,
+# it runs into the next line and _operands() honours a `--` belonging to a different
+# command, lifting that command's path. That is how one read yields the harmless fragment
+# `.rs` while two reads yield a real file -- the second `--` is what completes the defect.
+# Measured 2026-09-15; guarded in tests/file-provenance.sh.
 RELOCATORS = re.compile(
-    r"\b(git\s+mv|git\s+checkout|git\s+restore|mv|cp|install)\b([^;&|]*)")
+    r"\b(git\s+mv|git\s+checkout|git\s+restore|mv|cp|install)(?=\s)([^;&|\n]*)")
 
 
 def _operands(rest: str) -> list[str]:
