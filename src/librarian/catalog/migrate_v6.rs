@@ -473,10 +473,24 @@ mod tests {
         // converting a rollback-journal database to WAL starts it with an EMPTY `-wal`
         // — there is nothing for a checkpoint to flush. It is kept as a guarantee that
         // the row below is the only thing in the WAL, not as a condition of the test.
-        // Note this differs from the sibling fixture in `indexer.rs`, which opens
-        // through `Catalog` and writes embeddings first, so its WAL is non-empty by the
-        // time it checkpoints; that comment's claim is about a different fixture and is
-        // not re-derived here.
+        // The sibling fixture in `indexer.rs` reaches the same inertness by the OPPOSITE
+        // route, since `Catalog::open` sets WAL before anything is written, so every row
+        // it commits is already in the sidecar. Neither fixture's checkpoint creates the
+        // condition: here the WAL never starts, there it never stops. Measured by
+        // f5f48b42-6d84-482e-84a4-8eaebb0ce60f (four runs with a control, `266e6136`)
+        // after an earlier draft of THIS comment asserted a mechanism that holds in
+        // neither — worse than crediting an inert line, because it hands the next reader
+        // a false model to reason from when they write a third fixture.
+        //
+        // One difference that is real and is the reason to keep the checkpoint THERE:
+        // it changes the SHAPE of the failure, not whether there is one. Modelled on the
+        // same bytes — with the checkpoint the copy is 12,288 bytes and the query returns
+        // 0, so the assertion fires; without it the copy is 4,096 bytes with no schema at
+        // all and the query raises `no such table`, so the test reds on an unwrap
+        // instead. Inert for the VERDICT, load-bearing for the DIAGNOSTIC. Here that
+        // distinction does not arise: `seed_v3_db` creates the table before WAL is on, so
+        // the schema is in the `.db` either way and this test always reds on its
+        // assertion.
         let other = rusqlite::Connection::open(&db_path).unwrap();
         other.execute_batch("PRAGMA journal_mode = WAL;").unwrap();
         other
