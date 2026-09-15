@@ -301,11 +301,31 @@ unswept corpus reported as clean.
 - **Move before you write the citation, not after.** A Members line, tracker row or
   cross-reference written after the move already names the new path, so a slug-only
   verification has nothing to hide — the same zero is honest either way.
-- **`doc(action="move")`'s `inbound_path_citations` field has the same blind spot.** It matches
-  the path form only, so a bare-slug citation — every `**Members:**` line in
-  `docs/trackers/issue-clusters/` is one — is invisible to it and reports as `[]`. Read that as
-  "no path-form citations found," not "no citations exist," and grep the slug yourself, before
-  the move, to catch those.
+- **`doc(action="move")`'s `inbound_path_citations` sees BOTH forms, and tells you which is
+  which.** It once matched the path form only, so a bare-slug citation — every `**Members:**`
+  line in `docs/trackers/issue-clusters/` is one — reported as `[]`; that was fixed in
+  `c57e9f7272b36f3f`, and this bullet said otherwise until 2026-09-15. Do not grep the slug
+  yourself to cover a blind spot that is closed.
+
+  What the response now separates, because the two forms take **opposite** remedies:
+
+  | field | meaning |
+  |---|---|
+  | `inbound_path_citations` | the union, capped at 20, `null` if the scan could not run |
+  | `inbound_citations_cleared` | the subset of those same entries that **cannot** cite the old path |
+  | `citation_stem_preserved` | `false` ⇒ nothing is cleared, and why |
+
+  **`cleared` is sound; its complement is not a verdict.** An entry is cleared when the file
+  never mentions the old *dated* stem — and since every citation of `docs/issues/<dated>.md`
+  contains that substring, such a file cannot hold one. Nothing is owed; editing it would
+  convert a slug citation into a path one. An entry **not** cleared may hold a dead path
+  citation *or* a bare dated stem that survives untouched, because a move changes only the
+  directory. Look at those; the scan deliberately over-reports and will not guess for you.
+
+  **`citation_stem_preserved: false` clears nothing, deliberately.** A slug citation survives
+  a move only because the slug does, so a move that *renames* the stem breaks slug and path
+  citations alike. The flag is why the list is empty, which is a different fact from "checked
+  and found none".
 
 **Cite where the file IS, never where the archive flow will put it.** The sweep above
 repairs citations that *were* correct when written; it can never reach one that was wrong

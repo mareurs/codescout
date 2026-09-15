@@ -75,6 +75,60 @@ fn dateless_slug(stem: &str) -> Option<&str> {
     }
 }
 
+/// Every file citing `old_stem`, each paired with whether it mentions the **dated** stem.
+///
+/// THE BOOLEAN IS AN OBSERVATION, NOT A VERDICT, and the distinction is the whole design.
+/// `files_mentioning` deliberately over-reports — its doc comment says so — so this cannot
+/// honestly answer "must this be re-pointed?". What it can answer is "did the dated stem
+/// appear in this file", and that turns out to be sound in exactly one direction:
+///
+/// * `false` — the file does NOT mention `2026-09-14-foo`. Every citation of the old path
+///   (`docs/issues/2026-09-14-foo.md`) contains that substring, so the file **cannot** hold
+///   one. Nothing is owed. This direction carries a claim.
+/// * `true` — the file mentions it, which may be the dead path OR a bare dated stem that
+///   survives the move untouched, since a move changes only the DIRECTORY. Ambiguous, and
+///   deliberately left so: the caller looks.
+///
+/// That asymmetry is the point. The population this clears is not hypothetical — every
+/// `**Members:**` line under `docs/trackers/issue-clusters/` cites by the dateless slug as
+/// house style, and on 2026-09-15 seven consecutive archive moves each reported one such
+/// entry in a field named for paths, each costing a hand-run grep to discover that nothing
+/// was owed. Worse than the make-work: a caller who trusts the field name and EDITS an
+/// `IC-N` file converts a slug citation into a path one, which is the exact form
+/// `docs/issues/archive/2026-09-13-inbound-path-citations-cannot-see-a-slug-form-citation.md`
+/// records the scan as having been blind to.
+///
+/// **Both scans are run and merged exactly as before**; this only stops discarding which one
+/// matched. No extra `git` invocation, no match text, no second cap — the information was
+/// already computed and thrown away at `extend`/`dedup`.
+///
+/// `None` when either scan could not run, matching the caller's existing
+/// `null`-means-the-scan-could-not-run convention rather than reporting half a result.
+fn citations_with_dated_flag(
+    root: &std::path::Path,
+    old_stem: &str,
+    exclude: &str,
+) -> Option<Vec<(String, bool)>> {
+    let dated = files_mentioning(root, old_stem, exclude)?;
+    let dated_set: std::collections::HashSet<String> = dated.iter().cloned().collect();
+
+    let mut all = dated;
+    if let Some(slug) = dateless_slug(old_stem) {
+        all.extend(files_mentioning(root, slug, exclude)?);
+        all.sort();
+        all.dedup();
+    }
+
+    Some(
+        all.into_iter()
+            .map(|p| {
+                let dated = dated_set.contains(&p);
+                (p, dated)
+            })
+            .collect(),
+    )
+}
+
 /// How many citing files to name before switching to a count alone.
 const CITATION_SAMPLE: usize = 20;
 
@@ -281,18 +335,24 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // (`dateless_slug`'s doc comment says why: issue-clusters Members lines cite by the
     // dateless form on purpose). Either scan failing to run makes the whole result `None`
     // rather than silently reporting only the half that succeeded.
-    let citing_files = old_full
+    let citing = old_full
         .file_stem()
         .and_then(|s| s.to_str())
-        .and_then(|stem| {
-            let mut found = files_mentioning(&root_path, stem, &a.new_rel_path)?;
-            if let Some(slug) = dateless_slug(stem) {
-                found.extend(files_mentioning(&root_path, slug, &a.new_rel_path)?);
-                found.sort();
-                found.dedup();
-            }
-            Some(found)
-        });
+        .and_then(|stem| citations_with_dated_flag(&root_path, stem, &a.new_rel_path));
+    let citing_files: Option<Vec<String>> = citing
+        .as_ref()
+        .map(|v| v.iter().map(|(p, _)| p.clone()).collect());
+
+    // Whether this move keeps the artifact's file STEM, which decides whether anything can
+    // be cleared at all. Found by naming the claim rather than by reading more code: a
+    // dateless-slug citation is untouched by a move only because the slug itself survives,
+    // and `new_rel_path` is arbitrary — a move that RENAMES the stem breaks slug citations
+    // exactly as hard as path ones. So when the stem changes, nothing is cleared and the
+    // caller is told why rather than shown an empty list to interpret.
+    let stem_preserved = old_full.file_stem().and_then(|s| s.to_str())
+        == std::path::Path::new(&a.new_rel_path)
+            .file_stem()
+            .and_then(|s| s.to_str());
 
     // THE ID HALF OF THE SAME OBLIGATION, and it was missing for as long as the path half
     // existed. `previous_id` and `id_changed` are reported three fields down and the tool
@@ -384,6 +444,37 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // complete population is its own defect class. The count is what a caller sizes the
         // commit from; the sample is only what they start with.
         "inbound_path_citation_count": citing_files.as_ref().map(|f| f.len()),
+        // The subset of the SAME CAPPED ENTRIES above that cannot cite the old path, because
+        // they never mention its dated stem. Projected from one capped vector rather than
+        // scanned again, so the two lists correspond by construction — two independently
+        // `.take(CITATION_SAMPLE)`-ed samples could not be subtracted from one another, which
+        // is `IC-13` (a capped result presented as complete) built into the seam.
+        //
+        // Named for what it CLAIMS, and the claim is sound in this direction only: a file
+        // with no mention of `2026-09-14-foo` cannot hold a citation of
+        // `docs/issues/2026-09-14-foo.md`. The complement is deliberately NOT published as
+        // "needs re-pointing" — a file that does mention the dated stem may be citing a bare
+        // stem that survives the move, and the over-reporting scan cannot tell. Everything
+        // not listed here is "look at it", which is what the caller was already doing to all
+        // of them.
+        //
+        // EMPTY WHEN THE STEM CHANGED, and the sibling flag is what says so: slug citations
+        // survive a move only because the slug does, so a rename clears nothing. An empty
+        // list on its own would read as "we checked and found none", which is a different
+        // fact from "we could not clear anything here".
+        "inbound_citations_cleared": citing.as_ref().map(|v| {
+            if !stem_preserved {
+                return Vec::new();
+            }
+            v.iter()
+                .take(CITATION_SAMPLE)
+                .filter(|(_, dated)| !*dated)
+                .map(|(p, _)| p.clone())
+                .collect::<Vec<_>>()
+        }),
+        // Carried BESIDE `inbound_citations_cleared` because the two only disambiguate as a
+        // pair — the same reason `vectors_refile_error` sits beside `vectors_refiled`.
+        "citation_stem_preserved": stem_preserved,
         // Same `null`-means-the-scan-could-not-run convention as its path twin above, and
         // the same cap. A caller reads these as a pair: paths become the new path, ids
         // become `id` from this very response.
@@ -926,6 +1017,288 @@ mod tests {
             listed.iter().any(|p| p.ends_with("ic-example.md")),
             "a dateless-slug citation must be found: {listed:?}"
         );
+    }
+    /// Fixture for the four `inbound_citations_cleared` cases below: a dated-stem artifact in a
+    /// real git repo, ready for citers to be written around it. Returns the tempdir and ctx.
+    ///
+    /// Factored because four tests need the identical seven-step setup and a divergence between
+    /// any two of them would be invisible — fixture construction only; every assertion stays in
+    /// the test that makes it.
+    #[cfg(test)]
+    async fn cleared_fixture() -> (tempfile::TempDir, super::ToolContext) {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let row = ArtifactRow {
+            id: "aabbccdd11223399".into(),
+            abs_path: tmp.path().join("docs/issues/2026-09-13-example-bug.md"),
+            kind: "bug".into(),
+            status: "open".into(),
+            title: Some("Example Bug".into()),
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: None,
+            created_at: 0,
+            updated_at: 0,
+            file_mtime: 0,
+            file_sha256: String::new(),
+            confidence: 1.0,
+        };
+        artifact::upsert(&cat, &row).unwrap();
+
+        let src = tmp.path().join("docs/issues/2026-09-13-example-bug.md");
+        std::fs::create_dir_all(src.parent().unwrap()).unwrap();
+        std::fs::write(
+            &src,
+            "---\nid: aabbccdd11223399\nkind: bug\n---\n# Example Bug\n",
+        )
+        .unwrap();
+
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "test-repo".into(),
+                path: tmp.path().to_path_buf(),
+            })
+            .build();
+
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(tmp.path())
+                .arg("init")
+                .output()
+                .is_ok_and(|o| o.status.success()),
+            "fixture needs a git repo for the scan to run at all"
+        );
+
+        (tmp, ctx)
+    }
+
+    #[cfg(test)]
+    fn write_citer(tmp: &tempfile::TempDir, rel: &str, body: &str) {
+        let p = tmp.path().join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, body).unwrap();
+    }
+
+    #[cfg(test)]
+    fn names(v: &serde_json::Value, key: &str) -> Vec<String> {
+        v[key]
+            .as_array()
+            .unwrap_or_else(|| panic!("{key} must be present rather than null"))
+            .iter()
+            .map(|x| x.as_str().unwrap_or_default().to_string())
+            .collect()
+    }
+
+    /// THE CORE DISCRIMINATION, and the reason this field exists.
+    ///
+    /// Two citers, identical in every way the old field could see: both are markdown, both are
+    /// reported in `inbound_path_citations`, and both were indistinguishable to a caller who
+    /// had to re-run the grep per entry to tell them apart. They take OPPOSITE remedies — the
+    /// path citation is dead and must be re-pointed; editing the slug citation would convert an
+    /// `IC-N` Members line into the path form that the scan was once blind to.
+    ///
+    /// NON-VACUOUS BY CONSTRUCTION: asserts a present entry AND an absent one, so a `cleared`
+    /// that returned everything and a `cleared` that returned nothing both fail. A test that
+    /// only checked the slug file was listed would pass against `cleared == all`.
+    #[tokio::test]
+    async fn a_slug_only_citation_is_cleared_and_a_path_citation_is_not() {
+        let (tmp, ctx) = cleared_fixture().await;
+
+        // Cites the DATELESS slug only — the house form of every issue-clusters Members line.
+        write_citer(
+            &tmp,
+            "docs/trackers/issue-clusters/ic-example.md",
+            "**Members:** example-bug\n",
+        );
+        // Cites the full OLD PATH — dead the instant the move lands.
+        write_citer(
+            &tmp,
+            "src/thing.rs",
+            "// BUG docs/issues/2026-09-13-example-bug.md\n",
+        );
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223399",
+                "new_rel_path": "docs/issues/archive/2026-09-13-example-bug.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let listed = names(&result, "inbound_path_citations");
+        let cleared = names(&result, "inbound_citations_cleared");
+
+        assert!(
+            listed.iter().any(|p| p.ends_with("ic-example.md"))
+                && listed.iter().any(|p| p.ends_with("thing.rs")),
+            "both citers must still appear in the union, which is unchanged: {listed:?}"
+        );
+        assert!(
+            cleared.iter().any(|p| p.ends_with("ic-example.md")),
+            "a slug-only citer cannot hold a path citation, so it must be cleared: {cleared:?}"
+        );
+        assert!(
+            !cleared.iter().any(|p| p.ends_with("thing.rs")),
+            "a citer of the old PATH must never be cleared: {cleared:?}"
+        );
+        assert_eq!(
+            result["citation_stem_preserved"], true,
+            "this move keeps the stem, which is what makes clearing sound at all"
+        );
+    }
+
+    /// A file citing BOTH forms is not cleared — the conservative direction.
+    ///
+    /// `dedup()` collapses a file that matched both scans into one entry, so the flag has to be
+    /// a property of the SET MEMBERSHIP rather than of the last scan to touch it. Build this
+    /// wrong (`dated` overwritten by the dateless pass) and the file reads as cleared while
+    /// holding a dead path citation, which is the one outcome worse than the original defect:
+    /// it tells the caller to skip a file that genuinely breaks.
+    #[tokio::test]
+    async fn a_file_citing_both_forms_is_not_cleared() {
+        let (tmp, ctx) = cleared_fixture().await;
+
+        write_citer(
+            &tmp,
+            "docs/trackers/issue-clusters/ic-both.md",
+            "**Members:** example-bug\n\nSee docs/issues/2026-09-13-example-bug.md for the full account.\n",
+        );
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223399",
+                "new_rel_path": "docs/issues/archive/2026-09-13-example-bug.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let listed = names(&result, "inbound_path_citations");
+        let cleared = names(&result, "inbound_citations_cleared");
+
+        assert!(
+            listed.iter().any(|p| p.ends_with("ic-both.md")),
+            "the citer must be in the union: {listed:?}"
+        );
+        assert!(
+            !cleared.iter().any(|p| p.ends_with("ic-both.md")),
+            "a file holding BOTH forms holds a dead path citation and must not be cleared: {cleared:?}"
+        );
+    }
+
+    /// A move that RENAMES the stem clears nothing, and says why.
+    ///
+    /// Found by naming the claim rather than by reading code: "a slug citation is unaffected by
+    /// this move" is sound only because the slug survives it. `new_rel_path` is arbitrary, so a
+    /// move that changes the stem breaks slug citations exactly as hard as path ones. Without
+    /// this branch the field would clear an `IC-N` Members line that a rename had just killed —
+    /// a confident wrong answer in the direction that loses data.
+    ///
+    /// The boolean is asserted beside the empty list on purpose: an empty list alone reads as
+    /// "checked, found none", which is a different fact from "could clear nothing here".
+    #[tokio::test]
+    async fn a_move_that_renames_the_stem_clears_nothing_and_says_so() {
+        let (tmp, ctx) = cleared_fixture().await;
+
+        write_citer(
+            &tmp,
+            "docs/trackers/issue-clusters/ic-example.md",
+            "**Members:** example-bug\n",
+        );
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223399",
+                "new_rel_path": "docs/issues/archive/2026-09-13-renamed-bug.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result["citation_stem_preserved"], false,
+            "the stem changed, and the flag is the only surface saying so"
+        );
+        assert!(
+            names(&result, "inbound_citations_cleared").is_empty(),
+            "a rename kills slug citations too, so nothing may be cleared: {:?}",
+            result["inbound_citations_cleared"]
+        );
+        assert!(
+            names(&result, "inbound_path_citations")
+                .iter()
+                .any(|p| p.ends_with("ic-example.md")),
+            "the citer is still reported as work — only the CLEARING is withheld"
+        );
+    }
+
+    /// `inbound_citations_cleared` is a SUBSET of the capped sample beside it.
+    ///
+    /// The two lists are projections of one capped vector precisely so a caller can subtract
+    /// them. Two independently `.take(CITATION_SAMPLE)`-ed scans would produce samples that do
+    /// not correspond — a cleared path absent from the sample, or worse a sample entry the
+    /// caller cannot classify — which is `IC-13` (a capped result presented as complete) built
+    /// into the seam rather than merely risked.
+    ///
+    /// Asserted as a property over whatever the scan returns rather than against a fixed list,
+    /// so it keeps holding when the fixture grows.
+    #[tokio::test]
+    async fn the_cleared_list_is_a_subset_of_the_sample_it_is_read_beside() {
+        let (tmp, ctx) = cleared_fixture().await;
+
+        // TWENTY-FIVE, and the number is load-bearing: `CITATION_SAMPLE` is 20, so a fixture
+        // under it cannot express the failure this test names. With 25 slug-only citers the
+        // sample holds 20 while an UNCAPPED cleared list would hold 25, and the subset property
+        // below reds. Measured: at 5 citers, deleting `.take(CITATION_SAMPLE)` from the cleared
+        // projection kills nothing and the test reports success over a mutation that shipped.
+        for i in 0..25 {
+            write_citer(
+                &tmp,
+                &format!("docs/trackers/issue-clusters/ic-{i:02}.md"),
+                "**Members:** example-bug\n",
+            );
+        }
+        write_citer(
+            &tmp,
+            "src/thing.rs",
+            "// BUG docs/issues/2026-09-13-example-bug.md\n",
+        );
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223399",
+                "new_rel_path": "docs/issues/archive/2026-09-13-example-bug.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let listed = names(&result, "inbound_path_citations");
+        let cleared = names(&result, "inbound_citations_cleared");
+
+        assert!(
+            !cleared.is_empty(),
+            "the property below is vacuous over an empty cleared list, so this must find some"
+        );
+        for c in &cleared {
+            assert!(
+                listed.contains(c),
+                "cleared entry {c} is absent from the sample it must be subtracted from: {listed:?}"
+            );
+        }
     }
 
     /// Direct unit test on the boundary itself, not just an end-to-end citation-found
