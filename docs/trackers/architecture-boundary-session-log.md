@@ -11,7 +11,7 @@ topic: architecture-boundary-measurement
 entry_prefix:
 - F
 - W
-entry_high_water_F: 1
+entry_high_water_F: 2
 entry_high_water_W: 1
 ---
 
@@ -56,6 +56,24 @@ Frictions and counterfactual wins while validating the architecture instrument. 
 **Rests on:** the retained mutation logs and isolated copies under /tmp/codescout-boundary-mutations-M3Ro6F/. Import normalization was checked separately through observed red/green regressions, not included in this mutation count.
 
 **Promote-when:** No new promotion proposed; this applies the existing Testing Discipline law.
+
+## F-2 — The renderer already reads absent exit_code as "running", so storing job state without publishing it inverts that inference
+
+**Valid:** dated 2026-09-15
+
+**Observed:** 2026-09-15, scouting before the slice-1 job-record change. `format_run_command` (`src/tools/run_command/output.rs:454-537`) matches on `result["exit_code"]` and renders the `None` arm as `… running  (query <id>)`, carrying a comment that asserts the background payload is "`output_id`, `hint`, `stdout` and nothing else". That arm was written one day earlier, at `cc57cd28`.
+
+**Expected (plan):** The unconditional running-claim lived at one site — the `hint` string built in `spawn_background_command` (`src/tools/run_command/inner.rs:89-144`) — making step 0 a one-line honesty fix.
+
+**Got (scouted reality):** Two sites assert running-ness, and the second infers it from the **absence** of `exit_code`. Once a background job carries terminal state, absent stops meaning running: an exited job still renders `… running` unless its status is published under the key the renderer already reads. A job record holding state no renderer consults is `cluster/declared-not-wired` — written, never reachable — so the read path is not a later step but a condition of the write being worth anything. The archived bug also records the standing contract this slice supersedes: that a backgrounded command's exit status is not available through this tool even when everything works.
+
+**Severity:** med — would have shipped a job record whose state no caller could observe, with a green suite, and would have re-fixed a one-day-old bug in the wrong direction.
+
+**Status:** mitigated
+
+**Rests on:** `src/tools/run_command/output.rs:454-537`; `src/tools/run_command/inner.rs:89-144`; `docs/issues/archive/2026-09-14-a-backgrounded-gate-command-was-summarised-as-exit-0-while-its-buffer-held-the-failure.md` (artifact `1f280b2def570b97`, fixed at `cc57cd28`). Slice-1 decision in `docs/trackers/architecture-boundary-measurement.md`.
+
+**Workaround (superseded by what shipped — recorded because the reasoning changed):** The entry first proposed publishing the terminal status into `exit_code` on the background payload. That conflates two payloads and is wrong for the READ path: a later `tail @bg_x` is the reader's own result, so writing the job's code into its `exit_code` would claim `tail` exited 7. What shipped instead: the spawn payload keeps asserting no `exit_code` at all — correct, and now true by construction because the response is emitted at spawn time rather than after a 5s wait — and the job's outcome travels in a separate `jobs` array attached by `OutputBuffer::job_states_in`. The renderer's three-state match is therefore untouched; only its stale comment changed.
 
 ## Entries
 

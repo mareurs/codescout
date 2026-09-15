@@ -1651,16 +1651,103 @@ async fn run_in_background_returns_bg_handle() {
         output_id.starts_with("@bg_"),
         "expected @bg_ prefix, got {output_id}"
     );
-    let stdout = result["stdout"].as_str().unwrap_or("");
+    // The response returns at SPAWN time, so it carries no output yet and — the
+    // load-bearing half — asserts no exit status. `format_run_command` reads that
+    // absence as "running", which is true by construction only because we did not
+    // wait. Assert the absence: a response that grew an `exit_code` here would be
+    // claiming an outcome nothing had observed, which is the defect this slice closed.
     assert!(
-        stdout.contains("hello-bg-test"),
-        "expected stdout to contain echo output, got: {stdout}"
+        result["exit_code"].is_null(),
+        "a just-spawned job must assert no exit status, got: {:?}",
+        result["exit_code"]
     );
     let hint = result["hint"].as_str().unwrap_or("");
     assert!(
         hint.contains(output_id),
         "hint should reference the handle, got: {hint}"
     );
+}
+
+/// The defect this slice exists to close, end to end.
+///
+/// A backgrounded failure used to be unobservable: the response asserted
+/// `Process running` without checking, and a later `tail @bg_x` returned the
+/// READER's exit code, never the job's. This asserts the outcome now ARRIVES —
+/// through the envelope, because the `@bg_` substitution channel expands to a
+/// filename and cannot carry a status.
+///
+/// docs/issues/2026-09-13-background-command-loses-terminal-status.md
+#[tokio::test]
+async fn a_failed_background_job_reports_its_exit_code_through_the_envelope() {
+    let (_dir, ctx) = project_ctx().await;
+    let res = RunCommand
+        .call(
+            json!({ "command": "exit 7", "run_in_background": true }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let ref_id = res["output_id"].as_str().unwrap().to_string();
+
+    // Poll rather than sleep a fixed interval: the claim is that the outcome
+    // arrives, not how fast, and a fixed wait would be flaky on a loaded machine.
+    // Keep the last state so a failure names what it actually saw.
+    let mut last = String::from("<never populated>");
+    for _ in 0..200 {
+        let out = RunCommand
+            .call(json!({ "command": format!("cat {ref_id}") }), &ctx)
+            .await
+            .unwrap();
+        if let Some(jobs) = out["jobs"].as_array() {
+            if let Some(state) = jobs.first().and_then(|j| j["state"].as_str()) {
+                last = state.to_string();
+                if last == "exited 7" {
+                    return;
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("background job never reported its terminal state; last seen: {last:?}");
+}
+
+/// The reader's exit code and the job's outcome are DIFFERENT NUMBERS, and the
+/// response must carry both without conflating them. `cat` succeeds (0) while
+/// the job it reads failed (7) — the exact pair that made the original defect
+/// invisible.
+#[tokio::test]
+async fn the_readers_exit_code_and_the_jobs_outcome_are_reported_separately() {
+    let (_dir, ctx) = project_ctx().await;
+    let res = RunCommand
+        .call(
+            json!({ "command": "exit 7", "run_in_background": true }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let ref_id = res["output_id"].as_str().unwrap().to_string();
+
+    for _ in 0..200 {
+        let out = RunCommand
+            .call(json!({ "command": format!("cat {ref_id}") }), &ctx)
+            .await
+            .unwrap();
+        let job_state = out["jobs"]
+            .as_array()
+            .and_then(|j| j.first())
+            .and_then(|j| j["state"].as_str())
+            .unwrap_or("");
+        if job_state == "exited 7" {
+            assert_eq!(
+                out["exit_code"].as_i64(),
+                Some(0),
+                "the READER (cat) succeeded; its exit code must stay its own"
+            );
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("job never reached its terminal state");
 }
 
 #[tokio::test]
@@ -1773,12 +1860,28 @@ async fn run_in_background_avoids_pipe_inheritance_hang() {
         output_id.starts_with("@bg_"),
         "expected @bg_ handle, got: {output_id}"
     );
-    // Warm-window stdout should contain the echo output.
-    let stdout = result["stdout"].as_str().unwrap_or("");
-    assert!(
-        stdout.contains("launched"),
-        "stdout should capture echo output within warm window, got: {stdout}"
-    );
+
+    // The output still has to REACH the log — that is what routing stdout to a
+    // file rather than a pipe buys, and it is the half of this test that is
+    // about the defect rather than about latency.
+    //
+    // Read it through the handle rather than from the spawn response: the 5s
+    // warm window this used to assert on was removed on 2026-09-15 so the call
+    // could return immediately, and asserting on a scraped preview would now be
+    // asserting on a race. Polling tests the same property without one.
+    let mut last = String::new();
+    for _ in 0..100 {
+        let out = RunCommand
+            .call(json!({ "command": format!("cat {output_id}") }), &ctx)
+            .await
+            .unwrap();
+        last = out["stdout"].as_str().unwrap_or("").to_string();
+        if last.contains("launched") {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("echo output never reached the background log; last read: {last:?}");
 }
 
 #[tokio::test]
@@ -4990,9 +5093,16 @@ async fn a_red_attaches_wip_authors_on_the_buffer_only_arm() {
     );
 }
 
-/// A backgrounded, STILL-RUNNING result carries no `exit_code` — it is `output_id`, `hint`,
-/// `stdout` and nothing else. The compact renderer must not turn that absence into a success
-/// claim.
+/// A backgrounded, STILL-RUNNING result carries no `exit_code`. The compact renderer must not
+/// turn that absence into a success claim.
+///
+/// **The fixture below is the HISTORICAL payload shape, kept deliberately.** Production has
+/// emitted `output_id` + `hint` only since 2026-09-15 (no warm-window `stdout`), so the
+/// `stdout` key here is inert for these three assertions — the `None` arm never reads it. It
+/// is retained because it is the defect verbatim: the buffer held a compile failure while the
+/// summary claimed success. Do not "tidy" it to match the current shape and do not credit it
+/// with covering one; the renderer must stay correct for both, and the shape that can still
+/// reach this arm is the smaller one.
 ///
 /// **Asserting `✓` versus `✗` cannot catch this, which is how it shipped.** Both checkmarks
 /// describe a *completed* run, so a third state rendered as the first is invisible on that

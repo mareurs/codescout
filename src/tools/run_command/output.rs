@@ -456,7 +456,10 @@ pub(crate) fn format_run_command(result: &Value) -> String {
         let output_id = result["output_id"].as_str().unwrap_or("");
         match result["exit_code"].as_i64() {
             // A backgrounded job that has not exited carries NO `exit_code` — the payload is
-            // `output_id`, `hint`, `stdout` and nothing else. This arm used to be
+            // `output_id` and `hint`, nothing else. Since 2026-09-15 that response is emitted at
+            // spawn time rather than after a 5s warm-up, so "running" is true by construction
+            // here; the job's OUTCOME arrives separately, in the `jobs` field of any later
+            // command naming the handle. This arm used to be
             // `unwrap_or(0)`, which made that absence indistinguishable from a clean exit and
             // rendered `✓ exit 0` for a run that had already failed to compile. Absence is a
             // third state, not a default: say "running" and assert nothing.
@@ -508,6 +511,18 @@ pub(crate) fn format_run_command(result: &Value) -> String {
         let check = if exit == 0 { "✓" } else { "✗" };
         format!("{check} exit {exit} · {stdout_lines} lines")
     };
+
+    // Background job state, rendered first among the appended notices because it answers the
+    // question the caller actually asked. A `tail @bg_x` reports the READER's exit code; this
+    // line is the only place the JOB's outcome appears, and a field this function does not read
+    // reaches nobody.
+    if let Some(jobs) = result["jobs"].as_array() {
+        for job in jobs {
+            let handle = job["handle"].as_str().unwrap_or("");
+            let state = job["state"].as_str().unwrap_or("");
+            s.push_str(&format!("\n⎈ job {handle}: {state}"));
+        }
+    }
 
     // Append timeout hint after all branch logic so it covers every output shape.
     if let Some(hint) = result["timeout_hint"].as_str() {

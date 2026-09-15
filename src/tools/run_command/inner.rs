@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 use super::super::{RecoverableError, ToolContext};
 use super::output::handle_successful_output;
+use crate::tools::output_buffer::{BackgroundJob, JobState};
 
 /// RAII guard: deletes a named temp file when dropped.
 pub(crate) struct TmpfileGuard(pub(crate) String);
@@ -22,39 +23,6 @@ struct AbortOnDrop(tokio::task::JoinHandle<()>);
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {
         self.0.abort();
-    }
-}
-
-/// Guard that SIGKILLs a background child if dropped while armed. Used during
-/// the `spawn_background_command` warm-up window so that a cancelled tool
-/// future does not leave orphaned processes behind.
-struct BackgroundKillGuard {
-    pid: Option<u32>,
-    disarmed: bool,
-}
-
-impl Drop for BackgroundKillGuard {
-    fn drop(&mut self) {
-        if self.disarmed {
-            return;
-        }
-        if let Some(pid) = self.pid {
-            #[cfg(unix)]
-            // SAFETY: libc::kill with a PID obtained from a child we just spawned,
-            // SIGKILL is safe to send. Worst case the PID was reaped and we
-            // kill nothing (ESRCH), which is a no-op.
-            unsafe {
-                libc::kill(pid as libc::pid_t, libc::SIGKILL);
-            }
-            #[cfg(windows)]
-            {
-                // Win32 TerminateProcess (forced, ≈ `taskkill /F`) with no child
-                // spawn. Spawning taskkill here would stall under EDR at the worst
-                // possible moment — a cancellation Drop — defeating the guard's
-                // cancel-fast intent. Mirrors the no-spawn unix SIGKILL arm above.
-                let _ = crate::platform::terminate_process(pid);
-            }
-        }
     }
 }
 
@@ -86,6 +54,23 @@ fn resolve_work_dir(root: &Path, cwd_param: Option<&str>) -> anyhow::Result<std:
     }
 }
 
+/// Spawn a detached background command and return immediately.
+///
+/// **The `Child` is handed to a supervisor task rather than dropped, and that is
+/// the whole point.** Dropping it (as this function did until 2026-09-15) gives
+/// the process to tokio's orphan reaper and discards its exit status with it —
+/// there is no other channel that status exists on, which is why "just record
+/// the exit code" was never a smaller change than this one.
+///
+/// **No warm-up window.** This used to sleep 5s to scrape an early log tail,
+/// which bought a preview at the cost of emitting `Process running.` *after* a
+/// fast command had already exited — a claim about current state made at the one
+/// moment it could be false. Returning immediately makes the running state true
+/// by construction at emit time; the outcome arrives later, through the envelope
+/// of any command that names the handle (`OutputBuffer::job_states_in`).
+///
+/// docs/issues/2026-09-13-background-command-loses-terminal-status.md
+/// docs/trackers/architecture-boundary-measurement.md — slice 1
 async fn spawn_background_command(
     resolved_command: &str,
     work_dir: &Path,
@@ -100,47 +85,48 @@ async fn spawn_background_command(
     let log_stderr = log_file.try_clone()?;
 
     let mut cmd = crate::platform::shell_command_configured(resolved_command);
-    let child = cmd
+    let mut child = cmd
         .current_dir(work_dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::from(log_file))
         .stderr(std::process::Stdio::from(log_stderr))
         .spawn()?;
 
-    // Cancel-aware warm-up: during the 5s window we hold a guard that
-    // SIGKILLs the child if this future is dropped (tool cancellation).
-    // After the window elapses normally the guard disarms, the tokio
-    // Child handle is dropped, and the process runs detached.
-    let pid = child.id();
-    drop(child);
-    let mut kill_guard = BackgroundKillGuard {
-        pid,
-        disarmed: false,
-    };
+    let ref_id = ctx.output_buffer.store_background(BackgroundJob {
+        log_path,
+        command: resolved_command.to_string(),
+        state: JobState::Running,
+    });
 
-    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    kill_guard.disarmed = true;
+    // The supervisor outlives this call deliberately: it is not tied to the tool
+    // future, so cancelling the call does not discard the outcome. It holds an
+    // `Arc<OutputBuffer>` clone, which is what makes the write-after-return legal.
+    let buffer = ctx.output_buffer.clone();
+    let supervised_id = ref_id.clone();
+    tokio::spawn(async move {
+        let state = match child.wait().await {
+            Ok(status) => JobState::Exited {
+                code: status.code(),
+            },
+            Err(e) => JobState::Failed {
+                error: e.to_string(),
+            },
+        };
+        buffer.set_job_state(&supervised_id, state);
+    });
 
-    let log_content = std::fs::read_to_string(&log_path).unwrap_or_default();
-    let tail_50: String = {
-        let lines: Vec<&str> = log_content.lines().collect();
-        let start = lines.len().saturating_sub(50);
-        lines[start..].join("\n")
-    };
-
-    let ref_id = ctx.output_buffer.store_background(log_path);
-
-    let mut bg_result = serde_json::json!({
+    // No `exit_code` key: the job has just started and no status exists to
+    // report. `format_run_command`'s three-state match reads that absence as
+    // "running", which is correct here precisely because this response is
+    // emitted at spawn time rather than five seconds later.
+    Ok(serde_json::json!({
         "output_id": ref_id,
         "hint": format!(
-            "Process running. Output captured in {} — use run_command(\"tail -50 {}\") or grep/cat as needed.",
-            ref_id, ref_id
+            "Started; outcome not yet observed. Read output with run_command(\"tail -50 {}\") \
+             — that response carries this job's state.",
+            ref_id
         )
-    });
-    if !tail_50.is_empty() {
-        bg_result["stdout"] = json!(tail_50);
-    }
-    Ok(bg_result)
+    }))
 }
 
 /// SF-4: is `path` safe to interpolate into a shell command?
@@ -399,7 +385,7 @@ pub(crate) async fn run_command_inner(
         );
     }
 
-    // --- Step 4.7: Background spawn with warm return ---
+    // --- Step 4.7: Background spawn, returning at spawn time ---
     if run_in_background {
         return spawn_background_command(resolved_command, &work_dir, ctx).await;
     }

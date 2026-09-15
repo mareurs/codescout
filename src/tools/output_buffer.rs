@@ -110,6 +110,67 @@ pub enum PendingAck {
     Write(PendingAckWrite),
 }
 
+/// Observed lifecycle state of a background job.
+///
+/// Every variant is an OBSERVATION, never an assumption. `Running` means the
+/// supervisor task spawned in `spawn_background_command` has not yet had
+/// `wait()` return — it is not a default and not a placeholder for "unknown".
+/// That distinction is the whole defect this type exists to close: the previous
+/// model had nowhere to record an outcome, so the response asserted a running
+/// state it had never checked.
+///
+/// docs/issues/2026-09-13-background-command-loses-terminal-status.md
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobState {
+    /// Spawned; the supervisor has not observed it exit.
+    Running,
+    /// Child reaped. `code` is `None` when the process was terminated by a
+    /// signal and therefore has no exit code — reported as absent rather than
+    /// as `0`, which is the same conflation `format_run_command` was fixed for
+    /// at `cc57cd28`.
+    Exited { code: Option<i32> },
+    /// The supervisor could not reap the child at all. Distinct from
+    /// `Exited`: nothing is known about how the job ended.
+    Failed { error: String },
+}
+
+impl JobState {
+    /// Whether the job may still be writing to its log. Used by eviction, which
+    /// must not unlink a file a live process still holds open.
+    pub fn is_running(&self) -> bool {
+        matches!(self, JobState::Running)
+    }
+
+    /// One-line rendering for the response envelope.
+    pub fn summary(&self) -> String {
+        match self {
+            JobState::Running => "running".to_string(),
+            JobState::Exited { code: Some(c) } => format!("exited {c}"),
+            JobState::Exited { code: None } => "terminated by signal".to_string(),
+            JobState::Failed { error } => format!("unobservable: {error}"),
+        }
+    }
+}
+
+/// A backgrounded command.
+///
+/// Replaces the bare `PathBuf` this map used to hold. A path cannot answer
+/// "did it finish, and how" — which is the only question a background job is
+/// ever asked — so eviction had no liveness predicate to consult and the
+/// response had no outcome to report. Both fell out of the type, not out of
+/// the call sites.
+#[derive(Debug, Clone)]
+pub struct BackgroundJob {
+    /// Log file receiving the job's merged stdout+stderr. This is what a
+    /// `@bg_*` handle substitutes to in a shell command.
+    pub log_path: PathBuf,
+    /// The resolved command, retained so the envelope can name what a handle
+    /// refers to without the caller having to remember.
+    pub command: String,
+    /// Last observed state. Written once by the supervisor task.
+    pub state: JobState,
+}
+
 /// Thread-safe LRU buffer for command output.
 ///
 /// `store()` inserts an entry and returns an opaque `@cmd_<8hex>` handle.
@@ -133,7 +194,7 @@ struct BufferInner {
     pending_order: Vec<String>,
     max_pending: usize,
     // --- background job store ---
-    background_jobs: HashMap<String, PathBuf>,
+    background_jobs: HashMap<String, BackgroundJob>,
     background_order: Vec<String>,
 }
 
@@ -598,37 +659,131 @@ impl OutputBuffer {
         }
     }
 
-    /// Store a background job log path and return a `@bg_<8hex>` handle.
-    pub fn store_background(&self, log_path: PathBuf) -> String {
+    /// Store a background job and return a `@bg_<8hex>` handle.
+    ///
+    /// **Eviction prefers a TERMINATED job and never unlinks a live job's log.**
+    /// Evicting by insertion order alone deletes whatever was backgrounded
+    /// first, which is on average the longest-running job — precisely the one
+    /// still writing to the file being removed. The process keeps the unlinked
+    /// inode open, so its output becomes unreachable while the handle reports
+    /// `background job log unavailable`, sending the reader to inspect their own
+    /// job when the cause was an unrelated 21st background command.
+    ///
+    /// When every retained job is still running there is no safe file to
+    /// delete, so the oldest HANDLE is dropped and its log is left on disk for
+    /// the owning process and the OS tempdir to deal with. Losing addressability
+    /// is recoverable; unlinking a live log is not.
+    ///
+    /// docs/issues/2026-09-15-background-log-eviction-deletes-a-running-jobs-log.md
+    pub fn store_background(&self, job: BackgroundJob) -> String {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.counter = inner.counter.wrapping_add(1);
         let id = format!("@bg_{:08x}", inner.counter as u32);
 
-        // Evict oldest if at capacity
         if inner.background_jobs.len() >= inner.max_pending {
-            if let Some(oldest) = inner.background_order.first().cloned() {
-                inner.background_order.remove(0);
-                if let Some(log_path) = inner.background_jobs.remove(&oldest) {
-                    if let Err(e) = std::fs::remove_file(&log_path) {
-                        tracing::debug!(
-                            "failed to clean up evicted bg log {}: {}",
-                            log_path.display(),
-                            e
-                        );
+            // Oldest job that is no longer running, if any. A handle present in
+            // `background_order` but absent from `background_jobs` is already
+            // gone and is safe to drop.
+            let terminated = inner
+                .background_order
+                .iter()
+                .find(|oid| {
+                    inner
+                        .background_jobs
+                        .get(*oid)
+                        .is_none_or(|j| !j.state.is_running())
+                })
+                .cloned();
+
+            match terminated {
+                Some(victim) => {
+                    inner.background_order.retain(|oid| oid != &victim);
+                    if let Some(job) = inner.background_jobs.remove(&victim) {
+                        if let Err(e) = std::fs::remove_file(&job.log_path) {
+                            tracing::debug!(
+                                "failed to clean up evicted bg log {}: {}",
+                                job.log_path.display(),
+                                e
+                            );
+                        }
+                    }
+                }
+                None => {
+                    // Every retained job is live. Drop the oldest handle only.
+                    if !inner.background_order.is_empty() {
+                        let victim = inner.background_order.remove(0);
+                        if let Some(job) = inner.background_jobs.remove(&victim) {
+                            tracing::debug!(
+                                "evicting live bg handle {} without unlinking {}",
+                                victim,
+                                job.log_path.display()
+                            );
+                        }
                     }
                 }
             }
         }
 
-        inner.background_jobs.insert(id.clone(), log_path);
+        inner.background_jobs.insert(id.clone(), job);
         inner.background_order.push(id.clone());
         id
     }
 
-    /// Look up the log path for a background job handle.
-    pub fn get_background(&self, id: &str) -> Option<PathBuf> {
+    /// Record a background job's observed state. Called by the supervisor task
+    /// once `wait()` returns.
+    ///
+    /// Silently no-ops when the handle has already been evicted: a job whose
+    /// handle is gone has no reader left to inform, and the supervisor must not
+    /// resurrect an entry the buffer deliberately dropped.
+    pub fn set_job_state(&self, id: &str, state: JobState) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(job) = inner.background_jobs.get_mut(id) {
+            job.state = state;
+        }
+    }
+
+    /// `(handle, state, command)` for every `@bg_*` handle named in a command.
+    ///
+    /// **This is the read path for job state, and it has to be the envelope.**
+    /// A `@bg_*` handle is resolved by textual substitution into the shell
+    /// command (`resolve_refs`), so it can only ever expand to a *filename* —
+    /// the channel cannot carry a status, and the exit code the shell returns
+    /// belongs to the reader (`tail`), not to the job. Mirrors
+    /// [`Self::truncation_notices_in`], including its reason for not widening
+    /// `resolve_refs`' return tuple.
+    pub fn job_states_in(&self, command: &str) -> Vec<(String, JobState, String)> {
+        static BG_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+        let re = BG_RE.get_or_init(|| Regex::new(r"@bg_[0-9a-f]{8}").expect("valid regex"));
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut seen = std::collections::HashSet::new();
+        re.find_iter(command)
+            .map(|m| m.as_str())
+            .filter(|tok| seen.insert(*tok))
+            .filter_map(|tok| {
+                inner
+                    .background_jobs
+                    .get(tok)
+                    .map(|j| (tok.to_string(), j.state.clone(), j.command.clone()))
+            })
+            .collect()
+    }
+
+    /// Look up a background job by handle.
+    pub fn get_background(&self, id: &str) -> Option<BackgroundJob> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.background_jobs.get(id).cloned()
+    }
+
+    /// Look up just the log path for a background job handle.
+    ///
+    /// Kept as a named accessor rather than leaving callers to reach through
+    /// `get_background(..).log_path`: the substitution path in `resolve_refs`
+    /// wants the path and nothing else, and saying so at the call site keeps
+    /// that site from accidentally growing a dependency on job state it must
+    /// not consult (it runs before the job is read, on every command).
+    pub fn get_background_log(&self, id: &str) -> Option<PathBuf> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.background_jobs.get(id).map(|j| j.log_path.clone())
     }
 
     /// Resolve `@cmd_<8hex>` (and `@cmd_<8hex>.err`) references in a command string.
@@ -714,7 +869,7 @@ impl OutputBuffer {
                     )
                     .into());
                 }
-                let log_path = self.get_background(base_id).ok_or_else(|| {
+                let log_path = self.get_background_log(base_id).ok_or_else(|| {
                     RecoverableError::with_hint(
                         format!("background job ref not found: {}", token),
                         "Buffer refs expire when the session resets. Re-run the original command to get a fresh handle.",
@@ -1735,13 +1890,159 @@ mod tests {
         assert!(refreshed.is_empty(), "cmd handles never refresh");
     }
 
+    /// Background-job fixture for tests that care only about the LOG PATH —
+    /// ref resolution, missing-file handling, suffix rejection.
+    ///
+    /// **State is `Exited` deliberately.** A `Running` fixture would route every
+    /// one of those tests through `store_background`'s live-job eviction branch,
+    /// which keeps a handle's log on disk instead of unlinking it — so an
+    /// eviction regression would be masked here and left to the tests below,
+    /// which set state explicitly. Change this and those stop being the only
+    /// thing asserting that branch.
+    fn bg_job(log_path: std::path::PathBuf) -> BackgroundJob {
+        BackgroundJob {
+            log_path,
+            command: "test-cmd".to_string(),
+            state: JobState::Exited { code: Some(0) },
+        }
+    }
+
+    /// Same fixture, still running. The state is the entire point here.
+    fn bg_job_running(log_path: std::path::PathBuf) -> BackgroundJob {
+        BackgroundJob {
+            log_path,
+            command: "test-cmd".to_string(),
+            state: JobState::Running,
+        }
+    }
+
+    /// `max_pending`, mirrored from `OutputBuffer::new`. If that changes and this
+    /// does not, the eviction tests below stop reaching the eviction branch at
+    /// all and pass by never filling the buffer.
+    ///
+    // cap-class: NOT_A_CAP — a test-local mirror of a production literal, read only by
+    // the two eviction tests below to decide how many fixtures to store. It bounds no
+    // caller's result and is compiled out of every non-test build.
+    const TEST_MAX_PENDING: usize = 20;
+
+    #[test]
+    fn eviction_prefers_a_terminated_job_over_an_older_running_one() {
+        let buf = OutputBuffer::new(10);
+        let dir = tempfile::tempdir().unwrap();
+
+        // 19 running jobs, then one that has exited. FIFO would evict the first
+        // running one; liveness-aware eviction must take the terminated one.
+        let mut running_ids = Vec::new();
+        for i in 0..(TEST_MAX_PENDING - 1) {
+            let p = dir.path().join(format!("run{i}.log"));
+            std::fs::write(&p, "x").unwrap();
+            running_ids.push((buf.store_background(bg_job_running(p.clone())), p));
+        }
+        let done_path = dir.path().join("done.log");
+        std::fs::write(&done_path, "x").unwrap();
+        let done_id = buf.store_background(bg_job(done_path.clone()));
+
+        // Trip eviction.
+        let new_path = dir.path().join("new.log");
+        std::fs::write(&new_path, "x").unwrap();
+        buf.store_background(bg_job_running(new_path));
+
+        assert!(
+            buf.get_background_log(&done_id).is_none(),
+            "the terminated job should have been evicted"
+        );
+        assert!(
+            !done_path.exists(),
+            "a terminated job's log is safe to unlink and should be"
+        );
+        let (oldest_running_id, oldest_running_path) = &running_ids[0];
+        assert!(
+            buf.get_background_log(oldest_running_id).is_some(),
+            "the oldest RUNNING job must survive while a terminated one exists"
+        );
+        assert!(
+            oldest_running_path.exists(),
+            "its log must still be on disk"
+        );
+    }
+
+    #[test]
+    fn eviction_never_unlinks_a_live_jobs_log() {
+        // When every retained job is still running there is no safe file to
+        // delete. The handle may go; the file may not — the process still holds
+        // it open and unlinking strands its output.
+        // docs/issues/2026-09-15-background-log-eviction-deletes-a-running-jobs-log.md
+        let buf = OutputBuffer::new(10);
+        let dir = tempfile::tempdir().unwrap();
+
+        let mut ids = Vec::new();
+        for i in 0..TEST_MAX_PENDING {
+            let p = dir.path().join(format!("live{i}.log"));
+            std::fs::write(&p, "x").unwrap();
+            ids.push((buf.store_background(bg_job_running(p.clone())), p));
+        }
+
+        let new_path = dir.path().join("new.log");
+        std::fs::write(&new_path, "x").unwrap();
+        buf.store_background(bg_job_running(new_path));
+
+        let (evicted_id, evicted_path) = &ids[0];
+        assert!(
+            buf.get_background_log(evicted_id).is_none(),
+            "the oldest handle should be dropped when nothing has terminated"
+        );
+        assert!(
+            evicted_path.exists(),
+            "a LIVE job's log must survive eviction of its handle"
+        );
+    }
+
+    #[test]
+    fn job_states_in_reports_the_observed_outcome() {
+        let buf = OutputBuffer::new(10);
+        let id = buf.store_background(bg_job_running(std::path::PathBuf::from("/tmp/x.log")));
+
+        let before = buf.job_states_in(&format!("tail -50 {id}"));
+        assert_eq!(before.len(), 1, "the handle should be found in the command");
+        assert_eq!(before[0].1, JobState::Running);
+
+        buf.set_job_state(&id, JobState::Exited { code: Some(7) });
+
+        let after = buf.job_states_in(&format!("tail -50 {id}"));
+        assert_eq!(after[0].1, JobState::Exited { code: Some(7) });
+        assert_eq!(
+            after[0].2, "test-cmd",
+            "the envelope names the command the handle refers to"
+        );
+    }
+
+    #[test]
+    fn job_states_in_is_silent_for_commands_naming_no_background_handle() {
+        // The negative half: a plain command must not grow a `jobs` field.
+        let buf = OutputBuffer::new(10);
+        buf.store_background(bg_job_running(std::path::PathBuf::from("/tmp/x.log")));
+        assert!(buf.job_states_in("cargo test").is_empty());
+    }
+
+    #[test]
+    fn a_signal_killed_job_reports_no_exit_code_rather_than_zero() {
+        // `Exited { code: None }` is the honest rendering of "terminated by a
+        // signal, so no exit code exists". Rendering it as 0 is the same
+        // absence-as-success conflation fixed at cc57cd28.
+        assert_eq!(
+            JobState::Exited { code: None }.summary(),
+            "terminated by signal"
+        );
+        assert_eq!(JobState::Exited { code: Some(0) }.summary(), "exited 0");
+    }
+
     #[test]
     fn store_background_returns_bg_prefix() {
         let buf = OutputBuffer::new(10);
         let path = std::path::PathBuf::from("/tmp/test-codescout.log");
-        let id = buf.store_background(path.clone());
+        let id = buf.store_background(bg_job(path.clone()));
         assert!(id.starts_with("@bg_"), "expected @bg_ prefix, got {id}");
-        assert_eq!(buf.get_background(&id), Some(path));
+        assert_eq!(buf.get_background_log(&id), Some(path));
     }
     #[test]
     fn resolve_refs_bg_substitutes_live_log_not_snapshot() {
@@ -1752,7 +2053,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let log_path = dir.path().join("bg.log");
         std::fs::write(&log_path, "line1\n").unwrap();
-        let id = buf.store_background(log_path.clone());
+        let id = buf.store_background(bg_job(log_path.clone()));
 
         let (resolved, temp_paths, is_buffer_only, _refreshed) =
             buf.resolve_refs(&format!("tail -f {id}")).unwrap();
@@ -1777,7 +2078,7 @@ mod tests {
     #[test]
     fn get_background_missing_returns_none() {
         let buf = OutputBuffer::new(10);
-        assert_eq!(buf.get_background("@bg_00000000"), None);
+        assert_eq!(buf.get_background_log("@bg_00000000"), None);
     }
 
     #[test]
@@ -1790,7 +2091,7 @@ mod tests {
         tmp.flush().unwrap();
         let log_path = tmp.path().to_path_buf();
 
-        let id = buf.store_background(log_path.clone());
+        let id = buf.store_background(bg_job(log_path.clone()));
 
         // First resolve — reads "first content"
         let (resolved1, temps1, _, _) = buf.resolve_refs(&id).unwrap();
@@ -1811,9 +2112,9 @@ mod tests {
     #[test]
     fn resolve_refs_bg_missing_file_errors() {
         let buf = OutputBuffer::new(10);
-        let id = buf.store_background(std::path::PathBuf::from(
+        let id = buf.store_background(bg_job(std::path::PathBuf::from(
             "/tmp/nonexistent-codescout-bg-test-xyz.log",
-        ));
+        )));
         let err = buf.resolve_refs(&id).unwrap_err();
         assert!(
             err.to_string().contains("background job log unavailable"),
@@ -1824,7 +2125,7 @@ mod tests {
     #[test]
     fn resolve_refs_bg_rejects_err_suffix() {
         let buf = OutputBuffer::new(10);
-        let id = buf.store_background(std::path::PathBuf::from("/tmp/fake.log"));
+        let id = buf.store_background(bg_job(std::path::PathBuf::from("/tmp/fake.log")));
         let err_ref = format!("{}.err", id);
         let err = buf.resolve_refs(&err_ref).unwrap_err();
         assert!(

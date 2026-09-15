@@ -203,13 +203,29 @@ measurements.
 Read **Status** and **Bounded baseline and verdict — 2026-09-13** first. Confirm home workspace and fresh git status before doing new work. Do not restart broad measurement merely because shared HEAD moved: preserve the named frozen snapshot and version any changed source-population definition. Design approval is next; runtime implementation is not yet authorized.
 ## Status
 
-**Phase:** bounded architecture review complete; recommendations await design approval. Read **Bounded baseline and verdict — 2026-09-13** below.
+**Phase:** bounded architecture review complete. **Slice 1 approved and implemented 2026-09-15**; slices 2–4 remain unauthorized. Read **Bounded baseline and verdict — 2026-09-13** below, then **Slice 1 — approved and implemented** at the end of this section.
 
 **Verification:** 14 probe regression tests and self-test pass. Four applied mutation candidates were detected, zero survived. Second full gate completed with FMT_EXIT=0, CLIPPY_EXIT=0, LEAN_EXIT=0, DEFAULT_EXIT=0, in the required order; logs are under `.codescout/measurements/architecture-boundary/2026-09-13/gate2-*.log`. The earlier formatter refusal/default attribution failure remain in the first-run logs. These gates do not establish server-stack coverage.
 
 **Source bound:** frozen snapshot 23adef79023ebc43ea30d8d8e50a2175bacab5aa, not current shared HEAD; corrected measurement commands retained their exit-2 HEAD-change warning. No numeric finding is a whole-project/compiler-resolution claim.
 
-**Next action:** discuss and approve the job/result vertical slice before runtime implementation. Missing-symbol latency repetition and unresolved action paths remain explicitly scoped follow-ups. The work stream — probe, regression tests, this tracker and its seven bug files — is committed in `d3a2c24f`. No runtime refactor has been implemented.
+**Next action:** slice 1 is done pending commit — see below. Next is whether slice 2 (generalize semantic results) is authorized. Missing-symbol latency repetition and unresolved action paths remain explicitly scoped follow-ups. The measurement work stream — probe, regression tests, this tracker and its seven bug files — is committed in `d3a2c24f`.
+
+### Slice 1 — approved and implemented
+
+**Approved 2026-09-15** by the operator, with one amendment to the design as proposed: the background call **returns at spawn time** rather than after the 5s warm-up. That amendment turned out to resolve a tension rather than create one — `format_run_command` renders an absent `exit_code` as "running", which is a claim that could be false when emitted after a wait and is true by construction when emitted at spawn.
+
+Shipped in one change, because each part makes the previous one non-vacuous:
+
+- `BufferInner.background_jobs` is `HashMap<String, BackgroundJob>`, not `HashMap<String, PathBuf>`. A path cannot answer "did it finish, and how".
+- A supervisor task owns the `Child` and records `JobState::Exited { code }` / `Failed`. `drop(child)` gave the process to tokio's orphan reaper and discarded the status; there is no other channel it exists on.
+- The 5s warm-up window and `BackgroundKillGuard` are gone; the call returns immediately.
+- Job state reaches the caller through the **response envelope** (`OutputBuffer::job_states_in` → a `jobs` array). It cannot travel the `@bg_` channel: that resolves by textual substitution to a filename, which is why a `tail @bg_x` returns the reader's exit code and never the job's. A job record with no read path would have been `cluster/declared-not-wired`.
+- Eviction consults liveness and never unlinks a running job's log.
+
+**Verification.** Gate green on all four lanes (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`), own test names read out of the default lane rather than the total. **Three mutations, each KILLED** in an isolated worktree: eviction predicate → FIFO (2 tests red), `status.code()` → `Some(0)` (red, `last seen: "exited 0"`), `job_states_in(command)` → `job_states_in("")` (red). Mutating the production path, not test inputs.
+
+**Not committed at time of writing.** Closes `7a17adf0a2766a96` and `7ca1aa2451dd57a8` and removes the pid hazard in `b7b85f7e2da1ba37` — none archived yet, since archiving needs the fix SHA and its stable patch-id. Scouting friction recorded as `architecture-boundary-session-log:F-2`; an instrument limitation found on the way as `a0dd1c43aeef41de`.
 ## Bounded baseline and verdict — 2026-09-13
 
 **Status:** review evidence collected; recommendations below are proposals, not approved runtime changes.

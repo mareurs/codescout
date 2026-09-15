@@ -269,6 +269,33 @@ impl Tool for RunCommand {
             }
         }
 
+        // Background job state travels in the ENVELOPE, and it has to.
+        //
+        // A `@bg_*` handle is resolved by textual substitution into the shell
+        // command, so it can only ever expand to a FILENAME — the channel cannot
+        // carry a status, and the exit code the shell hands back belongs to the
+        // reader (`tail`, `cat`) rather than to the job. That is the whole reason
+        // a backgrounded failure read as success: the caller asked `tail` how it
+        // went. Attaching state here is what makes the supervisor's observation
+        // reachable; without it the job record would be written and never read.
+        //
+        // docs/issues/2026-09-13-background-command-loses-terminal-status.md
+        let job_states = ctx.output_buffer.job_states_in(command);
+        if !job_states.is_empty() {
+            if let Ok(ref mut val) = result {
+                val["jobs"] = serde_json::json!(job_states
+                    .iter()
+                    .map(|(id, state, cmd)| {
+                        serde_json::json!({
+                            "handle": id,
+                            "state": state.summary(),
+                            "command": cmd,
+                        })
+                    })
+                    .collect::<Vec<_>>());
+            }
+        }
+
         // Attach timeout hint when the timeout parameter was auto-corrected.
         if let Some(ref hint) = timeout_hint {
             if let Ok(ref mut val) = result {
