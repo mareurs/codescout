@@ -136,6 +136,63 @@ loss. Report it, and let the other session decide.
 `--no-verify` is never the answer either. The entangled case is exactly when these guards
 are load-bearing.
 
+## The entangled single file, where steps 4 and 6 both fail
+
+Every step above takes the **file** as the unit of ownership. When two sessions' changes sit
+inside one file, none of them reaches:
+
+- **Pathspec commit** takes the working tree at that path, so it carries their hunks under your
+  `Session-Id` — step 4's own measured trap, and here it is unavoidable rather than accidental.
+- **Bare `git commit`** takes the index, which has the same problem the moment you `git add` the
+  whole file.
+- **Step 6** says stop and report, which is right *after* a capture. Here nothing has been
+  captured yet and both sessions are blocked on the same file.
+
+The construction that works is to **stage a version of the file that never has to exist on disk
+afterwards.** `git add` snapshots *content*, not a path, so the index and the working tree can
+deliberately disagree — and that disagreement **is** the split.
+
+```
+# 1. build a version carrying only YOUR changes
+#    (their region reverted to HEAD, or to whatever base they wrote against)
+# 2. git add <file>              -> the index now holds yours alone
+# 3. restore THEIR region in the working tree
+# 4. git diff --cached           -> yours. read it.
+#    git diff                    -> theirs. read it too, as a separate call.
+# 5. git commit                  -> commits the INDEX, not the tree
+```
+
+**Step 5 is a bare `git commit`, which step 4 above calls a trap, and here it is the precise
+form.** The trap is that a bare commit takes the *whole index*; that is exactly what you want
+once you have verified the index holds only your content. `git diff --cached --name-only`, run
+as its own call per step 5, is what converts the trap into the tool. The two forms have not
+swapped places — what changed is that the index is now a snapshot you constructed rather than
+one that accumulated.
+
+Measured 2026-09-15 on `docs/trackers/bug-fix-session-log.md`, the second known hot file after
+`issue-clusters.md`. Two sessions held one file: an 11-row index backfill plus four rewritten
+prescriptive blocks, and a `## W-140` `REFUSED` block plus its reconciled index row. Split this
+way they landed as `84efa618` (68 insertions / 13 deletions) and `9b251426` (38 / 3). Neither
+commit carried a byte of the other's work, and the second session re-verified the first at the
+bytes before committing.
+
+**The precondition, and it is not always met:** you must be able to reconstruct *their* version
+of the region. HEAD serves when their change is uncommitted on top of it. **If their edits
+overlap yours in the same lines, this is a merge and not a split** — wait, or ask them, and do
+not reach for this.
+
+**One guard will decline, and that is correct behaviour rather than a failure.**
+`dead-artifact-ids` prints `NOT CHECKED — staged bytes differ from the worktree … It declines
+rather than guessing. Passing open.` It is the only guard in the chain that can see the split at
+all. Note what you are accepting: that check does not run for that commit.
+
+**Tell the other session.** Their work is still uncommitted in a tree you have been writing to,
+and they may not know you touched the file.
+
+**If you get the reconstruction wrong, their content may still be recoverable.** `git add`
+leaves a complete tree in the object store and `git restore --staged` only un-references it, so
+`git fsck --unreachable` recovers it byte-exact — which is how 35 lines deleted during exactly
+this procedure were restored. `bug-fix-session-log:W-142`.
 ## The empty intersection, which no sequence fixes
 
 `foreign-index` accepts **only** a pathspec commit when the index holds a peer's paths.
