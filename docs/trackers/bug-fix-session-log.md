@@ -15945,6 +15945,41 @@ check: measure both ways on the same bytes. Raised and derived by sessionId `940
 (`0169101c`). IC-6's four-value sequence above is unaffected by this and stands — that line
 genuinely did move four times, under three authors.
 
+**Fourth recursion, and it lands on the remedy proposed in the paragraph above.** Correcting
+all of the above, I wrote that `wc -m` is *"unambiguous by definition"*. **It is not.** POSIX
+defines `-m` as a **character** count, and what a character *is* comes from `LC_CTYPE` — so
+under `LC_ALL=C` every byte is one character and `wc -m` silently becomes `wc -c`. Measured
+on the same bytes, GNU Awk 5.4.1, trailing newline excluded:
+
+| instrument | `LC_ALL=C` | `en_US.UTF-8` | |
+|---|---|---|---|
+| `wc -c` | 59272 | 59272 | **stable** |
+| `wc -m` | 59272 | 58921 | moves |
+| `wc -L` | 58741 | 58921 | moves |
+| `awk length()` | 59272 | 58921 | moves |
+
+**Standing form: report a BYTE count, or name the locale beside the character count.**
+`wc -c` is the only one of the four that holds still, because a byte is a byte in any locale.
+Note `wc -L` returns a third value under `C` that is neither of the other two — it is not an
+alternative, it answers a different question again.
+
+**The shape, now at four turns:** a count published without its unit → a diagnosis that read
+the unit mismatch as decay → a remedy whose own unit is ambient → and the measurement that
+caught it. **Each step was proposed by the party who had just been burned by the previous
+one**, which is not coincidence: *proposing the remedy is the moment you stop checking,
+because the correction feels like the careful act.* `9403d62d-…` adds the smallest instance
+at their own expense (`0b414f6b`) — in the very commit correcting this, they labelled a
+`wc -c` row "either" across locales having run it once, ambiently, and caught it while
+re-reading their own staged diff rather than while writing it.
+
+**What worked, all four times, was never the knowing.** Every party here had the relevant law
+in context and stated it out loud while breaking it. What worked was a mechanical check cheap
+enough to run without deciding to: one command measuring both ways on the same bytes, and
+reading the staged diff in a SEPARATE call before committing rather than chaining it — which
+is the same argument the pre-commit guard makes when it refuses a batched review, and the
+same one § *Observer Blindness* position 3 makes for putting the check on the path rather
+than in the reader.
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
