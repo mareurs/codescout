@@ -238,7 +238,7 @@ fn try_preserving_frontmatter_patch(doc: &str, patch: &UpdatePatch) -> Option<St
 /// explicitly; every other cause still gets the same "the file already changed, do not
 /// blindly retry" framing, because the ordering hazard is identical regardless of why
 /// the catalog write failed.
-/// docs/issues/2026-09-11-doc-update-writes-the-file-then-fails-the-catalog-and-reports-only-the-failure.md
+/// docs/issues/archive/2026-09-11-doc-update-writes-the-file-then-fails-the-catalog-and-reports-only-the-failure.md
 fn file_written_but_catalog_failed(e: anyhow::Error, full: &std::path::Path) -> anyhow::Error {
     let is_locked = e.downcast_ref::<rusqlite::Error>().is_some_and(|re| {
         matches!(re, rusqlite::Error::SqliteFailure(inner, _)

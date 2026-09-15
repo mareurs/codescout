@@ -1,14 +1,14 @@
 ---
-id: '9c58cc41923b5c23'
+id: 72e2f6bd75b5ed09
 kind: bug
-status: investigating
+status: fixed
 title: doc(action=update) writes the file, fails the catalog write, and reports only the failure — so the retry duplicates the section
 owners:
 - marius
 tags:
 - cluster/unclassified
 topic: catalog/file write atomicity
-unverified: 'Partial: bf068e61 fixed doc(action=update) only. The identical file-write-then-commit window in append_entry (src/librarian/catalog/augmentation.rs) is confirmed and NOT fixed -- a tx.commit() failure after a successful std::fs::write leaves the section on disk with its id never persisted, and a retry allocates a fresh id and writes a second section. Left unfixed because a peer session was actively editing that function (adding a `section` parameter), so it was flagged to them rather than edited concurrently. Ordering is also unchanged by design: catalog-first was considered and rejected.'
+closed: 2026-09-15
 ---
 
 ## Summary
@@ -124,6 +124,31 @@ a follow-up.
 
 **Fix SHA:** `bf068e61`, patch-id `ffc2ac691b32b33b35e6ff8bfd79aa34f9ed97a8`.
 
+### `append_entry`, fixed 2026-09-15 — compensation rather than reordering
+
+The paragraph above says `append_entry` was left unfixed because a peer was editing that
+function. That edit landed on 2026-09-13 (`59e8c970`), so the blocker was gone and the
+half is now closed.
+
+Ordering is still unchanged, and for the reason given above — this is COMPENSATION, which
+the 2026-09-13 pass did not consider. On a failed `tx.commit()`:
+
+- `restore_section_after_failed_commit` puts the file back **only if it still holds exactly
+  the bytes this call wrote**. Nothing locks the markdown between the write and the
+  rollback — the `IMMEDIATE` transaction locks the catalog, not the file — so a peer
+  editing the same ledger is the ordinary case, and an unconditional restore would repair
+  our failed call by discarding their edit. The other two outcomes (`ForeignChange`,
+  `Failed`) are reported, never papered over.
+- `commit_failed_after_section_write` names both halves and **which of two OPPOSITE
+  remedies applies**: rolled back → safe to retry; still on disk → delete the section
+  first, because a retry allocates a new id and writes a second one.
+
+So the DUPLICATES answer this file records for `append_entry` becomes CONVERGES in the
+common case, and stays DUPLICATES — said out loud, with the id to delete — when the file
+moved under us.
+
+**Fix SHA:** `85642b1b`, patch-id `6750473b1da7b03ae6cb1ef792a0a01bcebf9c6f`.
+
 ## Workarounds
 
 **Do not retry a `database is locked` from `doc(action="update")` blind.** Read the target file
@@ -131,6 +156,13 @@ first and check whether the edit landed; if it did, the remaining work is the ca
 `occurrence: N` on a `body_edits` `remove` is the repair for a duplicate that already exists.
 
 ## Resume
+
+**Both recorded instances fixed as of 2026-09-15.** `doc(action="update")`'s reporting half
+landed 2026-09-13 (`bf068e61`); `append_entry`'s duplicating half landed 2026-09-15
+(`85642b1b`), with five tests and an observed kill on three separate mutations. The sweep
+(items 3 and 4 below) was **not** done and is the live remainder of this file.
+
+What follows is the 2026-09-13 state, kept because its ordering argument still holds:
 
 **Partially fixed 2026-09-13.** The reporting/remedy-text half of `doc(action="update")` is
 fixed and tested (see § Fix). The ordering/race itself is NOT fixed — the file write still
@@ -153,8 +185,22 @@ consequence stand in for "fine".
    site in `update.rs`) — `file_written_but_catalog_failed` is unit-tested directly against a
    hand-built error, but no test constructs real cross-connection lock contention to exercise
    the join between `call()` and the helper.
-2. `append_entry`'s DUPLICATING instance of the general form (§ Fix) — confirmed by reading
-   the code, not fixed, flagged to the session working in that function.
+   **NOW REACHABLE — and what blocked it was a mis-stated premise, not a missing tool.**
+   The blocker was written as *constructing lock contention*, and lock contention is only
+   ONE cause of a failed commit. A **deferred foreign-key violation** is the one SQLite
+   failure that surfaces at `COMMIT` rather than at the statement that caused it, so every
+   statement — including the `fs::write` — succeeds and only `tx.commit()` returns `Err`,
+   deterministically and with no timing. `append_entry`'s `arm_commit_tripwire` (`85642b1b`)
+   does exactly this: an `AFTER UPDATE` trigger on the table the path writes, inserting a
+   row whose deferred FK cannot resolve. The same technique should reach `update.rs`'s
+   `upsert_and_mint_slug` join — **not attempted here**, so that is a prediction, not a
+   result. The `NOT REACHED BY ANY UNIT TEST` annotation is stale in its REASONING as well
+   as its status, which matters more: read as written, it tells the next person the test
+   cannot be built.
+2. ~~`append_entry`'s DUPLICATING instance of the general form~~ — **DONE 2026-09-15**
+   (`85642b1b`). Confirmed by execution rather than by reading: the retry allocated `F-2`
+   and wrote a second section, which is the observed red the 2026-09-13 pass could only
+   infer.
 3. Whether `write_field_to_frontmatter`'s callers (e.g. `event_create`) have the same ordering,
    and which answer (duplicates / converges) applies — not checked this pass.
 4. A `git grep` for every other `std::fs::write` followed by a `tx.commit()` or catalog upsert

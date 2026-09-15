@@ -921,7 +921,7 @@ pub fn append_entry(
     // NOT `tx.commit()?`. The commit is the one failure that lands AFTER the section is
     // already on disk, and the bare error it used to propagate answers "did anything
     // happen?" with silence — inviting the retry that duplicates the section.
-    // docs/issues/2026-09-11-doc-update-writes-the-file-then-fails-the-catalog-and-reports-only-the-failure.md
+    // docs/issues/archive/2026-09-11-doc-update-writes-the-file-then-fails-the-catalog-and-reports-only-the-failure.md
     if let Err(e) = tx.commit() {
         return Err(commit_failed_after_section_write(
             e,
@@ -4411,7 +4411,7 @@ mod tests {
         }
     }
 
-    /// Regression: `docs/issues/2026-09-11-doc-update-writes-the-file-then-fails-the-catalog-and-reports-only-the-failure.md`
+    /// Regression: `docs/issues/archive/2026-09-11-doc-update-writes-the-file-then-fails-the-catalog-and-reports-only-the-failure.md`
     ///
     /// The section is written BEFORE `tx.commit()` deliberately — a splice failure then
     /// rolls the transaction back and the refusal's "nothing was written" is true. That
