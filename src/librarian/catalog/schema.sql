@@ -57,16 +57,11 @@ CREATE TABLE IF NOT EXISTS artifact_observation (
   created_at    INTEGER NOT NULL
 );
 
-CREATE VIRTUAL TABLE IF NOT EXISTS artifact_vec USING vec0(
-  id            TEXT PRIMARY KEY,
-  embedding     FLOAT[768]
-);
-
-CREATE TRIGGER IF NOT EXISTS artifact_vec_cascade_delete
-AFTER DELETE ON artifact
-BEGIN
-  DELETE FROM artifact_vec WHERE id = OLD.id;
-END;
+-- Vector tables are not declared here. The chunk-keyed `artifact_vec_v2` is
+-- created by the v11 migration (mod.rs). The artifact-keyed v1 `artifact_vec`
+-- was retired by v13, and must never return to this file: SCHEMA_SQL runs on
+-- every open, and v13's drop runs only once, so a declaration here would
+-- re-create the table on every open after the first.
 
 CREATE INDEX IF NOT EXISTS idx_artifact_kind_status ON artifact(kind, status);
 CREATE INDEX IF NOT EXISTS idx_link_dst ON artifact_link(dst_id, rel);

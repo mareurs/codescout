@@ -18,7 +18,8 @@ src/
   util.rs             — normalize_rel_path()
   catalog/
     mod.rs            — Catalog { conn: Connection }; open/open_in_memory; schema bootstrap
-    schema.sql        — v1 tables (artifact, artifact_link, artifact_vec, artifact_observation)
+    schema.sql        — v1 tables (artifact, artifact_link, artifact_observation); vec tables are
+                        created by migrations (artifact_vec_v2 at v11; v1 artifact_vec retired at v13)
                         + v2 TimeMachine (events, commits, sources, event_edges)
     artifact.rs       — upsert/get/delete/delete_orphan_repos; ArtifactRow
     events.rs         — EventRow; insert/latest_for_artifact/timeline_for_artifact/open_intents/orphan_verdicts
@@ -73,14 +74,14 @@ src/
 3. Changed/new rows upserted to `artifact`; deleted files removed; embed queue
    populated (content changes only, not re-classification)
 4. `index_repo()` async wrapper drains embed queue concurrently
-   (`EMBED_CONCURRENCY=4`) via `codescout_embed`, writes vectors to `artifact_vec`
+   (`EMBED_CONCURRENCY=4`) via `codescout_embed`, writes chunk vectors to `artifact_vec_v2`
 
 ## Data Flow: Query (artifact_find)
 
 1. `ArtifactFind::call()` deserializes `Args` (filter, limit, offset, semantic, scope, include_archived)
 2. `scope::apply_scope()` wraps the user filter with repo/rel_path clauses based on `CurrentProject`
 3. `combine_user_with_archived_hide()` injects `status NOT IN [archived, superseded]` unless the user filter already constrains status
-4. If `semantic` text provided: embed query → `find_semantic()` (KNN in `artifact_vec`, post-filter by metadata), else `find()` (SQL WHERE)
+4. If `semantic` text provided: embed query → `find_semantic()` (KNN in `artifact_vec_v2`, chunk ids resolved to artifacts via `artifact_chunk`, post-filter by metadata), else `find()` (SQL WHERE)
 5. Response includes `rows`, `count`, `hints` (more_in_repo, more_in_umbrella, more_in_workspace, hidden_archived, expand suggestions)
 
 ## Data Flow: TimeMachine (artifact_state_at)

@@ -1,7 +1,9 @@
 # ADR: artifact_vec stays a single shared table; migration must name affected projects
 
 - **Date:** 2026-07-20
-- **Status:** accepted (with one open follow-up)
+- **Status:** accepted (with one open follow-up); **amended 2026-09-15** — the
+  table this ADR names was retired and the decision now applies to
+  `artifact_vec_v2` (see *Amendment* below)
 - **Deciders:** Marius (with the Architecture Snow Lion)
 - **Commits:** `109c1ead` (feat(librarian): opt-in artifact_vec dimension
   migration), on `experiments` as of `bb693446` (PR #8, merged 2026-07-19).
@@ -107,7 +109,7 @@ the concrete projects it is about to affect.
 ## Revisit-when
 
 - **Open follow-up (this ADR's one actionable item):** upgrade the warning
-  in `rebuild_artifact_vec_at_dim` to enumerate the actual project roots
+  in `rebuild_artifact_vec_v2_at_dim` to enumerate the actual project roots
   present in `artifact.abs_path` before dropping the table, so the operator
   sees the concrete blast radius, not an abstract one. Not yet implemented
   or tested as of this ADR — confidence on "this is cheap to query at that
@@ -125,11 +127,40 @@ discipline. **Medium** on the "name the affected projects in the warning"
 recommendation — the data path (`artifact.abs_path`) is real and verified,
 but the change itself is unwritten and unverified.
 
-## Sites (initial)
+## Amendment 2026-09-15 — the decision moves to `artifact_vec_v2`
 
-- `src/librarian/indexer.rs` — `write_embeddings`, `rebuild_artifact_vec_at_dim`,
-  `ARTIFACT_VEC_MIGRATE_ENV`
-- `src/librarian/catalog/schema.sql` — `artifact_vec` table + cascade-delete trigger
+Chunk-grain retrieval (schema v11) added `artifact_vec_v2`, keyed by chunk id,
+and moved every writer and the KNN query onto it. `artifact_vec` kept this
+ADR's migration path while search stopped reading it: after a model swap,
+`LIBRARIAN_ARTIFACT_VEC_MIGRATE=1` wrote a backup, rebuilt a table nothing
+queried, and left semantic search failing with a dimension mismatch against
+`artifact_vec_v2`, whose `FLOAT[768]` had no migration at all.
+
+- **The decision is unchanged**: one shared, fixed-width table per catalog; an
+  opt-in, backed-up rebuild on mismatch; no namespacing. It now applies to
+  `artifact_vec_v2`.
+- **Same gate, now pointed at the table search reads.** `LIBRARIAN_ARTIFACT_VEC_MIGRATE=1`
+  runs `rebuild_artifact_vec_v2_at_dim`, backing up to
+  `catalog.db.pre-vec-v2-dim-bak.<unix_ts>`. A `pre-vec-dim-bak` file on disk
+  was taken by the v1 rebuild, which never touched the searched table. The
+  guard also reads an EMPTY table's declared width, which a row-content check
+  cannot see. `artifact_chunk` rows survive the rebuild; `backfill-chunks` or a
+  `reembed` reindex regenerates their vectors.
+- **`artifact_vec` is retired.** Schema v13 drops it and its
+  `artifact_vec_cascade_delete` trigger once per catalog, gated on the version
+  stamp. It is one-shot because the catalog is shared with older binaries:
+  one of those re-creates an empty v1 table on its next open, and re-dropping
+  it on every open would pull it out from under that process.
+- **The open follow-up carries over unchanged.** The warning still describes
+  the blast radius abstractly and should name the project roots it is about
+  to affect.
+
+## Sites
+
+- `src/librarian/indexer.rs` — `write_embeddings_v2_with`, `rebuild_artifact_vec_v2_at_dim`,
+  `vec0_table_dim`, `ARTIFACT_VEC_MIGRATE_ENV`
+- `src/librarian/catalog/mod.rs` — v11 (`artifact_vec_v2` + its chunk cascade
+  trigger) and v13 (the v1 retirement) in `apply_migrations_in_txn`
 - `src/librarian/mod.rs` — `build_tool_context_with` (catalog.db path resolution)
 
 ## References

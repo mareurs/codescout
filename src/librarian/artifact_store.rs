@@ -25,7 +25,7 @@ pub enum ArtifactBackend {
     /// Default — a shared Qdrant `artifacts` collection. Needs a reachable
     /// Qdrant daemon.
     Qdrant,
-    /// Escape hatch — the in-process sqlite-vec `artifact_vec` table. No
+    /// Escape hatch — the in-process sqlite-vec `artifact_vec_v2` table. No
     /// daemon; works fully offline on low-end / locked-down machines.
     SqliteVec,
 }
@@ -495,10 +495,6 @@ impl ArtifactVectorStore for SqliteVecArtifactStore {
         // artifact row is removed here. Missing this reds nothing; the cost is
         // an accumulating orphan set that no sweep collects.
         crate::librarian::indexer::delete_chunk_vectors(&cat, id)?;
-        cat.conn.execute(
-            "DELETE FROM artifact_vec WHERE id = ?1",
-            rusqlite::params![id],
-        )?;
         Ok(())
     }
 
@@ -536,8 +532,8 @@ impl ArtifactVectorStore for SqliteVecArtifactStore {
         // sqlite-vec has no project_id column; the catalog's scoped filter does
         // the project narrowing after hydration (results match the Qdrant path).
         //
-        // `artifact_vec` is declared `vec0(id, embedding FLOAT[768])` in schema.sql
-        // with no distance metric, so sqlite-vec's default L2 applies and the
+        // `artifact_vec_v2` is declared `vec0(id, embedding FLOAT[N])` by the v11
+        // migration with no distance metric, so sqlite-vec's default L2 applies and the
         // `distance` column is already lower-is-closer — the polarity the trait
         // requires. No conversion here, unlike the Qdrant path.
         let blob: Vec<u8> = query.iter().flat_map(|f| f.to_le_bytes()).collect();
@@ -1024,13 +1020,18 @@ mod backend_tests {
                 .unwrap();
             assert_eq!(n, 1, "chunk {id} must reach artifact_vec_v2");
         }
-        // BOTH halves are required. The first is monotone under a writer that
-        // writes v2 AND v1 — which is exactly what a half-finished re-point
-        // looks like, and is a state this task passes through.
-        let v1: i64 = guard
+        // The half above is monotone under a writer that writes v2 AND v1. That
+        // used to be checked as `COUNT(*) FROM artifact_vec == 0`; since schema
+        // v13 the v1 table does not exist, so such a writer fails with "no such
+        // table" at upsert, and what is left to guard is the table returning.
+        let v1_tables: i64 = guard
             .conn
-            .query_row("SELECT COUNT(*) FROM artifact_vec", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'artifact_vec'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(v1, 0, "no chunk id may reach the artifact-keyed v1 table");
+        assert_eq!(v1_tables, 0, "the retired v1 table must not be re-created");
     }
 }

@@ -255,17 +255,14 @@ fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> R
         "INSERT OR IGNORE INTO schema_version (version) VALUES (10)",
         [],
     )?;
-    // v11: chunk-grain artifact embeddings.
-    //
-    // `artifact_vec` needs no schema change — its `id` is already TEXT PRIMARY KEY
-    // and nothing requires it to DENOTE an artifact. v11 adds the side table and a
-    // second vec table; a later task backfills v2 and swaps. Keeping both alive is
-    // what avoids a dark window over ~90,500 embeds.
+    // v11: chunk-grain artifact embeddings — a chunk side table and a chunk-keyed
+    // vec table. (The artifact-keyed v1 `artifact_vec` stayed alive beside it until
+    // every writer and the KNN reader had moved over; v13 retires it.)
     //
     // `chunk_id` is an OPAQUE uuid, deliberately not derived from artifact_id:
     // `id = sha256(abs_path)`, so archiving re-keys an artifact, and a derived
-    // chunk id would make every archive move an O(chunks) loop through
-    // `gc::migrate_vec_id` (which exists only because vec0 rejects UPDATE ... SET id).
+    // chunk id would make every archive move an O(chunks) delete-then-insert loop
+    // over the vec table, because vec0 rejects `UPDATE ... SET id`.
     conn.execute(
         "CREATE TABLE IF NOT EXISTS artifact_chunk (
            chunk_id     TEXT PRIMARY KEY,
@@ -294,9 +291,8 @@ fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> R
          )",
         [],
     )?;
-    // `artifact_vec_v2` is keyed by `chunk_id`, not `artifact_id`, so neither
-    // the `artifact_vec_cascade_delete` trigger (schema.sql:54, keyed on
-    // artifact.id) nor the startup orphan sweep reaches it. `artifact_chunk`
+    // `artifact_vec_v2` is keyed by `chunk_id`, not `artifact_id`, so no trigger
+    // on `artifact` can reach it by id. `artifact_chunk`
     // rows vanish silently via the FK cascade above when an artifact is
     // deleted — this trigger is what turns that into a matching vector
     // delete instead of an orphan. Verified (not assumed): SQLite fires
@@ -337,6 +333,38 @@ fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> R
         "INSERT OR IGNORE INTO schema_version (version) VALUES (12)",
         [],
     )?;
+    // v13: retire `artifact_vec` (v1, artifact-keyed). Nothing has written or read
+    // it since chunk-grain retrieval moved every writer and the KNN query onto
+    // `artifact_vec_v2`; it survived as a table every open re-created and swept,
+    // and as a dimension migration that rebuilt a table search never read.
+    //
+    // TRIGGER FIRST: `artifact_vec_cascade_delete` is declared ON `artifact` and
+    // names `artifact_vec` only in its body, so dropping the table does not drop
+    // it — left behind, it turns every artifact DELETE into
+    // `no such table: main.artifact_vec`.
+    //
+    // ONE-SHOT, gated on the stamp rather than on the table's existence. The
+    // catalog is shared across every codescout binary on the machine, and an
+    // older one re-creates an empty `artifact_vec` + trigger from its own
+    // schema.sql on its next open (and still issues `DELETE FROM artifact_vec`
+    // from its store). Re-dropping on every open would pull the table out from
+    // under that process repeatedly; once stamped, a re-created table is empty,
+    // unread, and harmless.
+    let v13_applied: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM schema_version WHERE version = 13)",
+        [],
+        |r| r.get(0),
+    )?;
+    if !v13_applied {
+        conn.execute_batch(
+            "DROP TRIGGER IF EXISTS artifact_vec_cascade_delete;
+             DROP TABLE IF EXISTS artifact_vec;",
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version (version) VALUES (13)",
+            [],
+        )?;
+    }
     // v6: add abs_path/git_root alongside legacy columns, then backfill.
     // drop_legacy_and_stamp is called separately by open_with_workspace after
     // backfill — NOT here, because backfill requires a workspace config and
@@ -520,9 +548,6 @@ impl Catalog {
         audit::install(&conn).context("installing audit triggers")?;
         audit::install_session(&conn, &audit::resolve_actor())
             .context("installing audit session")?;
-        // Clean up any artifact_vec rows that lost their parent artifact row
-        // (e.g. orphans from before the cascade-delete trigger was added).
-        conn.execute_batch("DELETE FROM artifact_vec WHERE id NOT IN (SELECT id FROM artifact);")?;
         Ok(Self { conn })
     }
 
@@ -535,9 +560,6 @@ impl Catalog {
         audit::install(&conn).context("installing audit triggers")?;
         audit::install_session(&conn, &audit::resolve_actor())
             .context("installing audit session")?;
-        // Clean up any artifact_vec rows that lost their parent artifact row
-        // (e.g. orphans from before the cascade-delete trigger was added).
-        conn.execute_batch("DELETE FROM artifact_vec WHERE id NOT IN (SELECT id FROM artifact);")?;
         Ok(Self { conn })
     }
 
@@ -566,9 +588,6 @@ impl Catalog {
         audit::install(&conn).context("installing audit triggers")?;
         audit::install_session(&conn, &audit::resolve_actor())
             .context("installing audit session")?;
-        // Clean up any artifact_vec rows that lost their parent artifact row
-        // (e.g. orphans from before the cascade-delete trigger was added).
-        conn.execute_batch("DELETE FROM artifact_vec WHERE id NOT IN (SELECT id FROM artifact);")?;
         Ok(Self { conn })
     }
 
@@ -624,7 +643,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 12);
+        assert_eq!(v, 13);
     }
 
     #[test]
@@ -659,7 +678,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 12);
+        assert_eq!(v, 13);
     }
 
     #[test]
@@ -692,7 +711,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 12);
+        assert_eq!(v, 13);
         let n: i64 = cat
             .conn
             .query_row("SELECT COUNT(*) FROM artifact_chunk", [], |r| r.get(0))
@@ -715,7 +734,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 12, "re-running must not advance or duplicate");
+        assert_eq!(v, 13, "re-running must not advance or duplicate");
     }
 
     /// v12 adds `entry_part` / `entry_parts` to `artifact_chunk`.
@@ -747,7 +766,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 12);
+        assert_eq!(v, 13);
 
         // Nullable, and NULL is the value a pre-v12 row carries.
         {
@@ -784,6 +803,133 @@ mod tests {
             (None, None),
             "a row written without them must read back NULL, not a fabricated 1-of-1"
         );
+    }
+
+    fn sqlite_master_has(conn: &Connection, kind: &str, name: &str) -> bool {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = ?1 AND name = ?2)",
+            rusqlite::params![kind, name],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    /// Put back what a pre-v13 catalog (or an older binary's schema.sql) leaves:
+    /// the v1 table, its trigger on `artifact`, and a row in it.
+    fn recreate_v1_vec_table(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE artifact_vec USING vec0(id TEXT PRIMARY KEY, embedding FLOAT[4]);
+             CREATE TRIGGER artifact_vec_cascade_delete AFTER DELETE ON artifact
+             BEGIN DELETE FROM artifact_vec WHERE id = OLD.id; END;",
+        )
+        .unwrap();
+        let blob: Vec<u8> = [0.5f32; 4].iter().flat_map(|f| f.to_le_bytes()).collect();
+        conn.execute(
+            "INSERT INTO artifact_vec (id, embedding) VALUES ('stale', ?1)",
+            [blob],
+        )
+        .unwrap();
+    }
+
+    /// v13 drops the retired v1 table AND its trigger from a catalog that has them.
+    ///
+    /// LOAD-BEARING: the artifact DELETE at the end. The trigger is declared ON
+    /// `artifact`, so dropping only the table leaves it behind, and the absence
+    /// assertions on the table alone stay green while every artifact delete fails
+    /// with "no such table".
+    #[test]
+    fn v13_drops_the_v1_vec_table_and_its_trigger_from_a_pre_v13_catalog() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.db");
+        {
+            let cat = Catalog::open(&path).unwrap();
+            recreate_v1_vec_table(&cat.conn);
+            cat.conn
+                .execute("DELETE FROM schema_version WHERE version = 13", [])
+                .unwrap();
+        }
+
+        let cat = Catalog::open(&path).unwrap();
+        assert!(
+            !sqlite_master_has(&cat.conn, "table", "artifact_vec"),
+            "v13 must drop artifact_vec"
+        );
+        assert!(
+            !sqlite_master_has(&cat.conn, "trigger", "artifact_vec_cascade_delete"),
+            "v13 must drop the trigger, which dropping the table does not"
+        );
+        let v: i64 = cat
+            .conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 13);
+
+        {
+            use crate::librarian::catalog::artifact::{self, TestArtifactRowBuilder};
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new("a")
+                    .with_abs_path("/test/a.md")
+                    .with_kind("tracker")
+                    .with_status("active")
+                    .with_file_sha256("x")
+                    .build(),
+            )
+            .unwrap();
+        }
+        cat.conn
+            .execute("DELETE FROM artifact WHERE id = 'a'", [])
+            .expect("an artifact DELETE must not hit a dangling v1 trigger");
+    }
+
+    /// A catalog stays free of the v1 table across reopens, not just on the open
+    /// that ran v13.
+    ///
+    /// A single open cannot see a declaration left in schema.sql: SCHEMA_SQL
+    /// creates the table and v13 drops it again moments later in the same open.
+    /// Only the SECOND open, where the stamp skips the drop, would keep it.
+    #[test]
+    fn v13_stays_dropped_across_reopens() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.db");
+        drop(Catalog::open(&path).unwrap());
+        let cat = Catalog::open(&path).unwrap();
+        assert!(
+            !sqlite_master_has(&cat.conn, "table", "artifact_vec"),
+            "a reopened catalog must not re-create artifact_vec"
+        );
+        assert!(!sqlite_master_has(
+            &cat.conn,
+            "trigger",
+            "artifact_vec_cascade_delete"
+        ));
+    }
+
+    /// v13 is one-shot: once stamped, a v1 table that an OLDER binary re-created
+    /// from its own schema.sql is left alone.
+    ///
+    /// The catalog is shared by every codescout binary on the machine, and an
+    /// older one still issues `DELETE FROM artifact_vec` from its store. Dropping
+    /// on every open would pull the table out from under that process each time a
+    /// newer binary opened the catalog; the re-created table is empty and unread.
+    #[test]
+    fn v13_is_one_shot_so_a_table_an_older_binary_recreated_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.db");
+        {
+            let cat = Catalog::open(&path).unwrap();
+            recreate_v1_vec_table(&cat.conn);
+        }
+        let cat = Catalog::open(&path).unwrap();
+        assert!(
+            sqlite_master_has(&cat.conn, "table", "artifact_vec"),
+            "a stamped catalog must not re-run the v13 drop"
+        );
+        assert!(sqlite_master_has(
+            &cat.conn,
+            "trigger",
+            "artifact_vec_cascade_delete"
+        ));
     }
 
     #[test]

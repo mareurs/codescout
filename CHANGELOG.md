@@ -371,6 +371,29 @@ All notable changes to codescout are documented here.
 
 ### Fixed
 
+- **The dimension-migration backup was a `fs::copy` of a WAL-mode catalog, so it silently
+  omitted everything committed since the last checkpoint.** `catalog.db` is opened
+  `journal_mode = WAL`; the main `.db` file holds only checkpointed pages, and the rest lives
+  in the `-wal` sidecar a single-file copy leaves behind. Measured on a catalog in this shape:
+  51 rows visible to the live connection, **1** in the copy. The lost rows are not the
+  vectors — those regenerate — but the artifacts, events and augmentations committed since,
+  and augmentations are not in git. The backup now uses `VACUUM INTO`, which snapshots WAL
+  content and is not blocked by concurrent readers. `PRAGMA wal_checkpoint(TRUNCATE)` before a
+  copy is **not** an equivalent fix: it reports `busy = 1` rather than failing when any other
+  connection holds a read lock, and this catalog is shared by every codescout process on the
+  machine. The pre-existing test asserted only that a file with the right *name* appeared;
+  the new one opens the backup and reads a post-checkpoint row out of it.
+
+- **`LIBRARIAN_ARTIFACT_VEC_MIGRATE=1` rebuilt a table search no longer reads.** After
+  switching to an embedding model with a different width, every `doc(find, semantic=)`
+  failed with `Expected 768 dimensions but received 3072`. The migration backed up the
+  catalog, rebuilt `artifact_vec` (v1), and left `artifact_vec_v2`, which is the table
+  chunk-grain search queries, at its hardcoded `FLOAT[768]`. `backfill-chunks` crashed
+  on its first insert with vec0's raw error. The gate now rebuilds `artifact_vec_v2`
+  (backup: `catalog.db.pre-vec-v2-dim-bak.<ts>`), and the guard also reads an empty
+  table's declared width. Recover with `LIBRARIAN_ARTIFACT_VEC_MIGRATE=1`, then
+  `backfill-chunks --all` and a `reembed` reindex.
+
 - **`read_file` on a buffer returned an envelope instead of content when a single line
   was wider than the whole inline budget.** `read_from_buffer` documents that it never
   re-wraps its own result, but the safety valve in `extract_lines_with_cost` always emits
@@ -691,6 +714,13 @@ All notable changes to codescout are documented here.
   field values are searchable instead of collapsing to one line.
 
 ### Removed
+
+- **The v1 `artifact_vec` table.** Nothing had written or read it since chunk-grain
+  retrieval moved to `artifact_vec_v2`. Schema v13 drops the table and its
+  `artifact_vec_cascade_delete` trigger once per catalog. An older codescout binary
+  sharing the catalog re-creates an empty copy on its next open, which is harmless and
+  left alone. Also gone: the v1 writers, v1's dimension-migration copy, the rehome
+  helper for v1 ids, and the orphan sweep that ran on every catalog open.
 
 - `CodePayload::ast_kind`. Declared, serialized, deserialized — and written as `""` at
   every construction site in the tree. It had no producer anywhere, so populating it

@@ -3,7 +3,7 @@
 //! no scope-based deletion, no automatic deletion.
 
 use anyhow::Result;
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use std::path::Path;
 
 pub const DEFAULT_GRACE_DAYS: i64 = 14;
@@ -403,40 +403,6 @@ pub fn rehome_commits(conn: &Connection, old_root: &Path, new_root: &Path) -> Re
     Ok(total)
 }
 
-/// Migrate an `artifact_vec` embedding row from `old_id` to `new_id`.
-///
-/// `artifact_vec` is a `vec0` VIRTUAL table (see schema.sql) with no FK to
-/// `artifact` — only an `AFTER DELETE` trigger on `artifact` that cascades a
-/// DELETE, never an UPDATE, into `artifact_vec`. Rewriting `artifact.id` via
-/// UPDATE therefore does NOT move the vec row; it must be migrated here
-/// explicitly, or it becomes an orphan under the old id.
-///
-/// Empirically verified (throwaway probe, since removed): a direct
-/// `UPDATE artifact_vec SET id = ?1 WHERE id = ?2` is rejected outright by
-/// sqlite-vec with `SqliteFailure` / "UPDATEs on vec0 primary key values are
-/// not allowed." — not a silent no-op, a hard error. This matches the
-/// existing DELETE-then-INSERT idiom `src/librarian/indexer.rs::write_embeddings`
-/// already uses for the same table (there because vec0 also doesn't honor
-/// `INSERT OR REPLACE` conflict resolution on this column). A no-op if there
-/// is no embedding row for `old_id`.
-fn migrate_vec_id(tx: &rusqlite::Transaction<'_>, old_id: &str, new_id: &str) -> Result<()> {
-    let embedding: Option<Vec<u8>> = tx
-        .query_row(
-            "SELECT embedding FROM artifact_vec WHERE id = ?1",
-            [old_id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    if let Some(embedding) = embedding {
-        tx.execute("DELETE FROM artifact_vec WHERE id = ?1", [old_id])?;
-        tx.execute(
-            "INSERT INTO artifact_vec (id, embedding) VALUES (?1, ?2)",
-            rusqlite::params![new_id, embedding],
-        )?;
-    }
-    Ok(())
-}
-
 /// Every `(table, column)` carrying a foreign key onto `artifact(id)`, which
 /// [`apply_rehome`] must rewrite when it changes an artifact's primary key.
 ///
@@ -504,8 +470,9 @@ pub fn apply_rehome(conn: &Connection, plan: &RehomePlan) -> Result<RehomeStats>
             "UPDATE entry_cite SET dst_ref = ?1 WHERE dst_ref = ?2",
             rusqlite::params![row.new_id, row.old_id],
         )?;
-        // artifact_vec: no FK, DELETE-trigger only — handled explicitly.
-        migrate_vec_id(&tx, &row.old_id, &row.new_id)?;
+        // Vectors need nothing here: `artifact_vec_v2` is keyed by chunk_id, and
+        // the `artifact_chunk` rewrite above re-points the chunk at the new id
+        // without deleting it, so `artifact_vec_v2_cascade_delete` never fires.
         // Parent last.
         tx.execute(
             "UPDATE artifact SET id = ?1, abs_path = ?2, missing_since = NULL WHERE id = ?3",
@@ -630,19 +597,8 @@ mod tests {
                 [&old_id],
             )
             .unwrap();
-        // artifact_vec (vec0): a DISTINCTIVE (non-zero, non-uniform) embedding
-        // under old_id, so migration of the VALUE — not just row presence —
-        // can be asserted after rehome.
-        let embedding_bytes: Vec<u8> = (0..768u32)
-            .map(|i| i as f32)
-            .flat_map(|f| f.to_le_bytes())
-            .collect();
-        cat.conn
-            .execute(
-                "INSERT INTO artifact_vec(id,embedding) VALUES (?1, ?2)",
-                rusqlite::params![old_id, embedding_bytes],
-            )
-            .unwrap();
+        // Chunk vectors are covered by
+        // `rehome_carries_chunk_rows_and_their_vectors_to_the_new_id`.
 
         let plan = plan_rehome(&cat.conn, std::path::Path::new("/oldrepo"), &new_root).unwrap();
         let new_id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
@@ -748,51 +704,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(cite_new, 1, "entry_cite.dst_ref did not follow to new id");
-        // artifact_vec: no orphan under old_id (either migrated to new_id or removed for re-embed)
-        let vold: i64 = cat
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM artifact_vec WHERE id=?1",
-                [&old_id],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            vold, 0,
-            "artifact_vec orphan under old id (vec0 trigger only fires on DELETE, not UPDATE)"
-        );
-        // and the embedding actually migrated to new_id with its VALUE intact
-        // (not just row presence, and not silently replaced/dropped).
-        let migrated_embedding: Vec<u8> = cat
-            .conn
-            .query_row(
-                "SELECT embedding FROM artifact_vec WHERE id=?1",
-                [&new_id],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            migrated_embedding, embedding_bytes,
-            "migrated embedding bytes must match the originally seeded value"
-        );
-    }
-
-    #[test]
-    fn migrate_vec_id_is_noop_when_no_embedding_row_exists() {
-        // No artifact_vec row exists for "missing-old" — migrate_vec_id must
-        // be a clean no-op: no error, and no row created under either id.
-        let cat = Catalog::open_in_memory().unwrap();
-        let tx = cat.conn.unchecked_transaction().unwrap();
-        migrate_vec_id(&tx, "missing-old", "missing-new").unwrap();
-        tx.commit().unwrap();
-        let n: i64 = cat
-            .conn
-            .query_row("SELECT COUNT(*) FROM artifact_vec", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(
-            n, 0,
-            "migrate_vec_id must not create a row when none existed for old_id"
-        );
     }
 
     #[test]
