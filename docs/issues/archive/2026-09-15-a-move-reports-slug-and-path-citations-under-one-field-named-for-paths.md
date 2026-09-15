@@ -1,13 +1,13 @@
 ---
-status: open
-opened: 2026-09-15
-closed:
-severity: medium
-owner: marius
-related: []
+kind: bug
+status: fixed
 tags:
 - cluster/unclassified
-kind: bug
+closed: 2026-09-15
+opened: 2026-09-15
+owner: marius
+related: []
+severity: medium
 ---
 
 # BUG: `doc(action="move")` reports slug-form and path-form citations in one field named for paths, and only one of the two needs re-pointing
@@ -82,6 +82,53 @@ guard whose REMEDY TEXT is wrong for half its output, which this repo already tr
 class of its own (`CLAUDE.md` § *Testing Discipline*, the remedy-text law).
 
 ## Fix
+
+**SHIPPED `e79fa902`**, patch-id `d63380f9840374e5291d2ca0704d461a933f434c`.
+
+The response grows two fields, and the information needed no new work — `mv.rs` already
+scanned the dated stem and the dateless slug separately, then `extend`ed and `dedup`ed. The
+fix only stops discarding which scan matched. No extra `git` invocation, no match text, no
+second cap.
+
+| field | meaning |
+|---|---|
+| `inbound_citations_cleared` | the subset of the **same capped entries** that cannot cite the old path |
+| `citation_stem_preserved` | `false` ⇒ nothing is cleared, and why |
+
+**The flag is an OBSERVATION, not a verdict, and that is the design.** `files_mentioning`
+deliberately over-reports — its own doc comment says so — so it cannot honestly answer *"must
+this be re-pointed?"*. It can answer *"did the dated stem appear in this file"*, and that is
+sound in exactly one direction: every citation of `docs/issues/<dated>.md` contains that
+substring, so a file not mentioning it **cannot** hold one. The complement stays ambiguous on
+purpose — a bare dated stem survives a move untouched, since a move changes only the
+directory.
+
+### Two things this file got wrong, both found by scouting before implementing
+
+**The plan said *"per-entry kind: path vs slug"*. That is not the distinction.** A bare dated
+stem carries no path wrapper and still survives the move, so "form of the citation" does not
+decide the remedy. The honest datum is which **needle** matched.
+
+**The plan rejected a second array for the wrong reason.** It argued the caller would have to
+re-union the two lists. The real hazard is narrower and worse: two independently
+`.take(CITATION_SAMPLE)`-ed lists cannot be subtracted **at all** — that is `IC-13` built into
+the seam rather than merely risked. Fixed by capping **once** and projecting both renderings
+from the same vector, so they correspond by construction.
+
+### A fourth condition, found by naming the claim rather than by reading code
+
+*"Unaffected by this move"* holds only because the slug survives it — and `new_rel_path` is
+arbitrary, so a move that **renames** the stem breaks slug citations exactly as hard as path
+ones. Without `citation_stem_preserved` the field would clear an `IC-N` Members line that a
+rename had just killed: a confident wrong answer in the direction that **loses data**, which
+is strictly worse than the make-work this bug was filed about.
+
+### NOT LIVE IN THE SESSION THAT SHIPPED IT
+
+The running MCP binary was built 2026-09-15 07:04:55; this commit landed 08:27:23. So the
+archive move for **this very file** returned the OLD response shape, with neither new field —
+recorded because it is the obvious thing to claim and it would have been false. `cargo rb`
+plus `/mcp` is what makes it live; CI tests it regardless of any session's binary.
 
 Not attempted. The shape that would close it is a per-entry kind rather than a second array —
 a second array re-splits a population the caller then has to re-union for the "did I get them
