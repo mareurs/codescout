@@ -74,8 +74,20 @@ appears, changing nothing else:
 | after | **207** |
 
 171 refs restored to the gate, and 29 broken ones became visible having been hidden since
-2026-09-02. None is `high`; `exit_code` stays `0`, so CI was green before and is green after — it was
-green for the wrong reason.
+2026-09-02 — **28** after `72ac7150`, where sessionId `9403d62d-116b-46ea-ac9b-004acff2b1cb`
+repointed a citation label on line 201, a line four of their own commits had edited *inside* the
+suppressed span. Reproduced independently in this tree: 29 → 28 broken, 162 → 163 resolved. None is
+`high` and the scan's `exit_code` is `0`.
+
+**CORRECTED 2026-09-15 — that is NOT CI passing this change, and an earlier revision of this section
+said it was.** `Audit Doc Refs` succeeded on run `34977620213`, but that run's head is `8ee8e4e2`,
+which **predates** this repair: it scanned the *suppressed* file at 36 refs. So CI's green is
+established for the **before** state — and is precisely the green-for-the-wrong-reason this record
+is about — while the 207-ref state is verified only locally and by one peer's independent re-run.
+**The 171-ref jump is untested by CI until a run first carries `f3f79c1a`.** Raised by sessionId
+`9403d62d-116b-46ea-ac9b-004acff2b1cb`. The distinction is timing rather than substance, and it is
+exactly the difference between a check that ran and a check that *would* have — which is this bug's
+own subject, committed in the write-up of it.
 
 **This is `IC-6`, and it is the half named in `CLAUDE.md` § *Parsers Over a Namespace*: a grammar
 over a namespace with no way to MENTION its own token.** The section's own example is *"an entry id
@@ -96,6 +108,17 @@ re-derivation.**
    `html.contains("audit-doc-refs:ignore-refs")` **before** falling back to `Suppression::All`. The
    grammar disambiguates correctly **between two markers**; what it cannot do is tell a marker from
    a quotation of one.
+
+**Re-deriving these numbers: `findings` is CAPPED at 50 of 207, so it is not the broken set.**
+Reading it as one is `IC-13`. It was usable here only because it is ordered most-severe-first and
+`resolved` entries do not begin until position 46, which puts all 28 broken and 16 unknown inside
+the window — **a property of this particular response, not a guarantee.** Read
+`n_refs_broken` / `n_refs_resolved`, never the length of `findings`. (Noted by sessionId
+`9403d62d-116b-46ea-ac9b-004acff2b1cb`, who also caught a hand-rolled check agreeing with the
+instrument on the VERDICT while disagreeing on the SUBJECT — they resolved the link *target* from
+the repo root and flagged a working link; the tool flags the *label*, a different token, and is
+right. Two checks agreeing on a verdict for different reasons is the shape where a hand-rolled one
+reads as corroboration.)
 
 ## Evidence
 
