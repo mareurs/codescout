@@ -15809,6 +15809,36 @@ reassures**, because alarm reads as diligence.
 
 **Status:** validated
 
+**Sharpened 2026-09-15 by an independent instance, which names a gap in the probe above.**
+`embedder-stack-ops-session-log:F-6` (`b4660a99`) measured this seam from the other side and
+found the cause this entry's method **cannot see**: `cargo rb` compiles the LOCAL tree, and
+at 14:08 that checkout was **15 commits behind origin** — so the build finished three
+minutes short of the reconciling push and every inspection signal still said current (exit
+0, fresh mtime, correct symlink, `--version` unchanged by the merge so it discriminated
+nothing, `doc --help` succeeding, which proves the librarian is compiled in and not which
+schema it carries). The probe above compares the binary to the **local tree** and to the
+**running process**, and has nothing to say about whether the local tree is current with
+origin. Add `git rev-list --count HEAD..@{upstream}`: non-zero means *"is my fix in the
+binary"* is not the question you actually have. Re-checked here at 15:26 — `behind=0`,
+`506924f2` an ancestor of HEAD, binary built 14:54:32 after it, no `.rs` touched by any
+later commit — so this session's verdict survives the sharpening; the method needed the
+extra check regardless.
+
+**The two entries only APPEAR to disagree about method, and the difference is DIRECTION —
+worth stating because a later reader meeting both in one corpus will otherwise treat one as
+refuting the other.** `F-6` reports `strings | grep -c` over a release binary returning **0**
+for a constant present in *both* pre- and post-PR source, and concludes that a line-oriented
+search "cannot express the question", because Rust merges string literals into large
+`.rodata` blobs. That is a claim about the **negative** direction: a zero cannot separate
+*absent from the build* from *unexpressible by the instrument*. This entry's finds were
+**positive** — control `2`, each fix string `1` — and a hit on a sentence that exists only in
+the fix is an identification, not an inference from silence. So `-a` rescues the positive
+direction and rescues **nothing** in the negative one. **When the answer you need is an
+absence, do not use a text search on a binary at all:** use `F-6`'s behavioural probe (ask
+the binary what it *does* — it reads a scratch catalog's schema version in one command) or
+linkage evidence (`ldd`, plus the 62 MB → 40 MB size drop it cites), both of which can
+express absence.
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
