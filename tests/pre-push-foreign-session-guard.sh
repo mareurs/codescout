@@ -994,6 +994,10 @@ R6_TIP="$(sha)"
 run "$ALICE" "$BOB" "refs/heads/main $R6_TIP refs/heads/main $R6_BASE"
 eq    "empty population: allowed"                 "$EC" 0
 has   "empty population: says the set was empty"  "$OUT" "no commits by another session"
+# DISCRIMINATION for row 6g: nothing was authorised here, so nobody is owed a notification.
+# A notify block printed unconditionally would satisfy 6g and be worse than none — it would
+# send a pusher to message sessions whose work was not in the range.
+hasnt "empty population: owes nobody a notification" "$OUT" "have NOT been told"
 
 # Row 6b -- THE POSITIVE CONTROL, and 6a is vacuous without it. Same ack, but a foreign
 # population EXISTS and Bob is simply not in it. Here the old wording is the correct one, so
@@ -1007,6 +1011,11 @@ R6B_TIP="$(sha)"
 run "$ALICE" "$BOB" "refs/heads/main $R6B_TIP refs/heads/main $R6B_BASE"
 has   "wrong sid named: still says authored no commit" "$OUT" "authored no commit in"
 hasnt "wrong sid named: does not claim an empty set"   "$OUT" "no commits by another session"
+# DISCRIMINATION for row 6g, the harder of the two: a foreign population EXISTS here and the
+# push is refused, so `ack_matched` is non-empty-ish territory while nothing was authorised.
+# The notify block must stay silent — telling a refused pusher to go notify sessions whose
+# work did NOT go out is the same defect pointed the other way.
+hasnt "wrong sid named: owes nobody a notification"    "$OUT" "have NOT been told"
 
 # Rows 6c-6e -- the banner. Needs a refusal, so: a foreign commit and no ack.
 new_repo
@@ -1073,6 +1082,36 @@ eq    "fully acked: allowed"                      "$EC" 0
 hasnt "fully acked: does NOT claim an empty set"  "$OUT" "no commits by another session"
 hasnt "fully acked: does NOT deny the ack's role" "$OUT" "not on the ack"
 has   "fully acked: names the population it authorised" "$OUT" "2 commit(s) by another session"
+
+# Row 6g -- THE NOTE NAMES WHO, AND WHAT IS OWED THEM.
+#
+# 6f pins that the note reports the right COUNT. That is not enough to act on: until
+# 2026-09-15 the branch printed `24` and stopped, stating in its last sentence that every
+# author remains UNCLEARED while naming no party, no action, and no way to reach one.
+# `ack_matched` had held those sids since `:103` and was discarded at the print.
+#
+# Measured, and the author of this row is the instance: push 56f33bd2 carried 33 commits
+# across four sessions, the note printed 24 correctly, THREE sessions had work published and
+# ZERO were told. It surfaced three hours later when one of them noticed origin had moved,
+# reconstructed the range by hand, and undercounted their own commits 5 against 12.
+# `docs/issues/2026-09-15-the-ack-note-states-a-residual-obligation-and-names-no-one-to-discharge-it.md`
+#
+# Asserts the SIDS THEMSELVES, not the surrounding prose: a rewrite that keeps the sentence
+# and drops the loop is exactly the regression this row exists for, and prose assertions go
+# green on it. Both sids, because printing only the first is a plausible loop bug.
+has   "fully acked: names the first acked sid"  "$OUT" "$BOB"
+has   "fully acked: names the second acked sid" "$OUT" "$CAROL"
+has   "fully acked: says they have not been told" "$OUT" "have NOT been told"
+# The REMEDY half, by shape rather than wording. A guard that names a party and no procedure
+# leaves the reader to invent one, and the sid->session route is the part that decays --
+# CLAUDE.md § Reaching a Peer Session, re-derive at use and never cache.
+has   "fully acked: names a procedure that resolves a sid" \
+      "$OUT" "reaching-peer-sessions"
+# And the reason it is owed, which is the half that makes a busy reader act: the other
+# session's standing instruction is the same as the pusher's, so this is an outward-facing
+# action on their work that their operator did not sanction.
+has   "fully acked: says why it is owed, not merely that it is" \
+      "$OUT" "their operator did not sanction"
 
 echo
 echo "== entry-id collision scan (Fix Part 1, 9c7c5bc9168404be) =="

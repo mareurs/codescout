@@ -343,6 +343,44 @@ if [ -n "$ack" ] && [ "$ack_matched" != "all" ]; then
         printf '  why this push is allowed -- every foreign author in the range was named.\n' >&2
         printf '  The ack records YOUR operator decision about them; it does not speak for\n' >&2
         printf '  theirs, and it leaves each of them exactly as UNCLEARED as they were.\n' >&2
+        # NAMING THEM IS WHAT MAKES THAT LAST SENTENCE ACTIONABLE, and until 2026-09-15 it
+        # was not. `ack_matched` has held these sids since `:103` and was discarded here, so
+        # the note stated a residual obligation and gave the reader no party to discharge it
+        # against. Measured, with the author of this line as the instance: push 56f33bd2
+        # carried 33 commits across four sessions, the note printed `24`, and THREE sessions
+        # had work published with ZERO told. It surfaced three hours later because one of
+        # them noticed origin had moved and reconstructed the range by hand -- undercounting
+        # their own commits 5 against 12, which is precisely the work this print removes.
+        #
+        # The pusher is the one reader who cannot see the omission: they derived this list to
+        # write the ack, so the note reads complete to them and to nobody else.
+        # `docs/issues/2026-09-15-the-ack-note-states-a-residual-obligation-and-names-no-one-to-discharge-it.md`
+        #
+        # NOT A REFUSAL and deliberately placed after the push is allowed: the push is
+        # correct and authorised, and this is a courtesy owed afterwards. Blocking on it
+        # would punish the path the guard is trying to encourage.
+        printf '\n  Their sessions have NOT been told. Yours to do, now:\n' >&2
+        # `%s\n`, and the newline is load-bearing. `printf '%s'` emits no trailing newline,
+        # so `tr` hands `while read` a final UNTERMINATED line, `read` returns non-zero on
+        # it, and the loop silently drops the LAST sid. Written that way first and caught by
+        # this block's own test naming both sids — which matters because the failure is the
+        # defect this note exists to fix, one level down: a list of who is owed a
+        # notification that quietly omits one of them.
+        printf '%s\n' "$ack_matched" | tr ',' '\n' | while IFS= read -r _s; do
+            [ -n "$_s" ] || continue
+            printf '      %s\n' "$_s" >&2
+        done
+        # The sid is the durable identifier and the route from it to a live session is not:
+        # pid, socket and registry name all decay, and this guard runs in a git hook with no
+        # way to know who is still alive. So it names the sids and points at the one
+        # procedure that resolves them, rather than printing an address that may already be
+        # stale -- `CLAUDE.md` § Reaching a Peer Session, RE-DERIVE AT USE AND NEVER CACHE.
+        printf '  Resolve each to a live session with\n' >&2
+        printf '  /codescout-companion:reaching-peer-sessions, then tell them their work is\n' >&2
+        printf '  on origin. They cannot see this note, and their own standing instruction is\n' >&2
+        printf '  the same as yours: push only when their user asks. So for them this is an\n' >&2
+        printf '  outward-facing action on their work that their operator did not sanction,\n' >&2
+        printf '  and they have to report it -- from your account, or from a reconstruction.\n' >&2
     else
         for _tok in "$@"; do
             [ -n "$_tok" ] || continue
