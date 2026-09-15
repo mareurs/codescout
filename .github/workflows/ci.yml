@@ -134,7 +134,7 @@ jobs:
       # Same job, deliberately: this suite also builds throwaway git repos and needs the
       # committer identity configured above. It guards the worktree/index divergence note
       # in `pre-commit-ledger-counts.py` -- see
-      # docs/issues/2026-09-13-a-gate-script-edited-in-the-worktree-has-already-shipped.md.
+      # docs/issues/archive/2026-09-13-a-gate-script-edited-in-the-worktree-has-already-shipped.md.
       # Toolchain-free by construction (python3 + git only), which is why it is here and
       # not behind a cargo lane: a case that skips itself for a missing toolchain reports
       # success while testing nothing.

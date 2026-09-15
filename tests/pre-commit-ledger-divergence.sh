@@ -7,7 +7,7 @@
 # executes the copy in the WORKING TREE. So a corpus file edited on disk and not staged
 # puts the reader in a state where the refusal cites a file, and opening that file shows
 # the OPPOSITE of what the refusal says
-# (`docs/issues/2026-09-13-a-gate-script-edited-in-the-worktree-has-already-shipped.md`).
+# (`docs/issues/archive/2026-09-13-a-gate-script-edited-in-the-worktree-has-already-shipped.md`).
 #
 # Measured 2026-09-15 in an isolated repo, the same grep against both copies of the
 # ledger: worktree `1`, index `0`. The reader's rational conclusion from that pair is
@@ -107,7 +107,7 @@ _write_roster() { # _write_roster <repo> <clean|counted>
 # mechanism-column rule) instead, and because CHECK 1 runs first the suite would still
 # look green while asserting against a refusal it never triggered.
 #
-# The slug cell carries the BARE slug (`demo-1`), never `cluster/demo-1`. Measured against
+# The slug cell carries the BARE slug (`demo-a`), never `cluster/demo-a`. Measured against
 # the script 2026-09-15: with the prefixed form `parse_index_counts` matches nothing, the
 # declared map comes back empty, and a different check fires. The live ledger is bare.
 _write_classes() { # _write_classes <repo>
