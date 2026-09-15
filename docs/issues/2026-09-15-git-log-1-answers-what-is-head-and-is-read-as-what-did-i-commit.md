@@ -83,6 +83,28 @@ sha is no longer HEAD" — which `--amend` refuses rather than silently doing.
 
 Their commit now carries your file, their trailer, and a new sha.
 
+### Verifying what YOU added, when the field is one enormous line
+
+The same "tell my own contribution from shared state" problem has a second form, and the
+instrument for it is different. Cluster `**Members:**` fields are **exactly one line** —
+the widest in `docs/trackers/issue-clusters/` is 59,273 characters, derived 2026-09-15 —
+so appending rewrites the whole line, and `--numstat` reports `1 1` for any append of any
+size. **Every line-granularity question about that field is therefore unanswerable in a
+way that returns a number rather than an error.**
+
+```
+git show <sha> --word-diff=plain -- docs/trackers/issue-clusters/ \
+  | sed -n 's/.*{+\(.*\)+}.*/\1/p'
+```
+
+That yields only the words the commit ADDED. Measured on `05251908`: a naive
+`grep -cE '^\+.*n=[0-9]'` over the line diff returns **1** — reading as *this author wrote
+a bare count* — while the same grep over the word-diff's added text returns **0**. The line
+diff accuses you of every other author's figure anywhere in a year of entries.
+
+Contributed by `29420e72-c262-4236-82c2-52d769fdc549`, who hit the false positive while
+independently checking a warning I had sent them, and reproduced here before recording.
+
 ## This is an instance of a rule already written here, not a new discovery
 
 `docs/conventions/shared-checkout-commit-sequence.md` § 2 already says: *identify your own

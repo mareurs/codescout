@@ -30,6 +30,14 @@ no error, and nothing for the victim to attribute it to.
 `git reset --soft` moves HEAD and leaves the index alone. On this checkout that is
 almost always the flag you want.
 
+**Lead with this, because it is what makes the remedy free:** `--soft` is not merely
+*safer*, it is also what the repairing session already wants — it leaves the change being
+rescued **staged and ready to re-commit**, so it saves a step rather than costing one. A
+remedy that saves a step needs no discipline to adopt, which is § *Observer Blindness*
+position 3 in its cheapest form: the correct path ends in the safe state on its own.
+(Framing owed to `29420e72-c262-4236-82c2-52d769fdc549`, who pointed out that burying it
+under "safer" asks for vigilance the mechanism does not need.)
+
 ## Symptom (Effect)
 
 A peer runs `git add` as part of a stage → read `git diff --cached` → commit sequence.
