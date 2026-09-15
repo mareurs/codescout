@@ -89,7 +89,7 @@ mention has no such discriminator, which is why this is filed rather than gated.
 ### Three facts added 2026-09-06, one of which settles the § Fix question
 
 Found while verifying an unrelated bug's surface, and merged in from a duplicate filed the same
-day (`36ff17248b2c6ec7`, now superseded by this file — grepping `docs/issues/` for `librarian-mcp`
+day (`74dcfa57bda6b4cb`, now superseded by this file — grepping `docs/issues/` for `librarian-mcp`
 before filing would have caught it, and I did not).
 
 1. **The page is absent from `SUMMARY.md`.** mdBook renders what `SUMMARY.md` lists, so this page

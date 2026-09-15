@@ -3,7 +3,7 @@ kind: bug
 status: superseded
 tags:
 - cluster/gate-keyed-on-unobservable-event
-closed: null
+closed: 2026-09-13
 opened: 2026-09-12
 owner: marius
 related: []
@@ -88,6 +88,59 @@ contradiction reading is the obvious one and it is false.
    the code knows and what the message tells the caller.
 
 ## Fix
+
+**SUPERSEDED, not fixed here.** This record is superseded by
+`docs/issues/archive/2026-09-13-snapshot-stale-tests-row-presence-and-reports-a-content-claim.md`
+(`01be550a9d05d5d1`), a better-diagnosed account of the same defect. The edge is live in the
+catalog — `links.incoming` on this artifact holds exactly one entry, `rel: "supersedes"`,
+from that id — so unlike its sibling this one can still be read straight out of the graph.
+
+The underlying defect did ship, credited to the surviving record: `e9995df3` (patch-id
+`8e69d8508c0af3aa2aab79f777346f6c1d2602d4`), *"stop the snapshot advisory asserting a content
+claim it never checked"*, touching `src/librarian/catalog/augmentation.rs` and
+`src/librarian/tools/update_entry.rs`.
+
+**A WRONG NOTE STOOD HERE BRIEFLY.** It claimed `superseded` had been written by hand and was
+out of vocabulary. The first half is false here and was false for the sibling too: the status
+is set by `doc(action="link", rel="supersedes")`, a documented verb, and on this record the
+edge is still visible. The claim was reached by checking the sibling's link table, finding
+nothing, and generalising — which is a population-to-member inference over a sample of one,
+and the member it was checked against was the one whose edge had been orphaned.
+
+**What survives, narrower.** `superseded` is absent from the bug-file status vocabulary in
+`get_guide("tracker-conventions")` § *Bug files*, and the librarian treats it as an archived
+state — `doc(action="find")` hid this row and reported only `hints.hidden_archived: 1`. So a
+superseded bug that is never MOVED is invisible to every routine triage query while sitting
+in the live directory. This one sat there 3 days. Supersession has a mechanism; the archive
+step after it has none.
+
+**§ *Resume* below is stale and is left standing deliberately.** It asks for a
+wording-vs-comparison decision that `e9995df3` then made. Kept because the sibling caveat it
+raises — that `doctor`'s `scan_snapshot_drift` and `scan_params_behind_body` share the same
+`ParamsBackedLedger` and would want the same treatment — was **not** verified as part of this
+close-out and remains a thing to check.
+
+**SHIPPED `e9995df3`**, patch-id `8e69d8508c0af3aa2aab79f777346f6c1d2602d4` —
+*"stop the snapshot advisory asserting a content claim it never checked"*, which is this
+file's title. It touched `src/librarian/catalog/augmentation.rs` (+163) and
+`src/librarian/tools/update_entry.rs` (+112), and its own message records the reproduction
+changing the fix, plus a live verification against the rebuilt MCP server rather than tests
+alone.
+
+**This record carried `status: superseded` until 2026-09-15, and that is the finding worth
+keeping.** `superseded` is not in the bug-file status vocabulary
+(`open | taken | investigating | fixed | mitigated | wontfix | zombie`,
+`get_guide("tracker-conventions")` § *Bug files*), and the librarian treats it as an archived
+state: `doc(action="find")` hid this row and reported only `hints.hidden_archived: 1`. So a
+fixed bug sat in the LIVE directory, reachable by no routine triage query — not `open`, not
+the four-status open filter, not a default find — and not archived either.
+
+**§ *Resume* below is stale and is left standing deliberately.** It asks for a
+wording-vs-comparison decision in `snapshot_stale_note` that `e9995df3` then made. Kept
+because it records what was owed at filing time and because the sibling caveat it raises —
+that `doctor`'s `scan_snapshot_drift` and `scan_params_behind_body` share the same
+`ParamsBackedLedger` and would want the same treatment — was **not** verified as part of this
+close-out and remains a thing to check.
 
 Not applied. The cheap form is wording: state the uncertainty the code already documents, e.g.
 *"its `{entry_id}` row MAY still show the previous field values — this check sees only that the id

@@ -135,7 +135,7 @@ Two look-alikes deliberately left: `src/tools/markdown/edit_markdown.rs` is a **
 **Not fixed here, filed instead:** `docs/manual/src/concepts/librarian-mcp.md` carries 18 retired
 names in a tool-inventory table and documents a separate MCP server that no longer exists. It is
 absent from `SUMMARY.md`, so it needs a delete/tombstone/rewrite decision rather than a substitution
-— `36ff17248b2c6ec7`.
+— `74dcfa57bda6b4cb`.
 
 Fix SHA: `1f982a34f0a2371fd92d233f4aedf576c29f5c31`
 Patch-id: `c2ae9f523f258d1175f9704ff9a478cd7ff63aba`

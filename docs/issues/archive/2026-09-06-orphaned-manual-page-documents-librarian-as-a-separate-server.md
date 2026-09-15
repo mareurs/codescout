@@ -1,10 +1,11 @@
 ---
-id: '36ff17248b2c6ec7'
+id: '74dcfa57bda6b4cb'
 kind: bug
 status: superseded
 title: 'BUG: an orphaned manual page documents librarian as a separate MCP server, unreachable from SUMMARY.md and invisible to the gate that scans it'
 tags:
 - cluster/doc-contradicted-by-code
+closed: 2026-09-06
 ---
 
 ## Summary
@@ -73,6 +74,65 @@ inside the automated one that cannot see it.** Either miss alone is recoverable.
 
 ## Fix
 
+**SUPERSEDED, not fixed here.** This record is a duplicate of
+`docs/issues/archive/2026-09-01-librarian-mcp-page-describes-a-separate-server-that-was-collapsed.md`,
+and was marked so on 2026-09-06 by `doc(action="link", src_id=876d7282ddc61f06,
+dst_id=36ff17248b2c6ec7, rel="supersedes")` — that call is quoted verbatim in the
+reproduction of
+`docs/issues/archive/2026-09-06-supersedes-link-moves-catalog-status-without-writing-the-file.md`,
+whose whole subject is that the link moved the status in the catalog and never wrote the
+file. `36ff17248b2c6ec7` was this record's id before archiving.
+
+The underlying defect did ship: `a6743089` (patch-id
+`d95d41e70bbab9d031847601632d02f09c4480fb`) deleted the page and added
+`tests/manual_toc.rs` — `every_manual_page_is_reachable_from_summary`, with
+`the_toc_scan_is_reading_both_sides` as its non-vacuity control; both green 2026-09-15. It is
+credited to the surviving record, not to this one.
+
+**A WRONG NOTE STOOD HERE BRIEFLY AND ITS ERROR IS THE REASON THIS PARAGRAPH EXISTS.** It
+read that no `supersedes` edge exists on this artifact — true of the catalog today,
+`links.incoming` holds two `cites` and nothing else — and inferred from that absence that the
+status had been *written by hand*, out of vocabulary. The inference is false, and the
+falsifying evidence was one archived bug file away: the edge existed, was exercised, and is
+recorded. **An edge that is absent now was not necessarily never there** — the source of this
+one (`876d7282ddc61f06`) no longer resolves to any file, having been re-keyed or deleted in
+the merge that created the edge, and an orphaned edge leaves no trace in `links`. Absence in
+a link table is monotone under every way an edge can be removed.
+
+**What survives as a real finding, narrower than the retracted claim.** `superseded` is not
+in the bug-file status vocabulary that `get_guide("tracker-conventions")` § *Bug files*
+publishes (`open | taken | investigating | fixed | mitigated | wontfix | zombie`), yet
+`doc(action="link", rel="supersedes")` sets exactly that on a bug. The librarian then treats
+it as archived: `doc(action="find")` hides the row and reports only
+`hints.hidden_archived: 1`, and the four-status open filter never names it. So a superseded
+bug that is never MOVED sits in the live `docs/issues/` directory reachable by no routine
+query — not `open`, not the triage filter, not a default find. This one sat there 9 days and
+was found by a filesystem scan of `docs/issues/*.md`. Supersession has a mechanism; the
+archive step after it has no gate.
+
+**SHIPPED `a6743089`**, patch-id `d95d41e70bbab9d031847601632d02f09c4480fb` — the page was
+deleted and the TOC-reachability gate this file's § *Resume* asked for shipped in the same
+commit as `tests/manual_toc.rs`. Verified 2026-09-15: the file is gone, `SUMMARY.md` holds no
+reference to it, and the gate is green — `every_manual_page_is_reachable_from_summary` plus
+`the_toc_scan_is_reading_both_sides`, the second being the non-vacuity control that makes the
+first a measurement rather than a scan of an empty population.
+
+**This record carried `status: superseded` until 2026-09-15, and that is the finding worth
+keeping.** `superseded` is not in the bug-file status vocabulary
+(`open | taken | investigating | fixed | mitigated | wontfix | zombie`,
+`get_guide("tracker-conventions")` § *Bug files*), and the librarian treats it as an archived
+state: `doc(action="find")` hides it by default and reports only `hints.hidden_archived: 1`.
+So a fixed-and-gated bug sat in the LIVE directory, invisible to every routine triage query
+— `status="open"` misses it, the four-status open filter misses it, and the default find
+misses it. Not archived, not visible. It was reachable only by a filesystem scan of
+`docs/issues/*.md`, which is how this was found.
+
+**No `supersedes` edge exists on this artifact** — checked, `links.incoming` holds two `cites`
+and nothing else — so the status was written by hand rather than set by
+`doc(action="link", rel="supersedes")`, which is the tracker-shaped operation that would flip
+it legitimately. Two independent sessions reached for the same out-of-vocabulary token on the
+same day, which reads as a vocabulary gap rather than two typos.
+
 Needs a decision rather than an edit, which is why this is filed and not fixed in the pass that
 found it. Three options, cost ascending:
 
@@ -114,4 +174,3 @@ run as a population.
   `docs/issues/2026-09-02-four-manual-surfaces-still-describe-read-markdown-in-the-present-tense.md`.
 - `Cargo.toml:141` and `:269` — the dissolve, stated in the build file.
 - Found 2026-09-06 while verifying that bug's surface was clean; it was not in that bug's scope.
-
