@@ -379,7 +379,7 @@ entry_high_water_W: 140
 | W-91 | 2026-09-01 | high | **Re-read the substrate before a claim enters a DURABLE, queryable record** — the filesystem for a claim about the filesystem, the implementation for a claim that a capability is missing. Recorded as a **recurrence** of the reconnaissance skill's already-promoted current-state law, not as a new pattern, per that skill's § *Every promotion audits the promoted set* | Two catches. (1) A bug file's `## Residual — still open` said `.worktrees/bench` retains an orphaned gitdir; `ls .worktrees/` shows only `audit-trail-t1`. I was one call from writing a queryable `unverified:` field asserting an open residual that does not exist — into the single file tagged `cluster/record-asserts-an-unchecked-completion`. (2) I had begun drafting a bug asserting `unverified:` is unreachable by any query, on two true pieces of evidence (`find` → `unknown field`, and the librarian guide's "`extra` is NOT catalog-indexed"); `scan_terminal_status_with_caveat` is the deliberate reader and reports **65** records. Both false claims were backed by real evidence about something narrower than the sentence it was licensing. `outgrown` signal (n=1) on the promoted text: it names *fixes* and *prohibitions*, not **filed defect records** — the costliest surface, since a fix assuming a missing capability fails loudly at the call site while a filed bug is durable and nothing re-checks it. **Promote-when FIRED same-day on a MISS** — a filed bug claimed two parsers lacked a fence guard they already had; shipped in `claude-plugins` `b74c730` / codescout-companion 1.19.11 | promoted-to-permanent-docs |
 | W-138 | 2026-09-15 | high | **A deferral rationale that names a CAUSE is checkable against what the code can OBSERVE — widen the cause, not the effort.** *"The trigger is a lock race, not reducible to a deterministic script"* scoped the failure to a cause `append_entry` never sees; it sees `tx.commit()` return `Err`. A **deferred foreign-key violation** is the one SQLite failure that surfaces at COMMIT rather than at the statement, so every statement — including the `fs::write` — succeeds and only the commit fails, with no timing | The named cause could not have worked here at all: `journal_mode = WAL` + `BEGIN IMMEDIATE` takes the write lock up front, so a competing writer blocks at BEGIN and never at COMMIT. The three live alternatives were a test that cannot fire, a `#[cfg(test)]`-only hook exercising a path the shipped binary lacks, or shipping untested — which the sibling fix did (`update.rs` still carries `NOT REACHED BY ANY UNIT TEST` at its call site). The widened cause produced a first RED showing the retry allocate `F-2` and write a SECOND section, then three production-path mutations each KILLED. The technique was **already in-tree** at `create.rs`'s `RAISE(ABORT)` orphan-file test, so the repo held the capability while the rationale asserted it did not. Recurrence of `R-95`/`R-92`, recorded as a denominator rather than a new law | validated |
 | W-139 | 2026-09-15 | med | **Run the positive control before believing a probe's zero — especially when the zero ALARMS.** The law is usually cited against a *reassuring* zero; a zero saying *your fix is missing* reads as a finding rather than as an instrument failure, so nothing about it prompts you to check the tool. Alarm reads as diligence | Probing the freshly rebuilt release binary for three strings unique to `85642b1b` returned **0/0/0** — which says the rebuild did not take, and sends you either to re-run `cargo rb` or to tell the operator that their own rebuild silently failed. The control (three strings that MUST be in any codescout binary) returned `0/0/0` **as well**, which is impossible, and the impossibility is the entire signal. With `-a`: control `2`, all three fix strings `1`. **Instrument fact:** `grep` here is **ugrep 7.8.4**, which on a binary without `-a` prints nothing and exits **1** — indistinguishable from "no match" at both stdout and exit status, where GNU grep would at least print `Binary file … matches`. Any freshness probe of a built artifact needs `-a` or `strings`. Stronger and string-free: `readlink /proc/<pid>/exe` returning the live path with no `(deleted)` suffix proves the running image IS the file on disk — identity rather than ordering | validated |
-| W-140 | 2026-09-15 | med | **An instrument's verdict has two consumers — the decision it feeds and the audience it reaches — and gating protects only the first.** I gated a `file-provenance.py` SHARED verdict on the tree (read the hunks; all mine) so it decided nothing, then PUBLISHED it as evidence to my operator and a peer. A published false attribution becomes another session's premise, which `29420e72` then hit from the other end. `f0b1a4c7` argued a porcelain-gated caller is structurally safe — true of decisions, silent on reporting — and withdrew it once the split was named: their five runs returned `UNKNOWN`, and a `SHARED` would have been published identically. OB candidate, deliberately not minted: the admission test asks whether a careful party could have caught it, and one could. | validated |
+| W-140 | 2026-09-15 | med | **An instrument's verdict has two consumers — the decision it feeds and the audience it reaches — and gating protects only the first.** I gated a `file-provenance.py` SHARED verdict on the tree (read the hunks; all mine) so it decided nothing, then PUBLISHED it as evidence to my operator and a peer. A published false attribution becomes another session's premise, which `29420e72` then hit from the other end. `f0b1a4c7` argued a porcelain-gated caller is structurally safe — true of decisions, silent on reporting — and withdrew it once the split was named: their five runs returned `UNKNOWN`, and a `SHARED` would have been published identically. OB candidate REFUSED same day by `f0b1a4c7`, on a population rather than an argument: two count failures, two sessions, two mechanisms, and BOTH had channels — mine unreached, theirs stale. Zero structural blindness across the pair, so `F-N`/`W-N` is the right home. Do not re-open without a case that fails `:1126`. | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -16070,8 +16070,43 @@ publisher, whose own correctness check (*did the verdict decide anything?*) retu
 answer while saying nothing about the other consumer. But `observer-blindness.md`'s
 admission test asks whether a more careful version of the same party would have caught it,
 and a careful publisher *could* notice a verdict has two audiences. Too close to mint
-`OB-27` on at the end of a long session; left here for someone with fresh eyes to promote
-or refuse.
+`OB-27` on at the end of a long session; put to `f0b1a4c7` with the instance-holder's
+caveat that I was the worse party to judge it.
+
+**REFUSED, 2026-09-15, and the refusal is better evidenced than the proposal was.**
+`f0b1a4c7` checked both formulations in `observer-blindness.md`: `:1180` — *a more careful
+version of the same author writes the same line* — fails, because a publisher asked *"did
+you rely on this verdict before repeating it?"* holds the fact needed; it is their own
+reasoning from the same turn. `:1126` — *no amount of care reaches a fact the process has
+no channel to* — fails too, because the channel exists and is short.
+
+Then they produced a **population** rather than an argument, which is what actually settles
+it. Two count failures, two sessions, two mechanisms, and **both had channels**:
+
+| | failure | why it was reachable |
+|---|---|---|
+| mine | published a memory-derived "12 commits today" when the `Session-Id` trailer held **22** | did not reach for the channel |
+| theirs | four correctly-derived unpushed figures against a stale `origin/experiments` | reached for a cache, no `git fetch` |
+
+Neither process lacked a channel. One did not reach for it; the other reached for a stale
+one. Zero structural blindness across the pair — so `F-N`/`W-N` is the right home and this
+entry is it. **Do not re-open this as an `OB` without a case that fails `:1126`.**
+
+**And the adjacent candidate they raised was withdrawn in the same exchange**, which is the
+part worth keeping. Their formulation — *any instrument whose output is the only remaining
+record of a fact the harness routinely discards* — was carrying the committed case it has
+no right to. Split by where the edit landed:
+
+| where | record | channel |
+|---|---|---|
+| committed | `Session-Id` trailer, **on the object** | perfect; survives compaction intact |
+| staged only | index carries no owner, no reflog | none — this is `IC-17` |
+| worktree | no record the edit ever existed | none |
+
+Only the last two meet `:1126`, and they are plausibly **`IC-17` extended along the time
+axis** rather than a new class: the index has no owner in *space*, and after a compaction
+the worktree has no owner in *time*. Same absence, second axis. That belongs to
+`d725fa54d387d55d` if anywhere, and is n=1 regardless.
 
 **Method note worth more than the finding:** one paragraph in that bug file was narrowed
 three times today, alternating between two sessions, and **each narrowing was only visible
