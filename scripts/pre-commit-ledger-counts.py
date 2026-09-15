@@ -98,6 +98,16 @@ LEDGER = "docs/trackers/issue-clusters.md"
 # join between two concatenated files.
 LEDGER_DIR = "docs/trackers/issue-clusters"
 
+# The `--source` this run is judging, set once by `main()`. Read only by
+# `_emit_divergence_note`, which must stay silent unless the verdict came from the INDEX --
+# under `--source=worktree` there is no second copy to disagree with and the note would be
+# false. A module global rather than a parameter THREADED THROUGH SEVEN REFUSAL SITES: a
+# parameter that a future check forgets to pass degrades to no note, silently, which is the
+# same forgettable-placement failure the note itself exists to close. `None` until `main()`
+# runs, so the `--fixture-*` modes -- which call the refusal emitters directly, with no repo
+# and no index -- emit nothing.
+_SOURCE: str | None = None
+
 
 def _git(*args: str) -> str:
     r = subprocess.run(["git", *args], capture_output=True, text=True)
@@ -682,6 +692,85 @@ def actual_counts(valid: set[str], source: str) -> dict[str, int]:
     return out
 
 
+def _corpus_paths_diverged() -> list[str]:
+    """Corpus paths whose WORKTREE bytes differ from their INDEX bytes.
+
+    `git diff --name-only` with no revision is exactly worktree-vs-index, which is the
+    divergence this hook's refusals are computed across -- one call, no per-file `git show`.
+    Scoped to this hook's own corpus so an unrelated dirty `.rs` never surfaces in a refusal
+    about the clusters ledger.
+
+    Best-effort, and deliberately NOT `_git`: that raises `SystemExit` on a non-zero status,
+    which would turn "git was momentarily unavailable" into a crash of a hook whose real
+    verdict is already on stderr by the time this runs.
+    """
+    try:
+        r = subprocess.run(
+            ["git", "diff", "--name-only", "--", LEDGER, LEDGER_DIR, "docs/issues"],
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return []
+    if r.returncode != 0:
+        return []
+    return sorted({p for p in r.stdout.splitlines() if p.endswith(".md")})
+
+
+def _emit_divergence_note() -> None:
+    """Name a worktree/index disagreement, because the refusal above cites a file that shows
+    the opposite of what it says.
+
+    THE REFUSAL IS CORRECT AND THE READER'S NEXT ACTION IS WRONG, which is the narrow thing
+    this closes. Every refusal here names a corpus file and sends the reader to it. When that
+    file is dirty the bytes they open are not the bytes the verdict was computed from -- so a
+    reader who follows the instruction finds their own slug sitting in the `**Members:**` line
+    the refusal just said does not contain it. Measured 2026-09-15 in an isolated repo, same
+    grep against both copies: worktree `1`, index `0`. The rational conclusion from that pair
+    is "the gate is broken", and the action it licenses is `--no-verify`.
+
+    So this does NOT suppress or soften the verdict -- the verdict is right about the index,
+    and the index is what the commit publishes. It supplies the one fact that makes the
+    contradiction legible, and it fires only on a refusal: a hook that says this on every
+    green commit teaches the same `--no-verify` lesson by a different route.
+
+    Placed in the shared tail rather than at each refusal ON PURPOSE. There are seven
+    `return 1` sites and every one already routes through here, so a check added later
+    inherits this without its author knowing the hazard exists. A head position would read
+    better and would be one more thing to remember -- `CLAUDE.md` § *Observer Blindness*
+    position 3 prefers the placement that cannot be omitted.
+
+    Silent unless `--source=index`: under `--source=worktree` the verdict IS computed from the
+    bytes on disk, so there is no divergence to warn about and this note would be false.
+    """
+    if _SOURCE != "index":
+        return
+    diverged = _corpus_paths_diverged()
+    if not diverged:
+        return
+    print(
+        "\nNOTE -- the worktree and the index DISAGREE about "
+        f"{len(diverged)} of this hook's corpus file(s):\n  "
+        + "\n  ".join(diverged)
+        + "\n\n"
+        "The refusal above was computed from the INDEX, because the index is what your\n"
+        "commit publishes. The paths above read DIFFERENTLY on disk. So opening one to\n"
+        "check the refusal can show you the OPPOSITE of what it says -- your slug present\n"
+        "in a `**Members:**` line the refusal reports as missing, for instance. That is\n"
+        "this divergence, not a contradiction, and not a broken gate.\n\n"
+        "If the edit that satisfies the rule is in a path above, it is on disk and unstaged:\n"
+        "stage it, or commit it together with what you already staged.\n\n"
+        "If you did not write those edits, another session holds them -- and this hook's\n"
+        "CODE runs from the working tree, so their edit went live for you the moment they\n"
+        "saved it, with no commit in between. Name the owner:\n"
+        "    python3 scripts/file-provenance.py <path>\n"
+        "then ask them whether that edit is ready to STAGE. Ask that, not \"is it yours\":\n"
+        "it has three answers they can actually give -- yes, not yet, or I will revert it --\n"
+        "and each one tells you what to do next. Waiting clears nothing on its own: the\n"
+        "index moves only when somebody stages.",
+        file=sys.stderr,
+    )
+
 def _emit_sequence_tail() -> None:
     """Print the shared commit-sequence tail, if it is readable.
 
@@ -698,7 +787,13 @@ def _emit_sequence_tail() -> None:
 
     Best-effort by design: a missing or unreadable tail must never turn this hook's own
     verdict into a crash, and that verdict is already on stderr by the time this runs.
+
+    Also carries ``_emit_divergence_note``, and that is the whole reason it is called from
+    seven places rather than one: this function is the only line every refusal already
+    crosses, so wiring the note here gives it to checks nobody has written yet. See that
+    function for why the note exists at all.
     """
+    _emit_divergence_note()
     tail = pathlib.Path(__file__).with_name("commit-sequence-tail.txt")
     try:
         print("\n" + tail.read_text(encoding="utf-8"), file=sys.stderr, end="")
@@ -943,6 +1038,16 @@ def main() -> int:
             return 0
     if source not in ("index", "worktree", "head"):
         raise SystemExit(f"--source must be index|worktree|head, got {source!r}")
+
+    # AFTER the arg loop, not inside it, and the difference is the whole wiring. The hook
+    # invokes this script with NO arguments -- `--source` is never passed on the one path
+    # that refuses real commits -- so an assignment guarded by `arg.startswith("--source=")`
+    # leaves `_SOURCE` at `None` exactly there, and `_emit_divergence_note` returns early on
+    # every hook run while passing every test that drives it with an explicit flag. Caught
+    # while writing it; recorded because the green version is indistinguishable from the
+    # wired one until you run the hook with no arguments.
+    global _SOURCE
+    _SOURCE = source
 
     ledger = read_ledger(source)
     if ledger is None:

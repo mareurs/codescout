@@ -131,6 +131,14 @@ jobs:
           git config --global user.name  CI
           git config --global init.defaultBranch master
       - run: bash tests/pre-commit-dead-artifact-ids.sh
+      # Same job, deliberately: this suite also builds throwaway git repos and needs the
+      # committer identity configured above. It guards the worktree/index divergence note
+      # in `pre-commit-ledger-counts.py` -- see
+      # docs/issues/2026-09-13-a-gate-script-edited-in-the-worktree-has-already-shipped.md.
+      # Toolchain-free by construction (python3 + git only), which is why it is here and
+      # not behind a cargo lane: a case that skips itself for a missing toolchain reports
+      # success while testing nothing.
+      - run: bash tests/pre-commit-ledger-divergence.sh
 
   # ITS OWN JOB, same reason as `push-guard-tests` above: `shell-tests` is a known-
   # flaky lane, and this suite's assertions are verdicts about ATTRIBUTION -- the one
