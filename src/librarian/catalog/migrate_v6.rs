@@ -456,16 +456,27 @@ mod tests {
 
         // `other` stands in for a second codescout process holding the shared catalog.
         //
-        // THREE LOAD-BEARING DETAILS, and each one defeats this test differently if a
-        // tidy-up removes it — in every case leaving a test that passes against the
+        // TWO LOAD-BEARING DETAILS. Each was measured by removing it and re-running the
+        // copy, not asserted — removing either leaves a test that passes against the
         // `fs::copy` this replaced, i.e. one that discriminates nothing:
-        //   * `journal_mode = WAL` — `seed_v3_db` leaves a rollback-journal database,
-        //     where every committed row is already in the `.db` file.
-        //   * the checkpoint — without it the row below can land in the main file
-        //     anyway, depending on what the seed left in the WAL.
+        //   * `journal_mode = WAL` — `seed_v3_db` leaves a ROLLBACK-JOURNAL database
+        //     (measured: `PRAGMA journal_mode` returns `delete`, no `-wal` ever
+        //     created), where every committed row is already in the `.db` file.
         //   * holding `other` open PAST `open_with_workspace` — SQLite checkpoints and
-        //     deletes the `-wal` when the LAST connection closes, so dropping it early
+        //     deletes the `-wal` when the LAST connection closes, so an early drop
         //     silently moves the row into the `.db` file before the backup is taken.
+        //     Measured: held open the copy sees 0 rows, dropped early it sees 1.
+        //
+        // The `wal_checkpoint(TRUNCATE)` below is NOT in that set, and is annotated as
+        // such so nobody credits it with coverage it does not provide. Removing it was
+        // measured to leave the test still discriminating (copy still sees 0), because
+        // converting a rollback-journal database to WAL starts it with an EMPTY `-wal`
+        // — there is nothing for a checkpoint to flush. It is kept as a guarantee that
+        // the row below is the only thing in the WAL, not as a condition of the test.
+        // Note this differs from the sibling fixture in `indexer.rs`, which opens
+        // through `Catalog` and writes embeddings first, so its WAL is non-empty by the
+        // time it checkpoints; that comment's claim is about a different fixture and is
+        // not re-derived here.
         let other = rusqlite::Connection::open(&db_path).unwrap();
         other.execute_batch("PRAGMA journal_mode = WAL;").unwrap();
         other
