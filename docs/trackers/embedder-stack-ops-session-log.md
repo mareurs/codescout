@@ -558,6 +558,17 @@ After a second `cargo rb` on the reconciled tree (`HEAD` = `506924f2`): `13`, no
 
 **Narrowest seam for a mechanism:** `cargo rb` is an alias in `.cargo/config.toml` and cannot run a precondition. A `scripts/rb.sh` wrapper could refuse, or warn, when `git rev-list --count HEAD..@{upstream}` is non-zero — the same shape as `gate.sh` wrapping the four gate commands, and the same argument for it (§ *Observer Blindness* position 3: make the correct path end in a safe state). Until then, the standing instruction is the probe above: **after any rebuild you are relying on, ask the binary what it does, not what it is.**
 
+**SHARPENED 2026-09-15, same day, by the first use of this entry — and it corrects a reading this entry invites.** The text above lists "the binary's mtime updated" among the signals that misled, which a reader can easily invert into *check that mtime moved*. That check produces a FALSE ALARM. Asked to verify a later rebuild, mtime was **unchanged** (`14:54:32`, read at `15:25`) — and the binary was **correct**: `git log --since=@<binary mtime> -- '*.rs' 'Cargo.toml' 'Cargo.lock'` returned **0** commits and the tree held no uncommitted Rust, so `cargo` had nothing to relink and skipped the write. The behavioural probe confirmed schema 13.
+
+So mtime is uninformative in **both** directions, and that is strictly stronger than the original claim:
+
+| mtime | content | when |
+|---|---|---|
+| **updated** | **stale** | built from a tree behind origin (the 14:08 case above) |
+| **unchanged** | **current** | nothing to rebuild; cargo correctly no-ops (the 15:25 case) |
+
+A session trusting mtime gets a false negative in the first row and a false positive in the second. The two checks that *do* discriminate are the ones to run: `git log --since=@<binary mtime>` over `*.rs` + manifests for whether a rebuild was even owed, and the scratch-`LIBRARIAN_DB` schema probe for what the binary actually does. Neither is about the file's metadata.
+
 **Status:** open.
 
 ## Template for new entries
