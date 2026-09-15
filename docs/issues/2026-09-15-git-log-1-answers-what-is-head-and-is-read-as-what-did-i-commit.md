@@ -86,11 +86,44 @@ Their commit now carries your file, their trailer, and a new sha.
 ### Verifying what YOU added, when the field is one enormous line
 
 The same "tell my own contribution from shared state" problem has a second form, and the
-instrument for it is different. Cluster `**Members:**` fields are **exactly one line** —
-the widest in `docs/trackers/issue-clusters/` is 59,273 characters, derived 2026-09-15 —
-so appending rewrites the whole line, and `--numstat` reports `1 1` for any append of any
-size. **Every line-granularity question about that field is therefore unanswerable in a
-way that returns a number rather than an error.**
+instrument for it is different. Cluster `**Members:**` fields are **exactly one line**, so
+appending rewrites the whole line and `--numstat` reports `1 1` for any append of any size.
+**Every line-granularity question about that field is therefore unanswerable in a way that
+returns a number rather than an error.**
+
+**The length matters ORDINALLY, not cardinally, and stating it that way is the durable
+form.** These fields run roughly 20k–60k characters: the point is that the line is far
+longer than a diff hunk, so line granularity cannot express a question about a phrase
+inside it. That claim survives every append; a scalar does not. (Form owed to
+`29420e72-c262-4236-82c2-52d769fdc549`, who withdrew their own bare figure after tracing
+it through four values in one day across three authors.)
+
+#### The two readings of that length were not decay — they were a missing unit
+
+Worth recording because both of us reached for the wrong explanation, and we were the two
+sessions least entitled to. A draft of this file cited the widest such line as **59,273**;
+the same line measured by that peer came back **58,921**, and we both read it as the
+corpus having moved between two correct readings — the line-drift tell `CLAUDE.md`
+§ *Testing Discipline* names.
+
+It had not moved. IC-18 had no commit that day and its worktree and `HEAD` copies were
+identical. The difference is entirely the **unit**:
+
+| reading | instrument | counts |
+|---|---|---|
+| 59,273 | `wc -c` | **bytes**, including the trailing newline |
+| 58,921 | `awk length()` | **characters**, excluding it |
+
+Derived: the line holds **180** non-ASCII characters contributing exactly **351** extra
+bytes — 156 em-dashes, 9 `§`, 8 `→`, 5 `…`, and two others — and 351 + 1 newline is the
+whole of the 352 gap. The house prose style is what opens it, which is why it will recur
+on any byte-count of any file here.
+
+So this is not an instance of *"a citation decays"*; it is an instance of **"a count must
+arrive with its unit or not at all"** — the law directly above it in the same section.
+The documented failure is reaching for *"they made a mistake"* before *"the corpus moved"*;
+this is that reflex one step further on, reaching for *"the corpus moved"* before
+*"we counted different things"*, in a conversation that was *about* measurement decay.
 
 ```
 git show <sha> --word-diff=plain -- docs/trackers/issue-clusters/ \
