@@ -15922,9 +15922,28 @@ it replaces.
 value is a decaying fact, not one to carry. The reason the length matters at all is
 **ordinal, not cardinal**: the line is far longer than a diff hunk, so line granularity
 cannot express a question about a phrase inside it. That claim survives every append; the
-scalar did not survive the afternoon. Note also that the peer's own `IC-18` figure (`59,273`)
-and mine (`58,921`) already disagree, which is not a discrepancy to resolve — it is the same
-property, measured twice.
+scalar did not survive the afternoon. **RETRACTED same day, and the retraction is the sharper lesson.** This entry originally
+offered the peer's `IC-18` figure (`59,273`) beside mine (`58,921`) as *"the same property,
+measured twice"* — evidence that a Members-line length decays. **That was wrong.** `IC-18`
+had **zero** commits that day and its worktree and HEAD copies are byte-identical: nothing
+moved. The two readings are the same line at the same instant **in different units**,
+verified here rather than inferred from the arithmetic — `wc -c` = `59,273` (bytes, including
+the trailing newline), `wc -m` = `58,922` (characters, including it), `awk length()` =
+`58,921` (characters, excluding it). The line carries **180** non-ASCII characters
+contributing exactly **351** extra bytes, and 351 + 1 newline is the entire 352-wide gap.
+The house prose style — em-dashes, `§`, `→`, `…` — is what opens it, so this recurs on any
+byte-count of any file in this repo, not just this line.
+
+So the pair illustrates the law **directly above** the one this entry reached for: *a count
+must arrive with its unit or not at all.* What was missing was never the instant — it was the
+unit. **And the reflex worth recording sits one step past the documented one:** `CLAUDE.md`
+notes that readers reach for *"they made a mistake"* before *"the corpus moved"*. Both of us
+reached for *"the corpus moved"* before *"we counted different things"* — inside a
+conversation whose subject was measurement decay, each having just corrected a stale figure
+of our own. Knowing the class prevented neither of us, and what settled it was one mechanical
+check: measure both ways on the same bytes. Raised and derived by sessionId `9403d62d-…`
+(`0169101c`). IC-6's four-value sequence above is unaffected by this and stands — that line
+genuinely did move four times, under three authors.
 
 ## Template for new entries
 
