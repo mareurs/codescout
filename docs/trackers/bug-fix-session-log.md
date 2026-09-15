@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 157
+entry_high_water_F: 159
 entry_high_water_W: 136
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 136
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-159 | 2026-09-15 | med | tooling | fixed-verified | **A wait-loop whose predicate matched itself, so its exit condition was unreachable by construction.** `until ! pgrep -f "scripts/gate.sh"; do sleep 10; done` — `pgrep -f` scans the full command line, and the waiter's own contains the pattern. Proven bare with no `gate.sh` running: `pgrep -c -f "scripts/gate.sh"` → `1`, and that 1 is the pgrep. Two such shells ran overnight and were **mutually** sustaining. Survived a day of careful verification because the failure mode is **silence**, which is byte-identical to "still running" — and the work had actually completed, read out of the `@bg_*` buffers, so nothing was wrong enough to notice. Distinct from this ledger's prior `pgrep` finding (a miscount from build processes): same over-match family, but that one inflates a number and this one makes a loop immortal. Tell: before arming an `until`-loop, ask whether the condition can observe the loop — a predicate over the process table always can. |
 | W-136 | 2026-09-14 | — | verification | validated | **A confirming run that never entered the code path it was confirming — caught before reporting.** Post-rebuild recon verified three live fixes (buffer-query stderr, `.err` on `grep`/`read_file`, the `type:"test"` envelope). My first probe used a 1-test filter and returned the verdict in full — but 1 test is ~2 KB, `needs_summary` is false, so it took the **inline** path, which was never broken. The envelope defect lives only above the ~10 KB gate, and **a broken world returns byte-identical output for that run**. Re-ran wide (179 tests, `type:"test"`, 177/2) and only then did it prove anything. `F-150`'s own mechanism recurring inside the verification of `F-150`'s bug — the class did not stop, but the entry existed, so *"which side of the gate did this land on?"* was already loaded. |
 | F-155 | 2026-09-14 | med | cross-session | open | **A peer attributed a staged changeset to me by TOPIC, and topic adjacency survives an explicit handoff.** `codescout-e7` named *"your `.err` changeset"*; the `.err` read-side is peer `40130`'s (sid `9403d62d`), handed to them by me in writing that evening. **Their size figure was right and an earlier revision of this row wrongly corrected it** — 541/6 at 21:41:53 and 23/1 at 21:42:5x are the same instrument at two instants, across a commit that landed between them; see the entry. No harm — they committed by pathspec and left it alone — but a sweep would have landed it under my name. `CLAUDE.md` § *Reaching a Peer Session* names only **diff** adjacency (*"`git diff --stat` names insertions and names no author"*); this attributed by **who is associated with the subject**, a reading that never touches the tree. **A handoff is visible only to its parties** — I told `40130`, not the room — and no tool records a transfer: `file-provenance.py` returned `UNKNOWN`, and the socket route answers who *sent a message*, not who *owns a changeset*. Tell: announce a handoff to the room, and say *"is this yours?"* rather than *"your changeset"*. |
 | F-154 | 2026-09-14 | med | reasoning/citation-resolution | open | **Refuted a peer's citation by finding a sound match in a file they never named — verification succeeded, on the wrong object.** They said "the hook's `four`" meaning `codescout-companion/hooks/pre-edit-dirty-check.mjs:118`, a **runtime advisory** claiming "Four such captures are recorded in" a file whose highest instance is now **14**. I checked `scripts/pre-commit-foreign-index.sh:144`, found "all four arms" (test arms, sound, not stale), and sent a correction that was itself the error it described. **A confirming match terminates a search**, so finding a *sound* "four" was worse than finding none — it converted an unfinished search into a confident refutation. Distinct from `F-150` (region of input space), `F-151` (shape of search) and `F-153` (right command, wrong pair): this is the right command, correctly run, on the **wrong artifact**, resolved by token rather than referent. Tell: quote the file:line you checked back to the other party *before* concluding — the mismatch is visible with no further reading. Their hook also contradicts itself in place ("Four such captures" four lines above "instance 5"), so it was never once-true. |
@@ -15473,6 +15474,73 @@ is a resource bound rather than a gate.
 
 **Rests on:** `project_security_config` remaining the single derivation every gate reads. If a
 gate ever reads `p.config.security` directly, it leaves the covered set silently.
+
+## F-158 — An MCP reconnect destroyed a finished gate run's buffer, and the reconnect was the point of the rebuild
+
+**Valid:** dated 2026-09-15
+
+**Severity:** med · **Status:** mitigated · **Category:** tooling/evidence-lifetime
+
+**Observed:** A four-command gate run was parked in a background `@bg_*` buffer. The user then
+ran `/mcp` to pick up a rebuild, and the reconnect reset the session:
+`background job ref not found: @bg_0000000a — Buffer refs expire when the session resets.` The
+gate had finished; its four exit codes were never read, and there is no way to recover them. The
+run has to be repeated in full.
+
+**Cost:** one ~10-minute gate re-run, on a shared checkout where that also re-takes the build
+lock other sessions queue on. Bounded and not severe — but the failure is *total* for that
+evidence rather than partial: a buffer does not degrade, it vanishes.
+
+**Why it is not simply "should have read it sooner":** the two events are the SAME event. `/mcp`
+is what makes a rebuild testable, and it is the only way to get the new binary in front of the
+live tools — so the act that creates the thing worth verifying is the act that destroys the
+verification you already have. A session cannot park evidence across the restart it is waiting
+for, and the restart is user-initiated, so no ordering by the session avoids it.
+
+**The remedy already existed on a surface I had read, attached to a different reason.** IL-3's
+refusal text says: *"For whole-input work, redirect to a file instead: `git show <sha> >
+/tmp/x.patch`"* — published against buffer TRUNCATION (a capped buffer silently holding a
+prefix). The same remedy covers buffer DISAPPEARANCE, and nothing connects them, so having read
+it for the first reason did not make it fire for the second. A remedy indexed by one hazard does
+not reach a reader who has the other.
+
+**Tell:** any output you will still need after the next tool call is a FILE, not a buffer.
+`{ gate; } > "$SP/gate.log" 2>&1` costs nothing and survives a reconnect, a compaction and a
+crash. Buffers are for output you are about to read.
+
+**Rests on:** `@cmd_*` / `@bg_*` / `@tool_*` buffers living in the codescout server process, so
+their lifetime is that process's. Nothing about this changes if the buffer cap changes.
+
+## F-159 — A wait-loop whose pgrep predicate matches its own command line can never exit
+
+**Valid:** dated 2026-09-15
+
+**Severity:** med · **Status:** fixed-verified
+
+**Observed.** Two background wait-shells from 2026-09-14 were still alive the next day, spinning `sleep 10`, output files empty. Found only because the operator asked about them; nothing in the session surfaced them.
+
+```bash
+until ! pgrep -f "scripts/gate.sh" >/dev/null 2>&1; do sleep 10; done; echo "gate.sh finished"
+```
+
+**`pgrep -f` matches the FULL COMMAND LINE, and the waiter's own command line contains the pattern** — it is sitting right there inside the `until` condition. So the loop matches itself and its exit condition is unreachable by construction. Demonstrated bare, with no `gate.sh` anywhere:
+
+```
+$ pgrep -c -f "scripts/gate.sh"
+1                      # that 1 IS the pgrep
+```
+
+**And two of them were mutually sustaining.** With a second waiter alive, each also matched the other, so killing one would not have freed the other. Both needed `kill`; both exited 144 (SIGTERM).
+
+**Why it went unnoticed for a day, and this is the part that generalises.** The failure mode of a never-terminating waiter is **silence**, and silence is byte-identical to *"the job is still running"*. Both `gate.sh` runs had in fact finished, and I had read their verdicts out of the `@bg_*` buffers directly — so the work completed, the report was correct, and the only casualty was two idle shells nobody was waiting on. **Nothing was wrong enough to notice**, which is why it survived a full session of otherwise-careful verification.
+
+**Distinct from the prior `pgrep` finding in this ledger** (§ `W-128` area, 2026-09-12): that one is a **miscount** — `pgrep -f codescout` sweeping in `cargo`, `rustc`, `sccache` and `bash` build processes, corrected by *count the LIST, never the corpus*. Same over-match family, different member and different consequence: theirs inflates a number you then read, mine makes a loop immortal. Re-measured today for the record — `pgrep -c -f codescout` returns **13** against **11** actual `codescout start` servers, and the 2 extra are the `pgrep` itself plus its `bash -c` wrapper, which is *this* entry's mechanism showing up inside *that* entry's instrument.
+
+**Fix.** Do not build a waiter on a predicate that can match itself. Either exclude self (`pgrep -f 'pattern' | grep -v $$`), match on something the waiter's own command line cannot contain, or — better — do not poll for a process at all: the harness already re-invokes on completion, so read the `@bg_*` buffer when the notification arrives. The harness's own Monitor guidance prescribes `until grep -q "Ready" log; do sleep 0.5; done`, which is safe precisely because the predicate is over a **file**, not over the process table the waiter is itself in.
+
+**Tell.** Before arming any `until`-loop, ask whether the condition can observe the loop. A predicate over the process table always can.
+
+**Rests on:** nothing external.
 
 ## Template for new entries
 
