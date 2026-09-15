@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 162
-entry_high_water_W: 141
+entry_high_water_F: 163
+entry_high_water_W: 142
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -65,6 +65,7 @@ entry_high_water_W: 141
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-163 | 2026-09-15 | high | measurement | open | **A count in my own output was the discriminator three times in one day, and only the party holding a stated expectation stopped on it.** `106/16` for a one-paragraph edit caught an interleave; `64 vs 99 lines` was read past and cost 35 lines of a peer's uncommitted work; `2` misfiled rows was never computed at all where a set difference said `11`. Same instrument, opposite outcomes — the variable is an expectation to compare against, not care. Direction was the tell in case 2: staleness makes a copy SMALLER, and a surplus is what uncommitted peer content looks like. Candidate remedy, policy not mechanism: state the expected magnitude before reading the number. |
 | F-160 | 2026-09-15 | med | documentation | fixed-verified | **A record's own "same exposure, not addressed here" list was a HYPOTHESIS SET published as a worklist — neither named file was an instance.** Written while holding the mechanism (*resolves a binary by path*), which both files genuinely match; never checked whether the mechanism has a CONSEQUENCE at either site. One is `#[ignore]`d against a deleted binary; the other runs in both lanes so it passes against a lean one (measured, 5.04s). A grep-shaped observation published as a worklist inherits the grep's blindness and loses the qualifier, because by the time a reader arrives only the conclusion is there. Retracted in `ca7edebc`. |
 | F-159 | 2026-09-15 | med | tooling | fixed-verified | **A wait-loop whose predicate matched itself, so its exit condition was unreachable by construction.** `until ! pgrep -f "scripts/gate.sh"; do sleep 10; done` — `pgrep -f` scans the full command line, and the waiter's own contains the pattern. Proven bare with no `gate.sh` running: `pgrep -c -f "scripts/gate.sh"` → `1`, and that 1 is the pgrep. Two such shells ran overnight and were **mutually** sustaining. Survived a day of careful verification because the failure mode is **silence**, which is byte-identical to "still running" — and the work had actually completed, read out of the `@bg_*` buffers, so nothing was wrong enough to notice. Distinct from this ledger's prior `pgrep` finding (a miscount from build processes): same over-match family, but that one inflates a number and this one makes a loop immortal. Tell: before arming an `until`-loop, ask whether the condition can observe the loop — a predicate over the process table always can. |
 | F-155 | 2026-09-14 | med | cross-session | open | **A peer attributed a staged changeset to me by TOPIC, and topic adjacency survives an explicit handoff.** `codescout-e7` named *"your `.err` changeset"*; the `.err` read-side is peer `40130`'s (sid `9403d62d`), handed to them by me in writing that evening. **Their size figure was right and an earlier revision of this row wrongly corrected it** — 541/6 at 21:41:53 and 23/1 at 21:42:5x are the same instrument at two instants, across a commit that landed between them; see the entry. No harm — they committed by pathspec and left it alone — but a sweep would have landed it under my name. `CLAUDE.md` § *Reaching a Peer Session* names only **diff** adjacency (*"`git diff --stat` names insertions and names no author"*); this attributed by **who is associated with the subject**, a reading that never touches the tree. **A handoff is visible only to its parties** — I told `40130`, not the room — and no tool records a transfer: `file-provenance.py` returned `UNKNOWN`, and the socket route answers who *sent a message*, not who *owns a changeset*. Tell: announce a handoff to the room, and say *"is this yours?"* rather than *"your changeset"*. |
@@ -236,6 +237,7 @@ entry_high_water_W: 141
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-142 | 2026-09-15 | high | `git add` writes a complete tree to the object store and `git restore --staged` only un-references it, so staged content survives as an unreachable blob and `git fsck --unreachable` recovers it byte-exact | A peer's 35 uncommitted lines, deleted by me, were recovered exactly; no backup of mine predated their write, so the staged blob was the only copy outside their context | validated |
 | W-137 | 2026-09-15 | — | reproduction-before-plan | **The reproduction refuted the record's own root-cause lead in both particulars, before any code was read.** See the entry for the full counterfactual. | validated |
 | W-134 | 2026-09-14 | med | **A pinned throwaway project probes a security-config gate live, by behaviour rather than build metadata.** After a rebuild, `workspace(status)` reported `git_sha: 3d9cd206, git_dirty: true` — and a dirty build is exactly the case a sha cannot settle. Pinned `workspace=` at a temp project whose own `.codescout/project.toml` sets `file_write_enabled = false`: `memory(action="write")` was REFUSED with cause `ConfiguredOff`, and `memory(action="list")` through the SAME pin returned `0 topics` as the control — which is what makes the refusal a measurement rather than an unresolvable path. A `read_only`-based probe self-defeats, because `call_tool_inner` upgrades a pinned workspace to writable for write tools; the config flag is the only route that reaches the arm | One activation, one probe and one restore — plus a `read_only` probe that would have silently read as *"gate absent"*. That is the honest counterfactual, NOT the "six broken peers" first claimed and retracted in `F-145` | validated |
 | W-135 | 2026-09-14 | high | **`git status` before implementing assigned work found a peer already holding a complete uncommitted implementation of it.** The tell was a DATE in a fixture comment, not the tooling; `file-provenance.py` only confirmed afterwards and nothing in the flow would have invoked it, because the peer had honestly said the work was unclaimed — a fact about a moment, which decays with nothing announcing it | My ready draft would have overwritten a complete, tested, UNCOMMITTED implementation that `git checkout` could not have restored — silently, and I would have reported success. Theirs was also strictly better: it gated KILLED as well as SURVIVED, catching a malformed `--replace` compile failure reported as a catch, which my draft did not cover | validated |
@@ -16186,6 +16188,113 @@ mechanical check caught it — the same finding as `F-162`/`W-139`, third instan
 patch-id `574120f8573a2f60aa00f6fd64d312d75b3bbbf7`; and `CLAUDE.md` § *Testing Discipline*.
 
 **Status:** validated
+
+## W-142 — `git add` is a durable snapshot, not a declaration of intent — an unstage leaves a recoverable tree in the object store
+
+**Observed:** 2026-09-15, recovering a peer session's uncommitted work that I had just
+deleted from `docs/trackers/bug-fix-session-log.md`. They had staged the file to inspect it,
+read `git diff --cached --stat`, spotted our interleaved edits, and run `git restore --staged`
+to leave my rows alone.
+
+**Pattern:** `git add` writes a **complete tree** into the object store, not a pointer to the
+worktree. `git restore --staged` un-references that tree; it does not delete it. So a staged
+version survives as an unreachable blob until `gc`, and `git fsck --unreachable` recovers it
+**byte-exact** — a snapshot, not a reconstruction.
+
+```
+git fsck --unreachable --no-progress | awk '/unreachable blob/ {print $3}'
+git cat-file -s <blob>   # size filter
+git cat-file -p <blob>   # the bytes
+```
+
+**Counterfactual:** I replaced their `## W-140` section with HEAD's, on the wrong belief that
+my copy was stale. Their `REFUSED` block had never been committed, so "take HEAD's version"
+deleted 35 lines. **No backup of mine could have helped** — my own pre-edit copy predated their
+section entirely, and `git stash`, reflog and HEAD all hold only committed state. The staged
+blob (`2e189660…`, 16,144 lines) was the sole surviving copy outside their context window.
+Without it the repair was "ask them to re-author from memory", which is lossy and which they
+would have had to do on my account.
+
+**Confirming data points:** (1) recovery verified by set difference — zero lines of the staged
+blob missing from the file afterwards; (2) the peer independently re-verified at the bytes
+before committing their half, confirming their `REFUSED` block, their reconciled index row, and
+a 38/3 diff matching my figure exactly; (3) the invariant held with their edit on top —
+302 sections, 302 unique rows, both directions empty.
+
+**The shape worth keeping:** the action taken to avoid capturing *my* work is what made *their*
+work recoverable from *my* mistake. Neither of us chose it for that reason, and neither of us
+knew it was a consequence. `git add` is documented here and elsewhere as declaring intent; it is
+also a durable checkpoint, and that second property is the one that paid.
+
+**Impact:** high — 35 lines of another session's unpublished reasoning, recovered exactly rather
+than re-authored.
+
+**Promote-when:** a second recovery through this route, or one where the staged tree is the only
+copy of something larger. Until then it is one datapoint with a strong counterfactual, and the
+operational note belongs in `docs/conventions/shared-checkout-commit-sequence.md` rather than in
+`CLAUDE.md`.
+
+**Status:** validated
+
+**Valid:** dated 2026-09-15
+
+**Rests on:** `84efa618` (my half), `9b251426` (theirs), and the recovery run recorded in the
+sessions' exchange. Credit for the staging act is sessionId `9403d62d-116b-46ea-ac9b-004acff2b1cb`,
+who did not know it was a checkpoint either and said so.
+
+## F-163 — A count in my own output was the discriminator three times in one day, and only the party holding a stated expectation stopped on it
+
+**Observed:** 2026-09-15, three times in one day across two sessions, all on
+`docs/trackers/bug-fix-session-log.md`.
+
+**When:** Each time a number that would have settled the question was already sitting in my
+own tool output, unprompted.
+
+| # | the number | what happened |
+|---|---|---|
+| 1 | `106 insertions, 16 deletions` for a one-paragraph edit | peer `9403d62d` — **stopped on it**, found our interleaved edits before committing |
+| 2 | `HEAD W-140 section: 64 lines, mine: 99` | me — **read past it**, and deleted 35 lines of their uncommitted work |
+| 3 | `2` misfiled index rows | me — **never computed it**; I read the top of the table where a set difference said **11** |
+
+**Expected:** that noticing is the safeguard — that a surprising figure in front of you gets
+acted on.
+
+**Got:** the instrument was identical in all three and the outcomes were opposite. What
+differed is whether the reader held a **stated expectation** to compare against. The peer knew
+what a one-paragraph edit costs, so `106` was loud. I had no expectation for *how many lines a
+tracker section should be*, so `64` against `99` carried no signal at all — and a 35-line
+surplus is exactly what uncommitted peer content looks like, while staleness makes a copy
+**smaller**, never larger. The direction was the tell and I had not asked which direction to
+expect.
+
+**Probable cause:** a bare count is not evidence until it is compared with something. Absent an
+expectation, "surprising" degrades to "unusual-looking", which is a property of prose rather
+than of data — and case 3 shows the degenerate end, where no count exists to be surprised by
+because a scan of the head stood in for a query over the population.
+
+**Workaround:** none applied in the moment; case 2 was repaired only because the peer had
+staged the file (`W-142`), which was luck rather than procedure.
+
+**Severity:** high — case 2 destroyed 35 lines of another session's unpublished work, and
+recovery depended on an object the other party had created for an unrelated reason.
+
+**Status:** open — no mechanism. The candidate is cheap and testable: **state the expected
+magnitude before reading the number.** One clause, written first, converts "does this look
+odd?" into a comparison. It does not reach case 3, where the fix is different and already
+known — compute over the population (a set difference), never scan its head, which is
+`observer-blindness:OB-22`'s *filter the PRESENTATION, never the QUERY*.
+
+**Fix idea / Pointer:** the two halves want different homes. The expectation clause is a
+§ *Testing Discipline* law about reading instruments, not a gate anything can enforce, so it
+is a policy and should be written as one rather than dressed as a mechanism. Promote only on a
+fourth instance, and record confirmations as a denominator when a stated expectation matches —
+otherwise this entry collects its own catches and looks self-correcting.
+
+**Valid:** dated 2026-09-15
+
+**Rests on:** `W-142` (the recovery), `84efa618`, `9b251426`, and `observer-blindness:OB-22`
+for case 3. The pairing of cases 1 and 2 was proposed by sessionId
+`9403d62d-116b-46ea-ac9b-004acff2b1cb`, who held the one expectation that worked.
 
 ## Template for new entries
 
