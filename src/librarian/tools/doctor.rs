@@ -6005,7 +6005,7 @@ fn structured_fix_pointers(content: &str) -> Vec<(String, Option<String>)> {
 /// and nothing in it parses" are different states that produced one identical sentence —
 /// *"no `## Fix provenance` pointer is declared"* — and the second reads as a flat
 /// contradiction to an author looking straight at the section.
-/// docs/issues/2026-09-13-fix-anchor-check-reports-absent-when-it-means-unparseable.md
+/// docs/issues/archive/2026-09-13-fix-anchor-check-reports-absent-when-it-means-unparseable.md
 ///
 /// Any heading LEVEL counts. Level is irrelevant to whether the pointers parse, so refusing a
 /// `### Fix provenance` here would send its author to fix the one thing that was never the
@@ -9300,7 +9300,7 @@ mod tests {
         );
     }
     /// Regression for
-    /// `docs/issues/2026-09-13-fix-anchor-check-reports-absent-when-it-means-unparseable.md`.
+    /// `docs/issues/archive/2026-09-13-fix-anchor-check-reports-absent-when-it-means-unparseable.md`.
     ///
     /// A record carrying `## Fix provenance` verbatim, at `##` level, preceded by a blank line,
     /// with BOTH correct hashes written as a sentence, was told *"no `## Fix provenance` pointer

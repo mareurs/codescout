@@ -84,7 +84,7 @@ So the enforcement is correct and the gap is purely documentary.
 
 Two sibling records already exist on this check's behaviour
 (`docs/issues/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md`,
-`docs/issues/2026-09-13-fix-anchor-check-reports-absent-when-it-means-unparseable.md`), so
+`docs/issues/archive/2026-09-13-fix-anchor-check-reports-absent-when-it-means-unparseable.md`), so
 the check is actively worked; neither is about the missing documentation.
 
 ## Fix

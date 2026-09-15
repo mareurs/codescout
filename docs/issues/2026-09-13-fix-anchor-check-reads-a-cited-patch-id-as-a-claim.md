@@ -133,7 +133,14 @@ stricter read is a breaking change or a no-op.
   'docs/issues/archive/*.md'` — one command, not run before this file was opened.
 - `docs/trackers/issue-clusters/IC-6-addressing-without-an-escape-hatch.md`
 - Sibling defect found the same day, same mechanism, opposite direction:
-  `docs/issues/2026-09-13-fix-anchor-check-reports-absent-when-it-means-unparseable.md`
+  `docs/issues/archive/2026-09-13-fix-anchor-check-reports-absent-when-it-means-unparseable.md`
+  — fixed and archived 2026-09-15 at `da5c1f8c`. Its § *Resume* now carries a correction
+  relevant to **direction 1 above**: `declared_patch_ids` is deliberately looser than
+  `structured_fix_pointers`, and its doc comment records that **0 of the LIVE corpus** used the
+  structured form on 2026-09-02 — which is the population this check actually examines, since it
+  skips `archive/`. That does not contradict the 115 archived records named in § *Resume*; the
+  two count different populations, and only the live one binds here. The count that decides
+  direction 1 is the one § *Resume* already names.
 - CLAUDE.md § *Parsers Over a Namespace* — "owe an escape and a disambiguator"
 - CLAUDE.md § *Testing Discipline* — a document that names one failure mode implies by omission that
   the rest are handled
