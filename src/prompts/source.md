@@ -30,7 +30,7 @@ Subagents inherit these rules. Pass them along.
 Call get_guide(topic) FIRST before deeper work:
 - "librarian" — artifacts, filters, trackers
 - "tracker-conventions" — entry fields (`**Valid:**`, `**Rests on:**`), status, archive
-- "progressive-disclosure" — output budgets, @ref buffers
+- "progressive-disclosure" — output budgets, @ref buffers, .err
 - "error-handling" — RecoverableError vs anyhow::bail
 - "workspace-state" — activate, home/foreign, pinning, reset
 - "iron-laws-detail" — gate text + exceptions
