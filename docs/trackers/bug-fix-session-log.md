@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 160
-entry_high_water_W: 137
+entry_high_water_F: 161
+entry_high_water_W: 138
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -207,6 +207,7 @@ entry_high_water_W: 137
 | F-88 | 2026-09-01 | med | self-friction | fixed-verified | Bulk-inserted `## Fix provenance` into 7 bug files after verifying placement on the FIRST one only. One target already had that section (unbolded `- SHA:`, which the parser skips), so the insert produced two byte-identical headings — `IC-6`, and removable only via the `occurrence` disambiguator shipped by another file in the same batch. The post-hoc check asked *did it land between `## Fix` and `## Tests added`*, an assertion **monotone under "a section already existed here"**: it can confirm an insert worked, never that it was inappropriate. The precondition was *absent in all 7*, and one `grep -c '^## Fix provenance'` answers it. Also read `doctor`'s "no pointer is **declared**" as a claim about the file when it is a claim about the parse |
 | F-89 | 2026-09-01 | med | cross-session | fixed-verified | Misattributed uncommitted `doctor.rs` work to `bcc98c22` by DIRECTORY ADJACENCY, inside the message correcting a peer for misattributing by elimination, citing `F-80` and `F-85` while doing it. Real owner was `c2a08c22` (codescout-68), who volunteered it. The `Session-Id` trailer I had just promoted exists only on COMMITTED work; the disputed work was uncommitted, so I swapped instruments mid-argument without noticing. Rule splits by state: committed -> trailer, positive and exact; uncommitted -> NO positive instrument exists on a shared checkout, ask the session, and until it answers the honest claim is "not mine", never "yours". **Sharpened: the real owner was INSIDE my visible four — I named an invisible session and offered its invisibility as corroboration, so the documented `ListAgents` gap (BL-58) explains neither this error nor the peer's. Three misattributions of one file in one evening, three parties, all three actively reasoning about attribution** |
 | F-90 | 2026-09-01 | med | self-friction | fixed-verified | Published "the worktree guard MANDATES `git -C`, so the two guards are in direct tension" to five surfaces — three commit messages, a bug file, and a source comment — without probing it. One command refutes it: `git add --dry-run <path>` exits 0, unblocked. The guard refuses only commit-family verbs; both my blocked commands merely CONTAINED `git commit`. Attribution is recorded at STAGING time, so no tension exists on the path that matters. Population inflated too: `-C` is 32 of 1586 real `git add` calls (2.0%), not the mandated form. Being blocked twice felt like having tested it — refusal establishes what a guard refuses, never what it permits |
+| F-161 | 2026-09-15 | med | cross-session | open | **Selected an already-fixed bug for work: `doc(find)` returned it `open` while its fix (`e79fa902`, 08:27:23) and archive (`3c4c3b61`, 08:28:49) had landed mid-triage.** The catalog was never stale — `doctor` reported `missing_file: 0`, because the peer archived properly through `doc(action="move")`, which re-keys the row atomically; the SNAPSHOT aged. **Distinct from the promoted substrate law**, which is about reading the wrong world: here one world was read correctly and then moved, so the discriminator is *when*, not *which*. Corpus rate at the time: 88 commits touching `docs/issues/` in 24h, 5 sessions live in the checkout. Caught only because two surfaces disagreed — `grep` listed the archive path while the catalog reported it live — and the reflex that has to be beaten is *"one of my instruments is broken"*. Remedy is ordering, not mechanism: re-verify at CLAIM time, since `status: taken` + `claimed_by` re-reads the row anyway |
 
 ## Wins Index
 <!-- audit-doc-refs:ignore-refs `1f8784f932f042bc` — a CATALOG DIGEST, not an artifact id — the sentence reads "4786 rows, digest ...". Sixteen lowercase hex, same shape, different namespace. -->
@@ -351,6 +352,7 @@ entry_high_water_W: 137
 | W-92 | 2026-09-01 | med | **Resolve authorship with the `Session-Id` commit trailer, never by elimination over `ListAgents`.** The trailer is a POSITIVE identifier (whose a commit IS), costs one `git log`, needs no socket enumeration, and reaches sessions that have already exited | A peer's heads-up asserted "your uncommitted doctor.rs work" reddened the shared gate. Not mine — all four of my commits contain 0 `.rs` files. Their diagnostics (`git status` + `git grep <symbol> HEAD`) soundly established "not mine"; the step to "yours" ran over an incomplete population — `peer-sessions.sh` 5, `ListAgents` 4, `peer-sessions.sh` 5, `ListAgents` 4 — **but that gap did NOT contain the answer: the real owner `c2a08c22` (codescout-68) was inside the visible four, for both of us.** Their error was conversational salience, not coverage; mine named an INVISIBLE session and cited its invisibility as corroboration. So "ListAgents under-reports" is true, documented (BL-58) and did no work in either failure — a false explanation built entirely from true parts. Cheaper than `F-80`'s transcript grep and `F-85`'s ask-the-session, and the only one that reaches exited sessions. `git log --author` is NOT a substitute: every session commits as the same author (IC-10). Cost was one turn spent disproving a negative, not zero. **Rule splits by state — committed: trailer; uncommitted: NO positive instrument exists, ask, and until answered say "not mine", never "yours" — see [[F-89]]** | validated |
 | W-90 | 2026-09-01 | med | **Re-verify `path:line` citations in artifacts THIS session authored, after any rebuild or peer commit.** Authorship is no exemption (`R-49`) — a bug file's citations are written at fix time, while peers are still moving the substrate under them | Filed bug cited `post-index-change-stage-log.sh:142` for the mv/rm fallback; the line is `:141` and `:142` is blank. No gate would have caught it: `audit_doc_refs` DOES scan `**/*.sh`, but `scan_code_comments` forces those findings to `Med` and CI runs `--fail-on high`, so it passes by design — the citation survives until a human follows it onto whitespace. The same pass also separated real drift from a false accusation: a `docs(issues):`-titled commit genuinely had changed the script, which looked like a capture, but the diff was a comment-only re-point of an archived path, coherent with its message. Without reading it, the plausible move was filing a third capture bug against a correct commit | validated |
 | W-91 | 2026-09-01 | high | **Re-read the substrate before a claim enters a DURABLE, queryable record** — the filesystem for a claim about the filesystem, the implementation for a claim that a capability is missing. Recorded as a **recurrence** of the reconnaissance skill's already-promoted current-state law, not as a new pattern, per that skill's § *Every promotion audits the promoted set* | Two catches. (1) A bug file's `## Residual — still open` said `.worktrees/bench` retains an orphaned gitdir; `ls .worktrees/` shows only `audit-trail-t1`. I was one call from writing a queryable `unverified:` field asserting an open residual that does not exist — into the single file tagged `cluster/record-asserts-an-unchecked-completion`. (2) I had begun drafting a bug asserting `unverified:` is unreachable by any query, on two true pieces of evidence (`find` → `unknown field`, and the librarian guide's "`extra` is NOT catalog-indexed"); `scan_terminal_status_with_caveat` is the deliberate reader and reports **65** records. Both false claims were backed by real evidence about something narrower than the sentence it was licensing. `outgrown` signal (n=1) on the promoted text: it names *fixes* and *prohibitions*, not **filed defect records** — the costliest surface, since a fix assuming a missing capability fails loudly at the call site while a filed bug is durable and nothing re-checks it. **Promote-when FIRED same-day on a MISS** — a filed bug claimed two parsers lacked a fence guard they already had; shipped in `claude-plugins` `b74c730` / codescout-companion 1.19.11 | promoted-to-permanent-docs |
+| W-138 | 2026-09-15 | high | **A deferral rationale that names a CAUSE is checkable against what the code can OBSERVE — widen the cause, not the effort.** *"The trigger is a lock race, not reducible to a deterministic script"* scoped the failure to a cause `append_entry` never sees; it sees `tx.commit()` return `Err`. A **deferred foreign-key violation** is the one SQLite failure that surfaces at COMMIT rather than at the statement, so every statement — including the `fs::write` — succeeds and only the commit fails, with no timing | The named cause could not have worked here at all: `journal_mode = WAL` + `BEGIN IMMEDIATE` takes the write lock up front, so a competing writer blocks at BEGIN and never at COMMIT. The three live alternatives were a test that cannot fire, a `#[cfg(test)]`-only hook exercising a path the shipped binary lacks, or shipping untested — which the sibling fix did (`update.rs` still carries `NOT REACHED BY ANY UNIT TEST` at its call site). The widened cause produced a first RED showing the retry allocate `F-2` and write a SECOND section, then three production-path mutations each KILLED. The technique was **already in-tree** at `create.rs`'s `RAISE(ABORT)` orphan-file test, so the repo held the capability while the rationale asserted it did not. Recurrence of `R-95`/`R-92`, recorded as a denominator rather than a new law | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -15648,6 +15650,109 @@ consequence follows. They are different claims, and the second is the one a read
 
 **Rests on:** the corpus holding three by-path test files and one gated target that executes a
 binary; a fourth would not change the tell but would change *"the only one this corpus can have"*.
+
+## W-138 — A deferral named a CAUSE the code cannot observe, so "untestable race" was false — widen the cause, not the effort
+
+**Valid:** dated 2026-09-15
+
+**Observed:** 2026-09-15, closing the `append_entry` half of
+`doc-update-writes-the-file-then-fails-the-catalog-and-reports-only-the-failure`.
+
+**Pattern:** Re-cost a deferral rationale before accepting it — and specifically, **check
+whether it names a CAUSE the code under test can actually distinguish.** That file's
+`## Reproduction` read *"not reduced to a deterministic script — the trigger is a lock race
+against a concurrent catalog writer"*, and its owed-item 1 recorded the sibling fix's wiring
+as untestable because *"no test constructs real cross-connection lock contention"*. Both
+name a **cause**. `append_entry` never observes a cause: it observes `tx.commit()` returning
+`Err`. A **deferred foreign-key violation** is the one SQLite failure that surfaces at
+`COMMIT` rather than at the statement that caused it, so every statement — including the
+`std::fs::write` — succeeds and only the commit fails. Same effect, different cause, no
+timing.
+
+**Counterfactual:** Accepting the rationale leaves three routes and all three were live.
+(a) Write the timing test anyway — it could not have worked: `Catalog::open` sets
+`journal_mode = WAL` and `BEGIN IMMEDIATE` takes the write lock up front, so a competing
+writer blocks at BEGIN and never at COMMIT. The rationale named the one cause that does not
+fire on this configuration. (b) Add a `#[cfg(test)]` injection hook, which tests a path the
+shipped binary does not contain. (c) Ship it untested, which is what the sibling did —
+`update.rs` still carries `NOT REACHED BY ANY UNIT TEST` at its call site. Evidence the
+widened cause bought real coverage rather than a trick: the first RED showed the retry
+allocating `F-2` and writing a **second** section (the consequence the file could previously
+only infer from reading code), and three separate mutations of the production path were each
+KILLED — forgetting to record what was written (both integration tests), dropping the
+unchanged-file guard (2 tests), and flipping the still-on-disk remedy text (1 test).
+
+**Confirming data points:** (1) the deferral scoped the failure to a cause while the code
+sees only an effect; (2) WAL + `busy_timeout=5000` makes that named cause nearly unreachable
+at COMMIT, so the rationale was not merely expensive but aimed at the wrong failure; (3) the
+technique was **already in-tree** — `create.rs`'s `create_does_not_leave_orphan_file_when_upsert_fails`
+installs `RAISE(ABORT)` on an `artifact` insert to fail a catalog write on demand — so the
+capability existed in the repository while the rationale asserted it did not.
+
+**Impact:** high
+
+**Promote-when:** Already promoted in substance: this is a **recurrence** of the
+reconnaissance skill's `R-95` / `R-92` deferral-rationale law, recorded as a denominator
+datapoint rather than as a new pattern, per that skill's audit obligation. The half NOT in
+the promoted text, and worth adding on a second instance: **when a deferral names a CAUSE,
+ask whether the code under test can distinguish causes at all — if it cannot, any cause
+producing the same effect discharges the deferral.** The promoted text says re-cost the
+number, read the consumer behind the binary, probe the premise; it does not say *check the
+granularity of the thing being deferred against the granularity the code can observe*.
+
+**Status:** validated
+
+## F-161 — Picked an already-fixed bug: the catalog row was right at read time and 17 minutes stale by use time
+
+**Valid:** dated 2026-09-15
+
+**Observed:** 2026-09-15, triaging open bugs to choose one to work.
+
+**When:** Answering *"what's open?"* with the canonical query —
+`doc(action="find", kind="bug", filter={"status": {"in": ["open","taken","investigating","zombie"]}})` —
+then selecting one, reading it, and beginning work.
+
+**Expected:** 83 live bug files. The one selected —
+`a-move-reports-slug-and-path-citations-under-one-field-named-for-paths`, `status: open`,
+filed that morning — available to work.
+
+**Got:** Its fix had already shipped as `e79fa902` at 08:27:23 and the file was archived by
+`3c4c3b61` at 08:28:49 — **both during my triage**. `doc(find)` returned it as `open` and
+`read_file` served its body from the live path; a few calls later `grep` listed the same
+file under `docs/issues/archive/`.
+
+**Probable cause:** Not catalog staleness — `librarian(action="doctor")` reported
+`missing_file: 0`, because the peer archived properly through `doc(action="move")`, which
+re-keys the row atomically. The catalog was correct at every instant; **my snapshot of it
+was not.** A `find` result is a claim about a moment and nothing in the response carries
+that moment. Measured rate on this corpus at the time: **88 commits touching `docs/issues/`
+in 24 hours**, with 5 sessions live in the checkout (socket enumeration, 08:44:53 +03:00).
+
+**Note what this is NOT, so it is not read as a duplicate:** the promoted substrate law
+(`seam-classes.md`, *"a tool that resolves its target from the environment has a SUBSTRATE
+as well as a verdict"*) is about reading the **wrong world**. Here there was one world, read
+correctly, that then moved. The discriminator is not *which substrate* but *when*.
+
+**Workaround:** Caught by two surfaces disagreeing — `grep` reported the archive path while
+the catalog reported the file live. That disagreement is the signal, and the reflex it has
+to beat is *"one of my instruments is broken"*; CLAUDE.md's line-drift tell records two
+sessions each reading the other's correct measurement as a miscount. Re-picked, and before
+claiming the replacement I re-read its frontmatter on disk and verified that the blocker its
+own `unverified:` field named had since cleared (`59e8c970`, 2026-09-13).
+
+**Severity:** med — cost one triage cycle and a re-pick. No wrong code was written, and
+reading the file would have surfaced it eventually once the fix text appeared; the expensive
+branch, avoided, was starting a fix and re-deriving a root cause a peer had already closed.
+
+**Status:** open
+
+**Fix idea / Pointer:** The cheap half is ordering, not mechanism: **re-verify a bug's state
+at CLAIM time rather than at SELECT time.** The claim protocol already does this —
+`doc(action="update", patch={status:"taken", extra:{claimed_by:…}})` re-reads the row — so
+the rule is simply *claim before reading deeply*, and the failure is free. The mechanism
+half would be for `doc(action="find")` to stamp the instant it answered, which is the same
+obligation CLAUDE.md already places on any peer count and for the identical reason. Not
+filed as a bug: every component behaved correctly.
 
 ## Template for new entries
 
