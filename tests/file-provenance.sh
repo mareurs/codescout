@@ -287,6 +287,27 @@ out="$(run --all src/sibling.rs)"
 has "a path beside a verb-shaped filename is not its destination" "$out" "UNKNOWN"
 hasnt "and the sibling names no author" "$out" "$PEER"
 
+# ...and that pair STOPPED isolating `(?=\s)` the moment command-position anchoring was
+# added below it. Both put the verb-shaped filename after a `/`, which position already
+# rejects, so dropping the whitespace bound SURVIVED them -- measured 2026-09-15, the same
+# day the pair was written for exactly that purpose. **Adding a bound can silently un-guard
+# a site an older bound still owns**, and nothing about the suite going green says so.
+#
+# This case is what isolates the whitespace bound now: the verb-shaped token OPENS a line,
+# so command-position is satisfied and only `(?=\s)` can refuse it.
+bash_cmd "$B" "cat <<'EOF'
+mv.rs src/regenerated.rs
+EOF"
+out="$(run --all src/regenerated.rs)"
+has "a line OPENING with a verb-shaped filename is not a relocation" "$out" "UNKNOWN"
+hasnt "and the path beside it names no author" "$out" "$PEER"
+
+# CONTROL: a real relocation opening a line still resolves. Without it the assertion above
+# is satisfied by refusing every line-initial verb, which would delete the feature.
+bash_cmd "$B" "cat src/whatever.rs
+mv src/lineinit_from.rs src/lineinit_to.rs"
+has "and a real relocation opening a line still resolves" "$(run --all src/lineinit_to.rs)" "$PEER"
+
 # Site 2, the `\n` in the negated class: a REAL relocation, so the lookahead is satisfied
 # and cannot help. Unbounded, the tail runs into the next command and _operands() honours
 # ITS `--`. Note both directions are asserted -- the unbounded form does not merely ADD the
@@ -298,6 +319,58 @@ out="$(run --all src/victim.rs)"
 has "a real mv does not annex the next command's operand" "$out" "UNKNOWN"
 hasnt "and the next command's path names no author" "$out" "$PEER"
 has "and the mv's own destination is still attributed" "$(run --all src/relocated_to.txt)" "$PEER"
+
+# A verb bounded by whitespace on both sides is still not necessarily a COMMAND. Two ways
+# it is not, and the whitespace bound above cannot see either, because in both the
+# whitespace is real:
+#
+#   1. it is a SUBCOMMAND of another program -- `cargo install`, `apt install`;
+#   2. it is inside a HEREDOC BODY, text a shell passes through as data.
+#
+# Both must be command-POSITION failures rather than token-shape ones, so each case below
+# is paired with a control that keeps the real verb working.
+bash_cmd "$B" 'cargo install ripgrep'
+out="$(run --all ripgrep)"
+has "a subcommand of another program is not a relocation" "$out" "UNKNOWN"
+hasnt "and the package name names no author" "$out" "$PEER"
+
+# CONTROL for the pair. Without it, deleting `install` from the alternation passes the two
+# assertions above -- suppression reading as discrimination.
+bash_cmd "$B" 'install -m 755 build/staged_tool bin/installed_tool'
+has "a real install still writes its destination" "$(run --all bin/installed_tool)" "$PEER"
+out="$(run --all build/staged_tool)"
+has "and its source is read, not written" "$out" "UNKNOWN"
+
+# The heredoc. `<<'PY'` exists PRECISELY to mean "the following is data, not syntax", and
+# every shell scanner in this process has had to learn that separately. The quoted path here
+# is the exact shape this repo's own mutation probes write, which is how it was found: the
+# probes verifying the previous fix each recorded a relocation of files nobody touched.
+bash_cmd "$B" "python3 - <<'PY'
+cases = [(\"a real relocation\", \"mv src/heredoc_alpha.rs src/heredoc_beta.rs\")]
+PY"
+# NOTE the query is the FIRST operand. The second comes back as `src/heredoc_beta.rs")]`,
+# with the Python syntax still attached, so it resolves to no file and asserting on it
+# passes against the unfixed tool. That trailing garbage is also the sharpest evidence the
+# matched text was never a command.
+out="$(run --all src/heredoc_alpha.rs)"
+has "a relocation inside a heredoc BODY is data, not a command" "$out" "UNKNOWN"
+hasnt "and the quoted path names no author" "$out" "$PEER"
+
+# CONTROL: the command CARRYING the heredoc is still a command, and its own verbs resolve.
+# Without this, a scanner that gave up on any input containing `<<` would pass the pair above.
+bash_cmd "$B" "mv src/wrapper_from.rs src/wrapper_to.rs && python3 - <<'PY'
+print('nothing here')
+PY"
+has "and the enclosing command's own relocation still resolves" "$(run --all src/wrapper_to.rs)" "$PEER"
+
+# KNOWN LOSS, asserted so that widening it is a deliberate edit and not an accident.
+# Anchoring on command position means a wrapper word -- sudo, time, env, xargs -- hides the
+# verb behind it, exactly as `cargo` does, because nothing distinguishes a wrapper from a
+# program with subcommands without a list of one or the other. The miss degrades to UNKNOWN,
+# which is this tool's safe direction; a wrong name is what it exists to avoid. If you make
+# wrappers work, change this assertion on purpose.
+bash_cmd "$B" 'sudo mv src/wrapped_from.rs src/wrapped_to.rs'
+has "a verb behind a wrapper word is missed, in the safe direction" "$(run --all src/wrapped_to.rs)" "UNKNOWN"
 
 echo
 echo "== artifact() writes are addressed by ID, and must still resolve to a path =="

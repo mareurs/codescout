@@ -206,9 +206,32 @@ BASH_WRITE_PATTERNS = [
 # it runs into the next line and _operands() honours a `--` belonging to a different
 # command, lifting that command's path. That is how one read yields the harmless fragment
 # `.rs` while two reads yield a real file -- the second `--` is what completes the defect.
-# Measured 2026-09-15; guarded in tests/file-provenance.sh.
+#
+# A third bound, and it is about POSITION rather than shape, which is why neither of the
+# other two can stand in for it: a verb surrounded by real whitespace still need not be a
+# COMMAND. `(?:^|[;&|(\n])\s*` requires it to open one. Without that, `cargo install X`
+# attributes a write of `X` -- the verb is a SUBCOMMAND of another program -- and a HEREDOC
+# BODY is scanned as command text, which yielded a path with the surrounding Python syntax
+# still attached (`src/beta.rs")]`). A heredoc exists precisely to mean "this is data, not
+# syntax", and it is the fifth construct in this process to be misread that way.
+#
+# KNOWN LOSS, deliberate: a wrapper word hides the verb behind it exactly as `cargo` does --
+# `sudo mv a b` no longer resolves -- because nothing separates a wrapper from a program
+# with subcommands without a list of one or the other, and a list is the same no-escape
+# problem one level in. The miss degrades to UNKNOWN, which is this file's safe direction; a
+# confident wrong name is what it exists to avoid. Asserted in the suite so that widening it
+# is a deliberate edit.
+#
+# RESIDUE this does not close: a relocation at the START of a line inside a heredoc body is,
+# to a line-oriented scanner, indistinguishable from a command. Closing that needs heredoc
+# extent tracking -- a parser, not a tighter pattern.
+#
+# Measured 2026-09-15; every clause above is guarded in tests/file-provenance.sh, one case
+# per bound, because each bound alone prevents the others' symptom and they would otherwise
+# guard the conjunction and no single site.
 RELOCATORS = re.compile(
-    r"\b(git\s+mv|git\s+checkout|git\s+restore|mv|cp|install)(?=\s)([^;&|\n]*)")
+    r"(?:^|[;&|(\n])\s*"
+    r"(git\s+mv|git\s+checkout|git\s+restore|mv|cp|install)(?=\s)([^;&|\n]*)")
 
 
 def _operands(rest: str) -> list[str]:
