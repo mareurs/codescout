@@ -53,8 +53,38 @@ scripts` (`:162`) to `## Built-in \`librarian\` scans` (`:202`).
 
 ## Root cause
 
-**NOT ESTABLISHED, and two plausible causes are already falsified — recorded so the next reader does
-not re-run them.**
+**ESTABLISHED 2026-09-15 by experiment. THE MARKER'S OWN EXPLANATION INVOKED THE FORM IT WAS
+EXPLAINING.** The comment is re-parsed line by line — `parse_ignore_marker` runs on **every** HTML
+event and line 33 reassigns `suppression` each time. Line 167 read:
+
+> `` `audit-doc-refs:ignore` `` would silence every one of them
+
+That line contains `audit-doc-refs:ignore` and **not** `audit-doc-refs:ignore-refs`, so
+`parse_ignore_marker` returns `Some(Suppression::All)` — a *new, bare* marker, four lines into the
+scoped one — and `All` then holds to the next heading. The author wrote *"a bare
+`audit-doc-refs:ignore` would silence every one of them"* and, in writing it, silenced every one of
+them.
+
+**The experiment, and it is also the repair.** Rewording line 167 so the literal bare token no longer
+appears, changing nothing else:
+
+| | refs found |
+|---|---|
+| before | **36** |
+| after | **207** |
+
+171 refs restored to the gate, and 29 broken ones became visible having been hidden since
+2026-09-02. None is `high`; `exit_code` stays `0`, so CI was green before and is green after — it was
+green for the wrong reason.
+
+**This is `IC-6`, and it is the half named in `CLAUDE.md` § *Parsers Over a Namespace*: a grammar
+over a namespace with no way to MENTION its own token.** The section's own example is *"an entry id
+cannot be mentioned without citing it"*; here a suppression marker cannot be mentioned without
+invoking it, and the only place anyone would ever mention it is the explanation of why they chose
+the other form.
+
+**Both earlier hypotheses stay recorded, because each cost a measurement and each is a plausible
+re-derivation.**
 
 1. **Line length — FALSIFIED.** Lines 175/180/185/186/201 (4441–7704 chars) are unreported and line
    208 (2453) is reported, which looked like a cap. It is not: 208 sits *past the section boundary*.
@@ -64,10 +94,8 @@ not re-run them.**
    which `"audit-doc-refs:ignore-refs"` also contains — so the scoped form looked like it might be
    swallowed by the bare one. It is not: `parse_ignore_marker` tests
    `html.contains("audit-doc-refs:ignore-refs")` **before** falling back to `Suppression::All`. The
-   grammar disambiguates correctly.
-
-What is established is the **behaviour**: the suppression in force over that span is `All`, not
-`Only`. Which path produces it is the open question.
+   grammar disambiguates correctly **between two markers**; what it cannot do is tell a marker from
+   a quotation of one.
 
 ## Evidence
 
@@ -92,18 +120,33 @@ the link target instead, and only because the silence looked wrong.
 
 ## Fix
 
-Not designed; the cause is not known. **Do not "fix" this by deleting the marker from
-`docs/PROBES.md`** — that unguards two genuine false positives the author correctly annotated, and
-it would hide the defect rather than close it.
+**THE INSTANCE IS REPAIRED; THE DEFECT IS NOT. This record stays `open` for that reason.**
 
-Two things are worth doing independently of the diagnosis:
+**Shipped** — `docs/PROBES.md`:167 reworded so the marker's explanation no longer contains the bare
+token, plus a line at the site saying *why* it must not be written literally there. 36 → 207 refs.
+That is a workaround at one call site: it repairs this file and protects nothing else. **The next
+author who explains their choice of the scoped form re-creates it**, and the explanation is exactly
+where the bare token naturally appears.
 
-- **A regression test at the behaviour, not the parse.** `Suppression::blocks` and
-  `blocks_everything` are already unit-correct by inspection; the failure is downstream of them, so
-  a test on those two would pass and prove nothing. Assert on a whole-file scan: a fixture with a
-  scoped marker and three refs, one named, must report **two**.
+**Not designed** — the grammar needs an escape for *mention*, which is `IC-6`'s standing debt. The
+house pattern is to narrow where safe and **name the residual at the refusal site**; the residual
+here is that no escape exists at all, so the marker's documentation cannot describe its own
+alternative form without triggering it.
+
+**Do not** "fix" this by deleting the marker from `docs/PROBES.md` — that unguards two genuine false
+positives the author correctly annotated, and hides the defect rather than closing it.
+
+Two things worth doing, both still owed:
+
+- **A regression test at the BEHAVIOUR, not the parse.** `Suppression::blocks` and
+  `blocks_everything` are unit-correct by inspection and would both pass — the failure is that a
+  later event overwrites a correct `Only` with `All`. Assert on a whole-file scan: a fixture whose
+  scoped marker **quotes the bare form in its own comment body** must still report the section's
+  unnamed refs. That is the regression that actually happened, and no unit test on the two methods
+  can reach it.
 - **Narrow the target capture** to the run of backticked tokens *before* the first prose word, so a
-  marker's explanation cannot contribute targets.
+  marker's explanation cannot contribute targets — the separate over-capture in § *Evidence* (4
+  declared where 2 were intended).
 
 ## Resume
 

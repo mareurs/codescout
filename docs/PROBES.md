@@ -164,8 +164,12 @@ word, then heading forms) before calling it dangling, on rule 3's own terms.
      truncated paths, in the sentence documenting the 200-char `args` cut that produces
      them. They are meant not to resolve; that is the point being made. Scoped by token,
      not by section, because this section carries 27 real refs and a bare
-     `audit-doc-refs:ignore` would silence every one of them — in the document whose whole
-     job is telling a reader which instrument to trust. -->
+     section-wide marker (this one without its `-refs` suffix) would silence every one of
+     them — in the document whose whole job is telling a reader which instrument to trust.
+     DO NOT WRITE THAT BARE FORM LITERALLY HERE: this comment is re-parsed line by line,
+     so quoting it sets Suppression::All and silences the 73 refs below, which is exactly
+     what this marker was scoped to avoid. See
+     docs/issues/2026-09-15-a-scoped-audit-ignore-marker-suppresses-its-whole-section.md -->
 
 | Probe | Measures | Invoke | Know before you run it |
 |---|---|---|---|
