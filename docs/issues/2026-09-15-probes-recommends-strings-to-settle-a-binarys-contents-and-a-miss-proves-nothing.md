@@ -154,6 +154,23 @@ instrument — **and the `ldd` instance proves deletion could not work anyway**:
 the next reader reaches for `ldd`, `nm` or `readelf` and inherits the identical one-directionality.
 Name the property of the FAMILY, not a caveat on one member.
 
+**And the family has two sub-kinds that take different advice — flattening them is how the remedy
+fails.** (Raised by sessionId `f5f48b42-6d84-482e-84a4-8eaebb0ce60f`; verified here.)
+
+- **Contingent** — `strings`. The 0-on-one-build, 1-on-another measurement above is what makes this
+  sub-kind provable rather than asserted, and the consequence is that **you cannot know which regime
+  you are in** from the output.
+- **Structural** — `ldd`, for this question, on this crate. `crates/codescout-embed/Cargo.toml`:18
+  declares `local-embed` a *static* prebuilt runtime, so a static link appears in no link map **by
+  design, always**. Worse in never being right for the question; better in being knowable in advance
+  from `Cargo.toml` alone, without running anything.
+
+**The practical consequence is the line the remedy must carry: a reader told only "`strings` is
+unreliable" reaches for `ldd` and lands on the WORSE instrument.** That is not hypothetical — it is
+exactly what happened one step later, and was called *"the decisive test"*. A caveat naming one
+instrument does not just under-cover the family, it actively routes the reader to a member with no
+conditions attached at all.
+
 ## Resume
 
 One build flag at a time on a fixed source tree — `--features server-stack` vs `local-embed`, then
