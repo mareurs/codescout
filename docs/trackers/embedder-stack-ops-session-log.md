@@ -556,7 +556,13 @@ After a second `cargo rb` on the reconciled tree (`HEAD` = `506924f2`): `13`, no
 
 **The correct claim is the peer's, and it is sharper than the original:** a method whose reliability varies per build is **worse than one reliably broken**, because nothing tells you which regime you are in — a **0 is uninterpretable, a 1 is sound**. Asymmetric, not absent. The standing instruction is unchanged and is the reason this entry exists: **ask the binary what it does, not what it is.**
 
-**Same shape one step later, worth recording together.** Verifying `local-embed` had actually left a subsequent build, `strings` reported `onnxruntime: 7` — merged-blob hits that say nothing about linkage. `ldd` answers in one call (`no onnxruntime in the link map`), corroborated by the 62 MB -> 40 MB size drop. Three text-search probes in one session, each returning a plausible number none of them could support.
+**Same shape one step later — and the second half of this paragraph was WRONG until 2026-09-15, which makes it the third instance rather than the second.** Verifying `local-embed` had actually left a subsequent build, `strings` reported `onnxruntime: 7` — merged-blob hits saying nothing about linkage. I then ran `ldd`, called it *"the decisive test"*, read `no onnxruntime in the link map`, and concluded the feature was gone.
+
+**`ldd` cannot answer that question.** `crates/codescout-embed/Cargo.toml:18` declares `local-embed` as a **static prebuilt ONNX Runtime** (`fastembed/ort-download-binaries-native-tls`); the dynamic variant is a *separate* feature, `local-embed-dynamic`, used only on windows-gnu. A statically linked runtime appears in no link map, so `ldd` returns the same empty result whether the feature is in or out — a **one-directional instrument presented as decisive**, which is precisely the defect the `strings` half of this entry is about. I could not even compare against the previous binary, since it had already been overwritten.
+
+The conclusion survives, on evidence that does discriminate: the **62 MB -> 40 MB** drop, which is exactly what removing a statically linked runtime costs. The right answer, reached by an instrument that could not reach it, rescued by one that could.
+
+So: three probes in one session (`strings` twice, `ldd` once), each returning a plausible result none of them established, and each corrected only by a control or a second instrument. Found while auditing a *peer's* bug file about the `strings` half — not by re-reading my own entry, which I had already revised twice.
 
 **Cost:** one wasted rebuild plus a reconnect, and a window in which the operator believed the WAL-backup fix was live when it was not — so any dimension migration firing in that window would still have taken the broken `fs::copy` backup. Nothing indicates one did (`artifact_vec_v2` intact at 768 dims, 61,489 vectors).
 
