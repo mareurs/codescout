@@ -17,10 +17,28 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 # (sqlite-vec lite default) — which is what repo cloners get. Harmless on master:
 # it only adds a command; nothing invokes it unless you type `cargo rb`.
 #
-# `local-embed` rides along because the alias IS the live-MCP build: without it
-# `~/.cargo/bin/codescout` (a symlink to target/release/codescout) cannot resolve
-# a `local:` / `local-dir:` model at all, and a rebuild silently removes the
-# capability from a running setup. Costs ~21MB of binary (39M -> 60M) and the
-# ort/fastembed compile; changes nothing at runtime unless a local model is
-# actually configured.
-rb = "build --release --features server-stack,local-embed"
+# `local-embed` is deliberately NOT here, and its absence is the decision rather
+# than an omission. The alias IS the live-MCP build, so what it omits, the running
+# server cannot do: without `local-embed`, `~/.cargo/bin/codescout` (a symlink to
+# target/release/codescout) cannot resolve a `local:` / `local-dir:` model at all,
+# and the failure arrives at embed time, not at build time.
+#
+# It was dropped 2026-09-15 after checking rather than assuming: `.env` and
+# `.env.amd` configure the embedder entirely over HTTP —
+# `CODESCOUT_EMBEDDER_URL=http://127.0.0.1:48081`, `PROTOCOL=llama-server`,
+# `CodeRankEmbed-Q4_K_M.gguf`, plus sparse and reranker legs — and neither file,
+# nor `.codescout/project.toml`, nor `workspace.toml`, names a `local:` or
+# `local-dir:` model. (All four files were confirmed to EXIST first; an empty grep
+# over a missing file proves nothing.) Saves ~21MB of binary and the ort/fastembed
+# compile on every live rebuild.
+#
+# `CODESCOUT_MODEL_DIR=./models` is still set in `.env` and does NOT re-enable this:
+# it is where a `local-dir:` model would be READ FROM, not a model selection. It is
+# inert unless some model spec actually carries the prefix.
+#
+# TO GET IT BACK: `cargo build --release --features server-stack,local-embed`, or
+# re-add it here. The feature itself is untouched in Cargo.toml and still has CI
+# lanes on all three platforms plus the gate's clippy — this changes one build
+# command, not the project's support for the ONNX path (GitHub #16 is open and
+# wants that path extended, so do not delete the feature).
+rb = "build --release --features server-stack"
