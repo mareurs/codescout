@@ -487,7 +487,12 @@ mod tests {
         // same bytes — with the checkpoint the copy is 12,288 bytes and the query returns
         // 0, so the assertion fires; without it the copy is 4,096 bytes with no schema at
         // all and the query raises `no such table`, so the test reds on an unwrap
-        // instead. Inert for the VERDICT, load-bearing for the DIAGNOSTIC. Here that
+        // instead. Inert for the VERDICT, load-bearing for the DIAGNOSTIC — and the
+        // sharper half, which is f5f48b42's after running it rather than modelling it
+        // (`e38f259e`): `no such table: artifact` does not merely inform LESS, it points
+        // at the WRONG SUBSYSTEM. A reader hitting it goes to the seed data, not to the
+        // stale backup that is the actual defect. The checkpoint is what keeps that
+        // failure honest about where it lives. Here that
         // distinction does not arise: `seed_v3_db` creates the table before WAL is on, so
         // the schema is in the `.db` either way and this test always reds on its
         // assertion.
