@@ -497,13 +497,22 @@ fn catalog_needs_v6_migration(db_path: &Path) -> Result<bool> {
     Ok(version < 6)
 }
 
+/// Back the catalog up before the destructive v6 migration.
+///
+/// Opens its **own** connection because this runs before `open_with_workspace`
+/// has one — `catalog_needs_v6_migration`'s connection is already dropped by
+/// here. That is also why the window is real rather than guaranteed: the
+/// uncheckpointed WAL this has to capture belongs to *another* process sharing
+/// the machine's catalog, not to us.
 fn backup_db(db_path: &Path) -> Result<()> {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
     let bak = db_path.with_extension(format!("db.pre-v6-bak.{ts}"));
-    std::fs::copy(db_path, &bak).with_context(|| {
+    let conn = Connection::open(db_path)
+        .with_context(|| format!("opening {} to snapshot it", db_path.display()))?;
+    snapshot_catalog(&conn, &bak).with_context(|| {
         format!(
             "backing up catalog before v6 migration: {} -> {}",
             db_path.display(),
@@ -511,6 +520,53 @@ fn backup_db(db_path: &Path) -> Result<()> {
         )
     })?;
     tracing::info!("v6 migration backup created at {}", bak.display());
+    Ok(())
+}
+
+/// Write a consistent snapshot of the catalog to `dest`.
+///
+/// **Deliberately not `std::fs::copy`.** `Catalog::open` sets
+/// `journal_mode = WAL`, so the main `.db` file holds only what has been
+/// CHECKPOINTED; everything committed since lives in the `-wal` sidecar, which a
+/// single-file copy leaves behind. Measured 2026-09-15 against a WAL catalog in
+/// this shape: **51** rows visible to the live connection, **1** row in the copy.
+/// The loss is not the vectors — those regenerate from `backfill-chunks` — it is
+/// every artifact, event and augmentation committed since the last checkpoint, and
+/// augmentations are not in git.
+///
+/// **`PRAGMA wal_checkpoint(TRUNCATE)` before a copy is NOT the fix, which is why
+/// it is named here rather than left as the obvious thing to try.** It reports
+/// `busy = 1` in its result row instead of failing when any other connection holds
+/// a read lock, and `catalog.db` is shared by every codescout process on the
+/// machine — so busy is the ORDINARY case here, not the edge one (measured: one
+/// concurrent reader was enough). Checkpoint-then-copy therefore returns the same
+/// stale backup through a call that looks like it succeeded.
+///
+/// `VACUUM INTO` takes a read transaction and writes a snapshot that includes WAL
+/// content, unblocked by concurrent readers — verified 51/51 with a reader holding
+/// a transaction open. It refuses to run inside an open transaction, and that error
+/// is propagated rather than falling back to a copy **on purpose**: this backup is
+/// the only thing between an operator and destroyed vectors, so the caller must not
+/// proceed on a backup that cannot restore.
+///
+/// **It lives in `catalog` rather than beside either caller, and that placement is
+/// half the fix.** The two backup sites — `backup_db` above and
+/// `indexer::rebuild_artifact_vec_v2_at_dim` — shipped the *same* `fs::copy` defect
+/// and were repaired separately, because a mutation killed at one says nothing
+/// about the other (CLAUDE.md § *Testing Discipline*: mutate once per guarded
+/// SITE). One implementation is what stops a third site being written against the
+/// wrong model; `catalog` owns it because `catalog` is what sets `journal_mode =
+/// WAL` in the first place.
+pub(crate) fn snapshot_catalog(conn: &Connection, dest: &Path) -> Result<()> {
+    conn.execute("VACUUM INTO ?1", rusqlite::params![dest.to_string_lossy()])
+        .with_context(|| {
+            format!(
+                "VACUUM INTO {} — a WAL-mode catalog cannot be backed up by copying \
+                 the .db file alone; if this failed because a transaction is open, the \
+                 rebuild is refused rather than run against a backup that cannot restore",
+                dest.display()
+            )
+        })?;
     Ok(())
 }
 

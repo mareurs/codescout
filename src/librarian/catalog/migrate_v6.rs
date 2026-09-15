@@ -409,6 +409,13 @@ mod tests {
         assert_eq!(git_root, "/abs/c");
     }
 
+    /// The EXISTENCE half: a file with the right name appeared.
+    ///
+    /// Monotone under the backup being empty, stale or truncated — green for a
+    /// 0-byte file — so it cannot see the defect its sibling
+    /// `the_v6_backup_contains_rows_still_in_the_wal` was written for. Kept
+    /// deliberately: neither direction covers the other, and this one is the only
+    /// check that the file is named such that an operator can find it.
     #[test]
     fn migration_v6_creates_backup_file() {
         use std::fs;
@@ -428,6 +435,84 @@ mod tests {
             "backup file not created; entries: {:?}",
             entries
         );
+    }
+
+    /// The v6 backup must contain rows COMMITTED but not yet CHECKPOINTED — rows
+    /// living only in the `-wal` sidecar at the instant the backup runs.
+    ///
+    /// This is site 2 of the bug
+    /// `docs/issues/2026-09-15-a-wal-catalog-backup-by-fs-copy-omits-everything-since-the-last-checkpoint.md`.
+    /// Site 1 (`indexer::rebuild_artifact_vec_v2_at_dim`) copies while holding its OWN
+    /// WAL-active connection and so is guaranteed to miss its own commits; this site
+    /// runs *before* `open_with_workspace` opens one, so what it can miss is ANOTHER
+    /// process's uncheckpointed WAL. That is the smaller window, not the absent one —
+    /// this catalog is shared by every codescout process on the machine, and the
+    /// migration it guards drops legacy columns irreversibly.
+    #[test]
+    fn the_v6_backup_contains_rows_still_in_the_wal() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("catalog.db");
+        seed_v3_db(&db_path);
+
+        // `other` stands in for a second codescout process holding the shared catalog.
+        //
+        // THREE LOAD-BEARING DETAILS, and each one defeats this test differently if a
+        // tidy-up removes it — in every case leaving a test that passes against the
+        // `fs::copy` this replaced, i.e. one that discriminates nothing:
+        //   * `journal_mode = WAL` — `seed_v3_db` leaves a rollback-journal database,
+        //     where every committed row is already in the `.db` file.
+        //   * the checkpoint — without it the row below can land in the main file
+        //     anyway, depending on what the seed left in the WAL.
+        //   * holding `other` open PAST `open_with_workspace` — SQLite checkpoints and
+        //     deletes the `-wal` when the LAST connection closes, so dropping it early
+        //     silently moves the row into the `.db` file before the backup is taken.
+        let other = rusqlite::Connection::open(&db_path).unwrap();
+        other.execute_batch("PRAGMA journal_mode = WAL;").unwrap();
+        other
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .unwrap();
+        other
+            .execute(
+                "INSERT INTO artifact(id, repo, rel_path, kind, status, title,
+                                      created_at, updated_at, file_mtime, file_sha256)
+                 VALUES ('in-wal', 'r', 'docs/in-wal.md', 'tracker', 'active', 't', 0, 0, 0, 'sha')",
+                [],
+            )
+            .unwrap();
+
+        let ws = ws_with("r", tmp.path().to_str().unwrap());
+        // Result ignored on purpose: the backup is taken BEFORE the migration runs, so
+        // whether the migration itself succeeds is a different test's question.
+        let _ = crate::librarian::catalog::Catalog::open_with_workspace(&db_path, &ws);
+
+        let bak = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .find(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("catalog.db.pre-v6-bak.")
+            })
+            .expect("a backup must be taken before the v6 migration");
+
+        // Raw connection, not `Catalog::open` — opening through the catalog would run
+        // migrations against the backup and mutate the thing under test.
+        let restored = rusqlite::Connection::open(bak.path()).unwrap();
+        let n: i64 = restored
+            .query_row(
+                "SELECT COUNT(*) FROM artifact WHERE id = 'in-wal'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            n, 1,
+            "the v6 backup must hold rows committed after the last checkpoint; a bare \
+             fs::copy of a WAL-mode catalog leaves them behind in the -wal sidecar"
+        );
+
+        // Explicit, and not merely scope-end: see the third load-bearing detail above.
+        drop(other);
     }
 
     #[test]
