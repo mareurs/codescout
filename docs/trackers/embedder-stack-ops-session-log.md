@@ -6,8 +6,8 @@ owners: ["marius"]
 tags: ["embeddings", "retrieval", "docker", "gpu"]
 topic: embedder stack ops
 entry_prefix: ["F", "W"]
-entry_high_water_F: 5
-entry_high_water_W: 2
+entry_high_water_F: 6
+entry_high_water_W: 3
 ---
 
 # Session Log — Embedder Stack Ops
@@ -70,6 +70,7 @@ entry_high_water_W: 2
 | F-3 | 2026-09-15 | high | tooling | open | `/code-review` given a PR number reviewed the local working tree instead, returning 14 findings about peers' uncommitted code and none about the PR |
 | F-4 | 2026-09-15 | med | shared-checkout | open | The foreign-index guard's remedy ("re-stage by explicit path") is a git no-op after a blanket add, and only the action it warns against clears it |
 | F-5 | 2026-09-15 | high | ledger-integrity | open | Merging a ledger-touching PR leaves the local id allocator stale, so the next append mints a colliding id rather than erroring |
+| F-6 | 2026-09-15 | high | build-provenance | open | A rebuild is not a rebuild of what you merged — `cargo rb` on a tree behind origin exits 0, updates mtime, and ships the old binary |
 
 ## Wins Index
 
@@ -77,6 +78,7 @@ entry_high_water_W: 2
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-08-29 | high | test-via-real-invocation-path | .env's stale CODESCOUT_MODEL_DIR would have stayed masked indefinitely, first breaking on the unit's own first real boot | validated |
 | W-2 | 2026-09-14 | high | call-graph-before-recommending-removal | Would have recommended mirroring v1's dimension-migration machinery for v2 (doubling it) instead of retargeting and deleting v1 | validated |
+| W-3 | 2026-09-15 | high | measure-the-remedy-not-only-the-diagnosis | The approved fix (`wal_checkpoint`) would have shipped the same stale backup while reading as diligence; measuring it inverted the remedy to `VACUUM INTO` | validated |
 
 ---
 
@@ -502,6 +504,61 @@ the machinery.
 around a table with zero production traffic in either direction.
 
 **Promote-when:** N/A — single-decision scout, not a recurring pattern proposal.
+
+## W-3 — Measuring an already-approved remedy inverted it — `wal_checkpoint` reports busy in a row callers discard
+
+**Valid:** dated 2026-09-15
+
+**Observed:** 2026-09-15, reviewing PR #20. Found that `rebuild_artifact_vec_v2_at_dim` backed the catalog up with `std::fs::copy` of a `journal_mode = WAL` database, which omits the `-wal` sidecar. Proposed the obvious remedy to the operator — `PRAGMA wal_checkpoint(TRUNCATE)` before the copy — **and they approved it.** Then measured it before writing it.
+
+**Pattern:** treat an approved remedy as a hypothesis until it has been run. The measurement took two minutes in a scratch SQLite database and inverted the fix:
+
+| remedy | with ONE concurrent reader holding a transaction |
+|---|---|
+| `PRAGMA wal_checkpoint(TRUNCATE)` | returns `(busy=1, log=100, checkpointed=100)` — **incomplete** |
+| `VACUUM INTO` | complete snapshot, **51/51 rows** |
+
+`wal_checkpoint` reports `busy = 1` *in its result row* rather than failing. `catalog.db` is shared by every codescout process on the machine — 6 sessions in this checkout at the time — so busy is the ORDINARY case here, not the edge one. Shipped `VACUUM INTO`, whose failure is an error rather than a discarded row.
+
+**Counterfactual — and it is worse than "the fix would not have worked".** A caller runs `wal_checkpoint` through `execute_batch`, which **discards result rows**. The approved fix would therefore have produced the *same stale backup* as the bare `fs::copy`, while adding a step that reads as diligence — a `PRAGMA` call sitting above the copy, which any later reader would take as the WAL problem already being handled. The bug file for this defect is tagged `cluster/record-asserts-an-unchecked-completion` (IC-8), so the approved remedy would have reproduced the exact class it was fixing, one level down, inside its own fix. That is recorded on IC-8's `**Members:**` field, because the next person will reach for `wal_checkpoint` too.
+
+**Confirming data points:**
+1. The backup staleness itself was measured, not reasoned: 51 rows visible to the live connection, **1** row in the `fs::copy`. The live catalog at the time was 420 MB with a 4.2 MB `-wal` written seconds earlier, so the exposure was real rather than theoretical.
+2. The mutation is the discriminator: reverting the production path to `std::fs::copy` reds the new test (`left: 0, right: 1`) while the pre-existing `write_embeddings_v2_migration_backs_up_file_backed_catalog` stays **green** — it asserts a file whose NAME matches and never opens it.
+3. `VACUUM INTO`'s one real constraint was checked too: it refuses inside an open transaction. That error is propagated rather than falling back to a copy, because a rebuild that destroys vectors must not proceed on a backup that cannot restore.
+
+**Why this is a win and not merely a fix:** the operator had already approved the wrong remedy, and nothing downstream would have caught it — not the gate, not CI, not the existing test. The only thing between the approval and shipping it was running it once.
+
+**Promote-when:** pairs with `F-1` in this same ledger (*asserted root cause before measuring*). Two datapoints now for one discipline in opposite directions — `F-1` is measuring before **diagnosing**, this is measuring before **remedying**. A third would justify promoting *"measure the remedy, not only the diagnosis"* into CLAUDE.md.
+
+## F-6 — A rebuild is not a rebuild of what you merged, and every signal except behaviour says it is
+
+**Valid:** dated 2026-09-15
+
+**Observed:** 2026-09-15. After PR #20 merged to `origin/experiments` at 13:22, the operator ran `cargo rb` at 14:08 and `/mcp` to pick up the fix. **The binary did not contain it.** At 14:08 local `HEAD` was `8c217e1a`, and `git merge-base --is-ancestor cbbfb7be 8c217e1a` is false — the local checkout was still 15 commits behind origin, carrying peers' uncommitted work, so `cargo rb` compiled a tree three minutes short of the reconciling push that landed at 14:11.
+
+**Every available signal said the rebuild was current.** `cargo rb` exited 0. The binary's mtime updated. `~/.cargo/bin/codescout` resolved correctly through the symlink. `codescout --version` returned `0.15.0` — unchanged by the merge, so it discriminated nothing. `codescout doc --help` succeeded, which only proves the librarian is compiled in, not which schema it carries. Nothing anywhere reported "you built a tree that does not contain what you merged."
+
+**What actually settled it — a BEHAVIOURAL probe, not an inspection.** Point the binary at a scratch catalog and read what schema it writes:
+
+```
+LIBRARIAN_DB=<scratch> codescout doc find --kind tracker
+-> schema version written: 12; creates v1 artifact_vec: YES  => pre-v13 binary
+```
+
+After a second `cargo rb` on the reconciled tree (`HEAD` = `506924f2`): `13`, no v1 table. That is a one-command discriminator and it is the only check that answered the question.
+
+**The inspection route failed, and its failure is the instructive half.** `strings ~/.cargo/bin/codescout | grep -c 'DROP TABLE IF EXISTS artifact_vec'` returned **0** — the correct verdict, reached by a method that could not support it. The control proves it: `LIBRARIAN_ARTIFACT_VEC_MIGRATE` also returned **0**, and that constant exists in *both* pre- and post-PR source. Rust merges string literals into large `.rodata` blobs, so a line-oriented search over a release binary cannot express the question. Without the control, a correct conclusion would have been published on evidence that did not establish it — and the same probe would have returned 0 for a binary that *did* carry the fix.
+
+**Same shape one step later, worth recording together.** Verifying `local-embed` had actually left a subsequent build, `strings` reported `onnxruntime: 7` — merged-blob hits that say nothing about linkage. `ldd` answers in one call (`no onnxruntime in the link map`), corroborated by the 62 MB -> 40 MB size drop. Three text-search probes in one session, each returning a plausible number none of them could support.
+
+**Cost:** one wasted rebuild plus a reconnect, and a window in which the operator believed the WAL-backup fix was live when it was not — so any dimension migration firing in that window would still have taken the broken `fs::copy` backup. Nothing indicates one did (`artifact_vec_v2` intact at 768 dims, 61,489 vectors).
+
+**Why it belongs beside `F-5`, not folded into it.** `F-5` is a *ledger* allocator reading a stale local tree; this is a *compiler* reading one. Same class — an instrument correctly reading a tree that is older than the fact, and reporting success — reached through two unrelated subsystems. Both were caused by the same underlying condition (local behind origin on a shared checkout) and neither names it.
+
+**Narrowest seam for a mechanism:** `cargo rb` is an alias in `.cargo/config.toml` and cannot run a precondition. A `scripts/rb.sh` wrapper could refuse, or warn, when `git rev-list --count HEAD..@{upstream}` is non-zero — the same shape as `gate.sh` wrapping the four gate commands, and the same argument for it (§ *Observer Blindness* position 3: make the correct path end in a safe state). Until then, the standing instruction is the probe above: **after any rebuild you are relying on, ask the binary what it does, not what it is.**
+
+**Status:** open.
 
 ## Template for new entries
 
