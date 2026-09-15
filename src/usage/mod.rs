@@ -179,8 +179,18 @@ fn classify_content_result(result: &Result<Vec<Content>>) -> (&'static str, bool
             (outcome, false, Some(e.to_string()))
         }
         Ok(blocks) => {
-            // Parse the text of the first content block as JSON and inspect it
-            // for the same "error" / "overflow" sentinel keys that classify_result uses.
+            // Parse the text of the first content block as JSON and inspect it for the
+            // `error` / `output_id` sentinel keys.
+            //
+            // **This depends on an invariant of the RENDERER, not of this function.**
+            // `Tool::call_content`'s buffered arm emits its `{output_id, summary, hint,
+            // buffered_bytes}` envelope as JSON with no `output_form` branch, so
+            // `output_id` is findable here for every tool. A buffered arm that ever
+            // rendered compactly would make `overflowed` silently `false` for every
+            // `OutputForm::Text` tool — `grep`, `symbols`, `references`, `tree` — and
+            // nothing in this module would fail, because every other test here builds
+            // its blocks by hand. Pinned by
+            // `content_tests::the_renderer_and_the_classifier_agree_about_overflow`.
             let text = blocks
                 .first()
                 .and_then(|c| c.as_text())
@@ -250,6 +260,126 @@ fn extract_friction_target(input: &Value) -> Option<String> {
 mod content_tests {
     use super::*;
     use rmcp::model::Content;
+
+    async fn test_ctx() -> crate::tools::ToolContext {
+        crate::tools::ToolContext {
+            agent: crate::agent::Agent::new(None).await.unwrap(),
+            lsp: crate::lsp::LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(
+                crate::tools::guide_ledger::GuideLedger::mid_session(),
+            )),
+            workspace_override: None,
+        }
+    }
+
+    /// The renderer and the classifier agree about overflow — driven through the
+    /// PRODUCTION render path rather than a hand-built envelope.
+    ///
+    /// **Every other test in this module builds its `Vec<Content>` by hand**, so each
+    /// asserts about this module's own idea of what an overflow envelope looks like.
+    /// `classify_detects_overflow_by_output_id_not_legacy_key` is the closest, and it
+    /// would stay green if `call_content` stopped emitting `output_id` in the first
+    /// block — `classify_content_result` would then report `overflowed = false` for
+    /// every buffered call, `is_friction` would go quiet, and `usage.db` would fill
+    /// with rows claiming an inline result that was actually buffered. That is
+    /// `CLAUDE.md` § *Testing Discipline*: a second level asserting about its own
+    /// re-implementation reads as coverage until you break the thing that ships.
+    ///
+    /// **The invariant pinned here:** the buffered arm of `Tool::call_content` emits
+    /// JSON carrying `output_id` as the FIRST content block, for every `OutputForm`.
+    /// That arm (`src/tools/core/types.rs`) has **no `output_form` branch** — on the
+    /// buffered path `format_compact` fills the envelope's `summary` field and is not
+    /// the wire form. Classification is correct today only because of that, and
+    /// nothing else stated it. Prose nearby generalises the other way
+    /// (`OutputForm`'s own doc comment, and `cap_probe.rs`'s "Grep declares
+    /// `OutputForm::Text`, so its primary content block is never JSON") — true of the
+    /// SMALL path, not of this one.
+    ///
+    /// Sibling coverage, deliberately not duplicated: `core::tests::
+    /// a_compact_rendered_read_still_carries_the_worktree_notice` drives the same
+    /// `Text` + `format_compact` fixture shape through the **small** path. This is its
+    /// buffered twin.
+    #[tokio::test]
+    async fn the_renderer_and_the_classifier_agree_about_overflow() {
+        struct BulkTool;
+
+        #[async_trait::async_trait]
+        impl crate::tools::Tool for BulkTool {
+            fn name(&self) -> &str {
+                "bulk"
+            }
+            fn description(&self) -> &str {
+                "test"
+            }
+            fn input_schema(&self) -> serde_json::Value {
+                serde_json::json!({"type": "object"})
+            }
+            async fn call(
+                &self,
+                _input: serde_json::Value,
+                _ctx: &crate::tools::ToolContext,
+            ) -> anyhow::Result<serde_json::Value> {
+                // Load-bearing: this must exceed TOOL_OUTPUT_BUFFER_THRESHOLD
+                // (10_000 bytes) so the BUFFERED arm runs. Shrink it and the test
+                // silently starts exercising the small-output path, where there is
+                // no `output_id` at all and the assertions below stop discriminating.
+                Ok(serde_json::json!({ "rows": vec!["x".repeat(200); 100] }))
+            }
+            // Load-bearing pair: `Text` + a non-JSON `format_compact` is the
+            // combination `grep`/`symbols`/`references`/`tree` ship, and the one that
+            // would render non-JSON here if the buffered arm ever grew an
+            // `output_form` branch. With the default `Json` form this test would pass
+            // for the wrong reason and catch nothing.
+            fn output_form(&self) -> crate::tools::OutputForm {
+                crate::tools::OutputForm::Text
+            }
+            fn format_compact(&self, _result: &serde_json::Value) -> Option<String> {
+                Some("compact text, deliberately not JSON".to_string())
+            }
+        }
+
+        // Brings the trait's provided `call_content` into scope; the impl above is
+        // fully qualified, which is not enough to call through it.
+        use crate::tools::Tool as _;
+
+        let ctx = test_ctx().await;
+        let rendered = BulkTool.call_content(serde_json::json!({}), &ctx).await;
+
+        let blocks = rendered.as_ref().expect("fixture must not error");
+        let first = blocks
+            .first()
+            .and_then(|c| c.as_text())
+            .map(|t| t.text.as_str())
+            .unwrap_or("");
+
+        // Fixture check first: if the payload stopped overflowing, everything below
+        // would pass vacuously against the small path.
+        assert!(
+            first.contains("output_id"),
+            "fixture check: the payload must have overflowed and the envelope must be \
+             the FIRST block, or the classifier assertion below proves nothing; got: {first}"
+        );
+        assert!(
+            serde_json::from_str::<serde_json::Value>(first).is_ok(),
+            "the buffered arm must emit JSON even for an OutputForm::Text tool — this is \
+             the invariant `classify_content_result` silently depends on; got: {first}"
+        );
+
+        let (outcome, overflowed, msg) = classify_content_result(&rendered);
+        assert_eq!(outcome, "success");
+        assert!(
+            overflowed,
+            "a buffered result must classify as overflowed, or usage.db records it as an \
+             inline one; first block was: {first}"
+        );
+        assert!(msg.is_none());
+    }
 
     #[test]
     fn classify_content_error_result() {

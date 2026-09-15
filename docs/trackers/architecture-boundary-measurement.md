@@ -209,7 +209,7 @@ Read **Status** and **Bounded baseline and verdict — 2026-09-13** first. Confi
 
 **Source bound:** frozen snapshot 23adef79023ebc43ea30d8d8e50a2175bacab5aa, not current shared HEAD; corrected measurement commands retained their exit-2 HEAD-change warning. No numeric finding is a whole-project/compiler-resolution claim.
 
-**Next action:** slice 1 is done pending commit — see below. Next is whether slice 2 (generalize semantic results) is authorized. Missing-symbol latency repetition and unresolved action paths remain explicitly scoped follow-ups. The measurement work stream — probe, regression tests, this tracker and its seven bug files — is committed in `d3a2c24f`.
+**Next action:** slice 1 shipped (`f098069a`, pushed). Slice 2 is **scouted and parked with its invariant pinned** — see below. Slices 3 and 4 remain unauthorized, and neither is ready: the tracker already names slice 3's prerequisite (audit the unresolved helper paths) and slice 4's (no crash-injection or shared-edit parity experiment was ever performed). Missing-symbol latency repetition and unresolved action paths remain explicitly scoped follow-ups. The measurement work stream — probe, regression tests, this tracker and its seven bug files — is committed in `d3a2c24f`.
 
 ### Slice 1 — approved and implemented
 
@@ -226,6 +226,49 @@ Shipped in one change, because each part makes the previous one non-vacuous:
 **Verification.** Gate green on all four lanes (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`), own test names read out of the default lane rather than the total. **Three mutations, each KILLED** in an isolated worktree: eviction predicate → FIFO (2 tests red), `status.code()` → `Some(0)` (red, `last seen: "exited 0"`), `job_states_in(command)` → `job_states_in("")` (red). Mutating the production path, not test inputs.
 
 **Committed 2026-09-15** in `f098069a` — patch-id `8658a129d49444e33a6fce955a2f8b498bb743d1`. Archived with it: `b9935bb5470a799c` (background command loses terminal status) and `52f03908f97a948a` (eviction unlinks a running job's log), both carrying a killed mutation; and `d44b0a9aa38738f5` (the raw-pid kill guard), archived on the weaker basis that its remedy was deletion, so no regression test is possible — its **Tests added** section names what would re-introduce it. Scouting friction recorded as `architecture-boundary-session-log:F-2`; an instrument limitation found on the way as `a0dd1c43aeef41de`.
+
+**MCP-verified 2026-09-15** against the live server, after `cargo rb` + `/mcp` reconnect. The gate and the mutation runs both exercise test harnesses; this is the shipped binary answering the filed bug's own reproduction. All four `JobState` renderings observed:
+
+| call, then `cat <handle>` | `exit_code` (the READER's) | `jobs[0].state` (the JOB's) |
+|---|---|---|
+| `sh -c 'exit 7'` | 0 | `exited 7` |
+| `sh -c 'echo alive; sleep 45'` | 0 | `running` — while the log streamed `alive` concurrently |
+| `sh -c 'kill -TERM $$'` | 0 | `terminated by signal` |
+| `sh -c 'echo done-ok; exit 0'` | 0 | `exited 0` |
+
+Row 1 is the bug's reproduction inverted: the `exit_code: 0` that used to be the caller's only signal is still there and still the reader's, with the job's real outcome beside it rather than instead of it. Row 4 matters for the same reason — two zeros, in different fields, both correct.
+
+**Row 3 is the one the suite could not buy.** `a_signal_killed_job_reports_no_exit_code_rather_than_zero` constructs `JobState::Exited { code: None }` by hand, so it asserts about its own re-implementation rather than about the production path; only a real signal death makes `status.code()` return `None` for real. Recorded because this is a case where the live check was genuinely not redundant with a green suite.
+
+Every spawn response carried no `exit_code` key and read `Started; outcome not yet observed` — nothing claimed before it was observed, which is the defect's other half.
+
+Noted while verifying, not filed against this slice: `kill -9` trips the dangerous-command gate, and ack re-dispatch is forced foreground, so `run_in_background` is dropped on the acked call. Pre-existing and deliberate at the site; filed separately.
+
+### Slice 2 — scouted 2026-09-15, PARKED with its invariant pinned
+
+**No code migration, deliberately.** The scout found **no live misclassification**, and this records that rather than dressing a latent coupling as a fire.
+
+**The proposal's framing is off by one step.** It reads as *introduce a boundary*; the boundary already exists and one concern already migrated to it. `Tool::call_content` holds the typed `Value` from `self.call(...)`, and field-aware path-stripping runs exactly there — moved up after operating on rendered text corrupted file content and collapsed root fields to `""` (`docs/issues/archive/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md`). Slice 2 is **finishing that migration**, which lowers both its risk and its urgency.
+
+**The decomposition the proposal's wording hides — three facts, two kinds:**
+
+| fact | kind | known at |
+|---|---|---|
+| `outcome` | semantic | `self.call(...)`, and the `Err` arm |
+| `error_msg` | semantic | same |
+| `overflowed` | **rendering** — `output_id` is minted by buffering | the buffered arm |
+
+So *"classify earlier"* is the wrong instruction: one of the three genuinely is not knowable earlier. The move is per-fact.
+
+**Blast radius, two independent instruments agreeing:** `references` reports 96 `call_content` sites across 13 files with exactly **one** in production; `src/server.rs`'s own doc comment independently asserts it *"has no other production caller."* Different instruments, different scopes.
+
+**Why parked rather than done.** Classification is correct today **only** because the buffered arm emits JSON unconditionally — it has no `output_form` branch — so overflow and non-JSON rendering are mutually exclusive by construction. Nothing stated or tested that. Pinning it costs one test; migrating costs a signature change across ~95 test sites for a defect that does not exist yet.
+
+**Shipped instead:** `usage::content_tests::the_renderer_and_the_classifier_agree_about_overflow`, which drives the real buffered arm rather than a hand-built envelope, plus three doc corrections. **Counterfactual measured:** under a mutation that breaks the invariant, that test reds and **17 of 18** in its module stay green — including two named for the property destroyed. Full derivation: `architecture-boundary-session-log:W-2`.
+
+**Revisit-when:** a second consumer of tool outcomes appears (an eval harness, a retry policy), or a new `OutputForm` variant is proposed — at that point the envelope type this decision rejects starts earning itself, and the pinned test is what will fail loudly rather than silently.
+
+**Confidence:** high that the seam is where it is and that the blast radius is one production caller — both read at the bytes. Medium on the mechanism for carrying `overflowed` back out. Low that it is urgent.
 ## Bounded baseline and verdict — 2026-09-13
 
 **Status:** review evidence collected; recommendations below are proposals, not approved runtime changes.

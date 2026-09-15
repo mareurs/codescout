@@ -810,14 +810,24 @@ pub enum Availability {
 
 /// Wire-format preference for `Tool::call_content`.
 ///
-/// `Json` (default): inline output is pretty-printed JSON; only buffered
-/// overflow uses `format_compact`. Right for tools whose result has named
-/// fields callers want to access (`output_id`, `summary`, etc).
+/// **This selects the INLINE wire form only.** The buffered (overflow) arm is JSON
+/// for BOTH variants: it emits an `{output_id, summary, hint, buffered_bytes}`
+/// envelope with no `output_form` branch, and `format_compact` fills that
+/// envelope's `summary` FIELD rather than replacing it as the wire form. Stated
+/// here because `classify_content_result` (`src/usage/mod.rs`) silently depends on
+/// it — it finds `output_id` by parsing the first block as JSON — and because the
+/// previous wording of this comment ("`Text`: inline AND buffered output use
+/// `format_compact`") implied the opposite, which would send a reader to fix a
+/// defect that does not exist. Pinned by
+/// `usage::content_tests::the_renderer_and_the_classifier_agree_about_overflow`.
 ///
-/// `Text`: inline AND buffered output use `format_compact`. Right for bulk
-/// locator tools (grep, references, tree glob) where the compact text form
-/// is ripgrep-style `file\n  N: content` — strictly more compact than the
-/// equivalent JSON and trivially parseable.
+/// `Json` (default): inline output is pretty-printed JSON. Right for tools whose
+/// result has named fields callers want to access (`output_id`, `summary`, etc).
+///
+/// `Text`: inline output uses `format_compact`. Right for bulk locator tools
+/// (grep, references, tree glob) where the compact text form is ripgrep-style
+/// `file\n  N: content` — strictly more compact than the equivalent JSON and
+/// trivially parseable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputForm {
     Json,

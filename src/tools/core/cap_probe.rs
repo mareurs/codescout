@@ -21,8 +21,11 @@
 /// Where a marker must be reachable, in the shape the CALLER reads.
 ///
 /// Both variants are needed non-hypothetically: `Grep` declares
-/// `OutputForm::Text`, so its primary content block is never JSON, and a
-/// `JsonPath`-only design could not name a marker for it at all.
+/// `OutputForm::Text`, so its primary content block is not JSON on the
+/// inline path, and a `JsonPath`-only design could not name a marker for it
+/// at all. (Not "never JSON" — the BUFFERED arm emits a JSON envelope for
+/// every `OutputForm`, which is what `classify_content_result` relies on.
+/// The argument for this variant needs only the inline case.)
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Marker {
     /// A path into the primary content block parsed as JSON, e.g.

@@ -12,7 +12,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 2
-entry_high_water_W: 1
+entry_high_water_W: 2
 ---
 
 # Architecture Boundary Measurement — Session Log
@@ -74,6 +74,22 @@ Frictions and counterfactual wins while validating the architecture instrument. 
 **Rests on:** `src/tools/run_command/output.rs:454-537`; `src/tools/run_command/inner.rs:89-144`; `docs/issues/archive/2026-09-14-a-backgrounded-gate-command-was-summarised-as-exit-0-while-its-buffer-held-the-failure.md` (artifact `1f280b2def570b97`, fixed at `cc57cd28`). Slice-1 decision in `docs/trackers/architecture-boundary-measurement.md`.
 
 **Workaround (superseded by what shipped — recorded because the reasoning changed):** The entry first proposed publishing the terminal status into `exit_code` on the background payload. That conflates two payloads and is wrong for the READ path: a later `tail @bg_x` is the reader's own result, so writing the job's code into its `exit_code` would claim `tail` exited 7. What shipped instead: the spawn payload keeps asserting no `exit_code` at all — correct, and now true by construction because the response is emitted at spawn time rather than after a 5s wait — and the job's outcome travels in a separate `jobs` array attached by `OutputBuffer::job_states_in`. The renderer's three-state match is therefore untouched; only its stale comment changed.
+
+## W-2 — The classifier's whole test module was non-discriminating, and only a test driving the real renderer showed it
+
+**Valid:** dated 2026-09-15
+
+**Observed:** 2026-09-15, slice-2 design pass. `usage::content_tests` held five tests of `classify_content_result`, and **every one built its `Vec<Content>` by hand** — including `classify_detects_overflow_by_output_id_not_legacy_key`, whose subject is the overflow envelope. Added one test that instead drives `Tool::call_content`'s buffered arm for real and feeds its actual output to the classifier.
+
+**Counterfactual — measured, not argued.** Mutating the buffered arm to emit the compact summary instead of the JSON envelope (`to_string_pretty(&buffered)` → `to_string_pretty(&raw_summary)`, one occurrence, applied in an isolated worktree) reds **1 of 18** tests in that module: the new one. The other **17 pass**, among them `classify_detects_overflow_by_output_id_not_legacy_key` and `record_content_populates_friction_fields_on_overflow` — two tests named for precisely the property the mutation destroys. Under that mutation `overflowed` is silently `false` for every buffered `OutputForm::Text` call (`grep`, `symbols`, `references`, `tree`, `read_file`, `memory`, `library`, `call_graph`, `symbol_at`, `tree`), `is_friction` goes quiet, and `usage.db` records buffered results as inline. Nothing would have failed.
+
+**What the scout changed about the design.** The slice-2 proposal reads as "introduce a boundary". The seam already exists and one concern already migrated to it: `types.rs` holds the typed `Value` from `self.call(...)`, and field-aware path-stripping runs there — moved up after operating on rendered text corrupted file content (`docs/issues/archive/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md`). Slice 2 is finishing that migration, not starting one, which lowers its risk and its urgency together.
+
+**Doc-vs-code drift found on the way, all three corrected here:** `OutputForm`'s own doc said *"`Text`: inline AND buffered output use `format_compact`"* — the buffered arm has no `output_form` branch at all and `format_compact` fills the envelope's `summary` field; `cap_probe.rs` generalised *"its primary content block is never JSON"*, true of the inline path only; and `classify_content_result` cited a `classify_result` that exists nowhere in the repo. The first two would each have sent a reader to fix a defect that does not exist — which is the shape this scout nearly fell for itself.
+
+**Status:** validated
+
+**Rests on:** `src/usage/mod.rs` (`content_tests::the_renderer_and_the_classifier_agree_about_overflow`); `src/tools/core/types.rs` (buffered arm, `OutputForm`); `src/tools/core/cap_probe.rs`. Gate green all four lanes. Sibling coverage deliberately not duplicated: `core::tests::a_compact_rendered_read_still_carries_the_worktree_notice` drives the same `Text` + `format_compact` fixture through the SMALL path.
 
 ## Entries
 
