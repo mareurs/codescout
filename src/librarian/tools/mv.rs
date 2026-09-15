@@ -194,6 +194,34 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         let new_full = root_path.join(&a.new_rel_path);
 
         if new_full.exists() {
+            // A destination that exists WHILE THIS ID'S OWN OLD PATH DOES NOT is a
+            // half-completed move, not an occupied path. `mv` renames before it re-keys the
+            // catalog, so a failure in between leaves the artifact at the destination with
+            // the row still naming the old one — and the two states want OPPOSITE remedies.
+            // The discriminator was already in scope (`row.abs_path`, read above) and simply
+            // not consulted, which is why the refusal used to send that caller to delete the
+            // artifact's only surviving copy.
+            // docs/issues/2026-09-15-a-half-completed-move-is-refused-with-a-remedy-that-deletes-the-artifact.md
+            if !old_full.exists() {
+                return Err(super::LibrarianRecoverableError::with_hint(
+                    format!(
+                        "destination '{}' already exists, and this artifact's own recorded \
+                         path '{}' does not — a previous move of this id renamed the file \
+                         and then failed before the catalog caught up",
+                        a.new_rel_path,
+                        old_full.display()
+                    ),
+                    format!(
+                        "The file at the destination IS this artifact, and it is the only \
+                         copy — do NOT remove it. To finish the move, put it back at '{}' \
+                         and re-run this call: the catalog row still points there, so the \
+                         move then completes with its history graft intact. \
+                         `librarian(action=\"doctor\")` reports this same state as \
+                         `missing_file` against the old path.",
+                        old_full.display()
+                    ),
+                ));
+            }
             return Err(super::LibrarianRecoverableError::new(format!(
                 "destination '{}' already exists — choose a different path or delete it first",
                 a.new_rel_path
@@ -2228,7 +2256,94 @@ mod tests {
         .await
         .unwrap_err();
 
-        assert!(err.to_string().contains("already exists"));
+        let err = err.to_string();
+        assert!(err.contains("already exists"));
+        // The other half of the discrimination added by
+        // docs/issues/2026-09-15-a-half-completed-move-is-refused-with-a-remedy-that-deletes-the-artifact.md.
+        // A GENUINELY occupied destination keeps the delete-it remedy and must not be
+        // reported as a half-completed move. Without this pair the branch condition is
+        // unguarded: collapsing `if !old_full.exists()` to `if true` left all 29 tests
+        // green (measured via scripts/mutation-probe.sh, SURVIVED), because both messages
+        // say "already exists" and only the remedy differs.
+        assert!(
+            err.contains("delete it first"),
+            "an occupied destination really is safe to clear, so it must keep that \
+             remedy: {err}"
+        );
+        assert!(
+            !err.contains("recorded path"),
+            "and must not be reported as a half-completed move — the source file is still \
+             exactly where the catalog says it is: {err}"
+        );
+    }
+
+    /// Regression: `docs/issues/2026-09-15-a-half-completed-move-is-refused-with-a-remedy-that-deletes-the-artifact.md`
+    ///
+    /// `mv` renames the file before re-keying the catalog. When a later step fails, the
+    /// artifact is at the destination and the row still names the old path. The retry then
+    /// never reaches the rename: the destination-exists guard refuses first, and its remedy
+    /// — *"choose a different path or delete it first"* — names the artifact's **only**
+    /// surviving copy. Following it is data loss.
+    ///
+    /// The discriminator is already in scope and simply not consulted: `row.abs_path` was
+    /// read a few lines earlier, and a destination that exists **while this id's own old
+    /// path does not** is a resumed move, not an occupied path.
+    ///
+    /// LOAD-BEARING: the ABORT trigger must fire on `artifact` INSERT, which is the write
+    /// `mv` makes AFTER the rename. Move it to a table this path does not write and the
+    /// move succeeds, leaving no half-completed state for the second call to meet — every
+    /// assertion below then passes while testing nothing.
+    #[tokio::test]
+    async fn a_half_completed_move_is_named_as_one_not_reported_as_an_occupied_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+        let old_path = tmp.path().join("docs/trackers/foo.md");
+        let new_path = tmp.path().join("docs/archive/foo.md");
+        let args = serde_json::json!({
+            "action": "move",
+            "id": "aabbccdd11223344",
+            "new_rel_path": "docs/archive/foo.md"
+        });
+
+        // Fail the catalog re-key AFTER the rename has already landed.
+        ctx.catalog
+            .lock()
+            .conn
+            .execute_batch(
+                "CREATE TRIGGER fail_artifact BEFORE INSERT ON artifact \
+                 BEGIN SELECT RAISE(ABORT, 'simulated upsert failure'); END;",
+            )
+            .unwrap();
+
+        mv::call(&ctx, args.clone()).await.unwrap_err();
+
+        // The half-completed state this bug is about, asserted rather than assumed.
+        assert!(
+            new_path.exists(),
+            "the rename landed, so the file is at the destination"
+        );
+        assert!(!old_path.exists(), "and it is no longer at the old path");
+
+        ctx.catalog
+            .lock()
+            .conn
+            .execute_batch("DROP TRIGGER fail_artifact;")
+            .unwrap();
+
+        // The retry. It is still refused — resuming is a separate, larger change — but the
+        // refusal must not send the caller to delete the file.
+        let err = mv::call(&ctx, args).await.unwrap_err().to_string();
+
+        assert!(
+            !err.contains("delete it first"),
+            "the destination is this artifact's ONLY copy — a remedy telling the caller to \
+             delete it is the data-loss branch this fix removes: {err}"
+        );
+        assert!(
+            err.contains("docs/trackers/foo.md"),
+            "the refusal must name the artifact's own recorded path, which is what the \
+             caller has to restore to resume: {err}"
+        );
     }
 
     #[tokio::test]
