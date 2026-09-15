@@ -44,7 +44,7 @@
 - `artifact.id` = `artifact_id(repo, rel_path)` — deterministic, hash-based ULID-style string
 - Times are **millisecond epoch integers** — not ISO-8601
 - `tags` and `owners` stored as JSON arrays in TEXT columns; `json_each()` used in SQL for `contains` operator
-- `artifact_vec` is a `vec0` virtual table (sqlite-vec) with 768-dim float embeddings
+- `artifact_vec_v2` is a `vec0` virtual table (sqlite-vec), keyed by chunk id, 768-dim float embeddings by default (rebuilt at a new width via `LIBRARIAN_ARTIFACT_VEC_MIGRATE=1`)
 
 ## Environment Variables
 

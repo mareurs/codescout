@@ -206,7 +206,11 @@ pub(super) fn drop_legacy_and_stamp(conn: &Connection) -> Result<()> {
                  file_sha256, confidence, slug, missing_since, embedded_sha256
           FROM artifact;
 
-          -- DROP TABLE implicitly drops the artifact_vec_cascade_delete trigger.
+          -- DROP TABLE implicitly drops every trigger declared ON artifact.
+          -- The v1 `artifact_vec_cascade_delete` is deliberately NOT re-created:
+          -- v13 (run_migrations, which runs BEFORE this on the open_with_workspace
+          -- path) already dropped `artifact_vec`, so a re-created trigger would
+          -- dangle and fail every artifact DELETE with "no such table".
           DROP TABLE artifact;
           ALTER TABLE artifact_new RENAME TO artifact;
           CREATE UNIQUE INDEX idx_artifact_abs_path  ON artifact(abs_path);
@@ -216,10 +220,6 @@ pub(super) fn drop_legacy_and_stamp(conn: &Connection) -> Result<()> {
           -- under SQLite's UNIQUE index semantics, so this doesn't restrict
           -- artifacts that have no slug yet.
           CREATE UNIQUE INDEX ux_artifact_slug ON artifact(slug);
-        CREATE TRIGGER artifact_vec_cascade_delete
-          AFTER DELETE ON artifact BEGIN
-            DELETE FROM artifact_vec WHERE id = OLD.id;
-          END;
 
         CREATE TABLE commits_new (
           hash         TEXT PRIMARY KEY,
@@ -454,7 +454,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 12);
+        assert_eq!(v, 13);
     }
 
     #[test]
@@ -469,7 +469,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 12);
+        assert_eq!(v, 13);
     }
     #[test]
     fn migration_v6_single_open_preserves_v9_entry_graph_shape() {

@@ -371,6 +371,16 @@ All notable changes to codescout are documented here.
 
 ### Fixed
 
+- **`LIBRARIAN_ARTIFACT_VEC_MIGRATE=1` rebuilt a table search no longer reads.** After
+  switching to an embedding model with a different width, every `doc(find, semantic=)`
+  failed with `Expected 768 dimensions but received 3072`. The migration backed up the
+  catalog, rebuilt `artifact_vec` (v1), and left `artifact_vec_v2`, which is the table
+  chunk-grain search queries, at its hardcoded `FLOAT[768]`. `backfill-chunks` crashed
+  on its first insert with vec0's raw error. The gate now rebuilds `artifact_vec_v2`
+  (backup: `catalog.db.pre-vec-v2-dim-bak.<ts>`), and the guard also reads an empty
+  table's declared width. Recover with `LIBRARIAN_ARTIFACT_VEC_MIGRATE=1`, then
+  `backfill-chunks --all` and a `reembed` reindex.
+
 - **`read_file` on a buffer returned an envelope instead of content when a single line
   was wider than the whole inline budget.** `read_from_buffer` documents that it never
   re-wraps its own result, but the safety valve in `extract_lines_with_cost` always emits
@@ -691,6 +701,13 @@ All notable changes to codescout are documented here.
   field values are searchable instead of collapsing to one line.
 
 ### Removed
+
+- **The v1 `artifact_vec` table.** Nothing had written or read it since chunk-grain
+  retrieval moved to `artifact_vec_v2`. Schema v13 drops the table and its
+  `artifact_vec_cascade_delete` trigger once per catalog. An older codescout binary
+  sharing the catalog re-creates an empty copy on its next open, which is harmless and
+  left alone. Also gone: the v1 writers, v1's dimension-migration copy, the rehome
+  helper for v1 ids, and the orphan sweep that ran on every catalog open.
 
 - `CodePayload::ast_kind`. Declared, serialized, deserialized — and written as `""` at
   every construction site in the tree. It had no producer anywhere, so populating it

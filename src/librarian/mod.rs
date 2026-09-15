@@ -461,8 +461,8 @@ pub(crate) async fn reindex_cli(env: &LibrarianEnv, repo: Option<&str>) -> Resul
         }
     }
 
-    // Artifact vector backend for the CLI reindex. sqlite-vec → None (legacy
-    // write_embeddings on the owned catalog); Qdrant → the store.
+    // Artifact vector backend for the CLI reindex. sqlite-vec → None
+    // (write_embeddings_v2 on the owned catalog); Qdrant → the store.
     let root_paths: Vec<PathBuf> = ws.roots.iter().map(|r| r.path.clone()).collect();
     let artifact_store: Option<std::sync::Arc<dyn artifact_store::ArtifactVectorStore>> =
         match artifact_store::ArtifactBackend::resolve(None) {

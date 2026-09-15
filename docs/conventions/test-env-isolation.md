@@ -89,9 +89,9 @@ One `EnvGuard` use remains in the tree, and it is not a counter-example:
 
 The `src/librarian/indexer.rs` instance this section used to list as outstanding
 debt is gone. It was added in `109c1ead` and removed in `45669701`, which split
-the env read out into `write_embeddings_with` (taking `allow_dim_migration` as a
-parameter) plus a pure `migrate_opt_in` predicate — so those tests now set no
-environment at all. That is the shape to copy when you meet an `EnvGuard`: push
+the env read out into a `_with` writer taking `allow_dim_migration` as a
+parameter (today `write_embeddings_v2_with`) plus a pure `migrate_opt_in`
+predicate — so those tests now set no environment at all. That is the shape to copy when you meet an `EnvGuard`: push
 the env read up to the caller and unit-test the decision as a pure function.
 ## Diagnostic shape
 
