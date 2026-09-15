@@ -2,17 +2,18 @@
 id: '1efc6488cb2b8946'
 kind: bug
 status: investigating
-opened: 2026-09-01
-closed:
-severity: high
-owner: marius
-related: []
 title: Two correct pre-commit guards have an empty intersection on an entangled index
 owners:
 - marius
 tags:
 - cluster/shared-resource-carries-no-owner
 topic: shared-checkout commit coordination
+closed: null
+opened: 2026-09-01
+owner: marius
+related: []
+severity: high
+unverified: This record is LEGITIMATELY OPEN and the declared patch-id is a citation, not a claim. `## Fix` reads "Not designed. Three directions, none costed", and direction 3 was falsified 2026-09-02 by codescout-8a hitting the same empty intersection inside a private linked worktree. The patch-id 0e7feedf232c5ed9e22fd975c6fe36baa109e1d2 in the body belongs to a DIFFERENT bug -- d5af3d3ceff1d08c, fixed at 74b9cc67 -- cited because it superseded the two guards this file proposed. doctor's non_terminal_status_with_fix_anchor cannot separate a cited patch-id from a claimed one, and that misreading is itself filed as docs/issues/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md. Verified at the bytes 2026-09-15 by reading the citing paragraph; not inferred from the status field.
 ---
 
 # BUG: two correct pre-commit guards have an empty intersection on an entangled index

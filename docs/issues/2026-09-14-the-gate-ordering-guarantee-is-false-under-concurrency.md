@@ -8,7 +8,7 @@ opened: 2026-09-14
 owner: marius
 related: []
 severity: medium
-unverified: 'The race itself is NOT closed — only its legibility. A peer''s lean-lane build can still replace target/debug/codescout inside any default lane''s run phase; cli_doc now names that cause instead of reading as the reader''s own feature-gating regression. The closure is direction 1, a per-session CARGO_TARGET_DIR, which changes every session''s environment and is an operator decision. Cost measured both ways: 3.7 G + 48 s cold for an isolated debug target, against a prior measurement of 87 s + 2.8 G once then 11 s per run, faster than the contended shared tree.'
+unverified: 'The race itself is NOT closed -- only its legibility, and its arming for whoever runs scripts/gate.sh. cli_doc now names the cause instead of reading as the reader''s own feature-gating regression, and the gate lanes build in a per-session CARGO_TARGET_DIR keyed on CLAUDE_CODE_SESSION_ID. WHAT REMAINS IS ADOPTION, NOT A DECISION -- the earlier form of this field named direction 1 as an unmade operator call, and a scoped variant of it shipped in 58b6bafc. A session that types the four commands by hand still shares target/ and can still replace target/debug/codescout inside another lane''s run phase, so the script is a mechanism for whoever runs it and a policy for everyone else. Also unclosed: tests/cross_process_write_lock.rs and tests/librarian/mcp_integration.rs carry the same by-path exposure the pin fixed in cli_doc. Measured cost of the isolated lanes, first cold run: 13 G and 3m10s, against 358 G free and a 113 G shared tree.'
 ---
 
 # BUG: the gate-ordering guarantee is true sequentially and false under concurrency — a peer's lean lane re-arms the trap inside your default lane
@@ -300,23 +300,38 @@ behaviour change by any party closes the window — which is now measured, not a
 written anyway (the `CLAUDE.md` gate-order bullet now carries it), and it is worth having for the
 reader who hits this; it is simply not a fix.
 
-**Two commits, and the second SUPERSEDES the first's mechanism — cite both, or a reader chasing
-one SHA lands on the approach this file already records as overturned.**
-
-- `412415bd` — patch-id `213ec5cc5d2f4ddd77a56e1022a7407d79ba2b08`. Made `cli_doc` say whose outage
-  it is, via a per-`run_cmd` check that the binary advertises `doc`, and settled the window with
-  the `lsof` measurement above. **The diagnosis it carries stands; the mechanism it shipped does
-  not** — see the paragraph above on why the pin replaced it.
-- `58b6bafc` — patch-id `cd244fa46a481105e2c9f2b5de9b64ef38649f31`. What runs today: [`pinned_binary`]
-  (hardlink taken once, checked once — link count 3 observed, so it shares the inode rather than
-  copying), `scripts/gate.sh`, and the `src/lsp/manager.rs` silent-skip that the isolation itself
-  would otherwise have introduced.
+Both commits are cited in § *Fix provenance* below, with their roles named. **The pairs are there
+rather than here for a reason worth the line:** prose hashes are exactly what `doctor`'s
+`terminal_status_without_fix_anchor` reads as an anchor that is not one — it fired on this record
+while four commit-like hashes sat in its prose, because a reader scanning for provenance finds one
+and stops looking. Naming them in prose is not recording them.
 
 **Deliberately NOT archived.** The mitigation is verified and the gate is green, but the defect
 this record names is still live and its only closure is an operator decision. Archiving would
 remove the one queryable surface where that decision is visible — a `mitigated` record in
 `docs/issues/` is the honest place for a fix that made an outage legible without preventing it.
 
+## Fix provenance
+
+- **SHA:** `412415bd` (`experiments`)
+- **patch-id:** `213ec5cc5d2f4ddd77a56e1022a7407d79ba2b08`
+- **SHA:** `58b6bafc` (`experiments`)
+- **patch-id:** `cd244fa46a481105e2c9f2b5de9b64ef38649f31`
+
+**The second SUPERSEDES the first's mechanism, and the plural form cannot say so.** Each
+`- **patch-id:**` binds to the `- **SHA:**` above it and to nothing else, so the ordering of the
+pairs carries no meaning any parser reads — which is why it is stated in prose here, inside the
+declared section, rather than left for a reader to infer from sequence.
+
+`412415bd` made `cli_doc` say whose outage it is, via a per-`run_cmd` check that the binary
+advertises `doc`, and settled the window with the `lsof` measurement in § *Evidence*. **Its
+diagnosis stands; its mechanism does not.** `58b6bafc` is what runs today: [`pinned_binary`]
+(hardlink taken once, checked once — link count 3 observed, so it shares the inode rather than
+copying), `scripts/gate.sh`, and the `src/lsp/manager.rs` silent-skip that the isolation itself
+would otherwise have introduced.
+
+Both patch-ids were re-derived with `git show <sha> | git patch-id --stable` rather than copied
+forward; `412415bd`'s matched the previously recorded value byte-for-byte.
 ## Attribution
 
 The finding is a **pair**, and neither half stands alone.
