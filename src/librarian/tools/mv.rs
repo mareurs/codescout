@@ -201,7 +201,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             // The discriminator was already in scope (`row.abs_path`, read above) and simply
             // not consulted, which is why the refusal used to send that caller to delete the
             // artifact's only surviving copy.
-            // docs/issues/2026-09-15-a-half-completed-move-is-refused-with-a-remedy-that-deletes-the-artifact.md
+            // docs/issues/archive/2026-09-15-a-half-completed-move-is-refused-with-a-remedy-that-deletes-the-artifact.md
             if !old_full.exists() {
                 return Err(super::LibrarianRecoverableError::with_hint(
                     format!(
@@ -2259,7 +2259,7 @@ mod tests {
         let err = err.to_string();
         assert!(err.contains("already exists"));
         // The other half of the discrimination added by
-        // docs/issues/2026-09-15-a-half-completed-move-is-refused-with-a-remedy-that-deletes-the-artifact.md.
+        // docs/issues/archive/2026-09-15-a-half-completed-move-is-refused-with-a-remedy-that-deletes-the-artifact.md.
         // A GENUINELY occupied destination keeps the delete-it remedy and must not be
         // reported as a half-completed move. Without this pair the branch condition is
         // unguarded: collapsing `if !old_full.exists()` to `if true` left all 29 tests
@@ -2277,7 +2277,7 @@ mod tests {
         );
     }
 
-    /// Regression: `docs/issues/2026-09-15-a-half-completed-move-is-refused-with-a-remedy-that-deletes-the-artifact.md`
+    /// Regression: `docs/issues/archive/2026-09-15-a-half-completed-move-is-refused-with-a-remedy-that-deletes-the-artifact.md`
     ///
     /// `mv` renames the file before re-keying the catalog. When a later step fails, the
     /// artifact is at the destination and the row still names the old path. The retry then

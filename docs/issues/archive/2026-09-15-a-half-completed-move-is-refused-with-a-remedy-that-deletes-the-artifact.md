@@ -1,7 +1,7 @@
 ---
-id: '206cc49546544e88'
+id: 47d950f43b562b36
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a half-completed doc(move) is refused with a remedy that deletes the artifact''s only copy'
 owners:
 - marius
@@ -12,6 +12,7 @@ tags:
 - data-loss
 - remedy-text
 topic: catalog/file write atomicity
+closed: 2026-09-15
 ---
 
 ## Summary
@@ -144,13 +145,46 @@ Not attempted. Three shapes, smallest first:
 (1) and (3) are complements, not alternatives: (3) narrows the window, (1) covers the case
 where the compensation itself could not run.
 
+### Fixed 2026-09-15 — fix (1), the discrimination
+
+Shipped `1b8a64b4`, patch-id `22837bdde1613f76f4d9cb584177413bb987c371`. The guard now asks
+both questions it held the answer to: when the destination exists **and this id's own
+`row.abs_path` does not**, it reports a half-completed move — naming the old path, stating
+that the file at the destination IS the artifact and its only copy, and telling the caller to
+put it back and re-run rather than to delete anything. A genuinely occupied destination is
+unchanged and keeps `delete it first`, which is correct for it.
+
+Ordering is untouched, and (2) resume and (3) compensate remain open and un-taken. (1) was
+chosen because it removes the data-losing branch without deciding either of those, and
+because auto-resuming would act on a destination file this code cannot positively identify
+as the artifact — `repair_frontmatter_id` rewrites the id before the upsert, so a content
+hash matches the catalog row in only one of the two failure sub-cases.
+
 ## Tests added
 
-None. The shape a guard needs: assert on the **remedy text**, not only the refusal. A test
-that the call is refused passes today and passes after the fix, because refusing is correct
-in both cases — what must change is *what it tells you to do*. This is the remedy-text law
-in `CLAUDE.md` § *Testing Discipline*, and the reason it goes untested by construction is
-that every natural assertion here is about the predicate.
+Two, in `src/librarian/tools/mv.rs`, and **the second exists because the first was not
+enough** — which is the part worth reading.
+
+`a_half_completed_move_is_named_as_one_not_reported_as_an_occupied_path` reproduces the state
+with an ABORT trigger on `artifact` INSERT (the technique `create.rs` already uses), asserts
+the half-completed state at the bytes — destination present, old path gone — then asserts the
+retry's refusal neither contains `delete it first` nor omits the old path. It went red first,
+for the right reason.
+
+Then `scripts/mutation-probe.sh --find 'if !old_full.exists() {' --replace 'if true {'`
+**SURVIVED**: collapsing the branch left all 29 tests green. Both messages say *"already
+exists"* and only the remedy differs, and the pre-existing `move_errors_if_destination_exists`
+asserted on the shared half — so the discrimination this fix adds was, at that moment,
+unguarded by either test. That test therefore gained the opposite pair: an occupied
+destination must **keep** `delete it first` and must **not** be described as a half-completed
+move. Re-run: **KILLED**.
+
+**The mutation is positively proven to have applied, independently of the probe's own
+verdict:** the KILLED run's failure text quotes the *mutated code's* message (*"this
+artifact's own recorded path … does not"*) inside a test about a genuinely occupied path. A
+red quoting the mutation's own output cannot be produced by a patch that never applied —
+which matters because a non-applying patch otherwise reports PASS, indistinguishable from
+survival at the verdict level.
 
 ## Workarounds
 
@@ -174,4 +208,13 @@ right — the destination really does exist; only its remedy is wrong), and `IC-
 
 ## Resume
 
-Start with fix (1) — it is a two-line condition and it removes the branch that loses data.
+**Fixed 2026-09-15** by fix (1) — `1b8a64b4`, gate green (`FMT=0 CLIPPY=0 LEAN=0
+DEFAULT=0`), regression tests in both directions with an observed KILL on the branch
+condition.
+
+What remains open and is deliberately not carried by this file: (2) **resume** and (3)
+**compensate the rename**. Neither is needed to stop the data loss, and both want a decision
+this fix does not force — in particular, resuming needs a positive identification of the
+destination file as the artifact, which `repair_frontmatter_id` makes impossible by content
+hash in one of the two failure sub-cases. If either is taken up, the tests added here already
+pin the discrimination they would build on.
