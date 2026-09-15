@@ -2715,3 +2715,84 @@ fn format_read_memory_renders_the_shadow_warning_at_the_head() {
         "the memory body must still be there, and last: {shadowed}"
     );
 }
+
+/// Regression for
+/// `docs/issues/2026-09-14-a-workspace-pin-to-an-unparseable-config-silently-reads-the-default-project.md`.
+///
+/// A `workspace=` pin at a project whose `.codescout/project.toml` fails to parse used to
+/// answer with the SESSION DEFAULT project's memories — no error, no warning, and no scope
+/// note naming the substitution. The caller asked about project A and was answered about
+/// project B. The WRITE half of the same parameter already refused on the identical config
+/// (`write gate: missing field 'project'`), so the two halves of one parameter disagreed
+/// about what an unparseable config means.
+///
+/// **Assert on IDENTITY, never on a count — the bug file says so and it is right.** Both
+/// projects have memories here, so `topics.len() > 0`, `!topics.is_empty()` and every count
+/// assertion pass in the *failing* world. Only the marker topic distinguishes "answered
+/// about the pin" from "answered about the default". The panic path prints what actually
+/// came back for the same reason: a bare `is_err()` failure would not say WHICH project
+/// answered, which is the entire question.
+///
+/// **The control is load-bearing.** Without the valid pin below, the refusal is
+/// indistinguishable from "a pin always refuses" — a test that would stay green if
+/// `workspace=` were broken outright.
+#[tokio::test]
+async fn a_pin_at_an_unparseable_config_refuses_instead_of_answering_about_the_default() {
+    let (home, mut ctx) = test_ctx_with_project().await;
+    let home_memories = home.path().join(".codescout").join("memories");
+    std::fs::create_dir_all(&home_memories).unwrap();
+    std::fs::write(home_memories.join("home-only-marker.md"), "# home").unwrap();
+
+    // Two pinned roots, structurally identical — same layout, same single marker. The
+    // ONLY difference is that `bad`'s project.toml has no `[project]` table. Anything
+    // else differing would make the refusal attributable to the wrong cause.
+    let good = tempdir().unwrap();
+    let bad = tempdir().unwrap();
+    for (dir, toml, marker) in [
+        (
+            &good,
+            "[project]\nname = \"good\"\nlanguages = [\"rust\"]\n",
+            "good-only-marker.md",
+        ),
+        (
+            &bad,
+            "[security]\nfile_write_enabled = true\n",
+            "bad-only-marker.md",
+        ),
+    ] {
+        let mem = dir.path().join(".codescout").join("memories");
+        std::fs::create_dir_all(&mem).unwrap();
+        std::fs::write(dir.path().join(".codescout").join("project.toml"), toml).unwrap();
+        std::fs::write(mem.join(marker), "# marker").unwrap();
+    }
+
+    // CONTROL: a pin whose config parses answers about the PINNED project.
+    ctx.workspace_override = Some(good.path().to_path_buf());
+    let topics = resolve_memory_dirs(&json!({}), &ctx)
+        .await
+        .expect("a pin at a VALID config must resolve")
+        .list_union()
+        .unwrap();
+    assert!(
+        topics.iter().any(|t| t == "good-only-marker"),
+        "control: a valid pin must answer about the pinned project, got {topics:?}"
+    );
+    assert!(
+        !topics.iter().any(|t| t == "home-only-marker"),
+        "control: a valid pin must not answer about the session default, got {topics:?}"
+    );
+
+    // THE DEFECT: same call, same shape, config that does not parse.
+    ctx.workspace_override = Some(bad.path().to_path_buf());
+    match resolve_memory_dirs(&json!({}), &ctx).await {
+        Err(_) => {}
+        Ok(dirs) => {
+            let topics = dirs.list_union().unwrap_or_default();
+            panic!(
+                "a pin at an unparseable config must REFUSE, not answer — got {topics:?}. \
+                 If that contains `home-only-marker`, the pin was silently replaced by the \
+                 session default, which is the filed defect verbatim."
+            );
+        }
+    }
+}

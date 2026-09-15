@@ -467,16 +467,47 @@ async fn resolve_memory_dirs(input: &Value, ctx: &ToolContext) -> anyhow::Result
         .get("project_id")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-    // Pin the memory dir to the workspace named by ctx.workspace_override
-    // (resident-on-demand), else the session default (regime-3).
+    // A pin that cannot be made resident must FAIL, never fall through to the session
+    // default. `ensure_resident`'s error is the only thing that names the cause --
+    // `missing field 'project'` for an unparseable config -- and discarding it here is
+    // what turned "this pin is unusable" into "answered about a different project,
+    // silently". The WRITE half of the same parameter already refuses on the identical
+    // config, because it resolves through `with_project_at`, which propagates this
+    // error AND refuses a non-resident pin. This is the read half catching up; the two
+    // halves of one parameter disagreeing about what an unparseable config means is the
+    // filed defect.
+    // docs/issues/2026-09-14-a-workspace-pin-to-an-unparseable-config-silently-reads-the-default-project.md
     if let Some(root) = ctx.workspace_override.as_deref() {
-        let _ = ctx.agent.ensure_resident(root.to_path_buf(), None).await;
+        ctx.agent
+            .ensure_resident(root.to_path_buf(), None)
+            .await
+            .map_err(|e| {
+                super::RecoverableError::with_hint(
+                    format!(
+                        "workspace pin {} could not be resolved: {e}",
+                        root.display()
+                    ),
+                    "Fix that project's .codescout/project.toml -- a [project] table with a \
+                     `name` is required -- or drop the workspace= argument to read the active \
+                     project instead.",
+                )
+            })?;
     }
     let inner = ctx.agent.inner.read().await;
     let ws = match ctx.workspace_override.as_deref() {
         Some(root) => {
             let key = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-            inner.workspaces.get(&key)
+            // NOT a bare `.get(&key)`: a `None` here falls to the `else` branch below,
+            // whose fallback is right for "no pin was requested" and wrong for "the pin
+            // did not resolve". One branch reached by two conditions with opposite
+            // correct answers, handling only one of them.
+            Some(inner.workspaces.get(&key).ok_or_else(|| {
+                super::RecoverableError::with_hint(
+                    format!("workspace pin {} is not resident", key.display()),
+                    "Call workspace(action='activate') for that root, or drop the workspace= \
+                     argument to read the active project.",
+                )
+            })?)
         }
         None => inner.default_workspace(),
     };
