@@ -86,8 +86,18 @@ coverage structurally could not see this.
 
 ## Fix provenance
 
-Site 1 fixed on `refactor/retire-artifact-vec-v1`; SHA and patch-id recorded at merge.
-Site 2 (`backup_db`) remains open.
+Site 1 fixed by `dd05a56a`, patch-id `248d200cb7e89a4fd09fc58dd2b50470a14e71ad`
+(merged to `experiments` in `720fbeb8`; cite the constituent commit, never the merge).
+The pair is recorded here rather than promised: the SHA is positional and dies when
+`experiments` is rebased, the patch-id is a content hash of the diff and survives rebase
+and cherry-pick. Verified at fix time — CI 24/24 including the `server-stack` lane, and
+the four-command gate green in an isolated worktree (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`,
+1864 `librarian::` tests in the default lane).
+
+**Site 2 (`catalog::backup_db`) remains open, which is why this file is not archived.**
+A kill at site 1 says nothing about site 2 — `write_embeddings_v2`'s path and
+`open_with_workspace`'s path are separate guarded sites, and only the first has a test
+that opens its backup.
 
 ## Repro
 
