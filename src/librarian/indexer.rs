@@ -3220,11 +3220,27 @@ kind = "memory"
     /// The migration backup must contain rows that were COMMITTED but not yet
     /// CHECKPOINTED — rows living only in the `-wal` sidecar when the backup runs.
     ///
-    /// LOAD-BEARING, both of them: the `wal_checkpoint(TRUNCATE)` and the artifact
-    /// upserted *after* it. Without that pair every row sits in the main `.db` file,
-    /// a bare `fs::copy` backup passes, and this test discriminates nothing — which
-    /// is precisely how the defect shipped. Do not "simplify" by dropping the
-    /// checkpoint.
+    /// LOAD-BEARING: the artifact upserted while the catalog is in WAL mode. That row
+    /// is the one a `fs::copy` backup leaves behind, and without a row committed after
+    /// `Catalog::open` there is nothing for the assertion to miss.
+    ///
+    /// **The `wal_checkpoint(TRUNCATE)` above it is NOT load-bearing, and this comment
+    /// claimed it was until 2026-09-15.** The claim was *"without that pair every row
+    /// sits in the main `.db` file, a bare `fs::copy` backup passes, and this test
+    /// discriminates nothing"* — and that is false. Measured in an isolated worktree:
+    /// delete the checkpoint, mutate `snapshot_catalog` back to `std::fs::copy`, and the
+    /// test still **REDS**; restore production and it passes. `Catalog::open` sets
+    /// `journal_mode = WAL` before anything is written, so every row committed after it
+    /// is already in the sidecar — the checkpoint does not create that condition, it only
+    /// makes the boundary explicit to a reader.
+    ///
+    /// Kept anyway, and worth keeping, but for the honest reason: it documents intent.
+    /// A false LOAD-BEARING annotation is worse than none — it tells a tidier not to touch
+    /// an inert line, and it asserts a mechanism a reader will reason from and be wrong.
+    /// Corrected after sessionId `9403d62d-116b-46ea-ac9b-004acff2b1cb` measured the same
+    /// detail in the v6 fixture, found it inert there for a *different* reason (a
+    /// rollback-journal seed, so no `-wal` ever exists), and flagged that this fixture's
+    /// claim was never re-derived. It had not been. It is now.
     ///
     /// Its sibling `write_embeddings_v2_migration_backs_up_file_backed_catalog`
     /// asserts only that a file with the right NAME appeared; it never opens it, so
