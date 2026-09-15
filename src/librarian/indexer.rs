@@ -914,16 +914,31 @@ fn pairs_for_sqlite(batch: &[(String, String, Vec<f32>)]) -> Vec<(String, Vec<f3
 /// keeps re-embedding idempotent.
 ///
 /// Mirrors [`write_embeddings_with`]'s dimension guard in all three parts —
-/// zero-dim, intra-batch consistency, and agreement with existing rows — and
-/// runs every check BEFORE the first `DELETE`, so a rejected batch is a loud,
-/// safe stop rather than a silent partial write. The intra-batch check is the
-/// F-6b case: an embedder returning a 1-element error sentinel mixed into an
-/// otherwise good batch.
+/// zero-dim, intra-batch consistency, and agreement with existing rows.
 ///
-/// Unlike v1 there is deliberately no `allow_dim_migration` path. `artifact_vec_v2`
-/// is populated by a backfill, so a model change is handled by re-running that
-/// rather than by rebuilding the table in place.
-pub fn write_embeddings_v2(cat: &Catalog, embeddings: &[(String, Vec<f32>)]) -> Result<()> {
+/// A dimension mismatch against the table's current dimension (e.g. after
+/// switching embedding models) is a loud, safe stop unless `allow_dim_migration`
+/// — see [`rebuild_artifact_vec_v2_at_dim`] for the explicit, backed-up
+/// migration path. This used to have no migration path at all — the doc
+/// comment here claimed "a model change is handled by re-running [the
+/// backfill]", but nothing rebuilt the table at the new dimension, so
+/// re-running the backfill hit the same hardcoded-dimension schema and failed
+/// identically. See
+/// docs/issues/2026-09-14-artifact-vec-v2-hardcoded-768-dim-no-migration-path.md.
+///
+/// The table's current dimension is read from row content when a row exists,
+/// but falls back to [`vec0_table_dim`] (the schema's own declared width) when
+/// the table is empty — an EMPTY `artifact_vec_v2` is still fixed at whatever
+/// dimension it was `CREATE`d with, so a row-content-only check has nothing to
+/// compare against and lets a mismatched INSERT reach the raw `vec0`
+/// constraint uncaught. This is not hypothetical: it is exactly what broke the
+/// first version of this migration on this catalog, whose `artifact_vec_v2`
+/// had never been successfully populated even at the old dimension.
+pub fn write_embeddings_v2_with(
+    cat: &Catalog,
+    embeddings: &[(String, Vec<f32>)],
+    allow_dim_migration: bool,
+) -> Result<()> {
     use rusqlite::OptionalExtension;
 
     if embeddings.is_empty() {
@@ -958,17 +973,33 @@ pub fn write_embeddings_v2(cat: &Catalog, embeddings: &[(String, Vec<f32>)]) -> 
             |r| r.get(0),
         )
         .optional()?;
-    if let Some(blob_len) = existing_blob_len {
+    let existing_dim = match existing_blob_len {
         // Each f32 takes 4 bytes in the little-endian blob serialization.
-        let existing_dim = (blob_len / 4) as usize;
+        Some(blob_len) => Some((blob_len / 4) as usize),
+        None => vec0_table_dim(&cat.conn, "artifact_vec_v2")?,
+    };
+    if let Some(existing_dim) = existing_dim {
         if batch_dim != existing_dim {
-            anyhow::bail!(
-                "embedding dim mismatch vs artifact_vec_v2: batch={}, existing={}. \
-                 The chunk vector table is populated by a backfill — re-run it for the \
-                 new model rather than mixing dimensions in one table.",
-                batch_dim,
-                existing_dim
+            if !allow_dim_migration {
+                anyhow::bail!(
+                    "embedding dim mismatch vs artifact_vec_v2: batch={}, existing={}. \
+                     To rebuild artifact_vec_v2 for the new model, set \
+                     {ARTIFACT_VEC_MIGRATE_ENV}=1 and retry: this backs up catalog.db, \
+                     then drops + recreates artifact_vec_v2 at the new dimension. \
+                     artifact_vec_v2 is a SHARED table (one catalog.db per user, not per \
+                     repo) — this destroys existing chunk vectors for EVERY project \
+                     sharing this catalog (artifact_chunk rows are untouched; re-running \
+                     backfill-chunks regenerates their vectors).",
+                    batch_dim,
+                    existing_dim
+                );
+            }
+            tracing::warn!(
+                "{ARTIFACT_VEC_MIGRATE_ENV}=1: rebuilding artifact_vec_v2 {existing_dim}->{batch_dim} \
+                 — this deletes chunk vectors for every project sharing this catalog; \
+                 re-run backfill-chunks to regenerate them"
             );
+            rebuild_artifact_vec_v2_at_dim(&cat.conn, batch_dim)?;
         }
     }
 
@@ -984,6 +1015,46 @@ pub fn write_embeddings_v2(cat: &Catalog, embeddings: &[(String, Vec<f32>)]) -> 
         )?;
     }
     Ok(())
+}
+
+/// The dimension a `vec0` virtual table was created with, parsed from its own
+/// `sqlite_master` SQL text. Row content alone cannot answer this for an
+/// EMPTY table — the column width is fixed at `CREATE VIRTUAL TABLE` time,
+/// independent of how many rows currently exist.
+fn vec0_table_dim(conn: &rusqlite::Connection, table: &str) -> Result<Option<usize>> {
+    use rusqlite::OptionalExtension;
+    let sql: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            rusqlite::params![table],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(sql) = sql else {
+        return Ok(None);
+    };
+    let Some(start) = sql.find("FLOAT[") else {
+        anyhow::bail!("could not find a FLOAT[N] embedding column in {table}'s schema: {sql}");
+    };
+    let rest = &sql[start + "FLOAT[".len()..];
+    let end = rest
+        .find(']')
+        .with_context(|| format!("unterminated FLOAT[ in {table}'s schema: {sql}"))?;
+    let dim: usize = rest[..end]
+        .parse()
+        .with_context(|| format!("non-numeric FLOAT[...] dimension in {table}'s schema: {sql}"))?;
+    Ok(Some(dim))
+}
+
+/// Write pre-computed CHUNK vectors into `artifact_vec_v2`.
+///
+/// Reads the migration opt-in from the environment once, here at the edge, and
+/// hands it to [`write_embeddings_v2_with`] as data — mirrors [`write_embeddings`]'s
+/// own edge/testable split. Tests call [`write_embeddings_v2_with`] directly
+/// with an explicit flag rather than mutating process-global env.
+pub fn write_embeddings_v2(cat: &Catalog, embeddings: &[(String, Vec<f32>)]) -> Result<()> {
+    let raw = std::env::var(ARTIFACT_VEC_MIGRATE_ENV).ok();
+    write_embeddings_v2_with(cat, embeddings, migrate_opt_in(raw.as_deref()))
 }
 
 /// Delete every `artifact_vec_v2` row belonging to `artifact_id`, returning the
@@ -1325,6 +1396,40 @@ fn rebuild_artifact_vec_at_dim(conn: &rusqlite::Connection, new_dim: usize) -> R
          CREATE VIRTUAL TABLE artifact_vec USING vec0(id TEXT PRIMARY KEY, embedding FLOAT[{new_dim}]);"
     ))
     .context("rebuilding artifact_vec at new dimension")?;
+    Ok(())
+}
+
+/// Rebuild `artifact_vec_v2` at a new dimension, same shape as
+/// [`rebuild_artifact_vec_at_dim`] for v1: back up the file-backed catalog
+/// first, then `DROP TABLE` + `CREATE VIRTUAL TABLE ... FLOAT[{new_dim}]`.
+/// `artifact_vec_v2` is keyed by `chunk_id` rather than `artifact_id`, but the
+/// table shape (one primary key column + one `embedding` column) is otherwise
+/// identical, so the migration is identical too.
+fn rebuild_artifact_vec_v2_at_dim(conn: &rusqlite::Connection, new_dim: usize) -> Result<()> {
+    if let Some(path) = conn.path().filter(|p| !p.is_empty()) {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let db_path = std::path::Path::new(path);
+        let bak = db_path.with_extension(format!("db.pre-vec-v2-dim-bak.{ts}"));
+        std::fs::copy(db_path, &bak).with_context(|| {
+            format!(
+                "backing up catalog before artifact_vec_v2 dimension migration: {} -> {}",
+                db_path.display(),
+                bak.display()
+            )
+        })?;
+        tracing::warn!(
+            "artifact_vec_v2 dimension migration: backup created at {} before rebuilding at dim={new_dim}",
+            bak.display()
+        );
+    }
+    conn.execute_batch(&format!(
+        "DROP TABLE IF EXISTS artifact_vec_v2; \
+         CREATE VIRTUAL TABLE artifact_vec_v2 USING vec0(id TEXT PRIMARY KEY, embedding FLOAT[{new_dim}]);"
+    ))
+    .context("rebuilding artifact_vec_v2 at new dimension")?;
     Ok(())
 }
 
@@ -3302,6 +3407,108 @@ kind = "memory"
             .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0, "nothing may be written when the batch is rejected");
+    }
+
+    #[test]
+    fn write_embeddings_v2_dim_mismatch_migrates_when_opted_in() {
+        let cat = Catalog::open_in_memory().unwrap();
+        write_embeddings_v2_with(&cat, &[("c1".into(), vec![0.1f32; 768])], true).unwrap();
+
+        // Opted in: the 3072-dim batch must migrate the table instead of erroring.
+        write_embeddings_v2_with(&cat, &[("c2".into(), vec![0.2f32; 3072])], true).unwrap();
+
+        // The old 768-dim row is gone (table was dropped + recreated), only
+        // the new 3072-dim row survives.
+        let count: i64 = cat
+            .conn
+            .query_row("SELECT count(*) FROM artifact_vec_v2", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 1, "table rebuild must drop the old-dim row");
+        let blob_len: i64 = cat
+            .conn
+            .query_row(
+                "SELECT length(embedding) FROM artifact_vec_v2 WHERE id = 'c2'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(blob_len / 4, 3072, "surviving row must be at the new dim");
+
+        // The new dim is now the catalog's baseline — a second 3072-dim batch
+        // must succeed without further migration.
+        write_embeddings_v2_with(&cat, &[("c1".into(), vec![0.3f32; 3072])], true).unwrap();
+    }
+
+    #[test]
+    fn write_embeddings_v2_migration_backs_up_file_backed_catalog() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("catalog.db");
+        let cat = Catalog::open(&db_path).unwrap();
+        write_embeddings_v2_with(&cat, &[("c1".into(), vec![0.1f32; 768])], true).unwrap();
+
+        write_embeddings_v2_with(&cat, &[("c2".into(), vec![0.2f32; 3072])], true).unwrap();
+
+        let backups: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .contains("pre-vec-v2-dim-bak")
+            })
+            .collect();
+        assert_eq!(
+            backups.len(),
+            1,
+            "exactly one backup file must be created before the migration"
+        );
+    }
+
+    #[test]
+    fn write_embeddings_v2_refuses_a_dim_mismatch_when_table_is_empty() {
+        // `Catalog::open_in_memory` always creates `artifact_vec_v2` at the
+        // hardcoded FLOAT[768] (schema version 11) — this is the EMPTY-table
+        // case with no rows for a row-content check to compare against.
+        let cat = Catalog::open_in_memory().unwrap();
+        let err = write_embeddings_v2_with(&cat, &[("c1".into(), vec![0.1f32; 3072])], false)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains(ARTIFACT_VEC_MIGRATE_ENV),
+            "error must name the opt-in escape hatch even when the table starts \
+             empty, not just when it already holds rows: {err}"
+        );
+        let n: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "a refused batch must leave nothing behind");
+    }
+
+    #[test]
+    fn write_embeddings_v2_dim_mismatch_migrates_when_table_is_empty_and_opted_in() {
+        // The regression this session's second fix closes: a table that was
+        // never populated (so the row-content dimension check has nothing to
+        // compare against) must still migrate on its schema-declared
+        // dimension, not silently let the mismatched batch reach the raw
+        // `vec0` constraint.
+        let cat = Catalog::open_in_memory().unwrap();
+        write_embeddings_v2_with(&cat, &[("c1".into(), vec![0.1f32; 3072])], true).unwrap();
+
+        let blob_len: i64 = cat
+            .conn
+            .query_row(
+                "SELECT length(embedding) FROM artifact_vec_v2 WHERE id = 'c1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            blob_len / 4,
+            3072,
+            "must migrate the empty table's SCHEMA, not just react to existing rows"
+        );
     }
 
     #[test]
