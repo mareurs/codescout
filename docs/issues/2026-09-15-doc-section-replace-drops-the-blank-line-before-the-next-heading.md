@@ -1,0 +1,133 @@
+---
+id: '7f5fe0e00732b494'
+kind: bug
+status: open
+title: 'BUG: doc(update) section replace drops the blank line before the next heading, silently'
+tags:
+- cluster/accepted-parameter-silently-dropped
+- librarian
+- doc-tool
+- markdown
+topic: librarian document editing
+closed: null
+opened: 2026-09-15
+severity: low
+---
+
+# BUG: doc(update) section `replace` drops the blank line before the next heading
+
+## Summary
+
+`doc(action="update", patch={body_edits: [{action: "replace", …}]})` writes the new section
+body with no blank line between its last line and the **next heading**, joining them. The
+`content` may be passed *with* a trailing newline and it is still discarded, the call returns
+`updated: true`, and nothing in the response mentions it. The same tool's `action: "edit"`
+preserves the byte.
+
+## Symptom (Effect)
+
+After four `replace` edits to one bug file, four headings had lost their preceding blank line:
+
+```
+is not simply broken.
+## Root cause
+```
+
+No error, no warning. The response was `{"id": …, "updated": true, "wrote_to": …}` each time.
+
+## Reproduction
+
+1. Take any catalog-managed markdown artifact whose sections are separated by blank lines.
+2. `doc(action="update", id=…, patch={body_edits: [{heading: "## X", action: "replace",
+   content: "…text…\n"}]})` — note the trailing newline in `content`.
+3. Read the file: the line following the section's last line is `## <next heading>`, with no
+   blank line between them.
+
+Detector, which is also how this was found:
+
+```bash
+awk 'NR>1 && /^## / && prev != "" {print NR": "$0} {prev=$0}' <file>
+```
+
+## Environment
+
+codescout MCP, `experiments` at `b59a035d`, this checkout. Observed 4/4 on `replace`; `edit`
+did not reproduce it in 4 attempts.
+
+## Root cause
+
+Unknown — not read in the source. What is established is the **boundary**: the defect is
+specific to the `replace` action and not to section writing in general, because `action: "edit"`
+on the same artifact in the same call shape preserved and restored the separator.
+
+Inferred, not measured: `replace` appears to trim trailing whitespace from `content` and then
+join sections without re-inserting a separator, while `edit` performs a substring replacement
+inside an already-assembled body and never touches the boundary.
+
+## Evidence
+
+Measured on `docs/issues/2026-09-15-file-provenance-reads-mv-inside-a-filename-and-attributes-a-write.md`,
+2026-09-15, across two `doc(update)` calls carrying four `replace` edits between them.
+
+**The control is what makes this a measurement rather than a complaint about a file that may
+always have been malformed** — the committed version was checked and was clean:
+
+```bash
+git show "HEAD:$F" | awk 'NR>1 && /^## / && prev != "" {print NR": "$0} {prev=$0}'
+# (no output — every heading in the committed file had its blank line)
+```
+
+So the joins were introduced by the writes, not inherited. Repairing them with `action: "edit"`
+and a trailing `\n` in `new_string` worked on all four, which is the second half of the same
+discrimination: the byte is representable, and `replace` is what drops it.
+
+## Hypotheses tried
+
+1. **The file was already malformed.** **Refuted** by the `git show HEAD` control above.
+2. **Trailing newline in `content` was simply omitted by the caller.** **Refuted** — the
+   `## Root cause` replace passed `content` ending in `\n` explicitly and still lost it.
+
+## Fix
+
+Not attempted. Either preserve a caller-supplied trailing newline, or unconditionally emit the
+separator when a section is followed by a heading. The second is probably right: the separator
+is a property of the *document*, not of the section's content, so making it depend on caller
+bytes is what produced the bug.
+
+## Tests added
+
+None. Shape: a `replace` against a section followed by a heading, asserting the rendered file
+still matches `\n\n## ` at that boundary — plus the `edit` case as a control, so a fix that
+makes both paths equally wrong cannot pass.
+
+## Workarounds
+
+Use `action: "edit"` with `old_string`/`new_string` when the section's tail matters, and run
+the `awk` detector above after any batch of `replace` edits. Repairing after the fact works:
+an `edit` whose `new_string` appends `\n` to the section's final line restores the separator.
+
+## Severity note
+
+**Low, and the reason is worth stating so nobody re-raises it as urgent.** CommonMark lets an
+ATX heading interrupt a paragraph, so the rendered output is unchanged — this is a silent
+mutation of stored bytes, not a rendering defect. It matters because it is silent and because
+it accumulates: every `replace` on a document removes one more separator, and no reader of the
+response has any signal that it happened.
+
+## Classification
+
+`cluster/accepted-parameter-silently-dropped` (`IC-15`). The caller's `content` — specifically
+its trailing newline — is accepted at the boundary, the call succeeds, and the byte is
+discarded downstream. `updated: true` is the only feedback, and it is identical whether the
+newline was applied or dropped, which is that class's claim exactly.
+
+## Resume
+
+Read `replace`'s section-assembly path in the librarian body-edit code and confirm or refute
+the inferred mechanism above before changing anything — the Root cause here is explicitly
+marked inferred, and this repo has a standing rule that an unmeasured mechanism is a
+hypothesis wearing a conclusion's clothes.
+
+## References
+
+- `docs/issues/archive/2026-09-15-file-provenance-reads-mv-inside-a-filename-and-attributes-a-write.md` (`76c83a43c2d1752f`) — the artifact this was found on, while editing it.
