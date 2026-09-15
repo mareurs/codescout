@@ -15345,6 +15345,24 @@ They meant a different file. `codescout-companion/hooks/pre-edit-dirty-check.mjs
 
 **Rests on:** nothing external.
 
+**CLASS — added 2026-09-15: this is `observer-blindness:OB-22`**, *a self-written filter makes
+an enumeration a fixed point of its author's beliefs, and it returns a CONSISTENT number rather
+than a wrong one.* The class already existed, with a measured instance from 2026-09-09, and I
+did not check for it when filing — which is the entry's own mechanism operating on the ledger
+that records it: I enumerated *"what class is this?"* from the classes I remembered.
+
+The fit is exact and includes the part I would have got wrong. OB-22's claim is that the
+failure returns a **consistent** number, not a wrong one, and the `"four"` I found was genuinely
+sound — in a file the other party had never named. Re-checking it agrees every time. OB-22 also
+predicts the observer: *"anyone running the enumeration unfiltered — which is the enumerator
+too, a second later, if they think to. Also the omitted party, from the other side."* It was the
+omitted party, both here and in the two sibling instances now tabled under OB-22 — the
+three-anchored-tests miss and the pushed-commit count.
+
+**So the durable statement is OB-22's, not this entry's.** *"A confirming match terminates a
+search"* is the mechanism at the moment of reading; *filter the PRESENTATION, never the QUERY*
+is the remedy, and it is already designed there. Read them together.
+
 ## F-155 — Topic adjacency attributes work to whoever is associated with the subject, and survives an explicit handoff
 
 **Valid:** dated 2026-09-14

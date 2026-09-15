@@ -2655,6 +2655,37 @@ during that evening named *"4 sessions"* repeatedly and consistently, and the co
 what made it feel established. **Reported by the omitted party**, which is the only channel this
 class leaves open.
 
+**Three further instances, 2026-09-14/15, one session, and the value is that the filter was a
+different KIND of thing each time.** The 2026-09-09 case above filters a socket walk by known
+sessionIds, which reads as a coordination problem. These show the class is about the
+**projection**, not the population:
+
+| enumerated | filter written from memory | the unfiltered command | surfaced by |
+|---|---|---|---|
+| which tests pin CLAUDE.md's gate sentence | the two test *names* I knew | `grep -c '\*\*Run `\./scripts/'` | the gate, `LEAN=101 DEFAULT=101` |
+| which file held a peer's cited *"four"* | the one hook I knew of | `grep -rn` across both hooks | the peer, correcting my correction |
+| how many of my commits a peer's push carried | 7 shas I happened to hold | `git log --format='%(trailers:key=Session-Id,valueonly)' <range>` | the peer, unprompted |
+
+**Each returned a CONSISTENT number, which is this entry's whole claim holding.** *Two* tests
+really were anchored on that sentence — of three. The `"four"` I found really was sound — in a
+file nobody had named. *Five* of my commits really were on `origin` — of twelve. Re-checking any
+of them against the same remembered list agrees perfectly, every time, so the move that
+normally retires doubt confirms it. No total was ever wrong; the omitted rows were never
+counted.
+
+**And the blind-party prediction held three for three.** OB-22 says the omitted party sees it
+from the other side, and every one of these was surfaced by someone who did not share the
+author's context — twice by the same peer session, once by a test. Never by re-reading, never by
+care, and in all three cases the unfiltered command was one line and already available.
+
+**What the third adds specifically:** the enumerator was answering a question *about their own
+work* ("which of MY commits went out?"), where the belief that one knows one's own output is
+strongest and the filter is therefore least likely to be questioned. Instances: `F-154`
+(the citation case, which carries the mechanism in full) and this entry's table for the other
+two; the commit-count case is published as a **confirmation** rather than a catch, per
+`CLAUDE.md` § *Testing Discipline* — *when a re-derivation confirms, publish the confirmation;
+that is a denominator, never a catch.*
+
 ## OB-23 — a notification that changes the recipient's behaviour cannot also measure it
 
 **Valid:** invariant
