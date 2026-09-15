@@ -2,7 +2,7 @@
 id: ded9143998081efc
 kind: bug
 status: open
-title: 'BUG: PROBES.md offers `strings` as co-equal to a behavioural probe, but a miss proves nothing — and the blindness is per-binary'
+title: 'BUG: PROBES.md offers inspection as co-equal to a behavioural probe, and every inspection instrument''s miss proves nothing'
 tags:
 - cluster/unclassified
 ---
@@ -26,6 +26,14 @@ version`'s `git_sha` twice over, including the sharp case where a binary contain
 commit. The `strings` half sits beside those uncaveated, which is the shape worth recording: **a
 correct, hard-won warning about instrument A reads as though instrument B beside it was checked
 too.**
+
+**AND THE DEFECT IS THE CLASS, NOT `strings` — THE ROW WOULD STILL BE WRONG WITH `strings`
+DELETED.** A reader who correctly distrusts `strings` reaches for the next plausible inspection:
+`ldd`, `nm`, `objdump`, `readelf`. Every one is one-directional for the same reason — **absence is a
+property of the SCAN, not of the binary.** Measured below as a third instance, on `ldd`. So the
+remedy is not to swap the instrument named; it is to state that the whole inspection family answers
+only in the affirmative, and that the behavioural probe is the one that answers both ways. (Raised
+by sessionId `f5f48b42-6d84-482e-84a4-8eaebb0ce60f` on auditing this file; verified here.)
 
 ## Symptom (Effect)
 
@@ -96,6 +104,27 @@ route is at fault than either session's reasoning alone:
 that validates your INSTRUMENT.** Both of this session's controls were sound for the question they
 asked; neither asked the question that mattered.
 
+**THIRD INSTANCE — `ldd`, one step after the `strings` failure, and it widens this bug from one
+instrument to the family.** `f5f48b42` asked whether the ONNX runtime was actually LINKED, ran
+`ldd`, read `no onnxruntime in the link map`, and concluded `local-embed` had left the build.
+**`ldd` cannot answer that question on this crate.** Verified here at the bytes:
+`crates/codescout-embed/Cargo.toml`:23 declares `local-embed = ["dep:fastembed",
+"fastembed/ort-download-binaries-native-tls", …]` — a **static** prebuilt runtime, and the file's
+own comment at `:18` says so in those words. The dynamic variant is a **separate** feature,
+`local-embed-dynamic` → `fastembed/ort-load-dynamic`, needed on windows-gnu where `ort` ships no
+prebuilt. A statically linked runtime appears in no link map, so `ldd` returns the identical empty
+result with the feature in **or** out — confirmed on the current binary:
+`ldd target/release/codescout | grep -c onnxruntime` → **0**, which is what a static-linked runtime
+and an absent one both give. The conclusion survived only on the 62 → 40 MB size drop: right answer,
+wrong instrument, rescued by a second one. Corrected by its author in `552a3c71`.
+
+**And how that instance was caught is itself evidence for the remedy.** Not by a control, and not by
+its author re-reading their own entry — they had revised `F-6` twice and read past it both times. It
+surfaced only when they audited **this file**, a different artifact with a different framing. Two
+revisions of a lessons-learned record by the person who wrote it did not surface the defect that
+record describes. That is the argument for the caveat living at the recommendation site rather than
+in a log, made by the log's own author against their own record.
+
 ## Hypotheses tried
 
 `IC-20` (`floor-published-under-the-name-of-a-total`) is the near-miss and is **rejected by its own
@@ -121,7 +150,9 @@ corroboration.
 Do **not** close this by deleting `strings` from the row. A positive hit is genuinely sound and
 cheap, and it found real drift before — the `git_sha`-vs-`params_status_drift` instance that same
 cell records was caught by exactly this rule. The defect is the missing asymmetry, not the
-instrument.
+instrument — **and the `ldd` instance proves deletion could not work anyway**: remove `strings` and
+the next reader reaches for `ldd`, `nm` or `readelf` and inherits the identical one-directionality.
+Name the property of the FAMILY, not a caveat on one member.
 
 ## Resume
 
