@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 161
-entry_high_water_W: 138
+entry_high_water_W: 139
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -353,6 +353,7 @@ entry_high_water_W: 138
 | W-90 | 2026-09-01 | med | **Re-verify `path:line` citations in artifacts THIS session authored, after any rebuild or peer commit.** Authorship is no exemption (`R-49`) — a bug file's citations are written at fix time, while peers are still moving the substrate under them | Filed bug cited `post-index-change-stage-log.sh:142` for the mv/rm fallback; the line is `:141` and `:142` is blank. No gate would have caught it: `audit_doc_refs` DOES scan `**/*.sh`, but `scan_code_comments` forces those findings to `Med` and CI runs `--fail-on high`, so it passes by design — the citation survives until a human follows it onto whitespace. The same pass also separated real drift from a false accusation: a `docs(issues):`-titled commit genuinely had changed the script, which looked like a capture, but the diff was a comment-only re-point of an archived path, coherent with its message. Without reading it, the plausible move was filing a third capture bug against a correct commit | validated |
 | W-91 | 2026-09-01 | high | **Re-read the substrate before a claim enters a DURABLE, queryable record** — the filesystem for a claim about the filesystem, the implementation for a claim that a capability is missing. Recorded as a **recurrence** of the reconnaissance skill's already-promoted current-state law, not as a new pattern, per that skill's § *Every promotion audits the promoted set* | Two catches. (1) A bug file's `## Residual — still open` said `.worktrees/bench` retains an orphaned gitdir; `ls .worktrees/` shows only `audit-trail-t1`. I was one call from writing a queryable `unverified:` field asserting an open residual that does not exist — into the single file tagged `cluster/record-asserts-an-unchecked-completion`. (2) I had begun drafting a bug asserting `unverified:` is unreachable by any query, on two true pieces of evidence (`find` → `unknown field`, and the librarian guide's "`extra` is NOT catalog-indexed"); `scan_terminal_status_with_caveat` is the deliberate reader and reports **65** records. Both false claims were backed by real evidence about something narrower than the sentence it was licensing. `outgrown` signal (n=1) on the promoted text: it names *fixes* and *prohibitions*, not **filed defect records** — the costliest surface, since a fix assuming a missing capability fails loudly at the call site while a filed bug is durable and nothing re-checks it. **Promote-when FIRED same-day on a MISS** — a filed bug claimed two parsers lacked a fence guard they already had; shipped in `claude-plugins` `b74c730` / codescout-companion 1.19.11 | promoted-to-permanent-docs |
 | W-138 | 2026-09-15 | high | **A deferral rationale that names a CAUSE is checkable against what the code can OBSERVE — widen the cause, not the effort.** *"The trigger is a lock race, not reducible to a deterministic script"* scoped the failure to a cause `append_entry` never sees; it sees `tx.commit()` return `Err`. A **deferred foreign-key violation** is the one SQLite failure that surfaces at COMMIT rather than at the statement, so every statement — including the `fs::write` — succeeds and only the commit fails, with no timing | The named cause could not have worked here at all: `journal_mode = WAL` + `BEGIN IMMEDIATE` takes the write lock up front, so a competing writer blocks at BEGIN and never at COMMIT. The three live alternatives were a test that cannot fire, a `#[cfg(test)]`-only hook exercising a path the shipped binary lacks, or shipping untested — which the sibling fix did (`update.rs` still carries `NOT REACHED BY ANY UNIT TEST` at its call site). The widened cause produced a first RED showing the retry allocate `F-2` and write a SECOND section, then three production-path mutations each KILLED. The technique was **already in-tree** at `create.rs`'s `RAISE(ABORT)` orphan-file test, so the repo held the capability while the rationale asserted it did not. Recurrence of `R-95`/`R-92`, recorded as a denominator rather than a new law | validated |
+| W-139 | 2026-09-15 | med | **Run the positive control before believing a probe's zero — especially when the zero ALARMS.** The law is usually cited against a *reassuring* zero; a zero saying *your fix is missing* reads as a finding rather than as an instrument failure, so nothing about it prompts you to check the tool. Alarm reads as diligence | Probing the freshly rebuilt release binary for three strings unique to `85642b1b` returned **0/0/0** — which says the rebuild did not take, and sends you either to re-run `cargo rb` or to tell the operator that their own rebuild silently failed. The control (three strings that MUST be in any codescout binary) returned `0/0/0` **as well**, which is impossible, and the impossibility is the entire signal. With `-a`: control `2`, all three fix strings `1`. **Instrument fact:** `grep` here is **ugrep 7.8.4**, which on a binary without `-a` prints nothing and exits **1** — indistinguishable from "no match" at both stdout and exit status, where GNU grep would at least print `Binary file … matches`. Any freshness probe of a built artifact needs `-a` or `strings`. Stronger and string-free: `readlink /proc/<pid>/exe` returning the live path with no `(deleted)` suffix proves the running image IS the file on disk — identity rather than ordering | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -15753,6 +15754,60 @@ the rule is simply *claim before reading deeply*, and the failure is free. The m
 half would be for `doc(action="find")` to stamp the instant it answered, which is the same
 obligation CLAUDE.md already places on any peer count and for the identical reason. Not
 filed as a bug: every component behaved correctly.
+
+## W-139 — A freshness probe returned a false "the fix is missing" — the control caught it, and the instrument was ugrep skipping a binary
+
+**Valid:** dated 2026-09-15
+
+**Observed:** 2026-09-15, verifying after `cargo rb` + `/mcp` that the live MCP binary
+actually carried the `append_entry` commit-compensation fix (`85642b1b`).
+
+**Pattern:** Run the positive control **before** believing a probe's zero — including, and
+especially, when the zero is the *alarming* answer. The promoted law (`seam-classes.md`:
+*"a search that finds nothing is evidence about the search, not about the world… run a
+positive control, one per state you believe the instrument can report"*) is usually cited
+against a reassuring zero. Here it fired against a frightening one, and that is the
+direction that makes the control feel unnecessary: a zero saying *your fix is missing* reads
+as a finding rather than as an instrument failure, so nothing about it prompts you to check
+the tool.
+
+**Counterfactual:** The first probe — `grep -c "<fix string>" target/release/codescout` over
+three strings unique to the fix — returned **0, 0, 0**. Taken at face value that says the
+rebuild did not include the fix, and the next actions are to re-run `cargo rb` or to tell
+the operator that their own rebuild silently did not take. Both are wrong, and the second is
+worse than wasted work: it reports a false failure about an action the user just performed.
+The control — three strings that **must** be in any codescout binary (`append_entry:
+artifact`, `no id was allocated`, `entry_collection`) — also returned `0, 0, 0`, which is
+impossible, and the impossibility is the entire signal. Re-probed with `-a`: control `2`,
+and all three fix strings `1`.
+
+**The instrument fact, which is the reusable half:** `grep` on this machine is **ugrep
+7.8.4**, not GNU grep. On a binary file without `-a` it prints **nothing and exits 1** — and
+exit 1 is precisely "no match found", so the failure is indistinguishable from a true
+negative at both the stdout and the exit-status level. Measured on one string:
+`grep -c entry_collection` → exit 1, empty stdout; `grep -ac entry_collection` → exit 0,
+**57**. GNU grep would have printed `Binary file … matches`, so this is sharper than the
+familiar binary-grep caveat: there is no tell at all. **Any freshness probe of a built
+artifact needs `-a`** (or `strings`) — and the law that sends you to probe the served copy's
+bytes is pointing straight at an instrument that fails closed.
+
+**Confirming data points:** (1) the impossible control is what caught it, not suspicion of
+the result, which read as a plausible build failure; (2) this same session had already
+written `F-161` about a stale snapshot, so the reflex *"my instrument may be lying"* was
+primed and still did not fire unaided; (3) the stronger process-axis check needs no strings
+at all — `readlink /proc/<pid>/exe` for this session's two servers (2384368, 2384894,
+started 14:29:38/39) returns the live path **without** a `(deleted)` suffix, so the running
+image IS the file on disk. That beats comparing an mtime to a start time, because it
+compares identity rather than ordering.
+
+**Impact:** med
+
+**Promote-when:** a second instance of a *freshness* probe defeated by its own instrument.
+The positive-control law is already promoted and needs no restatement; what would be worth
+adding is the direction asymmetry — **a zero that alarms is checked less than a zero that
+reassures**, because alarm reads as diligence.
+
+**Status:** validated
 
 ## Template for new entries
 
