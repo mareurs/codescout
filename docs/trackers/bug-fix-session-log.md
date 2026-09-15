@@ -208,7 +208,7 @@ entry_high_water_W: 139
 | F-89 | 2026-09-01 | med | cross-session | fixed-verified | Misattributed uncommitted `doctor.rs` work to `bcc98c22` by DIRECTORY ADJACENCY, inside the message correcting a peer for misattributing by elimination, citing `F-80` and `F-85` while doing it. Real owner was `c2a08c22` (codescout-68), who volunteered it. The `Session-Id` trailer I had just promoted exists only on COMMITTED work; the disputed work was uncommitted, so I swapped instruments mid-argument without noticing. Rule splits by state: committed -> trailer, positive and exact; uncommitted -> NO positive instrument exists on a shared checkout, ask the session, and until it answers the honest claim is "not mine", never "yours". **Sharpened: the real owner was INSIDE my visible four — I named an invisible session and offered its invisibility as corroboration, so the documented `ListAgents` gap (BL-58) explains neither this error nor the peer's. Three misattributions of one file in one evening, three parties, all three actively reasoning about attribution** |
 | F-90 | 2026-09-01 | med | self-friction | fixed-verified | Published "the worktree guard MANDATES `git -C`, so the two guards are in direct tension" to five surfaces — three commit messages, a bug file, and a source comment — without probing it. One command refutes it: `git add --dry-run <path>` exits 0, unblocked. The guard refuses only commit-family verbs; both my blocked commands merely CONTAINED `git commit`. Attribution is recorded at STAGING time, so no tension exists on the path that matters. Population inflated too: `-C` is 32 of 1586 real `git add` calls (2.0%), not the mandated form. Being blocked twice felt like having tested it — refusal establishes what a guard refuses, never what it permits |
 | F-161 | 2026-09-15 | med | cross-session | open | **Selected an already-fixed bug for work: `doc(find)` returned it `open` while its fix (`e79fa902`, 08:27:23) and archive (`3c4c3b61`, 08:28:49) had landed mid-triage.** The catalog was never stale — `doctor` reported `missing_file: 0`, because the peer archived properly through `doc(action="move")`, which re-keys the row atomically; the SNAPSHOT aged. **Distinct from the promoted substrate law**, which is about reading the wrong world: here one world was read correctly and then moved, so the discriminator is *when*, not *which*. Corpus rate at the time: 88 commits touching `docs/issues/` in 24h, 5 sessions live in the checkout. Caught only because two surfaces disagreed — `grep` listed the archive path while the catalog reported it live — and the reflex that has to be beaten is *"one of my instruments is broken"*. Remedy is ordering, not mechanism: re-verify at CLAIM time, since `status: taken` + `claimed_by` re-reads the row anyway |
-| F-162 | 2026-09-15 | med | self-friction | open | **Three mis-scoped instruments in one verification, two of them a commit RANGE read as authorship — while the rule against it sat quoted in my context.** `85642b1b^..HEAD` reported **7** peer commits as my `IC-12` citations; a line-granularity `grep -c` on the 38,416-character `**Members:**` line reported a bare `n=` I had not written, because appending re-writes the whole line and any other author's `n=` anywhere in it counts. Both corrected readings came back clean, and what caught the first two was their **impossibility** (7 citations in a session that wrote none) rather than vigilance — `shared-checkout-commit-sequence.md` § 2 forbids exactly this and was in context, quoted by the peer message that prompted the check. Remedies, both one-liners: enumerate your own shas explicitly instead of a range, and use `--word-diff` when the unit you care about is a phrase inside a mega-line. Generalises past the positive-control law: **when an instrument's UNIT (line, commit, file) is coarser than the thing asked about (a word, an author, a field), its answer can be neither right nor wrong** |
+| F-162 | 2026-09-15 | med | self-friction | open | **Three mis-scoped instruments in one verification, two of them a commit RANGE read as authorship — while the rule against it sat quoted in my context.** `85642b1b^..HEAD` reported **7** peer commits as my `IC-12` citations; a line-granularity `grep -c` on the `**Members:**` line (IC-6's, ~38k chars at that instant and 40,018 two appends later — the scalar decays, see the entry) reported a bare `n=` I had not written, because appending re-writes the whole line and any other author's `n=` anywhere in it counts. Both corrected readings came back clean, and what caught the first two was their **impossibility** (7 citations in a session that wrote none) rather than vigilance — `shared-checkout-commit-sequence.md` § 2 forbids exactly this and was in context, quoted by the peer message that prompted the check. Remedies, both one-liners: enumerate your own shas explicitly instead of a range, and use `--word-diff` when the unit you care about is a phrase inside a mega-line. Generalises past the positive-control law: **when an instrument's UNIT (line, commit, file) is coarser than the thing asked about (a word, an author, a field), its answer can be neither right nor wrong** |
 
 ## Wins Index
 <!-- audit-doc-refs:ignore-refs `1f8784f932f042bc` — a CATALOG DIGEST, not an artifact id — the sentence reads "4786 rows, digest ...". Sixteen lowercase hex, same shape, different namespace. -->
@@ -15857,7 +15857,7 @@ written a bare `n=` count into either `**Members:**` line I appended to today.
 "citing IC-12" — a RANGE, which swept in every peer commit in the window; none of the seven
 were mine. (2) `git show <sha> -- <path> | grep -cE '\bn=[0-9]'` returned `1` for each of my
 three commits, which reads as *I wrote one bare count each time*. The `**Members:**` field is
-**one line of 38,416 characters**, so appending to it re-writes the whole line, and a
+**one line of 38,416 characters** (IC-6's, at that instant — corrected below), so appending to it re-writes the whole line, and a
 line-oriented count returns 1 for a line containing any `n=` anywhere in a decade of other
 authors' entries. (3) The first `grep -c` on a binary earlier the same session — `W-139`.
 
@@ -15900,6 +15900,31 @@ generalisable statement, which the promoted positive-control law does not quite 
 **when an instrument's UNIT (line, commit, file) is coarser than the thing you are asking
 about (a word, an author, a field), its answer cannot be wrong and cannot be right either.**
 Check the unit before the result.
+
+**Corrected 2026-09-15, same day, and the correction is better evidence than the original
+claim was.** This entry published `38,416 characters` as a bare scalar, naming neither the
+file it came from nor the instant — which is `CLAUDE.md` § *Testing Discipline* verbatim (*"a
+count of a defect population must arrive with its unit or not at all"*, and on a shared
+checkout *"its INSTANT and its TREE as well"*), inside an entry whose whole subject is
+instruments answering a question other than the one asked. Raised by sessionId
+`9403d62d-…`, who declined to carry the number and derived their own instead — correctly,
+since theirs (`IC-12` 16,849, `IC-17` 21,061) are different files and matched nothing here.
+
+It was **IC-6's** `**Members:**` line, measured immediately before this session's second
+append to it. Its value that day, in order: `35,961` → `37,224` (my first append) → `38,416`
+(a peer's append, the instant I measured) → `40,018` (my second append). **Four values in one
+day, on one line, from three authors** — which is the append-decay this entry describes,
+reproduced by the entry's own citation, and a far stronger datapoint than the single figure
+it replaces.
+
+**The durable claim, which is what should have been written:** these fields run roughly
+20k–60k characters — widest in the directory today is `IC-18` at `58,921` — and any exact
+value is a decaying fact, not one to carry. The reason the length matters at all is
+**ordinal, not cardinal**: the line is far longer than a diff hunk, so line granularity
+cannot express a question about a phrase inside it. That claim survives every append; the
+scalar did not survive the afternoon. Note also that the peer's own `IC-18` figure (`59,273`)
+and mine (`58,921`) already disagree, which is not a discrepancy to resolve — it is the same
+property, measured twice.
 
 ## Template for new entries
 
