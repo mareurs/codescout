@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-09-15
-closed:
+closed: 2026-09-15
 severity: high
 owner: marius
 related: []
@@ -31,10 +31,16 @@ written seconds before the reading**.
 | # | site | exposure | status |
 |---|---|---|---|
 | 1 | `rebuild_artifact_vec_v2_at_dim`, `src/librarian/indexer.rs` | copies while **its own** connection is open and WAL-active — guaranteed to miss its own uncheckpointed commits | **fixed** — see *Fix provenance* |
-| 2 | `backup_db`, `src/librarian/catalog/mod.rs:500` (called from `open_with_workspace` when `needs_v6`) | copies *before* this process opens its connection, so it is exposed only to **another** process's uncheckpointed WAL — real on a machine-shared catalog, smaller window | **open** |
+| 2 | `backup_db`, `src/librarian/catalog/mod.rs` (called from `open_with_workspace` when `needs_v6`) | copies *before* this process opens its connection, so it is exposed only to **another** process's uncheckpointed WAL — real on a machine-shared catalog, smaller window | **fixed** — see *Fix provenance* |
 
-Site 2 is why this file stays `open` after site 1 ships. Per § *Testing Discipline*,
-**mutate once per guarded SITE** — a kill at site 1 says nothing about site 2.
+Per § *Testing Discipline*, **mutate once per guarded SITE** — a kill at site 1 said
+nothing about site 2, which is why this file stayed `open` for the eight commits between
+them. The two are now one implementation: `snapshot_catalog` lives in `catalog`, the
+module that sets `journal_mode = WAL`, and `indexer` calls it. A third site written against
+the wrong model would have to reimplement it rather than merely forget the lesson.
+
+**The count of two is derived, not inherited.** The only other `std::fs::copy` in `src/`
+is `lsp/mux/test_support.rs`, copying LSP fixture files — not a database.
 
 ## Why it mattered more the moment it was noticed
 
@@ -84,6 +90,43 @@ backup to read that row back.
 the pre-existing test stays **green** — which is the discrimination evidence that prior
 coverage structurally could not see this.
 
+### Site 2's test had the same shape, plus a second blindness the first one did not have
+
+`migration_v6_creates_backup_file` (`src/librarian/catalog/migrate_v6.rs`) asserts that a
+directory entry `starts_with("catalog.db.pre-v6-bak.")` exists. **It never opens it
+either** — the identical existence assertion, written independently, in a different
+module, for the sibling site. Two authors reached for the same monotone shape, which is
+what makes it a class rather than an oversight.
+
+**And here it would not have helped to assert on the content, which is the part worth
+keeping.** `seed_v3_db`, the fixture every v6 test builds on, opens a plain connection and
+runs `CREATE TABLE` / `INSERT` with no journal pragma — so the database it leaves is in
+**rollback-journal** mode, not WAL. Measured 2026-09-15 by rebuilding that exact shape:
+`PRAGMA journal_mode` returns `delete`, on the seeding connection and on reopen, and no
+`-wal` file is ever created. Every committed row is therefore already in the `.db` file,
+where `fs::copy` finds it. A content assertion bolted onto the old fixture would have
+passed against the defect and read as proof.
+
+So the missing coverage was not one assertion. It was an assertion *and* a fixture in the
+wrong journal mode, stacked — and the fixture half is the one no reviewer looking at the
+assertion would see.
+
+The replacement test annotates its load-bearing details on the fixture lines. **I first
+wrote down three and measurement cut it to two**, which is worth recording because the
+error ran the other way from the one this section is about: crediting an inert detail as
+load-bearing is how a reader stops looking.
+
+| detail | removed → | verdict |
+|---|---|---|
+| `journal_mode = WAL` | copy sees the row | load-bearing |
+| holding the second connection open past the migration | copy sees the row | load-bearing |
+| `wal_checkpoint(TRUNCATE)` | copy still sees **0** rows | **not** load-bearing — kept, annotated as a guarantee |
+
+The checkpoint cannot matter here because converting a rollback-journal database to WAL
+starts it with an *empty* `-wal`; there is nothing to flush. Site 1's fixture is different
+— it opens through `Catalog` and writes embeddings first — so that comment's own
+load-bearing claim is about a different database and is deliberately not re-derived.
+
 ## Fix provenance
 
 Site 1 fixed by `dd05a56a`, patch-id `248d200cb7e89a4fd09fc58dd2b50470a14e71ad`
@@ -94,10 +137,19 @@ and cherry-pick. Verified at fix time — CI 24/24 including the `server-stack` 
 the four-command gate green in an isolated worktree (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`,
 1864 `librarian::` tests in the default lane).
 
-**Site 2 (`catalog::backup_db`) remains open, which is why this file is not archived.**
-A kill at site 1 says nothing about site 2 — `write_embeddings_v2`'s path and
-`open_with_workspace`'s path are separate guarded sites, and only the first has a test
-that opens its backup.
+Site 2 fixed by `4f21a6b1`, patch-id `1fc338d446cea96f992dad5009c00771febce0e1`, with
+the fixture-annotation correction in `a3579710`, patch-id
+`558ba7ac12550ee88f8d40af0fa5a0e1c446ab4c`.
+
+**Observed RED at site 2, from `scripts/mutation-probe.sh` in an isolated worktree.**
+Reverting `backup_db` to `std::fs::copy` reds `the_v6_backup_contains_rows_still_in_the_wal`
+with `left: 0, right: 1` — and `migration_v6_creates_backup_file`, the existence-only
+sibling, stays **green** in the same run (12 passed, 1 failed). That green is the
+discrimination evidence: the prior coverage structurally could not see this defect, at
+either site.
+
+Gate green in a per-session target dir: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, 0 FAILED,
+1875 `librarian::` tests in the default lane.
 
 ## Repro
 

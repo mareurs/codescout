@@ -441,7 +441,7 @@ mod tests {
     /// living only in the `-wal` sidecar at the instant the backup runs.
     ///
     /// This is site 2 of the bug
-    /// `docs/issues/2026-09-15-a-wal-catalog-backup-by-fs-copy-omits-everything-since-the-last-checkpoint.md`.
+    /// `docs/issues/archive/2026-09-15-a-wal-catalog-backup-by-fs-copy-omits-everything-since-the-last-checkpoint.md`.
     /// Site 1 (`indexer::rebuild_artifact_vec_v2_at_dim`) copies while holding its OWN
     /// WAL-active connection and so is guaranteed to miss its own commits; this site
     /// runs *before* `open_with_workspace` opens one, so what it can miss is ANOTHER
