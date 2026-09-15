@@ -3037,6 +3037,22 @@ mod redesign_invariants {
     ///
     /// If you need to add content, author a `get_guide(topic)` entry and reference it
     /// from the slice — do not raise this number.
+    ///
+    /// **THIS IS NOT THE TIGHTEST BOUND, AND PASSING IT PROVES LITTLE.** The binding
+    /// constraint is `the_tier_split_leaves_real_headroom_in_the_persistent_channel`,
+    /// which renders the *whole* surface — static slice plus the worst ordinary dynamic
+    /// block (worktree banner + 18 memories) — and requires ≥120 chars still free inside
+    /// `CLIENT_INSTRUCTIONS_CHAR_LIMIT - CHANNEL_SAFETY_MARGIN`. That dynamic block costs
+    /// ~170 chars, so the static slice's real ceiling is ≈**1710**: this constant is ~190
+    /// looser than the bound that actually fails.
+    ///
+    /// Measured 2026-09-15, and the measurement is the reason this paragraph exists. A
+    /// session sizing an addition to Iron Law 3 probed *this* constant, found 1694 against
+    /// 1900, reported **206 characters free** to a peer, and wrote a 127-byte clause. The
+    /// real headroom was **16**. The number was correct and answered a question nobody had
+    /// asked; the tier-split assertion is what red, and its own message names the remedy
+    /// (*move the addition to a guide*). Check BOTH before sizing anything, or simply add
+    /// the content and let the gate price it.
     // cap-class: NOT_A_CAP — test-only ratchet asserting the static slice size; it bounds no runtime path
     const STATIC_SLICE_CHAR_BUDGET: usize = 1900;
 
