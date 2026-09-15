@@ -16037,7 +16037,7 @@ nothing.
 
 I then **published** it — to my operator, and to a peer — as evidence.
 
-Separately, `d725fa54d387d55d` established that the same tool records phantom writes:
+Separately, `76c83a43c2d1752f` established that the same tool records phantom writes:
 `RELOCATORS` carries a bare `mv` bounded by `\b`, which matches inside the filename
 `mv.rs`, and the operand capture spans newlines so it lifts a `--` pathspec from a later
 command. Reproduced against the production function with controls — `update.rs` returns
@@ -16106,7 +16106,7 @@ no right to. Split by where the edit landed:
 Only the last two meet `:1126`, and they are plausibly **`IC-17` extended along the time
 axis** rather than a new class: the index has no owner in *space*, and after a compaction
 the worktree has no owner in *time*. Same absence, second axis. That belongs to
-`d725fa54d387d55d` if anywhere, and is n=1 regardless.
+`76c83a43c2d1752f` if anywhere, and is n=1 regardless.
 
 **Method note worth more than the finding:** one paragraph in that bug file was narrowed
 three times today, alternating between two sessions, and **each narrowing was only visible
@@ -16119,8 +16119,8 @@ message.
 
 **Status:** validated
 
-**Rests on:** `docs/issues/2026-09-15-file-provenance-reads-mv-inside-a-filename-and-attributes-a-write.md`
-(`d725fa54d387d55d`), and CLAUDE.md § *Testing Discipline* — *when a re-derivation confirms,
+**Rests on:** `docs/issues/archive/2026-09-15-file-provenance-reads-mv-inside-a-filename-and-attributes-a-write.md`
+(`76c83a43c2d1752f`), and CLAUDE.md § *Testing Discipline* — *when a re-derivation confirms,
 publish the confirmation*. Both this and `f0b1a4c7`'s five `UNKNOWN` runs are individually
 worthless and only mean something as a pair, which is the mechanism by which a denominator
 normally goes unrecorded.
