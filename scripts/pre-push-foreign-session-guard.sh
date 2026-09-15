@@ -354,7 +354,7 @@ if [ -n "$ack" ] && [ "$ack_matched" != "all" ]; then
         #
         # The pusher is the one reader who cannot see the omission: they derived this list to
         # write the ack, so the note reads complete to them and to nobody else.
-        # `docs/issues/2026-09-15-the-ack-note-states-a-residual-obligation-and-names-no-one-to-discharge-it.md`
+        # `docs/issues/archive/2026-09-15-the-ack-note-states-a-residual-obligation-and-names-no-one-to-discharge-it.md`
         #
         # NOT A REFUSAL and deliberately placed after the push is allowed: the push is
         # correct and authorised, and this is a courtesy owed afterwards. Blocking on it

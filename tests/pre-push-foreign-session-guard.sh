@@ -1094,7 +1094,7 @@ has   "fully acked: names the population it authorised" "$OUT" "2 commit(s) by a
 # across four sessions, the note printed 24 correctly, THREE sessions had work published and
 # ZERO were told. It surfaced three hours later when one of them noticed origin had moved,
 # reconstructed the range by hand, and undercounted their own commits 5 against 12.
-# `docs/issues/2026-09-15-the-ack-note-states-a-residual-obligation-and-names-no-one-to-discharge-it.md`
+# `docs/issues/archive/2026-09-15-the-ack-note-states-a-residual-obligation-and-names-no-one-to-discharge-it.md`
 #
 # Asserts the SIDS THEMSELVES, not the surrounding prose: a rewrite that keeps the sentence
 # and drops the loop is exactly the regression this row exists for, and prose assertions go

@@ -1,7 +1,7 @@
 ---
-id: '28f197a703b6f903'
+id: 268459412845a31f
 kind: bug
-status: investigating
+status: fixed
 title: 'BUG: the ack note reports "no commits by another session" exactly when the ack covered every one of them'
 owners:
 - marius
@@ -9,6 +9,7 @@ tags:
 - cluster/gate-keyed-on-unobservable-event
 - git
 - guards
+closed: 2026-09-15
 ---
 
 ## Summary
@@ -220,8 +221,34 @@ behaviour the note's own file exists to discourage, and this defect argues for i
 
 ## Resume
 
-Add the pre-ack counter at `:173`, branch `:222` on `ack_matched`, write the two-row pair, and
-demand an observed red by reverting the branch.
+**Done — nothing in flight.** Every step this section prescribed has landed and was verified
+rather than inspected, 2026-09-15:
+
+- the pre-ack counter exists (`foreign_pre_ack_n`, incremented at `:286` **before** the ack
+  test, exactly as this section asked);
+- the branch at `:331` tests it instead of `$foreign_report`;
+- the two-row pair is rows 6a and 6b in `tests/pre-push-foreign-session-guard.sh`, plus 6f
+  for the fully-acked case this bug is about.
+
+**The observed red this section demanded, produced 2026-09-15.** Reverting the branch to
+`if [ -z "$foreign_report" ]` in an isolated copy reds **8** assertions:
+
+```
+fully acked: does NOT claim an empty set
+fully acked: does NOT deny the ack's role
+fully acked: names the population it authorised
+fully acked: names the first acked sid
+fully acked: names the second acked sid
+fully acked: says they have not been told
+fully acked: names a procedure that resolves a sid
+fully acked: says why it is owed, not merely that it is
+```
+
+The first three are this bug's own; the last five belong to its successor. The branch this
+bug created turned out to be load-bearing for a second defect — the note it made *correct*
+was still **actionless**, naming a count and no party. Filed and fixed as
+`docs/issues/archive/2026-09-15-the-ack-note-states-a-residual-obligation-and-names-no-one-to-discharge-it.md`
+(`ab735e4a`), which is why reverting one line now reds both populations at once.
 
 ## References
 

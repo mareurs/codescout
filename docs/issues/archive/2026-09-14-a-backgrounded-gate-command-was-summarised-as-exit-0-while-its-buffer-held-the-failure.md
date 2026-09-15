@@ -374,7 +374,7 @@ state is invisible to that axis however many cases you add. The assertion that b
 
 This is `CLAUDE.md` § *Testing Discipline*'s population law in its input-side form, and this
 corpus has the same finding under a different mechanism in
-`docs/issues/2026-09-10-the-ack-note-reports-no-foreign-population-exactly-when-the-ack-covered-all-of-it.md`:
+`docs/issues/archive/2026-09-10-the-ack-note-reports-no-foreign-population-exactly-when-the-ack-covered-all-of-it.md`:
 *"three states, two tested, and the untested one is the defect"*. Enumerate what the predicate can
 see, not what the fixtures can vary. Two sites per § *Root cause*, so two mutations — `:415` is
 the reachable one, `:446` currently is not.

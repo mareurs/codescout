@@ -547,7 +547,7 @@ it is the copy git runs. What is **not** recoverable is whether it fired, what i
 an ack was supplied — an ack leaves no durable artifact, so *"a human read the refusal and decided"*
 and *"the guard was bypassed"* are indistinguishable afterwards. That is a second unrecorded
 decision sitting directly on top of the first this file is about, and
-`docs/issues/2026-09-10-the-ack-note-reports-no-foreign-population-exactly-when-the-ack-covered-all-of-it.md`
+`docs/issues/archive/2026-09-10-the-ack-note-reports-no-foreign-population-exactly-when-the-ack-covered-all-of-it.md`
 reports the ack note itself misreporting its own population.
 
 **No harm done and that is not the point.** `experiments` is shared, never deleted, and nothing
