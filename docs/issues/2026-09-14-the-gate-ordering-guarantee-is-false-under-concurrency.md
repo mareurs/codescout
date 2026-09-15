@@ -8,7 +8,7 @@ opened: 2026-09-14
 owner: marius
 related: []
 severity: medium
-unverified: 'The race itself is NOT closed -- only its legibility, and its arming for whoever runs scripts/gate.sh. cli_doc now names the cause instead of reading as the reader''s own feature-gating regression, and the gate lanes build in a per-session CARGO_TARGET_DIR keyed on CLAUDE_CODE_SESSION_ID. WHAT REMAINS IS ADOPTION, NOT A DECISION -- the earlier form of this field named direction 1 as an unmade operator call, and a scoped variant of it shipped in 58b6bafc. A session that types the four commands by hand still shares target/ and can still replace target/debug/codescout inside another lane''s run phase, so the script is a mechanism for whoever runs it and a policy for everyone else. Also unclosed: tests/cross_process_write_lock.rs and tests/librarian/mcp_integration.rs carry the same by-path exposure the pin fixed in cli_doc. Measured cost of the isolated lanes, first cold run: 13 G and 3m10s, against 358 G free and a 113 G shared tree.'
+unverified: 'The race itself is NOT closed -- only its legibility, and its arming for whoever runs scripts/gate.sh. cli_doc now names the cause instead of reading as the reader''s own feature-gating regression, and the gate lanes build in a per-session CARGO_TARGET_DIR keyed on CLAUDE_CODE_SESSION_ID. WHAT REMAINS IS ADOPTION, NOT A DECISION -- the earlier form of this field named direction 1 as an unmade operator call, and a scoped variant of it shipped in 58b6bafc; four sessions had adopted it by 2026-09-15, 61 G across four isolated trees. A session that types the four commands by hand still shares target/ and can still replace target/debug/codescout inside another lane''s run phase, so the script is a mechanism for whoever runs it and a policy for everyone else. RETRACTED 2026-09-15: this field previously named tests/cross_process_write_lock.rs and tests/librarian/mcp_integration.rs as carrying the same by-path exposure. Neither does -- mcp_integration is #[ignore]d against a binary the 2026-05-16 dissolution deleted, and cross_process_write_lock declares no required-features so it runs in both lanes and passes against a lean binary (measured, 5.04s). cli_doc is the only detector this corpus can have, which is why it must never be made to skip. Measured cost of the isolated lanes, first cold run: 13 G and 3m10s, against 358 G free and a 113 G shared tree.'
 ---
 
 # BUG: the gate-ordering guarantee is true sequentially and false under concurrency — a peer's lean lane re-arms the trap inside your default lane
@@ -291,9 +291,40 @@ worth a `static` plus a cleanup path — was overturned by the operator, correct
 window is still a window, and the pin removes the class rather than narrowing it. Recorded because
 the judgement was mine and the reversal was right.
 
-**Same exposure, not addressed here:** `tests/cross_process_write_lock.rs` (`CARGO_BIN_EXE_codescout`
-— which guarantees the binary was BUILT, a different problem, and is still a path readable after
-replacement) and `tests/librarian/mcp_integration.rs` (`cargo_bin("librarian-mcp")`).
+**RETRACTED 2026-09-15 — "same exposure, not addressed here" was FALSE, and it was a worklist item
+sent to a reader for work that does not exist.** This paragraph named
+`tests/cross_process_write_lock.rs` and `tests/librarian/mcp_integration.rs` as carrying the
+by-path exposure the pin fixed in `cli_doc`. Checked at the bytes, neither does:
+
+- **`tests/librarian/mcp_integration.rs` is not an instance — it never runs.** It is
+  `#[ignore = "requires standalone librarian binary which no longer exists post-dissolution"]`,
+  and `cargo_bin("librarian-mcp")` names a binary `Cargo.toml` declares no target for; the
+  2026-05-16 dissolution deleted it. `tests/librarian/main.rs` already annotates it inert, with the
+  count (*"19 tests, 17 of which run"*), which is § *Testing Discipline*'s **annotate an inert
+  fixture as inert** already obeyed. Citing it here credited it with an exposure it cannot have.
+- **`tests/cross_process_write_lock.rs` has the mechanism and no observable consequence.** It
+  declares no `required-features`, so it runs in **both** lanes — and therefore passes against a
+  librarian-less binary by design. Measured 2026-09-15 in an isolated tree:
+  `cargo test --no-default-features --test cross_process_write_lock` →
+  `write_lock_contention_produces_recoverable_error ... ok`, 5.04s. **That run IS the condition a
+  mid-run swap creates**, which is what makes it a measurement rather than an argument. Its
+  `env!("CARGO_BIN_EXE_codescout")` also already tracks `CARGO_TARGET_DIR`, so the isolation
+  defect found in `src/lsp/manager.rs` does not reach it, and its own archived bug
+  (`2026-08-27-cross-process-write-lock-test-passes-when-it-does-not-run.md`) already closed the
+  skip-branch half.
+
+**What the check turned up instead, and it is the sharper fact: `cli_doc` is not one detector among
+several — it is the ONLY one the corpus can have.** Exactly three test files execute a binary by
+path: the two above and `cli_doc`. A test that runs in **both** lanes passes in both, so it is blind
+to a lane swap **by construction**; only a `required-features = ["librarian"]` target is asymmetric
+enough to notice. Of the three librarian-gated targets (`audit_doc_refs`, `cli_doc`, `librarian`),
+`cli_doc` is the single one that both executes the binary and executes at all.
+
+**So "Do not make `cli_doc` skip" is structural, not a preference** — the property that makes it the
+only possible detector is the same property that makes it poisonable, and if it goes quiet there is
+no second instrument. **The one live residue:** the by-path mechanism does still sit in
+`cross_process_write_lock.rs`. It is inert only because that test asserts nothing a lean binary
+fails. Add one librarian-gated assertion there and it inherits the full defect silently.
 
 Direction 3 is retired as insufficient: stating the premise in `CLAUDE.md` cannot help when no
 behaviour change by any party closes the window — which is now measured, not argued. It has been
