@@ -3234,13 +3234,39 @@ kind = "memory"
     /// is already in the sidecar — the checkpoint does not create that condition, it only
     /// makes the boundary explicit to a reader.
     ///
-    /// Kept anyway, and worth keeping, but for the honest reason: it documents intent.
-    /// A false LOAD-BEARING annotation is worse than none — it tells a tidier not to touch
-    /// an inert line, and it asserts a mechanism a reader will reason from and be wrong.
+    /// **A FALSE load-bearing annotation is worse than no annotation, and worse than
+    /// either direction CLAUDE.md names.** § *Testing Discipline* names two — mark a
+    /// load-bearing detail so it is not silently removed, mark an inert one so it is not
+    /// silently credited. This was a third: *claiming a mechanism that holds in neither
+    /// fixture*. It tells a tidier not to touch an inert line, and it hands the next
+    /// reader a false model to reason from when they write a third fixture. The second
+    /// cost is the one that propagates, and it is the reason this paragraph stays here
+    /// rather than being tidied away once the text was fixed.
+    ///
+    /// **It is however load-bearing for the DIAGNOSTIC, which is the reason to keep it —
+    /// and "it documents intent", written here first, was the wrong reason for the right
+    /// decision.** Measured both ways with the production path mutated to `fs::copy`:
+    ///
+    /// | checkpoint | copied file | what fails |
+    /// |---|---|---|
+    /// | present | 12,288 bytes | `left: 0, right: 1` — the assertion fires |
+    /// | removed | 4,096 bytes | `no such table: artifact` — panics on the `unwrap` |
+    ///
+    /// Without the checkpoint nothing has ever been flushed, so the copy carries no
+    /// schema and `query_row(…).unwrap()` dies before the assertion is reached. The
+    /// verdict is the same and the message is not, and the message is the half that
+    /// matters here: **`no such table` reads like a fixture-setup bug**, so it sends a
+    /// reader to the seed data rather than to the stale backup that is the actual defect.
+    /// A test that reds pointing at the wrong subsystem is worse than one that reds
+    /// loudly. Keep the checkpoint; it is what makes the assertion, rather than an
+    /// `unwrap`, be the thing that fails.
+    ///
     /// Corrected after sessionId `9403d62d-116b-46ea-ac9b-004acff2b1cb` measured the same
     /// detail in the v6 fixture, found it inert there for a *different* reason (a
     /// rollback-journal seed, so no `-wal` ever exists), and flagged that this fixture's
-    /// claim was never re-derived. It had not been. It is now.
+    /// claim was never re-derived. It had not been. The verdict/diagnostic split is
+    /// theirs; their fixture cannot show it, because `seed_v3_db` creates the table
+    /// before WAL is on and the schema is in the `.db` either way.
     ///
     /// Its sibling `write_embeddings_v2_migration_backs_up_file_backed_catalog`
     /// asserts only that a file with the right NAME appeared; it never opens it, so
