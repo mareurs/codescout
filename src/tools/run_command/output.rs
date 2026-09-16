@@ -67,6 +67,78 @@ pub(crate) fn rebuild_buffered_summary(raw: Value, output_id: &str) -> Value {
 /// (`docs/adrs/2026-07-10-repair-and-continue-input-handling.md`).
 ///
 /// See `docs/issues/archive/2026-08-16-run-command-backticks-substituted-in-quoted-message.md`.
+/// Name an empty test selection, which libtest reports with the same word and the same exit
+/// code as a real pass.
+///
+/// `cargo test <filter>` is a **selector** over the test namespace. A filter matching nothing
+/// selects an empty set, and the harness then reports success over that empty set:
+/// `test result: ok.`, exit `0`. Nothing distinguishes *"every test I asked for passed"* from
+/// *"I asked for a test that does not exist"*, so a verification step silently becomes a no-op
+/// that certifies itself. In the reported incident the filter named a **helper function**
+/// rather than a test; the caller read `ok` as verification and was one step from committing
+/// on it.
+///
+/// What makes this worth a dedicated diagnostic rather than leaving the numbers to speak: the
+/// discriminating field is **already printed**. `filtered out: N` beside `0 passed` is the
+/// tell, on screen, on every run, and unread. That is the same shape as
+/// `substitution_diagnostic`'s `Argument list too long` — the misleading signal and the real
+/// one arrive together, and the misleading one reads like an explanation.
+///
+/// **Decided over the WHOLE output, never one `test result:` line at a time.** `cargo test
+/// <filter>` builds every target in the workspace and each prints its own summary, so a target
+/// holding no match prints `0 passed; N filtered out` *legitimately* while a sibling runs the
+/// match. A per-line predicate would fire on every successful filtered workspace run, which is
+/// the one failure mode that gets a warning ignored rather than read.
+///
+/// Anchored on libtest's own summary rather than on command shape, per the rule
+/// `substitution_diagnostic` follows: an unfiltered run cannot reach `filtered out > 0`, so the
+/// output alone proves the selection was empty and the caller's command never needs parsing.
+///
+/// Silent on a non-`ok.` summary (a red is loud already and `wip_authors` routes it) and on a
+/// selection whose every match was `#[ignore]`d (that selection was not empty, and its remedy
+/// is `-- --ignored`, so claiming otherwise would send the reader somewhere useless).
+///
+/// See `docs/issues/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md`.
+pub(crate) fn empty_test_selection_diagnostic(stdout: &str) -> Option<String> {
+    let (mut passed, mut ignored, mut filtered) = (0usize, 0usize, 0usize);
+    let mut saw_summary = false;
+
+    for line in stdout.lines() {
+        let Some(rest) = line.trim_start().strip_prefix("test result:") else {
+            continue;
+        };
+        // `FAILED.` and friends: not a vacuous pass, and already loud.
+        let rest = rest.trim_start().strip_prefix("ok.")?;
+        saw_summary = true;
+        for field in rest.split(';') {
+            let Some((n, label)) = field.trim().split_once(' ') else {
+                continue;
+            };
+            let Ok(n) = n.parse::<usize>() else {
+                continue;
+            };
+            match label {
+                "passed" => passed += n,
+                "ignored" => ignored += n,
+                "filtered out" => filtered += n,
+                _ => {}
+            }
+        }
+    }
+
+    if !saw_summary || filtered == 0 || passed > 0 || ignored > 0 {
+        return None;
+    }
+
+    Some(format!(
+        "This run selected NO tests: `{filtered} filtered out` against `0 passed`, so the `ok` \
+         and the exit code report success over an EMPTY SET and would read identically if the \
+         code were broken. It is not evidence that anything was verified. Check that the filter \
+         names a test rather than a helper function or a module, or drop it and run the whole \
+         target, which cannot select empty."
+    ))
+}
+
 pub(crate) fn substitution_diagnostic(command: &str, stderr: &str) -> Option<String> {
     if !stderr.contains("command substitution:") {
         return None;
@@ -233,6 +305,12 @@ pub(crate) async fn handle_successful_output(
     // the diagnostic has to cover every output shape — buffered summary included.
     let shell_cause = substitution_diagnostic(original_command, &raw_stderr);
 
+    // Same placement, same reason. Also: the buffered-summary arm below hands the caller a
+    // SUMMARY instead of the numbers, so on exactly that path they cannot read `filtered out`
+    // for themselves even if they think to. The diagnostic has to be computed before the
+    // branch to reach it.
+    let empty_selection = empty_test_selection_diagnostic(&raw_stdout);
+
     // Same placement, same reason. The non-zero-exit gate lives inside the callee, not
     // here, so the one place that decides "is this a red" is the one place documenting
     // what it costs to be wrong about it. A green command spawns nothing at all.
@@ -332,6 +410,9 @@ pub(crate) async fn handle_successful_output(
             }
             if let Some(who) = wip_authors {
                 result["wip_authors"] = json!(who);
+            }
+            if let Some(empty) = empty_selection {
+                result["empty_test_selection"] = json!(empty);
             }
             return Ok(result);
         }
@@ -446,6 +527,9 @@ pub(crate) async fn handle_successful_output(
     if let Some(who) = wip_authors {
         result["wip_authors"] = json!(who);
     }
+    if let Some(empty) = empty_selection {
+        result["empty_test_selection"] = json!(empty);
+    }
 
     Ok(result)
 }
@@ -535,6 +619,13 @@ pub(crate) fn format_run_command(result: &Value) -> String {
     // `docs/issues/archive/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`.
     if let Some(cause) = result["shell_cause"].as_str() {
         s.push_str(&format!("\n⚠ cause: {cause}"));
+    }
+
+    // Rendered here for the reason stated above: a field this function does not read reaches
+    // nobody. This one is worth the line specifically because its JSON sits beside an
+    // `exit 0` that the reader has every reason to believe.
+    if let Some(empty) = result["empty_test_selection"].as_str() {
+        s.push_str(&format!("\n⚠ {empty}"));
     }
 
     // Last, and unconditional across output shapes for the same reason. This one is

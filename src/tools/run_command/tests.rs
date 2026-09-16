@@ -2904,6 +2904,169 @@ fn substitution_diagnostic_is_silent_when_the_command_shows_no_substitution() {
     );
 }
 
+/// Real `cargo test` output, measured 2026-09-16 on `--test doc_tool_refs` with a filter
+/// naming a HELPER function rather than a test. The word `ok` and the exit code are
+/// byte-identical to a genuinely passing run; only which integers are non-zero differs.
+/// See `docs/issues/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md`.
+const EMPTY_SELECTION_STDOUT: &str = "\nrunning 0 tests\n\ntest result: ok. 0 passed; \
+     0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s\n";
+
+/// The same target, same day, no filter — the control that makes the above a measurement.
+const FULL_RUN_STDOUT: &str = "\nrunning 14 tests\n\ntest result: ok. 14 passed; \
+     0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.60s\n";
+
+#[test]
+fn an_empty_test_selection_is_named_rather_than_left_reading_as_a_pass() {
+    use super::output::empty_test_selection_diagnostic;
+
+    let d = empty_test_selection_diagnostic(EMPTY_SELECTION_STDOUT)
+        .expect("0 passed against 14 filtered out is an empty selection, not a pass");
+
+    assert!(
+        d.contains("filtered out"),
+        "must name the discriminator that was already in the output: {d}"
+    );
+    assert!(
+        d.contains("14"),
+        "must quote the count, so the reader can check the claim against their own \
+         screen rather than take it: {d}"
+    );
+    // The load-bearing assertion, and the exact analogue of the substitution case's
+    // `Argument list too long`: the reader's problem is not a missing signal, it is a
+    // present and self-consistent WRONG one. Naming `filtered out` while leaving `ok`
+    // unchallenged leaves both readings alive.
+    assert!(
+        d.contains("ok"),
+        "must disown the success word itself, not merely add a fact beside it: {d}"
+    );
+}
+
+/// The commonest shape of all, and the one a careless predicate breaks. A filter that
+/// matched 3 of 14 is a CORRECT selective run; `filtered out > 0` alone cannot tell it
+/// from an empty selection, which is why the predicate is `nothing ran`, not `something
+/// was filtered`.
+#[test]
+fn a_filter_that_matched_something_is_not_an_empty_selection() {
+    use super::output::empty_test_selection_diagnostic;
+
+    let partial = "\nrunning 3 tests\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; \
+                   0 measured; 11 filtered out; finished in 0.12s\n";
+    assert!(
+        empty_test_selection_diagnostic(partial).is_none(),
+        "a selective run that ran something is exactly what filters are for"
+    );
+}
+
+/// The whole target. `filtered out` is 0 by construction, so there is nothing to warn about
+/// — this is the shape the bug file recommends preferring.
+#[test]
+fn a_full_target_run_is_silent() {
+    use super::output::empty_test_selection_diagnostic;
+
+    assert!(
+        empty_test_selection_diagnostic(FULL_RUN_STDOUT).is_none(),
+        "an unfiltered run cannot select empty"
+    );
+}
+
+/// A target holding NO TESTS AT ALL — an integration file whose tests were deleted, or a
+/// workspace member that never had any. `0 passed; 0 filtered out` is an empty POPULATION,
+/// not an empty selection: there is no filter to blame and nothing to tell the caller.
+///
+/// This case exists because the `filtered == 0` guard had nothing else guarding it.
+/// Measured 2026-09-16: deleting that guard SURVIVED the suite, because
+/// `a_full_target_run_is_silent` carries `14 passed` and the `passed > 0` guard refuses it
+/// first. A case written for one bound was being answered by another — the same shape as
+/// `bug-fix-session-log:W-143`, in a different language, and found the same way.
+#[test]
+fn a_target_with_no_tests_at_all_is_silent() {
+    use super::output::empty_test_selection_diagnostic;
+
+    let empty_target = "\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; \
+                        0 measured; 0 filtered out; finished in 0.00s\n";
+    assert!(
+        empty_test_selection_diagnostic(empty_target).is_none(),
+        "no tests and no filter is an empty population, not an empty selection"
+    );
+}
+
+/// THE false-positive guard, and the reason this cannot be decided one `test result:` line
+/// at a time. `cargo test <filter>` builds every target in the workspace and each prints its
+/// own result line, so a target holding no match prints `0 passed; N filtered out`
+/// LEGITIMATELY while a sibling runs the match. A per-line predicate would fire on every
+/// successful filtered workspace run — turning the diagnostic into noise, which is the one
+/// failure mode that gets a warning ignored rather than read.
+#[test]
+fn a_workspace_run_where_another_target_matched_is_silent() {
+    use super::output::empty_test_selection_diagnostic;
+
+    let workspace = "\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; \
+                     0 measured; 14 filtered out; finished in 0.00s\n\
+                     \nrunning 1 test\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; \
+                     0 measured; 7 filtered out; finished in 0.03s\n";
+    assert!(
+        empty_test_selection_diagnostic(workspace).is_none(),
+        "one target matching nothing is normal when a sibling matched; the caller's \
+         selection was NOT empty"
+    );
+}
+
+/// Matched, but every match was `#[ignore]`d. Nothing ran, yet the selection was not empty
+/// and the remedy is different (`-- --ignored`), so claiming an empty selection would send
+/// the reader somewhere useless.
+#[test]
+fn a_selection_whose_matches_were_all_ignored_is_silent() {
+    use super::output::empty_test_selection_diagnostic;
+
+    let ignored = "\nrunning 2 tests\n\ntest result: ok. 0 passed; 0 failed; 2 ignored; \
+                   0 measured; 12 filtered out; finished in 0.00s\n";
+    assert!(
+        empty_test_selection_diagnostic(ignored).is_none(),
+        "an ignored match is a match; the filter selected something"
+    );
+}
+
+/// A red is already loud and already routed — `wip_authors` covers it. Firing here too would
+/// put a second, quieter explanation beside a real failure.
+#[test]
+fn a_failing_run_is_left_to_the_red_that_already_speaks() {
+    use super::output::empty_test_selection_diagnostic;
+
+    let failed = "\nrunning 14 tests\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; \
+                  0 measured; 13 filtered out; finished in 0.20s\n";
+    assert!(
+        empty_test_selection_diagnostic(failed).is_none(),
+        "a FAILED line is not a vacuous pass"
+    );
+}
+
+/// The boundary test, and this diagnostic needs one more than most. `format_compact` builds
+/// its one-liner from a fixed set of keys, so a field it does not read reaches nobody however
+/// correct the JSON is — the defect filed as
+/// `docs/issues/archive/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`.
+/// Here the unread field would sit beside an `exit 0` the reader has every reason to believe,
+/// so the silent-drop failure is indistinguishable from the bug this whole change exists to
+/// fix. Asserting the function EXISTS is not the same as asserting its verdict ARRIVES.
+#[test]
+fn the_compact_renderer_actually_shows_an_empty_selection() {
+    let tool = RunCommand;
+    let result = json!({
+        "stdout": EMPTY_SELECTION_STDOUT,
+        "stderr": "",
+        "exit_code": 0,
+        "empty_test_selection": "This run selected NO tests: `14 filtered out` against `0 passed`",
+    });
+    let text = tool.format_compact(&result).unwrap();
+    assert!(
+        text.contains("selected NO tests"),
+        "the verdict must reach the surface call_content renders: {text}"
+    );
+    assert!(
+        text.contains("exit 0"),
+        "and it must sit beside the exit code it contradicts, not replace it: {text}"
+    );
+}
+
 /// The boundary test. `format_compact` is what `call_content` renders, and it builds a
 /// one-liner from a fixed set of keys — so a field it does not read reaches nobody, no
 /// matter how correct the JSON is. That is the defect filed as
