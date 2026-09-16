@@ -668,16 +668,44 @@ impl Suppression {
 /// Returns `None` for a comment that is not a marker at all, so the caller can leave
 /// the current suppression untouched rather than clearing it.
 fn parse_ignore_marker(html: &str) -> Option<Suppression> {
+    let token = marker_token(html)?;
     // Positional: which form is DECLARED, never which form is mentioned anywhere in
     // the body. A bare marker whose prose quotes `ignore-refs` must stay coarse, and a
     // scoped one whose prose quotes the bare form must stay scoped.
-    if marker_token(html)? == "audit-doc-refs:ignore" {
+    if token == "audit-doc-refs:ignore" {
         return Some(Suppression::All);
     }
-    let targets: Vec<String> = backtick_re()
-        .captures_iter(html)
-        .map(|c| c[1].to_string())
-        .collect();
+    // **Only the LEADING run of backticked tokens is the target list**, and the scan
+    // stops at the first thing that is not one. A regex over the whole comment read the
+    // EXPLANATION as targets too: `docs/PROBES.md`'s marker named 2 and declared 4,
+    // picking up `args` and the bare marker token out of the prose justifying the
+    // choice. Harmless there only because a spurious target matches no real ref — but
+    // it is the same failure as `marker_token`'s, one field along, and a target list
+    // that silently grows is a suppression that silently widens.
+    //
+    // Backticks remain the delimiter rather than whitespace, for the reason the regex
+    // form had right: the body carries prose, and a whitespace split would read the
+    // explanation as targets. What changes is where the list is agreed to END.
+    let mut rest = html
+        .trim_start()
+        .strip_prefix("<!--")?
+        .trim_start()
+        .strip_prefix(token)?;
+    let mut targets: Vec<String> = Vec::new();
+    loop {
+        rest = rest.trim_start();
+        let Some(body) = rest.strip_prefix('`') else {
+            break;
+        };
+        let Some(end) = body.find('`') else { break };
+        // An empty span is not a target; treat it as the end of the list rather than
+        // pushing a String that can never match a raw ref.
+        if end == 0 {
+            break;
+        }
+        targets.push(body[..end].to_string());
+        rest = &body[end + 1..];
+    }
     // A scoped marker naming nothing is a typo, not an instruction to suppress
     // nothing — degrade to the coarse form so the author sees the effect they asked
     // for rather than a silently inert comment.
@@ -685,11 +713,6 @@ fn parse_ignore_marker(html: &str) -> Option<Suppression> {
         return Some(Suppression::All);
     }
     Some(Suppression::Only(targets))
-}
-
-fn backtick_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"`([^`]+)`").unwrap())
 }
 
 /// Trim trailing sentence punctuation (period, brackets, braces) that often
@@ -1281,6 +1304,40 @@ A 200-char cut leaves a truncated path (`src/serve`); the real probe is
             got.contains(&"scripts/peer-sessions.sh") && got.contains(&"scripts/fmt-mine.sh"),
             "a marker must survive its own explanation: quoting the bare form inside a \
              scoped marker must not widen it to Suppression::All, got {got:?}"
+        );
+    }
+
+    /// A backticked token in the marker's PROSE is not a target.
+    ///
+    /// The target list is the leading run only. A regex over the whole comment read
+    /// the explanation too — `docs/PROBES.md`'s marker named 2 and declared 4, picking
+    /// up a token out of the very sentence justifying its choice of the scoped form.
+    ///
+    /// **The assertion has to be that the prose token is still AUDITED, not merely that
+    /// it is absent from some target list**, because the list is private. Over-capture
+    /// is invisible until a ref that should have been checked silently is not: a target
+    /// naming something no ref matches costs nothing and shows nothing, and the first
+    /// time it costs anything is the first time the prose happens to quote a real path.
+    /// This fixture makes it quote one.
+    #[test]
+    fn a_backticked_token_in_the_markers_prose_is_not_a_target() {
+        let md = "\
+## Examples
+
+<!-- audit-doc-refs:ignore-refs `src/serve` — kept because `scripts/fmt-mine.sh` explains it -->
+
+Here `src/serve` is an example, and `scripts/fmt-mine.sh` is a real citation.
+";
+        let (refs, _) = parse_refs(md, Path::new("d.md"), PathSyntax::DottedModules);
+        let got: Vec<&str> = refs.iter().map(|r| r.raw_ref.as_str()).collect();
+        assert!(
+            !got.contains(&"src/serve"),
+            "the leading token is a real target and must be suppressed, got {got:?}"
+        );
+        assert!(
+            got.contains(&"scripts/fmt-mine.sh"),
+            "a path quoted in the marker's EXPLANATION must still be audited — the \
+             target list ends at the first non-backtick, got {got:?}"
         );
     }
 
