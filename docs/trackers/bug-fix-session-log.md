@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 166
+entry_high_water_F: 167
 entry_high_water_W: 144
 ---
 
@@ -65,6 +65,7 @@ entry_high_water_W: 144
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-167 | 2026-09-16 | med | self-friction | open | **A selector drawn from one implementation, its zero read as absence of the capability** - two instances in one session; both zeros were correct, so re-running either returns the same zero |
 | F-166 | 2026-09-16 | med | self-friction | open | **A measured symptom licensed skipping the search for an already-archived correction** - `audit_doc_refs` does scan `.rs`; the gap is severity, not scope, and the correction had been archived a month earlier |
 | F-165 | 2026-09-16 | med | cross-session | open | **Attribution by THREAD adjacency — credited a commit to the session I had a live thread with, not to its trailer.** Distinct from `F-155`'s TOPIC adjacency: its tell (*"ask is this yours"*) is a question about the subject and does not fire here, because I was reasoning about who I had been talking to. Committed inside a message about an attribution defect. |
 | F-163 | 2026-09-15 | high | measurement | open | **A count in my own output was the discriminator three times in one day, and only the party holding a stated expectation stopped on it.** `106/16` for a one-paragraph edit caught an interleave; `64 vs 99 lines` was read past and cost 35 lines of a peer's uncommitted work; `2` misfiled rows was never computed at all where a set difference said `11`. Same instrument, opposite outcomes — the variable is an expectation to compare against, not care. Direction was the tell in case 2: staleness makes a copy SMALLER, and a surplus is what uncommitted peer content looks like. Candidate remedy, policy not mechanism: state the expected magnitude before reading the number. |
@@ -16605,6 +16606,63 @@ is the one moment the routing would pay.
 
 **Rests on:** `F-165`, whose third instance this same session produced and which is recorded
 there rather than here; § *Testing Discipline* — *check independence, not agreement*.
+
+## F-167 — A selector drawn from one implementation, its zero read as absence of the capability
+
+**Valid:** dated 2026-09-16
+
+**Observed:** twice in one session, and the second nearly shipped a change.
+
+1. **`audit_doc_refs`'s scope.** I claimed it "scans markdown only". My basis was the tool
+   schema's default-paths string plus a run with `paths=[<one .md file>]` returning
+   `n_files_scanned=1`. That reading is consistent with *"markdown only"* **and** with *"scans
+   whatever you point it at"* — it cannot separate them. Measured properly afterwards: the
+   default scan reports `n_files_scanned=2228` against 1795 `.md` + 438 `.rs`.
+2. **`ledger-counts`'s routing.** I grepped it for `cc-socks|SendMessage|sessionId|uds:`, got
+   one comment, and concluded it does not route. Those tokens are `foreign-index`'s
+   identifiers. `ledger-counts` routes through `python3 scripts/file-provenance.py` in five
+   refusal branches, with an answerable question and its answers enumerated — a better
+   instrument than the one I was about to copy into it.
+
+**Mechanism:** a reading whose SCOPE is narrower than the CLAIM it was used to support, where
+the narrow reading is consistent with both answers. In (2) the selector was drawn from a
+sibling's *implementation* and its zero was read as absence of the *capability* — a question
+about **how** something is done, answered, and then reported as a question about **whether** it
+is done.
+
+**Why "verify harder" is a no-op against it, which is the part worth keeping.** Both zeros were
+*correct*. Re-running either returns the same zero, because nothing about the search was
+broken — only its reach. That is `observer-blindness:OB-20`'s shape: the instrument arrives,
+and says nothing about what it could not have seen.
+
+**The mechanism that would catch it already exists and fired.** `grep` prints *"this zero
+describes what was searched, not the pattern"* on every zero. I read that line, banked the zero
+anyway, and quoted the same law back in a commit message within the hour. The warning is
+attached to the SEARCH RESULT; the error happens later, when the zero becomes a premise in a
+design document, and nothing re-checks at that point. A warning delivered where it cannot bind
+is § *Observer Blindness* position 3 — correct, published, and addressed to someone who has not
+yet made the mistake.
+
+**Cheap discriminator, since the law needs one to be actionable:** before a zero becomes a
+premise, ask what the capability would be called by someone who implemented it DIFFERENTLY. If
+you cannot name a second plausible token, the selector is a guess about implementation and its
+zero bounds nothing. In (2) that second token was `file-provenance.py`, which the refusal text
+names in full.
+
+**Severity:** med — nothing shipped. Caught in (1) by searching the archive before filing, and
+in (2) by reading a test file that pinned the very remedy text I had just called absent. Both
+catches were accidental byproducts of doing something else, which is why this is `open`.
+
+**Status:** open — the remedy is a question to ask at the moment of ACTING on a zero, which is
+a policy rather than a mechanism. The surface that could hold it is `docs/PROBES.md` §
+*Before you trust any probe on this page*, which already exists and which a grep result routes
+nobody to.
+
+**Rests on:** `F-166` (the complement, deliberately NOT merged with it — that entry is about
+failing to search the archive for a prior diagnosis, this one about how the false belief was
+formed in the first place); `F-165` (also this session, also a wrong claim about another
+session's artifact — but generated from thread salience rather than from a scoped reading, so a
+different supply and explicitly not a third instance of this).
 
 ## Template for new entries
 
