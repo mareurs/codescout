@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 164
+entry_high_water_F: 165
 entry_high_water_W: 143
 ---
 
@@ -65,6 +65,7 @@ entry_high_water_W: 143
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-165 | 2026-09-16 | med | cross-session | open | **Attribution by THREAD adjacency — credited a commit to the session I had a live thread with, not to its trailer.** Distinct from `F-155`'s TOPIC adjacency: its tell (*"ask is this yours"*) is a question about the subject and does not fire here, because I was reasoning about who I had been talking to. Committed inside a message about an attribution defect. |
 | F-163 | 2026-09-15 | high | measurement | open | **A count in my own output was the discriminator three times in one day, and only the party holding a stated expectation stopped on it.** `106/16` for a one-paragraph edit caught an interleave; `64 vs 99 lines` was read past and cost 35 lines of a peer's uncommitted work; `2` misfiled rows was never computed at all where a set difference said `11`. Same instrument, opposite outcomes — the variable is an expectation to compare against, not care. Direction was the tell in case 2: staleness makes a copy SMALLER, and a surplus is what uncommitted peer content looks like. Candidate remedy, policy not mechanism: state the expected magnitude before reading the number. |
 | F-160 | 2026-09-15 | med | documentation | fixed-verified | **A record's own "same exposure, not addressed here" list was a HYPOTHESIS SET published as a worklist — neither named file was an instance.** Written while holding the mechanism (*resolves a binary by path*), which both files genuinely match; never checked whether the mechanism has a CONSEQUENCE at either site. One is `#[ignore]`d against a deleted binary; the other runs in both lanes so it passes against a lean one (measured, 5.04s). A grep-shaped observation published as a worklist inherits the grep's blindness and loses the qualifier, because by the time a reader arrives only the conclusion is there. Retracted in `ca7edebc`. |
 | F-159 | 2026-09-15 | med | tooling | fixed-verified | **A wait-loop whose predicate matched itself, so its exit condition was unreachable by construction.** `until ! pgrep -f "scripts/gate.sh"; do sleep 10; done` — `pgrep -f` scans the full command line, and the waiter's own contains the pattern. Proven bare with no `gate.sh` running: `pgrep -c -f "scripts/gate.sh"` → `1`, and that 1 is the pgrep. Two such shells ran overnight and were **mutually** sustaining. Survived a day of careful verification because the failure mode is **silence**, which is byte-identical to "still running" — and the work had actually completed, read out of the `@bg_*` buffers, so nothing was wrong enough to notice. Distinct from this ledger's prior `pgrep` finding (a miscount from build processes): same over-match family, but that one inflates a number and this one makes a loop immortal. Tell: before arming an `until`-loop, ask whether the condition can observe the loop — a predicate over the process table always can. |
@@ -16398,6 +16399,50 @@ in an ad-hoc probe, so there is no in-tree instrument to repair.
 **Rests on:** `W-139` (run the positive control before believing a probe's zero — the
 alarming-zero half) and `W-140` (an instrument's verdict has two consumers, and gating
 protects only one).
+
+## F-165 — Attribution by thread adjacency, in a message about an attribution defect
+
+**Valid:** dated 2026-09-16
+
+**Observed:** I told `29420e72` that `c3135fa3` was theirs. It is
+`aa272bed`'s — as are `84efa618`, `c4f18966`, `7d9fd20c` and `43fdc0ea`, the whole
+ledger-repair sequence. They caught it and corrected me.
+
+**Mechanism:** I attributed from **thread memory**, not from the trailer. The
+heading-shadowing exchange was with `aa272bed`; I filed it under `29420e72` because I
+had a live, adjacent thread with *them* about attribution. The proximity axis was the
+**conversation**, not the subject.
+
+`git log -1 --format='%(trailers:key=Session-Id,valueonly)' c3135fa3` was available the
+whole time and answers it in one line. I did not run it, because it did not feel like a
+question.
+
+**Why this is not `F-155`, which is the reason it earns a row.** `aa272bed`'s `F-155` is
+**topic** adjacency — work attributed to whoever is associated with the *subject*
+(`codescout-e7` calling the `.err` changeset "yours" to them because they were associated
+with `.err`). Its tell is *"ask **is this yours** rather than saying **your changeset**"*,
+a question about the subject.
+
+**That tell does not fire here at all.** I was not reasoning about the subject; I was
+reasoning about who I had been talking to. A tell that does not fire is worse than none,
+because it reads as coverage. Same family as `F-122`, same one-line remedy, different
+trigger — which is the whole content of this entry.
+
+**Where it happened:** inside a message *about* an attribution defect — the
+`file-provenance.py` finding — sent to the session that had spent that afternoon being
+falsely named as `mv.rs`'s author. `CLAUDE.md` § *Observer Blindness* already names this
+shape (*"every one was committed by an author actively writing about that class"*); this
+is a further datapoint for a law that says knowing the class prevents nothing, not a new
+law.
+
+**Severity:** med — a false attribution published to a peer becomes their premise
+(`W-140`). Caught within one exchange because they re-derived rather than accepting.
+
+**Status:** open — remedy is `%(trailers:key=Session-Id)`, which is a policy and not a
+mechanism. Promote if a third adjacency axis turns up.
+
+**Rests on:** `F-155` and `F-122` (`aa272bed`'s, who drew the topic/thread distinction and
+declined to file this one for me on the grounds that the error is mine); `W-140`.
 
 ## Template for new entries
 
