@@ -1059,6 +1059,76 @@ has "the refusal emits the shared commit-sequence tail" \
     "$(bash "$FMT" 2>&1)" "This is one rule in a sequence"
 rm -rf "$T"
 
+# ==============================================================================
+# 12. A MOVE THAT STRANDS A CITATION OUTSIDE THE COMMIT
+# ==============================================================================
+# scripts/pre-commit-orphaned-citations.sh. Measured at `215a5cad`: six archive renames
+# landed while the tracker citing them stayed uncommitted, leaving HEAD with seven live
+# `../issues/2026-09-13-...` citation lines against paths absent from that tree.
+#
+# THE DISCRIMINATION IS THE COMPLEMENT, not the rename. A commit that moves a file AND
+# repoints its citer is the correct shape and must stay silent; one that moves it and
+# leaves the citer behind must speak. A check that fired on every rename would be noise on
+# every archive, which is how `--no-verify` gets learned.
+echo "== orphaned citations (move vs complement)"
+
+# Exit code and output must be captured SEPARATELY here. The warning path exits 0, so an
+# `EXIT=` marker cannot discriminate "warned" from "did nothing" -- the two differ only in
+# bytes printed. Same reasoning as tests/pre-commit-dead-artifact-ids.sh:160-161.
+orph() { OUT="$(bash "$SRC/pre-commit-orphaned-citations.sh" 2>&1)"; RC=$?; }
+
+new_repo
+mkdir -p docs/issues/archive docs/trackers
+echo '# foo' > docs/issues/2026-09-13-foo.md
+printf 'See [foo](../issues/2026-09-13-foo.md) for the detail.\n' > docs/trackers/t.md
+git add -A > /dev/null 2>&1
+git commit -qm base
+
+# The citation is RELATIVE, which is the common form here and the reason the scan is keyed
+# on the STEM rather than the full path -- a path-anchored grep matches none of these.
+git mv docs/issues/2026-09-13-foo.md docs/issues/archive/2026-09-13-foo.md
+orph
+eq  "a stranded citation exits 0 (warn, never refuse)" "$RC" "0"
+has "it names the moved source"                       "$OUT" "docs/issues/2026-09-13-foo.md"
+has "it names the citer left behind"                  "$OUT" "docs/trackers/t.md"
+has "it says it is not a refusal"                     "$OUT" "Not a refusal"
+
+# THE SILENCE CONTROL, and it is the case that makes the one above mean anything. Repoint
+# the citer in the SAME commit and the check must print NOTHING -- asserted in bytes,
+# because exit 0 is true of both a silent pass and a warning.
+sed -i 's|\.\./issues/2026-09-13-foo\.md|../issues/archive/2026-09-13-foo.md|' docs/trackers/t.md
+git add docs/trackers/t.md
+orph
+eq "citer repointed in the same commit -> exits 0"   "$RC" "0"
+eq "and prints nothing at all"                       "$(printf '%s' "$OUT" | wc -c)" "0"
+rm -rf "$T"
+
+# Self-gating: a commit staging no rename must not pay for a scan, and must say nothing.
+new_repo
+echo a > a.md
+git add a.md > /dev/null 2>&1
+git commit -qm base
+echo b > b.md
+git add b.md
+orph
+eq "no rename staged -> exits 0"        "$RC" "0"
+eq "no rename staged -> prints nothing" "$(printf '%s' "$OUT" | wc -c)" "0"
+rm -rf "$T"
+
+# A file whose own content mentions its own stem is its own subject, not a citer of itself.
+# Without the self-exclusion every archive move warns about the file being moved, which is
+# noise on the commonest operation this check sees.
+new_repo
+mkdir -p docs/issues/archive
+printf '# 2026-09-13-solo\n\nThis file names 2026-09-13-solo in its own body.\n' \
+    > docs/issues/2026-09-13-solo.md
+git add -A > /dev/null 2>&1
+git commit -qm base
+git mv docs/issues/2026-09-13-solo.md docs/issues/archive/2026-09-13-solo.md
+orph
+eq "a self-mentioning file is not its own citer" "$(printf '%s' "$OUT" | wc -c)" "0"
+rm -rf "$T"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" = "0" ]

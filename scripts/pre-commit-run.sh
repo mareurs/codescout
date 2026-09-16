@@ -178,4 +178,15 @@ run "rustfmt --check (committed bytes)" scripts/pre-commit-cargo-fmt.sh
 run "refuse a commit citing an artifact id nothing resolves" \
     scripts/pre-commit-dead-artifact-ids.sh
 
+# Self-gating (exits 0 when the commit stages no rename), and it WARNS rather than refuses.
+# Placed here, not folded into the foreign-index guard, because that guard has five early
+# `exit 0` paths and builds its rename maps after all of them -- `215a5cad` was a pathspec
+# commit naming only its author's own paths, so `theirs` was empty, the guard exited before
+# any rename was read, and it is recorded as Passed on the very commit that stranded seven
+# citation lines. A warning hosted there could not have fired on the case it exists for.
+# It also asks a different question: whether a MOVE strands a citation, which has nothing
+# to do with who staged what.
+run "warn when a moved path is still cited from outside the commit" \
+    scripts/pre-commit-orphaned-citations.sh
+
 exit $status
