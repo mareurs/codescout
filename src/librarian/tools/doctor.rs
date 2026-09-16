@@ -240,11 +240,24 @@ impl Check {
     /// `by_check` either way. So the bar is the one each check above meets: the emitted
     /// row's own first word tells a reader it is not a defect, and there is no edit to
     /// the repo that would make it stop firing.
+    ///
+    /// `open_bug_under_live_edit` fires when a live bug is cited from a source file with
+    /// **uncommitted changes** — the working-tree complement of `open_bug_cited_from_source`,
+    /// which suppresses exactly this set as its false-positive class 1. It meets the bar the
+    /// same way `claim_unresolvable_here` does, and for that check's reason rather than by
+    /// analogy: **the remedy is not an edit this reader can make.** The party who should mark
+    /// the record `taken` is the session holding the uncommitted work, and a reader claiming
+    /// it on their behalf would be claiming work that is not theirs — so the row sends you to
+    /// ask, exactly as an unresolvable claim sends you to check another host. Counting it as
+    /// drift would also exit 1 for precisely the population that has the condition — a shared
+    /// checkout with anyone mid-fix — and never for a solo one, which is the
+    /// `claim_held_by_live_session` mistake restated one check along.
     pub fn is_informational(self) -> bool {
         matches!(
             self,
             Check::ClaimHeldByLiveSession
                 | Check::ClaimUnresolvableHere
+                | Check::OpenBugUnderLiveEdit
                 | Check::RetiredObjectStillPresent
         )
     }
@@ -347,6 +360,7 @@ impl Check {
                 | Check::MissingFile
                 | Check::NonTerminalStatusWithFixAnchor
                 | Check::OpenBugCitedFromSource
+                | Check::OpenBugUnderLiveEdit
                 | Check::ParamsBehindBody
                 | Check::ParamsStatusDrift
                 | Check::PrematureArchiveCitation
@@ -389,6 +403,7 @@ declare_checks! {
     MissingFile => "missing_file",
     NonTerminalStatusWithFixAnchor => "non_terminal_status_with_fix_anchor",
     OpenBugCitedFromSource => "open_bug_cited_from_source",
+    OpenBugUnderLiveEdit => "open_bug_under_live_edit",
     ParamsBehindBody => "params_behind_body",
     ParamsStatusDrift => "params_status_drift",
     PrematureArchiveCitation => "premature_archive_citation",
@@ -548,6 +563,10 @@ const ROW_GRAIN_SCOPED_CHECKS: &[Check] = &[
     Check::TerminalStatusWithoutFixAnchor,
     Check::NonTerminalStatusWithFixAnchor,
     Check::OpenBugCitedFromSource,
+    // Added 2026-09-16 with the check itself. It shares `scan_open_bug_cited_from_source`'s
+    // population exactly, so it must share its scoping: a row refused for one is refused for
+    // the other, and a counter naming only one of them under-reports the refusal.
+    Check::OpenBugUnderLiveEdit,
     Check::UnterminatedFence,
     Check::ClaimWithoutClaimant,
     Check::ClaimHeldByLiveSession,
@@ -6903,7 +6922,13 @@ fn scan_open_bug_cited_from_source(
         Default::default();
     for (id, abs_path, status) in rows {
         let path = Path::new(&abs_path);
-        if !scope.admit("open_bug_cited_from_source", &id, &abs_path) {
+        // BOTH checks this scan emits must record the refusal. They share one population, so
+        // a row scoped out is scoped out of both; admitting under only the older name would
+        // leave `open_bug_under_live_edit` reporting a zero that means "nothing was looked
+        // at" in exactly the same bytes as "nothing was found".
+        let admit_cited = scope.admit("open_bug_cited_from_source", &id, &abs_path);
+        let admit_live_edit = scope.admit("open_bug_under_live_edit", &id, &abs_path);
+        if !admit_cited || !admit_live_edit {
             continue;
         }
         // Same path-COMPONENT test as the sibling checks: a repo living under a directory
@@ -6922,8 +6947,30 @@ fn scan_open_bug_cited_from_source(
     }
     let live_bug_count = live_by_rel.len();
 
+    // Slug -> the live bug's rel_path. A citation written while a fix is IN FLIGHT names the
+    // path the record is about to have, not the one it has. Measured 2026-09-16: an
+    // uncommitted test block cited `docs/issues/archive/<slug>.md` while the bug still sat at
+    // `docs/issues/<slug>.md`, so an exact-path lookup dropped the only signal that a session
+    // was working it — the extractor found the token and the LOOKUP discarded it.
+    //
+    // Only `open_bug_under_live_edit` resolves through this map. `open_bug_cited_from_source`
+    // keeps the exact-path match it shipped with: widening a SETTLED-citation check is a
+    // different decision from widening an in-flight one, and it is not the one being made here.
+    let live_by_slug: std::collections::HashMap<String, String> = live_by_rel
+        .keys()
+        .filter_map(|rel| {
+            Path::new(rel)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| (s.to_string(), rel.clone()))
+        })
+        .collect();
+
     // Bug rel_path -> the source files citing it, repo-relative.
     let mut citations: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    // The same, resolved by SLUG rather than by exact path — a superset, and the population
+    // `open_bug_under_live_edit` reads.
+    let mut slug_citations: std::collections::BTreeMap<String, Vec<String>> = Default::default();
     let mut source_files_scanned = 0usize;
     for entry in ignore::WalkBuilder::new(&cp.git_root)
         .standard_filters(true)
@@ -6951,7 +6998,20 @@ fn scan_open_bug_cited_from_source(
         let rel = rel.to_string_lossy().replace('\\', "/");
         for token in cited_issue_paths(&content) {
             if live_by_rel.contains_key(&token) {
-                citations.entry(token).or_default().push(rel.clone());
+                citations
+                    .entry(token.clone())
+                    .or_default()
+                    .push(rel.clone());
+            }
+            if let Some(bug_rel) = Path::new(&token)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .and_then(|s| live_by_slug.get(s))
+            {
+                slug_citations
+                    .entry(bug_rel.clone())
+                    .or_default()
+                    .push(rel.clone());
             }
         }
     }
@@ -7015,6 +7075,69 @@ fn scan_open_bug_cited_from_source(
         ));
     }
 
+    // ---- open_bug_under_live_edit ------------------------------------------------------
+    // The complement of the filter above, and the reason this is a second CHECK rather than a
+    // second scan: `settled` discards every citing file with a dirty working tree as false-
+    // positive class 1, and that discarded set is the whole answer to a different question —
+    // "is a session working this bug right now?". Same walk, same status calls, opposite
+    // reading. Nothing new is read from disk to produce it.
+    //
+    // `taken` is excluded because those records already name a claimant and the four
+    // `claim_*` checks own them. What is left is the gap this closes: a bug that is `open` or
+    // `investigating`, which every triage query reports as free, while a session has
+    // uncommitted work citing it. That state is invisible to the catalog — the signal lives in
+    // a working tree, which no `doc(action="find")` can see.
+    let mut under_live_edit = 0usize;
+    for (bug_rel, citing) in &slug_citations {
+        let Some((id, abs_path, status)) = live_by_rel.get(bug_rel) else {
+            continue;
+        };
+        if status == "taken" {
+            continue;
+        }
+        let mut dirty: Vec<&String> = citing
+            .iter()
+            .filter(|f| matches!(repo.status_file(Path::new(f)), Ok(s) if !s.is_empty()))
+            .collect();
+        dirty.sort();
+        dirty.dedup();
+        if dirty.is_empty() {
+            continue;
+        }
+        under_live_edit += 1;
+        let shown: Vec<String> = dirty.iter().take(2).map(|f| format!("`{f}`")).collect();
+        let more = dirty.len().saturating_sub(shown.len());
+        let tail = if more > 0 {
+            format!(" (+{more} more)")
+        } else {
+            String::new()
+        };
+        out.push(Violation::new(
+            "open_bug_under_live_edit",
+            Some(id.clone()),
+            abs_path.clone(),
+            format!(
+                "informational: status is `{status}` and no claimant is recorded, but {} \
+                 source file(s) citing this bug have UNCOMMITTED changes — {}{}. A session is \
+                 probably working it, and every triage query reports it as free: \
+                 `doc(action=\"find\", kind=\"bug\", filter={{\"status\": …}})` reads the \
+                 catalog, and this signal is in a working tree the catalog cannot see. ASK \
+                 before you claim it — resolve the writer with \
+                 `python3 scripts/file-provenance.py <path>`, which names the session and the \
+                 socket. Do NOT mark it `taken` yourself: the claim belongs to whoever holds \
+                 the edit, and claiming their work is the failure this exists to prevent. \
+                 Measured 2026-09-16: a session reached an `open`, unclaimed bug whose filer \
+                 had already written the regression test for it, uncommitted, in the file the \
+                 fix needed — and the only thing that surfaced it was running provenance by \
+                 hand. Worklist, not a verdict: a citation may be RATIONALE, and a dirty file \
+                 may be dirty for an unrelated reason.",
+                dirty.len(),
+                shown.join(", "),
+                tail
+            ),
+        ));
+    }
+
     let health = json!({
         "live_bugs_in_scope": live_bug_count,
         "source_files_scanned": source_files_scanned,
@@ -7022,11 +7145,18 @@ fn scan_open_bug_cited_from_source(
         "bugs_cited_from_source": citations.len(),
         "suppressed_as_unsettled": unsettled,
         "settle_days": SETTLE_DAYS,
+        "bugs_under_live_edit": under_live_edit,
+        "slug_resolved_citations": slug_citations.len(),
         "blind_to": "a citation WRAPPED across lines by a code formatter — whitespace \
                      terminates the path token, and one such citation existed in this repo. \
                      Markdown is excluded by design. A zero here means no SETTLED, \
                      single-line, source-file citation of a live bug was found — not that \
-                     every live bug is genuinely unfixed.",
+                     every live bug is genuinely unfixed. `open_bug_under_live_edit` inherits \
+                     every one of those bounds and adds two: it sees only sessions that have \
+                     CITED the bug from source, so a session working a bug without naming its \
+                     path is invisible, and `.md`-only work is invisible for the same reason \
+                     the settled check excludes markdown. Its zero is therefore never \
+                     evidence that nobody is working anything.",
     });
     Ok((out, health))
 }
@@ -10423,8 +10553,21 @@ mod tests {
             scan_open_bug_cited_from_source(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert!(
-            v.is_empty(),
+            v.iter().all(|x| x.check != "open_bug_cited_from_source"),
             "an uncommitted citation is a fix in flight, not a stale record: {v:#?}"
+        );
+        // 2026-09-16: this fixture IS the in-flight case, so it is also the positive fixture
+        // for `open_bug_under_live_edit`, which exists to surface exactly what the assertion
+        // above suppresses. Pinned here, not only in that check's own tests, because the bare
+        // `v.is_empty()` this replaced would go green again the moment the complement stopped
+        // firing — suppression and surfacing are one decision, and a test that pins only the
+        // suppressing half cannot tell a working complement from a deleted one.
+        assert_eq!(
+            v.iter()
+                .filter(|x| x.check == "open_bug_under_live_edit")
+                .count(),
+            1,
+            "and the complement must SURFACE what this one suppresses: {v:#?}"
         );
     }
 
@@ -10547,6 +10690,155 @@ mod tests {
             1,
             "the sibling-root row must be COUNTED as scoped out, not silently dropped: \
              {scoped_out:?}"
+        );
+    }
+
+    /// THE CASE THIS CHECK EXISTS FOR, measured 2026-09-16.
+    ///
+    /// A session writes the regression test for a bug *before* fixing it, and cites the path
+    /// the record is ABOUT to have — the archive one — while the record still sits in
+    /// `docs/issues/`. `cited_issue_paths` extracts that token fine; the exact-path lookup
+    /// `open_bug_cited_from_source` uses then resolves nothing, so the only signal that the
+    /// bug is being worked is dropped by the LOOKUP, not by the extractor. The slug index is
+    /// the whole reason this passes.
+    ///
+    /// LOAD-BEARING FIXTURE DETAIL: `guard.sh` is written *after* the fixture commits, so it
+    /// is untracked and `status_file` reports it dirty. Commit it and this test still passes
+    /// its citation assertion while measuring nothing — the check would be reading a settled
+    /// file. The `..._is_silent_when_the_citer_is_clean` sibling is what pins that direction.
+    #[tokio::test]
+    async fn open_bug_under_live_edit_fires_on_a_dirty_citer_that_names_the_archive_path() {
+        let (_tmp, root) =
+            git_fixture_with_backdated_source("src/thing.rs", "//! unrelated\npub fn f() {}\n", 30);
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "silent-push",
+            "open",
+            "",
+            "## Fix\n\nNot applied.",
+        );
+        std::fs::write(
+            root.join("guard.sh"),
+            "# docs/issues/archive/silent-push.md\nrun_case\n",
+        )
+        .unwrap();
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
+        let (v, health) = {
+            let cat = ctx.catalog.lock();
+            scan_open_bug_cited_from_source(&ctx, &mut ds, &cat.conn).unwrap()
+        };
+
+        let rows: Vec<_> = v
+            .iter()
+            .filter(|x| x.check == "open_bug_under_live_edit")
+            .collect();
+        assert_eq!(
+            rows.len(),
+            1,
+            "an archive-path citation from a DIRTY file must reach the live record: {v:#?}"
+        );
+        assert!(
+            rows[0].detail.contains("guard.sh"),
+            "the row must name the file holding the edit, not merely that one exists: {}",
+            rows[0].detail
+        );
+        assert_eq!(
+            health["bugs_under_live_edit"], 1,
+            "the health block must count it: {health}"
+        );
+        assert!(
+            v.iter().all(|x| x.check != "open_bug_cited_from_source"),
+            "the settled check must stay silent on an in-flight citation — that suppression \
+             is its false-positive class 1, and this check is its complement, not its \
+             replacement: {v:#?}"
+        );
+    }
+
+    /// The direction the test above is monotone under, pinned separately.
+    ///
+    /// A citation alone must not fire this: the claim is about UNCOMMITTED work. Without this,
+    /// a check that reported every citing file would satisfy the sibling assertion above and
+    /// measure nothing.
+    #[tokio::test]
+    async fn open_bug_under_live_edit_is_silent_when_the_citer_is_clean() {
+        let (_tmp, root) = git_fixture_with_backdated_source(
+            "guard.sh",
+            "# docs/issues/archive/silent-push.md\nrun_case\n",
+            30,
+        );
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "silent-push",
+            "open",
+            "",
+            "## Fix\n\nNot applied.",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
+        let (v, health) = {
+            let cat = ctx.catalog.lock();
+            scan_open_bug_cited_from_source(&ctx, &mut ds, &cat.conn).unwrap()
+        };
+
+        assert!(
+            v.iter().all(|x| x.check != "open_bug_under_live_edit"),
+            "a committed, clean citer is not in-flight work: {v:#?}"
+        );
+        assert_eq!(
+            health["bugs_under_live_edit"], 0,
+            "and the counter must agree with the rows: {health}"
+        );
+    }
+
+    /// `taken` records already name a claimant, and the four `claim_*` checks own them.
+    ///
+    /// Reporting one here would tell a reader to go ask about a claim that is already
+    /// declared — the exact noise this check was scoped to avoid.
+    #[tokio::test]
+    async fn open_bug_under_live_edit_skips_a_record_that_already_declares_a_claimant() {
+        let (_tmp, root) =
+            git_fixture_with_backdated_source("src/thing.rs", "//! unrelated\npub fn f() {}\n", 30);
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "silent-push",
+            "taken",
+            "",
+            "## Fix\n\nNot applied.",
+        );
+        std::fs::write(
+            root.join("guard.sh"),
+            "# docs/issues/archive/silent-push.md\nrun_case\n",
+        )
+        .unwrap();
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
+        let (v, _health) = {
+            let cat = ctx.catalog.lock();
+            scan_open_bug_cited_from_source(&ctx, &mut ds, &cat.conn).unwrap()
+        };
+
+        assert!(
+            v.iter().all(|x| x.check != "open_bug_under_live_edit"),
+            "a `taken` record is the claim feature working; the claim_* checks own it: {v:#?}"
         );
     }
 
