@@ -227,13 +227,28 @@ Slice 4 is not a next step; slice 3's prerequisite is now discharged but slice 3
 
 ## Status
 
-**Phase:** bounded architecture review complete. **Slice 1 approved and implemented 2026-09-15**; slices 2–4 remain unauthorized. Read **Bounded baseline and verdict — 2026-09-13** below, then **Slice 1 — approved and implemented** at the end of this section.
+**Phase:** bounded architecture review **complete — all four slices resolved**. Slice 1 built; slices 2, 3 and 4 scouted and deliberately NOT built, each leaving a test or a filed gap instead of a migration. Read **Bounded baseline and verdict — 2026-09-13** for the measurements, then the four slice records at the end of this section.
 
 **Verification:** 14 probe regression tests and self-test pass. Four applied mutation candidates were detected, zero survived. Second full gate completed with FMT_EXIT=0, CLIPPY_EXIT=0, LEAN_EXIT=0, DEFAULT_EXIT=0, in the required order; logs are under `.codescout/measurements/architecture-boundary/2026-09-13/gate2-*.log`. The earlier formatter refusal/default attribution failure remain in the first-run logs. These gates do not establish server-stack coverage.
 
 **Source bound:** frozen snapshot 23adef79023ebc43ea30d8d8e50a2175bacab5aa, not current shared HEAD; corrected measurement commands retained their exit-2 HEAD-change warning. No numeric finding is a whole-project/compiler-resolution claim.
 
-**Next action:** slice 1 shipped (`f098069a`, pushed). Slice 2 is **scouted and parked with its invariant pinned** — see below. Slices 3 and 4 remain unauthorized, and neither is ready: the tracker already names slice 3's prerequisite (audit the unresolved helper paths) and slice 4's (no crash-injection or shared-edit parity experiment was ever performed). Missing-symbol latency repetition and unresolved action paths remain explicitly scoped follow-ups. The measurement work stream — probe, regression tests, this tracker and its seven bug files — is committed in `d3a2c24f`.
+**Next action: none in this work stream.** All four slices are resolved and both remaining prerequisites were discharged 2026-09-16.
+
+| slice | outcome | artifact |
+|---|---|---|
+| 1 — job lifecycle | **built**, MCP-verified against the live binary | `f098069a` |
+| 2 — semantic results | scouted, parked; boundary already existed, invariant pinned | `8a1a44b3` |
+| 3 — request context | scouted, not built; pin already shipped, population guard added | `d4ab86e2` |
+| 4 — recoverable mutations | experiment run; slice reframed, gap filed | `8a76f435` |
+
+**Three of four ended the same way, and that is the review's actual finding:** the proposed boundary already existed or solved a problem the measurement did not find, and what was missing each time was the invariant that keeps what exists. The output is three tests and two bug files, not three migrations.
+
+**The follow-ups this section used to list as owed are done** — missing-symbol latency repeated with startup and miss separated, unresolved action paths resolved, merges and renames characterised. See **Follow-up measurements — 2026-09-16**. Widening the frozen population remains deliberately not done, gated as a separately versioned measurement.
+
+**Open, and not blocking anything here:** `86e44eba4bbdd891` (the probe counts Rust keywords as unresolved helpers) and `bd117fbc0d1a0308` (a catalog row behind its file is repairable but invisible). **The one experiment still owed** is the other four writer pairs — `move`, `append_entry`, `augment`, `edit_file`'s catalog sync — none of which was injected, so *"across actual sibling implementations"* is two compared and four unexamined.
+
+The measurement work stream — probe, regression tests, this tracker and its seven bug files — is committed in `d3a2c24f`.
 
 ### Slice 1 — approved and implemented
 
