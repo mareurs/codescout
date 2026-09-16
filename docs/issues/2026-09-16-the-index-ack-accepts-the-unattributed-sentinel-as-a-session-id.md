@@ -101,6 +101,18 @@ be slowest about. It is also the direction a proposed ack *widening* would have 
 a wider admitting predicate reaches far more rows, and every `-` among them would have been
 ackable by one character.
 
+## Fix provenance
+
+- **SHA:** `96d839c3` (`experiments`)
+- **patch-id:** `caa8669f048c56e0dd09ced10823b9f2a2131cc6`
+
+Declared under this heading rather than left in § *Fix* prose, because `doctor`'s
+`terminal_status_without_fix_anchor` fired on the first version of this file and its
+reasoning is right: a bare hash in prose makes a record **read as anchored** while nothing
+parses it, and a reader scanning for provenance finds the hash and stops looking. The pair
+is what survives — the SHA dies on the next rebase of `experiments`, the patch-id is a
+content hash of the diff and survives rebase and cherry-pick both.
+
 ## Tests added
 
 Four cases in `tests/hooks-discrimination.sh` § 5. The two that carry the fix —
