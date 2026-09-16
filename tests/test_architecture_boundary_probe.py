@@ -145,7 +145,7 @@ impl Tool for Workspace {
         # Only `ambiguous` is a real unresolved route: two free definitions, so the
         # probe cannot pick one. Asserted by EQUALITY rather than assertNotIn, so this
         # reds on over-reporting AND on losing the genuine member.
-        # docs/issues/2026-09-16-probe-counts-rust-keywords-as-unresolved-helpers.md
+        # docs/issues/archive/2026-09-16-probe-counts-rust-keywords-as-unresolved-helpers.md
         result = self.trace('''
 impl Tool for Workspace {
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
@@ -197,7 +197,7 @@ impl Drop for Guard {
         # it wants has a `self` receiver -- so flipping the default to True empties
         # it and silently kills this whole resolution path. Found by mutation: the
         # flip left 16 of 16 tests green, because no fixture exercised `self.f()`.
-        # docs/issues/2026-09-16-probe-counts-rust-keywords-as-unresolved-helpers.md
+        # docs/issues/archive/2026-09-16-probe-counts-rust-keywords-as-unresolved-helpers.md
         result = self.trace('''
 impl Tool for Workspace {
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {

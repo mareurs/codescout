@@ -1,7 +1,7 @@
 ---
-id: '86e44eba4bbdd891'
+id: 20807215e1c20c3d
 kind: bug
-status: taken
+status: fixed
 title: Architecture probe counts Rust keywords as unresolved helpers
 tags:
 - architecture
@@ -9,6 +9,7 @@ tags:
 - cluster/addressing-without-an-escape-hatch
 claimed_at: 2026-09-16
 claimed_by: e5691fad-9f78-4cd1-ad14-edfdd1fee41f
+closed: 2026-09-16
 ---
 
 # BUG: the probe counts Rust keywords as unresolved helpers, inflating the population 5.6x
@@ -97,6 +98,8 @@ Verified rather than reasoned:
    declared inside a body the probe already walks.
 
 ## Fix
+
+**FIXED 2026-09-16** in `082b632b` — patch-id `87a2185ff7b99cf6f0ebbd2d30b90290d524d947`.
 
 Applied 2026-09-16, and **candidate 1 alone does not fix this bug's own case** — found by
 running the reproduction before building on the plan.

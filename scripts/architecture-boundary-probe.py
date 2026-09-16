@@ -738,7 +738,7 @@ def named_function_bodies(text: str, *, free_only: bool = False) -> dict[str, li
     The receiver is the discriminator and it is structural, so no name list is
     needed -- which matters because the guard it replaces was an enumerated
     denylist of four keywords over an open namespace.
-    docs/issues/2026-09-16-probe-counts-rust-keywords-as-unresolved-helpers.md
+    docs/issues/archive/2026-09-16-probe-counts-rust-keywords-as-unresolved-helpers.md
     """
     self_receiver = re.compile(r"\(\s*(?:&\s*(?:'[A-Za-z_][A-Za-z0-9_]*\s+)?)?(?:mut\s+)?self\b")
     functions: dict[str, list[str]] = defaultdict(list)
