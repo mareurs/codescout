@@ -308,6 +308,35 @@ moving it into Unit 1.
 - **`EmbedderHttp` retirement**, and with it root dropping `reqwest`/`rustls`
   and two lean CI lanes dropping 48 crates.
 - **Prebuilt release lane** — sub-project 2.
+- **A user-defined-model `local-dir:` path** — GitHub #16, recorded 2026-09-16.
+  **The seam exists and this design was built for it:** Component 1 loads via
+  fastembed's `try_new_from_user_defined`, and § *Decision* lists *"add a second
+  weights source"* among the absorbed change scenarios. What is **not** delivered is a
+  caller-supplied pooling / quantization / `output_key` spec — `from_dir_blocking`
+  takes all three from module constants, and Testing row 2 pins a **384-d** vector,
+  which is what scopes this design to AllMiniLM rather than any oversight. Dims are
+  probed from the model, so a directory holding another model's weights yields a
+  **plausible, wrong vector rather than an error**. Cost to a host already serving
+  CodeRankEmbed (768-d) over HTTP: the ONNX path means a model change plus a full
+  reindex of every code index and every memory. **Two sites must move together or the
+  token budget silently mismatches the model** — `from_dir_blocking`'s constants, and
+  `chunk_size_for_model`'s `local-dir:` arm, which hardcodes delegation to
+  `local:AllMiniLML6V2Q`. Splitting them reintroduces the class GitHub #15 was about.
+- **Hybrid sparse with a local backend** — GitHub #16, recorded 2026-09-16. **Not a
+  gap: § *Architecture* decides it** — *"Local implies dense-only… `server-stack`
+  compiled in and sparse expected and a local backend selected is an error, not a
+  downgrade"* — with the operator text specified in § *Error handling* and the
+  behaviour pinned by Testing row 7. Listed here because the decision is findable only
+  from inside this spec: an external reader meets it as `guard_sparse` refusing, with
+  nothing saying the refusal was chosen rather than unimplemented. Revisiting means
+  either giving a local backend a sparse leg or accepting a silently degraded hybrid,
+  and § *Architecture* rejected the second on purpose.
+
+**Both entries above were reported as *unplanned and unrecorded* on GitHub #16 before
+this spec was read** — a search of `docs/trackers/` and `ROADMAP.md` returned nothing and
+was published as a claim about the project. `docs/superpowers/specs/` is not a surface an
+issue-triage search reaches by default; that is the reason these are written down here
+rather than the lesson being recorded elsewhere.
 
 ## Risks
 
