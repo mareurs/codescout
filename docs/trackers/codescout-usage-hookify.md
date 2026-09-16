@@ -827,7 +827,7 @@ it.
   already paid for twice.
 - **Carve-out:** cap the output. A slug word like `gate` or `check` matches most of the archive, and
   a pile reads as coverage — see
-  `docs/issues/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md` § *Root cause*, where
+  `docs/issues/archive/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md` § *Root cause*, where
   an over-wide prior-art pattern returned 119 files. The advisory must not reproduce the defect it
   exists to catch.
 - **Why the passing path matters:** when it finds nothing, say so with its denominator — *"searched N

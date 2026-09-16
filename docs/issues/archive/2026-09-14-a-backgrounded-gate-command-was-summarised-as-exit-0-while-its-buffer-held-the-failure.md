@@ -301,7 +301,7 @@ does not carry *other* dirty files, so the then-uncommitted test was absent: `ru
 `5541 filtered out`. The script warns that dirty files are not carried, yet still prints
 `SURVIVED` with two readings (*untested* / *unreachable*), neither of which is *"your test was
 not in the tree"*. That is this corpus's own
-`docs/issues/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md` arriving inside
+`docs/issues/archive/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md` arriving inside
 the instrument built to check for it.
 
 **REFINED 2026-09-14 by `9403d62d` — and the correction is to the PRESCRIPTION, not to the
@@ -339,7 +339,7 @@ the caller's filter will select. **And exit codes cannot substitute** — on a z
 baseline exits 0 and the mutant exits 0 too, byte-identical to a genuine survival. That half is
 confirmed directly by this file's own vacuous run, which printed `SURVIVED (rc=0)` over
 `running 0 tests` and `test result: ok`: `cargo test` exits 0 when its filter matches nothing,
-which is `docs/issues/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md` again.
+which is `docs/issues/archive/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md` again.
 `--list` moves the parse to a purpose-built listing rather than result prose — marginally more
 stable, still a parse.
 

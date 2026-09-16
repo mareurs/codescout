@@ -98,7 +98,7 @@ pub(crate) fn rebuild_buffered_summary(raw: Value, output_id: &str) -> Value {
 /// selection whose every match was `#[ignore]`d (that selection was not empty, and its remedy
 /// is `-- --ignored`, so claiming otherwise would send the reader somewhere useless).
 ///
-/// See `docs/issues/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md`.
+/// See `docs/issues/archive/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md`.
 pub(crate) fn empty_test_selection_diagnostic(stdout: &str) -> Option<String> {
     let (mut passed, mut ignored, mut filtered) = (0usize, 0usize, 0usize);
     let mut saw_summary = false;

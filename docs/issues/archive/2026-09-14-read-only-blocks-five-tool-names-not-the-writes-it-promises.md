@@ -280,7 +280,7 @@ inputs.
   (`src/util/path_security.rs`) — asserts `doc`, `librarian`, `memory`, `onboarding` are refused.
   **Observed RED before the fix**, panicking on `doc`, with `1 failed; 0 passed; 5530 filtered
   out` — the filtered count is quoted because a filter matching nothing reports success here
-  (`docs/issues/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md`), so a bare
+  (`docs/issues/archive/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md`), so a bare
   `ok` would not have shown the test ran.
 - **`every_write_call_is_refused_under_a_write_block`** (`src/server.rs`) — walks the real
   registry, taking each tool's own `is_write` as the oracle and its own `action` enum as the

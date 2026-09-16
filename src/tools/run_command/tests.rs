@@ -2907,7 +2907,7 @@ fn substitution_diagnostic_is_silent_when_the_command_shows_no_substitution() {
 /// Real `cargo test` output, measured 2026-09-16 on `--test doc_tool_refs` with a filter
 /// naming a HELPER function rather than a test. The word `ok` and the exit code are
 /// byte-identical to a genuinely passing run; only which integers are non-zero differs.
-/// See `docs/issues/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md`.
+/// See `docs/issues/archive/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md`.
 const EMPTY_SELECTION_STDOUT: &str = "\nrunning 0 tests\n\ntest result: ok. 0 passed; \
      0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s\n";
 
