@@ -716,12 +716,38 @@ def function_body(text: str, name: str) -> str | None:
     return None
 
 
-def named_function_bodies(text: str) -> dict[str, list[str]]:
+def named_function_bodies(text: str, *, free_only: bool = False) -> dict[str, list[str]]:
+    """Function bodies keyed by name. `free_only` drops `self`-receiver methods.
+
+    Two consumers want opposite things, which is why this is a flag and not a
+    behaviour change. `methods_for_type` indexes a type's METHODS to resolve
+    `self.f()`, so it needs the receivers and keeps the default. The free-call
+    loop in `reachable_context` resolves `f(x)` -- its
+    `(?<![.:])\\b([a-z_]\\w*)\\s*\\(` regex already rules out `x.f()` and `T::f()`
+    by lookbehind -- and a free call cannot reach `fn f(&mut self)`. Resolving one
+    to a method is not a near-miss; it picks a body the caller could not have been
+    invoking.
+
+    `drop` is the live case and it has both failure modes. With several
+    `impl Drop for T { fn drop(&mut self) }` in one file the name resolves
+    ambiguously and lands in `unresolved_same_file_helpers`; with exactly one it
+    resolves UNIQUELY, the trait body gets walked, and its `ctx` reads are
+    attributed to the tool. The first is noise in a published population; the
+    second inflates the measurement and nothing flags it.
+
+    The receiver is the discriminator and it is structural, so no name list is
+    needed -- which matters because the guard it replaces was an enumerated
+    denylist of four keywords over an open namespace.
+    docs/issues/2026-09-16-probe-counts-rust-keywords-as-unresolved-helpers.md
+    """
+    self_receiver = re.compile(r"\(\s*(?:&\s*(?:'[A-Za-z_][A-Za-z0-9_]*\s+)?)?(?:mut\s+)?self\b")
     functions: dict[str, list[str]] = defaultdict(list)
     pattern = re.compile(r"\b(?:async\s+)?fn\s+([a-z_][A-Za-z0-9_]*)\b[^{{;]*")
     for match in pattern.finditer(text):
         opening = text.find("{", match.end())
         if opening < 0:
+            continue
+        if free_only and self_receiver.search(text[match.start() : opening]):
             continue
         try:
             closing = matching_brace(text, opening)
@@ -771,7 +797,7 @@ def reachable_context(
     all_impls = {item["type"]: item["body"] for item in impl_tool_blocks(file_text)}
     method_maps = {name: methods_for_type(file_text, name) for name in all_impls}
     method_maps.setdefault(tool_type, methods_for_type(file_text, tool_type))
-    local_functions = named_function_bodies(file_text)
+    local_functions = named_function_bodies(file_text, free_only=True)
 
     bodies = [call_body]
     queue = [(call_body, tool_type)]
@@ -806,7 +832,16 @@ def reachable_context(
                     visited_bodies.add(candidate)
                     bodies.append(candidate)
                     queue.append((candidate, owner_type))
-            elif "ctx" in body and helper not in {"if", "match", "while", "for"}:
+            elif len(candidates) > 1 and "ctx" in body:
+                # Report only names AMBIGUOUS between real free-function definitions
+                # -- the case where the probe genuinely cannot pick a body to follow.
+                # Zero candidates means syntax (`let (a, b) = ...`), a closure, or an
+                # out-of-tree call; none is a same-file helper. The enumerated
+                # {"if","match","while","for"} denylist this replaced was four names
+                # over an OPEN namespace, so every other keyword in call position was
+                # reported -- `let` reached 15 of 15 tools, 20 of 28 rows were syntax,
+                # and the list could only ever be extended by someone who had already
+                # noticed the specific miss.
                 unresolved_helpers.add(helper)
 
     fields: set[str] = set()
@@ -1031,7 +1066,7 @@ def context_measurement(source_root: Path, live_project_root: Path, binary: Path
             raise ProbeError(f"{path}: {error}") from error
         source_documents[path] = (original, production)
         try:
-            named_bodies = named_function_bodies(production)
+            named_bodies = named_function_bodies(production, free_only=True)
         except ProbeError as error:
             raise ProbeError(f"{path} (function index): {error}") from error
         for name, bodies in named_bodies.items():

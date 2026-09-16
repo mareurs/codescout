@@ -136,6 +136,80 @@ impl Tool for Workspace {
         methods = {json.loads(row)["method_or_field"] for row in result["agent_reach_through"]}
         self.assertIn("project_status", methods)
 
+    def test_unresolved_helpers_exclude_syntax_and_self_receiver_methods(self):
+        # Three names sit in call position without being same-file helpers, and no
+        # enumerated denylist reaches all three:
+        #   `let (a, b) = ...`  a KEYWORD in call position (15 of 15 tools, live)
+        #   `split(...)`        a name with no definition anywhere
+        #   `drop(guard)`       std::mem::drop, shadowed by trait-impl `fn drop(&mut self)`
+        # Only `ambiguous` is a real unresolved route: two free definitions, so the
+        # probe cannot pick one. Asserted by EQUALITY rather than assertNotIn, so this
+        # reds on over-reporting AND on losing the genuine member.
+        # docs/issues/2026-09-16-probe-counts-rust-keywords-as-unresolved-helpers.md
+        result = self.trace('''
+impl Tool for Workspace {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
+        let (head, tail) = split(ctx.agent.name());
+        drop(guard);
+        ambiguous(ctx);
+        unique_helper(ctx);
+    }
+}
+impl Drop for FirstGuard {
+    fn drop(&mut self) { self.release(); }
+}
+impl Drop for SecondGuard {
+    fn drop(&mut self) { self.release(); }
+}
+fn ambiguous(ctx: &ToolContext) -> usize { ctx.lsp.count() }
+fn ambiguous(ctx: &ToolContext, n: usize) -> usize { n }
+fn unique_helper(ctx: &ToolContext) { ctx.output_buffer.clear(); }
+''')
+        self.assertEqual(result["unresolved_same_file_helpers"], ["ambiguous"])
+        # Control: the uniquely-resolvable helper is still FOLLOWED, so the fix
+        # narrows the report without disabling traversal. Without this line, a
+        # change that stopped resolving free calls at all would pass the one above.
+        self.assertIn("output_buffer", result["context_fields"])
+
+    def test_a_free_call_does_not_resolve_to_a_trait_method_of_the_same_name(self):
+        # The quieter half of the same defect, and the more expensive one. With ONE
+        # `impl Drop`, `fn drop` resolves UNIQUELY, so the probe follows it and
+        # attributes that body's ctx reads to the tool -- inflating the measured
+        # blast radius rather than the unresolved list, where nothing flags it.
+        # A free `drop(x)` can never reach `fn drop(&mut self)`; the receiver is
+        # what rules it out, and no name-based list can.
+        result = self.trace('''
+impl Tool for Workspace {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
+        drop(guard);
+        ctx.agent.project_status();
+    }
+}
+impl Drop for Guard {
+    fn drop(&mut self) { ctx.lsp.shutdown_all(); }
+}
+''')
+        self.assertEqual(result["context_fields"], ["agent"])
+
+    def test_a_self_method_call_is_followed_through_the_type_index(self):
+        # Pins `named_function_bodies`' free_only DEFAULT, which nothing else does.
+        # `methods_for_type` uses that index to resolve `self.f()`, and every method
+        # it wants has a `self` receiver -- so flipping the default to True empties
+        # it and silently kills this whole resolution path. Found by mutation: the
+        # flip left 16 of 16 tests green, because no fixture exercised `self.f()`.
+        # docs/issues/2026-09-16-probe-counts-rust-keywords-as-unresolved-helpers.md
+        result = self.trace('''
+impl Tool for Workspace {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
+        self.helper(ctx)
+    }
+}
+impl Workspace {
+    fn helper(&self, ctx: &ToolContext) { ctx.lsp.shutdown_all(); }
+}
+''')
+        self.assertEqual(result["context_fields"], ["lsp"])
+
     def test_direct_and_delegated_reads_are_separate(self):
         result = self.trace('''
 impl Tool for Workspace {
