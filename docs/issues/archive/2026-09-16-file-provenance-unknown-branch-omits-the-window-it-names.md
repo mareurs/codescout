@@ -230,15 +230,56 @@ where `floor` is `None` and the silence is already correct. `if floor:` is the r
 bug is only that it sits below the `continue`.
 
 ## Tests
-DONE. `tests/file-provenance.sh` 144 → 153, with all six new assertions observed red first.
+DONE. `tests/file-provenance.sh` 144 → 155, eleven new assertions. **Eight were observed red
+before the code changed** — six at the fix, two at the prose repair below. The other three
+are mutation-driven, where the red is a mutation's *survival* rather than a failing run;
+they are named as such in the table so neither kind is credited with the other's evidence.
 
 Shape assertions rather than prose pins, as this section asked: `window: writes at or after`
 plus its floor **value**, `dispositive`, `too narrow`, `LIKELY CAUSE`. The fixture path
 `src/frame_probe.rs` deliberately shares no substring with any marker asserted on it — the
 constraint the `--since` section already annotates.
 
-**MUTATION EVIDENCE**, once per guarded site and re-run across every bound after the last
-change. Baseline `passed=153 failed=0`; verdicts read off the suite's own count line.
+**MUTATION EVIDENCE**, once per guarded site and re-run across every bound after every
+change — a verdict measures **bytes**, so the prose repair below invalidated the first
+run and all seven were re-run against the new bytes. Baseline `passed=155 failed=0`;
+verdicts read off the suite's own count line.
+
+| # | mutation | verdict |
+|---|---|---|
+| M1 | delete the `UNKNOWN` window print | KILLED (4) |
+| M2 | drop the `records` guard | KILLED (1) |
+| M3 | clearance fires on any known dirtiness | KILLED (2) |
+| M4 | remove the too-narrow branch | KILLED (1) |
+| M5 | an untracked path reads as clean | KILLED (1) |
+| M6 | the defensive `status` returncode branch | SURVIVED — predicted, annotated inert at the site |
+| M7 | the hedge reverts to a bare demonstrative | KILLED (2) |
+
+**A THIRD DEFECT, INTRODUCED BY THE FIX ITSELF AND INVISIBLE IN ITS DIFF** — found by
+sessionId `9e022ef0`, which is **incident 1 above**: the reader the original defect misled
+is the one who verified the repair and found what it broke. They ran the tool on the same
+clean `.rs` paths that had misled them that morning, rather than reading the diff. (Their
+sid was derived from the socket their message arrived on, not from the `codescout-61` they
+signed as — that name is `nameSource: derived` and is not the one they held when incident 1
+was recorded.) `no record … in the window. That is a statement
+about coverage` read unambiguously while it was the **first** line after the verdict: the
+demonstrative could only be the record absence. Inserting `LIKELY CAUSE:` between them
+displaced the antecedent, and the clearance's own closing clause is *"rather than a
+coverage gap"* — so two adjacent sentences both opened `That is` and said **opposite
+things about coverage**. A reader taking the last one as the verdict's summary recovers
+the exact misreading this file was opened for.
+
+The repair is the hedge naming its own subject (`That absence is a statement about
+coverage`), not a reordering: putting the hedge first would restore the pronoun and bury
+the cause under the long Bash paragraph, which is the *"reads as an aside"* failure in
+§ *Reproduction*. Suppressing the hedge was rejected too — it is true, and it is about
+**ownership**, a different question from whether uncommitted bytes exist.
+
+**Why no diff review would have caught it:** the changed bytes are all in the inserted
+line, and the defect is in a line that was **not** touched. It exists only in the
+rendered adjacency of the two. That is § *Testing Discipline*'s remedy-text law with the
+blast radius one step wider than usual — not *"the message sends you somewhere useless"*
+but *"a correct message acquires a false reading from what was placed above it"*.
 
 | # | mutation | verdict |
 |---|---|---|

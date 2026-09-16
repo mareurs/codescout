@@ -681,8 +681,9 @@ def main(argv: list[str]) -> int:
                           "is too narrow for the question you asked — NOT evidence that "
                           "nobody owns it. Re-run with --all before concluding anything.")
             print("          no record of any session writing this path in the window. "
-                  "That is a statement about coverage, NOT about ownership — Bash writes "
-                  "this tool's heuristics miss look identical. Do not read it as 'not mine'.")
+                  "That absence is a statement about coverage, NOT about ownership — Bash "
+                  "writes this tool's heuristics miss look identical. Do not read it as "
+                  "'not mine'.")
             print("          One blind spot is a Bash write: this tool's heuristics "
                   "can miss one, so an owner may exist and not be recorded. A SUBAGENT "
                   "write is NOT one — since 2026-09-12 this tool reads "

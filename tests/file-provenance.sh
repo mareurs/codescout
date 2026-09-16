@@ -931,6 +931,21 @@ has   "and names the window the default floor produced"       "$st" "window: wri
 has   "and a clean tree is reported as settling the question" "$st" "dispositive"
 hasnt "and the completeness claim is gone"                    "$st" "The one blind spot"
 
+# THE HEDGE MUST NAME ITS OWN SUBJECT, and this regressed the moment the clearance was
+# added above it. `no record … in the window. That is a statement about coverage` read
+# unambiguously while it was the FIRST line after the verdict -- "That" could only be the
+# record absence. Inserting LIKELY CAUSE between them displaced the antecedent, and the
+# clearance's own closing clause is `rather than a coverage gap`, so two adjacent sentences
+# both opened "That is" and said opposite things about coverage. A reader taking the last
+# one as the verdict's summary gets back the exact misreading this file was opened for.
+# Found by codescout-61 running the fix rather than reading it; the displaced-antecedent
+# mechanism is not visible in the diff, only in the rendered output.
+# The `hasnt` is monotone under removal -- deleting the prose satisfies it -- so it is
+# evidence only beside the `has`. Together they say: the sentence is present AND it is not
+# the bare-demonstrative form. Neither can tell you the wording is CLEAR.
+has   "the hedge names the absence as its subject"            "$st" "That absence is a statement"
+hasnt "and not the bare demonstrative the clearance collides with" "$st" "window. That is a statement"
+
 # The expensive direction, and the row the hidden hint CANNOT separate from the one above:
 # same floor, same records, same UNKNOWN -- and uncommitted bytes really are held. This is
 # incident 2, where --all went on to name three LIVE peers. git cleanliness is a SECOND
