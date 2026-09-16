@@ -1483,5 +1483,38 @@ row"* — the two-call form, in the ledger that measures its cost. Not swept her
 session was already active in this file and appending to it is the act this bug documents.
 ## Resume
 
-Decide remedy (1) vs (2) and record it in `docs/RELEASE.md` § git workflow, which today
-says nothing about concurrent sessions in one checkout.
+**Discharged 2026-09-16.** Both halves are done, and the gap between them is worth one line
+because it is this file's own subject in miniature.
+
+The *decision* was made 2026-09-01 in § *Re-ranking, third time* (`428cbe7b`): all three
+commit-side remedies withdrawn, the worktree promoted to the only unilateral defence. The
+*recording* never followed it. `docs/RELEASE.md` § *Concurrent-Work Rules* already existed by
+then — this section's claim that it "says nothing about concurrent sessions in one checkout"
+was stale when written — but it carried the **pre-falsification ranking**: the pathspec commit
+prescribed as the rule (2026-08-18, `c24abefe`) and the worktree demoted to *"when a write
+genuinely cannot wait"* with *"waiting is cheaper"* (2026-08-07, `ffe22948`). Both bullets
+predate the re-ranking by two to three-and-a-half weeks. So for fifteen days the surface a
+session actually reads before committing **prescribed the withdrawn remedy and discouraged the
+promoted one**, while the falsification sat here, 1400 lines deep, in a file nobody opens to
+look up how to commit.
+
+Closed by moving the scope to the read surface rather than recording the lesson again
+(CLAUDE.md § *Observer Blindness*, position 3): a new `RELEASE.md` bullet stating that every
+commit-side rule is scoped to the **different-files axis and null on the same-file one**, with
+instance 5's measurement (`e0525462` — two explicit paths, five of a peer's edits taken
+anyway, because both sessions were in one file), and the worktree bullet re-led with its
+actual rank plus the per-task trade. The bullets are not withdrawn there: they are the
+cheapest defence on the axis they cover, and that axis is most captures. What was missing was
+the axis, not the advice.
+
+**Why this file stayed `open` through all of it, which is the part a triage pass should not
+re-litigate.** `librarian(action="doctor")` reports this record under
+`open_bug_cited_from_source` — four scripts cite it by path, two of them settled past
+`SETTLE_DAYS`. That is the **rationale-citation** false positive the check's own doc comment
+names and accepts as the cheaper direction: the scripts cite this file as *why the hook
+exists*, not as *I fixed this*. Verified 2026-09-16, cost one look, which is exactly the
+budget the check was designed around. Do not close this on that finding.
+
+**Still open, and not closeable by documentation:** the same-file axis itself. It needs
+per-hunk provenance the working tree does not carry — `issue-clusters:IC-10`. The mechanism
+is also still firing: instance 14 was 2026-09-14.
