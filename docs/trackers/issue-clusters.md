@@ -374,6 +374,7 @@ delete this subsection in the same commit.
 | IC-21 | an instrument reports presence or a count where the decision turns on magnitude | `instrument-omits-the-dimension-that-grows` | not yet — `n=2`, one short; already 2 subsystems, so instance 3 meets both bars |
 | IC-22 | a next-step hint **or a causal explanation** is composed from the response shape, not from the request | `hint-composed-without-the-request` | not yet — **count bar cleared 2026-09-02** at three, judgement owed; derive the live figure with `python3 scripts/probe-cluster-census.py` rather than reading one here. This cell quoted `n=4` until 2026-09-14, by which point the probe returned **16** — the decay is left named because the +2 below was written beside the stale figure and nearly inherited it. Seed **fixed** `bb4688fd`, second member open on the *preview* surface. **+2 by retag 2026-09-14, and the retag is a finding about this column.** It said *hint* alone until then, while the membership had held causal explanations since 2026-09-05 — so two bugs sat in `cluster/unclassified` under a proposed NEW class because their authors read this line, and the claim line, and correctly concluded neither covered them. Heading and slug deliberately unchanged: the heading is cited as a live `doc(get, heading=…)` example in `docs/issues/archive/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md`, and the slug keys the tags of every member |
 | IC-23 | a per-item attribute is derived at the container's granularity, and is correct for the first item | `attribute-derived-at-container-granularity` | not yet — one member, one subsystem; opened 2026-09-13 by **retag out of `IC-6`** after the founding bug's diagnosis was falsified |
+| IC-24 | a value correct in one frame is published under a name that states another | `value-correct-in-a-frame-its-name-does-not-state` | not yet — opened 2026-09-16 at n=0, the house form; three `cluster/unclassified` members are the retag queue, each already carrying a NARROWER "candidate class if a second appears" note |
 
 **Every class at n≥3 clears the count threshold; spread is adjudicated per entry.** Read the `n`
 column — that is the derivation, and it cannot go stale when a count moves. This sentence used to
@@ -547,6 +548,49 @@ CHECK 2 (`scripts/pre-commit-ledger-counts.py`) runs against it.
 > Reported by `e5b1c28f` against a tree where the pair was absent and the member present, so the
 > gate red for them and green here — the transient split-brain a shared checkout produces while a
 > two-file change is landing, not a disagreement about the rule.
+
+**The candidate queue refilled 2026-09-16 — `IC-24`, and the evidence for it had been in this
+file three times over.** Three `cluster/unclassified` members each close with a *"candidate class
+if a second appears"* note naming a **narrower** version of one shape:
+`chunk-line-ranges-are-body-relative-but-published-as-file-lines` proposed *a quantity published
+in a coordinate space its name does not state*; `doc-tool-refs-counts-call-param-pairs-as-documents`
+called itself *unit-versus-label*;
+`a-move-reports-slug-and-path-citations-under-one-field-named-for-paths` proposed *a widened
+detector publishes its new population under the old one's name*. Coordinate space, unit, form —
+three authors, three axes, each writing *"if a second appears"* while two others already had.
+**Nobody was wrong about their own member; the generalisation is the FRAME itself**, and
+`embedder-stack-ops-session-log:F-7` supplies a fourth axis — the scope word — with three
+instances of its own: a sha correct for a commit but not for *my push range*, a CI tally correct
+for one run but not for *the range*, one author correct for eight of nine staged paths.
+
+**What carves it from `IC-20`, which all three members checked and rejected, is `IC-20`'s own
+falsification clause** — *"a member whose true total was recoverable — that is an ordinary
+reporting bug"*. There the value is **unknowable** because a walk stopped, and the remedy is to
+rename the quantity or refuse to print it. Here every value is exactly right and exactly
+recoverable; only the binding between value and name is wrong, so the remedy inverts — state the
+frame beside a value that is already correct. That clause is why three members landed in the
+hatch rather than being forced into `IC-20`, which makes the hatch's own contents the derivation
+for this class rather than merely its backlog.
+
+**Blind party: the producer, for whom the two frames coincide in every check they would think to
+run.** That is what makes *"verify before asserting"* a no-op here — re-verification returns the
+same correct value, and agreement is precisely what a correct answer to a neighbouring question
+produces. The body-relative test seeds the body and compares against the body; a session reading
+`who WROTE this path` off `file-provenance.py` and publishing it as `who STAGED it` gets a true
+sentence from a tool whose output says *"written by"*. Every instrument aimed at the value
+confirms it; no instrument aimed at the value can read the name.
+
+**Detector, on all four axes: a party holding the OTHER end of the binding.** The session whose
+commit it was knew which of theirs was outstanding; the session watching all three CI runs knew
+what the other two cost; the session that had staged the ninth path knew it was not the eighth
+author's. No detection was available to a more careful re-measurement on the publishing side, and
+all arrived as corrections rather than as alarms — the `OB` admission test met on the nose.
+
+**Retag of the three members is owed and is deliberately not in this commit.** Each is a bug-file
+frontmatter write through the catalog (a direct edit does not reach it — BL-48) *plus* the single
+`**Members:**` line below, and `scripts/pre-commit-ledger-counts.py` checks the two agree — so it
+is one coupled change, not four independent ones, and half of it landing is a red tree for every
+other session.
 
 **Slug:** `cluster/unclassified`
 
