@@ -445,6 +445,35 @@ negotiated. Needs nobody and risks nothing of theirs. **This does not help the a
 it lets readers stop paying, which removes the only signal that currently reaches the
 author at all.
 
+## Fix provenance
+
+- **SHA:** `5072c097` (`experiments`)
+- **patch-id:** `18a454244c0b063abb2933230e75fcb85301b495`
+
+Declared under this heading rather than left in § *Fix* prose, and `doctor`'s
+`terminal_status_without_fix_anchor` is right about why. This file carries **ten**
+commit-like hashes in prose, and every one is a commit the bug was *observed* at rather than
+fixed by — so the record **read as anchored** while nothing parsed it, and a reader scanning
+for provenance hit an observation hash and stopped looking. That is strictly worse than
+carrying no hash at all. (They are not re-quoted here: the population is the problem, and
+adding four more mentions to discharge a finding about too many mentions would be the
+finding again.)
+
+The pair is also what survives. The SHA dies on the next rebase of `experiments`; the
+patch-id is a content hash of the diff and survives rebase and cherry-pick both.
+
+**One pair, not two — and the parser accepts several, so this is a choice.** `7aa509c1` is
+this file's own record commit and is deliberately undeclared: it changed the status line and
+this section, so anchoring it would hand a reader a commit that fixes nothing.
+
+**The status is `mitigated`, so this anchor closes less than a `fixed` one would.** It
+records the commit that *published* the bound; the residual named in § *Fix* is unfixed and
+that is why the file stays open.
+
+Reported by sessionId `9403d62d`, who tripped the identical check 113 minutes earlier with
+both lines already sitting in their own § *Fix* prose — so the pair was never what the check
+wanted, the **surface** was. Their repair at `8273331d` is the shape followed here.
+
 ## Tests added
 
 None yet — nothing built to test.
