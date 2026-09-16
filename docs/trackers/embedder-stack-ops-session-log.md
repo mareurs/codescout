@@ -6,7 +6,7 @@ owners: ["marius"]
 tags: ["embeddings", "retrieval", "docker", "gpu"]
 topic: embedder stack ops
 entry_prefix: ["F", "W"]
-entry_high_water_F: 7
+entry_high_water_F: 8
 entry_high_water_W: 4
 ---
 
@@ -72,6 +72,7 @@ entry_high_water_W: 4
 | F-5 | 2026-09-15 | high | ledger-integrity | open | Merging a ledger-touching PR leaves the local id allocator stale, so the next append mints a colliding id rather than erroring |
 | F-6 | 2026-09-15 | high | build-provenance | open | A rebuild is not a rebuild of what you merged — `cargo rb` on a tree behind origin exits 0, updates mtime, and ships the old binary |
 | F-7 | 2026-09-16 | high | claim-scope | open | A value that is CORRECT about a question you were not asked — re-verification returns the same correct value, so "verify harder" is a no-op |
+| F-8 | 2026-09-16 | med | observer-blindness | open | Authored a class's tell and tripped it 3h 25m later — no instrument ran, so there was nothing to re-derive and no control to fire |
 
 ## Wins Index
 
@@ -743,6 +744,73 @@ produced: **a claim built from a DIRECTION rather than a reading is where this c
 lives.** "Origin moved forward", "the search came back empty", "that commit is theirs" are
 all directions. None of them is a number, and each becomes a claim about a situation only
 when someone supplies the situation from context.
+
+## F-8 — I authored the check for a class and produced an instance of it 3h 25m later
+
+**Valid:** dated 2026-09-16
+
+**Status:** open · **Severity:** med · **Category:** observer-blindness
+
+**Observed:** I authored a check for a defect class and produced an instance of
+that class **3h 25m later**, in the same session, having cited the check twice in
+between.
+
+| | |
+|---|---|
+| tell authored | `16575b1a`, 2026-09-16 **10:52:32Z** — F-7 gains *"the tell is that I had no measurement, only a direction"* |
+| tell tripped | ~**14:15Z** — I told a peer that `UNKNOWN`-with-no-hint is *"what the default floor produces most often"* |
+| measured by that peer | 12 files, **7** `UNKNOWN`, **5 hinted, 2 silent** — the hinted case is the common one |
+
+I had no measurement. I had a direction: *"a clean file has no writes, therefore no
+hint."* That is the tell verbatim, applied to a frequency claim, by the session that
+wrote it down.
+
+**This is not `F-7` and not `W-4`, and the separation is the entry's reason to exist.**
+`F-7` is a value **correct** about another question; re-verification returns it
+unchanged. `W-4` is a value **unsupported** but produced by an instrument. This was
+neither — **there was no instrument at all.** Nothing was run, so there was nothing to
+re-derive and nothing to control. A claim with no measurement behind it cannot fail
+under re-derivation, because re-derivation was never the step that was skipped.
+
+**Why it belongs in the ledger rather than in a message.** It reached the peer who
+measured it and nowhere else. Twice today a judgement that existed only in a socket
+message was lost — `f0b1a4c7`'s classification died with their session, and the peer who
+held the unsent answer said so explicitly. They declined to write this up for me, which
+was right: it is my error and my ledger, and filing another session's self-report is the
+thing they had just refused to do for a dead peer.
+
+**The interval is the evidence, and the interval itself was first stated unmeasured.** I
+reported it as *"four hours"* to two parties before deriving it. It is 3h 25m. An
+unmeasured number, inside the account of making unmeasured claims, in the correction of
+them. That is not an embellishment of the finding — it is the finding's third occurrence
+in one thread, and it is why the entry claims no remedy of the form *"be more careful
+with frequencies."*
+
+**What this instantiates.** `CLAUDE.md` § *Observer Blindness* opens with four instances
+of one class in one evening, **every one committed by an author actively writing about
+that class**, and concludes that knowing the class prevented none of them while a
+standing policy caught one. This is a fifth, and better evidenced than some: the gap
+between authoring the check and tripping it is a measured interval rather than a
+recollection.
+
+**No mechanism proposed, deliberately.** Position 3 asks for a check that runs when
+nobody is worried, and I have none for *"is this sentence carrying a number I never
+derived?"* The one thing that did fire was a **second party running the measurement** —
+position 2, an instrument that happened to be present. Recording the absence rather than
+filling it with a resolution to look harder, which is what the four instances above
+already falsified.
+
+**Residue kept from the same exchange, because it is independent of the above and neither
+claim subsumes the other:**
+
+- *Mine:* a wrong count erring toward **more caution** is not thereby harmless — which
+  side of a threshold it lands on is luck, not a property of the error. My `8 foreign
+  sessions` against an actual `4` straddled a threshold of 3.
+- *The peer's:* an error can be wrong, or wrong **and self-confirming**. `grep -cv '^$'`
+  without `sort -u` is too large by a factor and re-derivation fixes it; `pgrep | head -N`
+  over `/proc` glob order takes the N **oldest** and re-derivation returns the same wrong
+  answer with the same confidence. **Theirs decides whether re-derivation is a remedy;
+  mine says the error is not excused by its direction.**
 
 ## Template for new entries
 
