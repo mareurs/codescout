@@ -1,7 +1,7 @@
 ---
-id: d72f6e0d771073bd
+id: e1aaab73c7d3ba5f
 kind: bug
-status: open
+status: fixed
 title: Acking a dangerous command silently drops run_in_background
 owners:
 - marius
@@ -9,6 +9,7 @@ tags:
 - run-command
 - ack-gate
 - cluster/accepted-parameter-silently-dropped
+closed: 2026-09-16
 opened: 2026-09-15
 severity: low
 ---
@@ -89,22 +90,26 @@ None; found by using the tool, not by a failing call.
 
 ## Fix
 
-Not implemented, and it is a real decision rather than an oversight to undo. The
-comment asserts foreground re-dispatch is intended, and there may be a reason
-(an ack is a human-in-the-loop moment, and a backgrounded dangerous command
-detaches immediately past the one gate that paused it). Two candidates:
+**Fixed in `1f36fe26`** — patch-id `6e78e0e32346a3aa815454852772111c9e484924`. Direction chosen by the operator 2026-09-16: **honour the flag**, candidate 1 below.
 
-1. **Honour the flag** — store `run_in_background` on `PendingAckCommand`, or carry
-   the whole input as `PendingAckWrite` already does.
-2. **Keep foreground and say so** — add the caveat to the ack hint, so the dropped
-   parameter is a stated limitation rather than a silent one.
+What shipped: `PendingAckCommand` gains `run_in_background: bool`, `store_dangerous` takes it as a fourth argument, and the ack dispatch in `run_command/mod.rs` passes `stored.run_in_background` where it previously hardcoded `false`.
 
-If (2), it belongs in the hint text, not only in the source comment: the caller
-reads the hint and never the comment.
+**Which half of candidate 1, and why the other half was rejected.** The option offered two mechanisms — add the field, or carry the whole input as `PendingAckWrite` does. The `Value` form is the more general shape and would survive future parameters, but it is not reachable here: `store_dangerous` is called from inside `run_command_inner`, which never receives the original input `Value`. Carrying it means threading an eleventh parameter through a ten-parameter function and re-parsing it at dispatch to recover one bool already in scope at the call site. **If a second parameter is ever dropped the same way, that is the signal to switch to the `Value`** — two concretes, where today there is one.
+
+**A false doc claim corrected with it.** `store_dangerous`'s own comment read *"The handle carries the full execution context so the ack call needs no extra parameters."* That was false for exactly one parameter, and the comment is the surface a maintainer would have trusted. It now says when the claim was untrue rather than merely being made true.
 
 ## Tests added
 
-None.
+Two, in `src/tools/run_command/tests.rs`, and they are a **pair on purpose** — either alone is monotone in a direction that hides a real regression.
+
+- `ack_re_dispatch_honours_run_in_background` — stores an ack with `true`, dispatches the handle, asserts the response carries **no `exit_code`** and an `output_id` starting `@bg_`.
+- `ack_re_dispatch_stays_foreground_when_not_requested` — stores with `false`, asserts `exit_code == 0` and the command's stdout. **Without this one, honouring the flag unconditionally — backgrounding every acked command — passes the first test and breaks every other ack caller.**
+
+**Why the discriminator is the absence of `exit_code` rather than stdout.** A foreground `sleep 30` also returns stdout — empty — so a stdout assertion is satisfied by the broken behaviour and would not red under the mutation these tests exist to catch. Slice 1 (`f098069a`) made *"a spawn response carries no `exit_code` key"* true by construction, which is what makes that assertion available at all; before it, there was no observable difference to assert on.
+
+The `true` argument in the first test's `store_dangerous` call is load-bearing and annotated as such on its line: with `false` the test asserts nothing, because a foreground response is then the correct one.
+
+Gate green all four lanes at fix time: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`.
 
 ## Workarounds
 
