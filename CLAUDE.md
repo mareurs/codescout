@@ -122,8 +122,23 @@ The gate sentence above is pinned byte-for-byte by
 moves, move that test with it — do not delete it.
 
 On our stack the live-MCP release build is `cargo rb` (not `cargo build --release`); after it, run
-`/mcp` to reconnect. Full command reference (every crate + fixture, `cargo rb` vs lean build) →
-memory `development-commands`; the binary symlink gotcha → memory `gotchas` (MCP Binary Symlink).
+`/mcp` to reconnect. **Prefer `./scripts/rb.sh`, which runs that same alias behind one precondition:
+it refuses when your HEAD is behind `origin`.** A cargo alias cannot run a precondition, which is why
+this is a wrapper rather than a fix to the alias. Without it, `cargo rb` on a stale tree compiles
+something that does not contain what you merged, **exits 0**, updates the binary's mtime and ships
+it — measured 2026-09-15 at five commits behind, where *every* available signal reported success,
+`--version` included, since the merge did not change it and it therefore discriminated nothing
+(`embedder-stack-ops-session-log:F-6`). **It fetches first and refuses when the fetch fails, rather
+than passing that reading through:** `git rev-list --count HEAD..@{upstream}` reads a **local** ref,
+so unfetched it answers `0` for a checkout arbitrarily far behind — F-6's own defect, one layer up,
+and the suite asserts that stale `0` is really produced before asserting the guard refuses anyway.
+`CODESCOUT_RB_ACK=behind` builds regardless and records that you decided to; the refusal does **not**
+run a pull for you, because moving HEAD here moves it for every session in this working tree. Typing
+`cargo rb` directly still works and remains the canonical name — three other surfaces and
+`ci.yml:385` quote it — so this is a mechanism for whoever runs the wrapper and a policy for everyone
+else, the same limitation `gate.sh` carries. Full command reference (every crate + fixture,
+`cargo rb` vs lean build) → memory `development-commands`; the binary symlink gotcha → memory
+`gotchas` (MCP Binary Symlink).
 ## Testing Discipline — what a green suite is evidence for
 
 The gate above tells you how to get green. This tells you what green is worth. Every derivation,
