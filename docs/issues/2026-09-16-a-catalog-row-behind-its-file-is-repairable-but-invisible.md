@@ -1,7 +1,7 @@
 ---
 id: bd117fbc0d1a0308
 kind: bug
-status: open
+status: taken
 title: A catalog row left behind by a failed update is repairable but invisible
 tags:
 - librarian
@@ -43,7 +43,7 @@ arrives when `busy_timeout` expires):
 
 - `a_real_catalog_failure_after_the_file_write_leaves_disk_ahead_of_the_catalog`
 - `whether_reindex_reconciles_a_catalog_left_behind_by_a_failed_update`
-- `doctor_does_not_observe_a_catalog_row_that_has_fallen_behind_its_file`
+- `doctor_names_a_catalog_row_that_has_fallen_behind_its_file`
 
 Shape: on-disk catalog, second `rusqlite` connection takes `BEGIN IMMEDIATE` and
 holds it, `update` with a body patch, observe.

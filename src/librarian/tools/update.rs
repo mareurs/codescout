@@ -1104,7 +1104,7 @@ mod tests {
         );
     }
 
-    /// The third arm, and the one that decides slice 4's shape: the divergence is
+    /// The third arm, and the one that decided slice 4's shape: the divergence is
     /// reachable and reindex repairs it — but is it **observable** in the meantime?
     ///
     /// Recovery that requires someone to run `reindex` is only as good as the reason they
@@ -1112,13 +1112,22 @@ mod tests {
     /// is not "until the next reindex" but "until someone reindexes for an unrelated
     /// reason", which is not a bound.
     ///
-    /// **The control is the point.** A `doctor` that reports nothing because it is
-    /// healthy and a `doctor` that reports nothing because this scan cannot express the
-    /// question return the same JSON. So the same fixture is then broken a SECOND,
-    /// known-detectable way — the file is deleted, which `missing_file` owns — and doctor
-    /// must speak. A silent first half is a finding only if the second half is loud.
+    /// When this test was written the answer was NO, and it was written to red on the day
+    /// that changed. `doctor`'s `row_behind_file` closed it
+    /// (`docs/issues/2026-09-16-a-catalog-row-behind-its-file-is-repairable-but-invisible.md`),
+    /// so the assertion is now positive and this is the reachability half of that check's
+    /// coverage — the only test in the tree that reaches it through a REAL failed catalog
+    /// write rather than a hand-seeded row. `doctor.rs`'s own unit tests cover the
+    /// predicate; this covers the path that produces its input.
+    ///
+    /// **The control is still the point, and it is load-bearing in the other direction
+    /// now.** It used to stop a dead doctor being read as a clean one. It now also fixes
+    /// the ORDER: the deletion must happen after the divergence is observed, because
+    /// `missing_file` and `row_behind_file` are mutually exclusive on one row — a file
+    /// that is gone cannot be hashed, and `check_row_behind_file` abstains on it by
+    /// design. That exclusivity is asserted below rather than assumed.
     #[tokio::test]
-    async fn doctor_does_not_observe_a_catalog_row_that_has_fallen_behind_its_file() {
+    async fn doctor_names_a_catalog_row_that_has_fallen_behind_its_file() {
         let tmp = TempDir::new().unwrap();
         let db = tmp.path().join("catalog.db");
         let ctx = TestToolContextBuilder::new(Catalog::open(&db).unwrap())
@@ -1162,28 +1171,62 @@ mod tests {
         let diverged_report = crate::librarian::tools::doctor::call(&ctx, serde_json::json!({}))
             .await
             .expect("doctor runs");
-        let diverged_text = diverged_report.to_string();
 
-        // CONTROL, run first so a dead doctor cannot be read as a clean one: break the
-        // same fixture a way doctor demonstrably owns.
+        // Assert on the check's NAME against THIS id, never on a substring of the whole
+        // report: the id appears in that JSON for several unrelated reasons, so a
+        // `contains` would be green on a report that never ran this check at all.
+        let named: Vec<&serde_json::Value> = diverged_report["violations"]
+            .as_array()
+            .expect("violations is an array")
+            .iter()
+            .filter(|v| {
+                v["check"] == "row_behind_file" && v["artifact_id"] == serde_json::json!(id)
+            })
+            .collect();
+        assert_eq!(
+            named.len(),
+            1,
+            "doctor must name the artifact whose file has moved ahead of its row, under \
+             `row_behind_file`. This is the reachable-by-a-real-failure half of that \
+             check's coverage. Report: {diverged_report}"
+        );
+        assert!(
+            named[0]["detail"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("reindex"),
+            "the finding must name the repair the caller is meant to run: {:#?}",
+            named[0]
+        );
+
+        // CONTROL, run AFTER the observation above for the reason in the doc comment:
+        // break the same fixture a way doctor demonstrably owns, and confirm it speaks.
+        // Without this, a doctor naming every row for every reason would satisfy the
+        // assertions above just as well.
         std::fs::remove_file(&doc_path).unwrap();
         let missing_report = crate::librarian::tools::doctor::call(&ctx, serde_json::json!({}))
             .await
             .expect("doctor runs");
-        let missing_text = missing_report.to_string();
-        assert!(
-            missing_text.contains(&id),
-            "CONTROL FAILED — doctor did not name the artifact even with its file deleted, \
-         so its silence on the divergence above proves nothing about the divergence. \
-         Report: {missing_text}"
+        let by_check = |report: &serde_json::Value, check: &str| -> usize {
+            report["violations"]
+                .as_array()
+                .expect("violations is an array")
+                .iter()
+                .filter(|v| v["check"] == check && v["artifact_id"] == serde_json::json!(id))
+                .count()
+        };
+        assert_eq!(
+            by_check(&missing_report, "missing_file"),
+            1,
+            "CONTROL FAILED — doctor did not report the deleted file under `missing_file`, \
+             so the scan is not behaving as this test assumes. Report: {missing_report}"
         );
-
-        // With the control live, the first silence is a measurement.
-        assert!(
-            !diverged_text.contains(&id),
-            "doctor DID name the artifact whose file had moved ahead of its row — the \
-         observability gap this test records has been closed, and slice 4's recovery \
-         story should be re-read against it. Report: {diverged_text}"
+        assert_eq!(
+            by_check(&missing_report, "row_behind_file"),
+            0,
+            "a row whose file is GONE belongs to `missing_file` alone — reporting it under \
+             both would inflate the count on precisely the rows a reindex cannot help. \
+             Report: {missing_report}"
         );
     }
 

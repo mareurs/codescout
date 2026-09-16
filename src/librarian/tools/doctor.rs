@@ -299,6 +299,14 @@ impl Check {
     /// regression test — confirmed by mutation: re-adding `WorktreeScopedRow` here
     /// reds it (the cited foreign row gets reseated).
     ///
+    /// **`RowBehindFile` is INCLUDED, added 2026-09-16 with the check, and the guard is
+    /// what forced the decision rather than letting it default.** It gates through
+    /// `scan_artifact_paths`'s dynamic `scope.admit(&v.check, ...)` site on its own
+    /// finding's real `(id, abs_path)` — the same site as `MissingFile` — so the
+    /// precondition this list is about holds for it. It clears the mutation-authority
+    /// ruling trivially: it has no `fix=` mode and writes nothing, so surfacing it can
+    /// authorize nothing.
+    ///
     /// Every other declared check is assumed to pass its own finding's artifact id
     /// as `id` — that claim was **unverified** as of Task 8 for 10 of the 37
     /// members here: `AbsPathMustBeAbsolute`, `AdsColonInAbsPath`,
@@ -364,6 +372,7 @@ impl Check {
                 | Check::ParamsBehindBody
                 | Check::ParamsStatusDrift
                 | Check::PrematureArchiveCitation
+                | Check::RowBehindFile
                 | Check::SidecarShapeDrift
                 | Check::SidecarUnparseable
                 | Check::SnapshotDrift
@@ -408,6 +417,7 @@ declare_checks! {
     ParamsStatusDrift => "params_status_drift",
     PrematureArchiveCitation => "premature_archive_citation",
     RetiredObjectStillPresent => "retired_object_still_present",
+    RowBehindFile => "row_behind_file",
     SidecarShapeDrift => "sidecar_shape_drift",
     SidecarUnparseable => "sidecar_unparseable",
     SnapshotDrift => "snapshot_drift",
@@ -591,6 +601,12 @@ const ROW_GRAIN_SCOPED_CHECKS: &[Check] = &[
     Check::AdsColonInAbsPath,
     Check::DotdotSegmentInAbsPath,
     Check::MissingFile,
+    // Added 2026-09-16 with the check itself, on a SIGHTING rather than on structure.
+    // Measured against the live catalog that day: 124 of 4,944 rows diverge, and 118 of
+    // those 124 belong to other repos this catalog has indexed. Inside codescout the
+    // figure is 6 of 1,712. Unscoped, the check publishes a worklist that is 95% another
+    // developer's — the exact failure the 2026-08-27 bug left its instruction about.
+    Check::RowBehindFile,
     Check::BackslashInGitRoot,
     Check::PrematureArchiveCitation,
     Check::SidecarShapeDrift,
@@ -2501,14 +2517,25 @@ fn scan_artifact_paths(
     // change at all. A stable order is also what makes the `offset` parameter
     // mean anything. See
     // docs/issues/archive/2026-08-08-doctor-outside-roots-sample-is-unranked-and-unreachable.md
-    let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
-    let rows: Vec<(String, String)> = stmt
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+    //
+    // `file_sha256` joins the projection for `check_row_behind_file`. It rides THIS
+    // fetch rather than a second query for the reason the doc comment gives: one SQL
+    // round trip plus in-memory passes is cheaper than a query per check.
+    let mut stmt =
+        conn.prepare("SELECT id, abs_path, file_sha256 FROM artifact ORDER BY abs_path")?;
+    let rows: Vec<(String, String, String)> = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?
         .collect::<rusqlite::Result<_>>()?;
 
     let mut violations = Vec::new();
     let mut scoped: std::collections::BTreeMap<String, usize> = Default::default();
-    for (id, abs_path) in &rows {
+    for (id, abs_path, stored_sha) in &rows {
         let not_absolute = check_abs_path_must_be_absolute(id, abs_path);
         let is_absolute = not_absolute.is_none();
         // 2026-09-09 whole-branch review round 2, C3 (Critical): the five checks
@@ -2540,6 +2567,15 @@ fn scan_artifact_paths(
             }
         }
         if let Some(v) = check_missing_file(id, abs_path) {
+            if scope.admit(&v.check, id, abs_path) {
+                violations.push(v);
+            }
+        }
+        // Reads the file, so it runs after the cheap string checks. A missing or
+        // unreadable file yields None here — `check_missing_file` above already
+        // owns that finding. Measured 115 ms to hash this whole catalog (4,943
+        // files, 83.2 MB), which is why there is no mtime pre-filter in front of it.
+        if let Some(v) = check_row_behind_file(id, abs_path, stored_sha) {
             if scope.admit(&v.check, id, abs_path) {
                 violations.push(v);
             }
@@ -3150,6 +3186,73 @@ fn check_missing_file(id: &str, abs_path: &str) -> Option<Violation> {
             "file does not exist on disk",
         ))
     }
+}
+
+/// The catalog's stored content hash must still describe the bytes on disk.
+///
+/// `doc(action="update")` writes the file at `:688` and upserts the row at `:725`.
+/// When the catalog half fails, the row keeps the pre-edit `file_sha256` while the
+/// file carries the edit. That state is reachable (a second connection holding
+/// `BEGIN IMMEDIATE` past the 5 s `busy_timeout` produces it), repairable by
+/// `reindex`, and — until this check — reported by nothing. `missing_file` is
+/// adjacent and does not cover it: a changed file is present.
+/// (`docs/issues/2026-09-16-a-catalog-row-behind-its-file-is-repairable-but-invisible.md`)
+///
+/// **Named for what it OBSERVES, not for the bug that prompted it.** A failed
+/// `update` and a write that never reaches the catalog at all — `edit_file`, native
+/// `Edit`, `git checkout` — produce the identical row, and measured 2026-09-16 the
+/// corpus is dominated by the second. The repair is `reindex` either way, so the
+/// finding is useful for both; calling it `failed_update_divergence` would publish a
+/// value correct in one frame under a name asserting another (`IC-24`).
+///
+/// **No `file_mtime` pre-filter, deliberately, and the bug file proposed one.**
+/// Measured against the live catalog: hashing all 4,943 files (83.2 MB) costs
+/// **115 ms**, against 25 ms for the filtered arm — a 90 ms saving for a selector
+/// that `git checkout`, `touch -r`, `rsync --times` and any restore-from-backup can
+/// defeat, because each preserves mtime across a content change. The filter's
+/// false-negative count in that sample was 0 and that zero is *not* the argument:
+/// a selector narrower than its population is this bug's own cluster
+/// (`cluster/selector-narrower-than-its-population`), and 90 ms does not buy it.
+/// Re-derive both arms before reintroducing one;
+/// `architecture-boundary-session-log:F-3` holds the method.
+///
+/// Three deliberate abstentions:
+/// - **An unreadable or absent file** is [`check_missing_file`]'s finding. Reporting
+///   it here too would inflate the count on rows a reindex cannot help.
+/// - **An empty stored hash** is not a claim about content, so nothing is behind
+///   anything — the row was written by a path that never hashed it. Measured: 0 such
+///   rows live, and every one of doctor's own 70 `seed_artifact` fixtures is one, so
+///   firing here would report the test corpus rather than the real one.
+/// - **Equality** is silence, not a reported pass.
+///
+/// **Classified as a DEFECT, not informational, and the call is deliberate.** The four
+/// informational checks all report states that are normal and self-clearing — a claim
+/// held by a live session, a bug under live edit. This one is neither: measured
+/// 2026-09-16, codescout's own 6 diverged rows include `CLAUDE.md` and
+/// `docs/conventions/what-green-is-evidence-for.md`, which had been behind their files
+/// for an unbounded time because nothing reported them. Demoting it to informational
+/// would re-create the exact complaint the bug is about — a repair that exists and is
+/// never triggered.
+fn check_row_behind_file(id: &str, abs_path: &str, stored_sha: &str) -> Option<Violation> {
+    if stored_sha.is_empty() {
+        return None;
+    }
+    let bytes = std::fs::read(abs_path).ok()?;
+    let on_disk = crate::librarian::util::sha_of_bytes(&bytes);
+    if on_disk == stored_sha {
+        return None;
+    }
+    Some(Violation::new(
+        "row_behind_file",
+        Some(id.to_string()),
+        abs_path,
+        format!(
+            "catalog holds {} but the file hashes to {} — the row describes a previous \
+             version of this file; run librarian(action=\"reindex\") to reconcile it",
+            &stored_sha[..stored_sha.len().min(12)],
+            &on_disk[..on_disk.len().min(12)]
+        ),
+    ))
 }
 
 /// Every artifact file's frontmatter `id:` must name the row that owns it.
@@ -7921,6 +8024,141 @@ mod tests {
         let v = check_missing_file("a1", "/nonexistent/path/that/will/never/exist.md").unwrap();
         assert_eq!(v.check, "missing_file");
     }
+
+    /// **The control runs FIRST, and it is the half that makes the positive reading
+    /// mean anything** — a check that always fires produces the same second assertion
+    /// as one that discriminates.
+    #[test]
+    fn check_row_behind_file_is_silent_on_agreement_and_fires_on_divergence() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("doc.md");
+        std::fs::write(&path, "# original\n").unwrap();
+        let abs = path.to_str().unwrap();
+        let sha = crate::librarian::util::sha_of_bytes(b"# original\n");
+
+        assert!(
+            check_row_behind_file("a1", abs, &sha).is_none(),
+            "a row whose stored hash describes the bytes on disk must not be reported"
+        );
+
+        // The file moves on; the row does not. This is what a failed catalog upsert
+        // leaves behind — and equally what `edit_file`, native `Edit` or a
+        // `git checkout` leaves behind, which is why the check is named for the state
+        // rather than for either cause.
+        std::fs::write(&path, "# edited\n").unwrap();
+        let v = check_row_behind_file("a1", abs, &sha).expect("divergence must be reported");
+        assert_eq!(v.check, "row_behind_file");
+        assert_eq!(v.artifact_id.as_deref(), Some("a1"));
+        assert!(
+            v.detail.contains("reindex"),
+            "the finding must name the REPAIR and not only the fault — the whole point of \
+             the check is that the recovery already exists and nothing triggers it. Got: {}",
+            v.detail
+        );
+    }
+
+    /// An empty stored hash is not a claim about content, so nothing is behind anything.
+    ///
+    /// **The companion assertion is what stops this passing for the wrong reason:** the
+    /// same file at the same path DOES fire once a real stale hash is supplied, so the
+    /// abstention is the empty hash's doing rather than the fixture's inability to fire.
+    #[test]
+    fn check_row_behind_file_abstains_on_an_empty_stored_hash() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("doc.md");
+        std::fs::write(&path, "# content\n").unwrap();
+        let abs = path.to_str().unwrap();
+
+        assert!(
+            check_row_behind_file("a1", abs, "").is_none(),
+            "a row written by a path that never hashed the file is not BEHIND it"
+        );
+        assert!(
+            check_row_behind_file("a1", abs, &crate::librarian::util::sha_of_bytes(b"other"))
+                .is_some(),
+            "non-vacuity: this same fixture must be able to fire, or the abstention above \
+             is the fixture's doing rather than the empty hash's"
+        );
+    }
+
+    /// A row whose file is gone belongs to `missing_file`. Reporting it here too would
+    /// inflate the count on precisely the rows a reindex cannot help.
+    #[test]
+    fn check_row_behind_file_leaves_an_absent_file_to_missing_file() {
+        let absent = "/nonexistent/path/that/will/never/exist.md";
+        assert!(
+            check_row_behind_file("a1", absent, "deadbeefdeadbeef").is_none(),
+            "an absent file is not this check's finding"
+        );
+        // The control: the sibling check DOES own that row, so the silence above is a
+        // division of labour rather than a gap nobody covers.
+        assert_eq!(
+            check_missing_file("a1", absent).unwrap().check,
+            "missing_file"
+        );
+    }
+
+    /// The check must run in the DEFAULT scan and name the diverged row SPECIFICALLY.
+    ///
+    /// The clean sibling is the control, and the per-member assertion is the one that
+    /// discriminates: `by_check == 1` is satisfied both by "reported the right row" and
+    /// by "reported some row", so the aggregate alone would stay green on a check that
+    /// picked whichever sorted first.
+    #[tokio::test]
+    async fn doctor_names_the_row_whose_catalog_hash_has_fallen_behind_its_file() {
+        fn seed_hashed(
+            cat: &Catalog,
+            dir: &std::path::Path,
+            name: &str,
+            written: &str,
+            hashed_as: &[u8],
+        ) -> String {
+            let p = dir.join(name);
+            std::fs::write(&p, written).unwrap();
+            let abs = p.to_str().unwrap().to_string();
+            cat.conn
+                .execute(
+                    "INSERT INTO artifact \
+                     (id, abs_path, kind, status, created_at, updated_at, file_mtime, file_sha256) \
+                     VALUES (?1, ?2, 'spec', 'active', 0, 0, 0, ?3)",
+                    params![name, &abs, crate::librarian::util::sha_of_bytes(hashed_as)],
+                )
+                .unwrap();
+            abs
+        }
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        // Hashed as "old", now holds "new" — the diverged row.
+        let stale_abs = seed_hashed(&cat, tmp.path(), "stale.md", "new\n", b"old\n");
+        // Stored hash describes exactly what is on disk.
+        seed_hashed(&cat, tmp.path(), "clean.md", "same\n", b"same\n");
+
+        let ctx = TestToolContextBuilder::new(cat).build();
+        let report = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            report["summary"]["by_check"]["row_behind_file"],
+            json!(1),
+            "exactly the diverged row, and the check must run in the DEFAULT scan rather \
+             than only under fix=. Got: {}",
+            report["summary"]["by_check"]
+        );
+
+        let fired: Vec<&serde_json::Value> = report["violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v["check"] == "row_behind_file")
+            .collect();
+        assert_eq!(fired.len(), 1);
+        assert_eq!(
+            fired[0]["path"].as_str().unwrap(),
+            stale_abs,
+            "the finding must name the DIVERGED row, not whichever sorted first: {fired:#?}"
+        );
+    }
+
     /// The check fires on a resurrected retired object and stays silent on a clean catalog.
     ///
     /// **The control runs FIRST and is the half that makes the positive reading mean
@@ -13244,7 +13482,7 @@ mod tests {
             .map(|c| c[1].to_string())
             .collect();
 
-        // The six dynamic call sites in `scan_artifact_paths` — each `check_*` function
+        // The seven dynamic call sites in `scan_artifact_paths` — each `check_*` function
         // wraps its `Option<Violation>` in this identical shape, so counting occurrences
         // (rather than a bare `contains`) catches a site being added or removed without a
         // matching update to the hand-inserted names below.
@@ -13252,12 +13490,12 @@ mod tests {
             .matches("if scope.admit(&v.check, id, abs_path) {")
             .count();
         assert_eq!(
-            dynamic_site_count, 6,
-            "scan_artifact_paths is expected to have exactly six `scope.admit(&v.check, ...)` \
+            dynamic_site_count, 7,
+            "scan_artifact_paths is expected to have exactly seven `scope.admit(&v.check, ...)` \
              call sites (abs_path_must_be_absolute, backslash_in_abs_path, ads_colon_in_abs_path, \
-             dotdot_segment_in_abs_path, missing_file, and check_frontmatter_id_matches_catalog's \
-             shared site) — a site was added or removed without updating this test's hand-added \
-             names below, or this guard stops covering them"
+             dotdot_segment_in_abs_path, missing_file, row_behind_file, and \
+             check_frontmatter_id_matches_catalog's shared site) — a site was added or removed \
+             without updating this test's hand-added names below, or this guard stops covering them"
         );
         // check_frontmatter_id_matches_catalog is the one dynamic site with TWO possible
         // outcomes; the other five each produce exactly one fixed check name.
@@ -13268,6 +13506,7 @@ mod tests {
         admitting.insert("ads_colon_in_abs_path".to_string());
         admitting.insert("dotdot_segment_in_abs_path".to_string());
         admitting.insert("missing_file".to_string());
+        admitting.insert("row_behind_file".to_string());
 
         // Each entry names the map it actually scopes into instead — one comment per
         // entry, so this list stays self-auditing (2026-09-09 review round 2, deferred

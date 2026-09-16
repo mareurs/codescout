@@ -11,7 +11,7 @@ topic: architecture-boundary-measurement
 entry_prefix:
 - F
 - W
-entry_high_water_F: 2
+entry_high_water_F: 3
 entry_high_water_W: 3
 ---
 
@@ -112,6 +112,53 @@ That is **three** instances of one class inside one exchange: the peer's *"nothi
 **Status:** validated
 
 **Rests on:** GH run `35055091243`, job `104663485783` (windows/default, CANCELLED — carries the test's `... ok` at log line 5323 and zero `test result:` lines), job `104663485769` (windows/no-features), plus the two `default` cells; `.github/workflows/ci.yml:13-15` (`concurrency` / `cancel-in-progress`), `:279-283` (matrix — `local-embed` is `--features local-embed --no-default-features`, so it does **not** cover the default set and is not a fourth green cell for this purpose). Verified independently of the peer's report; their numbers matched on every count I re-derived.
+
+## F-3 — The cost that justified a narrowing is 115 ms, so the narrowing is the defect
+
+**Valid:** dated 2026-09-16
+
+**Observed:** `bd117fbc0d1a0308`'s *Fix* section names the cost to weigh before
+building the `doctor` check — *"hashing every artifact's bytes on every `doctor`
+run is O(corpus)"* — and proposes a `file_mtime` pre-filter as *"the obvious
+narrowing"*, noting that the filter is itself an instance of the cluster the bug
+is filed under. That framing survives reading and does not survive measurement.
+
+**Measured** against the live catalog (4,944 rows, 2026-09-16):
+
+| arm | files hashed | wall |
+|---|---|---|
+| hash every row | 4,943 (83.2 MB) | **115 ms** |
+| `mtime` pre-filter | 458 | 25 ms |
+
+The narrowing buys **90 ms** on the largest catalog on this machine. It is not a
+narrowing worth an unsound selector, so the right move is to **not build it** —
+which avoids the class rather than managing it. The pre-filter's false-negative
+count today is **0 of 124**, and that zero is deliberately not the argument:
+`git checkout`, `touch -r`, `rsync --times` and restore-from-backup all preserve
+mtime across a content change, so the filter is unsound in principle while being
+clean in this sample. Citing the zero would be the population-for-member
+substitution this ledger already carries twice.
+
+**Second finding, which decides the check's scope.** Divergence is **124 / 4,944
+globally (2.5%)** but **6 / 1,712 inside codescout (0.35%)** — 118 of the 124 rows
+belong to other repos this catalog has indexed. An unscoped check reports a
+worklist that is 95% someone else's, so it must join `ROW_GRAIN_SCOPED_CHECKS`.
+`every_declared_check_is_scope_gated_or_a_named_exemption` already reds the build
+on the omission, which is the mechanism doing the remembering.
+
+**Third finding, which decides what the check may CLAIM.** The predicate cannot
+separate *"a failed `update` lost the catalog half"* from *"the file was edited by
+a writer that does not reach the catalog"* — `edit_file`, native `Edit`, `git
+checkout`. Both produce stored ≠ disk, and the corpus is dominated by the second.
+The repair is `reindex` either way, so the check is useful for both; but naming it
+for the bug that prompted it would publish a value correct in one frame under a
+name stating another (`IC-24`). It is named for what it observes.
+
+**Cost if unexamined:** an unsound `mtime` selector shipped for 90 ms, a check
+reporting 124 rows where 6 are actionable, and a finding whose name asserts a
+cause it cannot establish.
+
+**Status:** fixed-verified — all three folded into the check as built.
 
 ## Entries
 
