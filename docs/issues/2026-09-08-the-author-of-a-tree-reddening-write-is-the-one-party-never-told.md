@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: mitigated
 title: The author of a tree-reddening write is the one party never told
 tags:
 - cluster/gate-keyed-on-unobservable-event
@@ -129,6 +129,53 @@ Two sessions, one checkout, shared `target/`. A saves uncommitted Rust that does
 compile and keeps working. Nothing in A's session mentions this. B's `cargo test` reds.
 
 ## Fix
+**MITIGATED — NOT FIXED — in `5072c097`, patch-id `18a454244c0b063abb2933230e75fcb85301b495`.**
+This file's own stated first debt is paid and the underlying gap is not, and the distinction
+is load-bearing rather than cautious: **marking this `fixed` would be the same
+false-coverage move the bug is about.** An author who writes a compiling edit that reds a
+test still receives nothing. What changed is that the mechanism no longer implies it covered
+that case.
+
+**What shipped, at both read surfaces.** The notice now carries its own scope —
+
+> `SCOPE: this compiles your tree and never runs its tests, so silence from this check is
+> not a green gate — an edit that compiles and reds a test produces nothing here.`
+
+— which is this section's *"the notice's own text should say it covers compilation and not
+test outcomes"* verbatim. And `build_check.rs`'s header gained a **fifth CEILINGS bullet**,
+so check-versus-test moves out of the COST section — where it sat as an invariant the module
+asserted it MET (*"the check has to match the gate's blast radius"*) — and into the list of
+gaps admitted *"because silence looks identical to health"*. The COST sentence now states
+what it can and cannot match. Two surfaces deliberately: the header for a reader who opens
+the file, the notice for the many who never will.
+
+**Why published rather than closed, stated in the code.** Running the gate's
+`cargo test --workspace` on every source write costs minutes and holds the shared build
+lock — which is the blocking this module exists to avoid. So the bound is disclosed, not
+removed.
+
+**Tests + mutation.** `the_notice_names_its_scope_so_silence_is_not_an_all_clear`, two
+assertions on the two halves; 34 green in `agent::build_check`; gate
+`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`. Both halves mutated in an isolated worktree, **one kill
+each** — which is what establishes they are independently guarded rather than one claim
+asserted twice.
+
+**The red was observed by MUTATION, not by a pre-fix run, and that is a departure worth
+naming.** A reproduction-first red in this checkout is byte-identical to a real regression
+for every peer compiling against it — `2026-09-14-a-reproduction-first-red-is-a-true-red-no-observer-can-attribute.md`,
+still open, with eight live sessions today. TDD's *"watch it fail"* was satisfied in
+isolation instead, at a zero-length shared-red window.
+
+**And the mutations falsified the test's own annotation**, corrected in the same commit: the
+doc comment claimed a meaning-preserving rewrite would keep it green, and both
+meaning-preserving mutations (`never runs its tests` → `never runs them`; `so silence from
+this check` → `so a clean result here`) red it. The comment now says so and accepts the false
+positive, the alternative being a sentence pin that reds on every rewording.
+
+**Left open deliberately.** The residual is the original complaint, narrowed: the author of a
+compiling-but-test-reddening write is still the one party never told. Closing this file would
+remove it from the open-bug query and stop the next person looking — which is precisely the
+mechanism recorded below.
 
 **PARTLY SHIPPED, and this section's "Not implemented" is stale — corrected 2026-09-16.**
 `src/agent/build_check.rs` is the author-side half this file asks for: *"tell the author their
