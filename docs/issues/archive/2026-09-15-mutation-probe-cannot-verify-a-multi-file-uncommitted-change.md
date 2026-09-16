@@ -180,6 +180,28 @@ does not exist, so the old single-file copy could not have produced this red —
 reported SURVIVED, a false negative manufactured by the very defect being fixed and
 indistinguishable from a real survival.
 
+## Independent confirmation — a denominator, not a catch
+
+Not a re-run of the dogfood, and that is what makes it worth recording: a **different session**,
+a **different change shape**, within twenty minutes of the fix landing and without being asked
+to check it.
+
+`f0b1a4c7` used the probe three times on a slice spanning an enum variant, two allow-lists and
+a scan body — exactly the multi-file uncommitted shape this bug says was previously
+unverifiable — and reported the whole tree carried correctly each time. Three mutations, one
+per guarded site, all `KILLED (rc=101, 3 test(s) ran)`, each killing exactly one test with the
+other two staying green, which is the correct discrimination given those two are absence
+assertions monotone the other way.
+
+They also confirmed the verdict line now carries the executed count, so *"the mutation applied
+and the suite ran"* needs no separate audit — the half that used to require trusting an exit
+code a compile failure and a survival share.
+
+**Recorded as a DENOMINATOR, not a catch.** `CLAUDE.md` § *Testing Discipline* asks that a
+confirming re-derivation be published rather than absorbed: a population that only ever records
+its catches looks self-correcting. This one confirmed, by a party who could have found it
+broken and had every opportunity to.
+
 ## Workarounds
 
 Commit the change first (the probe is designed for a committed tree), or stage the
