@@ -12,7 +12,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 2
-entry_high_water_W: 2
+entry_high_water_W: 3
 ---
 
 # Architecture Boundary Measurement — Session Log
@@ -35,7 +35,7 @@ Frictions and counterfactual wins while validating the architecture instrument. 
 
 **Status:** promoted-to-bug-tracker
 
-**Rests on:** docs/issues/2026-09-13-architecture-probe-invents-internal-imports.md and docs/issues/2026-09-13-architecture-probe-mangles-as-identifiers.md; scripts/architecture-boundary-probe.py; tests/test_architecture_boundary_probe.py. The architecture tracker owns baseline bounds and verification status.
+**Rests on:** docs/issues/archive/2026-09-13-architecture-probe-invents-internal-imports.md and docs/issues/archive/2026-09-13-architecture-probe-mangles-as-identifiers.md; scripts/architecture-boundary-probe.py; tests/test_architecture_boundary_probe.py. The architecture tracker owns baseline bounds and verification status.
 
 **Workaround:** Validate raw reference identity on both external and internal roots before publishing totals. Keep lexical results explicitly bounded; do not claim compiler resolution.
 
@@ -90,6 +90,28 @@ Frictions and counterfactual wins while validating the architecture instrument. 
 **Status:** validated
 
 **Rests on:** `src/usage/mod.rs` (`content_tests::the_renderer_and_the_classifier_agree_about_overflow`); `src/tools/core/types.rs` (buffered arm, `OutputForm`); `src/tools/core/cap_probe.rs`. Gate green all four lanes. Sibling coverage deliberately not duplicated: `core::tests::a_compact_rendered_read_still_carries_the_worktree_notice` drives the same `Text` + `format_compact` fixture through the SMALL path.
+
+## W-3 — A cancelled CI matrix cell bounds the CELL, never the property — the same population-for-member substitution, running backwards
+
+**Valid:** dated 2026-09-16
+
+**Observed:** 2026-09-16. A peer reported CI run `35055091243` (head `43fdc0ea`) as *"23 success, 1 cancelled, 0 failed"* and stated the gap honestly rather than letting it read as coverage: *"windows never completed against 43fdc0ea, so nothing failed there and nothing passed there either."* That sentence is **true of the job cell** and **over-states the gap about the test**. Re-derived every claim rather than quoting it, and the cell-level statement dissolved one level down.
+
+**What the logs actually hold — CORRECTED 2026-09-16, and the correction is this entry's best datapoint; see *The class* below.** First reading: the test grepped out of three job logs as `... ok` — `ubuntu-latest / default`, `macos-latest / default`, `windows-latest / no-features` — so the uncovered cell was called *"exactly (windows × default), both factors independently green"*. **That is wrong, and wrong in this entry's own direction.** The peer opened the CANCELLED cell's log, which I never did, and the test is in it: `test usage::content_tests::the_renderer_and_the_classifier_agree_about_overflow ... ok` at `2026-09-16T04:24:58.9888921Z`, fifteen seconds before the 04:25:13Z kill. Re-verified here against job `104663485783` — the line is at log line 5323, and `grep -c "test result:"` on that same log returns **0**. So **the test has a verdict in every cell including the cancelled one; the SUITE has no verdict there.** The missing artifact is the `test result:` summary line, not the test's outcome. The kill is `cancel-in-progress` (`.github/workflows/ci.yml:15`, exempting `master` only), fired when `f5f48b42` pushed `64411fe0`.
+
+**The `cfg(feature` argument, kept and demoted.** It was built to bridge a gap that turned out not to exist, so it no longer carries the verdict — retained because it still bounds the *feature* question independently of the log, and because deleting it would take the control with it. **Why that cell could not have differed anyway, and the residue that stays.** `cfg(feature` count across the three files on the path — `src/tools/core/types.rs`, `src/tools/output_buffer.rs`, `src/usage/mod.rs` — is **0**, and `pub mod usage;` (`src/lib.rs:59`) carries no attribute; `lib.rs`'s three gates are at `:14` / `:28` / `:39`. **Control, because a zero from a grep is otherwise indistinguishable from a broken pattern:** the same pattern returns `src/heartbeat.rs: 1`, `src/lib.rs: 3`, `src/sqlite_vec_ext.rs: 1`. What that rules out is a feature-conditional *source* difference in the path. What it does **not** rule out is a transitive dependency difference pulled in by a default feature — so the residue is real and small, and the honest statement is *"no feature-conditional code in the uncovered cell"*, never *"the cell is covered"*.
+
+**Counterfactual — what I would have shipped without the scout.** *"Green everywhere except Windows, where it is unknown."* Honest-sounding, under-reports the evidence by a whole platform, and leaves a phantom follow-up — re-run the Windows lane — that nothing needed. The peer would have kept a correct-but-weaker record, and the next reader of it would have had one fewer platform than the run actually bought.
+
+**The class.** CLAUDE.md's § *Testing Discipline* law says an assertion computed over a POPULATION cannot verify a claim about a MEMBER — an aggregate green read as per-member coverage. **This is the same substitution run backwards: an aggregate GAP read as a per-member gap.** Both replace the member's status with the population's, and the reverse direction is the harder one to notice because it errs toward *under*-claiming, which reads as rigour. The tell is a coverage statement whose unit is a **job** when the question's unit is a **test**.
+
+**And the discriminator this entry first published was itself an instance of the class it names.** It read *"grep the test name out of the SIBLING cells' logs"* — which treats the cancelled cell's **conclusion** as bounding its **log contents**: the same substitution one level finer, committed while writing the entry against it. A cancelled job's log is not empty; it holds every line written before the kill. The correct discriminator is the cheaper one that got skipped: **grep the cancelled cell's OWN log first, and fall back to siblings only if it is genuinely empty.** Sibling-bracketing is the weaker instrument, reached for because the cell was labelled `cancelled` and the label was read instead of the artifact.
+
+That is **three** instances of one class inside one exchange: the peer's *"nothing passed there either"*, the sibling-only discriminator, and treating `cancelled` as a statement about content. All three were committed by parties actively writing about the class — § *Observer Blindness*'s measured finding verbatim, and the reason the remedy is a standing move (open the log) rather than a resolution to read labels more carefully.
+
+**Status:** validated
+
+**Rests on:** GH run `35055091243`, job `104663485783` (windows/default, CANCELLED — carries the test's `... ok` at log line 5323 and zero `test result:` lines), job `104663485769` (windows/no-features), plus the two `default` cells; `.github/workflows/ci.yml:13-15` (`concurrency` / `cancel-in-progress`), `:279-283` (matrix — `local-embed` is `--features local-embed --no-default-features`, so it does **not** cover the default set and is not a fourth green cell for this purpose). Verified independently of the peer's report; their numbers matched on every count I re-derived.
 
 ## Entries
 

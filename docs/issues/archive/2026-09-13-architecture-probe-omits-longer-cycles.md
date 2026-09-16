@@ -1,7 +1,7 @@
 ---
-id: a4d7380dc4643d88
+id: 089e063d1419449f
 kind: bug
-status: investigating
+status: fixed
 title: Architecture probe omits longer population cycles
 owners:
 - marius
@@ -9,6 +9,7 @@ tags:
 - architecture
 - measurement
 - cluster/selector-narrower-than-its-population
+closed: 2026-09-16
 opened: 2026-09-13
 owner: marius
 related: []
@@ -94,7 +95,7 @@ Implemented in the uncommitted worktree probe `scripts/architecture-boundary-pro
 
 Verified 2026-09-13: 14 Python regression tests and self-test pass. The second repository gate passed formatting, full clippy, lean tests, then default tests; see `gate2-*.log` under `.codescout/measurements/architecture-boundary/2026-09-13/`. Earlier gate failures are retained separately.
 
-No fix commit has been made. SHA and patch-id are therefore not available; this record is not archived. Full measurement bounds and provenance: docs/trackers/architecture-boundary-measurement.md.
+**Fixed in `d3a2c24f`** — patch-id `f7ee24322b07702e7e87e5f4e17d78422089f2d1`. That commit introduced the corrected probe and its control suite in one change, which is why the fix and its regression tests share a SHA. **Re-verified 2026-09-16 at current HEAD: 14/14 regression tests pass, `self-test: ok`** — re-run rather than cited, because `40fb2843` later touched the probe script; inspected, and it only de-hardcodes the `--runtime-binary` default, touching none of this defect's code. Full measurement bounds and provenance: docs/trackers/architecture-boundary-measurement.md.
 ## Tests added
 
 In `tests/test_architecture_boundary_probe.py`: StaticControls.test_detects_long_cycle_without_reciprocal_edges; test_detects_reciprocal_pair_once; test_dag_and_test_only_reverse_edge_do_not_make_a_cycle. An isolated mutation restricting cycles to length two failed the longer-cycle regression.
