@@ -551,6 +551,24 @@ def last_commit_time(path: str, root: Path) -> str | None:
     return out.stdout.strip() or None
 
 
+def worktree_is_dirty(path: str, root: Path) -> bool | None:
+    """Does the worktree hold uncommitted bytes for this path? None when git cannot say.
+
+    Deliberately THREE-valued, and the None is load-bearing: the UNKNOWN prose keys a
+    dispositive clearance off False, so a wrong False would replace the omission this
+    answers with a louder false claim. Outside a repo `git status` fails plainly, where a
+    bool would have to guess. What makes the reading worth stating at all is INDEPENDENCE
+    -- it shares no blind spot with the transcript heuristics, so a Bash write they miss
+    still dirties the tree, and `clean` therefore settles what `no record` cannot.
+    """
+    out = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain", "--", path],
+        capture_output=True, text=True)
+    if out.returncode != 0:
+        return None
+    return bool(out.stdout.strip())
+
+
 def _key(iso: str) -> str:
     """Sortable UTC key. Tolerates 'Z', '+03:00' and naive forms alike."""
     from datetime import datetime, timezone
@@ -623,10 +641,34 @@ def main(argv: list[str]) -> int:
         if not who_set:
             unknown += 1
             print(f"UNKNOWN   {rel}")
+            # The window, printed here for the same reason `hidden` was lifted above the
+            # branch: this is the one verdict whose entire meaning IS the window, and the
+            # only one that was not naming it. `if floor` is the correct guard unchanged --
+            # an untracked path has no floor, and its silence is already right.
+            if floor:
+                print(f"          window: writes at or after {floor}")
+            # Name the cause the reader is most likely looking at BEFORE the caveats.
+            # Inside this branch `hidden == len(records)` is a TAUTOLOGY -- an empty
+            # who_set means in_window and undated are both empty -- so `records` is the
+            # whole condition. Do not "restore" the count as a guard here; it cannot
+            # discriminate. With no records at all we know nothing, and say nothing.
+            if floor and records:
+                dirty = worktree_is_dirty(rel, root)
+                if dirty is False:
+                    print("          LIKELY CAUSE: the worktree is CLEAN for this path "
+                          "and every write on record predates its last commit, so no "
+                          "session holds uncommitted bytes in it. That is a dispositive "
+                          "clearance rather than a coverage gap — git cleanliness shares "
+                          "no blind spot with the heuristics below.")
+                elif dirty is True:
+                    print("          LIKELY CAUSE: the worktree is DIRTY for this path "
+                          "and every write on record predates the window, so the window "
+                          "is too narrow for the question you asked — NOT evidence that "
+                          "nobody owns it. Re-run with --all before concluding anything.")
             print("          no record of any session writing this path in the window. "
                   "That is a statement about coverage, NOT about ownership — Bash writes "
                   "this tool's heuristics miss look identical. Do not read it as 'not mine'.")
-            print("          The one blind spot is a Bash write: this tool's heuristics "
+            print("          One blind spot is a Bash write: this tool's heuristics "
                   "can miss one, so an owner may exist and not be recorded. A SUBAGENT "
                   "write is NOT one — since 2026-09-12 this tool reads "
                   "<project-dir>/<session-id>/subagents/*.jsonl and attributes an "

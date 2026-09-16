@@ -873,5 +873,74 @@ hasnt "and no longer tells the reader to stop looking"  "$unk" "stop looking for
 hasnt "nor repeats the falsified zero-records count"    "$unk" "no subagent activity"
 
 echo
+echo "== UNKNOWN names the frame it was computed in =="
+# The window line printed on MINE/SHARED/PEER and NOT on UNKNOWN -- the one verdict whose
+# entire meaning IS the window. Four readers misread it in one day:
+# docs/issues/2026-09-16-file-provenance-unknown-branch-omits-the-window-it-names.md.
+# Three read a clean file's UNKNOWN as an attribution failure; one could not price the gap
+# without a second --all run, which then named three LIVE peers.
+#
+# NOTE the fixture path deliberately shares NO substring with the marker asserted below,
+# for the reason given at the --since section: a fixture name that can satisfy the
+# assertion by itself makes the assertion unable to fail.
+tool_use "$B" mcp__codescout__edit_file \
+    '{"path":"src/frame_probe.rs","old_string":"a","new_string":"b"}' "2026-01-01T00:00:00.000Z"
+fr=$(run --since 2026-06-01T00:00:00Z src/frame_probe.rs)
+has   "a floor with no surviving writer still reaches UNKNOWN" "$fr" "UNKNOWN"
+has   "and UNKNOWN now names its window"                       "$fr" "window: writes at or after"
+has   "and the floor VALUE, not merely the word"               "$fr" "2026-06-01"
+
+# The opposite direction, and the constraint the fix had to respect: with no floor there is
+# no frame to name, so an untracked path's silence is ALREADY correct and a window line
+# there would name a frame that does not exist. $unk is the no-writer fixture from the
+# section above, run against a non-git REPO_ROOT, so its floor is None.
+# This assertion is monotone under REMOVAL -- it passes against a tool with no window
+# support at all -- so it is evidence only beside the three above, never on its own.
+hasnt "and stays silent when no floor exists" "$unk" "window:"
+
+echo
+echo "== UNKNOWN names the LIKELY cause, not only the rare one =="
+# Half 2 of the same bug, and an ACTIVE FALSE CLAIM rather than an omission. The message
+# led with "The one blind spot is a Bash write" -- a completeness assertion -- while the
+# common cause of UNKNOWN is a committed file whose default floor sits at its own commit
+# time. A reader doing exactly what the message said went to investigate the rarer cause.
+#
+# This section is the suite's ONLY git fixture, and that is a gap it closes as well as one
+# it needs: every assertion above runs against a non-git REPO_ROOT, where last_commit_time()
+# returns None, so the DEFAULT floor -- the one the bug is about -- was exercised by
+# nothing. --since was the only floor under test.
+GR="$T/gitrepo"
+mkdir -p "$GR/src"
+git -C "$GR" init -q >/dev/null 2>&1
+git -C "$GR" config user.email fixture@example.invalid
+git -C "$GR" config user.name fixture
+rung() { REPO_ROOT="$GR" FILE_PROVENANCE_ROOTS="$ROOTS" \
+         CLAUDE_CODE_SESSION_ID="$ME" python3 "$TOOL" "$@" 2>&1; }
+
+echo x > "$GR/src/settled.rs"
+git -C "$GR" add src/settled.rs >/dev/null 2>&1
+git -C "$GR" commit -qm fixture >/dev/null 2>&1
+# A write recorded long BEFORE that commit, so every write on record predates the derived
+# floor and no writer survives into the window.
+tool_use "$B" mcp__codescout__edit_file \
+    '{"path":"src/settled.rs","old_string":"a","new_string":"b"}' "2020-01-01T00:00:00.000Z"
+
+st=$(rung src/settled.rs)
+has   "a clean committed path still reaches UNKNOWN"          "$st" "UNKNOWN"
+has   "and the derived floor is named too, not just --since's" "$st" "window: writes at or after"
+has   "and a clean tree is reported as settling the question"  "$st" "dispositive"
+hasnt "and the completeness claim is gone"                     "$st" "The one blind spot"
+
+# The expensive direction, and the row the hidden hint CANNOT separate from the one above:
+# same floor, same records, same UNKNOWN -- and uncommitted bytes really are held. This is
+# incident 2, where --all went on to name three live peers. git cleanliness is a SECOND
+# instrument with no blind spot in common with the transcript heuristics, which is the only
+# reason either verdict here is worth stating.
+printf 'y\n' >> "$GR/src/settled.rs"
+dt=$(rung src/settled.rs)
+has   "a DIRTY path with every write outside the window says so" "$dt" "too narrow"
+hasnt "and claims no clearance on the identical record set"      "$dt" "dispositive"
+
+echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" = "0" ]
