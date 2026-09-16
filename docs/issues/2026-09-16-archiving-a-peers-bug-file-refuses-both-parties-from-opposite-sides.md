@@ -14,23 +14,25 @@ kind: bug
 ## Summary
 
 `CLAUDE.md` **mandates** archiving through `doc(action="move")`, never a bare `git mv`.
-On a bug file **authored by one session and archived by another**, that procedure
-necessarily splits authorship of the same path: the source content is the author's, the
-current content (status flip, fix SHA, patch-id) is the archiver's.
+When one session archives bug files another session wrote, and that archive is coupled to
+a tracker a second session is editing, the whole change sits in one shared `.git/index`
+and `pre-commit-foreign-index.sh` refuses **both** parties — each refusal naming the other
+as its remedy, and that other party being themselves refused.
 
-`pre-commit-foreign-index.sh` is keyed on single authorship per path. So it refuses the
-archiver — the source half is the author's — **and it refuses the author** — the
-working-tree content is the archiver's. Each refusal's prescribed remedy names the other
-party. Neither can commit, and no narrowing exists, because every path in the change is
-contested.
+**The splitting act is `git add`, not `doc(action="move")`.** The guard is keyed on who
+STAGED a blob, not who wrote it; § *Root cause* carries the measurement, in which
+authorship and staging point in opposite directions for the same six files. An earlier
+version of this file said the mandated archive procedure splits a path's *authorship* and
+that the pair therefore has no legal state. Both halves were wrong: the procedure is not
+what splits anything, and a single session staging the whole coupled set is a legal state
+the guard accepts today. What survives is narrower and sharper — the refusal never names
+that route.
 
 **This is not the already-filed empty intersection.**
 `docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
 (`1efc6488cb2b8946`) is **two different guards** — `foreign-index` × `ledger-counts` —
-whose acceptance sets do not overlap. This is **one guard** refusing both parties, and the
-splitting act is a procedure `CLAUDE.md` requires rather than a choice either party made.
-Same cluster, different mechanism.
-
+whose acceptance sets do not overlap. This is **one guard** refusing both parties. Same
+cluster, different mechanism.
 ## Symptom (Effect)
 
 Measured 2026-09-16 on six files, from both sides of the same guard within one hour.
@@ -98,39 +100,141 @@ Verified before hitting the deadlock, so the refusal is the only blocker:
 
 ## Root cause
 
-`doc(action="move")` is the mandated archive path **and** the act that splits a path's
-authorship. The guard is keyed on a property — one author per path — that the mandated
-procedure destroys by construction. Neither component is wrong; the pair has no legal
-state.
+One `.git/index`, several sessions, and ownership recorded at `git add` time. A change
+that is logically one unit — six renames plus the two trackers citing them — gets staged
+in pieces by whichever session is doing that piece, so the index holds one change with
+two recorded stagers. `pre-commit-foreign-index.sh` then refuses each session the paths
+the other staged, and each refusal's remedy names the other party.
 
+**THE MECHANISM IS A STAGING SPLIT, NOT AN AUTHORSHIP SPLIT — corrected 2026-09-16, and
+the correction decides which fixes are even relevant.** The guard never reads authorship.
+`scripts/post-index-change-stage-log.sh` records *"WHICH SESSION staged each blob
+currently in the index"* (its own header, line 3) under the rule *"THE STAGER WINS, NOT
+THE FIRST OBSERVER"*. The contested set is produced by `git add`, never by
+`doc(action="move")`.
+
+**The two point in OPPOSITE directions here, which is what makes this a fact rather than a
+wording preference.** All six bug files were authored by `9403d62d` — `d3a2c24f`, read
+from its `Session-Id` trailer — and archived by `9e022ef0`. Yet at refuse time the guard's
+own `(blob, path)` lookup against `.git/session-stage-log` returned all twelve rename
+paths as `9403d62d`'s, `route=named`, because that session ran `git add` last. The guard
+called a session's own bug files its own, correctly by its own rule, while the session
+that *performed the archive* held none of them.
+
+**There IS a legal state, and this file's first version said there was none.** Any single
+session that stages the whole coupled set owns all of it and commits cleanly. What the
+guard does not do is *say so*: its remedy names the other party and offers narrowing,
+never *"one of you should stage the entire set"*. A correct predicate with a remedy that
+omits the performable route is CLAUDE.md § *Testing Discipline*'s *"a suite tests a
+guard's PREDICATE and never its REMEDY TEXT"*, once more.
+
+**The shortcut that looks like the remedy is not one.** `git add`-ing the other session's
+file makes the recorder call it yours and the guard go silent. That is gaming the
+instrument rather than satisfying it: it files their prose under your commit message with
+no refusal emitted — the exact capture the guard exists to prevent. Named here because
+nothing in the guard closes it.
 ## Fix
 
-**Not designed.** Directions, uncosted, recorded so the next session does not re-derive
-them:
+**Not designed.** Directions recorded so the next session does not re-derive them — and
+two of the original three are now measured dead, which is most of what this section is
+worth.
 
-1. **Teach the guard about renames.** Treat an `R` pair as one unit and accept it when the
-   source's author and the destination's author are the only two parties on it. Narrowest,
-   and it is the shape the archive actually has.
+1. **Teach the guard about renames.** **Implemented at `b37b888a`, and it does not reach
+   this case.** The `joint` predicate accepts a contested path only when it is half of a
+   rename whose partner belongs to the committer. Against the live deadlock it evaluates
+   to **0 from both sides**: side A's contested set was one plain `M` tracker with no
+   rename partner; side B's was thirteen paths including a second plain `M`, and the six
+   sources' partners are the six destinations, also the other party's. So
+   `CODESCOUT_INDEX_ACK` is inert for **both** parties — it is gated on `joint`. The change
+   is correct for a pure joint archive, was mutation-tested, and is exit-compatible with
+   the original script on the same fixture; it simply never fires on the shape that
+   actually occurred. **Assert the mechanism's REACH, not just its logic** — the law
+   landing on the commit written to satisfy it.
+
 2. **Let a commit declare two authors.** A second trailer, so the guard can pass on a
-   commit that *names* the split rather than hides it. Addresses attribution rather than
-   routing around it.
-3. **Move the frontmatter edit off the archiver.** If the author records the SHA and flips
-   status, and the peer only moves, the content stops being contested — but this shifts work
-   to the party who may not be present, which is the situation that produced the stale
-   `status: investigating` lines in the first place.
+   commit that *names* the split rather than hides it. Still open, and now the most
+   promising of the set.
 
+3. **~~Move the frontmatter edit off the archiver.~~ DEAD.** It targets authorship, and
+   the guard never reads authorship — whoever runs `git add` owns the row regardless of who
+   wrote the bytes. This direction would have cost a session real work and changed nothing.
+   Recorded rather than deleted precisely because it is the direction a reader of the
+   original framing would reach for first.
+
+4. **Name the performable route in the refusal text.** New, and the cheapest of the four:
+   the refusal should say that one party staging the whole coupled set is a legal state.
+   Nothing about the predicate changes, and it is the half a 101-assertion suite does not
+   test.
+
+5. **Warn on a partial commit that moves a path cited from outside the commit.** Also new,
+   and it is the one that would have caught the `215a5cad` window in § *Workarounds*. The
+   data is already there: the guard holds the staged rename pairs, and
+   `git grep <old path> HEAD` over the complement is one call.
 ## Workarounds
 
-None that preserve attribution. The six files remain archived-on-disk and uncommitted;
-nothing was discarded. **Do not `git checkout` or `git stash` the paths** — the archiver's
-work exists only in the working tree, and the guard says so explicitly.
+**One, and the second thing this section used to recommend is now measured WRONG.**
 
+- **One party stages the entire coupled set** and commits it, recording the other with a
+  `Co-Authored-Session-Id` trailer. Legal under the guard as written, needs no ack, and
+  strands nothing. This is the only clean route.
+
+- **~~Split by stager, ordered by citation dependency.~~ FALSIFIED 2026-09-16 — it was
+  tried, at `215a5cad`, and it opened the window it was reasoned to avoid.** The reasoning
+  was that the dependency is one-way: the six renames depend on nothing, while
+  `architecture-boundary-session-log.md:38` cites the post-move PATHS and the peer's
+  `architecture-boundary-measurement.md` cites the post-move IDS — so renames-first should
+  leave every citation resolving. **Every word of that is true of the STAGED content and
+  false of the resulting tree.** The exposure was HEAD's *old* copy of `architecture-boundary-measurement.md` —
+  a file deliberately NOT being committed, whose citations pointed at exactly the paths the
+  commit moved out from under them. Measured at `215a5cad`: **7 lines** of live
+  `../issues/2026-09-13-architecture-probe-*.md` citations against paths `git cat-file -e`
+  confirms absent from that tree, plus all six PRE-move ids. Repaired minutes later by
+  `53ff4aa0`; nothing consumed the window. **So BOTH orders strand something** — peer-first
+  strands the new ids, renames-first strands the old paths — and only the single commit
+  strands nothing, which is what the coupling rule was protecting all along.
+
+**Why no control over the staged blob could have caught it.** The check run was: all six
+post-move ids appear exactly once in the staged tracker, all six pre-move ids zero times,
+with the pre-column making the zeros a measurement. Sound, and blind — the failing artifact
+was **not in the staged set**, so the population the control enumerated could not contain
+it. This is CLAUDE.md § *Testing Discipline*'s population-vs-member law on an axis it does
+not state: not *aggregate read as per-member*, but **the STAGED SET read as the RESULTING
+TREE**. A commit's blast radius is every file citing what you moved, not every file you
+staged.
+
+**The check that does catch it, and it is one line.** Before a partial commit that moves or
+renames anything, grep the *complement*:
+
+```
+git grep -nE '<old path pattern>' HEAD   # files you are NOT committing that cite ones you are
+```
+
+**Write the pattern against the citation's own form, and verify it fires.** The first run of
+this check here used `docs/issues/2026-09-13-…` while every real citation is relative
+(`../issues/2026-09-13-…`), returned `1`, and read as confirmation. A near-zero from a
+pattern nobody has seen fire is the same bytes as a broken pattern.
+
+**Do not `git checkout` or `git stash` the paths** while a deadlock is parked — the
+archiver's work exists only in the working tree.
 ## Resume
 
-The deadlock is measured from both sides and the state is parked, not lost. Whoever picks
-this up: the evidence for both refusals is in this file, and the fix is a guard change
-rather than a procedure change, because the procedure is the one `CLAUDE.md` mandates.
+The 2026-09-16 instance is **resolved**: `215a5cad` landed the six archives plus the
+session log, `53ff4aa0` repointed the peer's tracker onto the new paths and ids, and HEAD
+is consistent — verified with all six pre-move ids at 0 hits and all six post-move ids at
+2 files each, the post-column being the control that makes those zeros a measurement.
 
-Credit: the collision was hypothesised by `9e022ef0-eb76-49f0-b175-4d68979290cf` from side
-A's refusal alone, with the three-option framing (`go ahead` / `leave them` / `you commit`)
-that made it diagnosable rather than a stuck commit. This file adds side B.
+This file stays **open** for the residue, which is smaller and sharper than what it was
+filed for: the refusal text names no performable route (§ *Fix* 4), nothing warns on a
+partial commit that orphans citations living outside it (§ *Fix* 5), and `b37b888a`'s
+`joint` predicate covers a shape this corpus has not yet produced.
+
+Credit, and it is split three ways because the halves were earned differently.
+`9e022ef0-eb76-49f0-b175-4d68979290cf` hypothesised the collision from side A's refusal
+alone, with the three-option framing (`go ahead` / `leave them` / `you commit`) that made
+it diagnosable rather than a stuck commit — and then caught the `215a5cad` window by
+reading HEAD's copy of the file that was left behind, which is the reading the committing
+session did not take. `9403d62d-116b-46ea-ac9b-004acff2b1cb` added side B and the
+staging-versus-authorship correction that supersedes this file's own first mechanism. The
+*"both orders strand something"* finding belongs to the pair: one session measured the
+dependency in the staged set, the other measured it in the tree, and neither reading alone
+was the answer.
