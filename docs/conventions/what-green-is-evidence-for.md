@@ -492,6 +492,73 @@ as a defect. What makes it more than hypothetical is that the same task produced
 wrong versions of one description*.
 
 
+## `SURVIVED` has a THIRD reading — the two-site `ack=all` run
+
+Measured 2026-09-16 by sessionId `f5f48b42-6d84-482e-84a4-8eaebb0ce60f` while fixing
+`8988bc7719b83b3b`
+(`docs/issues/archive/2026-09-15-push-ack-all-publishes-every-foreign-sessions-work-and-tells-none-of-them.md`,
+fix `fbddd86d`); the discriminator below by sessionId
+`f0b1a4c7-e991-4478-bf22-b088483b6821`. Two defects in one bug, one mutation per site as
+§ *One mutation per guarded SITE* requires:
+
+| mutation | site 1 (`acked()` wildcard) | site 2 (`!= "all"` gate) | result |
+|---|---|---|---|
+| wildcard short-circuit restored | **broken** | fixed | **KILLED** — 3 rows |
+| `!= "all"` gate restored | fixed | **broken** | **SURVIVED** — 0 rows |
+
+**Neither published reading fits row 2.** The clause is not untested — the suite runs it.
+It is not unreachable-by-any-test-you-could-write — no seam is missing. It is
+**semantically inert**: once site 1's fix puts real sids in `ack_matched`, the condition
+`ack_matched != "all"` cannot be false on any input the fixed code produces. Site 1's
+repair removed the clause's entire domain.
+
+So **the repair is neither of the published two.** Not *write the test* — no test can
+distinguish a condition that is always true. Not *add a seam* — the code is reachable. The
+correct action is to recognise the clause is dead and delete it, which is what `fbddd86d`
+did. A `SURVIVED` read as "untested" here sends you to write a test that cannot exist, the
+same terminal state the two-reading form already warns about, reached by a third route it
+does not name.
+
+### The discriminator — what makes this a category rather than a judgement about intent
+
+Inertness is **checkable**: revert the sibling fix and re-run the SAME mutation. If it now
+KILLs, the clause was inert rather than untested. Row 1 above *is* that check, run by
+accident.
+
+That is also why one-mutation-per-**SITE** is what surfaces this and a single run cannot:
+**inertness is a property of the PAIR of sites, not of the line**, so an instrument asking
+about one line at a time can only reach it by comparing two answers. The existing law was
+written to stop a kill at one site being credited to the other N−1; this is the same law
+paying out in the opposite direction, where a *survival* at one site is explained by the
+fix at another.
+
+### What the bug file got wrong, and the generalisation
+
+The record asserted **"two independent failures, and either alone is sufficient"**. That is
+correct about the **defects** and false about the **repairs**. Fixing `acked()` alone closes
+the bug — real sids make the old gate's condition true, so the block runs. Fixing the gate
+alone does not: it leaves the wildcard short-circuit in place and prints the literal token
+`all` as a session to go and notify, a plausible line naming a party that does not exist.
+
+**Independence of causes does not transfer to independence of repairs.** The author derived
+the independence by reading, and reading cannot separate the two — § *Bug Tracking*'s *"run
+the reproduction before reading the fix plan"* reaching the **fix** rather than the
+diagnosis.
+
+### A second result from the same run — prose is monotone under naming the wrong parties
+
+Under the site-1 mutation, the assertion `says they have not been told` **passed**. The
+sentence survived; only the list of sids was wrong. An assertion about a notification's
+*wording* cannot detect that notification naming the wrong recipients — § *Monotone
+assertions* applied to the half of a guard nobody writes assertions about (CLAUDE.md
+§ *Testing Discipline*, the remedy-text ceiling, which had been measured on deletion and is
+here measured on **substitution**). **Assert the sids, never the prose.**
+
+The same run supplies the converse, and it is why the ordering matters: a `hasnt` row
+asserting the literal token `all` never appears as a sid was **vacuous** before the fix —
+nothing printed at all — and became load-bearing only once the `has` rows could red on
+silence. A negative assertion is worth what the positive assertions beside it are worth.
+
 ## Related
 
 - The laws themselves: [`CLAUDE.md`](../../CLAUDE.md) § *Testing Discipline*.

@@ -247,10 +247,20 @@ premise that every addition falsifies.
   is aimed at the instant your revert runs. The script mutates an isolated worktree instead —
   measured 87 s + 2.8 G once, then **11 s per run, faster than the shared tree** — asserts the
   pattern occurs exactly once (a mutation that never applied is indistinguishable from one that
-  survived), and reverts before its process exits. **Read `SURVIVED` as two readings with
-  opposite repairs:** untested (write the test), or *unreachable by any test you could write*
-  (the code needs a seam first) — the natural reading is the first, and it sends you to write a
-  test that cannot exist. Index row and every caveat → [`docs/PROBES.md`](docs/PROBES.md).
+  survived), and reverts before its process exits. **Read `SURVIVED` as three readings with
+  opposite repairs:** untested (write the test); *unreachable by any test you could write* (the
+  code needs a seam first); or **semantically inert** — reachable and tested, but unable to be
+  false on any input the FIXED code produces, because a sibling repair removed its domain, so
+  the clause is dead and the repair is to delete it. The natural reading is the first, and on
+  both of the others it sends you to write a test that cannot exist. **The third has a
+  discriminator, which is what makes it a category rather than a guess about intent: revert the
+  sibling fix and re-run the SAME mutation — if it now KILLs, the clause was inert.** Inertness
+  is a property of the PAIR of sites, so the one-mutation-per-SITE law above is what surfaces
+  it, paying out in reverse: a survival at one site explained by the fix at another. And the
+  claim it falsifies is the one a bug file naturally writes — **independence of causes does not
+  transfer to independence of repairs** (measured 2026-09-16, `fbddd86d`; the author had derived
+  the independence by reading, which cannot separate them). Index row and every caveat →
+  [`docs/PROBES.md`](docs/PROBES.md).
 ## Bug Tracking
 
 **Per-file bug tracking lives in `docs/issues/`.** Every bug noticed during work gets its own file, copied from `docs/issues/_TEMPLATE.md`. Path, slug, the `status:` vocabulary (`open | taken | investigating | fixed | mitigated | wontfix | zombie`), and the archive flow are documented in **`get_guide("tracker-conventions")` § Bug files**.
