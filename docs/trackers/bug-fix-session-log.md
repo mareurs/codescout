@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 167
+entry_high_water_F: 171
 entry_high_water_W: 144
 ---
 
@@ -65,6 +65,9 @@ entry_high_water_W: 144
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-171 | 2026-09-16 | med | cross-session | open | **Read a STAGER off an instrument that answers WRITER, and was right by luck** - the correct-answer variant emits no signal; surfaced only because a peer disclosed their wrong one |
+| F-170 | 2026-09-16 | med | self-friction | open | **Hand-rolled a probe PROBES.md already ships, and reproduced the exact unit error it was fixed for** — servers and muxes counted as one population; 19+3=22 reconciles and means something different |
+| F-169 | 2026-09-16 | med | measurement | open | **The freshness probe answers for string literals, not identifiers — and a stripped binary returns 0 for both absent and present** - control symbol also 0, which is what turned a finding into a broken instrument |
 | F-167 | 2026-09-16 | med | self-friction | open | **A selector drawn from one implementation, its zero read as absence of the capability** - two instances in one session; both zeros were correct, so re-running either returns the same zero |
 | F-166 | 2026-09-16 | med | self-friction | open | **A measured symptom licensed skipping the search for an already-archived correction** - `audit_doc_refs` does scan `.rs`; the gap is severity, not scope, and the correction had been archived a month earlier |
 | F-165 | 2026-09-16 | med | cross-session | open | **Attribution by THREAD adjacency — credited a commit to the session I had a live thread with, not to its trailer.** Distinct from `F-155`'s TOPIC adjacency: its tell (*"ask is this yours"*) is a question about the subject and does not fire here, because I was reasoning about who I had been talking to. Committed inside a message about an attribution defect. |
@@ -233,6 +236,7 @@ entry_high_water_W: 144
 | F-161 | 2026-09-15 | med | cross-session | open | **Selected an already-fixed bug for work: `doc(find)` returned it `open` while its fix (`e79fa902`, 08:27:23) and archive (`3c4c3b61`, 08:28:49) had landed mid-triage.** The catalog was never stale — `doctor` reported `missing_file: 0`, because the peer archived properly through `doc(action="move")`, which re-keys the row atomically; the SNAPSHOT aged. **Distinct from the promoted substrate law**, which is about reading the wrong world: here one world was read correctly and then moved, so the discriminator is *when*, not *which*. Corpus rate at the time: 88 commits touching `docs/issues/` in 24h, 5 sessions live in the checkout. Caught only because two surfaces disagreed — `grep` listed the archive path while the catalog reported it live — and the reflex that has to be beaten is *"one of my instruments is broken"*. Remedy is ordering, not mechanism: re-verify at CLAIM time, since `status: taken` + `claimed_by` re-reads the row anyway |
 | F-162 | 2026-09-15 | med | self-friction | open | **Three mis-scoped instruments in one verification, two of them a commit RANGE read as authorship — while the rule against it sat quoted in my context.** `85642b1b^..HEAD` reported **7** peer commits as my `IC-12` citations; a line-granularity `grep -c` on the `**Members:**` line (IC-6's, ~38k chars at that instant and 40,018 two appends later — the scalar decays, see the entry) reported a bare `n=` I had not written, because appending re-writes the whole line and any other author's `n=` anywhere in it counts. Both corrected readings came back clean, and what caught the first two was their **impossibility** (7 citations in a session that wrote none) rather than vigilance — `shared-checkout-commit-sequence.md` § 2 forbids exactly this and was in context, quoted by the peer message that prompted the check. Remedies, both one-liners: enumerate your own shas explicitly instead of a range, and use `--word-diff` when the unit you care about is a phrase inside a mega-line. Generalises past the positive-control law: **when an instrument's UNIT (line, commit, file) is coarser than the thing asked about (a word, an author, a field), its answer can be neither right nor wrong** |
 | F-164 | 2026-09-16 | med | measurement | mitigated | **A nullable JSON field that returns the EMPTY STRING makes an `is None` guard fail open, and the failure direction is ALARM.** `gh run view --json jobs` emits `conclusion: ""` for a still-running job, not `null`, so `not in ('success','skipped',None)` flagged **12 of 24 jobs as failures on a run with zero failures**. Caught by a contradiction, not by suspicion: the flagged list contained a job my own output also reported as succeeded, and two contradictory statements about one job from one payload is an instrument fault (`W-139`'s discriminator). Worth an entry because it fails toward alarm — it manufactures failures, and the next actions (report broken CI, go debug a green pipeline) both feel like diligence. One step from the publish path, so `W-140` from the reporting side again. **Denominator:** peer `9403d62d`'s independent predicate `if c and c not in (...)` IS safe, since `bool('')` is False — and their note is the useful half, *"I would not have found mine safe by inspection; I ran the truth table."* Two implementations, one safe, neither author able to tell by reading. Prefer an **allowlist of terminal values** to a denylist of non-terminal ones: the allowlist fails toward *not finished yet*, the denylist toward *broken*. Scope checked before filing — nothing in this repo consumes `gh run --json`, so it is a lesson and not a defect. |
+| F-168 | 2026-09-16 | med | measurement | mitigated | **`/proc` order is START-TIME order, so `head -N` samples exactly the processes that answer a freshness question wrongly.** Verifying a `cargo rb` had reached the running MCP server: `pgrep -f codescout \| head -8` returned **4 processes, all `(deleted)`** — which reads as *the rebuild reached nothing*, and sends you to re-run it or to tell the operator their build silently failed. The full `/proc[0-9]*` walk returned **22**: 14 stale and **8 clean, started 15:09:15–15:10:31 against a binary mtime of 15:08:38**. The rebuild had landed perfectly. **Not an unlucky sample — anti-correlated with the property measured:** the glob is pid order, which is start-time order, so `head -N` takes the N OLDEST, i.e. precisely the population guaranteed to predate any rebuild. Caught by the marks being **4 of 4**: a unanimous reading over a tiny sample is `W-139`'s `0/0/0` shape, since long- and short-lived servers do not restart together. | The scout's other half confirmed and is recorded as a denominator: this session's server resolved to pid 2546536, exe carrying **no** `(deleted)` suffix — string-free identity rather than a content probe — and the behavioural check discriminated live, `empty_test_selection` present on a filter matching nothing and **absent** on the whole target, at `exit_code: 0` both times. Worth separating from the defect: 14 stale processes is not a fault, it is what a rebuild does to running servers, so any peer that has not run `/mcp` is serving pre-rebuild behaviour. The fault is an instrument rendering that ordinary state as *"the rebuild did not take"*. **When enumerating processes to answer an AGE question, do not truncate** — filter on the predicate, or take the whole set. | mitigated |
 
 ## Wins Index
 <!-- audit-doc-refs:ignore-refs `1f8784f932f042bc` — a CATALOG DIGEST, not an artifact id — the sentence reads "4786 rows, digest ...". Sixteen lowercase hex, same shape, different namespace. -->
@@ -16663,6 +16667,204 @@ failing to search the archive for a prior diagnosis, this one about how the fals
 formed in the first place); `F-165` (also this session, also a wrong claim about another
 session's artifact — but generated from thread salience rather than from a scoped reading, so a
 different supply and explicitly not a third instance of this).
+
+## F-168 — /proc order is start-time order, so `head -N` samples exactly the processes that answer a freshness question wrongly
+
+**Valid:** dated 2026-09-16
+
+**Observed.** Verifying that a `cargo rb` rebuild had reached the running MCP server. First
+instrument: `pgrep -f codescout | head -8`, reading `readlink /proc/<pid>/exe` for each. It
+returned **4 processes, every one marked `(deleted)`** — the signature of a server holding a
+replaced inode. Read literally that says the rebuild reached nothing, and the next actions are
+to re-run `cargo rb` or to tell the operator their rebuild silently failed.
+
+The full enumeration over `/proc/[0-9]*` returned **22** codescout processes: **14 stale
+(deleted) and 8 clean, started 15:09:15–15:10:31 against a binary mtime of 15:08:38.** The
+rebuild had landed perfectly.
+
+**Mechanism, and it is worse than an unlucky sample.** `/proc/[0-9]*` globs in
+lexical-numeric order, so it is **pid order, which is start-time order** (modulo wrap). A
+`head -N` over it therefore does not take an arbitrary N — it takes the **N oldest**, which on
+this question is exactly the population guaranteed to be stale. The truncation is not noisy, it
+is **anti-correlated with the property being measured**: every process it can return is one
+that started before the rebuild.
+
+**Why it was caught.** Not by suspicion — by the marks being **4 of 4**. A unanimous reading
+across a sample that small is the same shape as `W-139`'s `0/0/0` control: the extremity is the
+signal. Long-lived servers and short-lived ones do not restart together, so *"every single one
+is stale"* describes no plausible machine state.
+
+**The rest of the scout, recorded because a confirmation is a denominator.** This session's
+server resolved to `pid 2546536`, started 15:10:02, exe path carrying **no** `(deleted)` suffix
+— string-free identity, the form `W-139` recommends over any content probe. The behavioural
+half then discriminated correctly through the live tool: a filter matching nothing returned
+`empty_test_selection` beside `exit_code: 0`; the whole target returned **no** diagnostic at the
+same exit code. Both confirmed; neither is a catch.
+
+**A fact worth separating from the defect:** 14 stale processes is not itself a fault. A
+rebuild replaces the file and leaves running servers on the old inode by design, so any peer
+that has not reconnected is serving pre-rebuild behaviour until it runs `/mcp`. What is a fault
+is an instrument that renders that ordinary state as *"the rebuild did not take"*.
+
+**Operational form.** When enumerating processes to answer a question about **age or
+freshness**, do not truncate — `/proc` order is age order, so the cheap `head` samples precisely
+the subpopulation that answers the opposite way. Filter on the predicate you care about, or take
+the whole set.
+
+**THE 22 / 14 / 8 ABOVE IS A CONFLATED FIGURE, AND IT IS LEFT STANDING DELIBERATELY — see
+`F-170`.** `scripts/stale-servers.sh` — a `docs/PROBES.md` row, CI-guarded — reports this same
+population as **servers=19 (13 stale, 6 current)** and **muxes=3 (1 stale, 2 current)**: two
+populations whose remedies are opposite (a server never recycles and needs `/mcp`; a mux has no
+session to reconnect and exits past its own idle timeout), printed with **no combined total**,
+the script having been reshaped on 2026-09-14 to make exactly this merge unrepresentable. The
+arithmetic reconciles — 19+3=22, 13+1=14, 6+2=8 — and means something different.
+
+**The number is NOT amended because `F-170` depends on it verbatim.** That entry cites this
+figure as *"my figures exactly"* — the match between two sessions hand-walking `/proc` in the
+same hour is its whole evidence that this is a **class** rather than one session's slip.
+Correcting the number here would falsify that quotation and destroy the second datapoint, which
+is worth more than either entry alone. Read the two together; `F-170` carries the split.
+
+**And the compounding fact, which is why this note sits in this entry rather than only in
+`F-170`:** the conflation landed *inside* an entry whose subject is mis-measuring this very
+population, written by a session actively reasoning about instrument choice. I also failed the
+standing instruction that `docs/PROBES.md` states plainly — *start here before answering a
+question with a number, an instrument may already exist* — and then, re-deriving the split by
+hand, matched the prose line `SERVERS: a stale server serves…`, whose fourth field is literally
+`server`. Three measurement errors in one ten-minute check.
+
+**Status:** mitigated
+
+**Rests on:** `W-139` (the control that makes an impossible reading legible, and
+`readlink /proc/<pid>/exe` as the string-free freshness check) and `F-164` (an instrument whose
+failure direction is alarm rather than silence).
+
+## F-169 — The freshness probe answers for string literals, not identifiers, and a stripped binary returns 0 either way
+
+**Valid:** dated 2026-09-16
+
+**Observed:** the operator rebuilt the release binary and reconnected MCP. Probing the build
+axis per the freshness law in `reconnaissance/references/seam-classes.md` — *"`grep -c "<new
+string>" target/release/<bin>`"* — I ran it for `may_still_be_writing`, the symbol my own
+`82d0f58e` introduced, and got **0**. The control, `store_background`, a symbol that cannot be
+absent, also returned **0**.
+
+**Mechanism:** the release binary is `stripped` (`file target/release/codescout`). String
+literals survive — `"background job log unavailable"` → 1, `"Progressive Disclosure"` → 2 —
+and identifiers do not: `OutputBuffer` → 0. The recipe says **string**; I applied it to an
+**identifier**, and a stripped binary answers 0 for every identifier with no error and nothing
+marking the question as unanswerable.
+
+**Why this earns an entry when `R-89` already exists:** `R-89` gives the recipe without its
+applicability bound. Read literally it is correct. Read as *"grep the binary for your change"*
+it inverts silently on the commonest shape of change, and its 0 is indistinguishable from
+*"your fix is not in the binary"* — a reading that, in a session which had just pushed, sends
+you to re-run `cargo rb` and to report a failed build to your operator.
+
+**The bound, so the recipe stays usable:** it answers the build axis **only for a change that
+introduces a new string literal**. A rename, a match arm, a reordered predicate, a changed
+comparison — none add a string. My own fix is exactly that shape (`is_running` →
+`may_still_be_writing` plus two match arms, no new literal), so for `82d0f58e` the build axis
+is **unprobeable by this method**, and by `R-89`'s own closing rule the honest claim is
+*"committed"*, never *"live"*. Recorded rather than papered over.
+
+**The control is the whole entry.** One probe returning 0 is a finding; the same probe
+returning 0 for a symbol that cannot be absent is a broken instrument. One extra grep separated
+them — `R-3`'s positive-control law landing on `R-89`'s own recipe.
+
+**Severity:** med — nothing shipped, but the unguarded reading is *"the rebuild did not take"*,
+costing a wasted rebuild and a false report to the operator.
+
+**Status:** open — the remedy is a bound on a recipe that lives in the companion plugin's
+reference file, not in this repo, so it is not this ledger's to close.
+
+**Rests on:** `R-89` (the freshness law this bounds); `R-3` (run a positive control before
+trusting an instrument); `F-167` (same session, same family — but **deliberately separate**:
+there the selector was too narrow over a CORPUS, here a correct recipe was applied outside its
+domain over a BINARY's symbol table, and the fix is a bound rather than a wider pattern).
+
+## F-170 — Hand-rolled a probe PROBES.md already ships, and reproduced the exact unit error it was fixed for
+
+**Valid:** dated 2026-09-16
+
+**Observed:** 2026-09-16, after an operator `cargo rb` + `/mcp`. `librarian(action="doctor")` reported `retired_object_still_present: 2` (informational). Establishing whether the rebuild had actually landed, I hand-walked `/proc/<pid>/exe` for every `codescout` process and reported **22 processes, 14 stale, 8 current**.
+
+**The instrument already existed, and its published caveat names the exact error I made.** `scripts/stale-servers.sh` is a row in [`docs/PROBES.md`](../PROBES.md), whose own header reads *"Start here before answering a question with a number"*. Run afterwards, it reports **servers=19 (13 stale, 6 current)** and **muxes=3 (1 stale, 2 current)** — two populations, printed with **no combined total**, because their correct next actions are opposite: a server never recycles and must be reconnected with `/mcp`; a mux has no session to reconnect and exits by itself once idle past its `--idle-timeout`.
+
+My arithmetic was right and my UNIT was wrong: 19+3=22, 13+1=14, 6+2=8. The number reconciles perfectly and means something different. The script prints no combined total **specifically so this substitution is unrepresentable rather than policed** — it was reshaped on 2026-09-14 after counting muxes as servers under one `total=`. I reproduced the fixed defect by re-implementing the instrument instead of running it.
+
+**Why "be careful" is the wrong reading.** A hand-rolled walk over one namespace cannot see a distinction it never encoded; the populations are separated by `/proc/<pid>/cmdline`, which my walk did not read. The remedy is the standing move PROBES.md already states — **grep it for the population before answering with a number** — on a trigger that happens anyway ("I am about to report a count").
+
+**What the conflated form obscured, and it inverts the conclusion.** Cross-referencing the 13 stale servers' PPIDs against a socket enumeration at 15:12Z: every one belongs to a session in ANOTHER repo (terasa, garaj, claude-plugins, eduplanner-mobile, PFA, backend-kotlin, MRV-poc). **Every session in this checkout is current.** The conflated "14 stale" reads as a codescout-checkout problem; the split figure shows this checkout clean and the exposure being nine other projects served two-day-old guides, each reconnectable only by its own operator.
+
+**Not a new bug.** The `retired_object_still_present` rows are the mitigation of an already-archived record working as designed — informational, and *"no edit to this repo makes it stop firing"*. Its prescribed check, run rather than assumed: `workspace(status).server.git_sha` = `afcf8c14` = `index.head_commit`, so the rebuild did put HEAD in front of this session's tools.
+
+**Corroboration from instruments that do not share a scope.** An independent `/proc/<pid>/fd` walk found **13** processes holding `catalog.db` open, all stale-binary — matching the script's 13 stale *servers* and excluding its 1 stale *mux*, which is correct because a mux is LSP and never opens the catalog. Control: the same probe returns 3 fds against this session's own server, so the reading is a measurement rather than an empty query.
+
+**A SECOND, INDEPENDENT INSTANCE IN THE SAME HOUR, which is what makes this a class rather than one session's slip.** Session `29420e72-c262-4236-82c2-52d769fdc549` has `F-168` staged in this same ledger, written against the same question (*did `cargo rb` reach the running MCP server?*) in the same window, and reports *"The full `/proc[0-9]*` walk returned **22**: 14 stale and **8 clean**"* — my figures exactly, and **also with no server/mux split**. Two sessions hand-walked `/proc` rather than running `scripts/stale-servers.sh`, and both landed on the population the script was reshaped on 2026-09-14 to make unrepresentable.
+
+The sharper half: `F-168` is itself a friction entry *about mis-measuring this very population* — its subject is `head -N` sampling the oldest processes and reading as *"the rebuild did not take"*. So the conflation was committed **inside a correction of a neighbouring error in the same measurement**, by an author actively writing about instrument choice. That is CLAUDE.md § *Observer Blindness*'s measured claim reproducing itself: *knowing the class prevented none of the four*. Neither of us was careless; both of us were answering a process question with a process walk, which is the natural move and the wrong instrument.
+
+**So the remedy stays mechanical and moves left.** Not "remember the two populations" — both sessions could recite them afterwards — but grep [`docs/PROBES.md`](../PROBES.md) for the population **before** the walk. Candidate hardening, unbuilt: the probe already exists, is CI-guarded and mutation-tested, so the missing piece is a trigger, not a tool.
+
+**AND THE SECOND INSTANCE IS NOT A DEFECT IN `F-168` — corrected here, because the first version of this paragraph was unfair to it and analytically wrong.** `F-168`'s claim is *the rebuild landed*, evidenced by 8 processes started 15:09–15:10 against a binary mtime of 15:08:38. Whether those 8 are 6 servers plus 2 muxes does not touch that inference: any post-mtime process settles it. **So the same conflation is LATENT in `F-168` and LIVE in `F-170`, and what separates them is the question, not the measurement.** *"Did the rebuild reach anything?"* is answered by any process; *"who needs `/mcp`?"* is answered only by the server count, because that is where the two populations take opposite remedies.
+
+A unit error is therefore not a property of a number. It is a property of a number **paired with a question** — which is why a figure can sit correct in one entry and wrong in the next while the bytes are identical, and why "check your units" does not locate it.
+
+**`F-168` should not be amended, and the good reason is not this entry's citation.** That it is quoted verbatim above is real but is the weaker argument, and resting on it would protect a footnote over another session's accuracy. The reason is that `F-168` is not wrong. Its raw figure is the record of what was measured, adequate to what it concludes; the split belongs here, where the remedy is routed. A pointer from `F-168` to this entry is the whole repair.
+
+**Where the annotation properly belongs, stated because this entry cannot carry it.** CLAUDE.md § *Testing Discipline* says annotate a load-bearing detail **on the fixture line** — and the surface an amender reads is `F-168`, not this. A note here reaches nobody about to edit that number. `F-168` is another session's entry, so the most this entry can do is name the gap; the durable fix is one line in `F-168` saying its figure is cited downstream and why it is correct unsplit.
+
+**Status:** open
+
+**Rests on:** `scripts/stale-servers.sh` and its 18 cases in `tests/stale-servers.sh` (own CI job); [`docs/PROBES.md`](../PROBES.md)'s stale-servers row; `librarian(action="doctor")` `retired_object_still_present`. Counts valid at 15:12Z on 2026-09-16 and decay — re-derive, do not cite.
+
+## F-171 — Read a stager off an instrument that answers writer, and was right by luck
+
+**Valid:** dated 2026-09-16
+
+**Observed:** I attributed STAGING from an instrument that answers AUTHORSHIP, and was right by
+luck. Blocked behind a peer's eight staged paths, I ran `python3 scripts/file-provenance.py
+docs/trackers/architecture-boundary-session-log.md`, read `written by
+9e022ef0-eb76-49f0-b175-4d68979290cf`, and reported that *"both the staged work and the
+in-flight edits belong to the same session"*. The staged half was never measured. The tool's
+own output says **written by**. `9e022ef0` did hold those eight and unstaged them, so the
+conclusion held and nothing corrected me.
+
+**Mechanism:** writer and stager are different parties, and this repo already separates them at
+the bytes. `scripts/post-index-change-stage-log.sh:3` records *"WHICH SESSION staged each blob
+currently in the index"*, and `:37` states the rule — *"THE STAGER WINS, NOT THE FIRST
+OBSERVER"*. `.git/session-stage-log`, keyed on `(blob, path)`, is the instrument for a staging
+question. I used neither, and `file-provenance.py` does not decline a question it cannot
+answer.
+
+**Why "it was right" is the finding and not the mitigation.** A correct conclusion drawn from an
+unsound step emits nothing — no refusal, no contradiction, no peer correction. The identical
+substitution was made the same day by sessionId `327926`'s session, reported to `9e022ef0` as
+*"you staged it"*, was WRONG, and was corrected inside one exchange. So the unsound step drew a
+correction signal in one of its two instances, and not in the one that was absorbed into a
+routing decision and a report to an operator. They disclosed theirs unprompted, which is the
+only reason I went back and checked mine.
+
+**The two answers diverge by construction, not by accident — and on exactly this session's
+shape.** `docs/issues/2026-09-16-archiving-a-peers-bug-file-refuses-both-parties-from-opposite-sides.md`
+measures a case where all six files were AUTHORED by `9403d62d` and STAGED by `9e022ef0`, and
+the guard called them `9403d62d`'s — correctly, by its own rule. Writer and stager pointed at
+different sessions in the very deadlock I spent the afternoon reading.
+
+**Severity:** med — the routing decision rested on it: who to ask to free the shared index. Right
+answer, wrong instrument, and the cost of the wrong answer is a request sent to an operator who
+holds nothing.
+
+**Status:** open — the remedy is to read the stage log for a staging question, which is a policy.
+Nothing in `file-provenance.py`'s output marks the boundary between what it measures and what a
+reader wants from it; its `written by` line is already accurate.
+
+**Rests on:** `F-167` and `F-169` (same session, same family — an instrument answering a
+narrower question than the one asked; **this is the variant where the answer was CORRECT**, so
+it produced no signal at all, which is why it needed a peer's disclosure of their own wrong
+instance to surface);
+`docs/issues/2026-09-07-the-stage-log-records-the-stager-so-git-add--A-makes-you-the-owner.md`.
 
 ## Template for new entries
 
