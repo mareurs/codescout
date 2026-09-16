@@ -221,6 +221,19 @@ impl Check {
     /// stay defects: this host can already tell the claim is stale or broken, and fixing
     /// either is a local, repo-internal edit — the opposite of the bar above.
     ///
+    /// `retired_object_still_present` fires when an object a past migration RETIRED is back
+    /// in the catalog — an older binary re-created it from `schema.sql`'s
+    /// `CREATE ... IF NOT EXISTS` bootstrap, and the migration is one-shot so nothing drops
+    /// it again. It meets the bar on both halves: the row opens with `informational:`, and
+    /// there is no edit to this repo that makes it stop firing — the repair is a `DROP`
+    /// against a machine-local database, which the next open from an older binary undoes.
+    /// Deliberately NOT a defect even though the remedy is local and needs no other host,
+    /// which is the one place it differs from `claim_unresolvable_here`: mixed binary
+    /// versions on one catalog are routine on a development checkout and absent on a stable
+    /// install, so gating on it would exit 1 for exactly the population that has the
+    /// condition and never for the one that does not.
+    /// (`docs/issues/2026-09-15-a-one-shot-migrations-drop-is-undone-by-an-older-binarys-if-not-exists-bootstrap.md`)
+    ///
     /// Adding a variant here silently changes two published numbers (`summary.defects`
     /// and the CLI's exit code), and neither the compiler nor
     /// `summary_total_partitions_by_check` can notice — `total` still partitions
@@ -230,7 +243,9 @@ impl Check {
     pub fn is_informational(self) -> bool {
         matches!(
             self,
-            Check::ClaimHeldByLiveSession | Check::ClaimUnresolvableHere
+            Check::ClaimHeldByLiveSession
+                | Check::ClaimUnresolvableHere
+                | Check::RetiredObjectStillPresent
         )
     }
 
@@ -377,6 +392,7 @@ declare_checks! {
     ParamsBehindBody => "params_behind_body",
     ParamsStatusDrift => "params_status_drift",
     PrematureArchiveCitation => "premature_archive_citation",
+    RetiredObjectStillPresent => "retired_object_still_present",
     SidecarShapeDrift => "sidecar_shape_drift",
     SidecarUnparseable => "sidecar_unparseable",
     SnapshotDrift => "snapshot_drift",
@@ -560,6 +576,106 @@ const ROW_GRAIN_SCOPED_CHECKS: &[Check] = &[
     Check::PrematureArchiveCitation,
     Check::SidecarShapeDrift,
 ];
+
+/// Objects a past migration **retired** — dropped meaning to stay dropped — paired with
+/// the schema version that dropped them.
+///
+/// **Retirement, not rebuild-in-place, and the distinction is the whole list.** Every other
+/// `DROP` in the migration ladder is half of a table rebuild: `DROP TABLE events` followed
+/// by `ALTER TABLE events_new RENAME TO events`, and the same shape for `artifact` and
+/// `commits`. Those objects come back by design inside the same transaction, so an older
+/// binary re-creating them is a no-op. Deriving this list by grepping the ladder for `DROP`
+/// would therefore report four objects where one is meant — which is why it is a literal
+/// here, and why `retirement_list_covers_every_retirement_drop` derives the population from
+/// source and asserts this list equals it, rather than asking the next author to remember.
+///
+/// Why the check this feeds exists at all:
+/// `docs/issues/2026-09-15-a-one-shot-migrations-drop-is-undone-by-an-older-binarys-if-not-exists-bootstrap.md`.
+/// `schema.sql` runs on EVERY catalog open under `CREATE ... IF NOT EXISTS`, a shape that
+/// cannot distinguish *missing because this database is new* from *missing because a
+/// migration deliberately removed it* — so a binary built before the retirement re-creates
+/// the object, and a one-shot migration never drops it again.
+const RETIREMENTS: &[(i64, &str)] = &[
+    // Schema v13 (`cbbfb7be`) retired the v1 sqlite-vec table and its cascade trigger once
+    // chunk-grain retrieval had moved every writer and the KNN query to `artifact_vec_v2`.
+    (13, "artifact_vec"),
+    (13, "artifact_vec_cascade_delete"),
+];
+
+/// Objects a past retirement dropped that are present again in this catalog.
+///
+/// Catalog-grain rather than row-grain: it reads `schema_version` and `sqlite_master`, and
+/// emits `id: None` with the catalog's own path. There is no artifact, no repo and no
+/// project in the finding, which is why it is a named `EXEMPT` entry in
+/// `every_declared_check_is_scope_gated_or_a_named_exemption` rather than a member of
+/// `ROW_GRAIN_SCOPED_CHECKS`.
+///
+/// **The subject is derived from the connection, not passed in.** `PRAGMA database_list`
+/// names the file this very handle is attached to, so the row cannot name a database other
+/// than the one it read — a caller-supplied path would be a belief about which catalog was
+/// open, and this whole check exists because a record and the state it describes drifted
+/// apart.
+///
+/// **Informational, on the bar `Check::is_informational` states** — there is no edit to
+/// this repo that makes it stop firing, because the repair is a `DROP` against a
+/// machine-local database.
+fn scan_retired_objects(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    // A catalog with no `schema_version` row has never been migrated, so nothing has been
+    // retired from it and every object in it is there by bootstrap. Returning empty is the
+    // honest answer; treating a missing table as version 0 would say the same thing more
+    // obscurely.
+    let applied: i64 = match conn.query_row("SELECT MAX(version) FROM schema_version", [], |r| {
+        r.get::<_, Option<i64>>(0)
+    }) {
+        Ok(Some(v)) => v,
+        Ok(None) | Err(_) => return Ok(Vec::new()),
+    };
+
+    // `PRAGMA database_list` reports an empty file for `:memory:`; say so rather than
+    // emitting an empty path field that reads as a missing value.
+    let db_display: String = conn
+        .query_row(
+            "SELECT file FROM pragma_database_list WHERE name = 'main'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "<in-memory catalog>".to_string());
+
+    let mut out = Vec::new();
+    for (version, object) in RETIREMENTS {
+        if applied < *version {
+            continue;
+        }
+        let present: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name = ?1",
+            rusqlite::params![object],
+            |r| r.get(0),
+        )?;
+        if present == 0 {
+            continue;
+        }
+        out.push(Violation::new(
+            Check::RetiredObjectStillPresent.as_str(),
+            None,
+            db_display.clone(),
+            format!(
+                "informational: `{object}` was dropped by schema v{version} and is present \
+                 again. `schema_version` reports v{applied}, so the migration ran — the \
+                 record is true and its EFFECT has been reverted, which no reader of the \
+                 version number can tell. The cause is a binary built before v{version} \
+                 opening this catalog: `schema.sql` runs on every open under \
+                 `CREATE ... IF NOT EXISTS` and re-creates it, and the migration is \
+                 one-shot so nothing drops it again. Not this repo's defect to fix — the \
+                 repair is a `DROP` against a machine-local database, and it will be undone \
+                 again by the next open from an older binary. Rebuild at HEAD before \
+                 trusting this catalog's schema state."
+            ),
+        ));
+    }
+    Ok(out)
+}
 
 /// MCP entry point. Runs every invariant check and returns a structured
 /// report. Reads-only; safe to invoke against a live catalog.
@@ -798,6 +914,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .unwrap_or_default(),
         &crate::librarian::session_registry::RealProcProbe,
     )?);
+
+    // Catalog-grain, so it is not folded through `doctor_scope`: the finding names the
+    // database this connection is attached to, which belongs to no project. See
+    // `every_declared_check_is_scope_gated_or_a_named_exemption`'s EXEMPT block.
+    all_violations.extend(scan_retired_objects(&cat.conn)?);
 
     // Ruling 17 for the row-grain checks that carry no per-row state beyond their own
     // (id, abs_path): each such `scan_*` now calls `doctor_scope.admit(check, id,
@@ -7670,6 +7791,217 @@ mod tests {
         let v = check_missing_file("a1", "/nonexistent/path/that/will/never/exist.md").unwrap();
         assert_eq!(v.check, "missing_file");
     }
+    /// The check fires on a resurrected retired object and stays silent on a clean catalog.
+    ///
+    /// **The control runs FIRST and is the half that makes the positive reading mean
+    /// anything.** A check that always fires produces the same second assertion as one that
+    /// works; only the freshly-migrated catalog returning empty separates them. That ordering
+    /// is deliberate — `docs/trackers/bug-fix-session-log.md:W-139`.
+    #[test]
+    fn a_resurrected_retired_object_is_reported_and_a_clean_catalog_is_not() {
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let clean = scan_retired_objects(&cat.conn).unwrap();
+        assert!(
+            clean.is_empty(),
+            "a freshly migrated catalog has been through every retirement, so nothing should \
+         fire; got {clean:?}"
+        );
+
+        // Exactly what a pre-`cbbfb7be` binary's `schema.sql` bootstrap does on open: the
+        // statement is `CREATE ... IF NOT EXISTS`, so it re-creates what v13 dropped without
+        // any error the opening session could see.
+        cat.conn
+            .execute_batch("CREATE TABLE artifact_vec (id TEXT, embedding BLOB);")
+            .unwrap();
+
+        let found = scan_retired_objects(&cat.conn).unwrap();
+        assert_eq!(
+            found.len(),
+            1,
+            "one resurrected object should produce exactly one row; got {found:?}"
+        );
+        assert_eq!(found[0].check, Check::RetiredObjectStillPresent.as_str());
+        assert!(
+            found[0].artifact_id.is_none(),
+            "catalog-grain finding must carry no artifact id — that is the property its EXEMPT \
+         entry in every_declared_check_is_scope_gated_or_a_named_exemption rests on"
+        );
+        assert!(
+            found[0].detail.starts_with("informational:"),
+            "Check::is_informational's stated bar is that the row's own first word tells a \
+         reader it is not a defect; got {:?}",
+            found[0].detail
+        );
+    }
+
+    /// A resurrected object is informational, so `summary.defects` and the CLI exit code do
+    /// not move.
+    ///
+    /// Asserted through the real `defect_count` rather than by re-reading
+    /// `Check::is_informational`, because the second form would be a test about its own
+    /// re-implementation of the predicate.
+    #[test]
+    fn a_resurrected_retired_object_does_not_count_as_a_defect() {
+        let cat = Catalog::open_in_memory().unwrap();
+        cat.conn
+            .execute_batch("CREATE TABLE artifact_vec (id TEXT, embedding BLOB);")
+            .unwrap();
+        let found = scan_retired_objects(&cat.conn).unwrap();
+        assert_eq!(
+            found.len(),
+            1,
+            "precondition: the row must exist to be counted"
+        );
+        assert_eq!(
+            defect_count(&found),
+            0,
+            "mixed binary versions on one catalog are routine on a development checkout and \
+         absent on a stable install, so gating on this would exit 1 for exactly the \
+         population that has the condition and never for the one that does not"
+        );
+    }
+
+    /// `RETIREMENTS` names every retirement `DROP` in the migration ladder, and no others.
+    ///
+    /// **Derived, not eyeballed, and the derivation is the point.** A `DROP` is a RETIREMENT
+    /// only when the object does not come back: every other `DROP` here is half of a
+    /// rebuild-in-place (`DROP TABLE events` then `ALTER TABLE events_new RENAME TO events`),
+    /// where an older binary re-creating the object is a no-op. Grepping for `DROP` alone
+    /// would report four objects where one is meant, which is why the list is a literal and
+    /// why this test computes the population rather than asking the next author to remember
+    /// to append.
+    ///
+    /// Scoped to the three files that define catalog schema. `commit_tripwire` in
+    /// `augmentation.rs` is dropped inside a test fixture, not by a migration, and including
+    /// that file would put a test's scratch table into a production invariant.
+    #[test]
+    fn retirement_list_covers_every_retirement_drop() {
+        const SOURCES: &[(&str, &str)] = &[
+            ("catalog/mod.rs", include_str!("../catalog/mod.rs")),
+            (
+                "catalog/migrate_v6.rs",
+                include_str!("../catalog/migrate_v6.rs"),
+            ),
+            ("catalog/schema.sql", include_str!("../catalog/schema.sql")),
+        ];
+
+        let mut dropped: std::collections::BTreeSet<String> = Default::default();
+        let mut recreated: std::collections::BTreeSet<String> = Default::default();
+
+        for (_label, src) in SOURCES {
+            // Two narrowings, each paid for by a RED this test produced on its first run.
+            //
+            // `#[cfg(test)]` truncation: `catalog/mod.rs` creates `artifact_vec` in test
+            // fixtures, so scanning the whole file put the retired table into `recreated`
+            // and the derived set came back without it. The population is migration
+            // STATEMENTS, not lines in files that happen to contain migrations.
+            //
+            // Split on the test MODULE, not on any `#[cfg(test)]`: `catalog/mod.rs`'s first
+            // `#[cfg(test)]` is an attribute on a test-only helper near the top, and
+            // splitting there truncated the entire migration ladder. The aggregate control
+            // below stayed green throughout, because `migrate_v6.rs` alone satisfied it — an
+            // assertion over the union cannot see that one source contributed nothing, which
+            // is why the per-member controls sit beside it now.
+            //
+            // Comment skipping: `-- DROP TABLE implicitly drops the ... trigger` parsed as
+            // a drop of an object named `implicitly`. A comment naming a statement is not
+            // the statement, and this parser has no other escape for mention.
+            let src = src.split("#[cfg(test)]\nmod tests").next().unwrap_or(src);
+            for raw in src.lines() {
+                let line = raw.trim();
+                if line.starts_with("--") || line.starts_with("//") {
+                    continue;
+                }
+                // `DROP TABLE [IF EXISTS] name` / `DROP TRIGGER [IF EXISTS] name`
+                for kw in ["DROP TABLE", "DROP TRIGGER"] {
+                    if let Some(rest) = line.find(kw).map(|i| &line[i + kw.len()..]) {
+                        let rest = rest.trim_start();
+                        let rest = rest.strip_prefix("IF EXISTS").unwrap_or(rest).trim_start();
+                        if let Some(name) = rest
+                            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                            .find(|s| !s.is_empty())
+                        {
+                            dropped.insert(name.to_string());
+                        }
+                    }
+                }
+                // Anything the same corpus brings back: a rename onto the name, or a create of
+                // it. Either makes the drop a rebuild rather than a retirement.
+                if let Some(i) = line.find("RENAME TO") {
+                    let rest = line[i + "RENAME TO".len()..].trim_start();
+                    if let Some(name) = rest
+                        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                        .find(|s| !s.is_empty())
+                    {
+                        recreated.insert(name.to_string());
+                    }
+                }
+                for kw in [
+                    "CREATE TABLE",
+                    "CREATE TRIGGER",
+                    "CREATE VIRTUAL TABLE",
+                    "CREATE INDEX",
+                    "CREATE UNIQUE INDEX",
+                ] {
+                    if let Some(rest) = line.find(kw).map(|i| &line[i + kw.len()..]) {
+                        let rest = rest.trim_start();
+                        let rest = rest
+                            .strip_prefix("IF NOT EXISTS")
+                            .unwrap_or(rest)
+                            .trim_start();
+                        if let Some(name) = rest
+                            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                            .find(|s| !s.is_empty())
+                        {
+                            recreated.insert(name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        // The derivation is only evidence if it SAW something. A parse that silently matched
+        // nothing would make the set difference empty and this test green against any list.
+        assert!(
+            dropped.len() >= 4,
+            "the parse found {} DROP targets across the migration sources, which is fewer than \
+         the rebuild-in-place drops known to be there (events, artifact, commits, plus the \
+         _new temporaries) — the scan is broken, not the ladder",
+            dropped.len()
+        );
+        assert!(
+            recreated.contains("events"),
+            "positive control: `ALTER TABLE events_new RENAME TO events` must be seen as a \
+         re-creation, or every rebuild-in-place would read as a retirement"
+        );
+        // PER-MEMBER controls, not an aggregate. `dropped.len() >= 4` is satisfied by
+        // `migrate_v6.rs` on its own, so it stayed green while a truncation bug hid every
+        // statement in `catalog/mod.rs`. One named object per source, so a silent source is
+        // a red rather than a smaller number nobody reads.
+        assert!(
+            dropped.contains("artifact_vec"),
+            "the v13 retirement in catalog/mod.rs was not seen — the scan is not reading that \
+         source, and the aggregate count above cannot tell you so"
+        );
+        assert!(
+            dropped.contains("artifact"),
+            "migrate_v6.rs's table rebuild was not seen — the scan is not reading that source"
+        );
+
+        let derived: std::collections::BTreeSet<String> =
+            dropped.difference(&recreated).cloned().collect();
+        let declared: std::collections::BTreeSet<String> =
+            RETIREMENTS.iter().map(|(_, o)| o.to_string()).collect();
+
+        assert_eq!(
+            derived, declared,
+            "RETIREMENTS disagrees with the migration ladder. A DROP whose object is never \
+         re-created is a RETIREMENT and belongs in the list with the schema version that \
+         dropped it; anything in the list the ladder no longer drops should come out. Do \
+         not silence this by widening the list — read which side moved."
+        );
+    }
 
     #[test]
     fn check_abs_path_must_be_absolute_accepts_posix_and_drive() {
@@ -12699,8 +13031,9 @@ mod tests {
     /// (its own dedicated `outside_scope_refused_by_project` fold); the four entry-validity
     /// checks (`entry_validity_scoped_by_project`); `CitedPrefixWithNoDefiner` (its own
     /// dedicated `cited_prefix_scoped` fold, admitted only via `.as_str()`, never a
-    /// literal); or a named, commented `EXEMPT` entry. `EXEMPT` holds exactly two variants
-    /// today, each with a structural reason it needs no per-row scope gate of its own:
+    /// literal); or a named, commented `EXEMPT` entry. `EXEMPT` holds exactly three
+    /// variants today, each with a structural reason it needs no per-row scope gate of its
+    /// own:
     /// - `SidecarUnparseable` shares its sibling `SidecarShapeDrift`'s check name at BOTH of
     ///   `scan_sidecar_shape_drift`'s two `admit()` call sites — one guarding the
     ///   unparseable-sidecar push, one guarding the shape-drift push, each on the same
@@ -12763,6 +13096,14 @@ mod tests {
             // scan_declared_project_roots reads only ctx.current_project's own
             // workspace.toml and emits id: None — structurally never a foreign-repo row.
             Check::DeclaredRootMissing.as_str(),
+            // scan_retired_objects reads schema_version and sqlite_master and emits
+            // id: None with the path PRAGMA database_list reports for this very
+            // connection — a machine-local database that belongs to no project and sits
+            // under no managed root. There is no artifact, repo or git_root in the finding
+            // for a scope gate to test, so a per-row fold would have nothing to fold on.
+            // Stronger than "no id": the subject is the catalog this run is already
+            // reading, so it can never be another repo's.
+            Check::RetiredObjectStillPresent.as_str(),
         ]
         .into_iter()
         .collect();
@@ -12820,6 +13161,13 @@ mod tests {
     /// `admits_relevance_exemption`'s own doc comment for why (relevance surfacing
     /// and mutation authority are different questions, and `WorktreeScopedRow`
     /// shares its `admit` gate with a WRITE, `fix=reseat_worktree`).
+    ///
+    /// 2026-09-16: 2 to 3 with `Check::RetiredObjectStillPresent`, which is the case this
+    /// test was written for — the count changed, nothing else did, and the choice had to be
+    /// made on purpose. It is excluded because the question does not APPLY rather than
+    /// because it was weighed and declined: the check emits `id: None` against a
+    /// machine-local database, so there is no artifact for relevance to be a property of.
+    /// A third kind of exclusion, worth distinguishing from the other two.
     #[test]
     fn admits_relevance_exemption_allow_list_stays_exhaustive_over_check_all() {
         let allow_listed = Check::ALL
@@ -12836,9 +13184,16 @@ mod tests {
             "WorktreeScopedRow must stay excluded — it shares its admit() gate with \
              fix=reseat_worktree, a WRITE, and relevance must never authorize a mutation"
         );
+        assert!(
+            !Check::RetiredObjectStillPresent.admits_relevance_exemption(),
+            "RetiredObjectStillPresent must stay excluded — it emits id: None against a \
+             machine-local database, so there is no artifact for relevance to be a property \
+             OF. Excluded because the question does not apply, not because it was judged \
+             and declined"
+        );
         assert_eq!(
             Check::ALL.len() - allow_listed,
-            2,
+            3,
             "Check::ALL grew or shrank without a matching, deliberate update to \
              admits_relevance_exemption's matches! arms — a new check defaults to \
              EXCLUDED (the safe polarity), but that exclusion must be a choice this \
