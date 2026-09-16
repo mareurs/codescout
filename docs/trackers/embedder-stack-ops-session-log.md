@@ -624,14 +624,16 @@ A session trusting mtime gets a false negative in the first row and a false posi
 
 **Status:** open · **Severity:** high · **Category:** claim-scope
 
-**Observed:** Twice in one turn I published a figure that was fully supported and
-still wrong, because it answered a *different question* than the claim it was
-attached to. Neither was a guess; both survive re-verification.
+**Observed:** Three times in one session — the first two inside a single turn — I
+published a figure that was fully supported and still wrong, because it answered a
+*different question* than the claim it was attached to. None was a guess; all three
+survive re-verification.
 
 | what I published | the value is CORRECT for | the claim attached it to |
 |---|---|---|
 | "`a3579710` went to origin in your push range" | a real commit by sid `9403d62d`, already at origin | which of their commits *my push* carried — actually `55cbf9a3` |
 | "CI on the range: 23 success, 0 failed, 1 cancelled" | run `35055091243` (`43fdc0ea`) exactly | the **range** of three pushes — `64411fe0`'s run had **7** cancelled |
+| "the nine staged paths are `9e022ef0`'s" | eight of the nine, exactly | the ninth, `src/tools/output_buffer.rs`, had **two** live writers in flight — one author reported for a set with two |
 
 **Why the standard remedy is a no-op here.** "Verify before asserting" resolves to
 *re-check the value*, and the value is right. `git log a3579710` confirms a real
@@ -676,11 +678,36 @@ range. This is § *Testing Discipline*'s unit rule pushed one notch — the unit
 was not missing, it was **implicit and wrong**, and the value was right for the
 unit it actually had.
 
-**Open question, deliberately not closed:** whether any mechanism reaches this, or
-whether it is irreducibly a second-party catch. Both instances were caught by a
-peer, which is § *Observer Blindness* position 2 (a reviewer who does not share the
-author's context) with no position-3 mechanism proposed. Not promoted to an `OB`
-class: two instances, one session, one day — the shared-blind-spot condition.
+**Open question, PARTLY answered by the third instance.** The first two were caught
+by a peer — § *Observer Blindness* position 2, a reviewer who does not share the
+author's context — with no position-3 mechanism proposed. The third produced one.
+Run with its **default** window, `scripts/file-provenance.py` returns `UNKNOWN` for
+`src/tools/output_buffer.rs` and refuses to let that be read as a finding:
+
+> no record of any session writing this path in the window. That is a statement about
+> coverage, NOT about ownership — Bash writes this tool's heuristics miss look
+> identical. Do not read it as 'not mine'.
+
+Had it printed a bare `0`, the file would have been reported **unowned** — this class
+in its most expensive direction, since the next step is to edit it. So a negative
+result that **names the question it cannot answer** does reach the class: not by
+catching a mis-scoped value, but by declining to supply one. That is the shape
+position 3 asks for, and it is an **existence proof, not a general remedy** — it works
+because the instrument knows its own window, and nothing equivalent guards a sha
+recalled from a thread.
+
+**And the third instance shows the scope word need not be a WORD.** Instances 1 and 2
+turned on *"in my push"* and *"the range"* — phrases a writer can re-read. This one
+turned on an unnamed **window**: the same instrument, same path, same minute returns
+`UNKNOWN` (default), `2` (in flight), or `8 writers, 3 live` (`--all`), and the
+disambiguating flag appeared in neither party's message. A figure whose scope lives in
+a **flag** rather than in a phrase leaves nothing in the sentence to re-derive, which
+is why the remedy above (*re-derive the scope word*) does not reach it.
+
+Not promoted to an `OB` class: three instances, one session, one day, and both
+detectors are peers I had been in continuous conversation with all evening. A third
+instance from inside the same thread does not relieve the shared-blind-spot condition —
+it is the same population sampled again.
 
 ## Template for new entries
 
