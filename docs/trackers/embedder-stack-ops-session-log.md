@@ -6,7 +6,7 @@ owners: ["marius"]
 tags: ["embeddings", "retrieval", "docker", "gpu"]
 topic: embedder stack ops
 entry_prefix: ["F", "W"]
-entry_high_water_F: 6
+entry_high_water_F: 7
 entry_high_water_W: 4
 ---
 
@@ -71,6 +71,7 @@ entry_high_water_W: 4
 | F-4 | 2026-09-15 | med | shared-checkout | open | The foreign-index guard's remedy ("re-stage by explicit path") is a git no-op after a blanket add, and only the action it warns against clears it |
 | F-5 | 2026-09-15 | high | ledger-integrity | open | Merging a ledger-touching PR leaves the local id allocator stale, so the next append mints a colliding id rather than erroring |
 | F-6 | 2026-09-15 | high | build-provenance | open | A rebuild is not a rebuild of what you merged — `cargo rb` on a tree behind origin exits 0, updates mtime, and ships the old binary |
+| F-7 | 2026-09-16 | high | claim-scope | open | A value that is CORRECT about a question you were not asked — re-verification returns the same correct value, so "verify harder" is a no-op |
 
 ## Wins Index
 
@@ -616,6 +617,70 @@ A session trusting mtime gets a false negative in the first row and a false posi
 3. A third instance in the same thread, theirs: they attributed `c3135fa3` to `29420e72` from **thread memory** rather than the `Session-Id` trailer — adjacency, the one method CLAUDE.md names as *anti*-evidence, inside a message about an attribution fix. Caught by the party misattributed.
 
 **Promote-when:** at a third independent work stream. This is two (the PR-review stream and the cross-session verification thread), and the instances are correlated — same day, same participants. Do **not** promote on this entry alone; the population is small and the sessions were talking to each other, which is exactly the shared-blind-spot condition CLAUDE.md warns makes agreement worthless.
+
+## F-7 — A value that is CORRECT about a question you were not asked — and re-verifying it returns the same correct value
+
+**Valid:** dated 2026-09-16
+
+**Status:** open · **Severity:** high · **Category:** claim-scope
+
+**Observed:** Twice in one turn I published a figure that was fully supported and
+still wrong, because it answered a *different question* than the claim it was
+attached to. Neither was a guess; both survive re-verification.
+
+| what I published | the value is CORRECT for | the claim attached it to |
+|---|---|---|
+| "`a3579710` went to origin in your push range" | a real commit by sid `9403d62d`, already at origin | which of their commits *my push* carried — actually `55cbf9a3` |
+| "CI on the range: 23 success, 0 failed, 1 cancelled" | run `35055091243` (`43fdc0ea`) exactly | the **range** of three pushes — `64411fe0`'s run had **7** cancelled |
+
+**Why the standard remedy is a no-op here.** "Verify before asserting" resolves to
+*re-check the value*, and the value is right. `git log a3579710` confirms a real
+commit by that session. `gh run view 35055091243` confirms 23 success. Every
+instrument aimed at the number agrees, every time, and agreement is exactly what
+a correct answer to the wrong question produces. The defect is not in the value
+but in the **binding** between the value and the claim's scope word — *"in my
+push"*, *"the range"* — and no instrument pointed at the value can read that word.
+
+**Mechanism: holding a value suppresses the question that would scope it.** In
+both cases the correct instrument was one command away and no more expensive than
+what I did: `git rev-list 64411fe0..02ff86ee` (2 lines) instead of recalling a sha
+from the thread; `gh run list --branch experiments` instead of reading one run.
+Cost was never the barrier. The instrument went unreached because I already had a
+number in hand, and a number in hand does not feel like an open question.
+
+**The sha had no source but me, which is the sharpest part.**
+`scripts/pre-push-foreign-session-guard.sh:369` is
+`printf '%s\n' "$ack_matched" | tr ',' '\n'` — the guard prints **sids and never
+shas**. So no surface handed me `a3579710`; I produced it from thread salience.
+That is `F-165`'s own mechanism — attribution by thread adjacency — committed
+inside the notification about the commit that *is* `F-165`.
+
+**Detector, both times: a peer holding the other end of the binding.** The session
+that authored the commit knew which of theirs was outstanding. The session watching
+all three CI runs knew what the other two cost. Neither detection was available to
+a more careful re-measurement on my side, and both arrived as corrections rather
+than as alarms.
+
+**Distinct from `W-4`, and the distinction is the point.** `W-4` catalogues
+*plausible but unsupported* values — a broken `tr`, a per-build `strings` blindness,
+a non-discriminating `ldd`. Those fail under re-derivation. These do not: they are
+**supported and mis-scoped**, so the `W-4` discipline (derive it, don't cite it)
+runs clean over them and returns the same wrong claim. Two different failure modes
+wearing one word, "wrong number".
+
+**Remedy, and it is about the sentence rather than the check.** Re-derive the
+**scope word**, not the value: when writing *"X went out in my push"*, produce X
+from the push range at write time; when writing *"N green"*, name the run id in the
+same breath, because a figure that names its run cannot silently be read as a
+range. This is § *Testing Discipline*'s unit rule pushed one notch — the unit here
+was not missing, it was **implicit and wrong**, and the value was right for the
+unit it actually had.
+
+**Open question, deliberately not closed:** whether any mechanism reaches this, or
+whether it is irreducibly a second-party catch. Both instances were caught by a
+peer, which is § *Observer Blindness* position 2 (a reviewer who does not share the
+author's context) with no position-3 mechanism proposed. Not promoted to an `OB`
+class: two instances, one session, one day — the shared-blind-spot condition.
 
 ## Template for new entries
 
