@@ -87,6 +87,18 @@ correction is what makes this a bug report rather than an anecdote — the
 discipline that caught it is a policy held by one reader on one day, and the
 mechanism that exists does not reach this case.
 
+**Independently reproduced, and recorded because a confirmation is a
+denominator.** `e5691fad` ran the same shape through `run_command` at current
+HEAD with a different pair of filter names and got the same result — `1 passed;
+5617 filtered out`, exit 0, no diagnostic. That is published here rather than
+absorbed: a re-derivation which *confirms* goes on record, because a population
+whose confirmations are invisible looks self-correcting. It is not a second
+catch.
+
+They also checked the *"discriminator is genuinely absent"* claim against that
+output rather than agreeing with it: `5617 filtered out` is one aggregate, and
+nothing in libtest's output attributes it to either supplied filter.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** the existing diagnostic would have caught it if run through
@@ -103,9 +115,17 @@ Not implemented, and the cheap parser route is unavailable for the reason under
 
 The one candidate that would work: `cargo test -- --list` enumerates test names
 cheaply and without running them, so each supplied filter can be checked against
-that set and the non-matching ones named. Cost is one extra invocation per run,
-which is why this is a proposal rather than an obvious yes — and the check would
-have to hold its own population honestly, since `--list` output is itself
+that set and the non-matching ones named.
+
+**Cost, measured rather than adjectival.** `cargo test --lib -- --list` at
+`109c5b93`, 2026-09-16T14:20:01Z, emits **5,618 test names** in 5,620 lines (one
+blank, one `5618 tests, 0 benchmarks` summary). The unit is *names*, not lines,
+and the two differ by two — stated because an earlier account of this figure said
+"lines". Derived twice independently: `e5691fad` measured it first and this
+reading re-derived it at the same HEAD. So the price is one extra invocation plus
+a 5,618-name set to intersect against, per run, on every `cargo test` the tool
+wraps — which is why this is a proposal rather than an obvious yes. The check
+would also have to hold its own population honestly, since `--list` output is
 per-target.
 
 **Do not answer it by relaxing `passed > 0`.** That predicate is load-bearing
