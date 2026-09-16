@@ -358,6 +358,103 @@ has "working tree moved after staging -> refuse" "$out" "EXIT=1"
 has "names the file" "$out" "f.txt"
 rm -rf "$T"
 
+# ------------------------------- 5. the JOINT predicate and CODESCOUT_INDEX_ACK
+# docs/issues/2026-09-16-archiving-a-peers-bug-file-refuses-both-parties-from-opposite-sides.md
+#
+# BACKFILL. `b37b888a` shipped the `joint` predicate and the ack arm with NO coverage at
+# all -- `grep -rn "CODESCOUT_INDEX_ACK\|joint" tests/` returned nothing -- and was reported
+# as "101 passed", which was true of the suite and vacuous for the branch it added. These
+# cases pin the behaviour AS IT SHIPPED, before any widening, so a later change to the
+# admitting side has a baseline to red against rather than tests written alongside it.
+#
+# The fixture splits ONE rename across two sessions, which is the shape `joint` exists for
+# and which `git mv` cannot produce on its own (it stages both halves under one id). B
+# removes the source from the index; A adds the destination. `git diff --cached
+# --name-status -M` still reports `R100 r1.txt arch/r1.txt`, so the pair is recoverable
+# even though its halves have different owners -- which is exactly what the predicate reads.
+echo "== joint archive + index ack"
+
+# The ack arm needs an env var `guard()` does not pass, so this is its sibling rather than
+# a change to it: same unset of GIT_INDEX_FILE, same stderr merge, same EXIT= marker.
+guard_ack() {
+    env -u GIT_INDEX_FILE CLAUDE_CODE_SESSION_ID="$1" CODESCOUT_INDEX_ACK="$2" \
+        bash "$SRC/pre-commit-foreign-index.sh" 2>&1
+    echo "EXIT=$?"
+}
+
+new_repo
+echo r1 > r1.txt
+git add r1.txt > /dev/null 2>&1
+git commit -qm base
+mkdir -p arch
+CLAUDE_CODE_SESSION_ID="$B" git rm -q --cached r1.txt
+mv r1.txt arch/r1.txt
+CLAUDE_CODE_SESSION_ID="$A" git add arch/r1.txt
+
+# The fixture's own premise, asserted before anything reads the guard. Without this a
+# mis-built fixture makes every case below pass for the wrong reason -- § 7's rule.
+eq "joint fixture: source is FOREIGN"     "$(owner_of r1.txt)"      "$B"
+eq "joint fixture: destination is OURS"   "$(owner_of arch/r1.txt)" "$A"
+
+jout="$(guard "$A")"
+has "split rename -> refuses"                  "$jout" "EXIT=1"
+has "refusal names the JOINT ARCHIVE shape"    "$jout" "JOINT ARCHIVE"
+has "joint refusal names the foreign half"     "$jout" "r1.txt"
+has "joint refusal prefills the ack"                "$jout" "CODESCOUT_INDEX_ACK"
+
+# The pathspec arm is a DIFFERENT branch of the same refusal and carries the remedy
+# correction that matters. Written as its own case because the bare fixture above cannot
+# reach it: `guard()` unsets GIT_INDEX_FILE by design, so `pathspec` is 0 there and an
+# assertion on this text passes or fails for reasons unrelated to `joint`. Found by
+# asserting it against the bare case first and watching it red.
+cp .git/index .git/next-index-5.lock
+jpout="$(env -u CODESCOUT_INDEX_ACK CLAUDE_CODE_SESSION_ID="$A" \
+    GIT_INDEX_FILE=".git/next-index-5.lock" \
+    bash "$SRC/pre-commit-foreign-index.sh" 2>&1; echo "EXIT=$?")"
+has "joint pathspec commit -> refuses"              "$jpout" "EXIT=1"
+# The generic pathspec remedy is "ask the owner to commit theirs". For a joint archive that
+# owner is refused by this same guard over the other half, so printing it unqualified sends
+# the reader back into the refusal they arrived from. This is the remedy half a predicate
+# assertion cannot reach.
+has "joint refusal disowns the ask-the-owner route" "$jpout" "DOES NOT APPLY HERE"
+rm -f .git/next-index-5.lock
+
+# The admitting side. Four inputs, one accepted -- and the three refusals are what make the
+# acceptance mean anything.
+has "ack naming the foreign owner -> passes"   "$(guard_ack "$A" "$B")" "EXIT=0"
+has "accepted ack says so on stderr"           "$(guard_ack "$A" "$B")" "note: CODESCOUT_INDEX_ACK"
+has "accepted ack prints the trailer to record" "$(guard_ack "$A" "$B")" "Co-Authored-Session-Id"
+has "ack naming the WRONG sid still refuses"   "$(guard_ack "$A" "cccccccc-2222-2222-2222-cccccccccccc")" "EXIT=1"
+has "an empty ack still refuses"               "$(guard_ack "$A" "")" "EXIT=1"
+# There is deliberately no wildcard at this gate. The sibling pre-push guard HAS one, and
+# its own history argues against it: an `all` form answers "is this sid authorised?" and
+# accumulates nothing for "who is owed a notification?", so it publishes every foreign
+# session's work and tells none of them. Pinned here so the absence is a decision rather
+# than an omission somebody later "fixes".
+has "the literal 'all' is NOT a wildcard here" "$(guard_ack "$A" "all")" "EXIT=1"
+rm -rf "$T"
+
+# Two foreign owners, one named. The ack loop requires EVERY foreign owner, so a partial
+# list must refuse -- the case that separates "names an owner" from "names them all", and
+# the one a short-circuit on first match would pass.
+new_repo
+echo r1 > r1.txt
+echo r2 > r2.txt
+git add r1.txt r2.txt > /dev/null 2>&1
+git commit -qm base
+mkdir -p arch
+C2="cccccccc-2222-2222-2222-cccccccccccc"
+CLAUDE_CODE_SESSION_ID="$B"  git rm -q --cached r1.txt
+CLAUDE_CODE_SESSION_ID="$C2" git rm -q --cached r2.txt
+mv r1.txt arch/r1.txt
+mv r2.txt arch/r2.txt
+CLAUDE_CODE_SESSION_ID="$A" git add arch/r1.txt arch/r2.txt
+eq "two-owner fixture: first source is B"  "$(owner_of r1.txt)" "$B"
+eq "two-owner fixture: second source is C" "$(owner_of r2.txt)" "$C2"
+has "ack naming only ONE of two owners refuses" "$(guard_ack "$A" "$B")"       "EXIT=1"
+has "ack naming BOTH owners passes"             "$(guard_ack "$A" "$B,$C2")"   "EXIT=0"
+rm -rf "$T"
+
 # ------------------------------------------ 6. `git apply --cached` names paths in the PATCH
 # docs/issues/archive/2026-09-01-git-apply-cached-stages-but-records-no-owner.md
 #
