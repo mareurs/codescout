@@ -545,6 +545,45 @@ blind spot. **Nothing is wrong today** — five were verified — and it is reco
 as a defect. What makes it more than hypothetical is that the same task produced *three successive
 wrong versions of one description*.
 
+### The population can GROW after the assertion is written
+
+Every instance above is a population **fixed when the assertion was authored** — six contributors,
+six tool shapes, five property descriptions. The author could in principle have enumerated it and
+seen the gap. This one cannot be caught that way, because the set the assertion quantifies over
+did not exist yet.
+
+Measured 2026-09-16 by sessionId `f0b1a4c7-e991-4478-bf22-b088483b6821`, in
+`src/librarian/tools/doctor.rs`. `a_citation_still_dirty_in_the_working_tree_is_silent` asserted
+`v.is_empty()` — a claim over **every check the scan emits**. When written it was adequate: one
+check existed, and "the report is empty" and "my check is silent" picked out the same set. Adding
+a second check silently widened the assertion's subject, and the two claims came apart. The
+fixture was also the positive fixture for the new check, so the suppression could have gone green
+by deleting the surfacing, and no assertion in the file would have noticed.
+
+**Nothing was edited to cause this.** Not the assertion, not the code it guards, not the fixture.
+The assertion was per-member-adequate on the day it was written and became an aggregate later, by
+a change somewhere else that had no reason to look at it. So the usual tells are all absent: no
+diff to review, no author to have been careless, and re-reading the test at any point returns a
+sentence that is true.
+
+**It sits at the intersection of two laws, and neither is the one it looks like.** The scope law
+above — the subject is wider than the name — and the monotone law at the top of this page, since
+`is_empty()` is an absence assertion and therefore monotone under removal, which is exactly why
+deleting the surfacing would have passed. It is **not** an instance of the guard-ordering twin in
+§ *One mutation per guarded SITE*: there is no ordering here and no second guard racing to refuse
+an input, only one predicate quantifying over a set that grew.
+
+**The remedy is the one this page already warns about, plus a second half.** Narrowing to
+`v.iter().all(|x| x.check != "<mine>")` is correct and makes the fixture **inert** for the new
+check — the per-member fix that is not automatically the remedy. Asserting that the complement
+**fires** is what keeps it discriminating in both directions. The author's own summary is the
+line worth keeping: the fix *strengthened* the test rather than narrowing it, and that only
+became visible because the suppression and the surfacing were one decision made at two sites.
+
+**So the question to ask of an absence assertion is not only what it is computed over, but
+whether that set is CLOSED.** `is_empty()` over a growing collection is a claim whose meaning
+changes without its text changing. Where the collection is open-ended, name the member.
+
 
 ## `SURVIVED` has a THIRD reading — the two-site `ack=all` run
 

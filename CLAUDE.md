@@ -268,6 +268,18 @@ premise that every addition falsifies.
   discriminator is usually already in the output, unused, while both parties reach for a number.
   (Two remedies falsified before the third worked, measured 2026-09-02 →
   [`docs/conventions/what-green-is-evidence-for.md`](docs/conventions/what-green-is-evidence-for.md).)
+  **And ask whether the population is CLOSED, because an assertion can be per-member-adequate when
+  written and become an aggregate later — with no edit to it, to the code it guards, or to its
+  fixture.** Every instance above is a set fixed at authoring time, which an author could in
+  principle have enumerated; this one cannot be caught that way, because the members did not exist
+  yet. Measured 2026-09-16: a check's `v.is_empty()` over *every check a scan emits* was exact when
+  one check existed — "the report is empty" and "my check is silent" picked out the same set — and
+  a second check silently widened its subject. No diff to review, no carelessness, and re-reading
+  the test returns a true sentence. **`is_empty()` over a growing collection is a claim whose
+  meaning changes without its text changing, so where the collection is open-ended, name the
+  member** — and note this is the *scope* law crossed with the *monotone* one, not the
+  guard-ordering twin above: nothing races to refuse an input here, one predicate simply quantifies
+  over a set that grew.
   **Do not hand-roll the mutation on this checkout — `./scripts/mutation-probe.sh` exists, and
   the reason is not convenience.** A mutation in the shared tree publishes a red to every other
   session's `cargo test`, byte-identical to a real regression, and the window is not bounded by
@@ -403,6 +415,22 @@ backlog** — it returns a small number, never an error.
 ## Git Workflow
 
 **`master` is protected** — all experimental work on `experiments`; promote to `master` only after tests + clippy + MCP verify; `experiments` is never deleted; never commit in-progress work directly to `master`.
+
+**That sentence is now enforced server-side, not only by convention.** Both branches carry a
+GitHub *ruleset* requiring a pull request, each with exactly one bypass actor — `User` `mareurs`.
+Ids: `23546832` (master), `23533382` (experiments); read the live state with `gh api
+repos/mareurs/codescout/rules/branches/<branch>`, which returns `[]` for any unruled branch.
+**Rulesets, not classic branch protection, and that is forced rather than chosen:** classic
+protection's push allowlist is org-only, so on a user-owned repo it can express *protected* but
+never *protected from whom*. Two consequences worth stating because neither is visible from the
+repo. **Any credential that is not the owner's user account is refused on both branches** — a
+GitHub App, a deploy key, Actions' `GITHUB_TOKEN` — so release automation cannot push a ref
+here; no workflow does today (`ci.yml`/`manual.yml` use `push:` only as a trigger), and that is
+the thing to re-check before wiring one. And **agent sessions are NOT constrained**: they push
+over the owner's SSH key, authenticate as `mareurs`, and inherit the bypass. No server-side rule
+can separate one session from another, because GitHub sees one identity — that discrimination
+exists only in `scripts/pre-push-foreign-session-guard.sh`, and the remote has strictly less
+information than that hook does.
 
 **Cite a fix by SHA *and* patch-id — the SHA alone is not durable.** Both promotion paths stay available (cherry-pick for single fixes, fast-forward for large cohorts), and neither needs checking before you cite: `experiments` is rebased after every ship, so a cherry-picked commit's original is orphaned and eventually garbage-collected, while `git show <sha> | git patch-id --stable` is a content hash of the diff that survives both. Record the pair once at fix time — no decision, no follow-up reconciliation.
 
