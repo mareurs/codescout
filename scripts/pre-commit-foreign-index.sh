@@ -278,9 +278,23 @@ done
 # Deliberately NO `all` form — a joint archive has exactly one other party, so a wildcard
 # would buy nothing and would import the blast radius that `all` was filed for.
 index_ack="$(printf '%s' "${CODESCOUT_INDEX_ACK:-}" | tr -d '[:space:]')"
+ack_has_dash=0
 if ((joint)) && [ -n "$index_ack" ]; then
     ack_ok=1
     for owner in "${foreign_owners[@]}"; do
+        # `-` IS NOT A PARTY AND CANNOT BE ACKED. The recorder writes `-` for a pair it
+        # could not attribute -- four routes reach it, and its own header calls such a row
+        # "frequently a PEER's". The membership test below is plain string matching, so
+        # without this arm `CODESCOUT_INDEX_ACK="-"` satisfies it: one character, naming
+        # nobody, covering an unbounded number of unattributable pairs. That is the `all`
+        # form this gate deliberately does not have, reached by a different spelling.
+        # Reproduced 2026-09-16 against the shipped guard: EXIT=1 with no ack, EXIT=0 with
+        # `-`. Raised by a design review of a proposed widening; the hole predates it.
+        if [ "$owner" = "-" ]; then
+            ack_ok=0
+            ack_has_dash=1
+            break
+        fi
         case ",$index_ack," in
             *",$owner,"*) ;;
             *) ack_ok=0; break ;;
@@ -395,6 +409,21 @@ fi
         echo "under your name with nothing anywhere saying so."
         echo
         echo "Class: docs/issues/2026-09-16-archiving-a-peers-bug-file-refuses-both-parties-from-opposite-sides.md"
+    fi
+    if ((ack_has_dash)); then
+        echo
+        echo "YOUR ACK CANNOT CLEAR THIS: one contested half is UNATTRIBUTED (owner \`-\`)."
+        echo
+        echo "\`-\` is not a session. It is every session the recorder could not attribute,"
+        echo "so naming it would acknowledge an unbounded set of parties instead of the ones"
+        echo "you mean -- the wildcard this gate deliberately does not have. An ack has to"
+        echo "name a real sid, and no sid owns that row."
+        echo
+        echo "Find out who staged it before committing: the row is \`-\` because the write"
+        echo "that created it was not a recognised staging command, or carried no session id."
+        echo "Re-staging it yourself makes it yours by the recorder's rule and this guard goes"
+        echo "quiet -- which is attribution by stager, not approval, so record them anyway."
+        echo
     fi
     echo "Staged by:"
     for owner in "${foreign_owners[@]-}"; do

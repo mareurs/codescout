@@ -455,6 +455,33 @@ has "ack naming only ONE of two owners refuses" "$(guard_ack "$A" "$B")"       "
 has "ack naming BOTH owners passes"             "$(guard_ack "$A" "$B,$C2")"   "EXIT=0"
 rm -rf "$T"
 
+# `-` IS NOT A PARTY, and the ack must not accept it as one.
+#
+# post-index-change-stage-log.sh records `-` for a pair it could not attribute (:395, :401)
+# -- four routes reach it, and its own header calls such a row "frequently a PEER's". The
+# ack test is plain string membership on ",$index_ack," (:284), so `CODESCOUT_INDEX_ACK="-"`
+# satisfies it: one character, naming nobody, covering an unbounded number of unattributable
+# pairs. That is a functional wildcard over exactly the rows :278-279 refuses to give a
+# wildcard to -- "Deliberately NO `all` form".
+#
+# Reproduced before this case was written: EXIT=1 with no ack, EXIT=0 with `-`.
+new_repo
+echo r1 > r1.txt
+git add r1.txt > /dev/null 2>&1
+git commit -qm base
+mkdir -p arch
+env -u CLAUDE_CODE_SESSION_ID git rm -q --cached r1.txt
+mv r1.txt arch/r1.txt
+CLAUDE_CODE_SESSION_ID="$A" git add arch/r1.txt
+eq "dash fixture: the source is UNATTRIBUTED" "$(owner_of r1.txt)" "-"
+has "an unattributed half refuses without an ack" "$(guard "$A")"        "EXIT=1"
+has "ack of '-' does NOT clear an unattributed half" "$(guard_ack "$A" "-")" "EXIT=1"
+# And the refusal has to say WHY, or the caller retries the same string. Asserted as an
+# ALL-CAPS role token per tests/pre-push-foreign-session-guard.sh:156-157, so a rewrite of
+# the surrounding prose does not red and a deletion of the explanation does.
+has "refusal explains the UNATTRIBUTED half" "$(guard_ack "$A" "-")" "UNATTRIBUTED"
+rm -rf "$T"
+
 # ------------------------------------------ 6. `git apply --cached` names paths in the PATCH
 # docs/issues/archive/2026-09-01-git-apply-cached-stages-but-records-no-owner.md
 #
