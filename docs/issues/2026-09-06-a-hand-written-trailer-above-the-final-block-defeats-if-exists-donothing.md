@@ -141,6 +141,55 @@ branch. The reusable halves are the reproduction above and the placement rule, a
 part of the reproduction is that `git log` reads correctly the whole way through. Verified
 independently here before recording. Filed by `29420e72` at their explicit hand-off; if their
 operator later authorises them to file, they will add here rather than open a second file.
+## 2026-09-16 — a third instance, in the commit that files the second
+
+**The second consumer above is a trailer its own author mis-placed, so the sids survived in prose and a human reader recovers them. This one has no attribution surface at all, and the query an auditor actually runs returns a confident wrong answer rather than an empty one.**
+
+Measured on `7a986ac3`:
+
+```
+git show -s --format='%(trailers:key=Co-Authored-Session-Id,valueonly)' 7a986ac3  -> empty
+git show -s --format='%B' 7a986ac3 | grep -c 9403d62d                           -> 0
+
+controls, which is what makes those a measurement and not a broken query:
+git show -s --format='%(trailers:key=Session-Id,valueonly)'      7a986ac3  -> 29420e72-…
+git show -s --format='%(trailers:key=Co-Authored-By,valueonly)'  7a986ac3  -> Claude Opus 5 …
+```
+
+That commit carries `docs/trackers/bug-fix-session-log.md` at **32 added / 8 removed** — the exact combined delta of two sessions' uncommitted edits to one shared file: `29420e72`'s `F-168` remedy-sentence fix and `9403d62d`'s two `F-170` repairs, the latter written through `doc(action="update")` in the window between the committer's read and their `git add`.
+
+### The query an auditor runs is `git blame`, and it answers wrongly with no hedge
+
+```
+blame on the F-170 paragraph beginning "TWO TEXT SURFACES UNDER ONE ID"
+  -> 7a986ac3 -> Session-Id 29420e72…,  Co-Authored-Session-Id: (empty)
+
+control — can blame attribute ANY line of that ledger to 9403d62d?
+  -> yes: 0e7a945b, 0fc7eb5d, 2ef25326
+```
+
+The control matters: attribution through `blame` is **available in principle** on that file and **absent in this case**, so the miss is a property of the commit rather than of the instrument. An auditor asking *who wrote this* gets one session, confidently, with nothing in the commit to contradict it — which is strictly worse than the empty result the section above documents, because an empty result at least prompts a second question.
+
+### Why no one noticed, and it is not inattention
+
+The committer ran a check written for this exact hazard, minutes after being warned about it:
+
+```
+git diff --cached -U0 -- <ledger> | grep -oE "^\+## F-1[0-9]+|^\+\| F-1[0-9]+"
+```
+
+New entry **headings** and new **index rows**. The swept edits were neither — prose amended inside an entry that already existed. It returned empty, and *"edits only, no new entries"* was **true and was not the question**. The selector could not express the failure it was written to catch, so looking harder through it returns the same empty at any diff size. Their own general form, which is the reusable half: **a check over a shared file must be scoped to authorship of HUNKS, never to the shape of what was added** — headings and rows are a proxy for *someone added an entry*, and the proxy is silent on the commonest real edit, amending prose already there.
+
+### What this adds to the file's own claim
+
+The `## Root cause` above is unchanged and this instance does not widen it. What it establishes is the **cost band**: this file's original closing line read *"Cosmetic — no consumer is wrong today"*, the section above falsified that with a query returning empty, and this one moves it again to a standard tool returning the **wrong name**. Same defect, three readings, escalating.
+
+And the circumstance is the record, not decoration: **`7a986ac3` is the commit that files the section above.** The defect appeared inside the act of documenting it, committed by an author actively writing about it — `CLAUDE.md` § *Observer Blindness*'s measured claim rather than an illustration of it. The captured session was simultaneously mid-message to the committer about that same mechanism, quoting their own bug file's root cause; knowing the class slowed nothing.
+
+**Not amended, and that is a ruling rather than an omission.** `experiments` is shared and has moved past it; rewriting published history costs more than the defect. The durable substitute is that `F-170`'s text states its own authorship in the first person and is inside the commit — recoverable by a reader, not by a query, which is precisely the gap this file is about.
+
+**Provenance.** Capture measured and reported by the session whose content was taken (`9403d62d`); root cause of the missed check derived and filed by the committer (`29420e72`) as a separate instance; reproduction of the trailer half by `e5691fad`. Recorded here because a captured session noticing is a **channel and not a mechanism** — it depends on the injured party checking, which nothing guarantees.
+
 ## Evidence
 
 ### git's own parser is unaffected
