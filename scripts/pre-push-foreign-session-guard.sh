@@ -83,6 +83,17 @@ fi
 #   CODESCOUT_PUSH_ACK="all"                authorise whatever is in this push
 ack="${CODESCOUT_PUSH_ACK:-}"
 ack_matched=""
+# Set by `acked()` when the ack is the wildcard. Kept SEPARATE from `ack_matched` rather
+# than overloading it with the literal string `all`, because that variable is the
+# notification's DATA SOURCE and not merely its condition -- see `acked()` below.
+#
+# INITIALISED HERE BECAUSE `set -u` IS ON (`:69`), and omitting it does not fail in the
+# safe direction: an unset read aborts the script mid-block. Written without this line
+# first, and the red is worth recording -- it killed the per-token staleness note, and of
+# the three assertions covering that note only the ONE `has` row caught it. Both
+# neighbouring `hasnt` rows passed on the dead script, because an absence assertion is
+# monotone under removal and a script that exited produces exactly the silence they assert.
+ack_is_wildcard=""
 
 # TIGHTENED 2026-09-09. The previous form was `[ "$ack" = "all" ]` plus a comma-wrapped
 # SUBSTRING test, which was looser and stricter than it looked in three separate ways:
@@ -95,16 +106,30 @@ ack_matched=""
 # silent no-op on an input they clearly meant AND cannot see the effect of.
 acked() {
     _a="$(printf '%s' "$ack" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
-    [ "$_a" = "all" ] && { ack_matched="all"; return 0; }
-    case ",$_a," in
-        *",$1,"*)
-            case ",$ack_matched," in
-                *",$1,"*) ;;
-                *) ack_matched="${ack_matched:+$ack_matched,}$1" ;;
-            esac
-            return 0 ;;
-        *) return 1 ;;
+    # THE WILDCARD MUST ACCUMULATE, NOT SHORT-CIRCUIT, because `ack_matched` answers two
+    # questions at once: "is this sid authorised?" and "who is owed a notification?". The
+    # arm removed from here was `[ "$_a" = "all" ] && { ack_matched="all"; return 0; }` --
+    # a correct answer to the first question that collects nothing for the second. One
+    # resolution path satisfied the predicate over the FULL population while accumulating
+    # over NONE of it, so the note downstream had the right sentence and an empty list:
+    # `all` published every foreign session's work and told none of them, on the one ack
+    # path whose blast radius is maximal and which the header above already discourages.
+    if [ "$_a" = "all" ]; then
+        ack_is_wildcard=1
+    else
+        case ",$_a," in
+            *",$1,"*) ;;
+            *) return 1 ;;
+        esac
+    fi
+    # ONE ACCUMULATION PATH FOR BOTH FORMS, shared rather than copied into the wildcard
+    # branch. A second copy is what lets the two drift, and a branch that skipped this
+    # step is precisely the defect being replaced.
+    case ",$ack_matched," in
+        *",$1,"*) ;;
+        *) ack_matched="${ack_matched:+$ack_matched,}$1" ;;
     esac
+    return 0
 }
 
 foreign_sids=""
@@ -306,7 +331,18 @@ fi
 # guard let the push through for unrelated reasons, and nothing anywhere records that your
 # authorisation applied to no commit in the range. Reported, never fatal -- a stale ack left in
 # a shell history is a harmless habit, and refusing on it would punish the careful.
-if [ -n "$ack" ] && [ "$ack_matched" != "all" ]; then
+#
+# THE `!= "all"` REMOVED FROM THIS LINE GATED THREE JOBS WITH ONE CONDITION, and it was
+# right for one of them. Skipping the per-token staleness loop under `all` is correct --
+# no tokens were named, so there is no "you named the wrong sid" to report, and that loop
+# is now gated on its own below. Skipping the empty-population note is harmless. Skipping
+# the SID-NAMING branch is the defect: that branch fires precisely when a foreign
+# population exists and was authorised, which is exactly what `all` does, and its readers
+# are the sessions whose work just became public. They cannot audit a message that was
+# never sent -- receiving nothing is byte-identical to nobody having pushed -- so the only
+# party positioned to notice the omission is the pusher, who has no reason to look.
+# docs/issues/archive/2026-09-15-push-ack-all-publishes-every-foreign-sessions-work-and-tells-none-of-them.md
+if [ -n "$ack" ]; then
     _ifs2="$IFS"; IFS=,
     # shellcheck disable=SC2086
     set -- $(printf '%s' "$ack" | tr -d '[:space:]')
@@ -381,7 +417,15 @@ if [ -n "$ack" ] && [ "$ack_matched" != "all" ]; then
         printf '  the same as yours: push only when their user asks. So for them this is an\n' >&2
         printf '  outward-facing action on their work that their operator did not sanction,\n' >&2
         printf '  and they have to report it -- from your account, or from a reconstruction.\n' >&2
-    else
+    elif [ -z "$ack_is_wildcard" ]; then
+        # UNREACHABLE UNDER THE WILDCARD TODAY, AND GUARDED ANYWAY -- annotated so the next
+        # reader need not re-derive the reachability, and so the guard is not mistaken for
+        # a live branch. Under `all` every `acked` returns 0, so every foreign commit is
+        # skipped, `$foreign_report` is always empty, and the `elif` above always wins.
+        # The guard costs nothing and fails safe if that ever changes: without it `$@`
+        # holds the single token `all`, which `ack_matched` no longer contains, and this
+        # loop would print "CODESCOUT_PUSH_ACK named all, which authored no commit in this
+        # push" -- a plausible sentence naming a session that does not exist.
         for _tok in "$@"; do
             [ -n "$_tok" ] || continue
             case ",$ack_matched," in

@@ -1113,6 +1113,39 @@ has   "fully acked: names a procedure that resolves a sid" \
 has   "fully acked: says why it is owed, not merely that it is" \
       "$OUT" "their operator did not sanction"
 
+# -- 6h: ack=all OWES THE SAME NOTIFICATION, and used to print none ------------------
+# THE HIGHEST-BLAST-RADIUS ACK PATH HAD COVERAGE OF ITS VERDICT AND NONE OF ITS OUTPUT.
+# `:268` asserts `ack=all allows` on the exit code alone, which is green whether the note
+# prints or is absent -- so `all` was silent here while every row above tests the named
+# path's notification carefully. Two independent defects produced that, and either alone
+# was sufficient: `acked()` returned on the wildcard BEFORE the per-sid accumulation, so
+# `ack_matched` held the literal string `all` and no sids; and this block was gated on
+# `[ "$ack_matched" != "all" ]`, so it never ran. Removing only the gate would have
+# reached a branch with nothing to name.
+#
+# WHY THE SIDS AND NOT THE PROSE, same reasoning as 6f one level up: an assertion that
+# the block printed SOMETHING is monotone under printing the wrong sids, and the wildcard
+# arm's whole failure was that it had the right sentence and an empty list.
+#
+# WHY `all` IS NOT SIMPLY DISCOURAGED INSTEAD: the party this note protects -- the
+# foreign sessions -- receives nothing when it does not fire, and receiving nothing is
+# byte-identical to nobody having pushed. They cannot audit a message never sent, so no
+# amount of attention on their side substitutes for the print. The script's header already
+# discourages `all`; that is precisely the state this defect was found in.
+# docs/issues/archive/2026-09-15-push-ack-all-publishes-every-foreign-sessions-work-and-tells-none-of-them.md
+run "$ALICE" "all" "refs/heads/main $R6F_TIP refs/heads/main $R6F_BASE"
+eq    "ack=all: allowed"                          "$EC" 0
+has   "ack=all: names the population it authorised" "$OUT" "2 commit(s) by another session"
+has   "ack=all: names the first foreign sid"      "$OUT" "$BOB"
+has   "ack=all: names the second foreign sid"     "$OUT" "$CAROL"
+has   "ack=all: says they have not been told"     "$OUT" "have NOT been told"
+has   "ack=all: names a procedure that resolves a sid" \
+      "$OUT" "reaching-peer-sessions"
+# The literal string `all` must never reach the sid list. Before the fix `ack_matched`
+# WAS that string, so a loop over it would have printed `all` as though it were a session
+# to go and notify -- a plausible-looking line naming a party that does not exist.
+hasnt "ack=all: never prints the literal token as a sid" "$OUT" "      all"
+
 echo
 echo "== entry-id collision scan (Fix Part 1, 9c7c5bc9168404be) =="
 #
