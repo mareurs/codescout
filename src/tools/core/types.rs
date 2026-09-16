@@ -83,12 +83,25 @@ pub struct ToolContext {
     /// and a same-project re-activation leaves it alone entirely. See
     /// `ActivateProject::call` (`PROJECT_SCOPED`, `rendezvous_active`).
     pub guide_hints_emitted: Arc<parking_lot::Mutex<crate::tools::guide_ledger::GuideLedger>>,
-    /// Per-request workspace pin (Phase 2 plumbing for per-request workspace
-    /// resolution). Populated in `call_tool_inner` from an optional `workspace`
-    /// input field, canonicalized to match the registry's canonical-root keys.
-    /// No tool reads it yet — Phase 3 wires the selector-aware accessors
-    /// (`with_project_at`). See
-    /// docs/plans/2026-05-30-per-request-workspace-pinning.md.
+    /// Per-request workspace pin. Populated in `call_tool_inner` from an optional
+    /// `workspace` input field, canonicalized to match the registry's
+    /// canonical-root keys.
+    ///
+    /// **Read by every pinnable tool and by the librarian adapter** — 324
+    /// references across 47 files as of 2026-09-16, via
+    /// `Agent::with_project_at`, `with_project_at_mut`,
+    /// `require_project_root_for` and `reload_config_if_project_toml_for`.
+    /// `LibrarianAdapter` resolves it at `src/librarian/adapter.rs:285` and
+    /// surfaces an unresolvable pin loudly rather than falling back to the
+    /// session project.
+    ///
+    /// This comment said *"No tool reads it yet — Phase 3 wires the
+    /// selector-aware accessors"* until 2026-09-16. Phases 0–3 completed
+    /// 2026-05-31 and the plan records them as such; the comment outlived them by
+    /// three and a half months and is the reason an architecture review proposed
+    /// re-deriving a boundary that already shipped. Kept as one sentence rather
+    /// than deleted because the cost was paid.
+    /// See docs/plans/2026-05-30-per-request-workspace-pinning.md.
     pub workspace_override: Option<std::path::PathBuf>,
 }
 

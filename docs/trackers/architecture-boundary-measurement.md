@@ -292,6 +292,53 @@ So *"classify earlier"* is the wrong instruction: one of the three genuinely is 
 
 **Confidence:** high that the seam is where it is and that the blast radius is one production caller — both read at the bytes. Medium on the mechanism for carrying `overflowed` back out. Low that it is urgent.
 
+### Slice 3 — scouted 2026-09-16, RECOMMEND NOT BUILDING IT AS WRITTEN
+
+**The proposal is off by one step in the same way slice 2's was, and further along.** Slice 2's boundary partly existed; slice 3's per-request pin **fully exists and shipped 2026-05-31**. What does not exist is the invariant that keeps it.
+
+**Cited from the imports, not the diagram.** `ctx.workspace_override` has **324 references across 47 files**. `Agent::with_project_at` (`src/agent/mod.rs:793`) and `with_project_at_mut` (`:977`) are the selector-aware accessors. Every one of the 21 registered tools has a production source file referencing the pin except `doc` and `librarian`, which reach it through `LibrarianAdapter` — `src/librarian/adapter.rs:285` resolves `ctx.workspace_override` and, per its own comment, *"an unresolvable pin surfaces loudly instead of falling back"* (`docs/issues/archive/2026-07-17-artifact-find-ignores-workspace-pin.md`). The owning plan, `docs/plans/2026-05-30-per-request-workspace-pinning.md`, records **"Phases 0–3 COMPLETE"** and **"4a COMPLETE"**.
+
+**What the slice is actually about, once that is subtracted.** The text says *"build on existing workspace pins rather than pretending they are missing"* — so the author knew. The live proposal is the second clause: *avoid repeated ambient resolution*. That is real and now measured: **95 per-request resolution call sites across 25 production files**, worst-first `src/agent/mod.rs` 16, `src/tools/onboarding.rs` 15, `src/tools/memory/mod.rs` 14, `src/tools/semantic/index.rs` 10, `src/tools/config/mod.rs` 7. A single `onboarding` call can re-resolve project identity around fifteen times.
+
+**Change scenario, named and checked against history rather than imagined.** *"A new tool or call site is added and forgets the pin, so work silently scopes to the session project."* It has happened and is archived: `8f500ba0f27723a4` (references / symbol_at / call_graph ignored the pin), `4574d18db7aacec8` (one process-global active project), `f73130523241a666` (pin at an unparseable config), `6779f47d3c986e9c` (activation guard used wall-clock proximity). **All fixed.** A resolved request object threaded through the API would make forgetting unrepresentable — a caller could not reach a helper without it.
+
+**Why that is still not worth building.** The 95 sites are the cost, not the evidence: threading a request object through 25 files is a migration whose risk is concentrated in exactly the write paths whose correctness is least observable, and it buys prevention of a defect class that is currently at zero live instances. The cheaper instrument that catches the same class already has a house pattern here — `every_manual_page_is_reachable_from_summary`, `every_safety_comment_precedes_an_unsafe_construct`, `every_refusing_hook_emits_the_shared_tail`, `every_declared_feature_has_a_lane_or_a_reason`. **There is no `every_tool_honors_the_workspace_pin`.** The pin has per-site tests (`call_tool_inner_honors_workspace_override_for_security_config`, `an_out_of_band_edit_reaches_the_pinned_security_config_too`) and no population guard.
+
+```
+**Decision:** Do not build the scoped request object. Keep the existing per-request
+    pin plumbing and add the missing population guard that makes a pin-blind tool
+    or call site fail the build.
+**Context:** The pin shipped 2026-05-31 across 21 tools and the librarian adapter.
+    The remaining exposure is not a missing boundary but an unasserted invariant:
+    95 resolution sites, no test that a NEW one honors the pin.
+**Alternatives considered:**
+    - Scoped request object threaded through 95 sites — rejected: large migration,
+      risk concentrated in write paths, zero live instances of the defect it
+      prevents, and it re-derives a boundary that already exists.
+    - Do nothing — rejected: the defect class has four archived instances, so
+      "it has not recurred" is a statement about attention, not about structure.
+    - Population guard (chosen) — matches the established `every_*` pattern and
+      reds exactly on the failure the migration would prevent.
+**Consequences:**
+    now easier: a new tool that skips the pin cannot reach master silently.
+    now harder: nothing structural. The 95 call sites stay, so "resolve once"
+      remains unachieved and a reader must still not mistake site count for cost.
+**Change scenarios absorbed:** a new tool, or a new helper on an existing tool,
+    resolves project identity without consulting the per-request pin.
+**Revisit-when:** the guard reds twice for genuinely different reasons — that is
+    two concretes for the abstraction, where today there are none; OR a second
+    per-request dimension appears beside the workspace pin (a tenant, a session
+    identity, a read-only flag with its own resolution), at which point a request
+    object carries two things and stops being a wrapper around one.
+**Confidence:** high that the pin is fully wired, read at the bytes. Medium on the
+    95 figure as a COST estimate — it counts call sites, not the difficulty of
+    threading them. Low that any of this is urgent.
+```
+
+**The limit of this scout, stated because the recommendation depends on it.** What was verified is that every pinnable tool's production source **references** the pin, and that the adapter resolves it. That is **not** the same as every tool honoring it on every path — presence of an identifier is not correctness, and no instrument here reaches the stronger claim. **That gap is the argument for the guard rather than a caveat on it:** the guard is what would establish what this scout cannot.
+
+**Doc-vs-code drift corrected on the way.** `src/tools/core/types.rs:89` read *"No tool reads it yet — Phase 3 wires the selector-aware accessors"* — false since 2026-05-31, three and a half months stale, sitting on the field itself where a designer would look first. `cluster/doc-contradicted-by-code`.
+
 ## Follow-up measurements — 2026-09-16
 
 Run 2026-09-16, current HEAD, by `scripts/architecture-boundary-probe.py context` plus targeted checks. The probe exited **0** with `worktree_changed_during_measurement: false` — both 2026-09-13 runs exited 2, so this is the first run whose source basis is not disputed by a mid-run HEAD move.
