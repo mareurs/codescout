@@ -170,6 +170,32 @@ build artifacts but not source, and from `OB-23`'s stand-down shape. Neither of 
 That is `81d2cdcbbdfc03a6`'s class arriving here too — a shipped remedy implying a scope it does
 not have, where the false coverage is the half that stops the next person looking.
 
+**THE MODULE ADMITS FOUR CEILINGS AND PRESENTS CHECK-VERSUS-TEST AS MET — which is the whole
+asymmetry.** `build_check.rs:54-62`, under a heading that says why it exists (*"named here
+because silence looks identical to health"*): a write that does not go through codescout
+produces **no trigger** (native `Edit`/`Write`/`Bash` reach no tool — measured, **8 of 72
+sessions run cargo entirely through `Bash`**); **Rust only**; a **deliberate mutation** trips
+it, with `CODESCOUT_NO_BUILD_CHECK=1` as the escape; and a **lean build** emits nothing.
+
+Check-versus-test appears nowhere in that list. It sits in the COST section as an invariant the
+module asserts it **meets** — *"the check has to match the gate's blast radius"*. So of five
+gaps, four are admitted and one is presented as satisfied, and it is the one that swallowed all
+three of 2026-09-16's reds. A reader auditing this mechanism's limits finds an honest CEILINGS
+list and is told the remaining edge is covered.
+
+**And an intent channel DOES exist — author-private, which sharpens the deliberate-red claim
+rather than refuting it.** `CODESCOUT_NO_BUILD_CHECK=1` suppresses the AUTHOR's own notice and
+tells no peer anything; `DISABLE_ENV` explicitly mirrors `CODESCOUT_NO_WIP_ATTRIBUTION` on the
+reader side (`:68-70`), so both halves can be silenced independently and neither silencing is
+visible to the other party. *"A shared checkout has no channel for this red is deliberate"* is
+therefore not quite right: the channel is local to the author by construction, which is worse
+than absent, because a suppressing author may believe they have declared something.
+
+*Ceilings re-read and wiring re-verified by `9e022ef0-eb76-49f0-b175-4d68979290cf`, who had
+asserted the mechanism's absence an hour earlier and checked before accepting the correction;
+the only-gap-presented-as-satisfied framing is theirs. Their count of "three of four" is one
+short — the section names four and the fifth is the one presented as met — which strengthens it.*
+
 **Not implemented for the test-failure half, and deliberately not designed here.** Running the
 gate's tests on every source write is not a candidate on cost, and the cheap alternative — an
 advisory that a peer *might* be mid-edit — is `OB-23`'s measured shape, where the prescribed
