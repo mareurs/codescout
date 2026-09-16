@@ -555,15 +555,31 @@ def worktree_is_dirty(path: str, root: Path) -> bool | None:
     """Does the worktree hold uncommitted bytes for this path? None when git cannot say.
 
     Deliberately THREE-valued, and the None is load-bearing: the UNKNOWN prose keys a
-    dispositive clearance off False, so a wrong False would replace the omission this
-    answers with a louder false claim. Outside a repo `git status` fails plainly, where a
-    bool would have to guess. What makes the reading worth stating at all is INDEPENDENCE
-    -- it shares no blind spot with the transcript heuristics, so a Bash write they miss
-    still dirties the tree, and `clean` therefore settles what `no record` cannot.
+    DISPOSITIVE clearance off False, so a wrong False replaces the omission this answers
+    with a louder false claim.
+
+    TWO distinct ways git cannot say, and the second was found by a mutation-driven case
+    rather than by reading. Outside a repo `status` fails plainly. But for a path the repo
+    does not TRACK it SUCCEEDS and prints nothing — byte-identical to a clean tracked
+    file — so a bare `status` reading licenses a clearance about a path git holds no
+    baseline for. `ls-files --error-unmatch` is the discriminator, and it answers both
+    cases, which is why it is first.
+
+    What makes the reading worth stating at all is INDEPENDENCE: it shares no blind spot
+    with the transcript heuristics, so a Bash write they miss still dirties the tree, and
+    `clean` therefore settles what `no record` cannot.
     """
+    tracked = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "--error-unmatch", "--", path],
+        capture_output=True, text=True)
+    if tracked.returncode != 0:
+        return None
     out = subprocess.run(
         ["git", "-C", str(root), "status", "--porcelain", "--", path],
         capture_output=True, text=True)
+    # Defensive, and annotated as such: no input is known to reach a tracked path whose
+    # `status` then fails, so this None is not credited with coverage. It is here because
+    # the alternative on an unexpected failure is a fabricated clearance.
     if out.returncode != 0:
         return None
     return bool(out.stdout.strip())
@@ -655,11 +671,10 @@ def main(argv: list[str]) -> int:
             if floor and records:
                 dirty = worktree_is_dirty(rel, root)
                 if dirty is False:
-                    print("          LIKELY CAUSE: the worktree is CLEAN for this path "
-                          "and every write on record predates its last commit, so no "
-                          "session holds uncommitted bytes in it. That is a dispositive "
-                          "clearance rather than a coverage gap — git cleanliness shares "
-                          "no blind spot with the heuristics below.")
+                    print("          LIKELY CAUSE: the worktree is CLEAN for this path, "
+                          "so no session holds uncommitted bytes in it. That is a "
+                          "dispositive clearance rather than a coverage gap — git "
+                          "cleanliness shares no blind spot with the heuristics below.")
                 elif dirty is True:
                     print("          LIKELY CAUSE: the worktree is DIRTY for this path "
                           "and every write on record predates the window, so the window "

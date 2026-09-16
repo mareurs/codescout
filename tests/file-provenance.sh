@@ -891,12 +891,20 @@ has   "and UNKNOWN now names its window"                       "$fr" "window: wr
 has   "and the floor VALUE, not merely the word"               "$fr" "2026-06-01"
 
 # The opposite direction, and the constraint the fix had to respect: with no floor there is
-# no frame to name, so an untracked path's silence is ALREADY correct and a window line
-# there would name a frame that does not exist. $unk is the no-writer fixture from the
-# section above, run against a non-git REPO_ROOT, so its floor is None.
+# no frame to name, so the silence is ALREADY correct and a window line would name a frame
+# that does not exist. $unk is the no-writer fixture from the section above; its path is not
+# committed in $T/repo, so last_commit_time() finds nothing and the floor stays None.
 # This assertion is monotone under REMOVAL -- it passes against a tool with no window
 # support at all -- so it is evidence only beside the three above, never on its own.
 hasnt "and stays silent when no floor exists" "$unk" "window:"
+
+# And where git cannot answer, the tool must not answer either. src/frame_probe.rs is not
+# TRACKED in $T/repo, and that is the case a bare `git status --porcelain -- <path>` gets
+# WRONG: it succeeds and prints nothing, byte-identical to a clean tracked file. The first
+# draft of worktree_is_dirty() read exactly that and printed a dispositive clearance here,
+# about a path git holds no baseline for -- caught by this assertion, not by reading, while
+# its own docstring already called the three-valued None load-bearing.
+hasnt "and infers no cause for a path git holds no baseline for" "$fr" "LIKELY CAUSE"
 
 echo
 echo "== UNKNOWN names the LIKELY cause, not only the rare one =="
@@ -905,41 +913,46 @@ echo "== UNKNOWN names the LIKELY cause, not only the rare one =="
 # common cause of UNKNOWN is a committed file whose default floor sits at its own commit
 # time. A reader doing exactly what the message said went to investigate the rarer cause.
 #
-# This section is the suite's ONLY git fixture, and that is a gap it closes as well as one
-# it needs: every assertion above runs against a non-git REPO_ROOT, where last_commit_time()
-# returns None, so the DEFAULT floor -- the one the bug is about -- was exercised by
-# nothing. --since was the only floor under test.
-GR="$T/gitrepo"
-mkdir -p "$GR/src"
-git -C "$GR" init -q >/dev/null 2>&1
-git -C "$GR" config user.email fixture@example.invalid
-git -C "$GR" config user.name fixture
-rung() { REPO_ROOT="$GR" FILE_PROVENANCE_ROOTS="$ROOTS" \
-         CLAUDE_CODE_SESSION_ID="$ME" python3 "$TOOL" "$@" 2>&1; }
-
-echo x > "$GR/src/settled.rs"
-git -C "$GR" add src/settled.rs >/dev/null 2>&1
-git -C "$GR" commit -qm fixture >/dev/null 2>&1
+# Reuses the git fixture $T/repo already seeded by the DEFAULT-window section above. A
+# first draft of this section stood up a SECOND repo, on the strength of a `git init` grep
+# whose output `head -40` truncated before line 602 -- an absence read off a cap, which is
+# the same class of error as the verdict this section is about.
+echo "v1" > "$T/repo/src/settled.rs"
+git -C "$T/repo" add src/settled.rs
+git -C "$T/repo" commit -q -m "seed settled"
 # A write recorded long BEFORE that commit, so every write on record predates the derived
 # floor and no writer survives into the window.
 tool_use "$B" mcp__codescout__edit_file \
     '{"path":"src/settled.rs","old_string":"a","new_string":"b"}' "2020-01-01T00:00:00.000Z"
 
-st=$(rung src/settled.rs)
+st=$(run src/settled.rs)
 has   "a clean committed path still reaches UNKNOWN"          "$st" "UNKNOWN"
-has   "and the derived floor is named too, not just --since's" "$st" "window: writes at or after"
-has   "and a clean tree is reported as settling the question"  "$st" "dispositive"
-hasnt "and the completeness claim is gone"                     "$st" "The one blind spot"
+has   "and names the window the default floor produced"       "$st" "window: writes at or after"
+has   "and a clean tree is reported as settling the question" "$st" "dispositive"
+hasnt "and the completeness claim is gone"                    "$st" "The one blind spot"
 
 # The expensive direction, and the row the hidden hint CANNOT separate from the one above:
 # same floor, same records, same UNKNOWN -- and uncommitted bytes really are held. This is
-# incident 2, where --all went on to name three live peers. git cleanliness is a SECOND
-# instrument with no blind spot in common with the transcript heuristics, which is the only
-# reason either verdict here is worth stating.
-printf 'y\n' >> "$GR/src/settled.rs"
-dt=$(rung src/settled.rs)
+# incident 2, where --all went on to name three LIVE peers. git cleanliness is a SECOND
+# instrument sharing no blind spot with the transcript heuristics, which is the only reason
+# either verdict here is worth stating.
+printf 'v2\n' >> "$T/repo/src/settled.rs"
+dt=$(run src/settled.rs)
 has   "a DIRTY path with every write outside the window says so" "$dt" "too narrow"
 hasnt "and claims no clearance on the identical record set"      "$dt" "dispositive"
+
+# ZERO records with a floor: the window still prints, and there is nothing to infer a cause
+# FROM, so the tool must say nothing. This row is absent from the filed fix plan's table,
+# and the reproduction is what produced it -- the plan's `hidden == len(records)` guard is
+# 0 == 0 here and would have claimed "no session holds uncommitted bytes" about a path it
+# knows nothing about. The mutation dropping `records` from the guard SURVIVED all 150
+# assertions before this case existed.
+echo "v1" > "$T/repo/src/unrecorded.rs"
+git -C "$T/repo" add src/unrecorded.rs
+git -C "$T/repo" commit -q -m "seed unrecorded"
+nr=$(run src/unrecorded.rs)
+has   "a committed path with zero records still names its window" "$nr" "window: writes at or after"
+hasnt "and infers no cause from zero records"                     "$nr" "LIKELY CAUSE"
 
 echo
 echo "passed=$PASS failed=$FAIL"
