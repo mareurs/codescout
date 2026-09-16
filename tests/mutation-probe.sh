@@ -326,7 +326,7 @@ has  "20 an untracked new file is carried" "$OUT" "EDIT-IN-UNTRACKED-FILE"
 # of a Python file against `bash tests/file-provenance.sh` all read INCONCLUSIVE
 # while four were decisive kills and two decisive survivals, and the whole table was
 # read by hand off the suite's own `passed=N failed=M` line
-# (`docs/issues/2026-09-16-mutation-probe-renders-no-verdict-for-a-non-cargo-runner.md`).
+# (`docs/issues/archive/2026-09-16-mutation-probe-renders-no-verdict-for-a-non-cargo-runner.md`).
 #
 # This asserts ARRIVAL, not that the advice is correct — the distinction CLAUDE.md
 # § Testing Discipline draws: a suite tests a guard's PREDICATE and never its REMEDY

@@ -1,7 +1,7 @@
 ---
-id: '6213a09765698cfa'
+id: 0a8ae6d2685555d9
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: mutation-probe renders no verdict for a non-cargo runner, and its INCONCLUSIVE text names three causes that exclude the real one'
 owners:
 - marius
@@ -11,8 +11,9 @@ tags:
 - probes
 - remedy-text
 topic: measurement instruments and their blind spots
+claimed_at: 2026-09-16
 claimed_by: a3bf229c-658b-42f9-8f4b-794fcf0d35c7
-closed: null
+closed: 2026-09-16
 opened: 2026-09-16
 severity: medium
 ---
@@ -104,6 +105,9 @@ change lands in those two places and PROBES.md gains only a pointer.
 the wide one.
 
 ## Fix
+
+**Fixed in `eaeac9c7`** — patch-id `f69b7760c33c83dd9a47717d5aac06549e906df1`. Gate green:
+FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0.
 
 **Shipped 2026-09-16 — form 1, plus the scope moved to both read surfaces.** Form 2 is
 untouched and remains a design question.
