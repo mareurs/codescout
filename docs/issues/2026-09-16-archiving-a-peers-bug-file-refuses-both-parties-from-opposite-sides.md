@@ -1,12 +1,13 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/shared-resource-carries-no-owner
+closed: 2026-09-16
 opened: 2026-09-16
-closed:
-severity: high
 owner: marius
 related: []
-tags: [cluster/shared-resource-carries-no-owner]
-kind: bug
+severity: high
 ---
 
 # Archiving a peer's bug file refuses both parties, from opposite sides of one guard
@@ -149,8 +150,8 @@ no refusal emitted — the exact capture the guard exists to prevent. Named here
 nothing in the guard closes it.
 ## Fix
 
-**Directions 4, 5 and 6 SHIPPED 2026-09-16. Direction 2 remains open and 1 and 3 stay dead.**
-The deadlock is **half** resolved and the table below says which half.
+**Directions 2, 4, 5 and 6 SHIPPED 2026-09-16. 1 is shipped-but-unreached and 3 is dead.**
+The deadlock is resolved — both parties now have a route, and the table below says which.
 
 **Not designed.** Directions recorded so the next session does not re-derive them — and
 two of the original three are now measured dead, which is most of what this section is
@@ -254,7 +255,7 @@ worth.
 | direction | state | citation |
 |---|---|---|
 | 1 teach the guard about renames | shipped, does not reach this shape | `b37b888a` |
-| 2 let a commit declare two authors | **open** — the remaining one | — |
+| 2 let a commit declare two authors | **shipped, inverted** | `05c6f153`, patch-id `20ef09260e836da6f933f809b865a573970bc3db` |
 | 3 move the frontmatter edit off the archiver | **dead** — targets authorship, which the guard never reads | — |
 | 4 name the performable route | **shipped** | `fc1ad175`, patch-id `fef5458a8316af21fd0ed2db92289dfbda29ab01` |
 | 5 warn when a move strands a citation | **shipped** | `6853c517`, patch-id `3616d2f2fd5ae7e2633c939b568cb4d5cfd28519` |
@@ -293,6 +294,63 @@ with **zero** tests — `grep -rn "CODESCOUT_INDEX_ACK\|joint" tests/` returned 
 was reported as *"101 passed"*. That backfill landed at `ed0cce92` **before** any change to
 the admitting side, so the widening reds against a real baseline rather than against tests
 written alongside it.
+**DIRECTION 2 SHIPPED INVERTED, and the literal form was impossible.** It asked for *"a
+second trailer, so the guard can pass on a commit that NAMES the split"* — but a pre-commit
+hook **cannot read the commit message**, which does not exist yet. The guard says so about
+itself, and that is precisely why the ack is an env var. No amount of design makes the guard
+read a declared trailer.
+
+So the hook **writes** it. `scripts/prepare-commit-msg-session-id.sh` emits one
+`Co-Authored-Session-Id` per acked sid when `CODESCOUT_INDEX_ACK` is set, and the paste step
+— where all three filed instances of the trailer defect actually broke — is removed rather
+than documented better.
+
+**Order is what makes it sound, and it is measured:** git fires `pre-commit` **before**
+`prepare-commit-msg`. By the time the stamp runs, the guard has already refused unless the
+ack named **every** foreign owner, so the list is one the guard validated as complete on a
+commit it let through. The hook decides nothing; it records a decision already checked.
+
+**Two measurements the implementation turns on, both of which the obvious version gets
+wrong.** `--if-exists` is global to one `interpret-trailers` call and the two keys need
+opposite policies — `Session-Id` must stay `doNothing`, because on a rebase replaying a
+peer's commit `addIfDifferent` would add ours beside theirs and invent a second author;
+`Co-Authored-Session-Id` must be `addIfDifferent`, because under `doNothing` two distinct
+sids write **one** trailer and every co-author after the first is dropped silently. And the
+first implementation split the ack with `printf '%s'`, whose missing trailing newline makes
+`read` drop the **final** element — with one sid, the only sid.
+
+**That last one produced a test passing for the wrong reason**, which is the part worth
+carrying: the dropped element happened to be the `-` sentinel a filter was meant to drop, so
+*"a mixed list keeps the real sid"* went green over a filter that never executed. Written
+alone it would have certified the filter. Only its neighbours' failures exposed it, and a
+mutation afterwards confirmed the filter is now genuinely reached.
+## Fix provenance
+
+- **SHA:** `fc1ad175` (`experiments`) — directions 4 + 6, the ack's reach and the remedy text
+- **patch-id:** `fef5458a8316af21fd0ed2db92289dfbda29ab01`
+- **SHA:** `6853c517` (`experiments`) — direction 5, the orphaned-citation warning
+- **patch-id:** `3616d2f2fd5ae7e2633c939b568cb4d5cfd28519`
+- **SHA:** `05c6f153` (`experiments`) — direction 2, the acked co-authors written not pasted
+- **patch-id:** `20ef09260e836da6f933f809b865a573970bc3db`
+
+**Four commits, not three, and the fourth is not in this list on purpose.** `96d839c3`
+(patch-id `caa8669f048c56e0dd09ced10823b9f2a2131cc6`) closed the `-` sentinel bypass and had
+to land **before** the widening — `all_contested` reaches far more rows than `joint`, and
+every unattributed one among them would have been ackable by a single character. It is filed
+as its own record because it is a different defect that this work merely surfaced; citing it
+here as a fix for *this* bug would misreport what it repaired.
+
+**And the precondition that is not a fix at all:** `ed0cce92` backfilled the `joint`/ack test
+coverage that `b37b888a` shipped without. It changed no behaviour and closes nothing, but the
+widening reds against it rather than against tests written alongside the change — which is
+the only reason the mutation verdicts in those commits mean anything.
+
+**Archive-eligible and deliberately not archived.** `doc(action="move")` re-keys the artifact
+and strands every inbound citation of the old id until they are repointed in the same commit.
+This file was cited heavily across 2026-09-16 — by `IC-18`'s member list, by three peer
+sessions' entries, and by the guard's own refusal text, which prints this path. The move is
+its own act with its own checklist, not a tail of the fix.
+
 ## Workarounds
 
 **One, and the second thing this section used to recommend is now measured WRONG.**
