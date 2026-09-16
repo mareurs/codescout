@@ -59,6 +59,19 @@ Both refusals are **correct**. Side A is refused over the source half, side B ov
 current content. The guard's remedy — *"ask the owner to commit theirs"* — resolves to a
 party who is themselves refused, so following it terminates in the refusal it came from.
 
+**BOTH BLOCKS ABOVE ARE STAMPED, and without the stamps this file contradicts § *Root
+cause*.** They quote refusals produced **before** `9403d62d` re-staged the coupled set, when
+the twelve rename paths were `9e022ef0`'s. § *Root cause* reports the same lookup returning
+those twelve as `9403d62d`'s — a measurement taken **after** that `git add`. Both readings
+are correct at their own instant and cannot both be correct at one, which is exactly the
+failure this repo files under *a count is valid only at its instant*: ownership here is not
+a property of a path, it is a property of a path **at a moment**, and `git add` moves it.
+
+Raised by a design review reading the file as self-contradictory — a fair reading of what
+was written, since neither block carried a time. The correction is the stamp, not either
+number. **Nothing downstream of this file should cite an owner from it without one**, and
+that matters most where it would be cited as justification for relaxing the guard.
+
 ## Why the suggested remedy is worse than the refusal
 
 The guard directs a blocked caller to narrow by pathspec. On a `doc(action="move")` that is
@@ -115,7 +128,8 @@ THE FIRST OBSERVER"*. The contested set is produced by `git add`, never by
 
 **The two point in OPPOSITE directions here, which is what makes this a fact rather than a
 wording preference.** All six bug files were authored by `9403d62d` — `d3a2c24f`, read
-from its `Session-Id` trailer — and archived by `9e022ef0`. Yet at refuse time the guard's
+from its `Session-Id` trailer — and archived by `9e022ef0`. Yet **at the instant this was
+measured, after `9403d62d` had re-staged the coupled set**, the guard's
 own `(blob, path)` lookup against `.git/session-stage-log` returned all twelve rename
 paths as `9403d62d`'s, `route=named`, because that session ran `git add` last. The guard
 called a session's own bug files its own, correctly by its own rule, while the session
