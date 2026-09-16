@@ -1,0 +1,36 @@
+---
+id: '3f62fb253da43649'
+kind: tracker
+status: draft
+title: a value correct in one frame is published under a name that states another
+owners:
+- marius
+tags:
+- defect-classes
+- clusters
+- value-correct-in-a-frame-its-name-does-not-state
+topic: issue clusters and rule promotion
+---
+
+## IC-24 — a value correct in one frame is published under a name that states another
+
+**Slug:** `cluster/value-correct-in-a-frame-its-name-does-not-state`
+**Claim:** A value is computed correctly in one frame — a coordinate space, a unit, a citation form, a time window, a scope word — and published under a name that states a different frame. The value is **exactly right and exactly recoverable**; only the binding between the value and its name is wrong. Every instrument aimed at the value confirms it, because the value is not what is broken.
+**Members:** `filter={"tags": {"contains": "cluster/value-correct-in-a-frame-its-name-does-not-state"}}` — derive with `python3 scripts/probe-cluster-census.py`, which reads the tags rather than any count stored here; opened 2026-09-16 by retag out of `cluster/unclassified`, whose census fell 33 → 30 in the same change. +1: `chunk-line-ranges-are-body-relative-but-published-as-file-lines` (2026-09-02) — a span computed in the frontmatter-stripped **body**'s coordinate space and published as `start_line`, which every consumer reads as a **file** line; the frame is the coordinate space, and the true value is recoverable by adding a constant the response simply omits. +1: `doc-tool-refs-counts-call-param-pairs-as-documents` (2026-09-02) — a count of (call × param) pairs published under the name `documents`; the frame is the **unit**, and the true value is recoverable by deduplicating on `(file, line, tool)`. +1: `a-move-reports-slug-and-path-citations-under-one-field-named-for-paths` (2026-09-15) — a detector widened to see a second citation form publishes both under the OLD form's name; the frame is the citation **form**, and it matters because the two take opposite remedies — a path citation is dead and must be re-pointed, a slug citation is untouched by the move and must not be. Every one of the three is exactly right about what it measured, which is the claim above and the reason none of them is an `IC-20`.
+**Blind party:** the **producer**, for whom the two frames coincide in every check they would think to run. This is the class's sharpest property and the reason *"verify before asserting"* is a no-op against it: re-verification returns the same correct value, and agreement is precisely what a correct answer to a neighbouring question produces. The body-relative test seeds the body and compares against the body. A session reading *who WROTE this path* off `scripts/file-provenance.py` and publishing it as *who STAGED it* gets a true sentence out of a tool whose output literally says `written by`. No instrument aimed at the value can read the name.
+**Promotes to:** `not yet` — the count bar is cleared on creation, the spread bar is not adjudicated. Do not adjudicate it from the member list alone: three of the four axes were found in librarian-adjacent surfaces (chunk ranges, doc-ref counting, move reporting) and the fourth in git/CI reporting, which is a plausible two rather than a demonstrated four.
+**Mechanism status:** `none yet`. The shape a mechanism would need is unusual and worth stating so nobody builds the wrong one: the defect is not detectable at the value, so a checker that recomputes anything will agree with the producer. What is checkable is whether a published quantity's **name** carries its frame — `total_is_lower_bound` does, `start_line` does not — which is a lint over output field names and prose labels, not over values.
+
+**Why it opened at three members that were already in the file.** Three `cluster/unclassified` entries each close with a *"candidate class if a second appears"* note, and each names a **narrower** version of this one: `chunk-line-ranges-are-body-relative-but-published-as-file-lines` proposed *a quantity published in a coordinate space its name does not state*; `doc-tool-refs-counts-call-param-pairs-as-documents` called itself *unit-versus-label*; `a-move-reports-slug-and-path-citations-under-one-field-named-for-paths` proposed *a widened detector publishes its new population under the old one's name*. Coordinate space, unit, form — three authors, three axes, each asking for a second instance while two others already sat in the same file. **Nobody was wrong about their own member.** The generalisation is the frame itself, and it was invisible per-member by construction: from inside one axis the other two look like different bugs.
+
+**The fourth axis, and the one that forced this open.** `embedder-stack-ops-session-log:F-7` — *a value that is CORRECT about a question you were not asked* — carries three instances on the **scope word**: a sha correct for a real commit but not for *my push range*; a CI tally correct for one run but not for *the range*; one author correct for eight of nine staged paths. Its own analysis reaches this class's claim from the other direction (*"the defect is not in the value but in the binding between the value and the claim's scope word"*) without generalising past its axis, which is the same blindness the three members above show.
+
+**Falsified by** a member whose value is *wrong in its own frame*. That is an ordinary computation bug, and this class claims the computation is right. Also falsified by a member whose true value is **unknowable** — see below.
+
+**Held apart from `IC-20` by `IC-20`'s own falsification clause, which is also why these three were filed in the hatch rather than folded into it.** That row reads *"falsified by a member whose true total was recoverable — that is an ordinary reporting bug"*. There a walk **stopped**, so the true value is gone and the remedy is to rename the quantity as a floor or refuse to print it. Here every value is present and exact, and the remedy inverts: state the frame beside a value that is already correct. Each of the three members checked `IC-20` explicitly and rejected it on that clause; the hatch's contents are therefore this class's derivation rather than its backlog.
+
+**Held apart from `IC-18`** (`selector-narrower-than-its-population`) on direction, per the Index file's own discriminator: `IC-18` sees **less** than its name claims, so the zero-reads-as-absent tell applies. This class's output is complete and correct — nothing is missing from it — so that tell cannot fire.
+
+**Detector, on all four axes: a party holding the OTHER end of the binding.** The session whose commit it was knew which of theirs was outstanding; the session watching all three CI runs knew what the other two cost; the session that staged the ninth path knew it was not the eighth author's. None of those detections was available to a more careful re-measurement on the publishing side, and every one arrived as a correction rather than an alarm. That is the `OB` admission test met on the nose, and it is the argument for routing this to `OB` if the spread bar clears.
+
+**Valid:** dated 2026-09-16

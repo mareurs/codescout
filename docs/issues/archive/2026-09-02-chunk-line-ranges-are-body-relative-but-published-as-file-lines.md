@@ -2,7 +2,7 @@
 kind: bug
 status: fixed
 tags:
-- cluster/unclassified
+- cluster/value-correct-in-a-frame-its-name-does-not-state
 closed: 2026-09-06
 opened: 2026-09-02
 owner: marius
