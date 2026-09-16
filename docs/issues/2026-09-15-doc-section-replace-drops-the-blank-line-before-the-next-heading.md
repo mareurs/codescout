@@ -95,6 +95,46 @@ call — two replaces produced two damaged boundaries in a single write. And `ac
 with `old_string`/`new_string` does **not** exhibit it: the repair was two `edit` calls
 appending a newline, which makes the workaround this file already names a confirmed one
 rather than an assumed one.
+
+**Extended the same evening, and one half of the above was too narrow.** `action:
+"insert_after"` with `at: "end-of-section"` exhibits it as well — two such inserts, into two
+different bug files, each cost the blank line before the NEXT `##` heading. So the subject is
+not `replace`: it is any body write that ends a section, and a reader who took "replace" as the
+trigger would not check after an insert.
+
+**And it accumulates unnoticed, which is the part worth acting on.** Scanning one of those files
+before editing it found **two** boundaries already damaged — `## Fix` and `## Resume` — present
+in the committed bytes at `HEAD`, from earlier writes by other sessions. Nothing had reported
+them, and a later reader would have attributed them to whoever touched the file last. Both were
+repaired in the same commit as the instance that found them.
+
+The discriminator is one line, needs no tooling, and is worth running after any `doc` body write.
+**It must be fence-aware, and the first version published here was not** — see below for why that
+is this corpus's own parser law rather than a typo:
+
+```
+awk '/^```/{f=!f} !f && prev !~ /^$/ && /^#/ {print "MISSING BLANK BEFORE "NR": "$0} {prev=$0}' <file>
+```
+
+**The fence-blind version reported two findings on THIS FILE, and both were false.** Line 33 is
+the `## Root cause` heading inside the fenced block above — this file quoting its own damage —
+and line 77 is a `#` shell comment inside a fenced `bash` example. A document about a heading
+defect cannot exhibit a damaged heading without a heading scanner reading the exhibit as real.
+That is `CLAUDE.md` § *Parsers Over a Namespace* holding about the detector for the very bug
+this file records, and the fence is the escape the corpus already has: honour it, or the
+instrument is loudest exactly on the files that document the problem.
+
+**Prevalence, measured with the corrected form at `HEAD` on 2026-09-16.** `CLAUDE.md` alone
+carries **11** damaged `##` boundaries, none of them in a fence and none written by the session
+that counted them. Reported as an observation, not a diagnosis: this detector reads a boundary
+and cannot attribute a cause, so nothing here claims all 11 came from `doc`. They were left
+unrepaired deliberately — an 11-hunk sweep of the hottest shared file on a checkout with live
+peers costs more than the defect does.
+
+The limit of the check, stated because it is an ABSENCE assertion: it is monotone under any
+change that removes headings entirely, and it is a boundary check rather than a content one.
+
+
 ## Hypotheses tried
 
 1. **The file was already malformed.** **Refuted** by the `git show HEAD` control above.
