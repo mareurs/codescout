@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 165
+entry_high_water_F: 166
 entry_high_water_W: 144
 ---
 
@@ -65,6 +65,7 @@ entry_high_water_W: 144
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-166 | 2026-09-16 | med | self-friction | open | **A measured symptom licensed skipping the search for an already-archived correction** - `audit_doc_refs` does scan `.rs`; the gap is severity, not scope, and the correction had been archived a month earlier |
 | F-165 | 2026-09-16 | med | cross-session | open | **Attribution by THREAD adjacency — credited a commit to the session I had a live thread with, not to its trailer.** Distinct from `F-155`'s TOPIC adjacency: its tell (*"ask is this yours"*) is a question about the subject and does not fire here, because I was reasoning about who I had been talking to. Committed inside a message about an attribution defect. |
 | F-163 | 2026-09-15 | high | measurement | open | **A count in my own output was the discriminator three times in one day, and only the party holding a stated expectation stopped on it.** `106/16` for a one-paragraph edit caught an interleave; `64 vs 99 lines` was read past and cost 35 lines of a peer's uncommitted work; `2` misfiled rows was never computed at all where a set difference said `11`. Same instrument, opposite outcomes — the variable is an expectation to compare against, not care. Direction was the tell in case 2: staleness makes a copy SMALLER, and a surplus is what uncommitted peer content looks like. Candidate remedy, policy not mechanism: state the expected magnitude before reading the number. |
 | F-160 | 2026-09-15 | med | documentation | fixed-verified | **A record's own "same exposure, not addressed here" list was a HYPOTHESIS SET published as a worklist — neither named file was an instance.** Written while holding the mechanism (*resolves a binary by path*), which both files genuinely match; never checked whether the mechanism has a CONSEQUENCE at either site. One is `#[ignore]`d against a deleted binary; the other runs in both lanes so it passes against a lean one (measured, 5.04s). A grep-shaped observation published as a worklist inherits the grep's blindness and loses the qualifier, because by the time a reader arrives only the conclusion is there. Retracted in `ca7edebc`. |
@@ -16484,6 +16485,21 @@ one day, which is the shared-blind-spot condition, and two sessions talking to e
 all evening is precisely the population that condition warns about. That restraint is the
 right call and is recorded here so nobody promotes it on this evidence.
 
+**Third instance, 2026-09-16, by `e5691fad` — and it is the SAME axis, which is why it does
+not trip this entry's promotion condition.** I told `9e022ef0` that a false claim of mine
+appeared in their commit `72d0c222`, on my own authority and without reading it. They checked:
+it is not there, and nothing in that commit rests on my premise. `git show -s --format='%B'
+72d0c222` answers it in one call, and I did not run it — for the reason this entry already
+gives, that it did not feel like a question.
+
+The value was **generated from thread salience**, exactly as the second instance describes: we
+had been discussing that claim all morning, so what their commit said got filled in from the
+conversation rather than read off the artifact. What differs is only the OBJECT — the first
+two attribute AUTHORSHIP (*who wrote this*), this one attributes CONTENT (*what does their
+artifact say*). Same supply, same remedy, same adjacency axis. **Promotion still requires a
+third AXIS, and this is not one** — stated explicitly so that three instances here cannot be
+read as clearing a bar this entry sets in a different unit.
+
 ## W-144 — The discriminator was in the output of the run that established the finding
 
 **Valid:** dated 2026-09-16
@@ -16536,6 +16552,59 @@ from swallowing `cancelled`.
 `embedder-stack-ops-session-log:F-7`. **Deliberately cites no `R-N`**: `9e022ef0` offered
 one to their operator and it is unapproved, so it may never exist — a peer's offer is not
 their operator's decision.
+
+## F-166 — A measured symptom licensed skipping the search for an already-archived correction
+
+**Valid:** dated 2026-09-16
+
+**Observed:** I wrote in two commit messages (`13202c46`, `337ac28b`) that `audit_doc_refs`
+"scans markdown only, so a stale path in a `.rs` comment is reported by nothing." It is false,
+and always was. Measured afterwards, three ways: the default scan with no `paths` reports
+`n_files_scanned=2228` against a tree holding 1795 `.md` + 438 `.rs`; a direct scan of
+`src/tools/output_buffer.rs` returns `n_refs_found=23`; and a *missing* ref in that file comes
+back `severity: med`, `severity_reason: "code_comment_capped"`, whose legend reads *"found in a
+source comment rather than prose"*. `9e022ef0` repeated the claim on my authority — in a
+message to me and in a report to their operator — before either of us measured it.
+
+**Mechanism:** the correction was already filed, fixed and archived a month earlier.
+`docs/issues/archive/2026-08-26-archive-citation-sweep-grep-cannot-see-shell-or-yaml.md`'s Fix
+section reads: *"Corrected the implied reason the gate stays quiet: it is forced Med severity
+on code comments, NOT a markdown-only scan. A reader who believed the wrong reason would 'fix'
+it by widening the scan, which is already wide enough."* It names, in advance, both the wrong
+belief and the wrong repair that two sessions then walked toward.
+
+**What made it stick is the part worth keeping: we each held a measured SYMPTOM.** A real stale
+`.rs` citation, and a real absence of any CI failure over it. Both observations were correct,
+and neither touched the mechanism. Evidence for an *effect* read as licence to skip the search
+for a prior diagnosis of its *cause* — which is stronger than an unevidenced guess would have
+been, because a guess invites checking and a measurement does not. Two sessions holding one
+instance each felt like corroboration; it was one blind spot counted twice. That is § *Testing
+Discipline*'s *"check independence, not agreement"* firing on a population whose members agreed
+**because** they shared the gap.
+
+**The corrected fact, recorded so it is not re-derived wrong:** the gap is **severity, not
+scope**. `.rs` citations are found and reported at `med`; CI runs `audit-doc-refs
+--no-emit-tracker --fail-on high` with no `--paths` (`.github/workflows/ci.yml`:822), so `med`
+is reported and never fails a build. The cap is deliberate and carries a stated rationale, so
+anything filed against it is an argument that the cap is wrong — a much weaker claim, and
+neither session has a reason for it. **Nothing was filed, and that is the outcome rather than a
+shortfall.**
+
+**What caught it:** one `grep` of `docs/issues/` for a prior filing, run *before* writing the
+bug up rather than after. The cheap step and the skippable step were the same step, and I
+nearly skipped it precisely because the measurement felt like it had already done that job.
+
+**Severity:** med — it reached a peer as a premise, and it is embedded in two commit messages
+on a shared branch that cannot be amended, `experiments` having moved under both of us since.
+This entry is the record correction; there is no other surface that carries one.
+
+**Status:** open — the remedy is "search the archive before filing", which is a policy and not
+a mechanism (§ *Observer Blindness* position 3). `docs/issues/archive/` already holds the
+answer; nothing routes a reader to it at the moment they are about to write a bug file, which
+is the one moment the routing would pay.
+
+**Rests on:** `F-165`, whose third instance this same session produced and which is recorded
+there rather than here; § *Testing Discipline* — *check independence, not agreement*.
 
 ## Template for new entries
 
