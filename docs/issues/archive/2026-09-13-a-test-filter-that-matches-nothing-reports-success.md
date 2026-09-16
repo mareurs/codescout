@@ -218,7 +218,7 @@ whether the guards still discriminate.
 `scripts/mutation-probe.sh` creates its worktree at `HEAD` and says so at its own line 188, so
 it does **not** carry uncommitted work — and this change is uncommitted across two files,
 which is the limitation already filed as
-`docs/issues/2026-09-15-mutation-probe-cannot-verify-a-multi-file-uncommitted-change.md`. The
+`docs/issues/archive/2026-09-15-mutation-probe-cannot-verify-a-multi-file-uncommitted-change.md`. The
 same isolation was reproduced by hand: the probe worktree reset to `HEAD`, the two modified
 files copied in, each mutation asserted to occur exactly once, reverted after, with a control
 run either side. The worktree was reset to `HEAD` afterwards so it holds nothing of this work.

@@ -199,7 +199,7 @@ if [ "$MODE" = "isolated" ]; then
     # that alters a type and its call sites is the ordinary shape of real work, and it
     # then did not compile: the run paid a full cold build to end INCONCLUSIVE, having
     # announced the FACT ("N other .rs file(s) are dirty") and never its CONSEQUENCE.
-    # BUG docs/issues/2026-09-15-mutation-probe-cannot-verify-a-multi-file-uncommitted-change.md
+    # BUG docs/issues/archive/2026-09-15-mutation-probe-cannot-verify-a-multi-file-uncommitted-change.md
     #
     # Two mechanisms, because git reports the two populations separately and neither
     # covers the other:
