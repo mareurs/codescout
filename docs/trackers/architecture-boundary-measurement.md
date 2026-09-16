@@ -201,6 +201,26 @@ measurements.
 ## Resume protocol
 
 Read **Status** and **Bounded baseline and verdict — 2026-09-13** first. Confirm home workspace and fresh git status before doing new work. Do not restart broad measurement merely because shared HEAD moved: preserve the named frozen snapshot and version any changed source-population definition. Design approval is next; runtime implementation is not yet authorized.
+Derived 2026-09-16 from the slice records and the bug ledger below. Deliberately **unprefixed** — `T-N`, `R-N`, `F-N` and `W-N` are owned by other ledgers, and an ID-shaped token here would read as a citation into one of them.
+
+### Ready — evidence in hand
+
+1. **[DONE 2026-09-16]** ~~Archive the six architecture-probe bug files.~~ All six read `status: investigating` and *"No fix commit has been made. SHA and patch-id are therefore not available"*. That blocker had cleared: the fix is `d3a2c24f`, which introduced `scripts/architecture-boundary-probe.py` and its 218-line control suite in one commit. **Prerequisite re-run at current HEAD: 14/14 pass, `self-test: ok`** — re-run rather than cited because `40fb2843` later touched the script (inspected: it only de-hardcodes the `--runtime-binary` default). Recorded `d3a2c24f` + patch-id `f7ee24322b07702e7e87e5f4e17d78422089f2d1` on each file, flipped to `fixed` **through the catalog** (a raw frontmatter edit does not reach it — BL-48), archived via `doc(action="move")`, and repointed the twelve stale citations the moves created — six paths **and** six ids, since `id = sha256(abs_path)` re-keys every row. Verified zero stale remaining, with a control showing the grep fires.
+
+2. **Commit the `W-3` session-log entry**, uncommitted in the working tree. The other two dirty files are not ours: `src/librarian/tools/doctor.rs` is attributed to a live peer by `scripts/file-provenance.py`, and the audit `jsonl` is machine noise.
+
+3. **[DONE 2026-09-16, by peer `29420e72`]** ~~`c617b7bbbf85fa0c` — mutation-probe cannot verify a multi-file uncommitted change.~~ Fixed in `d8268215`, archived in `8ab825d6`, while this list was being written. Archiving re-keys the catalog row — `id = sha256(abs_path)` — so the id above is the post-archive one and any id cached for this bug before then has stopped resolving. The probe now carries the **whole working tree** into the isolated worktree — tracked edits, deletions and renames as one applied patch, plus untracked files — instead of only `--file`, and **refuses rather than falling back to `HEAD`** when the patch will not apply, since a verdict from a tree that is neither `HEAD` nor yours describes code nobody has. On a shared checkout it deliberately carries peers' in-flight work too, so the isolated tree matches what your own `cargo test` would compile and an `INCONCLUSIVE` means your real run would also have failed. This is the limitation that forced slice 1's mutations to be staged into the probe worktree by hand.
+
+4. **[DONE 2026-09-16]** ~~`e1aaab73c7d3ba5f` — acking a dangerous command silently drops `run_in_background`.~~ Fixed in `1f36fe26`, patch-id `6e78e0e32346a3aa815454852772111c9e484924`; archived, which re-keyed it by the same rule — the id above is post-archive. Operator chose **honour the flag**: `PendingAckCommand` gains the field, `store_dangerous` takes a fourth argument, and the ack dispatch passes `stored.run_in_background` where it hardcoded `false`. The `PendingAckWrite` `Value` form is the more general shape and was rejected as **unreachable rather than inferior** — `store_dangerous` is called from inside `run_command_inner`, which never receives the input `Value`, so carrying it means an eleventh parameter threaded through a ten-parameter function and re-parsed to recover one bool already in scope. A second parameter dropped the same way is the signal to switch: two concretes, where today there is one. Two tests, **paired so neither is monotone** — backgrounding *everything* passes the positive test alone. Gate green all four lanes. Cluster `IC-15`.
+
+### Blocked on authorization — and on a measurement nobody has taken
+
+Neither is a next step. Each slice names its own prerequisite, and in both cases the prerequisite is the work, not a formality.
+
+5. **Slice 3 prerequisite — audit the unresolved helper paths.** Until that audit exists there is no defensible initial migration target, only a plausible one.
+
+6. **Slice 4 prerequisite — a crash-injection or shared-edit parity experiment.** None was ever performed, so the file/SQLite ordering and rollback semantics the slice would consolidate are currently claims rather than observations.
+
 ## Status
 
 **Phase:** bounded architecture review complete. **Slice 1 approved and implemented 2026-09-15**; slices 2–4 remain unauthorized. Read **Bounded baseline and verdict — 2026-09-13** below, then **Slice 1 — approved and implemented** at the end of this section.
@@ -225,7 +245,7 @@ Shipped in one change, because each part makes the previous one non-vacuous:
 
 **Verification.** Gate green on all four lanes (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`), own test names read out of the default lane rather than the total. **Three mutations, each KILLED** in an isolated worktree: eviction predicate → FIFO (2 tests red), `status.code()` → `Some(0)` (red, `last seen: "exited 0"`), `job_states_in(command)` → `job_states_in("")` (red). Mutating the production path, not test inputs.
 
-**Committed 2026-09-15** in `f098069a` — patch-id `8658a129d49444e33a6fce955a2f8b498bb743d1`. Archived with it: `b9935bb5470a799c` (background command loses terminal status) and `52f03908f97a948a` (eviction unlinks a running job's log), both carrying a killed mutation; and `d44b0a9aa38738f5` (the raw-pid kill guard), archived on the weaker basis that its remedy was deletion, so no regression test is possible — its **Tests added** section names what would re-introduce it. Scouting friction recorded as `architecture-boundary-session-log:F-2`; an instrument limitation found on the way as `a0dd1c43aeef41de`.
+**Committed 2026-09-15** in `f098069a` — patch-id `8658a129d49444e33a6fce955a2f8b498bb743d1`. Archived with it: `b9935bb5470a799c` (background command loses terminal status) and `52f03908f97a948a` (eviction unlinks a running job's log), both carrying a killed mutation; and `d44b0a9aa38738f5` (the raw-pid kill guard), archived on the weaker basis that its remedy was deletion, so no regression test is possible — its **Tests added** section names what would re-introduce it. Scouting friction recorded as `architecture-boundary-session-log:F-2`; an instrument limitation found on the way as `c617b7bbbf85fa0c`.
 
 **MCP-verified 2026-09-15** against the live server, after `cargo rb` + `/mcp` reconnect. The gate and the mutation runs both exercise test harnesses; this is the shipped binary answering the filed bug's own reproduction. All four `JobState` renderings observed:
 
@@ -283,7 +303,7 @@ This is a **bounded frozen snapshot, not a clean current-tree certification**. T
 
 A second corrected run, `baseline-final.json`, also exited 2 when HEAD moved: source `02e61230b6708d8879185f6469ec02202bfdaacb`, ending HEAD `96574bfacee39c6e45168df3fd2eefb6d6847db6`, 09:24:51–09:27:03 +03:00. It independently recorded the same static edge total; its different history window is **not mixed into** this section. SHA-256: `9b6edf653fc70510dc109ab5007a1151cf73f2a7b0474149de61ba7da1d63797`.
 
-Reject the static totals in `baseline-initial.json` and `baseline-actions.json`: external imports were falsely made local and identifiers containing “as” were mangled. Both production defects were reproduced, given failing regressions, corrected, and rerun. The change from 379 to 315 edge rows is an **instrument correction**, not an architectural improvement. See [invented imports](../issues/2026-09-13-architecture-probe-invents-internal-imports.md) and [mangled identifiers](../issues/2026-09-13-architecture-probe-mangles-as-identifiers.md).
+Reject the static totals in `baseline-initial.json` and `baseline-actions.json`: external imports were falsely made local and identifiers containing “as” were mangled. Both production defects were reproduced, given failing regressions, corrected, and rerun. The change from 379 to 315 edge rows is an **instrument correction**, not an architectural improvement. See [invented imports](../issues/archive/2026-09-13-architecture-probe-invents-internal-imports.md) and [mangled identifiers](../issues/archive/2026-09-13-architecture-probe-mangles-as-identifiers.md).
 
 The registry in the report came from a newly started installed release executable at `target/release/codescout`; its recorded size/mtime are not proof of source identity. The separate workflow checks used the attached MCP, whose status reported `git_sha=408709ea`, dirty build, deleted executable, PID 2178312. Neither runtime is silently equated to the frozen source.
 
@@ -296,12 +316,12 @@ else found it — not because it is an instrument problem.
 
 Architecture-probe defects:
 
-- [Longer cycles omitted](../issues/2026-09-13-architecture-probe-omits-longer-cycles.md) — `a4d7380dc4643d88`.
-- [Multiline context omitted](../issues/2026-09-13-architecture-probe-misses-multiline-context.md) — `d648b0a40c1c0bf8`.
-- [Registration control accepts non-tools](../issues/2026-09-13-architecture-probe-registration-control-accepts-nontools.md) — `dd4a2785969615c9`.
-- [Test-field masking consumes production structure](../issues/2026-09-13-architecture-probe-test-field-masking.md) — `83b1a79f605582b3`.
-- [Invented internal imports](../issues/2026-09-13-architecture-probe-invents-internal-imports.md) — `0094594dea9a52b7`.
-- [Mangled alias-like identifiers](../issues/2026-09-13-architecture-probe-mangles-as-identifiers.md) — `b6b0361595f8b3f5`.
+- [Longer cycles omitted](../issues/archive/2026-09-13-architecture-probe-omits-longer-cycles.md) — `089e063d1419449f`.
+- [Multiline context omitted](../issues/archive/2026-09-13-architecture-probe-misses-multiline-context.md) — `360ba099bdb3c1e5`.
+- [Registration control accepts non-tools](../issues/archive/2026-09-13-architecture-probe-registration-control-accepts-nontools.md) — `a323e32a49c229a0`.
+- [Test-field masking consumes production structure](../issues/archive/2026-09-13-architecture-probe-test-field-masking.md) — `be92a232bf40c27f`.
+- [Invented internal imports](../issues/archive/2026-09-13-architecture-probe-invents-internal-imports.md) — `576276c90babb155`.
+- [Mangled alias-like identifiers](../issues/archive/2026-09-13-architecture-probe-mangles-as-identifiers.md) — `5b4a43dea0277aa5`.
 
 Not an instrument defect:
 
@@ -310,9 +330,17 @@ Not an instrument defect:
 The last two probe defects are the pair that invalidated the earlier static
 totals, and both carry `cluster/addressing-without-an-escape-hatch` (`IC-6`) —
 which is the reason the 379 → 315 change is an instrument correction and not an
-architectural improvement. Do not archive any of these as fixed until the
-project's fix-evidence requirements are met: gate green plus a regression test,
-with the fix SHA **and** its stable patch-id recorded.
+architectural improvement.
+
+**All six archived 2026-09-16**, fix-evidence requirements met: `d3a2c24f`,
+patch-id `f7ee24322b07702e7e87e5f4e17d78422089f2d1`, recorded on each file.
+That commit introduced the corrected probe and its control suite together, which
+is why fix and tests share one SHA. The regression suite was **re-run at current
+HEAD rather than cited** — 14/14 pass, `self-test: ok` — because `40fb2843`
+touched the probe script after `d3a2c24f`; inspected, and it only de-hardcodes
+the `--runtime-binary` default. The ids above are the **post-move** ones: `id =
+sha256(abs_path)`, so archiving re-keyed every row and the pre-move ids no longer
+resolve.
 
 Rejected artifact, retained deliberately: `baseline-initial.json` (1,356,751
 bytes, SHA-256
@@ -434,6 +462,6 @@ Probe: **14 regression tests pass**, self-test passes. Final checked worktree SH
 
 The first full gate had formatter refusal, clippy/lean success and a default-lane failure in a peer-modified attribution test. A second full gate is recorded in `gate2-*.log`; terminal results are recorded in the current Status section when available. Do not credit the first run as green or these lanes as server-stack coverage.
 
-No runtime refactor was implemented, and nothing has been archived. The work stream is committed in `d3a2c24f`; the six architecture-probe defects it fixes remain `investigating` rather than archived, because archiving requires this project's fix evidence — gate green plus a regression test, with the fix SHA and its stable patch-id recorded on each file.
+No runtime refactor was implemented by the measurement work itself. The work stream is committed in `d3a2c24f`, and **the six architecture-probe defects it fixes were archived 2026-09-16** once the fix evidence was recorded on each file — gate green, a regression test, the fix SHA and its stable patch-id. See **Filed defects** above for the post-move ids.
 
 Next useful work is **design approval for the job/result slice**, not more broad scans. Before implementation, settle job lifetime across reconnects/compaction, cancellation ownership, retention and backward-compatible rendering; add deterministic failed/success/cancelled job checks. Separate follow-ups: repeat the missing-symbol latency check; resolve edit_file/edit_code action footprints; widen the frozen population only as a separately versioned measurement; characterize merges/renames before stronger historical claims.
