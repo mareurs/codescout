@@ -206,7 +206,35 @@ asserted the mechanism's absence an hour earlier and checked before accepting th
 the only-gap-presented-as-satisfied framing is theirs. Their count of "three of four" is one
 short — the section names four and the fifth is the one presented as met — which strengthens it.*
 
-**Not implemented for the test-failure half, and deliberately not designed here.** Running the
+**Not implemented for the test-failure half, and deliberately not designed here.**
+
+**THE READER-SIDE TWIN IS ALREADY CLASSED, and the citation is re-runnable past the display
+cap.** `docs/PROBES.md`:190 — the `attribute-red.py` row — reads: *"This makes the tool an
+instance of `IC-14` (guard narrower than its name): it attributes a red that came through
+`run_command`, and the remainder is protected by nothing."* That is this residual with the
+nouns changed. So the **reader** half of this mechanism already sits in `IC-14` with a measured
+ceiling analysis, while this file is tagged `cluster/gate-keyed-on-unobservable-event` —
+correct for its title and not for the residual. **A second tag is not the route:** CLAUDE.md
+requires exactly one `cluster/` per bug file, so whoever takes the repair inherits a
+classification question rather than a free retag. `attribute-red.py` also appears in `IC-18`'s
+Members line; both candidates stand, since one row can argue name-over-promises-coverage and
+selector-narrower-than-population in different sentences. Left unadjudicated.
+
+**`IC-14` sits at byte 2569 of 4896 on that line and the display cap is 2000 — 569 bytes past
+where two sessions' readings stopped.** Read it without the cap:
+
+```sh
+awk 'NR==190 {n=index($0,"IC-14"); print substr($0,n-90,200)}' docs/PROBES.md
+```
+
+**That one boundary produced two symptoms inside a single check, which is why it is recorded
+here rather than as a note.** `9e022ef0` cited the line. `e5691fad` could not verify it (the
+row truncates at 2000 of 4896 in every tool reading) **and, separately, reported the row absent
+from a `grep` whose own output said `4 matches (capped)`**. Same cap, twice, inside the act of
+checking a claim about instruments that under-report their own scope — one session unable to
+confirm, the other concluding absence, neither seeing the boundary they shared. `awk` over the
+raw line is the escape for both, and a citation anyone can re-run is what replaces an
+assertion. Running the
 gate's tests on every source write is not a candidate on cost, and the cheap alternative — an
 advisory that a peer *might* be mid-edit — is `OB-23`'s measured shape, where the prescribed
 response is stand down and complying removes the observer whose build log resolves the anomaly.
