@@ -3225,6 +3225,27 @@ fn check_missing_file(id: &str, abs_path: &str) -> Option<Violation> {
 ///   firing here would report the test corpus rather than the real one.
 /// - **Equality** is silence, not a reported pass.
 ///
+/// **The DETAIL asserts no direction and the NAME does — deliberately, and the split is
+/// the point.** The predicate is `on_disk != stored_sha`, which is symmetric: it fires
+/// when the row is behind its file AND when it is ahead of one. Both are reachable,
+/// because the two writers order oppositely on purpose — `update` writes disk first, so
+/// a failed upsert leaves the row BEHIND, while `create` writes the catalog first and
+/// the file last (`create.rs:420` then `:459`, BUG-058: a failed upsert must leave no
+/// orphan file), so a partially-written file there leaves the row describing content
+/// that never fully landed — AHEAD, not behind. The detail line used to read *"the row
+/// describes a previous version of this file"*, a per-row claim this predicate cannot
+/// establish and which is false in exactly the `create` case. It now says the two
+/// disagree and names the repair — true in both directions, and all the check knows.
+///
+/// **The name stays `row_behind_file`, and that is a judgement rather than an
+/// oversight.** It is right for the dominant case — all 11 rows it fires on in
+/// codescout today are non-librarian writes that left the row behind — and a check's
+/// wire string is public vocabulary that `docs/issues/`, the guides and readers
+/// matching on `doctor`'s JSON all quote, so a rename costs every citation to buy
+/// precision about a case nobody has observed. An observed AHEAD instance is the
+/// trigger to rename; until then the detail carries the honesty and the name carries
+/// the convention.
+///
 /// **Classified as a DEFECT, not informational, and the call is deliberate.** The four
 /// informational checks all report states that are normal and self-clearing — a claim
 /// held by a live session, a bug under live edit. This one is neither: measured
@@ -3247,8 +3268,8 @@ fn check_row_behind_file(id: &str, abs_path: &str, stored_sha: &str) -> Option<V
         Some(id.to_string()),
         abs_path,
         format!(
-            "catalog holds {} but the file hashes to {} — the row describes a previous \
-             version of this file; run librarian(action=\"reindex\") to reconcile it",
+            "catalog holds {} but the file hashes to {} — the row and the file describe \
+             different content; run librarian(action=\"reindex\") to reconcile it",
             &stored_sha[..stored_sha.len().min(12)],
             &on_disk[..on_disk.len().min(12)]
         ),

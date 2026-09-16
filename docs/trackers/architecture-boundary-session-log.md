@@ -11,7 +11,7 @@ topic: architecture-boundary-measurement
 entry_prefix:
 - F
 - W
-entry_high_water_F: 3
+entry_high_water_F: 4
 entry_high_water_W: 3
 ---
 
@@ -159,6 +159,52 @@ reporting 124 rows where 6 are actionable, and a finding whose name asserts a
 cause it cannot establish.
 
 **Status:** fixed-verified — all three folded into the check as built.
+
+## F-4 — The check's NAME refused a direction it could not establish; its detail line asserted one anyway
+
+**Valid:** dated 2026-09-16
+
+**Observed:** `6fab2977` named its check `row_behind_file` rather than
+`failed_update_divergence`, and the doc comment says why in as many words — a failed
+`update` and a non-librarian write produce the identical row, so naming it for the bug
+that prompted it would publish a value correct in one frame under a name asserting
+another. The **detail line** of the same function then read *"the row describes a
+previous version of this file"*.
+
+**The predicate is `on_disk != stored_sha`, which is symmetric.** It fires when the row
+is behind its file and when it is ahead of one, and both are reachable because the two
+writers order oppositely **on purpose**: `update` writes disk first, so a failed upsert
+leaves the row BEHIND; `create` writes catalog first and file last (`create.rs:420` then
+`:459`, BUG-058 — a failed upsert must leave no orphan file), so a partially-written file
+there leaves the row describing content that never landed, AHEAD. *"A previous version"*
+is false in exactly that case, and it is a per-row claim the predicate cannot establish.
+
+**The discipline was applied to the NAME and not to the message beside it.** Both are
+public text emitted by one function, both were written in the same commit, and the
+argument against over-claiming in the first is the argument against it in the second.
+What separated them was that the name was a **decision** — held in mind, argued, recorded
+in a doc comment — while the detail line was **prose written to be helpful**, and prose
+does not present as a claim requiring support.
+
+**Fix:** the detail now says the row and the file describe different content and names
+`reindex`, which is true in both directions. The **name stays**: right for the dominant
+case (all 11 rows it fires on here are non-librarian writes that left the row behind),
+and a wire string is public vocabulary whose rename costs every citation. An observed
+AHEAD instance is the rename trigger.
+
+**Re-verified rather than cited**, per § *Testing Discipline*'s rule that a red is
+evidence only for the assertion that produced it: changing the bytes of
+`check_row_behind_file` invalidated its three KILL verdicts, so all three were re-run —
+inverted predicate, deleted empty-hash abstention, missing-file abstention made to fire —
+plus a **fourth** aimed at the new text itself (remove `reindex` from the detail), so the
+remedy-naming assertion is proven live against the current string and not the old one.
+All four KILLED.
+
+**Cost if unexamined:** a `doctor` finding that tells its reader which direction the
+divergence ran, on a predicate that cannot know, in the one case the two write orderings
+were deliberately made to differ.
+
+**Status:** fixed-verified.
 
 ## Entries
 
