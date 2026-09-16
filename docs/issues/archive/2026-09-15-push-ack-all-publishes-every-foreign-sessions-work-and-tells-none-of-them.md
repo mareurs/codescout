@@ -1,12 +1,13 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/selector-narrower-than-its-population
+closed: 2026-09-16
 opened: 2026-09-15
-closed:
-severity: high
 owner: marius
 related: []
-tags: [cluster/selector-narrower-than-its-population]
-kind: bug
+severity: high
 ---
 
 # `CODESCOUT_PUSH_ACK=all` publishes every foreign session's work and tells none of them
@@ -96,10 +97,25 @@ file knew. Had either pusher reached for `all`, the same push would have been si
 
 `tests/pre-push-foreign-session-guard.sh:268` is `eq "ack=all allows" "$EC" 0` — an
 **exit-code** assertion. It cannot observe stderr, so it is green for a run that prints the
-notification and for one that prints nothing. The `all` path has coverage of its verdict and
-none of its output, which is why this survived a suite that tests the notification carefully
-on every other path.
+notification and for one that prints nothing. The `all` path had coverage of its verdict
+and none of its output, which is why this survived a suite that tests the notification
+carefully on every other path.
 
+**Closed by block `6h`** — 7 rows, all asserting on **stderr**. Observed RED first: 5 of
+the 7 failed against the unfixed script, while `:268` stayed green throughout, which is
+the gap demonstrated rather than argued. Suite went 129 → 136 rows, 0 failed.
+
+Two rows carry reasoning that generalises past this bug:
+
+- **The sid rows discriminate; the prose row does not.** Under the site-1 mutation,
+  `says they have not been told` **passed** — the sentence survived intact and only the
+  list was wrong. A notification bug is invisible to an assertion about the notification's
+  wording. Assert the sids.
+- **`hasnt "never prints the literal token as a sid"` was vacuous before the fix.** Nothing
+  printed at all, and an absence assertion is monotone under removal, so it passed against
+  the very defect it was written for. It is load-bearing only because the `has` rows above
+  it red when the block is silent — and it earned that place by catching `      all` under
+  the site-1 mutation, a plausible-looking line naming a party that does not exist.
 ## Who cannot see it, and why that decides the fix
 
 The defect is invisible from the only side positioned to notice it, and that is not incidental
@@ -133,17 +149,49 @@ precisely the state in which this was found.
 
 ## Fix
 
-Not applied. Two changes, both needed:
+**Applied** — `fbddd86d929887dbf20f91b95db655e203e4172f`, patch-id
+`77fced910e5cf94da98108342a9a9867416e9128`.
 
-1. `acked()`'s wildcard arm must accumulate rather than short-circuit — set a flag
-   *and* fall through to the per-sid append, so `ack_matched` holds real sids under `all`.
-2. `:309` must stop gating the notification on `ack_matched != "all"`. The per-token
-   staleness loop keeps that condition; the sid-naming branch does not.
+Both changes landed:
 
-A regression test must assert on **stderr**, not the exit code: `has "ack=all: names the
-sessions not yet told" "$OUT" "<sid>"`. An assertion that the block *printed something* is
-monotone under printing the wrong sids.
+1. `acked()`'s wildcard arm sets a separate `ack_is_wildcard` flag and falls through to
+   the **same** accumulation the named form uses, so `ack_matched` holds real sids under
+   `all`. One shared append path rather than a copy per branch — a second copy is what
+   lets the two drift, and a branch that skipped the append is the defect being replaced.
+2. The `!= "all"` clause is gone from the gate. The per-token staleness loop keeps that
+   condition on its own `elif`, annotated as unreachable-today-and-guarded-anyway so it is
+   not mistaken for a live branch.
 
+`ack_is_wildcard` is initialised at its declaration because `set -u` is on (`:69`).
+Written without that line first, and the unset read aborted the script mid-block — the
+red is recorded at the declaration, because of *which* assertion caught it: of the three
+covering the killed note, only the one `has` row failed. Both neighbouring `hasnt` rows
+passed on the dead script, an absence assertion being monotone under removal.
+
+### The two defects are not independent in the direction this file claimed
+
+The Summary says *"two independent failures, and either alone is sufficient"*. That is
+right about the **defect** and wrong about the **fix**, and only a mutation per site showed
+it:
+
+| mutation | state it recreates | verdict |
+|---|---|---|
+| wildcard short-circuit restored | site 1 broken, site 2 fixed | **KILLED** — 3 rows |
+| `!= "all"` gate restored | site 1 fixed, site 2 broken | **SURVIVED** — 0 rows |
+
+Fixing site 1 alone **would** have closed the bug: with real sids in `ack_matched`, the old
+gate's `!= "all"` is true and the block runs. Fixing site 2 alone would not — that is
+exactly the first mutation, which prints the literal token `all` as a session to go and
+notify. So site 2's change removes a clause that site 1's fix renders inert.
+
+That is a **third** reading of `SURVIVED` beyond the two in `CLAUDE.md` § *Testing
+Discipline*: not untested, and not unreachable-without-a-seam, but **semantically inert** —
+the mutated condition cannot be false on any input the fixed code can produce. Worth
+naming because the two documented readings both send you to write something, and this one
+asks for nothing.
+
+The independence claim was reasoned from reading the code. Running it inverted the
+relationship.
 ## Provenance
 
 Found by `/code-review` on 2026-09-15 while pointed at the wrong target — it was given PR
