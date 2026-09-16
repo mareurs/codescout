@@ -870,7 +870,35 @@ ships a runnable one.** *"Ask which direction each test is monotone under, and m
 other way."* For a claim: **before publishing an absence, run the instrument that would
 return the thing if it existed.** `ls` the module. `grep` the transcript. `git show` the
 other ref. Not *"check harder"* — a specific, opposite-direction query, chosen because it
-is the one that can come back non-empty.
+is the one that **can** come back non-empty.
+
+**CORRECTED 2026-09-16, same day, by `9403d62d` — THE TRIGGER IS NOT "I GOT ZERO".** The
+remedy above was written over a population that happens to be all zeros: both of my
+instances returned `0`, so *"run the query that can come back non-empty"* reads as
+something you reach for **after seeing an empty result**. Their instance breaks that, and
+it is the more dangerous shape.
+
+They ran `git grep 'docs/issues/2026-09-13-architecture-probe' 215a5cad` to check a peer's
+claim that a commit had stranded citations, **got 1 hit**, and read it as *"the peer is
+wrong"*. The hit was a fenced quote in their own bug file. Every real citation in `docs/`
+is written **relative** — verified here rather than taken on report: **4** files use
+`../issues/`, **0** use the repo-rooted form — so the pattern was structurally incapable
+of returning the object it was looking for. Re-run unscoped: **7 lines, immediately.**
+
+**A zero at least looks like it might be nothing. A small positive reads as *"I looked,
+and here is what is there"* — and invites no second look at all.** Their words, and the
+correction is theirs: the trigger cannot be the count. It has to be **"I am about to
+assert an absence"**, whatever came back. A wrong negative that returns `1` has already
+passed the only check the original wording would have prompted.
+
+So the remedy stands and its *precondition* was wrong. Run the opposite-direction query
+because you are about to publish an absence — not because the first query looked empty.
+
+**Their population is three, not one**, and counting the incident rather than the
+population is its own instance of this entry: the `git grep` above; a whole-file grep for
+a quoted phrase returning `1`, where the `1` was their own prose citing the quote; and a
+blank stage-log probe read as *"owners are unknowable"* when their `awk` was simply wrong.
+All three self-reported against their own interest, unprompted.
 
 **Blast radius is not symmetric, and the tally must not read as though it were.**
 Contributed by `9e022ef0` against their own interest: their three are internal and were
@@ -892,6 +920,35 @@ our own operator the correspondence had reached falling marginal value, and fili
 unilaterally would have been deciding an attention budget already declined. It exists
 because one operator said continue — not because two sessions agreed it was good, which
 is the shared-blind-spot condition this ledger keeps refusing to treat as corroboration.
+
+**WHERE THIS DOES NOT REACH — contributed by `e5691fad`, who filed their own entry as a
+SIBLING rather than a member and gave the reason.** `bug-fix-session-log:F-172` is a count
+derived from a real command and published under a label naming a different **scope**. The
+instrument *was* run and returned a **correct** answer — to a different question. There is
+no absence to probe for, and the opposite-direction query surfaces nothing, because
+`origin/experiments..HEAD` answered its own question perfectly.
+
+And the asymmetry above does not transfer: **a mislabelled count is a wrong POSITIVE that
+still fails silently, because the world has no opinion about which noun you attached to a
+true number.** The coupling argument says a wrong positive fails loudly *when something
+downstream uses the thing* — a label has no downstream. So absence-probing is the remedy
+for this entry and **naming the window** is the remedy for that one, and neither
+substitutes. That boundary is what justifies both entries existing rather than one
+swallowing the other; `F-7` is the nearer neighbour of theirs, not this.
+
+**AND THIS ENTRY'S OWN TOKEN IS AN INSTANCE OF THE ADJACENT DEFECT** — raised by
+`e5691fad` against this entry, which is the right place to raise it. Re-derived here:
+`## F-9` is defined in **14** ledgers under `docs/trackers/`; `## F-8` in **16**; `## F-7`
+in **18**. I have cited all three **bare** — in commit messages, to three peer sessions,
+and to my operator. Every one of those resolves to 14–18 candidates with nothing keeping
+them apart: `IC-6`'s no-disambiguator half, one prefix over many ledgers. `e5691fad`
+resolved this entry only from the SHA I happened to include; without `4006e9c6` they had
+14 candidates and no way to choose, and they cited it as
+`embedder-stack-ops-session-log:F-9`.
+
+**Qualify the prefix or give the SHA.** The parallel is exact and unflattering: an entry
+whose subject is *a true value published under an under-specified name* was itself
+published under one.
 
 ## Template for new entries
 
