@@ -16701,9 +16701,12 @@ half then discriminated correctly through the live tool: a filter matching nothi
 `empty_test_selection` beside `exit_code: 0`; the whole target returned **no** diagnostic at the
 same exit code. Both confirmed; neither is a catch.
 
-**A fact worth separating from the defect:** 14 stale processes is not itself a fault. A
+**A fact worth separating from the defect:** the stale processes are not themselves a fault. A
 rebuild replaces the file and leaves running servers on the old inode by design, so any peer
-that has not reconnected is serving pre-rebuild behaviour until it runs `/mcp`. What is a fault
+that has not reconnected is serving pre-rebuild behaviour until it runs `/mcp` — **13 of the 14,
+not all 14: the remaining one is a mux, which has no session to reconnect and exits by itself
+past its own idle timeout.** That correction is the whole of what the split changes in this
+entry, and it is worth noticing WHERE it bit. What is a fault
 is an instrument that renders that ordinary state as *"the rebuild did not take"*.
 
 **Operational form.** When enumerating processes to answer a question about **age or
@@ -16719,11 +16722,26 @@ session to reconnect and exits past its own idle timeout), printed with **no com
 the script having been reshaped on 2026-09-14 to make exactly this merge unrepresentable. The
 arithmetic reconciles — 19+3=22, 13+1=14, 6+2=8 — and means something different.
 
-**The number is NOT amended because `F-170` depends on it verbatim.** That entry cites this
-figure as *"my figures exactly"* — the match between two sessions hand-walking `/proc` in the
-same hour is its whole evidence that this is a **class** rather than one session's slip.
-Correcting the number here would falsify that quotation and destroy the second datapoint, which
-is worth more than either entry alone. Read the two together; `F-170` carries the split.
+**The number is NOT amended because `F-170` depends on it verbatim, AND because it is adequate
+to what this entry concludes.** `9403d62d` made the second argument and it is the stronger one:
+this entry's claim is *the rebuild landed*, settled by **any** process started after the binary
+mtime, and whether those 8 are 6 servers plus 2 muxes does not touch that inference. The split
+matters for a different question — *who needs `/mcp`* — because that is the only place the two
+populations take opposite remedies.
+
+**So the same conflation is LATENT here and LIVE in `F-170`, and what separates them is the
+QUESTION rather than the measurement.** A unit error is not a property of a number; it is a
+property of a number paired with a question, which is why identical bytes are correct in one
+entry and wrong in the next, and why *"check your units"* does not locate it.
+
+**One refinement to that, found by testing it against this entry's own text rather than
+accepting it:** the conflation was not purely latent here. The sentence above about who must run
+`/mcp` IS a remedy claim over the stale population, and it said 14 where it should say 13. So
+the boundary is finer than *entry-by-entry* — **it runs between SENTENCES**, because a single
+entry can ask more than one question, and only the sentence that states a remedy goes live.
+That sentence is now corrected; the headline figure stands.
+
+`F-170` carries the split and the class.
 
 **And the compounding fact, which is why this note sits in this entry rather than only in
 `F-170`:** the conflation landed *inside* an entry whose subject is mis-measuring this very
@@ -16801,7 +16819,7 @@ My arithmetic was right and my UNIT was wrong: 19+3=22, 13+1=14, 6+2=8. The numb
 
 **Corroboration from instruments that do not share a scope.** An independent `/proc/<pid>/fd` walk found **13** processes holding `catalog.db` open, all stale-binary — matching the script's 13 stale *servers* and excluding its 1 stale *mux*, which is correct because a mux is LSP and never opens the catalog. Control: the same probe returns 3 fds against this session's own server, so the reading is a measurement rather than an empty query.
 
-**A SECOND, INDEPENDENT INSTANCE IN THE SAME HOUR, which is what makes this a class rather than one session's slip.** Session `29420e72-c262-4236-82c2-52d769fdc549` has `F-168` staged in this same ledger, written against the same question (*did `cargo rb` reach the running MCP server?*) in the same window, and reports *"The full `/proc[0-9]*` walk returned **22**: 14 stale and **8 clean**"* — my figures exactly, and **also with no server/mux split**. Two sessions hand-walked `/proc` rather than running `scripts/stale-servers.sh`, and both landed on the population the script was reshaped on 2026-09-14 to make unrepresentable.
+**A SECOND, INDEPENDENT INSTANCE IN THE SAME HOUR, which is what makes this a class rather than one session's slip.** Session `29420e72-c262-4236-82c2-52d769fdc549` has `F-168` staged in this same ledger, written against the same question (*did `cargo rb` reach the running MCP server?*) in the same window, and its **Index row** reads *"The full `/proc[0-9]*` walk returned **22**: 14 stale and **8 clean**"* — my figures exactly, and **also with no server/mux split**. Two sessions hand-walked `/proc` rather than running `scripts/stale-servers.sh`, and both landed on the population the script was reshaped on 2026-09-14 to make unrepresentable.
 
 The sharper half: `F-168` is itself a friction entry *about mis-measuring this very population* — its subject is `head -N` sampling the oldest processes and reading as *"the rebuild did not take"*. So the conflation was committed **inside a correction of a neighbouring error in the same measurement**, by an author actively writing about instrument choice. That is CLAUDE.md § *Observer Blindness*'s measured claim reproducing itself: *knowing the class prevented none of the four*. Neither of us was careless; both of us were answering a process question with a process walk, which is the natural move and the wrong instrument.
 
@@ -16814,6 +16832,12 @@ A unit error is therefore not a property of a number. It is a property of a numb
 **`F-168` should not be amended, and the good reason is not this entry's citation.** That it is quoted verbatim above is real but is the weaker argument, and resting on it would protect a footnote over another session's accuracy. The reason is that `F-168` is not wrong. Its raw figure is the record of what was measured, adequate to what it concludes; the split belongs here, where the remedy is routed. A pointer from `F-168` to this entry is the whole repair.
 
 **Where the annotation properly belongs, stated because this entry cannot carry it.** CLAUDE.md § *Testing Discipline* says annotate a load-bearing detail **on the fixture line** — and the surface an amender reads is `F-168`, not this. A note here reaches nobody about to edit that number. `F-168` is another session's entry, so the most this entry can do is name the gap; the durable fix is one line in `F-168` saying its figure is cited downstream and why it is correct unsplit.
+
+**AN ENTRY IN THIS LEDGER HAS TWO TEXT SURFACES UNDER ONE ID, AND THEY DRIFT — found by nearly retracting the quotation above as fabricated.** `F-168`'s **Index row** carries the sentence quoted above. Its **section body** carries a different one: *"The full enumeration over `/proc/[0-9]*` returned **22** codescout processes: **14 stale (deleted) and 8 clean"*. Same id, same entry, same numbers, different bytes — and an edit to one does not touch the other. Verified in `c054113b` and in the worktree: the quoted phrasing appears **0** times in the `F-168` section and **1** time in its Index row, with this entry's own copy as the control that a whole-file grep would otherwise return as a false confirmation (it did, once, and read as proof the quote was sound).
+
+**Cite `F-168` and you have not said which surface you mean.** A reader checking the quotation against the section finds it absent and concludes the citer invented it; a reader checking against the row finds it exact. Both read correctly. Two sessions reached opposite verdicts on the same quotation this way inside ten minutes — one verifying *"the headline stands untouched"* against the section while the quotation lived on the row — and neither could see the other's surface from where they sat. **That is `IC-6`, a namespace with no disambiguator, holding in the ledger that records `IC-6` instances.**
+
+The cheap repair is the one applied above: **name the surface in the citation** (*its Index row reads …*), which costs three words and makes the claim checkable. The structural one — whether a row and its section should be one source — is not this entry's to decide, and `get_guide("tracker-conventions")` § *One entry format, never two* already argues the general case.
 
 **Status:** open
 
