@@ -1574,6 +1574,21 @@ mod tests {
     ///   drops similarity under git's 50% default — measured 44% at `f7d61237`, six
     ///   points under. A correct, fully staged move then renders `D` + `A`, a shape the
     ///   old wording named nowhere, so a correct archive read as unconfirmed.
+    ///   CONFIRMED 2026-09-16, and the confirmation SHARPENS this bullet rather than
+    ///   repeating it. Two archives doing the same body-rewriting work scored 55%
+    ///   (`cbe62fa7`) and 58% (`ab36eb55`) and KEPT their `R`, while `f7d61237` at 44%
+    ///   emits no rename line at all under `git diff-tree -M --summary`. Same flow,
+    ///   opposite verdicts, six and eight points either side of one threshold — so the
+    ///   letter is not biased LOW, it is UNSTABLE across ordinary archives, and a reader
+    ///   who calibrates on either reading gets the opposite answer from the next one.
+    ///   Recorded as a DENOMINATOR and not a catch (CLAUDE.md § Testing Discipline: when
+    ///   a re-derivation confirms, publish the confirmation). The datapoint worth more
+    ///   than the percentages: two sessions re-derived this property independently the
+    ///   same day, each believed it novel, and neither found this comment — because the
+    ///   claim lives in a TEST DOC COMMENT, which is the surface a docs-only search does
+    ///   not reach. CLAUDE.md § Observer Blindness already prescribes the defence both
+    ///   skipped: grep `tests/`, `scripts/pre-commit-*` and hooks for the population's
+    ///   name, not only the docs.
     ///   docs/issues/archive/2026-09-08-the-archive-move-confirmation-signal-is-a-letter-not-staged-ness.md
     /// - It APPEARS when the archive is most broken. A destination holding a stale copy
     ///   of its source is similar enough to pair, so a bad move renders `R` identically
