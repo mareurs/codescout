@@ -624,16 +624,25 @@ A session trusting mtime gets a false negative in the first row and a false posi
 
 **Status:** open · **Severity:** high · **Category:** claim-scope
 
-**Observed:** Three times in one session — the first two inside a single turn — I
-published a figure that was fully supported and still wrong, because it answered a
-*different question* than the claim it was attached to. None was a guess; all three
-survive re-verification.
+**Observed:** Four times in one session — the first two inside a single turn — I published
+a figure that was fully supported and still wrong, because it answered a *different
+question* than the claim it was attached to. None was a guess; all four survive
+re-verification.
 
 | what I published | the value is CORRECT for | the claim attached it to |
 |---|---|---|
 | "`a3579710` went to origin in your push range" | a real commit by sid `9403d62d`, already at origin | which of their commits *my push* carried — actually `55cbf9a3` |
 | "CI on the range: 23 success, 0 failed, 1 cancelled" | run `35055091243` (`43fdc0ea`) exactly | the **range** of three pushes — `64411fe0`'s run had **7** cancelled |
 | "the nine staged paths are `9e022ef0`'s" | eight of the nine, exactly | the ninth, `src/tools/output_buffer.rs`, had **two** live writers in flight — one author reported for a set with two |
+| "no tracker, plan, or roadmap entry for it — I checked" | `docs/trackers/` and `ROADMAP.md`, where it is genuinely absent | **the project** — an `active` spec decides BOTH questions, in `docs/superpowers/specs/`, which that search never reaches |
+
+**The fourth is the worst of the four and the only one published outside this repo.** It
+went on GitHub #16, to a reporter who had audited the code correctly and asked two
+questions. *"Nobody has considered this"* is the single answer that makes someone stop
+looking, and both questions in fact had decided answers with rationales — § *Architecture*
+declares dense-only *"an error, not a downgrade"*, and § *Decision* lists their exact case,
+*"add a second weights source"*, among the absorbed change scenarios. Corrected publicly
+and filed into that spec's § *Deferred* in `606e2df0`.
 
 **Why the standard remedy is a no-op here.** "Verify before asserting" resolves to
 *re-check the value*, and the value is right. `git log a3579710` confirms a real
@@ -704,10 +713,36 @@ disambiguating flag appeared in neither party's message. A figure whose scope li
 a **flag** rather than in a phrase leaves nothing in the sentence to re-derive, which
 is why the remedy above (*re-derive the scope word*) does not reach it.
 
-Not promoted to an `OB` class: three instances, one session, one day, and both
-detectors are peers I had been in continuous conversation with all evening. A third
-instance from inside the same thread does not relieve the shared-blind-spot condition —
-it is the same population sampled again.
+Not promoted to an `OB` class: four instances, one session, one day, and both detectors
+are peers I had been in continuous conversation with all evening. A further instance from
+inside the same thread does not relieve the shared-blind-spot condition — it is the same
+population sampled again.
+
+**A FIFTH INSTANCE, NOT MINE, AND IT MOVES THE DETECTION EARLIER.** sessionId `9e022ef0`
+reported that this push would make `scripts/rb.sh` *"fire on trees that were fine ten
+minutes ago"*, reasoning from *"origin advanced 36 commits"* to *"therefore local is
+behind"*. Measured instead of accepted: `HEAD..origin/experiments` is **0** and `rb.sh`
+exits **0**, because those 36 commits came FROM this checkout — origin moved to MATCH local
+HEAD, not past it. **"Origin advanced" and "you are behind" are different relations, and a
+push that publishes local work produces only the first.** Their statement is exactly right
+about a *different clone*, which did gain 36 commits it lacks.
+
+Two things this one adds that the four above do not:
+
+- **It was caught BEFORE it reached a record**, at transmission, by the recipient. The
+  other four were all corrected after publication. Same detector — § *Observer Blindness*
+  position 2, a party not sharing the author's context — applied at a different point in
+  the lifecycle. Still an instrument that happened to be present, still not a mechanism.
+- **Its cost would have been distrust of a guard rather than a wrong fact.** A false
+  operational note filed beside a new guard is how the next reader learns to route around
+  it, and a guard readers route around is worse than no guard. The author's own summary,
+  which is sharper than mine: *"the tell is that I had no measurement, only a direction."*
+
+That tell generalises past this entry and is the closest thing to a usable check it has
+produced: **a claim built from a DIRECTION rather than a reading is where this class
+lives.** "Origin moved forward", "the search came back empty", "that commit is theirs" are
+all directions. None of them is a number, and each becomes a claim about a situation only
+when someone supplies the situation from context.
 
 ## Template for new entries
 
