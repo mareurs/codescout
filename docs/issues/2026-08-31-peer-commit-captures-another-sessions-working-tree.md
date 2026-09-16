@@ -1481,6 +1481,68 @@ this file's own § *Template for new entries* comment block still prescribes
 `edit_file(action="insert_before", …)` plus *"Also update the matching Index / Wins Index table
 row"* — the two-call form, in the ledger that measures its cost. Not swept here; the capturing
 session was already active in this file and appending to it is the act this bug documents.
+## Instance 15 — 2026-09-16, a PURPOSE-BUILT check ran and was blind by construction
+
+**What is new: the capturing session checked.** Every earlier instance here involves `git add -A`,
+a skipped step, or a step ordered into uselessness. This one ran a selector written for exactly
+this hazard, minutes after being warned about it by the session it then captured, and the
+selector could not express the failure.
+
+`7a986ac3` swept two uncommitted `F-170` edits belonging to `9403d62d` into a commit carrying
+neither their sid nor their name. Measured, not inferred:
+
+```
+git show 7a986ac3:docs/trackers/bug-fix-session-log.md | grep -c 'its \*\*Index row\*\* reads'   -> 1
+git show 7a986ac3:docs/trackers/bug-fix-session-log.md | grep -c 'TWO TEXT SURFACES UNDER ONE ID' -> 1
+git show 7a986ac3 --numstat -- docs/trackers/bug-fix-session-log.md                              -> 32  8
+git show -s --format='%(trailers:key=Co-Authored-Session-Id,valueonly)' 7a986ac3                 -> empty
+git show -s --format='%B' 7a986ac3 | grep -c 9403d62d                                           -> 0
+```
+
+Control, so the empty is a measurement rather than a broken query: `Session-Id` parses to
+`29420e72` and `Co-Authored-By` parses to the model line on the same commit.
+
+### The check, and why it could not work
+
+```
+git diff --cached -U0 -- <ledger> | grep -oE "^\+## F-1[0-9]+|^\+\| F-1[0-9]+"
+```
+
+It searches for **new entry headings and new index rows**. The captured content was neither: two
+edits to the *prose of an existing entry*, adding no heading and no row. The selector returned
+empty, and empty was read as *"edits only, no new entries"* — which was true, and was not the
+question.
+
+**This is the recording-filter law applied to a safety check rather than a test suite.** A check
+cannot detect what its recording filters out, and *"widen the sample"* is no remedy: the selector
+would return empty over any diff size, because the refuting outcome leaves no artifact in the
+shape it looks for. The earlier instances are answerable by *stage less, look harder*. This one
+is not — looking harder through the same selector returns the same empty.
+
+**The general form, which is what makes this worth a fifteenth entry:** a check over a shared
+file must be scoped to **authorship of hunks**, never to the *shape* of what was added. Entry
+headings and index rows are a proxy for "someone added an entry", and the proxy is silent on the
+commonest real edit — amending prose already there.
+
+### Disposition
+
+**Not amended, and neither party asked for it.** `experiments` is shared and has moved past the
+commit; this file's own standing ruling is that on a shared tree the repair destroys work the
+defect only mislabels. The content is correct and landed. What is lost is the machine-readable
+record that `F-170`'s last two paragraphs are `9403d62d`'s — and the durable substitute is
+`F-170`'s own text, which says so in the first person and is inside the commit.
+
+**The compounding fact.** The capture happened inside the commit whose subject is *"the trailer
+bug has a real consumer now — an attribution query that reads empty"*. A commit filing an
+attribution defect lost an attribution, by the mechanism its own § *Root cause* describes:
+staging a shared file makes the stage-log record the stager as owner and both pre-commit guards
+go green *because of* the staging act. Third occurrence that day of this class closing on an
+author actively writing about it.
+
+**Reported by the captured party**, who verified it from their side, stated plainly that nothing
+about it read as deliberate, and declined to ask for a repair. That is the channel working; it is
+not a mechanism, because it depends on the captured session noticing.
+
 ## Resume
 
 **Discharged 2026-09-16.** Both halves are done, and the gap between them is worth one line
