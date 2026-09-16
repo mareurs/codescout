@@ -216,8 +216,42 @@ branch of `foreign-index` today. **What is owed next is to check whether `ledger
 routes as well, and to re-measure this after a month rather than re-deriving it from the
 same 51 days.**
 
+**ANSWERED 2026-09-16 — `ledger-counts` DOES route, and by a better instrument than
+`foreign-index`.** Five of its refusal branches carry the form *"IF YOU DID NOT TOUCH X, THIS IS
+NOT YOUR DEFECT"*, name `python3 scripts/file-provenance.py <path>` as the way to reach the
+owner, and put an ANSWERABLE question to them with its answers enumerated — *"landing now" or
+"backed out"*, *"yes, not yet, or I will revert it"* — alongside *"waiting clears nothing on its
+own: the index moves only when somebody stages"*. Pinned by
+`tests/pre-commit-ledger-divergence.sh` § 5. That is `observer-blindness:OB-20`'s ceiling
+already handled, which `foreign-index`'s `LIVE — <name> (pid N)` block does NOT do: a socket
+address buys ARRIVAL and says nothing about what the addressee can reply. **So the routing
+direction is done on this half, and the remaining difference runs the OTHER way** — the
+instrument worth copying is `ledger-counts`'s question, into `foreign-index`.
+
+Measured by sessionId `e5691fad-9f78-4cd1-ad14-edfdd1fee41f`, whose first pass grepped for
+`foreign-index`'s own identifiers (`cc-socks`, `sessionId`, `uds:`), found a single comment, and
+read that scoped zero as absence of the capability — a selector narrower than its population,
+and the reason this answer cites the branch text rather than a grep count.
+
 Two guards read the **same** discriminator in **opposite** directions, and nothing composes
 them.
+
+**STALE AS OF 2026-09-14 — the first bullet below no longer describes the code, and it is the
+bullet the "opposite directions" framing rests on.** `foreign-index`'s pathspec `exit 0` was
+REMOVED as the defect itself; its header now reads *"THE PREMISE IS FALSE, and the stand-down
+was the entire defect"*, and the discriminator is kept with its meaning inverted so it selects
+the REMEDY rather than standing the guard down. Two consequences for a reader of this section:
+the two guards no longer read one discriminator in opposite directions, because `foreign-index`
+no longer uses it for engagement at all; and a pathspec commit's temporary index holds ONLY the
+paths it names, so `foreign-index` cannot see a peer's unrelated staged paths there — measured
+2026-09-14, recorded in
+`docs/issues/archive/2026-09-02-a-pathspec-commit-does-capture-staged-content-and-both-guards-stand-down.md`.
+
+**The `ledger-counts` half of the pair still holds, so the deadlock this file documents is
+real:** it has no pathspec exemption, and a coupled set split across a pathspec boundary still
+mismatches against HEAD's corpus. The bullets are left standing rather than rewritten because
+the second is load-bearing and the pair is how the section argues. Checked at the bytes by
+sessionId `e5691fad-9f78-4cd1-ad14-edfdd1fee41f` on 2026-09-16.
 
 - `scripts/pre-commit-foreign-index.sh:95-98` exits 0 when
   `${GIT_INDEX_FILE##*/}` matches `next-index-*` — the temporary index git builds for a

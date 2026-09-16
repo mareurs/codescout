@@ -170,6 +170,47 @@ worth.
    and it is the one that would have caught the `215a5cad` window in § *Workarounds*. The
    data is already there: the guard holds the staged rename pairs, and
    `git grep <old path> HEAD` over the complement is one call.
+
+6. **The ack already reconciles this file's own two statements about staging, and it is gated
+   on the one predicate that cannot reach this shape.** § *Root cause* says any single session
+   staging the whole coupled set "owns all of it and commits cleanly"; the paragraph directly
+   after it calls that same act "gaming the instrument rather than satisfying it — the exact
+   capture the guard exists to prevent". Both are true, and what separates them is already in
+   the guard: `CODESCOUT_INDEX_ACK` and the `Co-Authored-Session-Id` trailers it prints.
+   Staging the whole set is a capture when it is SILENT and a recorded two-author commit when
+   it is ACKED — in the guard's own words, *"the ack does not make the attribution correct — it
+   makes it RECORDED, which `--no-verify` does not."*
+
+   **So what is missing is not remedy text (direction 4) but REACH.** The ack arm is gated on
+   `joint`, and direction 1 above already measured `joint` as **0 from both sides** on the live
+   deadlock. The one route that would resolve this is unreachable from the one shape that needs
+   it — which is also why direction 4 is not sufficient alone: it would print a legal state
+   that the guard, reached by this shape, then refuses.
+
+   **Shape of the change, deliberately NOT applied:** admit the ack in the all-contested branch
+   — `theirs` non-empty with `mine` empty, the case whose text today reads *"Every path you
+   named is contested, so there is nothing to narrow to"* — rather than only for a joint
+   rename. The committer stages the whole coupled set, names every other author, and carries
+   their trailers.
+
+   **Two things to establish first, both of which sank earlier directions here.** A RED in
+   `tests/hooks-discrimination.sh` for the all-contested branch specifically — § 7's `no
+   sequencer -> still refuses` case is the control a widening must not break, and both
+   relaxations rejected in
+   `docs/issues/archive/2026-09-02-foreign-index-prescribes-a-remedy-git-refuses.md` were
+   rejected for being wider than their defect. And the two-site `--no-renames` law: that
+   pipeline is copy-pasted between `scripts/post-index-change-stage-log.sh` and
+   `scripts/pre-commit-foreign-index.sh`, so mutating one site leaves the other's assertion
+   green.
+
+   **Why this is a direction and not a fix:** it relaxes when the guard ACCEPTS, which is the
+   axis this file's own history says to be slowest about. Raised by sessionId
+   `e5691fad-9f78-4cd1-ad14-edfdd1fee41f`, which hit the NEIGHBOURING pair
+   (`scripts/pre-commit-unreviewed-content.sh` × `scripts/pre-commit-foreign-index.sh`) rather
+   than this one, and that case is **weaker — recorded as such so it is not counted here.**
+   `wait` was performable there and cleared it, because only one of the two parties was
+   blocked. It is this same empty intersection for an instant, not the permanent one this file
+   documents.
 ## Workarounds
 
 **One, and the second thing this section used to recommend is now measured WRONG.**
