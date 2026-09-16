@@ -177,6 +177,16 @@ produces **no trigger** (native `Edit`/`Write`/`Bash` reach no tool — measured
 sessions run cargo entirely through `Bash`**); **Rust only**; a **deliberate mutation** trips
 it, with `CODESCOUT_NO_BUILD_CHECK=1` as the escape; and a **lean build** emits nothing.
 
+**The 8-of-72 figure is ONE derivation cited in TWO places — do not read it as corroboration.**
+It appears in `build_check.rs:57-58` and in `docs/PROBES.md`:190's `attribute-red.py` row, both
+dated 2026-09-08 over 3 profiles and 72 sessions with any cargo activity. Same measurement,
+two surfaces. § *Testing Discipline* says check independence rather than agreement, and two
+citations of one number agree because they are one number. PROBES.md also carries the bound
+that matters when quoting it: the figure is a **session count**, and the call ratio (1058 of
+5256, 20.1%) is a proxy only — quoting the ratio invites *"~80% covered"*, a per-population
+claim standing in for a per-member one, when such a session gets **nothing** rather than being
+partly degraded.
+
 Check-versus-test appears nowhere in that list. It sits in the COST section as an invariant the
 module asserts it **meets** — *"the check has to match the gate's blast radius"*. So of five
 gaps, four are admitted and one is presented as satisfied, and it is the one that swallowed all
