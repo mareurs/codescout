@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 165
-entry_high_water_W: 143
+entry_high_water_W: 144
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -239,6 +239,7 @@ entry_high_water_W: 143
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-144 | 2026-09-16 | med | **The discriminator was already in the output OF THE RUN THAT ESTABLISHED THE FINDING** — three sessions, three instruments, one evening: `FutureWarning` ×3, a `FAILED` with no `left:`/`right:` lines, a `64 vs 99` line count. Worse than CLAUDE.md's "assert on the name": nobody chose a proxy, the answer was on screen in the scrollback being read to write up the result. Each caught only by a peer stating a checkable fact that collided. | validated |
 | W-142 | 2026-09-15 | high | `git add` writes a complete tree to the object store and `git restore --staged` only un-references it, so staged content survives as an unreachable blob and `git fsck --unreachable` recovers it byte-exact | A peer's 35 uncommitted lines, deleted by me, were recovered exactly; no backup of mine predated their write, so the staged blob was the only copy outside their context | validated |
 | W-137 | 2026-09-15 | — | reproduction-before-plan | **The reproduction refuted the record's own root-cause lead in both particulars, before any code was read.** See the entry for the full counterfactual. | validated |
 | W-134 | 2026-09-14 | med | **A pinned throwaway project probes a security-config gate live, by behaviour rather than build metadata.** After a rebuild, `workspace(status)` reported `git_sha: 3d9cd206, git_dirty: true` — and a dirty build is exactly the case a sha cannot settle. Pinned `workspace=` at a temp project whose own `.codescout/project.toml` sets `file_write_enabled = false`: `memory(action="write")` was REFUSED with cause `ConfiguredOff`, and `memory(action="list")` through the SAME pin returned `0 topics` as the control — which is what makes the refusal a measurement rather than an unresolvable path. A `read_only`-based probe self-defeats, because `call_tool_inner` upgrades a pinned workspace to writable for write tools; the config flag is the only route that reaches the arm | One activation, one probe and one restore — plus a `read_only` probe that would have silently read as *"gate absent"*. That is the honest counterfactual, NOT the "six broken peers" first claimed and retracted in `F-145` | validated |
@@ -16464,6 +16465,59 @@ They deliberately did **not** promote it to an `OB` class — two instances, one
 one day, which is the shared-blind-spot condition, and two sessions talking to each other
 all evening is precisely the population that condition warns about. That restraint is the
 right call and is recorded here so nobody promotes it on this evidence.
+
+## W-144 — The discriminator was in the output of the run that established the finding
+
+**Valid:** dated 2026-09-16
+
+**Observed:** three sessions, three instruments, one evening. In each case the output that
+established a finding **also contained the discriminator for a second thing the author was
+wrong about**, and all three of us reported around it.
+
+| session | the run | what it printed | what was read |
+|---|---|---|---|
+| mine | the run establishing that `[[:space:]]` is unparsed by Python | `FutureWarning: Possible nested set` **×3** | the measurement; the warnings went unmentioned |
+| `f5f48b42` | checkpoint-removed mutation | `FAILED` with **no** `left:`/`right:` lines, where the control printed both | "still REDS" |
+| `aa272bed` | comparing their W-140 section against HEAD | `HEAD 64 lines, mine 99` | surplus as staleness, so they nearly deleted 35 lines of a peer's work |
+
+**Why this is not `CLAUDE.md`'s existing law, and is worse than it.** § *Testing
+Discipline* already says *assert on the name, not on a proxy for it — the discriminator is
+usually already in the output, unused, while both parties reach for a number.* There the
+author **chose a proxy** and the discriminator sat unused elsewhere.
+
+Here nobody chose a proxy. The discriminator was in the output **of the run that
+established the finding** — on screen, in the terminal, in the same scrollback the author
+was actively reading to write up a result. Framing owed to
+`9e022ef0-eb76-49f0-b175-4d68979290cf`, who put it as *"unused in the output of the run
+that established the finding — different severity entirely."*
+
+**Why care is the wrong instrument.** All three of us were reading attentively; that is
+what a write-up *is*. The output answered a question we were not asking, and an answer to
+an unasked question is indistinguishable from noise at the moment it prints. `f5f48b42`'s
+grep filter (`-E '^test |test result|left:|right:'`) is the purest form: the filter that
+answers *"does it red?"* **cannot express** *"what reds?"*, so the absence of the assertion
+lines was structurally invisible to the instrument that produced them.
+
+**Counterfactual:** without a peer stating a checkable fact that collided, none of the
+three would have been caught. Mine surfaced because `9e022ef0` re-ran the literal predicate
+and declared their own substitution. `f5f48b42`'s surfaced because I modelled the same
+experiment and got a different failure shape. `aa272bed`'s surfaced because their splice
+disagreed with a blob my `git add` had left in the object store.
+
+**The operational move, which is not "read your output more carefully":** before writing up
+a result, ask **what else did this run just tell me** — not whether the finding is right.
+And prefer a filter that admits the shape of a second answer: an allowlist of terminal
+states over a denylist of non-terminal ones, which is the form that saved my own CI monitor
+from swallowing `cancelled`.
+
+**Severity:** n/a (win)
+
+**Status:** validated — three instances, three sessions, 2026-09-15/16.
+
+**Rests on:** `CLAUDE.md` § *Testing Discipline* (assert on the name); `F-165`; `W-140`;
+`embedder-stack-ops-session-log:F-7`. **Deliberately cites no `R-N`**: `9e022ef0` offered
+one to their operator and it is unapproved, so it may never exist — a peer's offer is not
+their operator's decision.
 
 ## Template for new entries
 
