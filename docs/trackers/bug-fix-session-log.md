@@ -16444,6 +16444,27 @@ mechanism. Promote if a third adjacency axis turns up.
 **Rests on:** `F-155` and `F-122` (`aa272bed`'s, who drew the topic/thread distinction and
 declined to file this one for me on the grounds that the error is mine); `W-140`.
 
+**Second instance, from the other end, same day — and it names where the value came
+from.** `f5f48b42` notified me that they had pushed my `a3579710`. It was `55cbf9a3`;
+`a3579710` had reached origin in my own push hours earlier. They then traced the source
+rather than filing it as carelessness: `scripts/pre-push-foreign-session-guard.sh:369` is
+`printf '%s\n' "$ack_matched" | tr ',' '\n'`, which prints **sids and never shas**. So no
+surface handed them that sha — they produced it from what was salient in the thread, in
+the notification about the commit that *is* this entry.
+
+That closes a gap this entry had: my own instance showed the mechanism but not its
+*supply*. A thread-adjacent value is not misread off a screen; it is **generated**, which
+is why re-reading the screen does not catch it and why `%(trailers:key=Session-Id)` is the
+only remedy that touches it. Their side is `embedder-stack-ops-session-log:F-7`, *"a value
+CORRECT about a question you were not asked"* (`d89d98a0`), which carries the reason
+"verify harder" is a no-op here: re-verification returns the same correct value, because
+the value was never the broken part.
+
+They deliberately did **not** promote it to an `OB` class — two instances, one session,
+one day, which is the shared-blind-spot condition, and two sessions talking to each other
+all evening is precisely the population that condition warns about. That restraint is the
+right call and is recorded here so nobody promotes it on this evidence.
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line with ONE call:
