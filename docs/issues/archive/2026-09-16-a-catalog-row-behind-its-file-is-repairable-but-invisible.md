@@ -1,7 +1,7 @@
 ---
-id: bd117fbc0d1a0308
+id: 794db556f3cfdf93
 kind: bug
-status: taken
+status: fixed
 title: A catalog row left behind by a failed update is repairable but invisible
 tags:
 - librarian
@@ -99,34 +99,65 @@ a constant.
 
 ## Fix
 
-Not implemented. The cheap remedy is a `doctor` check rather than a change to the
-write path: compare each row's `file_sha256` against the current bytes and report
-the rows that differ. That makes the existing recovery *triggerable* without
-touching an ordering whose sibling deliberately disagrees with it.
+Fixed by `6fab2977`, patch-id `1a3ef8e279706c0d701077dcb82d2f2e7b16bce7`.
 
-Reordering `update` to match `create` is the expensive alternative and is probably
-wrong: `create` can order catalog-first because it has nothing to lose if the file
-never lands, while `update` has a caller holding a patch it must not blindly
-re-apply — which is the whole reason `file_written_but_catalog_failed` says so.
+`doctor` gained `row_behind_file`: it compares each row's stored `file_sha256`
+against the bytes on disk and names the rows that differ, with a detail line that
+names `reindex` as the repair. The write path is untouched, which was the point —
+the recovery already existed and nothing triggered it.
 
-**Cost of the check, stated because it is the reason to think before adding it:**
-hashing every artifact's bytes on every `doctor` run is O(corpus), and `doctor` is
-documented as a manual cadence rather than a gate. A `file_mtime` pre-filter is the
-obvious narrowing and is itself a selector that can be narrower than its
-population — the thing this cluster is about.
+**Reordering `update` to match `create` was the expensive alternative and is still
+the wrong one**, for the reason this file gave before the fix: `create` can order
+catalog-first because it has nothing to lose if the file never lands, while `update`
+has a caller holding a patch it must not blindly re-apply — which is the whole
+reason `file_written_but_catalog_failed` says so. Both orderings are defensible and
+they are opposite; consolidating them would have destroyed information.
 
+**The `file_mtime` pre-filter this section used to call "the obvious narrowing" was
+NOT built, and the measurement is why.** Against the live catalog: hashing all
+4,943 files (83.2 MB) costs **115 ms**, against 25 ms for the filtered arm. The
+narrowing buys 90 ms for a selector that `git checkout`, `touch -r`,
+`rsync --times` and any restore-from-backup defeat, each preserving mtime across a
+content change. Its false-negative count in that sample was **0**, and that zero is
+deliberately not the argument — citing it would be the population-for-member
+substitution. Not building it avoids this file's own cluster rather than managing
+it. Re-derive both arms before reintroducing one;
+`architecture-boundary-session-log:F-3` holds the method.
+
+**Two things the check may not claim, both decided by measurement.** It is
+scope-gated (`ROW_GRAIN_SCOPED_CHECKS`) because divergence is 124 of 4,944 rows
+globally but 6 of 1,712 inside codescout — unscoped it publishes a worklist that is
+95% another developer's. And it is named for the state rather than for this bug: a
+failed `update` and a write that never reaches the catalog at all (`edit_file`,
+native `Edit`, `git checkout`) produce the identical row, the corpus is dominated
+by the second, and `reindex` repairs both. `failed_update_divergence` would have
+published a value correct in one frame under a name asserting another (`IC-24`).
 ## Tests added
 
-The three named under *Reproduction*, all in
-`src/librarian/tools/update.rs`'s test module — placed there because the
-production code at `:719` carries the comment *"NOT REACHED BY ANY UNIT TEST …
-needs real lock contention … which no test in this suite constructs"*. That
-comment is now false and was corrected with them.
+The three named under *Reproduction*, in `src/librarian/tools/update.rs`'s test
+module — placed there because the production code carried the comment *"NOT REACHED
+BY ANY UNIT TEST … needs real lock contention … which no test in this suite
+constructs"*. That comment was false once they existed and was corrected with them.
 
-The third test asserts the **observed** outcome, not the desired one: if a future
-change teaches `doctor` to see this, the test reds and its message says the gap
-has closed rather than that something broke.
+The third was written asserting the **observed** outcome — that `doctor` was blind —
+with a comment saying it would red on the day that changed. It did, on this fix. It
+is renamed `doctor_names_a_catalog_row_that_has_fallen_behind_its_file` and inverted
+rather than repaired, and it is now the only test that reaches `row_behind_file`
+through a **real** failed catalog write rather than a hand-seeded row. It also
+asserts the exclusivity the two checks depend on: a row whose file is *gone* is
+reported under `missing_file` alone.
 
+Four more in `src/librarian/tools/doctor.rs` cover the predicate itself — the
+agreement/divergence pair with its control running first, both abstentions each
+with a non-vacuity companion proving the same fixture *can* fire, and a wired
+`call()` test asserting the aggregate **and** naming the diverged row specifically
+(`by_check == 1` is satisfied equally by "reported the right row" and "reported
+some row").
+
+Four mutations, one per guarded site, all **KILLED** via
+`scripts/mutation-probe.sh`: inverted predicate (4 tests), deleted empty-hash
+abstention (1), missing-file abstention made to fire (2), and
+`Check::RowBehindFile` dropped from `ROW_GRAIN_SCOPED_CHECKS` (2).
 ## Workarounds
 
 Run `librarian(action="reindex")` after any `doc(action="update")` that returned

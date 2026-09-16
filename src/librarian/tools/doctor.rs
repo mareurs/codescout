@@ -3196,7 +3196,7 @@ fn check_missing_file(id: &str, abs_path: &str) -> Option<Violation> {
 /// `BEGIN IMMEDIATE` past the 5 s `busy_timeout` produces it), repairable by
 /// `reindex`, and — until this check — reported by nothing. `missing_file` is
 /// adjacent and does not cover it: a changed file is present.
-/// (`docs/issues/2026-09-16-a-catalog-row-behind-its-file-is-repairable-but-invisible.md`)
+/// (`docs/issues/archive/2026-09-16-a-catalog-row-behind-its-file-is-repairable-but-invisible.md`)
 ///
 /// **Named for what it OBSERVES, not for the bug that prompted it.** A failed
 /// `update` and a write that never reaches the catalog at all — `edit_file`, native

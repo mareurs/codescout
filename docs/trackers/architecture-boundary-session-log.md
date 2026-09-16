@@ -117,7 +117,7 @@ That is **three** instances of one class inside one exchange: the peer's *"nothi
 
 **Valid:** dated 2026-09-16
 
-**Observed:** `bd117fbc0d1a0308`'s *Fix* section names the cost to weigh before
+**Observed:** `794db556f3cfdf93`'s *Fix* section names the cost to weigh before
 building the `doctor` check — *"hashing every artifact's bytes on every `doctor`
 run is O(corpus)"* — and proposes a `file_mtime` pre-filter as *"the obvious
 narrowing"*, noting that the filter is itself an instance of the cluster the bug

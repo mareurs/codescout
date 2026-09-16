@@ -724,8 +724,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // join proves the ordering actually produces the state the wording describes.
     //
     // What the experiment established, beyond that this line runs: the resulting
-    // divergence is repairable by `reindex` and reported by NOTHING —
-    // docs/issues/2026-09-16-a-catalog-row-behind-its-file-is-repairable-but-invisible.md.
+    // divergence is repairable by `reindex`, and was reported by NOTHING until
+    // `doctor` gained `row_behind_file` in `6fab2977` — the trigger the repair had
+    // always lacked. Recovery that needs someone to run `reindex` is only as good as
+    // the reason they would run it.
+    // docs/issues/archive/2026-09-16-a-catalog-row-behind-its-file-is-repairable-but-invisible.md.
     if let Err(e) = artifact::upsert_and_mint_slug(&cat, &updated_row) {
         return Err(file_written_but_catalog_failed(e, &full));
     }
@@ -1114,7 +1117,7 @@ mod tests {
     ///
     /// When this test was written the answer was NO, and it was written to red on the day
     /// that changed. `doctor`'s `row_behind_file` closed it
-    /// (`docs/issues/2026-09-16-a-catalog-row-behind-its-file-is-repairable-but-invisible.md`),
+    /// (`docs/issues/archive/2026-09-16-a-catalog-row-behind-its-file-is-repairable-but-invisible.md`),
     /// so the assertion is now positive and this is the reachability half of that check's
     /// coverage — the only test in the tree that reaches it through a REAL failed catalog
     /// write rather than a hand-seeded row. `doctor.rs`'s own unit tests cover the
