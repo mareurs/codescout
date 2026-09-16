@@ -580,7 +580,7 @@ fn is_markup_display(content: &str) -> bool {
 /// quoted truncation. Do not use it to silence a reference you have not checked — the
 /// whole value of the gate is that an unchecked stale path is loud.
 ///
-/// **Positional, not `contains` — and that is the whole of `bc79a20e28c9ad1b`.** The
+/// **Positional, not `contains` — and that is the whole of `2190ec12967c9fcf`.** The
 /// original test was `html.contains("audit-doc-refs:ignore")`, which cannot tell a
 /// declaration from a QUOTATION of one. `docs/PROBES.md`'s own scoped marker explained
 /// why it had not used the coarse form, quoting the bare token in its prose — and
@@ -1245,7 +1245,7 @@ A 200-char cut leaves a truncated path (`src/serve`, `src/lsp/m`); the real prob
 
     /// A scoped marker that QUOTES the bare form in its own body stays scoped.
     ///
-    /// **This is the regression that actually happened** (`bc79a20e28c9ad1b`), and the
+    /// **This is the regression that actually happened** (`2190ec12967c9fcf`), and the
     /// assertion is over a whole parse rather than over `Suppression`'s methods for a
     /// reason: `blocks` and `blocks_everything` were both correct throughout, so a unit
     /// test on either passes against the defect. What failed is that a LATER event

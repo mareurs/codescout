@@ -169,7 +169,7 @@ word, then heading forms) before calling it dangling, on rule 3's own terms.
      DO NOT WRITE THAT BARE FORM LITERALLY HERE: this comment is re-parsed line by line,
      so quoting it sets Suppression::All and silences the 73 refs below, which is exactly
      what this marker was scoped to avoid. See
-     docs/issues/2026-09-15-a-scoped-audit-ignore-marker-suppresses-its-whole-section.md -->
+     docs/issues/archive/2026-09-15-a-scoped-audit-ignore-marker-suppresses-its-whole-section.md -->
 
 | Probe | Measures | Invoke | Know before you run it |
 |---|---|---|---|

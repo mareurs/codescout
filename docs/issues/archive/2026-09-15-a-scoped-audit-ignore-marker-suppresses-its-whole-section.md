@@ -1,10 +1,11 @@
 ---
-id: bc79a20e28c9ad1b
+id: 2190ec12967c9fcf
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a scoped audit-doc-refs:ignore-refs marker suppresses its entire section, so 73 refs in PROBES.md are unguarded and the scan still exits 0'
 tags:
 - cluster/selector-narrower-than-its-population
+closed: 2026-09-16
 ---
 
 ## Summary
@@ -151,34 +152,64 @@ the link target instead, and only because the silence looked wrong.
 
 ## Fix
 
-**THE INSTANCE IS REPAIRED; THE DEFECT IS NOT. This record stays `open` for that reason.**
+**FIXED at the grammar, not only at the call site.** The instance repair came first and is kept
+below because it is what produced the measurement; the defect itself is closed by `510b2c09`.
 
-**Shipped** — `docs/PROBES.md`:167 reworded so the marker's explanation no longer contains the bare
-token, plus a line at the site saying *why* it must not be written literally there. 36 → 207 refs.
-That is a workaround at one call site: it repairs this file and protects nothing else. **The next
-author who explains their choice of the scoped form re-creates it**, and the explanation is exactly
-where the bare token naturally appears.
+**The repair — positional, not `contains`.** `marker_token` replaces `is_ignore_marker`'s
+`html.contains("audit-doc-refs:ignore")`: the token must sit at the comment's **start**, after
+`<!--`. That makes a mention **unrepresentable** as a declaration rather than policing it —
+`CLAUDE.md` § *Observer Blindness* position 3 — so a marker's own documentation can now name the
+form it did not use. `-refs` is tested first because it is the longer prefix, and
+`parse_ignore_marker` branches on which form is *declared* rather than which is mentioned anywhere
+in the body. Continuation lines of a multi-line comment carry no `<!--`, return `None`, and leave an
+active suppression untouched — the call site's guard fires only on `Some`.
 
-**Not designed** — the grammar needs an escape for *mention*, which is `IC-6`'s standing debt. The
-house pattern is to narrow where safe and **name the residual at the refusal site**; the residual
-here is that no escape exists at all, so the marker's documentation cannot describe its own
-alternative form without triggering it.
+**`is_ignore_marker` is gone**, caught dead by clippy's `-D dead-code` on the `--all-targets` form
+(a bare `cargo clippy` lints neither the lib-test target nor this). Its doc comment carried the
+section-scope contract, which had no other home, so that paragraph moved to `marker_token` rather
+than dying with the function.
+
+**The regression test, and the red that proves it discriminates.**
+`a_scoped_marker_quoting_the_bare_form_does_not_widen_to_the_bare_form` asserts over a **whole
+parse**, not over `Suppression`'s methods — `blocks` and `blocks_everything` were correct throughout,
+so a unit test on either passes against the defect. The fixture mirrors `docs/PROBES.md`: a
+multi-line comment whose prose names the coarse form. Its **surviving** refs are the load-bearing
+half; assert only that the named target is gone and it passes against `Suppression::All`, which is
+the whole defect.
+
+`scripts/mutation-probe.sh`, reverting the positional check to `contains` in an isolated worktree:
+**KILLED (rc=101, 1 test ran)**, failing with `got []` — every ref suppressed. No peer saw that red.
+**The mutation also settled a question reading could not:** `got []` proves the continuation line
+reached `parse_ignore_marker` on its own, so the comment *is* re-parsed per event. Had it arrived as
+one event, the old `contains` would have returned `Only` and the test would have been
+non-discriminating — a guard that guards nothing, indistinguishable from this one at the point of
+commit.
+
+Gate: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, with the four suppression tests read out of the default
+lane **by name** rather than off a total.
+
+**Still owed, and deliberately not bundled:** narrow the target capture to the run of backticked
+tokens *before* the first prose word. The over-capture in § *Evidence* is real — 4 targets declared
+where 2 were intended — and independent of this fix, which is why it is not closed here.
+
+---
+
+**The instance repair, kept because it is the measurement.** `docs/PROBES.md`:167 was reworded so
+the marker's explanation no longer contains the bare token, plus a line at the site saying why it
+must not be written literally there: **36 → 207 refs**. That was a workaround at one call site and
+said so; `510b2c09` is what stops the next author re-creating it.
 
 **Do not** "fix" this by deleting the marker from `docs/PROBES.md` — that unguards two genuine false
-positives the author correctly annotated, and hides the defect rather than closing it.
+positives the author correctly annotated.
 
-Two things worth doing, both still owed:
+## Fix provenance
 
-- **A regression test at the BEHAVIOUR, not the parse.** `Suppression::blocks` and
-  `blocks_everything` are unit-correct by inspection and would both pass — the failure is that a
-  later event overwrites a correct `Only` with `All`. Assert on a whole-file scan: a fixture whose
-  scoped marker **quotes the bare form in its own comment body** must still report the section's
-  unnamed refs. That is the regression that actually happened, and no unit test on the two methods
-  can reach it.
-- **Narrow the target capture** to the run of backticked tokens *before* the first prose word, so a
-  marker's explanation cannot contribute targets — the separate over-capture in § *Evidence* (4
-  declared where 2 were intended).
+- **SHA:** `510b2c09` (`experiments`)
+- **patch-id:** `21d20fcc9e10cc4dd35f28f1e15d9770c6ed9909`
 
+The instance repair that produced the 36 → 207 measurement is `f3f79c1a`, which is not cited as the
+fix: it reworded one comment in `docs/PROBES.md` and protected nothing else. `510b2c09` is the
+grammar change plus its regression test and the mutation that killed it.
 ## Resume
 
 Start at the caller of `parse_ignore_marker`, not at `parse_ignore_marker` itself — it is correct in
