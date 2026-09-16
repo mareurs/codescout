@@ -100,6 +100,37 @@ notification and for one that prints nothing. The `all` path has coverage of its
 none of its output, which is why this survived a suite that tests the notification carefully
 on every other path.
 
+## Who cannot see it, and why that decides the fix
+
+The defect is invisible from the only side positioned to notice it, and that is not incidental
+— it is the shape.
+
+**Who structurally cannot see it:** the foreign sessions whose work is published. Their signal
+that a push happened is *the notification itself*. When it does not fire they receive nothing,
+and **receiving nothing is byte-identical to nobody having pushed.** No amount of attention on
+their side distinguishes the two. They cannot audit a message that was never sent.
+
+**Who can:** the pusher, who holds `$ack` and can see which form they typed — and who has no
+reason to look, because from their side the push succeeded either way. The guard prints its note
+on one path and stays silent on the other, and silence after a successful push reads as *nothing
+to report*.
+
+**Measured from the receiving end, 2026-09-16, by sessionId
+`f0b1a4c7-e991-4478-bf22-b088483b6821`:** every *"your commits were pushed"* message they
+received across four pushes existed because two peers **happened to choose the named form**.
+Five messages, all discretionary. Their words, and they are the point of this section: *"the
+tell-after discipline I have been relying on all day is a policy with a known silent failure
+mode, not a mechanism — and I could not have discovered that from the receiving end, because its
+failure looks exactly like nobody having pushed."*
+
+**Why this matters for the fix rather than being commentary.** § *Observer Blindness* position 3
+asks for a check that runs when nobody is worried, and the two changes under *Fix* are exactly
+that — they make the correct path end in a safe state, so the notification cannot be switched off
+by choosing the shorter ack. A remedy of the form *"remember to use the named form"* would be a
+policy layered on a policy, and the party it protects cannot verify compliance. **Do not close
+this by documenting `all` as discouraged.** The script's header already discourages it; that is
+precisely the state in which this was found.
+
 ## Fix
 
 Not applied. Two changes, both needed:
