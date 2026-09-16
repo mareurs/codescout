@@ -1543,6 +1543,54 @@ author actively writing about it.
 about it read as deliberate, and declined to ask for a repair. That is the channel working; it is
 not a mechanism, because it depends on the captured session noticing.
 
+## Instance 16 — 2026-09-16, the `--stat` detector fired at a RATIO of 2.3× and was still misread
+
+Third consecutive instance (with 11 and 13) in which § *Detection*'s free check fired, was
+printed to the capturing session, and was read as confirmation. That repetition is the finding:
+**"it fired for free" is true and "it works" is not**, and § *Detection* currently credits it
+without that qualification.
+
+`f9d77076` (sid `29420e72`) captured ~15 lines of `add00e12`'s uncommitted `CLAUDE.md` — a
+§ *Git Workflow* paragraph recording two GitHub branch rulesets — inside a commit whose own
+change to that file was 12 lines in § *Testing Discipline*. Same-file capture, so Instance 11's
+structural blindness applies. Verified from the capturing side after the report: hunk 1
+(`@@ -268,6 +268,18 @@`) is mine, hunk 2 (`@@ -404,6 +416,22 @@`) is theirs.
+
+**What is new is the MARGIN, which removes the last excuse the earlier two left open.** Instance
+11's magnitude was arguably subtle. Mine was not: `git diff --cached --stat` printed
+`CLAUDE.md | 28 ++++` against an edit of **12** lines — a factor of **2.3** — and passed. So the
+detector does not fail at the margin; it fails because a number in the right units is read as
+agreement whatever its value. No threshold on the magnitude fixes that.
+
+### The substitution is inside the prescribed sequence, and it PASSES
+
+`docs/conventions/shared-checkout-commit-sequence.md` step 4 lists both reads:
+
+```
+git diff --cached --name-only   # the index is SHARED: are these all yours?
+git diff --cached               # read the content; that is the whole point
+```
+
+I ran the first, then `--stat`, then committed. **`--stat` is not in the sequence and looks like
+it satisfies the second line** — it is a diff, of the cached tree, and it prints per-file. The
+comment *"read the content; that is the whole point"* is there because someone already knew, and
+nothing distinguishes a session that read the content from one that read a summary of it.
+
+**Why the substitution is not carelessness but this ledger's own subject.** `--stat` is an
+assertion computed over the **file**; the claim it was asked to support is about the **hunks**.
+An aggregate cannot verify a per-member claim — and the commit that captured this work is the
+commit that added exactly that law to `CLAUDE.md` § *Testing Discipline*, in the hunk immediately
+above the captured one. § *Observer Blindness*'s opening measurement, reproduced without trying:
+knowing the class, while writing the class, prevented nothing.
+
+### Disposition
+
+**Not amended, and that was the captured party's request as well as this file's rule** — on a
+shared tree the repair destroys work the defect only mislabels. `add00e12` recorded the
+provenance in `67c35ea7` from their side and asked for no repair. The commit is on `origin`
+(pushed by them, on their operator's authority, not mine), so the diff is wider than its subject
+line describes and will stay that way; this row is the record that reconciles them.
+
 ## Resume
 
 **Discharged 2026-09-16.** Both halves are done, and the gap between them is worth one line
