@@ -272,6 +272,32 @@ for path in "${theirs[@]}"; do
 done
 ((${#theirs[@]})) || joint=0
 
+# THE ALL-CONTESTED ROUTE. Every path the committer NAMED is someone else's, so no
+# narrowing exists -- the branch below says exactly that, and until now said nothing after
+# it. `joint` cannot reach this shape: it requires each contested path's partner to be in
+# `mine`, and here `mine` is empty, so the two are provably disjoint rather than nested.
+#
+# RESTRICTED TO THE PATHSPEC FORM, and the conjunct is the whole safety argument. A pathspec
+# commit builds a temporary index from the paths the committer typed, so `mine` empty means
+# "every path I named is theirs" -- bounded by an act of enumeration a human performed. A
+# BARE commit takes the entire shared index, where `mine` empty means "every path any peer
+# left staged is theirs", bounded by nothing. That is the whole-index sweep this guard was
+# built for: measured 2026-09-01, a `git add` on one file joined an index already holding 16
+# foreign staged files. Remove the one file and an unrestricted widening accepts it.
+#
+# The other half of the argument is that a guard should only offer an escape where it has
+# certified there is no compliant route. Under pathspec it says so in its own words below.
+# Under bare a narrower route always exists and the guard prints it -- `git commit -- <your
+# paths>` -- so an ack firing there is not an escape from a corner, it is a shortcut past one.
+#
+# A `-` owner is NOT separately excluded here because the ack loop already rejects it and
+# says why; see the `ack_has_dash` arm. Stated because its absence otherwise reads as an
+# oversight.
+all_contested=0
+if ((pathspec)) && ((${#theirs[@]})) && ((${#mine[@]} == 0)); then
+    all_contested=1
+fi
+
 # The ack mirrors `CODESCOUT_PUSH_ACK` in the pre-push guard deliberately: same shape, same
 # reason, and a pre-commit hook cannot read the commit message, so an env acknowledgement is
 # the only surface on which the committer can NAME the other author before the fact.
@@ -279,7 +305,7 @@ done
 # would buy nothing and would import the blast radius that `all` was filed for.
 index_ack="$(printf '%s' "${CODESCOUT_INDEX_ACK:-}" | tr -d '[:space:]')"
 ack_has_dash=0
-if ((joint)) && [ -n "$index_ack" ]; then
+if { ((joint)) || ((all_contested)); } && [ -n "$index_ack" ]; then
     ack_ok=1
     for owner in "${foreign_owners[@]}"; do
         # `-` IS NOT A PARTY AND CANNOT BE ACKED. The recorder writes `-` for a pair it
@@ -349,6 +375,30 @@ fi
             echo "    git commit -- ${mine[*]}"
         else
             echo "Every path you named is contested, so there is nothing to narrow to."
+            echo
+            echo "THAT IS NOT A DEAD END, and until 2026-09-16 this is where the text stopped."
+            echo "You named only their paths, so there is no smaller commit to make -- which is"
+            echo "exactly the state the ack exists for. Two steps, both yours, neither waiting"
+            echo "on them:"
+            echo
+            echo "  1. TELL them you are committing it. They cannot see this refusal."
+            echo "     Addresses: /codescout-companion:reaching-peer-sessions"
+            echo
+            echo "  2. Re-run with their session id named:"
+            echo
+            printf '    CODESCOUT_INDEX_ACK="%s" git commit -- <the same paths>\n' "$(IFS=,; echo "${foreign_owners[*]}")"
+            echo
+            echo "     and put these in the FINAL PARAGRAPH of the message, beside any other"
+            echo "     trailers. git parses ONLY the last paragraph as trailers, so one placed"
+            echo "     above an existing block is readable prose and invisible to every query:"
+            echo
+            for _o in "${foreign_owners[@]}"; do
+                echo "         Co-Authored-Session-Id: $_o"
+            done
+            echo
+            echo "The ack does not make the attribution correct -- it makes it RECORDED, which"
+            echo "\`--no-verify\` does not. It carries YOUR operator's decision about their"
+            echo "content and says nothing for their operator, who has not been asked."
         fi
         echo
         if ((joint)); then

@@ -482,6 +482,70 @@ has "ack of '-' does NOT clear an unattributed half" "$(guard_ack "$A" "-")" "EX
 has "refusal explains the UNATTRIBUTED half" "$(guard_ack "$A" "-")" "UNATTRIBUTED"
 rm -rf "$T"
 
+# ---- the ALL-CONTESTED route: every path YOU NAMED is someone else's ----
+#
+# This is the shape that deadlocked on 2026-09-16. `joint` cannot reach it: `joint` requires
+# each contested path's partner to be in `mine`, and here `mine` is EMPTY, so the two
+# predicates are provably disjoint rather than overlapping. That disjointness is why a green
+# case is owed on BOTH sides of the `||` -- a suite green on only one side cannot tell `||`
+# from `&&`, and `&&` would make the whole ack arm globally inert.
+pguard_ack() {
+    cp .git/index ".git/next-index-$3.lock"
+    env -u GIT_INDEX_FILE 2>/dev/null; :
+    CLAUDE_CODE_SESSION_ID="$1" CODESCOUT_INDEX_ACK="$2" \
+        GIT_INDEX_FILE=".git/next-index-$3.lock" \
+        bash "$SRC/pre-commit-foreign-index.sh" 2>&1
+    echo "EXIT=$?"
+    rm -f ".git/next-index-$3.lock"
+}
+
+new_repo
+echo base > a.txt
+echo base > c.txt
+git add -A > /dev/null 2>&1
+git commit -qm base
+echo theirs > a.txt
+CLAUDE_CODE_SESSION_ID="$B" git add a.txt
+eq "all-contested fixture: the named path is FOREIGN" "$(owner_of a.txt)" "$B"
+
+has "pathspec naming only foreign paths + correct ack -> passes" \
+    "$(pguard_ack "$A" "$B" 41)" "EXIT=0"
+has "pathspec all-contested + NO ack still refuses" \
+    "$(pguard_ack "$A" "" 42)" "EXIT=1"
+has "pathspec all-contested + WRONG sid still refuses" \
+    "$(pguard_ack "$A" "cccccccc-2222-2222-2222-cccccccccccc" 43)" "EXIT=1"
+# The comma anchors in the membership test. Without them a sid that is a PREFIX of the
+# real owner satisfies it, which is a silent widening no other case reaches.
+has "a sid that is a PREFIX of the owner does not satisfy the ack" \
+    "$(pguard_ack "$A" "bbbbbbbb" 44)" "EXIT=1"
+
+# THE BARE FORM IS NOT WIDENED, and this is one of the two cases carrying the design.
+# A bare commit takes the ENTIRE shared index rather than a set the committer named, so
+# `mine` empty there means "every path any peer staged is foreign" -- the whole-index sweep
+# this guard exists for, not a corner with no compliant route. Deleting the `pathspec`
+# conjunct is the cheapest wrong simplification and this is its only killer.
+has "BARE commit, all foreign, WITH an ack -> still refuses" "$(guard_ack "$A" "$B")" "EXIT=1"
+rm -rf "$T"
+
+# The second design-carrying case. `mine` non-empty means a compliant route still exists --
+# the guard prints `git commit -- <mine>` -- so the ack must not fire. Dropping the
+# mine-empty test makes every acked commit pass, and nothing else here would notice.
+new_repo
+echo base > a.txt
+echo base > c.txt
+git add -A > /dev/null 2>&1
+git commit -qm base
+echo theirs > a.txt
+echo mine > c.txt
+CLAUDE_CODE_SESSION_ID="$B" git add a.txt
+CLAUDE_CODE_SESSION_ID="$A" git add c.txt
+eq "mixed fixture: a.txt is FOREIGN" "$(owner_of a.txt)" "$B"
+eq "mixed fixture: c.txt is OURS"    "$(owner_of c.txt)" "$A"
+mixout="$(pguard_ack "$A" "$B" 45)"
+has "pathspec with one path of MINE + an ack -> still refuses" "$mixout" "EXIT=1"
+has "and it still offers the narrowing remedy"                 "$mixout" "git commit -- c.txt"
+rm -rf "$T"
+
 # ------------------------------------------ 6. `git apply --cached` names paths in the PATCH
 # docs/issues/archive/2026-09-01-git-apply-cached-stages-but-records-no-owner.md
 #
