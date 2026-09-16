@@ -82,6 +82,38 @@ sequence both prescribe explicit pathspecs, so the population may be small — b
 episode is a case where four sessions created untracked files simultaneously, which is exactly
 when a sweep is tempting.
 
+## Instance 2 — 2026-09-16, and it falsifies the remedy this file's own title implies
+
+The title names `git add -A`, so a reader takes the **narrow** form as the safe one. It is not.
+
+`e5691fad-9f78-4cd1-ad14-edfdd1fee41f` ran `git add docs/trackers/bug-fix-session-log.md` — one
+explicit path, no `-A`, no directory pathspec, the narrowest form
+`docs/conventions/shared-checkout-commit-sequence.md` prescribes — and staged `F-168` and
+`F-170`, neither theirs, alongside their own `F-169` / `F-171`. Both guards passed, verified at
+the predicates rather than from the incident: `scripts/pre-commit-unreviewed-content.sh:29`
+compares staged against working tree and a full stage makes them identical;
+`scripts/pre-commit-foreign-index.sh:152` reads `$git_dir/session-stage-log` and `:207` puts the
+path in `mine[]`, because the stage log records the **stager** and that was them.
+
+**Why this is worse than the `-A` case rather than a milder version of it.** Under `-A` the sweep
+crosses files the sweeper has no business in, and the remedy *"name your paths"* reaches it. Here
+the file **is** theirs to append to. Both ownership signals the system has — *did I write in this
+file* and *did I stage this blob* — correctly answer **yes**, and the entries are still not
+theirs. The per-file signal is **true and useless**, so there is no narrower `git add` available
+and no rule of that shape that helps.
+
+**The unit of ownership is the ENTRY; every instrument in the chain is path-grained.** That is
+this record's claim holding one level below where it was written. `c054113b` resolved the
+instance the only way available — four sessions' entries in one commit with authorship stated in
+the message — after `29420e72` observed that no ordering lets each session commit its own, since
+all four sections were already in the file: *"you first" and "me first" both capture, and everyone
+waiting is a deadlock.*
+
+Reported by `e5691fad` as a **near miss** — they unstaged by pathspec and nothing was lost, which
+is the only reason this is evidence rather than an incident. Recorded here rather than filed as a
+new bug: the mechanism is this file's, and a second record would have split one class across two
+paths (`bug-fix-session-log:F-171`, `issue-clusters:IC-17`).
+
 ## Fix
 
 Not fixed. Three directions, cheapest first, none costed:
@@ -125,4 +157,3 @@ sequence in `docs/conventions/shared-checkout-commit-sequence.md` § 4 already s
   `cda3afe5-17b8-4863-9f4c-9fe4eadbc17b`. Filed by
   `4eac25ba-b181-4dac-a5a1-ec88502a5bc5`, who extended this same mechanism twice today and did
   not notice this about it.
-
