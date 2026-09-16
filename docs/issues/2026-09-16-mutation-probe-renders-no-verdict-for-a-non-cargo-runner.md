@@ -1,7 +1,7 @@
 ---
 id: '6213a09765698cfa'
 kind: bug
-status: open
+status: taken
 title: 'BUG: mutation-probe renders no verdict for a non-cargo runner, and its INCONCLUSIVE text names three causes that exclude the real one'
 owners:
 - marius
@@ -11,6 +11,7 @@ tags:
 - probes
 - remedy-text
 topic: measurement instruments and their blind spots
+claimed_by: a3bf229c-658b-42f9-8f4b-794fcf0d35c7
 closed: null
 opened: 2026-09-16
 severity: medium
@@ -82,6 +83,20 @@ that sends you somewhere useless is untested by construction and no mutation rea
 
 The predicate here has 54-assertion-grade care behind it. The fourth cause is missing.
 
+### The scope was already published — two days earlier, to a surface this reader is not standing on
+
+Found while fixing, not while filing. `docs/PROBES.md` has carried the bound since
+`cf3facf6` (2026-09-14 17:05): *"SCOPE: the count keys on cargo's `^running N tests`, so
+ANY non-cargo runner — a shell suite, pytest — now renders INCONCLUSIVE always"*, naming
+the excluded population **and** the workaround. It was two days old when the six
+INCONCLUSIVE runs above were read as the probe failing.
+
+So this is not an unpublished bound, and "document it" is not the remedy. It is `CLAUDE.md`
+§ *Observer Blindness* position 3: the scope lives on the surface read when **choosing** an
+instrument, and the two surfaces the misrouted reader actually stands on — `usage()` when
+typing the command, the refusal text when reading the result — did not carry it.
+Publishing it a fourth time would be redundant; **moving** it is the fix, which is why the
+change lands in those two places and PROBES.md gains only a pointer.
 ## Classification
 
 `cluster/guard-narrower-than-its-name`. The **interface** accepts any runner; the
@@ -90,23 +105,64 @@ the wide one.
 
 ## Fix
 
-Not attempted. Two forms, and only the first is cheap.
+**Shipped 2026-09-16 — form 1, plus the scope moved to both read surfaces.** Form 2 is
+untouched and remains a design question.
 
-1. **A fourth cause in the message**, naming a non-cargo runner and what to do instead:
-   read that runner's own count line and the verdict off it. Purely additive, reds on
-   deletion under a shape assertion.
-2. **A verdict for arbitrary runners** needs either `--count-pattern <regex>` or an
-   explicit `--expect-kill` / `--expect-survive` contract the caller supplies. That is a
-   design question, not a text fix, and the header's own argument forbids the shortcut of
-   inferring a count from an unrecognised format.
+1. **The `ran_lines == 0` message in `scripts/mutation-probe.sh`** — a fourth cause naming
+   the non-cargo runner, and a closing paragraph saying what to do instead: the mutation
+   still applied exactly once and reverted, so only the verdict is missing, and it is
+   readable off that runner's own summary line against a known-clean baseline — never off
+   the exit code alone. Purely additive; the refusal predicate is untouched.
+2. **The `usage()` block** — a `SCOPE` paragraph on the `--` line, because the caller
+   choosing a runner reads that *before* the run and the refusal only *after* it.
+3. **A comment at the parse**, recording why the cause list is deliberately NOT a branch on
+   argv. The obvious improvement — print only the non-cargo cause when the command holds no
+   `cargo` token — is unsound in the direction that matters: `-- ./scripts/gate.sh` runs
+   cargo *inside* a wrapper, so a mutation that fails to COMPILE under one arrives here with
+   no `cargo` token in argv and would be told, confidently, that its runner is not cargo.
+   That is this same class one level down, and the next reader will have the idea.
+
+**What did NOT change, stated so nobody credits it:** a non-cargo runner still gets no
+verdict. Form 2 — `--count-pattern`, or an explicit `--expect-kill` / `--expect-survive`
+contract the caller supplies — is unimplemented, and the header's own argument still forbids
+the shortcut of inferring a count from an unrecognised format. What changed is that the
+reader is now told so at the moment it matters, rather than sent hunting a compile error
+that cannot exist.
 
 ## Tests
 
-`tests/mutation-probe.sh` cases 4, 5 and 6 run `-- true`, which the usage block already
-names as INCONCLUSIVE-by-design — so the suite has the *shape* of this situation and no
-assertion about the message. A guard belongs where `CLAUDE.md` says: assert the refusal text
-names a non-cargo runner among its causes. Reds on the deletion, survives rewording, and
-cannot tell you the advice is *correct* — only that the case is still addressed.
+**Case 21 of `tests/mutation-probe.sh`**, reached by CI's own `mutation-probe-tests` job
+(`.github/workflows/ci.yml:210-220`) — checked rather than assumed, since an assertion
+nothing runs is decoration.
+
+The fixture is the reported shape rather than case 13's compile-error shape: a runner
+exiting NON-ZERO with its own decisive summary (`passed=154 failed=1`). Four assertions —
+still INCONCLUSIVE, names the non-cargo cause, says where the verdict IS readable, renders
+no verdict.
+
+**Observed reds, not written assertions.** Pre-fix, 2 of the 4 were red. Per guarded site,
+mutated with the probe itself against a known-clean `50 passed, 0 failed` baseline:
+
+| mutation | result |
+|---|---|
+| delete the non-cargo clause | `49 passed, 1 failed` — KILLED |
+| reword the remedy's `summary line` | `49 passed, 1 failed` — KILLED |
+
+**And one measured SURVIVAL, which changed the test.** The first version asserted the
+ENTITY — case-insensitively, *"does this message still say cargo at all"* — which is what
+`CLAUDE.md` § *Testing Discipline* prescribes for a remedy text, because it reds on deletion
+and survives rewording. It does not hold here: the remedy paragraph two lines below the
+clause says *"On the NON-CARGO cause"*, so deleting the clause entirely left `cargo` in the
+output and the assertion green — `50 passed, 0 failed`, SURVIVED. That is the scope law
+itself: an assertion computed over a POPULATION (the whole message) cannot verify a claim
+about a MEMBER (one clause), and re-reading it returns a true sentence either way.
+**The pre-fix red did not cover it** — that red was observed for a *different* needle at the
+same site, so it was evidence for that needle and not this one.
+
+The needles are therefore phrases (`not CARGO`, `summary line`), which WILL red on a
+rewording that keeps the advice. Accepted rather than unnoticed: the message line names both
+pinned tokens and points at case 21, so a rewriter meets an instruction rather than a red
+they read as a regression.
 
 ## References
 

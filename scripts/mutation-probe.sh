@@ -90,6 +90,13 @@ mutation-probe.sh — run one mutation in an isolated tree and report kill/survi
                        trading their coverage for a reminder is the worse deal.
                        Pass --strict in any wrapper that branches on `$?`.
   --                   everything after this is the test command
+                       SCOPE — the mutation, the exactly-once guard and the revert
+                       work for ANY command; the VERDICT does not. It is parsed
+                       from cargo's '^running N tests', so a shell, pytest or node
+                       suite always reports INCONCLUSIVE however decisive its run
+                       was, and you read the result off that runner's own summary
+                       line against a known-clean baseline. docs/PROBES.md names
+                       the population this excludes.
 
   mutation-probe.sh --file src/a.rs --find 'st.defer();' --replace '' \
       -- cargo test --lib agent::build_check
@@ -317,17 +324,38 @@ restored=$(count_lit "$TARGET" "$FIND")
 # filter selects, and exit codes cannot stand in for exactly the reason above. So the
 # refusal branch is load-bearing rather than defensive — if the format ever changes,
 # this must decline to render a finding rather than fall back to one.
+#
+# THE CAUSE LIST BELOW IS ADDITIVE, AND DELIBERATELY NOT A BRANCH ON argv. The
+# obvious improvement — when the command holds no `cargo` token, print only the
+# non-cargo cause — is unsound in exactly the direction that matters: a wrapper
+# like `-- ./scripts/gate.sh` runs cargo INSIDE it, so a mutation that fails to
+# COMPILE under one reaches this branch with no `cargo` token in argv and would
+# be told, confidently, that its runner is not a cargo one. That is this same
+# class one level down — a guard narrower than its name, returning a plausible
+# answer rather than an error. Four causes the reader discriminates between cost
+# three lines of output; one confident wrong cause costs a hunt.
 ran_lines=$(grep -cE '^running [0-9]+ tests?$' "$RUNLOG" || true)
 executed=$(grep -oE '^running [0-9]+ tests?$' "$RUNLOG" | awk '{s+=$2} END {print s+0}')
 
 inconclusive=0
 if [ "$ran_lines" -eq 0 ]; then
     inconclusive=1
+    # `not CARGO` and `summary line` are PINNED by case 21 of tests/mutation-probe.sh.
+    # Reword freely around them; if you reword either token, update that case in the
+    # same commit. The needles are phrases rather than the entity "cargo" because the
+    # remedy paragraph below also says cargo, which measurably makes an entity needle
+    # green with this whole clause deleted — the reasoning is in case 21's header.
     echo "mutation-probe: INCONCLUSIVE — no test-count line in the output, so whether any" >&2
-    echo "  test ran is unknown and no verdict is available. Three causes, and they differ:" >&2
-    echo "  the mutation did not COMPILE; the command was not a test runner; or the runner's" >&2
-    echo "  '^running N tests' line has changed shape and this parse needs updating." >&2
+    echo "  test ran is unknown and no verdict is available. Four causes, and they differ:" >&2
+    echo "  the mutation did not COMPILE; the command was not a test runner; the runner is" >&2
+    echo "  not CARGO — this parse keys on cargo's '^running N tests' and on nothing else," >&2
+    echo "  so a shell, pytest or node suite always lands here however decisive its run was;" >&2
+    echo "  or the runner's '^running N tests' line has changed shape and this parse needs" >&2
+    echo "  updating." >&2
     echo "  Read the output above — it says which." >&2
+    echo "  On the non-cargo cause the mutation still applied exactly once and reverted, so" >&2
+    echo "  only the verdict is missing: read it off that runner's own summary line against" >&2
+    echo "  a known-clean baseline, never off the exit code alone." >&2
 elif [ "$executed" -eq 0 ]; then
     inconclusive=1
     echo "mutation-probe: INCONCLUSIVE — the runner started and selected 0 tests, so nothing" >&2

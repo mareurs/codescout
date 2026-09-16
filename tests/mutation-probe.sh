@@ -315,6 +315,59 @@ run "$R" "$SID" --file src/lib.rs --find 'guard();' --replace '' \
     -- sh -c 'cat src/newmod.rs 2>/dev/null; echo "running 1 test"; echo "test result: ok. 1 passed"'
 has  "20 an untracked new file is carried" "$OUT" "EDIT-IN-UNTRACKED-FILE"
 
+# --- 21. THE REFUSAL NAMES THE NON-CARGO RUNNER AMONG ITS CAUSES ------------
+# The `ran_lines == 0` branch is CORRECT here and must stay a refusal: inferring a
+# count from an unrecognised format is the `absence rendered as a value` that cases
+# 10-13 exist to forbid. What was wrong was the next sentence a reader acts on.
+#
+# For a shell suite the three causes it named were inapplicable (nothing compiles),
+# false (it IS a test runner, and it ran 155 tests) and misleading (a cargo format
+# "changed shape" that never applied to the run). Measured 2026-09-16: six mutations
+# of a Python file against `bash tests/file-provenance.sh` all read INCONCLUSIVE
+# while four were decisive kills and two decisive survivals, and the whole table was
+# read by hand off the suite's own `passed=N failed=M` line
+# (`docs/issues/2026-09-16-mutation-probe-renders-no-verdict-for-a-non-cargo-runner.md`).
+#
+# This asserts ARRIVAL, not that the advice is correct — the distinction CLAUDE.md
+# § Testing Discipline draws: a suite tests a guard's PREDICATE and never its REMEDY
+# TEXT, so the half that sends a reader somewhere useless is untested by construction
+# and no mutation reaches it.
+#
+# THE NEEDLE IS A PHRASE UNIQUE TO THE CLAUSE, AND THE OBVIOUS BETTER IDEA WAS
+# MEASURED VACUOUS. An entity needle — case-insensitively, "does this message still
+# say cargo at all" — is what CLAUDE.md § Testing Discipline prescribes for a remedy
+# text, because it reds on deletion and survives rewording. Here it does not: the
+# remedy paragraph two lines below the clause says "On the NON-CARGO cause", so
+# deleting the clause entirely leaves `cargo` in the output and the assertion green.
+# Measured 2026-09-16 with the probe itself — `--find` the clause, `--replace` a
+# cargo-free string, `-- bash tests/mutation-probe.sh`: 50 passed, 0 failed, SURVIVED.
+# That is the scope law of § Testing Discipline exactly: an assertion computed over a
+# POPULATION (the whole message) cannot verify a claim about a MEMBER (one clause),
+# and re-reading it returns a true sentence either way.
+#
+# So "not CARGO" it is — unique to the clause, reds on its deletion, and WILL red on a
+# rewording that keeps the advice. That cost is accepted rather than unnoticed: the
+# message line carries a pointer back to this case, so a rewriter is told where to
+# look instead of finding a red they read as a regression. "summary line" is the same
+# kind of needle for the remedy half, where the entity has no one-word name.
+#
+# Neither can tell you the advice is CORRECT — only that the case is still addressed.
+#
+# The fixture is the reported shape rather than case 13's compile-error shape: a
+# runner that exits NON-ZERO with its own decisive summary. Case 13 pins that a
+# non-zero exit with no count line is not a kill; this pins that the reader is told
+# why, and is not sent to hunt a compile error that cannot exist.
+#
+# Mutation that must kill this: delete the non-cargo clause from the `ran_lines == 0`
+# message in scripts/mutation-probe.sh.
+R=$(newrepo)
+run "$R" "$SID" --shared --file src/lib.rs --find 'guard();' --replace '' \
+    -- sh -c 'echo "passed=154 failed=1"; exit 1'
+has  "21 a non-cargo runner -> INCONCLUSIVE" "$OUT" "INCONCLUSIVE"
+has  "21 names the non-cargo runner as a cause" "$OUT" "not CARGO"
+has  "21 and says where the verdict IS readable" "$OUT" "summary line"
+eq   "21 and still renders no verdict" "$(printf '%s' "$OUT" | grep -cE 'KILLED|SURVIVED')" "0"
+
 echo
 echo "mutation-probe: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
