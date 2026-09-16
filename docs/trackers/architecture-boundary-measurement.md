@@ -215,11 +215,13 @@ Derived 2026-09-16 from the slice records and the bug ledger below. Deliberately
 
 ### Blocked on authorization — and on a measurement nobody has taken
 
-Neither is a next step. Each slice names its own prerequisite, and in both cases the prerequisite is the work, not a formality.
+Slice 4 is not a next step; slice 3's prerequisite is now discharged but slice 3 itself remains unauthorized.
 
-5. **Slice 3 prerequisite — audit the unresolved helper paths.** Until that audit exists there is no defensible initial migration target, only a plausible one.
+5. **[PREREQUISITE DISCHARGED 2026-09-16]** ~~Slice 3 prerequisite — audit the unresolved helper paths.~~ Audited; see *Follow-up measurements — 2026-09-16* § *Slice 3's prerequisite*. **Negative result: the unresolved routes hide no context dependency.** All three genuinely-unresolved helpers are pure string/URI functions with zero `ctx` references (control: the same method finds `ctx` in `grep.rs`'s `call`); the five unresolved `edit_file` actions dispatch in a span with zero `ctx` references; `unresolved_live_tools` is 0. So the baseline's helper-expanded footprints are complete with respect to every unresolved route, and slice 3 can be **designed** against them rather than against a population with unknown holes. **This does not authorize slice 3** and does not pick its migration target — the footprints remain lexical and scoped to the five declared populations, and complete-with-respect-to-unresolved-routes is not a call graph. Found on the way: the audit population was **5, not 28** — `86e44eba4bbdd891`.
 
-6. **Slice 4 prerequisite — a crash-injection or shared-edit parity experiment.** None was ever performed, so the file/SQLite ordering and rollback semantics the slice would consolidate are currently claims rather than observations.
+6. **Slice 4 prerequisite — a crash-injection or shared-edit parity experiment.** None was ever performed, so the file/SQLite ordering and rollback semantics the slice would consolidate are currently claims rather than observations. **Unchanged by the 2026-09-16 run** — nothing measured there touches crash recovery.
+
+7. **`86e44eba4bbdd891` — the probe counts Rust keywords as unresolved helpers.** Filed 2026-09-16 from the slice-3 audit; `cluster/addressing-without-an-escape-hatch`. Open. Fixing it does not change any conclusion recorded above — it changes the number a future reader must audit to reach them.
 
 ## Status
 
@@ -289,6 +291,93 @@ So *"classify earlier"* is the wrong instruction: one of the three genuinely is 
 **Revisit-when:** a second consumer of tool outcomes appears (an eval harness, a retry policy), or a new `OutputForm` variant is proposed — at that point the envelope type this decision rejects starts earning itself, and the pinned test is what will fail loudly rather than silently.
 
 **Confidence:** high that the seam is where it is and that the blast radius is one production caller — both read at the bytes. Medium on the mechanism for carrying `overflowed` back out. Low that it is urgent.
+
+## Follow-up measurements — 2026-09-16
+
+Run 2026-09-16, current HEAD, by `scripts/architecture-boundary-probe.py context` plus targeted checks. The probe exited **0** with `worktree_changed_during_measurement: false` — both 2026-09-13 runs exited 2, so this is the first run whose source basis is not disputed by a mid-run HEAD move.
+
+### 1. Missing-symbol latency — repeated, and the diagnosis it was reserved for is FALSIFIED
+
+The baseline recorded one missing-target edit at **134,088 ms** against a following successful edit at 156 ms, and correctly declined to diagnose it. What was owed was *"repetition with separated startup/miss costs"*. Both arms below spawn a **fresh server process** so startup is paid inside the measurement rather than assumed away.
+
+| population | call | n | median | range |
+|---|---|---:|---:|---|
+| 2-file fixture | cold HIT | 2 | 43.2 ms | 33.9–43.2 |
+| 2-file fixture | cold MISS | 2 | 37.9 ms | 34.3–37.9 |
+| 2-file fixture | warm (hit or miss) | 8 | ~1 ms | 0.8–1.3 |
+| full workspace | cold MISS | 3 | 3,381.6 ms | 3,245.7–3,627.9 |
+| full workspace | warm HIT | 3 | 1,819.1 ms | 1,803.0–1,823.3 |
+| full workspace | warm MISS | 3 | 1,647.1 ms | 1,636.0–1,673.6 |
+
+**A miss is not more expensive than a hit, at either scale.** Cold: 37.9 vs 43.2 ms. Warm on the full workspace: 1,647 vs 1,819 ms — the miss is marginally *faster*. The implied "missing-target lookups are slow" reading has a measurement against it now, in both directions.
+
+**Startup is real and bounded:** ~1.7 s on the full workspace, ~40 ms on a 2-file crate. **The 134,088 ms figure is not reproduced at any scale tested** — the largest single reading across every arm is 3,627.9 ms, ~37× smaller.
+
+**What this does NOT establish, stated because the gap is the same shape as the original error:** it does not explain the 134 s. Two variables are untested — contention on a *shared* MCP instance serving six sessions (every run here used a dedicated fresh process) and a cold rust-analyzer **disk** cache (these runs almost certainly hit a warm one). So the outlier is un-reproduced, not explained, and nothing here licenses calling the original reading wrong.
+
+**The repetition caught one of its own.** An n=1 pass of the workspace arm returned **8,679 ms** for a warm MISS — 5× the hit beside it, and exactly the shape that would have justified the original diagnosis. It did not survive n=3 (1,636–1,674 ms). Had that arm been reported at n=1 it would have *confirmed* the hypothesis the full run falsifies.
+
+### 2. Unresolved edit_file action footprints — resolved, and the instrument's scope is why they looked open
+
+Counts are unchanged at current HEAD: **67 action rows, 49 `textual_branch`, 5 `unresolved`, 13 `no_advertised_action_enum`** — identical to 2026-09-13.
+
+All five unresolved rows are `edit_file`'s `replace`, `insert_before`, `insert_after`, `remove`, `edit`. **They are dispatched in code**, at `src/tools/markdown/edit_markdown.rs:270` and its siblings, inside `plan_section_edit` (`:125-334`), and enumerated as `SECTION_EDIT_ACTIONS` at `:67`. The probe could not see them because its branch scan is **same-file** and the dispatch lives in a different module from `src/tools/edit_file/mod.rs`.
+
+**Context footprint: zero.** `plan_section_edit` spans lines 125–334 and contains **no `ctx` reference**. Every one of the file's 11 `ctx` occurrences sits at line 1376 or later, inside `pub(crate) async fn edit(input, ctx)` — the tool entry point the probe already scans. So the five actions add no `ToolContext` read that the baseline missed.
+
+### 3. Merge and rename characterization — the rename axis closes, the merge axis does not
+
+Same frozen window, `23adef79`, 500 SHAs.
+
+- **Merges in window: 5.** Confirms the baseline figure exactly. The probe still does not expand merge-parent diffs, so that bound is unchanged.
+- **Renames of a tracked `.rs` path in window: 0.** With a **control** — the same detector finds **80** renamed paths of other extensions in the same window, and fires `R053` on a known `.md` rename — so the zero is a measurement, not a dead pattern.
+
+**Consequence: renames cannot have distorted the per-population co-change counts**, because no `.rs` file was renamed in the window and the probe's unit is tracked-`.rs` paths. The historical section can be read without a rename caveat. The **merge** caveat stands unchanged.
+
+**A counting trap worth recording, because it fires silently.** `git rev-list --max-count=500 --merges <sha>` returns **24** — `--max-count` limits the number of *merges emitted*, not merges *within the first 500 commits*. The in-window figure needs an intersection against the window list, which gives 5. The wrong form returns a plausible number ~5× too large and no error.
+
+### 4. Widening the frozen population — deliberately NOT done
+
+The tracker gates this as *"only as a separately versioned measurement"*, and that gate is correct: every total above is scoped to the five hand-drawn populations, so a widened population is a new baseline rather than a better one. Not attempted.
+
+### A new probe defect this run surfaced — `unresolved_same_file_helpers` is 71% Rust keywords
+
+The probe reports **28** unresolved same-file helpers across 15 tools. **20 of the 28 are not helpers at all** — they are Rust syntax caught by an identifier regex:
+
+| reported "helper" | what it actually is | tools affected |
+|---|---|---:|
+| `let` | `let (a, b) = …` destructuring | 15 |
+| `return` | `return (…)` | 1 |
+| `cfg`, `derive` | attribute macros | 2 |
+| `drop` | `std::mem::drop` | 1 |
+| `any` | `cfg(any(…))` / `Iterator::any` | 1 |
+
+Cause, at `scripts/architecture-boundary-probe.py:809`: `elif "ctx" in body and helper not in {"if", "match", "while", "for"}` — an **enumerated four-keyword denylist over an open namespace**, the `IC-6` shape. Verified: `let` has zero `fn` definitions anywhere in `src/`, and `let (` destructuring is present in the scanned files.
+
+Of the 8 remaining, 3 are **local closures or `&dyn Fn` parameters** — `plan_path` (`edit_code.rs:410`), `collect_docstrings` (`list_overview.rs:216`), `name_ok` (`query.rs:56`) — whose bodies are inline in the enclosing function the probe already walks, so their `ctx` reads are captured and flagging them is double-counting.
+
+**The genuine population is 5 `(tool, helper)` pairs over 3 names**, each unresolved for the right reason — a name collision with exactly two definitions, so the probe correctly declines to guess:
+
+| helper | definitions | tools |
+|---|---|---|
+| `uri_to_path` | `src/fs/mod.rs:366`, `src/lsp/client.rs:41` | edit_code, references, symbol_at |
+| `leading_ws` | `src/tools/markdown/edit_markdown.rs:1143`, `src/util/text.rs:36` | edit_file |
+| `count_lines` | `src/tools/command_summary.rs:451`, `src/util/text.rs:14` | run_command |
+
+So the audit population slice 3 was waiting on is **5, not 28** — the instrument inflated it 5.6×.
+
+### Slice 3's prerequisite — DISCHARGED, with a negative result
+
+Slice 3 is blocked on *"audit the unresolved helper paths before selecting the initial migration."* Audited, and the answer is that **the unresolved routes hide no context dependency at all**:
+
+- All six definitions of the three genuinely-unresolved helpers take a `&str` or a URI and return a value. **Zero `ctx` references** in any of them. Control: the same method finds `ctx` in `grep.rs`'s `call`, so the zeros are measurements.
+- The five unresolved `edit_file` actions dispatch in a span with **zero `ctx` references** (§ 2).
+- `unresolved_live_tools` is **0** — every advertised tool resolved to source.
+
+**Therefore the helper-expanded `ToolContext` footprints in the 2026-09-13 baseline are complete with respect to every unresolved route.** No tool reads a context field the baseline failed to attribute, and the capability buckets do not move.
+
+**What this licenses, precisely:** slice 3 may now be *designed* against the recorded footprints rather than against a population with unknown holes. **It does not authorize slice 3** and does not settle its migration target — the footprints are still lexical, still scoped to the five declared populations, and a complete-with-respect-to-unresolved-routes claim is not a call-graph.
+
 ## Bounded baseline and verdict — 2026-09-13
 
 **Status:** review evidence collected; recommendations below are proposals, not approved runtime changes.
