@@ -81,6 +81,20 @@ So the joins were introduced by the writes, not inherited. Repairing them with `
 and a trailing `\n` in `new_string` worked on all four, which is the second half of the same
 discrimination: the byte is representable, and `replace` is what drops it.
 
+### Independently reproduced 2026-09-16 — published because a confirmation is a DENOMINATOR
+
+Not a second catch, and recorded as such. Session `a3bf229c` hit this while fixing the
+mutation-probe non-cargo-runner bug: one `doc(action="update")` call carrying two
+`body_edits` entries with `action: "replace"` (`## Fix`, `## Tests`), after which **both**
+following headings — `## Tests` and `## References` — had lost their preceding blank line.
+The replaced sections' own content was intact and the heading map read back correctly, so
+neither the response nor a re-read named it; `cat -A` on the boundary did.
+
+Two details this adds rather than restates. It fires **per replaced section**, not once per
+call — two replaces produced two damaged boundaries in a single write. And `action: "edit"`
+with `old_string`/`new_string` does **not** exhibit it: the repair was two `edit` calls
+appending a newline, which makes the workaround this file already names a confirmed one
+rather than an assumed one.
 ## Hypotheses tried
 
 1. **The file was already malformed.** **Refuted** by the `git show HEAD` control above.
