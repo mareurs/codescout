@@ -211,6 +211,27 @@ worth.
    `wait` was performable there and cleared it, because only one of the two parties was
    blocked. It is this same empty intersection for an instant, not the permanent one this file
    documents.
+
+   **WITNESS, 2026-09-16 — the same pattern is ungated one layer up and carries real load.**
+   `CODESCOUT_PUSH_ACK` in `scripts/pre-push-foreign-session-guard.sh` is this design already:
+   name the other authors, proceed on your OWN operator's authority rather than theirs, and
+   record what was done. It is gated on nothing but naming the sids, and it carried a single
+   push of **36 commits across 7 sessions** in one operation, with every reachable author
+   notified; the pushing session's operator authorised it. So the pattern is not what is in
+   doubt — an ack that names its other parties is load-bearing at a gate that lets it fire.
+   Direction 6 asks for that same shape at the index layer, where `joint` prevents it.
+
+   **Two bounds on what the witness licenses, stated because it would otherwise be read wider.**
+   The form used was the NAMED-SIDS one, re-derived from the range by the pushing session rather
+   than pasted from the guard's own list — **not** the `all` wildcard. `all` does exist at that
+   gate (`:83`, `:117` sets `ack_is_wildcard=1`), and its own history argues for naming instead:
+   the arm removed at `:111` was `[ "$_a" = "all" ] && { ack_matched="all"; return 0; }`, a
+   correct answer to *"is this sid authorised?"* that accumulated nothing for *"who is owed a
+   notification?"* — so `all` published every foreign session's work and told none of them, on
+   the ack path whose blast radius is largest. Second bound: the authority was one operator's
+   decision on one push. **No reasoning is attributed to them** — the pushing session reported
+   the trade-off and did not ask why, and putting a rationale in an operator's mouth is `IC-24`'s
+   shape, a value correct in one frame published under a name that states another.
 ## Workarounds
 
 **One, and the second thing this section used to recommend is now measured WRONG.**
