@@ -6,7 +6,7 @@ owners: ["marius"]
 tags: ["embeddings", "retrieval", "docker", "gpu"]
 topic: embedder stack ops
 entry_prefix: ["F", "W"]
-entry_high_water_F: 8
+entry_high_water_F: 9
 entry_high_water_W: 4
 ---
 
@@ -73,6 +73,7 @@ entry_high_water_W: 4
 | F-6 | 2026-09-15 | high | build-provenance | open | A rebuild is not a rebuild of what you merged — `cargo rb` on a tree behind origin exits 0, updates mtime, and ships the old binary |
 | F-7 | 2026-09-16 | high | claim-scope | open | A value that is CORRECT about a question you were not asked — re-verification returns the same correct value, so "verify harder" is a no-op |
 | F-8 | 2026-09-16 | med | observer-blindness | open | Authored a class's tell and tripped it 3h 25m later — no instrument ran, so there was nothing to re-derive and no control to fire |
+| F-9 | 2026-09-16 | high | claim-scope | open | Every wrong claim in a five-instance day asserted an ABSENCE — the first testing law (monotone-under-removal) applied to claims, not tests |
 
 ## Wins Index
 
@@ -811,6 +812,86 @@ claim subsumes the other:**
   over `/proc` glob order takes the N **oldest** and re-derivation returns the same wrong
   answer with the same confidence. **Theirs decides whether re-derivation is a remedy;
   mine says the error is not excused by its direction.**
+
+## F-9 — A published absence is monotone under its own falsity — the first testing law, pointed at claims
+
+**Valid:** dated 2026-09-16
+
+**Status:** open · **Severity:** high · **Category:** claim-scope
+
+**Observed:** Five wrong claims across two sessions in one day, and **every one asserted
+an absence.** Neither session got a positive badly wrong in the same way. The direction
+is the finding.
+
+| claim | reality | reached |
+|---|---|---|
+| *"There is no tracker, plan, or roadmap entry for it — I checked"* | an `active` spec decides **both** the reporter's questions, with rationales | **GitHub #16 — outside this machine** |
+| *"The false record was never public"* | it was; `grep -c` with mangled backtick escaping returned `0` for a line `grep -n` printed two commands later | nearly my operator's decision |
+| *"`src/agent/build_check.rs` does not exist"* | a 49 KB wired module, one `ls` away | `9e022ef0`, internal |
+| *"We have not corresponded today"* | we had, twice, and the record was in the asserter's own context | `9e022ef0`, to me |
+| *(third, `9e022ef0`'s own)* | — | internal |
+
+**THIS IS NOT A NEW MECHANISM. It is `CLAUDE.md` § *Testing Discipline*'s FIRST law,
+applied to a population it was never pointed at.** Verified at `CLAUDE.md:151` rather
+than recalled:
+
+> Absence assertions (`is_empty()`, `!exists()`) are monotone under **removal** — a dead
+> mechanism produces exactly the silence they assert.
+
+An agent asserting *"there is no tracker entry"*, *"no mechanism exists"*, *"we have not
+corresponded"* is making an **absence assertion**, and it is monotone under **its own
+falsity**: the world where the thing exists and the world where it does not produce an
+*identical experience for the asserter* — silence, no contradiction, nothing downstream.
+The law explains why a **test** cannot catch it. These five say the same structure
+governs the **claims we publish**, where there is no suite at all and therefore not even
+a red to miss.
+
+**The asymmetry, which is why this is worth separating from the wrong-value classes.** A
+wrong **positive** fails loudly because the world objects — you go to use the thing and
+it is not as claimed. A wrong **negative** has nothing downstream depending on it, so it
+simply sits there being wrong. That is not a difference in care; it is a difference in
+what the error is coupled to.
+
+**Distinct from the three already in this ledger, and the separation decides the
+remedy:**
+
+| entry | the claim was | why it survived |
+|---|---|---|
+| `F-7` | **correct**, about another question | re-verification returns it unchanged |
+| `W-4` | unsupported, but **an instrument ran** | a control could have fired and did not |
+| `F-8` | asserted with **no instrument at all** | nothing to re-derive |
+| **this** | an **absence**, no instrument | narrower than `F-8`: it supplies *why* nothing running is specifically undetectable |
+
+`F-8` records *that* nothing ran. This records *why that is fatal for a negative
+specifically*, which `F-8` cannot say.
+
+**REMEDY, and the law already prescribes its shape — this is the one entry today that
+ships a runnable one.** *"Ask which direction each test is monotone under, and mutate the
+other way."* For a claim: **before publishing an absence, run the instrument that would
+return the thing if it existed.** `ls` the module. `grep` the transcript. `git show` the
+other ref. Not *"check harder"* — a specific, opposite-direction query, chosen because it
+is the one that can come back non-empty.
+
+**Blast radius is not symmetric, and the tally must not read as though it were.**
+Contributed by `9e022ef0` against their own interest: their three are internal and were
+noticed same-day. Mine on GitHub #16 is worse than all three together — public, to a
+reporter who had audited the code correctly, and *"nobody has considered this"* is the
+single answer that makes someone stop looking. It is also the only one of the five that
+left this machine.
+
+**Attribution, split because the halves were earned differently.** The monotonicity
+framing — that this is the first testing law pointed at claims — is `9e022ef0`'s, and it
+is what makes the entry cheap: it inherits a derivation instead of needing one, and lands
+on a section every session already reads. They declined credit for the asymmetry itself,
+saying they noticed three instances and that *"a wrong positive fails loudly because the
+world objects; a wrong negative has nothing downstream depending on it"* was mine, named
+back at them in a usable form. Recorded their way.
+
+**Filed late and deliberately.** Both of us held it rather than write it: each had told
+our own operator the correspondence had reached falling marginal value, and filing
+unilaterally would have been deciding an attention budget already declined. It exists
+because one operator said continue — not because two sessions agreed it was good, which
+is the shared-blind-spot condition this ledger keeps refusing to treat as corroboration.
 
 ## Template for new entries
 
