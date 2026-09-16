@@ -107,6 +107,31 @@ jobs:
           git config --global init.defaultBranch master
       - run: bash tests/pre-push-foreign-session-guard.sh
 
+  # ITS OWN JOB, for the same reason as the one above rather than a new one: `shell-tests`
+  # is the known-flaky lane, and a suite whose assertions are meant to read as verdicts
+  # cannot live where reds get attributed to whoever pushed last. Kept out of
+  # `push-guard-tests` too, since that job's name would then describe half of what it runs.
+  #
+  # WHY IT IS WIRED AT ALL. `scripts/rb.sh` guards a defect whose entire signature is that
+  # every available signal reports success — `cargo rb` exits 0, the binary's mtime moves,
+  # the symlink resolves, `--version` is unchanged by the merge so it discriminates
+  # nothing (embedder-stack-ops-session-log:F-6). A guard for that class is worth exactly
+  # what its discriminating power is worth, and an assertion nothing runs is decoration
+  # however carefully written — CLAUDE.md § Testing Discipline, *loudness is a property of
+  # a PATH*. The suite's own controls are the load-bearing half: mutating the guard to
+  # refuse unconditionally left **27 of 31 rows green**, and only the ALLOW rows caught it.
+  rb-guard-tests:
+    name: rb.sh stale-tree guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Identify a committer (the suite builds throwaway git repos and clones them)
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name  CI
+          git config --global init.defaultBranch master
+      - run: bash tests/rb-guard.sh
+
   # ITS OWN JOB, and the reason is the reverse of the two above: this suite is the ONLY
   # automated evidence for a guard CI structurally cannot run. `id = sha256(ABSOLUTE
   # path)` and the librarian catalog is machine-wide, so a runner mints different ids
