@@ -1,7 +1,7 @@
 ---
 id: '7f0ebb4edab5e82b'
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: schema v13 dropped artifact_vec, an older binary re-created it from schema.sql, and v13 is one-shot so nothing will drop it again'
 owners:
 - marius
@@ -207,30 +207,35 @@ possible and pointless while any pre-`cbbfb7be` binary can still open the file.
 
 ## Resume
 
-Ruling made (§ *Fix*, option 3). What is left is the check itself, in
-`src/librarian/tools/doctor.rs`: a `Check` variant asserting that no object named by a past
-retirement `DROP` is present at or above the `schema_version` that dropped it, seeded with
-`artifact_vec` + `artifact_vec_cascade_delete` at v13.
+**Ruling implemented — option 3 shipped.** `a050d1d3`, patch-id
+`4229e0639bab56eec5308cdbe7dd347d8ab0614f`. Gate `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, with the
+three new test names read out of the DEFAULT lane rather than a total, since the lean lane
+compiles no librarian code.
 
-Two things to settle while writing it, both of which this file has an opinion about:
+**`mitigated` rather than `fixed`, and the distinction is the ruling's own.** The divergence
+still happens — an older binary still re-creates what a retirement dropped, and a one-shot
+migration still never drops it again. What changed is that it is now *visible*: § *Fix*
+established that prevention is unavailable at the layer that would have to ship it, because
+the re-creation is performed by the OLD binary. Reporting was the only remedy whose audience
+is the affected population.
 
-- **Defect or informational?** `Check::is_informational`'s stated bar is that *the emitted
-  row's own first word tells a reader it is not a defect, and there is no edit to the repo
-  that would make it stop firing*. There is no such edit here — the repair is a `DROP`
-  against a machine-local database, not a change to this repo — which argues informational.
-  Against that, `claim_unresolvable_here`'s precedent turns on the reader having to **go
-  check another host** first, which does not apply: this is checkable and fixable right here.
-  Read that doc comment before choosing. It silently moves `summary.defects` and the CLI exit
-  code, and by its own admission neither the compiler nor `summary_total_partitions_by_check`
-  can notice.
-- **The retirement list needs one home.** Deriving it by grepping the ladder for `DROP`
-  re-finds every rebuild-in-place and is the wrong population — that is the § *Fix*
-  measurement above, and a check built on the grep would report four objects where one is
-  meant. A literal list beside the migrations, which a future retirement must append to, is
-  the shape that cannot silently under-report. **It is also an instance of this file's own
-  class if nothing checks that it was appended to**, so the list wants a test that fails when
-  a new `DROP` lands without a matching entry, not a comment asking the next author to
-  remember.
+What shipped:
+
+- `Check::RetiredObjectStillPresent`, **informational** — the row opens with
+  `informational:` and no edit to this repo makes it stop firing.
+- `RETIREMENTS`, a literal list (`artifact_vec`, `artifact_vec_cascade_delete`, both v13),
+  with `retirement_list_covers_every_retirement_drop` deriving the population from the
+  migration sources and asserting the list equals it — so a future retirement landing
+  without an entry reds, rather than relying on the next author to remember.
+- `scan_retired_objects`, which derives its own subject from `PRAGMA database_list` rather
+  than accepting a path, so the row cannot name a database other than the one it read.
+
+**Archive-eligible and deliberately not archived yet.** Gate green plus regression tests,
+both held. `doc(action="move")` re-keys the artifact (`id = sha256(abs_path)`) and strands
+every inbound citation of the old id until they are repointed in the same commit — and this
+file is cited from `IC-8`'s `**Members:**` line and from
+`docs/conventions/shared-checkout-commit-sequence.md`. The move is its own act with its own
+checklist, not a tail of the fix.
 ## References
 
 - `cbbfb7be` — the retirement and schema v13
