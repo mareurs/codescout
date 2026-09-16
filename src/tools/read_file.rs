@@ -300,20 +300,15 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
         .into());
     }
 
-    // @tool_* refs contain compact single-line JSON — pretty-print so
-    // start_line/end_line navigation and json_path extraction are useful.
-    let text: String = if path.starts_with("@tool_") {
-        serde_json::from_str::<serde_json::Value>(&raw)
-            .ok()
-            .and_then(|v| serde_json::to_string_pretty(&v).ok())
-            .unwrap_or(raw)
-    } else {
-        raw
-    };
-
-    // json_path navigation is only meaningful for @tool_* (always JSON).
+    // json_path navigation is only meaningful for @tool_* (always JSON), and it RE-PARSES
+    // the text it is handed — so it reads the pretty-printed form UN-expanded, and must run
+    // before `line_addressable_text` below. See that function's doc comment.
     if path.starts_with("@tool_") {
         if let Some(jp) = input["json_path"].as_str() {
+            let text: String = serde_json::from_str::<serde_json::Value>(&raw)
+                .ok()
+                .and_then(|v| serde_json::to_string_pretty(&v).ok())
+                .unwrap_or_else(|| raw.clone());
             let (content, type_name, count) =
                 crate::tools::file_summary::extract_json_path(&text, jp)?;
             let mut result = if crate::tools::exceeds_inline_limit(&content) {
@@ -347,6 +342,9 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
             return Ok(result);
         }
     }
+
+    // ONE derivation, shared with `grep`. Never inline this — see its doc comment.
+    let text = crate::tools::output_buffer::line_addressable_text(path, raw);
 
     let total_lines = text.lines().count();
     let start = optional_u64_param(input, "start_line");
@@ -1172,7 +1170,20 @@ fn format_read_file_body(val: &Value) -> String {
         .unwrap_or_else(|| content.lines().count() as u64);
 
     if content.is_empty() {
-        return insert_below_header("0 lines".to_string(), &overflow_head(val));
+        // A zero NAMES ITS SCOPE when the scope is non-empty. `0 lines` alone is worse than
+        // uninformative here: the non-empty branch below spends the same two words on the
+        // TOTAL, so one phrase would denote two quantities and an empty slice of a 157-line
+        // buffer reads as "the content is not there" — the one conclusion that is false.
+        // The total was already in the payload and already in the local above.
+        // `docs/adrs/2026-08-27-negative-results-name-their-scope.md`: name the scope when
+        // the zero is suspicious, stay silent when it is trustworthy — hence the branch
+        // rather than an unconditional suffix.
+        let header = if total_lines > 0 {
+            format!("0 lines (target has {total_lines}; requested range is past the end)")
+        } else {
+            "0 lines".to_string()
+        };
+        return insert_below_header(header, &overflow_head(val));
     }
 
     // Raw content, no per-line number prefixes (caller-supplied ranges make them
@@ -1594,6 +1605,210 @@ mod tests {
         assert!(
             body.contains("line 150") && body.contains("line 160"),
             "buffer midpoint read should include lines 150-160, got: {body:?} from {result}"
+        );
+    }
+    /// A `@tool_*` payload whose JSON carries a multi-line string VALUE — the only shape
+    /// where `grep`'s expansion and `read_file`'s raw numbering can diverge. Flatten it and
+    /// every test below passes against the UNFIXED code.
+    fn multiline_tool_payload() -> String {
+        let filler: Vec<String> = (1..=40).map(|i| format!("    let v{i} = {i};")).collect();
+        json!({
+            "symbols": [{
+                "name": "demo",
+                "body": format!(
+                    "fn demo() {{\n{}\n    MARKER_DEEP_INSIDE\n}}",
+                    filler.join("\n")
+                ),
+            }]
+        })
+        .to_string()
+    }
+
+    /// First `"line"` value anywhere in a grep result, so the assertion does not depend on
+    /// whether grep grouped into `file_groups` (context_lines == 0) or returned a flat
+    /// `matches` array.
+    fn first_line_number(v: &serde_json::Value) -> Option<u64> {
+        match v {
+            serde_json::Value::Object(m) => m
+                .get("line")
+                .and_then(|x| x.as_u64())
+                .or_else(|| m.values().find_map(first_line_number)),
+            serde_json::Value::Array(a) => a.iter().find_map(first_line_number),
+            _ => None,
+        }
+    }
+
+    /// `grep` and `read_file` must address ONE `@tool_*` handle in ONE coordinate space.
+    ///
+    /// `grep_in_buffer` materializes escaped newlines before matching — the fix for
+    /// `docs/issues/archive/2026-07-01-grep-buffer-multiline-string-value-collapses.md`,
+    /// and correct for matching — so it numbers the EXPANDED text. `read_from_buffer`
+    /// numbered the raw pretty-printed JSON. One handle, two line spaces, and no field said
+    /// so: a citation BELOW the raw line count resolved to a different line and SUCCEEDED,
+    /// one above it returned `0 lines`. The silent half is the expensive one.
+    ///
+    /// LOAD-BEARING: the `\n` is inside a JSON string value (see `multiline_tool_payload`).
+    /// The flat-buffer control below is INERT for this defect and pinned as such — the two
+    /// move together or the pair stops discriminating.
+    ///
+    /// BUG docs/issues/2026-09-15-grep-and-read-file-number-one-buffer-handle-differently.md
+    #[tokio::test]
+    async fn grep_and_read_file_number_one_tool_handle_identically() {
+        let ctx = test_ctx().await;
+        let buf_id = ctx
+            .output_buffer
+            .store_tool("symbols", multiline_tool_payload());
+
+        let hit = crate::tools::grep::Grep
+            .call(
+                json!({ "pattern": "MARKER_DEEP_INSIDE", "path": buf_id.clone() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let cited = first_line_number(&hit)
+            .unwrap_or_else(|| panic!("grep reported no line for the marker: {hit}"));
+
+        let back = ReadFile
+            .call(
+                json!({ "path": buf_id.clone(), "start_line": cited, "end_line": cited }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let body = back.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            body.contains("MARKER_DEEP_INSIDE"),
+            "grep cited line {cited} of {buf_id}; read_file must resolve the SAME line there, \
+             got {body:?} from {back}"
+        );
+    }
+
+    /// CONTROL, and **inert for the coordinate split by construction** — do not credit it
+    /// with covering that defect. A `@tool_*` payload with no multi-line string value numbers
+    /// identically before and after the fix, so this is green either way. Its job is the
+    /// other direction: if it ever reds, the fix broke ordinary flat-buffer addressing.
+    #[tokio::test]
+    async fn a_flat_tool_buffer_numbers_identically_and_witnesses_nothing() {
+        let ctx = test_ctx().await;
+        let flat = json!({ "rows": (1..=30).map(|i| json!({ "n": i })).collect::<Vec<_>>() });
+        let buf_id = ctx.output_buffer.store_tool("rows", flat.to_string());
+
+        let hit = crate::tools::grep::Grep
+            .call(
+                json!({ "pattern": "\"n\": 17", "path": buf_id.clone() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let cited = first_line_number(&hit)
+            .unwrap_or_else(|| panic!("grep reported no line on the flat buffer: {hit}"));
+
+        let back = ReadFile
+            .call(
+                json!({ "path": buf_id.clone(), "start_line": cited, "end_line": cited }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let body = back.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            body.contains("17"),
+            "a flat buffer must round-trip a grep citation, got {body:?} from {back}"
+        );
+    }
+    /// `json_path` must read the UN-EXPANDED text, because it RE-PARSES what it is handed.
+    ///
+    /// `line_addressable_text` materializes escaped newlines, which puts a bare newline
+    /// inside a JSON string literal and makes the text invalid JSON. Sharing one `text`
+    /// between the two consumers — the obvious tidy-up, since they now sit a few lines
+    /// apart and look like duplicates — silently breaks every `json_path` read on a buffer
+    /// holding a multi-line value.
+    ///
+    /// LOAD-BEARING: `multiline_tool_payload`'s `body` contains `\n`.
+    /// `read_file_buffer_json_path_array_element_returns_value` above uses a single-line
+    /// body and stays GREEN under that exact mutation — it is not a witness for this and
+    /// must not be credited as one.
+    #[tokio::test]
+    async fn json_path_still_resolves_when_a_sibling_value_is_multi_line() {
+        let ctx = test_ctx().await;
+        let buf_id = ctx
+            .output_buffer
+            .store_tool("symbols", multiline_tool_payload());
+
+        let result = ReadFile
+            .call(
+                json!({ "path": buf_id, "json_path": "$.symbols[0].name" }),
+                &ctx,
+            )
+            .await
+            .expect("json_path must not fail on a buffer whose sibling value is multi-line");
+
+        let rendered = format!("{result}");
+        assert!(
+            rendered.contains("demo"),
+            "json_path must resolve the name beside a multi-line body, got {rendered}"
+        );
+    }
+    /// `@cmd_*` / `@file_*` buffers are RAW TEXT and must be served byte-for-byte, even when
+    /// their bytes happen to parse as JSON.
+    ///
+    /// `line_addressable_text`'s handle-kind guard is the only thing preventing otherwise: a
+    /// `curl` or `gh api --json` capture is valid JSON, and without the guard it would be
+    /// pretty-printed AND newline-expanded — so `read_file` would serve a reformatted
+    /// document instead of what the command actually wrote, and the `sed -n 'N,Mp' @cmd_x`
+    /// callers that `read_file_err_handle_reads_stderr_not_stdout` protects would address
+    /// different lines.
+    ///
+    /// LOAD-BEARING: the content must be VALID JSON *and* carry an escaped `\n`. Plain text
+    /// fails `from_str` and falls through to the same answer, so a non-JSON fixture leaves
+    /// the guard untested — which is exactly how it came to survive its first mutation.
+    #[tokio::test]
+    async fn a_cmd_buffer_that_happens_to_be_json_is_served_raw_not_reformatted() {
+        let ctx = test_ctx().await;
+        let raw = r#"{"a":"one\ntwo","b":1}"#;
+        let buf_id = ctx
+            .output_buffer
+            .store("curl".to_string(), raw.to_string(), String::new(), 0);
+
+        let result = ReadFile
+            .call(json!({ "path": buf_id }), &ctx)
+            .await
+            .unwrap();
+        let content = result.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        assert_eq!(
+            content, raw,
+            "a @cmd_* buffer must be served byte-for-byte, never pretty-printed or expanded"
+        );
+    }
+
+    /// An out-of-range buffer read must NAME THE SCOPE it examined rather than answer a bare
+    /// `0 lines`. On a 157-line buffer that zero is not merely uninformative, it is false in
+    /// the reader's units — the non-empty branch spends the same two words on the buffer's
+    /// TOTAL, so one phrase denotes two quantities.
+    ///
+    /// `docs/adrs/2026-08-27-negative-results-name-their-scope.md`: name the scope when the
+    /// zero is suspicious. The total was already in the payload AND already in a local on the
+    /// line above the early return.
+    #[test]
+    fn an_out_of_range_read_names_the_total_instead_of_a_bare_zero() {
+        let rendered = format_read_file(&json!({ "content": "", "total_lines": 157 }));
+        assert!(
+            rendered.contains("157"),
+            "an empty slice of a 157-line target must name the 157; got {rendered:?}"
+        );
+    }
+
+    /// The complement, so the fix above cannot be satisfied by unconditionally printing a
+    /// total: a genuinely empty target has no scope worth naming and must stay quiet. Without
+    /// this, "always add the number" passes the sibling and makes every empty file noisy.
+    #[test]
+    fn a_genuinely_empty_target_still_reads_as_a_plain_zero() {
+        let rendered = format_read_file(&json!({ "content": "", "total_lines": 0 }));
+        assert_eq!(
+            rendered.trim(),
+            "0 lines",
+            "an empty target names no scope; got {rendered:?}"
         );
     }
 
@@ -2100,28 +2315,39 @@ mod tests {
     /// both stay green with this defect present — which is why this arm is
     /// written with a fixture whose premise is asserted rather than assumed.
     ///
-    /// Real shape, measured 2026-08-29 on a live buffer: a `run_command`
-    /// envelope pretty-prints to 4 lines, of which line 3 is the entire stdout
-    /// as one JSON-escaped string, 9998 bytes wide. See
+    /// Real shape: a `run_command` envelope pretty-prints to 4 lines, of which line 3 is
+    /// the entire stdout as one JSON-escaped string. Since the two coordinate spaces were
+    /// unified behind `line_addressable_text`, a stdout CONTAINING newlines expands into many
+    /// short lines and no longer reaches this valve — so the shape that does is stdout with
+    /// no newline in it: a captured one-line API response, a base64 blob, or any `@cmd_*`
+    /// buffer, which is not expanded at all. See
     /// `docs/issues/archive/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`.
     #[tokio::test]
     async fn read_file_buffer_single_oversized_line_still_fits_the_threshold() {
+        // LOAD-BEARING SEPARATOR — a space, not `\n`. `line_addressable_text` materializes
+        // escaped newlines, so a `\n`-joined stdout becomes 1200 short lines and this fixture
+        // goes inert. That is not hypothetical: it is what the guard below caught the moment
+        // grep's and read_file's coordinate spaces were unified.
         let stdout = (1..=1200)
             .map(|i| format!("row {i:05}"))
             .collect::<Vec<_>>()
-            .join("\n");
+            .join(" ");
         let envelope = json!({ "exit_code": 0, "stdout": stdout }).to_string();
         let ctx = test_ctx().await;
         let buf_id = ctx.output_buffer.store_tool("cmd", envelope);
 
-        // Premise of the fixture, asserted rather than assumed: after
-        // pretty-printing, the payload really is ONE line wider than the budget.
-        // If a future edit makes this fixture many-short-lines, this fails here
+        // Premise of the fixture, asserted rather than assumed: in the coordinate space the
+        // production path actually addresses, the payload really is ONE line wider than the
+        // budget. If a future edit makes this fixture many-short-lines, this fails here
         // instead of silently degrading into a copy of the two tests above.
+        //
+        // DERIVED FROM THE PRODUCTION FUNCTION, not re-typed. This block used to call
+        // `to_string_pretty` itself, which made it a second implementation of the coordinate
+        // space — it kept passing while the shipped derivation moved underneath it, and the
+        // fixture guard went on certifying a premise the production path no longer saw.
         let pretty = {
             let raw = ctx.output_buffer.get(&buf_id).unwrap().stdout;
-            let v: Value = serde_json::from_str(&raw).unwrap();
-            serde_json::to_string_pretty(&v).unwrap()
+            crate::tools::output_buffer::line_addressable_text(&buf_id, raw)
         };
         let widest = pretty.lines().map(|l| l.len()).max().unwrap();
         assert!(

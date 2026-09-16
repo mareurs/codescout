@@ -969,22 +969,10 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
         )
     })?;
 
-    let text = if raw_path.starts_with("@tool_") {
-        serde_json::from_str::<serde_json::Value>(&raw)
-            .ok()
-            .and_then(|v| serde_json::to_string_pretty(&v).ok())
-            // Materialize escaped newlines inside string values (e.g. an
-            // artifact `body`) so multi-line fields become grep-able lines
-            // rather than one collapsed line. to_string_pretty splits JSON
-            // *structure* but leaves `\n` escaped inside string values.
-            // Search-only text, so the rare literal `\n`-in-data (serialized
-            // `\\n` → backslash+newline) is a cosmetically acceptable trade.
-            // Bug 2026-07-01-grep-buffer-multiline-string-value-collapses.
-            .map(|pretty| pretty.replace("\\n", "\n"))
-            .unwrap_or(raw)
-    } else {
-        raw
-    };
+    // ONE derivation, shared with `read_file`. These two drifted by exactly this
+    // `.replace()` once already; never re-inline it. See the function's doc comment for
+    // why the result must not be re-parsed.
+    let text = crate::tools::output_buffer::line_addressable_text(raw_path, raw);
 
     let (re, is_literal_fallback) = build_grep_regex(pattern, ignore_case, whole_word)?;
 

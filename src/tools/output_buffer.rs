@@ -15,6 +15,37 @@ use anyhow::Result;
 use regex::Regex;
 use tempfile::NamedTempFile;
 
+/// The ONE line-addressable coordinate space for a buffer handle.
+///
+/// `@tool_*` payloads are stored as compact JSON. Both readers pretty-print them so
+/// `start_line`/`end_line` navigation is useful, then materialize escaped newlines so a
+/// multi-line string VALUE — an artifact `body`, a captured stdout, a symbol body — becomes
+/// addressable lines instead of one collapsed line.
+///
+/// **This must have exactly one implementation, and the reason is measured.** `grep` and
+/// `read_file` derived it separately and drifted by a single `.replace()`, so one handle
+/// denoted two line spaces with no field saying so. A line cited by one tool addressed a
+/// *different line* in the other — silently, and successfully, for any citation below the
+/// un-expanded line count; `0 lines` above it. A third copy had also grown inside a test,
+/// which is what turned a two-site fix into this function.
+/// BUG `docs/issues/2026-09-15-grep-and-read-file-number-one-buffer-handle-differently.md`
+///
+/// **Search-and-address text ONLY — never re-parse the result.** Expansion puts a bare
+/// newline inside a JSON string literal, so the output is deliberately not valid JSON.
+/// `read_file`'s `json_path` branch runs *before* this, against the un-expanded pretty text,
+/// for exactly that reason; hoisting this call above it breaks every `json_path` read on a
+/// buffer holding a multi-line value.
+pub(crate) fn line_addressable_text(handle: &str, raw: String) -> String {
+    if !handle.starts_with("@tool_") {
+        return raw;
+    }
+    serde_json::from_str::<serde_json::Value>(&raw)
+        .ok()
+        .and_then(|v| serde_json::to_string_pretty(&v).ok())
+        .map(|pretty| pretty.replace("\\n", "\n"))
+        .unwrap_or(raw)
+}
+
 /// A single buffered command result.
 #[derive(Debug, Clone)]
 pub struct BufferEntry {
