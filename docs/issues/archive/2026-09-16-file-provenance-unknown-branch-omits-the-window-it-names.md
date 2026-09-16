@@ -1,7 +1,7 @@
 ---
-id: '89212e943c525d5d'
+id: 857ccb33f26c7363
 kind: bug
-status: open
+status: fixed
 title: 'BUG: file-provenance prints the window on every verdict except UNKNOWN, the one whose meaning is the window'
 owners:
 - marius
@@ -154,6 +154,49 @@ expensive *through* the word — a reader who knew the window would not be misle
 line.
 
 ## Fix
+FIXED in two commits, both halves. The second corrects the first; the plan as originally
+written is left below, because two of the corrections are about it.
+
+| commit | patch-id |
+|---|---|
+| `4077a9f7` | `ffd3107ce4a6da2de165bd0c2de0b57dd4f65220` |
+| `57bb954e` | `1282290562ad21fdbd03a9e1b8843eb900daca09` |
+
+**Half 1.** The window prints on `UNKNOWN`, lifted exactly as `hidden` was. `if floor:` is
+unchanged, so an untracked path stays silent.
+
+**Half 2.** "The one blind spot is a Bash write" is now "One blind spot", and a `LIKELY
+CAUSE:` line precedes the caveats rather than following them.
+
+**WHAT SEPARATES ROWS 2 AND 4 — the pair this file says `hidden` cannot separate.** A new
+`worktree_is_dirty()` reads git rather than the transcripts, so it shares **no blind spot**
+with the heuristics: a Bash write they miss still dirties the tree. `clean` therefore
+settles what *no record* cannot, and the clearance is dispositive rather than a hedge.
+`dirty` says the window is too narrow and sends the reader to `--all`, which is incident 2's
+actual remedy.
+
+**TWO CORRECTIONS TO THE PLAN BELOW, both earned by running the reproduction first.**
+
+1. The proposed guard `hidden == len(records)` is a **tautology inside this branch** — an
+   empty `who_set` means `in_window` and `undated` are both empty, so `hidden` always
+   equals `len(records)` here. It discriminates nothing and `records` is the whole
+   condition. Stated in a comment at the site so nobody restores it as a guard.
+2. The reproduction produced a row the *Root cause* table does not have: **tracked, DIRTY,
+   zero records** (`.codescout/audit/ripper-65e654-202609.jsonl`). `hidden == len(records)`
+   is `0 == 0` there, so the plan as written would have claimed *no session holds
+   uncommitted bytes* about a file that holds them — one false claim traded for another.
+   Requiring `records` excludes it: it now prints the window and no cause line, which is
+   correct, because with no records we know nothing.
+
+**AND THE FIRST DRAFT OF THE FIX SHIPPED AN INSTANCE OF THE DEFECT IT WAS FIXING.**
+`worktree_is_dirty()` read `git status --porcelain -- <path>` alone. For a path the repo
+does not **track** that command *succeeds and prints nothing* — byte-identical to a clean
+tracked file — so the helper answered `False` and `UNKNOWN` printed a dispositive clearance
+about a path git holds no baseline for. `ls-files --error-unmatch` is the discriminator and
+now runs first. Caught by a mutation-driven assertion rather than by reading: the docstring
+had already called the three-valued `None` load-bearing while nothing checked it. The same
+draft also claimed the floor was *"its last commit"*, which is false under `--since`; the
+clause is gone, since the floor is printed on the line above.
 
 Not attempted. Two halves, and unlike the last bug I wrote that sentence about, the cheap half
 is genuinely safe alone — it is the *same* half, not a louder version of a quieter one.
@@ -187,6 +230,43 @@ where `floor` is `None` and the silence is already correct. `if floor:` is the r
 bug is only that it sits below the `continue`.
 
 ## Tests
+DONE. `tests/file-provenance.sh` 144 → 153, with all six new assertions observed red first.
+
+Shape assertions rather than prose pins, as this section asked: `window: writes at or after`
+plus its floor **value**, `dispositive`, `too narrow`, `LIKELY CAUSE`. The fixture path
+`src/frame_probe.rs` deliberately shares no substring with any marker asserted on it — the
+constraint the `--since` section already annotates.
+
+**MUTATION EVIDENCE**, once per guarded site and re-run across every bound after the last
+change. Baseline `passed=153 failed=0`; verdicts read off the suite's own count line.
+
+| # | mutation | verdict |
+|---|---|---|
+| M1 | delete the `UNKNOWN` window print | KILLED (4) |
+| M2 | drop the `records` guard | KILLED (1) |
+| M3 | clearance fires on any known dirtiness | KILLED (2) |
+| M4 | remove the too-narrow branch | KILLED (1) |
+| M5 | an untracked path reads as clean | KILLED (1) |
+| M6 | the defensive `status` returncode branch | SURVIVED — predicted, annotated inert at the site |
+
+M2 and M5 **survived all 150 assertions** of the first draft, which is why the two cases
+that kill them exist at all; M5's survival is what exposed the tracked-path defect above.
+M6 is the third reading of `SURVIVED` — reachable by no input in the tree, annotated as
+defensive so it is not credited with coverage.
+
+**TWO THINGS THE SUITE'S OWN SHAPE CORRECTED**, recorded because each was asserted falsely
+first. `tests/file-provenance.sh:602` already runs `git init`, under a section headed *"the
+DEFAULT window derives from git, and is the load-bearing half"* — so the default floor was
+**not** unexercised, and a second fixture repo stood up on that belief has been removed. The
+belief came from a `git init` grep whose output `head -40` truncated before line 602: an
+absence read off a cap, which is this file's own verdict one namespace over. And
+`mutation-probe.sh` **does** carry uncommitted files into its worktree — verified at 154
+local / 154 isolated after a first probe that could not discriminate — so committing before
+mutating was belt-and-braces, not a requirement.
+
+`./scripts/gate.sh` → `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`. No Rust changed, so the gate
+reports that the tree is green rather than anything about this fix; the coverage claim rests
+entirely on the suite and the mutation table above.
 
 None yet. The shape a guard needs, noting that this is the half `tests/file-provenance.sh` is
 structurally weakest on: 140 assertions there are about **verdicts** — which party is named —

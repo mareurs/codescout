@@ -876,7 +876,7 @@ echo
 echo "== UNKNOWN names the frame it was computed in =="
 # The window line printed on MINE/SHARED/PEER and NOT on UNKNOWN -- the one verdict whose
 # entire meaning IS the window. Four readers misread it in one day:
-# docs/issues/2026-09-16-file-provenance-unknown-branch-omits-the-window-it-names.md.
+# docs/issues/archive/2026-09-16-file-provenance-unknown-branch-omits-the-window-it-names.md.
 # Three read a clean file's UNKNOWN as an attribution failure; one could not price the gap
 # without a second --all run, which then named three LIVE peers.
 #
