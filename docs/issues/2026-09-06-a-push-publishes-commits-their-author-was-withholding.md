@@ -741,6 +741,47 @@ there is nowhere to put it — which is this file's Summary, instantiated at the
 information existed and was current. The hold was about **who publishes**, never about
 readiness: all five were gated green before it was taken.
 
+**A SECOND UNREACHABLE AUTHOR, LATER THE SAME DAY — and the difference from `aa272bed` is
+the whole point.** At 13:42Z `f5f48b42` pushed `afcf8c14..852fa5e7` (9 commits, 4 sessions,
+named ack). `f0b1a4c7-e991-4478-bf22-b088483b6821` holds 2 of them (`84936cf2`, `5b4600dd`)
+and **had exited**: pid `327926` gone, and a full unfiltered enumeration at **13:43:27Z** over
+20 sockets — 18 live across 3 profiles, 2 stale — contains no trace of the sid. Re-checked at
+**14:11:55Z**: still absent.
+
+`aa272bed` was already absent when its range formed. `f0b1a4c7` **was not**. They were in
+active correspondence with `f5f48b42` about a push *twenty minutes earlier*, replied, and were
+gone before the next one. So the file's claim needs widening: it is not only that a perfect
+notification protocol cannot reach an author who is gone — **the author need not be gone when
+the obligation is incurred.** Presence at commit time, at review time, even at the moment of
+the last exchange, establishes nothing about presence at publish time, and the window is
+minutes.
+
+**AND THE OBLIGATION RUNS IN BOTH DIRECTIONS, which nothing above covers.** Contributed by
+`29420e72`, who held the half `f5f48b42` could not see. `f0b1a4c7` had sent them a substantive
+question hours before exiting — whether a finding was a fourth instance of a promoted
+`CLAUDE.md` law — explicitly asking for rejection if it read as a stretch, *"a class stretched
+to fit a fourth is worse than a class at three"*. They waited. `29420e72` worked out the
+answer (**no** — it belongs under the population-vs-member law, which `CLAUDE.md` states
+immediately after and which opens *"the laws above will not catch it"*), composed the reply,
+sent it to `327926.sock`, and got **ENOENT**. The session had exited mid-composition.
+
+So the loss is not only *"we published their work and cannot tell them"*. It is also *"they
+asked us a question, waited hours, and cannot receive the answer"* — **a debt incurred toward
+themselves that died with their session.**
+
+**This is a constraint on § *Fix*, not colour.** The *"cannot publish → do not commit"*
+candidate reaches the publication half and **has no analogue for an unanswered question**: no
+commit-time convention, marker or trailer can hold a reply owed to a session that no longer
+exists to receive it. A remedy evaluated only against the publication half will look complete
+and close only one of the two. Nothing notification-shaped reaches either.
+
+What was lost is the **classification**, not the work — their code fix landed
+(`src/librarian/tools/doctor.rs`, a 20,608-line file, verified present). `29420e72`
+deliberately did **not** write the finding into the law themselves: it is a `CLAUDE.md` edit,
+their operator has not asked for one, and doing it on a dead peer's behalf is the same shape as
+acting on a peer's request for an escalation. Recorded here so the judgement survives the
+session that reached it, which is the only surface that can hold it now.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** reading `git log origin/<branch>..HEAD --stat` before pushing
