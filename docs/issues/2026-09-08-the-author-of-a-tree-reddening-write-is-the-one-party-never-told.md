@@ -474,6 +474,30 @@ Reported by sessionId `9403d62d`, who tripped the identical check 113 minutes ea
 both lines already sitting in their own § *Fix* prose — so the pair was never what the check
 wanted, the **surface** was. Their repair at `8273331d` is the shape followed here.
 
+
+**The alternative discharge, and a correction to `e303dfa6`'s commit message.** A terminal
+record that genuinely closed with **no commit** declares `no_fix_commit:` in frontmatter
+instead of this section — documented with a worked example in
+`src/prompts/guides/tracker-conventions.md`, and pinned by
+`tracker_conventions_states_the_fix_anchor_grammar_doctor_enforces` (`src/prompts/mod.rs:2100`),
+which asserts all four literals of the grammar: `## Fix provenance`, `- **SHA:**`,
+`- **patch-id:**`, `no_fix_commit`.
+
+`e303dfa6`'s message called that field *"a bound living in the enforcement layer, published
+to an audience that does not read it"*, on the strength of
+`grep -c no_fix_commit docs/issues/_TEMPLATE.md` returning **0**. The grep was right and the
+conclusion was false: the field is documented and gated, on the surface `CLAUDE.md`
+§ *Bug Tracking* actually routes a filer to — `get_guide("tracker-conventions")` § *Bug
+files* — while the template is a body skeleton and was never the route. The gap I thought I
+had found was found and closed on 2026-09-14
+(`docs/issues/archive/2026-09-14-the-fix-anchor-grammar-is-enforced-by-doctor-and-defined-in-no-guide.md`).
+
+Recorded here because a commit message cannot be amended on a shared branch, and because the
+error is `embedder-stack-ops-session-log:F-9`'s class with an unusually clean shape: an
+**absence** published after grepping ONE surface of a two-surface population, where the
+surface I skipped was named in the document I had open. *Before publishing an absence, run
+the instrument that would return it.* Corrected by sessionId `9403d62d`, who also withdrew
+their own opposite error in the same exchange — they had said the template carried the field.
 ## Tests added
 
 None yet — nothing built to test.
