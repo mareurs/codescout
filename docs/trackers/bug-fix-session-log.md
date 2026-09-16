@@ -16943,9 +16943,28 @@ sixth of it.
 
 **Rests on:** the retraction chain in
 `docs/issues/archive/2026-09-16-file-provenance-unknown-branch-omits-the-window-it-names.md`;
-`3ab47393`; `F-166`, `F-167`, `F-169` for the sibling class (an **absence** asserted from a
-truncated pipeline) — same root, *a checkable claim published without running the available
-check*, different selector.
+`3ab47393`; `F-166`, `F-167`, `F-169` as this session's instances of the sibling class.
+
+**The sibling class is promoted, and its remedy does NOT reach this entry** — recorded so
+this is not read as a worse re-derivation of a rule already in force.
+`embedder-stack-ops-session-log:F-9` (`4006e9c6`, high, `claim-scope`) is the general form:
+*a published absence is monotone under its own falsity*, being § *Testing Discipline*'s first
+law pointed at claims rather than tests, with the remedy **"before publishing an absence, run
+the instrument that would return it"**. That covers `F-166`/`F-167`/`F-169` and the
+`head -40` truncation exactly.
+
+It does not cover this one, and the reason is the whole distinction: **here the instrument WAS
+run, and returned a correct answer to a different question.** There was no absence to probe
+for and nothing the opposite-direction query would have surfaced —
+`origin/experiments..HEAD` answered its own question perfectly. So F-9's asymmetry argument
+(a wrong positive fails loudly because the world objects) does not apply either: a mislabelled
+count is a wrong *positive* that still fails silently, because the world has no opinion about
+which noun you attached to a true number. Absence-probing is the remedy for one and naming the
+window is the remedy for the other; neither substitutes.
+
+**Cited in qualified form deliberately.** `## F-9` exists in **14** ledgers under
+`docs/trackers/` — verified by `grep -rln '^## F-9 '` — so a bare `F-9` is `IC-6`'s
+no-disambiguator half, and the pusher who raised it to me cited it bare.
 
 ## Template for new entries
 
