@@ -261,17 +261,36 @@ is the one who verified the repair and found what it broke. They ran the tool on
 clean `.rs` paths that had misled them that morning, rather than reading the diff. (Their
 sid was derived from the socket their message arrived on, not from the `codescout-61` they
 signed as — that name is `nameSource: derived` and is not the one they held when incident 1
-was recorded.) `no record … in the window. That is a statement
-about coverage` read unambiguously while it was the **first** line after the verdict: the
-demonstrative could only be the record absence. Inserting `LIKELY CAUSE:` between them
-displaced the antecedent, and the clearance's own closing clause is *"rather than a
-coverage gap"* — so two adjacent sentences both opened `That is` and said **opposite
-things about coverage**. A reader taking the last one as the verdict's summary recovers
-the exact misreading this file was opened for.
+was recorded.) The inserted `LIKELY CAUSE:` line closes on *"a dispositive clearance rather
+than a coverage gap"*; the untouched line below it opens its second clause *"That is a
+statement about coverage"*. Two consecutive lines, the same bare demonstrative,
+opposite-sounding claims about one word — so on a sequential read the second parses as a
+**correction of the first**, and a reader taking the last line as the block's summary recovers
+the exact misreading this file was opened for. Both lines remain **true**, which is why no
+truth check reds.
+
+**AND THE FIRST DIAGNOSIS OF IT, WRITTEN HERE AND IN `a26c9bc2`, WAS FALSE AT THE BYTES.** It
+called this a *displaced antecedent* — that the hedge's `That` had bound to the record absence
+while adjacent, and that the inserted line moved between them. The antecedent sits inside the
+**same `print` call and the same rendered line**, immediately before `That is`, so a line
+inserted *above* cannot move it; the binding was correct throughout. **The error came from the
+same instrument this defect is about** — a mechanism asserted off the *diff*, about a defect
+that exists only in the *rendering*, when rendering the prior state was one command away
+(`git show <sha>:scripts/file-provenance.py` to a file, then run it). That command was run only
+after `9e022ef0` withdrew a framing of their own and forced the re-check. Their weaker-sounding
+original diagnosis — *"the hedge reads as negating the clearance"* — was the correct one, and
+it had been rejected in writing for *naming a symptom and leaving the cause open*.
+
+The repair is unaffected and needs no re-doing: naming the subject breaks the parallelism as
+well as it would have fixed a binding, so the fix was right for a reason its author had not
+established. The two shape assertions are unaffected too — they assert `That absence is a
+statement` and the absence of `window. That is a statement`, which is the rendered shape, not
+anybody's account of why it matters. **That is the argument for shape assertions over mechanism
+narratives, made against this entry's own narrative.**
 
 The repair is the hedge naming its own subject (`That absence is a statement about
-coverage`), not a reordering: putting the hedge first would restore the pronoun and bury
-the cause under the long Bash paragraph, which is the *"reads as an aside"* failure in
+coverage`), not a reordering: putting the hedge first would bury the cause under the long
+Bash paragraph, which is the *"reads as an aside"* failure in
 § *Reproduction*. Suppressing the hedge was rejected too — it is true, and it is about
 **ownership**, a different question from whether uncommitted bytes exist.
 
