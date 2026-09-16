@@ -2053,7 +2053,7 @@ mod tests {
         // child, so nothing observed it exit". The process may still be alive and
         // still writing into the log's fd, which it inherited at spawn. Unknown
         // liveness must be treated as live: the handle may go, the file may not.
-        // docs/issues/2026-09-15-eviction-unlinks-the-log-of-a-job-whose-liveness-is-unknown.md
+        // docs/issues/archive/2026-09-15-eviction-unlinks-the-log-of-a-job-whose-liveness-is-unknown.md
         let buf = OutputBuffer::new(10);
         let dir = tempfile::tempdir().unwrap();
 
