@@ -75,6 +75,60 @@ Measured: the augment path (then the standalone `artifact_augment` tool) had two
 **different** tests, neither failing under the other's mutation — so a single mutation would have
 supported "covered" with the second site unguarded.
 
+### The sharpening — a case guards an INPUT, not a guard
+
+**Law:** a case only exercises the site it NAMES if every **other** guard admits its input.
+Where several guards can refuse one input, the **first to refuse owns it**, and every other
+guard's case is vacuous *for that guard* while reading as full coverage.
+
+The section above is about N call **sites**. This is about N guards at **one** site, and the
+laws are independent: you can mutate every site and still have this one, because the thing that
+goes unexercised is a *branch of a predicate* rather than a location.
+
+**Three instances, 2026-09-15/16, two subsystems, every one green until mutated.**
+
+1. **Two bounds addressing one symptom** — `scripts/file-provenance.py`'s `RELOCATORS` gained
+   `(?=\s)` (a verb boundary a filename cannot satisfy) and `\n` (an operand tail that stops at
+   its own command). TDD was followed: a test pair written, observed RED, observed GREEN.
+   Mutating each bound **separately** — both **SURVIVED**. Each bound *independently* prevents
+   the composite failure the assertions describe, so the pair guarded the **conjunction** and
+   neither site. **TDD cannot reach this by construction:** the red is observed in the pre-fix
+   state, the one configuration where *both* bounds are absent. `b59a035d`.
+
+2. **A NEW bound silently un-guarding an OLD one** — a third bound (command position) was added
+   to the same regex hours later, and the case written that same morning *specifically to
+   isolate* `(?=\s)` then **SURVIVED**. Both its inputs put the verb-shaped filename after a
+   `/`, which the new anchor rejects **earlier, for its own reason**. Nothing announced the
+   transfer of ownership. `2f32faa3`.
+
+3. **A disjunction in a different language** — `empty_test_selection_diagnostic`'s
+   `!saw_summary || filtered == 0 || passed > 0 || ignored > 0`. The case written to justify
+   `filtered == 0` carries `14 passed`, so `passed > 0` refuses that input first and the
+   filtered guard is never consulted; dropping it **SURVIVED**. Isolated by an empty
+   **population** (`0 passed; 0 filtered out`, no filter in play), which only that guard can
+   refuse. `cb397d1f`.
+
+**Why it is invisible.** In all three the test name, its comment and the author's intent all
+claim the guard is covered, and the suite agrees by staying green. Nothing in a diff, a review
+or CI distinguishes "this case exercises this guard" from "this case is refused earlier by a
+different one". Only a mutation asks the question the name is already answering.
+
+**Operational form, both halves.** When writing a case for a bound, construct an input every
+**other** bound admits — otherwise you are testing the other bound. And **after adding or
+changing any bound in a predicate, re-run the mutation set for EVERY bound**, not a new case
+for the new one.
+
+**Corollary, measured the same day: a mutation verdict is a measurement of specific BYTES.**
+Clippy's `question_mark` lint rewrote one line of (3) into `strip_prefix("ok.")?` — behaviour
+identical, so the natural move is to keep the verdicts. They had already decayed: the anchor
+string no longer existed, so a stale script either aborts on its occurs-exactly-once assertion
+or, lacking one, matches nothing and reports SURVIVED — indistinguishable from a real
+survival. **A refactor that preserves behaviour still invalidates the evidence that the
+behaviour is guarded.** Green tests after a refactor say the behaviour survived; they say
+nothing about whether the guards still discriminate.
+
+Session-log entries: `bug-fix-session-log:W-141` (instance 1), `W-143` (instance 2).
+
 ## `contains` is monotone too — two assertions that survived removing the thing they guarded
 
 **2026-09-13, two sessions, two subsystems, same day.** Both assertions read correctly, were

@@ -151,7 +151,20 @@ premise that every addition falsifies.
 - **Mutate once per guarded SITE, not once per feature.** A mutation run answers a question about
   one *line*; where a law is implemented at N call sites, one kill says nothing about the other N−1.
   (`doc(action="augment")`'s two shape-writing paths killed **different** tests, neither failing under
-  the other's mutation.)
+  the other's mutation.) **And the twin, about N guards at ONE site rather than N sites: a case only
+  exercises the guard it NAMES if every OTHER guard admits its input.** Where several can refuse one
+  input the first to refuse owns it, and the rest are vacuous *for that input* while the test name,
+  its comment and a green suite all report coverage. Measured three times in two subsystems on
+  2026-09-15/16, none visible to anything but a mutation: a test pair that killed only the
+  *conjunction* of two bounds and neither bound; a third bound added later that silently un-guarded
+  an older one by rejecting its cases earlier; and a disjunction where the case written for one guard
+  was refused first by another. **TDD cannot reach the first of those** — the red is observed in the
+  pre-fix state, which is the one configuration where both bounds are absent. So when writing a case
+  for a bound, construct an input every *other* bound admits; and **after adding or changing any
+  bound, re-run the mutation set for EVERY bound.** A verdict measures BYTES, so a
+  behaviour-preserving refactor invalidates it too — derivations, SHAs and the corollary in
+  [`docs/conventions/what-green-is-evidence-for.md`](docs/conventions/what-green-is-evidence-for.md)
+  § *The sharpening*.
 - **Loudness is a property of a PATH, not of a failure.** An alarm nothing reaches is exactly as
   informative as no alarm — `BL-66` *aborts the process* and survived anyway, because every in-tree
   caller installs the provider first. When adding a guard, alarm, error return or `panic!`, name the
