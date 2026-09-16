@@ -9,8 +9,8 @@ tags:
 entry_prefix:
   - F
   - W
-entry_high_water_F: 1
-entry_high_water_W: 1
+entry_high_water_F: 2
+entry_high_water_W: 2
 ---
 
 # Session Log — Shell Gating (`shell_command_mode` / `run_command` exposure)
@@ -69,12 +69,14 @@ entry_high_water_W: 1
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-08-27 | med | companion-hooks | fixed-verified | CLAUDE.md asserts native `Bash` is hard-denied; a positive control shows it is not |
+| F-2 | 2026-09-16 | med | companion-hooks | promoted-to-bug-tracker | A gate's refusal echoed the input it actually received; I reconstructed it from memory instead |
 
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-08-27 | high | Grep the config struct for the capability before designing the knob a request implies is missing | Would have re-added the `shell_enabled` switch this repo deleted as redundant, given two knobs for one behaviour, and missed the real gap — `run_command` still advertised in `list_tools` | validated |
+| W-2 | 2026-09-16 | med | Pair every confirming read with a member that must read NEGATIVE — and re-pick the control when the old one gains the property | Would have reported "correctly scoped to `refs/heads/experiments`" from a reading an `~ALL`-scoped ruleset produces identically — a true-sounding claim to the user about a setting that would govern every branch | validated |
 
 ---
 
@@ -410,6 +412,92 @@ either file is rewritten.
 
 **Rests on:** `shell_command_mode` remaining the single source of truth for shell
 gating. If a second shell knob is ever added, this win's reasoning inverts.
+
+## F-2 — A gate's refusal echoed the input it actually received; I reconstructed it from memory instead
+
+**Valid:** dated 2026-09-16
+
+**Observed:** `git-worktree-guard.mjs` refused a read-only `grep` as a "Worktree-ambiguous git
+mutation". I formed a mechanism hypothesis — `segments()` splits quote-naively, so
+`grep -rn -E "git push|peter-evans"` breaks at the `|` and the left fragment ends in `git push`,
+satisfying `TRIGGER`'s `(\s|$)` via `$` — and probed it by driving the hook on its real stdin
+contract (`{tool_name, tool_input.command, cwd}`) as a subprocess.
+
+**The probe falsified the story for my own call.** Version `1.20.11` *allows* the command I
+believed I had sent, and so do all twelve cached versions `1.20.0` → `1.20.11`. My command began
+`cd /home/marius/work/claude/codescout && …`, and `CD_TO_PATH` exempts every later segment — the
+guard should never have fired.
+
+**The answer was in the refusal from the first second.** Its `Command:` field began
+`echo "=== workflows that push ==="`, with the leading `cd <path> && ` I had typed **absent**. The
+harness lifts a leading `cd` into a real working-directory change and removes it from the string
+the hook is handed, so the guard's exemption was keyed on a token that no longer existed.
+
+**Two defects, composed; neither alone refuses this command.** The quote-naive split is real and
+newly filed (`docs/issues/2026-09-16-worktree-guard-reads-a-quoted-regex-alternation-as-a-bare-git-verb.md`,
+`7018ce840e36b942`, `cluster/addressing-without-an-escape-hatch`). The `cd` strip is already filed
+and open (`docs/issues/2026-09-13-worktree-guards-cd-chain-remedy-is-stripped-before-the-guard-sees-it.md`,
+`cluster/gate-keyed-on-unobservable-event`).
+
+**This is the SECOND instance of the same reader failure, in the same guard.** The `2026-09-13`
+file records its own author doing it: *"I spent three calls and one wrong diagnosis … before
+reading the `Command:` field that had the answer in it from the first refusal."* Two independent
+sessions, same guard, same evidence on screen, same miss. That it recurs against an author who
+**documented** the miss is the § *Observer Blindness* result — knowing the class prevented nothing.
+
+**Cost:** one falsified hypothesis and a twelve-version sweep run to answer a question the echo had
+already answered. No wrong code shipped, and the sweep was independently useful — it establishes the
+alternation defect has never worked rather than being a regression.
+
+**Lesson:** when a gate echoes its input, **that echo is the input**. A probe reconstructed from
+your memory of a command tests your memory, not the command — and it returns a clean, confident,
+wrong answer, because the reconstruction is well-formed. The tell here was specific and available:
+a probe that *contradicts an observed refusal* means the two runs had different inputs, not that
+the guard is nondeterministic.
+
+**Rests on:** the `Command:` field being `input.tool_input.command` verbatim; `installPath` in all
+three profiles' `installed_plugins.json` naming `1.20.11` (no cross-profile drift); a 6-case probe
+with both a positive control (`git push origin experiments` → BLOCKED) and a negative
+(`ls -la docs/` → allowed), so the method demonstrably discriminates.
+
+## W-2 — A control that must read NEGATIVE is what separates a scoped rule from a global one
+
+**Valid:** dated 2026-09-16
+
+**Pattern:** Verifying two GitHub rulesets (branch protection on `experiments`, then `master`),
+the confirming reading — `GET /rules/branches/experiments` returns the `pull_request` rule — is
+**the same reading an `~ALL`-scoped ruleset would produce**. It cannot distinguish *scoped to this
+branch* from *applies to every branch*. So each positive reading was paired with a branch that must
+read empty: `master` → `[]` while only `experiments` was ruled, and then — once `master` gained its
+own ruleset and could no longer serve — `refactoring` → `[]`.
+
+**Counterfactual:** without the negative member I would have reported *"the condition is correctly
+scoped to `refs/heads/experiments`"* on evidence that a repo-wide rule satisfies identically. The
+failure mode here is not a failed tool call that announces itself — it is a **true-sounding
+sentence told to the user** about the blast radius of a setting that would silently govern every
+branch in the repo, including `master` and every feature branch, at a moment when the user was
+explicitly asking who could push where.
+
+**The re-pick is half the win.** `master` was the control for the first ruleset; protecting it
+*consumed* the control. Reusing it would have left a check that reads green because both sides now
+have the property — a tautology wearing the shape of a verification. A control is only a control
+while it is a member that **cannot** have the property being asserted.
+
+**Second application, same session:** the guard probe carried a positive control
+(`git push origin experiments` → BLOCKED) and a negative (`ls -la docs/` → allowed). That pairing
+is the only reason a uniform result across twelve plugin versions was readable as a measurement
+rather than as a harness that blocks everything or nothing.
+
+**This is a DENOMINATOR, not a catch.** It confirms the law already promoted in the reconnaissance
+skill's `references/seam-classes.md` — *"Run a positive control before trusting any of them — one
+per state you believe the instrument can report"* — rather than extending it. Recorded because
+`CLAUDE.md` § *Testing Discipline* asks that a re-derivation which **confirms** be published as a
+confirmation, so the population does not read as self-correcting.
+
+**Rests on:** `GET /repos/{owner}/{repo}/rules/branches/{branch}` returning `[]` for an unruled
+branch, observed twice (on `master` pre-protection, on `refactoring` post-); and
+`current_user_can_bypass: "always"` read back from the ruleset row rather than inferred from the
+create response that set it.
 
 ## Template for new entries
 
