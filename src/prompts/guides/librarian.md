@@ -405,8 +405,8 @@ reports both ends:
 ```
 
 **Stage both halves: `git add -- <old> <new>`; confirm both lettered in column 1 of `git
-status --short` — one `R`, or `D`+`A`. Never `R` alone: a *similarity* verdict, absent
-when the body changed too, present when the destination is stale.**
+status --short` — one `R`, or `D`+`A`. Never `R` alone: a *similarity*
+verdict straddling git's 50% cutoff either way, present when stale.**
 Derivation: get_guide("tracker-conventions") § *Bug files*.
 
 Two consequences worth planning for:

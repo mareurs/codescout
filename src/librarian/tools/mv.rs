@@ -530,9 +530,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                        column 1: either one `R` line, or a `D` plus an `A`. A leading \
                        space (` D`) or a `??` is half-staged. Do NOT confirm on the `R` \
                        alone — it is a SIMILARITY verdict, not a staging or a content one: \
-                       it drops out when the move also rewrote the body (measured 44%, \
-                       under git's 50% default), and it appears identically when the \
-                       destination holds a STALE copy. For content, check the destination \
+                       the same body-rewriting archive flow has measured 44%, 55% and 58%, \
+                       straddling git's 50% default, so a PRESENT `R` is not evidence your \
+                       archive was shallow and an ABSENT one is not evidence anything is \
+                       wrong; and it appears identically when the destination holds a \
+                       STALE copy. For content, check the destination \
                        for something you wrote just before the move. `git add -u` and `git \
                        commit -a` are defined over paths that already have an index entry, \
                        so they take the deletion and never enumerate the addition, which \
