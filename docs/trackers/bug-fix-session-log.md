@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 171
+entry_high_water_F: 172
 entry_high_water_W: 144
 ---
 
@@ -65,6 +65,7 @@ entry_high_water_W: 144
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-172 | 2026-09-16 | med | measurement | open | **A derived count published under the label of a different scope** — correct command, wrong noun; twice in one session, the second inside the message declining a peer's count for being unspecifiable |
 | F-171 | 2026-09-16 | med | cross-session | open | **Read a STAGER off an instrument that answers WRITER, and was right by luck** - the correct-answer variant emits no signal; surfaced only because a peer disclosed their wrong one |
 | F-170 | 2026-09-16 | med | self-friction | open | **Hand-rolled a probe PROBES.md already ships, and reproduced the exact unit error it was fixed for** — servers and muxes counted as one population; 19+3=22 reconciles and means something different |
 | F-169 | 2026-09-16 | med | measurement | open | **The freshness probe answers for string literals, not identifiers — and a stripped binary returns 0 for both absent and present** - control symbol also 0, which is what turned a finding into a broken instrument |
@@ -16889,6 +16890,62 @@ narrower question than the one asked; **this is the variant where the answer was
 it produced no signal at all, which is why it needed a peer's disclosure of their own wrong
 instance to surface);
 `docs/issues/2026-09-07-the-stage-log-records-the-stager-so-git-add--A-makes-you-the-owner.md`.
+
+## F-172 — A count is not made safe by being derived — the label is what no command can check
+
+**Valid:** invariant
+
+**Observed:** twice in one session I derived a count from a real command and published it
+under a label naming a **different scope**. Both derivations were correct. Both sentences
+around them were not.
+
+| # | the command's scope | the label I gave it | the truth |
+|---|---|---|---|
+| 1 | commits carrying my sid | *"six local"* — read as the unpushed set | `origin/experiments..HEAD` was **18**, from four sessions |
+| 2 | `origin/experiments..HEAD` (push state) | *"my commits this session"* | 21 commits by sid — **5 `fix` / 16 `docs`**, 3 defects, published as 3 / 1 |
+
+Instance 1 was corrected at ~15:00, written into a peer message as a lesson, and the
+axis reproduced at ~19:00 — **inside the message declining a peer's count for being
+unspecifiable.** Instance 2 silently dropped my 14 already-public commits, including two
+of the three defects fixed.
+
+**Why § *Testing Discipline*'s existing rule does not prevent this.** *"A count of a defect
+population must arrive with its unit or not at all. Derive it, don't cite it"* was satisfied
+both times: the command was real, run then, on the right tree. The failure sits **between the
+command's scope and the sentence's noun** — a region no derivation discipline reaches.
+**A count is not made safe by being derived.** The derivation was never the weak part; the
+label was, both times, and *a label is not something a command can check.* (That formulation
+is the product of the exchange; the closing half is sessionId `9e022ef0`'s.)
+
+**What caught it — not re-reading, either time.** A peer independently derived the same
+quantity and got a different answer. The resolution is the transferable part: their generous
+explanation was *"two windows, calendar day versus session"*, which was **checkable and
+false** — all 21 of my commits share one date, so those windows are identical for my sid and
+no unspecified question existed. The tell for *label error* rather than *scope disagreement*
+is therefore: **derive the two candidate windows and see whether they can differ at all.**
+If they cannot, one party substituted a frame.
+
+**A selector worth recording, and it is `9e022ef0`'s.** They had named *"a claim that
+concedes to you gets less scrutiny"* an hour earlier, then accepted the windows story, and
+identified why it was the harder case: it conceded to **both** parties. *"A symmetry story is
+the easiest thing in the world to accept, because it reads as rigour while removing the
+finding — nobody is defending a position, so nobody checks."* More comfortable than a claim
+that merely flatters one side, and they reached for it within one message of naming the
+weaker version.
+
+**Cost, stated at its ceiling rather than at what was realised.** Instance 1 reached an
+operator report while an outward-facing push decision was pending, at one third of the true
+size; it was corrected before anyone acted, and the push was authorised by another operator
+on a correctly-sized figure. Instance 2 reached an operator report and a peer message and is
+in no commit. `med` rather than `high` because both were caught upstream of any action —
+uncorrected, instance 1 publishes three other sessions' work on a decision made about a
+sixth of it.
+
+**Rests on:** the retraction chain in
+`docs/issues/archive/2026-09-16-file-provenance-unknown-branch-omits-the-window-it-names.md`;
+`3ab47393`; `F-166`, `F-167`, `F-169` for the sibling class (an **absence** asserted from a
+truncated pipeline) — same root, *a checkable claim published without running the available
+check*, different selector.
 
 ## Template for new entries
 
