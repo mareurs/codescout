@@ -42,7 +42,10 @@
 //! A check that omits `--all-targets` is monotone under exactly the failure class it
 //! exists to catch, and would have returned clean on the original incident. The gate runs
 //! tests, so a broken test module reds peers the same as a broken lib does; the check has
-//! to match the gate's blast radius.
+//! to match the gate's blast radius. **It matches on COMPILATION and cannot match on
+//! EXECUTION** — `--all-targets` makes test targets COMPILE, and `check` never RUNS them.
+//! That is the fifth ceiling below, and this sentence asserted the match was complete for
+//! eight days.
 //!
 //! Incremental cost after one file changes is **~7 s** (`sccache` wrapper; a cold check
 //! cache is ~12.6 s, and the first build of a new test module inflates one run to ~21 s —
@@ -60,6 +63,19 @@
 //! * A **deliberate mutation** trips this, and mutation runs are routine in this repo.
 //!   `CODESCOUT_NO_BUILD_CHECK=1` is the escape.
 //! * A **lean build** emits nothing (see above).
+//! * **`check`, not `test` — and this is the one ceiling the header above used to present
+//!   as MET.** An uncommitted edit that COMPILES and reds a TEST produces nothing here.
+//!   Same distinction `CLAUDE.md` § *Development Commands* already draws for the gate
+//!   itself: *"it is `test`, not `check`"*. Measured 2026-09-16 — three failures in one
+//!   gate run, all on code that compiled clean (`read_file.rs:2277`, `doctor.rs:13572`,
+//!   `update.rs:1182`), so every red that day was in this half. The READER side routed
+//!   both holders correctly; the author side could not fire by construction.
+//!   **Why it is stated here and in the notice rather than fixed:** running the gate's
+//!   `cargo test --workspace` on every source write costs minutes and holds the shared
+//!   build lock, which is the blocking this module exists to avoid. So the bound is
+//!   published rather than closed — and published at BOTH surfaces, because a reader who
+//!   never opens this file still sees the notice
+//!   (`docs/issues/2026-09-08-the-author-of-a-tree-reddening-write-is-the-one-party-never-told.md`).
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -359,7 +375,9 @@ pub(crate) fn render_notice(errors: &str) -> String {
     format!(
         "\n[codescout] your uncommitted edit does not compile, and this checkout is shared \
          with other live sessions.\n{errors}\nThis is a statement about your own working \
-         tree, not a request — peers' gates see this break too."
+         tree, not a request — peers' gates see this break too.\nSCOPE: this compiles your \
+         tree and never runs its tests, so silence from this check is not a green gate — \
+         an edit that compiles and reds a test produces nothing here."
     )
 }
 
@@ -857,6 +875,42 @@ mod tests {
                 "notice must not ask for an action, found {demand:?}: {n}"
             );
         }
+    }
+
+    /// The notice is the ONLY surface that ever describes this mechanism to its author, and
+    /// the mechanism's SILENCE is what a reader treats as health — so the scope has to ride
+    /// on the one message that does fire. SHAPE, not wording: this cannot tell you the
+    /// sentence reads well, only that both halves survive — the thing the check never runs,
+    /// and the thing its own absence does not license. Deleting either is the regression,
+    /// and the module header above asserted this exact bound as MET for eight days while
+    /// every red of 2026-09-16 landed in the uncovered half.
+    ///
+    /// The two needles are the SUBJECTS of the two halves rather than phrases lifted from
+    /// them, which makes them more rewrite-resistant than a sentence pin — but **NOT
+    /// immune, and the mutation run says so rather than this comment guessing.** An earlier
+    /// draft claimed a meaning-preserving rewrite stays green; two mutations falsified it.
+    /// `never runs its tests` → `never runs them` and `so silence from this check` → `so a
+    /// clean result here` both preserve the meaning, and each reds exactly ONE assertion —
+    /// which is also what establishes that the two halves are independently guarded rather
+    /// than one claim asserted twice. A pronoun or a synonym is therefore a false positive
+    /// here, accepted deliberately: the alternative is pinning the sentence, which reds on
+    /// every rewording and is what § *Testing Discipline* says to avoid.
+    /// Observed failing by mutation rather than by a pre-fix run, deliberately: a
+    /// reproduction-first red in this shared checkout is indistinguishable from a real
+    /// regression to every peer compiling against it
+    /// (`docs/issues/2026-09-14-a-reproduction-first-red-is-a-true-red-no-observer-can-attribute.md`).
+    #[test]
+    fn the_notice_names_its_scope_so_silence_is_not_an_all_clear() {
+        let n = render_notice("  src/mine.rs:1  boom");
+        let low = n.to_lowercase();
+        assert!(
+            low.contains("tests"),
+            "notice must name what this check never RUNS: {n}"
+        );
+        assert!(
+            low.contains("silence"),
+            "notice must name what its own absence does not license: {n}"
+        );
     }
 
     // ---- debounce ----
