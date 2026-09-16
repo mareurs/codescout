@@ -28,7 +28,7 @@ use tempfile::NamedTempFile;
 /// *different line* in the other — silently, and successfully, for any citation below the
 /// un-expanded line count; `0 lines` above it. A third copy had also grown inside a test,
 /// which is what turned a two-site fix into this function.
-/// BUG `docs/issues/2026-09-15-grep-and-read-file-number-one-buffer-handle-differently.md`
+/// BUG `docs/issues/archive/2026-09-15-grep-and-read-file-number-one-buffer-handle-differently.md`
 ///
 /// **Search-and-address text ONLY — never re-parse the result.** Expansion puts a bare
 /// newline inside a JSON string literal, so the output is deliberately not valid JSON.

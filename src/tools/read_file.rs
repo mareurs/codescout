@@ -1651,7 +1651,7 @@ mod tests {
     /// The flat-buffer control below is INERT for this defect and pinned as such — the two
     /// move together or the pair stops discriminating.
     ///
-    /// BUG docs/issues/2026-09-15-grep-and-read-file-number-one-buffer-handle-differently.md
+    /// BUG docs/issues/archive/2026-09-15-grep-and-read-file-number-one-buffer-handle-differently.md
     #[tokio::test]
     async fn grep_and_read_file_number_one_tool_handle_identically() {
         let ctx = test_ctx().await;

@@ -1,7 +1,7 @@
 ---
-id: '716183640e6a047e'
+id: 24bc873cca114d96
 kind: bug
-status: open
+status: fixed
 title: 'BUG: grep and read_file number the same @tool_* handle differently, so a grep citation reads back as 0 lines'
 owners:
 - marius
@@ -110,8 +110,9 @@ and it is one of the most common buffers an agent creates.
 
 ## Fix
 
-Not attempted. Two independent halves, and the second is worth having even if the first
-is declined:
+**Fixed** in `57758be9`, patch-id `1ee5d0d79de83a2e29dda872e7f13863a795f97a`. Both halves
+shipped. The priority proposed below **inverted under reproduction**, and the original wording is
+kept rather than tidied because it is a rejected approach a reader would otherwise retry:
 
 1. **Share the coordinate space, or name it.** Either `read_file`'s buffer path applies
    the same expansion, or `grep`'s buffer result marks its line numbers as belonging to an
@@ -123,9 +124,63 @@ is declined:
    suspicious, so it owes its scope. This half is cheap and is what converts the failure
    from silent to self-explaining.
 
+### What the reproduction changed — half 2 is NOT safe to ship alone
+
+The headline above is the out-of-range case, which is the half a reader can notice. Re-running
+the reproduction before reading this plan showed the **addressable** range is the worse half: on
+a live `symbols(include_body=true)` buffer, `grep`'s line 10 was a doc-comment line and
+`read_file`'s line 10 was `"body_start_line": 680,` — different content, same number, **both
+calls succeeding**.
+
+So "worth having even if the first is declined" was wrong, and wrong in the expensive direction.
+Half 2 alone makes the loud case loud and leaves the silent case silent, and a reader who learns
+*out-of-range now errors* will reasonably infer *therefore a successful read is correctly
+addressed*. That inference is false, and the partial fix is precisely what licenses it.
+
+### And the shape was wrong too — a shared derivation, not a second copy
+
+The plan's half 1 reads as "apply the same expansion in `read_file`". That closes today's
+divergence and leaves the next one one edit away. It was already not hypothetical: a **third**
+copy had grown inside `read_file_buffer_single_oversized_line_still_fits_the_threshold`, which
+re-typed `to_string_pretty` to compute the line its assertion targets — a test asserting against
+its own re-implementation. Shipped instead as `line_addressable_text` in `output_buffer.rs`, the
+single implementation both tools and that test now call.
+
+**One constraint the plan does not mention, and a naive fix would have broken silently.**
+`read_file`'s `json_path` branch RE-PARSES its text, and expansion puts a bare newline inside a
+JSON string literal — invalid JSON. `grep` never re-parses, which is what its own "search-only
+text" comment was recording. So the identical transform is safe in one function and destructive
+in the other, and the shared call must sit **after** the `json_path` branch, not beside the
+pretty-print where it visually belongs.
+
 ## Tests added
 
-None yet. Note the shape a guard needs: asserting `grep`'s line resolves in `read_file` is
+Six, in `src/tools/read_file.rs`. All five mutation sites killed; `M2` survived its first run
+and is the finding worth keeping.
+
+- `grep_and_read_file_number_one_tool_handle_identically` — the cross-tool assertion. Greps a
+  buffer, reads back the line `grep` cited, asserts the content matches.
+- `a_flat_tool_buffer_numbers_identically_and_witnesses_nothing` — the control, annotated
+  **inert** so nobody credits it: it is green before and after the fix.
+- `json_path_still_resolves_when_a_sibling_value_is_multi_line` — the ordering constraint. The
+  pre-existing `json_path` test uses a single-line body and stays green under the mutation that
+  breaks this, so it was not a witness.
+- `a_cmd_buffer_that_happens_to_be_json_is_served_raw_not_reformatted` — written because the
+  handle-kind guard SURVIVED its mutation. For plain text `from_str` fails and the fallback
+  returns raw anyway, so the guard reads as inert; but a `@cmd_*` capture that IS valid JSON
+  (`curl`, `gh api --json`) would have been reformatted and expanded. Real domain, common,
+  untested.
+- `an_out_of_range_read_names_the_total_instead_of_a_bare_zero` and
+  `a_genuinely_empty_target_still_reads_as_a_plain_zero` — the pair. The second exists so the
+  first cannot be satisfied by unconditionally printing a total.
+
+One pre-existing test had to be repaired rather than adjusted: the `\n`-joined fixture in
+`read_file_buffer_single_oversized_line_still_fits_the_threshold` went **inert** under the
+unification, and its own premise guard caught it and named the reason (`widest line is 22 vs
+budget 9000`). That guard is the best-behaved thing this bug touched — it was written against a
+change nobody anticipated and still fired.
+
+The original note on the shape a guard needs, which held up: asserting `grep`'s line resolves in `read_file` is
 a **cross-tool** assertion, and neither tool's own suite is a place it will occur to
 anyone to put one — which is why this shipped inside a fix that was itself well tested.
 The fixture must contain a multi-line string value, and that detail is load-bearing: on
@@ -148,8 +203,14 @@ it returns coordinates in is the thing that differs).
 
 ## Resume
 
-Decide half 2 first — it is small, self-contained, and makes half 1 diagnosable by whoever
-hits it next instead of silent.
+Nothing owed. Both halves shipped in `57758be9`; gate green `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`.
+
+**The advice this section used to give was wrong and is worth one line, because it is the kind
+that reads as prudent.** It said to decide half 2 first — small, self-contained, makes half 1
+diagnosable. Reproduction showed half 2 addresses only the case a reader can already notice,
+while licensing a false inference about the case they cannot. Shipping the cheap half of a
+two-half defect is not always a safe down-payment; when the halves are *loud* and *silent*, the
+cheap one can make the silent half harder to find.
 
 ## References
 

@@ -113,11 +113,12 @@ document, two line spaces, and no field in the response says which one a number 
 
 **This is the second instance of that half found in this corpus in one day, in an unrelated
 subsystem**, which is the part worth noting rather than the instance itself. The other is
-`2026-09-15-grep-and-read-file-number-one-buffer-handle-differently.md` — `grep` expands
-escaped newlines before matching while `read_file` does not, so one `@tool_*` handle denotes
-two line spaces. Same shape, different surfaces, neither reachable from the other's tests:
-there, two *tools* disagree about one handle; here, two *fields of one response* disagree
-about one document. A remedy for either does nothing for the other.
+`docs/issues/archive/2026-09-15-grep-and-read-file-number-one-buffer-handle-differently.md`
+(fixed `57758be9`) — `grep` expanded escaped newlines before matching while `read_file` did
+not, so one `@tool_*` handle denoted two line spaces. Same shape, different surfaces,
+neither reachable from the other's tests: there, two *tools* disagreed about one handle;
+here, two *fields of one response* disagree about one document. A remedy for either does
+nothing for the other.
 
 ## Resume
 
