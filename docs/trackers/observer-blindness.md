@@ -47,6 +47,30 @@ structure rules out — see *The vigilance finding* below. So an entry without a
 observer and at least a candidate mechanism is not ready; write it as an `R-N` or a bug
 file until it is.
 
+
+**A third property — about how position 2 is WRITTEN rather than what it must contain. Added
+2026-09-16 at ONE instance and deliberately not generalised past it.** *"Who can see it"* is
+the position that predicts the reviewer, so **an over-pessimistic one licenses inaction, and
+is therefore not the safe direction to err in.** `OB-12`'s parallel-structure sub-pattern
+first claimed its detector was *"render it for the reader the old defect actually caught"* —
+a population of about one that no policy can staff. That was false, and the effect of
+believing it is to send the next reader to staff an impossible population instead of doing
+the cheap available thing, which was to ask a second person to render the output. **The
+asymmetry is the whole point:** an over-OPTIMISTIC position 2 fails loudly, because someone
+tries the named reviewer and it does not work. An over-PESSIMISTIC one fails silently,
+because nobody tries anything — and a row that says *nobody can see this* reads as rigour.
+
+**This is not a licence to doubt every narrow reading; some are load-bearing and correct.**
+`OB-20`'s *"the authorisation is not in the repository, so no amount of reading it produces
+the answer"* is true of git, and is the finding rather than a gloomy framing of one. The
+question to ask of a narrow position 2 is whether the narrowness belongs to the
+**substrate** or to the **instance's history**: OB-20's fact is absent from git for everyone,
+forever; the sub-pattern's was that one reader happened to hold a competing reading of one
+output. The first is a finding. The second is an accident published as a bound.
+
+Raised by sessionId `9e022ef0` as *"being too gloomy about who can see it is not a safe
+error"*, against an entry of mine that had just done it. The substrate-versus-history
+discriminator is the operative half and is the part to apply.
 ## The vigilance finding — why this ledger exists at all
 
 > **Measured 2026-08-30: four instances of one class, three sessions, one evening —
