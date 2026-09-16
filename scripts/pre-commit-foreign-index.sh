@@ -222,9 +222,87 @@ done < <(git diff --cached --raw --no-renames 2>/dev/null |
 
 ((${#theirs[@]})) || exit 0
 
+# ------------------------------------------------------------------------------------
+# JOINT ARCHIVE: one rename, two authors, and neither party can commit it.
+#
+# `CLAUDE.md` MANDATES archiving a bug file through `doc(action="move")`. When the file
+# was authored by one session and archived by another, that procedure necessarily splits
+# ONE path's authorship: the source content is the author's, the current content (status
+# flip, fix SHA, patch-id) is the archiver's. This guard is keyed on one author per path,
+# so it refuses the archiver over the source half AND the author over the destination —
+# each refusal's remedy naming the other party, who is themselves refused.
+#
+# Measured from both sides on six files, 2026-09-16:
+# `docs/issues/2026-09-16-archiving-a-peers-bug-file-refuses-both-parties-from-opposite-sides.md`
+#
+# WHY THE PAIR IS RECOVERED HERE RATHER THAN BY DROPPING `--no-renames` ABOVE. That flag
+# is load-bearing and its removal reintroduces an archived defect: with rename detection
+# on, `--raw` emits `R<score>\t<src>\t<dst>` and the awk takes `$2`, the SOURCE, so the
+# lookup becomes (destination blob, source path), matches nothing in a correctly-recorded
+# log, falls to `mine`, and the refusal never names the destination at all
+# (`docs/issues/archive/2026-09-08-the-stage-log-records-a-renames-source-path-and-drops-its-destination.md`,
+# pinned by `tests/hooks-discrimination.sh` "refusal names the rename DESTINATION"). The
+# lookup keeps the split view; the PAIRING is recovered from a second call that is used
+# for nothing else.
+#
+# THIS DOES NOT RELAX THE GUARD. A joint archive is still refused. What changes is that
+# the refusal names the situation correctly and offers a remedy the caller can actually
+# perform, instead of directing them to a party who is also blocked.
+declare -A rename_dst_of=()
+declare -A rename_src_of=()
+while IFS=$'\t' read -r _status _src _dst; do
+    case "$_status" in
+        R*) [ -n "$_dst" ] || continue
+            rename_dst_of["$_src"]="$_dst"
+            rename_src_of["$_dst"]="$_src" ;;
+    esac
+done < <(git diff --cached --name-status -M 2>/dev/null)
+
+# The change is a joint archive when EVERY contested path is one half of a rename whose
+# other half is yours. A contested path with no partner, or whose partner is also theirs,
+# is an ordinary capture and must keep the ordinary refusal.
+joint=1
+for path in "${theirs[@]}"; do
+    partner="${rename_dst_of[$path]:-${rename_src_of[$path]:-}}"
+    if [ -z "$partner" ]; then joint=0; break; fi
+    case " ${mine[*]-} " in
+        *" $partner "*) ;;
+        *) joint=0; break ;;
+    esac
+done
+((${#theirs[@]})) || joint=0
+
+# The ack mirrors `CODESCOUT_PUSH_ACK` in the pre-push guard deliberately: same shape, same
+# reason, and a pre-commit hook cannot read the commit message, so an env acknowledgement is
+# the only surface on which the committer can NAME the other author before the fact.
+# Deliberately NO `all` form — a joint archive has exactly one other party, so a wildcard
+# would buy nothing and would import the blast radius that `all` was filed for.
+index_ack="$(printf '%s' "${CODESCOUT_INDEX_ACK:-}" | tr -d '[:space:]')"
+if ((joint)) && [ -n "$index_ack" ]; then
+    ack_ok=1
+    for owner in "${foreign_owners[@]}"; do
+        case ",$index_ack," in
+            *",$owner,"*) ;;
+            *) ack_ok=0; break ;;
+        esac
+    done
+    if ((ack_ok)); then
+        printf '\n  note: CODESCOUT_INDEX_ACK names every other author of this joint archive.\n' >&2
+        printf '  Proceeding. Their work lands under YOUR commit message, so record them:\n' >&2
+        for owner in "${foreign_owners[@]}"; do
+            printf '      Co-Authored-Session-Id: %s\n' "$owner" >&2
+        done
+        printf '  The ack records your operator decision about their content. It does not\n' >&2
+        printf '  speak for their operator, and it leaves them as UNCLEARED as they were.\n\n' >&2
+        exit 0
+    fi
+fi
+
 {
     echo
-    if ((pathspec)); then
+    if ((joint)); then
+        echo "Refusing this commit: it is a JOINT ARCHIVE — one rename, two authors."
+    elif ((pathspec)); then
         echo "Refusing this pathspec commit: it captures content another session wrote."
     else
         echo "Refusing a bare commit: the index holds paths staged by another session."
@@ -259,8 +337,16 @@ done < <(git diff --cached --raw --no-renames 2>/dev/null |
             echo "Every path you named is contested, so there is nothing to narrow to."
         fi
         echo
-        echo "Then ask the owner below to commit theirs. Once their change is in HEAD your"
-        echo "next commit of that path carries only your own, and this guard goes quiet."
+        if ((joint)); then
+            echo "THAT REMEDY DOES NOT APPLY HERE and following it terminates where it started:"
+            echo "this is a rename whose source you authored and whose current content they"
+            echo "wrote, so they are refused over the source exactly as you are over the"
+            echo "content. Asking them to commit theirs sends you to a party this same guard"
+            echo "has already stopped."
+        else
+            echo "Then ask the owner below to commit theirs. Once their change is in HEAD your"
+            echo "next commit of that path carries only your own, and this guard goes quiet."
+        fi
         echo
         echo "Do NOT \`git checkout\` or \`git stash\` the path to clear this. Their work is"
         echo "in the working tree and is not committed anywhere — discarding it destroys it,"
@@ -284,6 +370,32 @@ done < <(git diff --cached --raw --no-renames 2>/dev/null |
         echo "would take their work out of the index seconds before they commit it."
     fi
     echo
+    if ((joint)); then
+        echo
+        echo "WHAT TO DO INSTEAD, and both steps are yours — neither waits on them:"
+        echo
+        echo "  1. TELL them you are committing it. They cannot see this refusal, and the"
+        echo "     archive will carry their status flip, fix SHA and patch-id under your"
+        echo "     message. Addresses: /codescout-companion:reaching-peer-sessions"
+        echo
+        echo "  2. Re-run with their session id named, and record them in the message:"
+        echo
+        printf '    CODESCOUT_INDEX_ACK="%s" git commit ...\n' "$(IFS=,; echo "${foreign_owners[*]}")"
+        echo
+        for _o in "${foreign_owners[@]}"; do
+            echo "    Co-Authored-Session-Id: $_o"
+        done
+        echo
+        echo "The ack does not make the attribution correct — it makes it RECORDED, which"
+        echo "\`--no-verify\` does not. It carries your operator decision about their"
+        echo "content and says nothing for their operator, who has not been asked."
+        echo
+        echo "Why this guard cannot simply accept the pair: a rename spanning two authors"
+        echo "is a real two-party commit, and passing it silently would file their work"
+        echo "under your name with nothing anywhere saying so."
+        echo
+        echo "Class: docs/issues/2026-09-16-archiving-a-peers-bug-file-refuses-both-parties-from-opposite-sides.md"
+    fi
     echo "Staged by:"
     for owner in "${foreign_owners[@]-}"; do
         if [ "$owner" = "-" ]; then
