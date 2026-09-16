@@ -677,8 +677,20 @@ so no prefix existed containing only cleared work.
 
 **One author could not be informed.** `aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66` holds 3 commits in
 the range (`a050d1d3`, `48c01606`, `b34b73ba`) and was absent from the live socket table at
-10:42:56Z. Independently re-checked from a second session at 13:45:18+03:00 over 19 sockets —
-still absent. **No route exists**: the channel route needs a live process, and the scratchpad
+10:42:56Z. Independently re-checked from a second session at **10:45:18Z** over 19 sockets —
+still absent.
+
+**Both stamps are normalised to UTC deliberately, and the reason is an error this file should
+not let a reader repeat.** They were first recorded as `10:42:56Z` and `13:45:18+03:00`, and
+the mixed zones read as a large gap: `29420e72` published the pair as *"two hours apart"* and
+claimed it ruled out a transient absence. `f5f48b42` caught it. The real gap is **2 min 22 s**.
+
+**What the second reading establishes is independence of INSTRUMENT and SCOPE** — a different
+session, a different enumeration, 19 sockets — **not independence of INSTANT.** A pid
+transition in flight at 10:42:56Z can still be in flight 142 seconds later, so the pair does
+**not** rule out a session between pids, mid-restart or briefly wedged. The conclusion that no
+route exists rests on the route argument below and not on elapsed time; a future reader pricing
+how hard to look for this author should read a two-minute absence, not a two-hour one. **No route exists**: the channel route needs a live process, and the scratchpad
 fallback is a self-report only a running session can make. Their work is public and they have
 not been told, by anybody, and cannot be.
 
