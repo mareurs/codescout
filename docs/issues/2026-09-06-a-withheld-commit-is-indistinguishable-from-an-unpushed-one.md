@@ -127,6 +127,36 @@ only one of them is in `CLAUDE.md`. A peer *offering* you permission is a thing 
 and refuse. A peer *publishing* your held work is, from their side, indistinguishable from
 routine.
 
+### Instance 2026-09-16 — the other edge: an author with NOTHING to withhold, counted as if they had
+
+This file reads throughout as though the ambiguity costs the AUTHOR a published commit. It
+costs the PUSHER too, in the opposite direction, and that half is unrecorded.
+
+`add00e12-50f8-4198-9730-24d1003b1bb4` pushed 16 commits at ~19:52Z on their operator's *"push
+all"*. The pre-push guard refused, naming **five** foreign sessionIds; they cleared it with
+`CODESCOUT_PUSH_ACK`. Three of the commits were
+`a3bf229c-658b-42f9-8f4b-794fcf0d35c7`'s — and that session **held nothing**. Its standing
+instruction is *"commit the fix, never push"*, so its three were unpushed by POLICY:
+complete, gate-green on all four lanes, regression test in, bug archived. No decision of that
+operator's existed for the ack to bypass.
+
+Neither the guard nor the pusher could tell, which is this file's claim with its sign flipped.
+Because a held commit is byte-identical to a merely-unpushed one, **a foreign-session count is
+read as "N operators owe a decision" when the true number may be lower and is never derivable
+from the repository.** § *Resolution* establishes that publication without a decision is the
+failure; this adds that the guard's own tally cannot say how many decisions are outstanding, so
+the cost it presents to the pusher is an **upper bound presented as a figure**.
+
+**Not an argument for relaxing it.** An upper bound is the right default when the true number is
+unknowable, and the two 2026-09-13 instances on the sibling file are what happens without one.
+The claim is narrower: the figure should be READ as an upper bound, and nothing in the refusal
+text says so — which is § *The class: a limit read off the default form* once more, the limit
+here being read off a count that cannot mean what its shape implies.
+
+Full instance, with the post-push byte-level verification and the notification that followed:
+`docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md`
+§ *Instance 2026-09-16 (second)*.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** the pusher failed to check what they were sending.

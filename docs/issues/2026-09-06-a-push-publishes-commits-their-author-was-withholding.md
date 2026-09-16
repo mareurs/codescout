@@ -782,6 +782,53 @@ their operator has not asked for one, and doing it on a dead peer's behalf is th
 acting on a peer's request for an escalation. Recorded here so the judgement survives the
 session that reached it, which is the only surface that can hold it now.
 
+### Instance 2026-09-16 (second) — the author WAS reachable, was told, and had nothing withheld
+
+The complement of the section above, and published as a DENOMINATOR rather than a catch.
+
+`add00e12-50f8-4198-9730-24d1003b1bb4` (`codescout-b2`, `.claude-kat`) pushed
+`284b6d7c:experiments` at ~19:52Z on their operator's *"push all"*. The guard refused, naming
+**five** foreign sessionIds; they cleared it with `CODESCOUT_PUSH_ACK` and pushed by SHA. Three
+of the 16 commits were `a3bf229c-658b-42f9-8f4b-794fcf0d35c7`'s: `eaeac9c7`, `502fb8ed`,
+`9fdb6818`.
+
+**The notify half worked, completely and unprompted.** Within minutes the pusher sent the
+range, the mechanism, the list of that author's commits, an explicit statement that their ack
+records THEIR operator's decision and does not speak for the author's, and — unasked — *"please
+do not read this back later as evidence you consented."* It was reported to the author's
+operator in the same turn. Against § *Instance 2026-09-15*, which recorded the guard NOTIFYING
+rather than preventing: here the notification reached an author who could act on it, which the
+section above could not.
+
+**Why that outcome is NOT evidence the mechanism is safe.** Nothing of that author's was
+mid-flight: all three commits were complete, gate-green on all four lanes, with the regression
+test in and the bug archived. The push was harmless because of a property of the AUTHOR'S
+STATE, not of the mechanism. The same push forty minutes earlier would have published a
+half-built guard whose first form was later measured vacuous.
+
+**AND THE NEGATIVE ARM, which is this file's population showing its other edge: there was
+nothing withheld.** That session's standing instruction is *"commit the fix, never push"*, so
+the three were unpushed by POLICY rather than by a decision to hold. No clearance of that
+operator's existed for the ack to bypass — and neither the guard nor the pusher could know it.
+The consequence is a count: *"five foreign sessions"* reads as five operators owing a decision,
+and at least one of the five owed none. Recorded in full on the sibling file
+(`docs/issues/2026-09-06-a-withheld-commit-is-indistinguishable-from-an-unpushed-one.md`),
+whose subject this is from the pusher's side.
+
+**What was verified, and the boundary not crossed.** This file's own rule is that the pusher is
+not derivable from the repository — `git reflog` names a ref movement and no actor — so the
+identity above is recorded from their message and is **not** independently established. What IS
+verified at the bytes, by the author, after the fact: all three commits are ancestors of
+`origin/experiments`; `4006e9c6` is an ancestor of `284b6d7c` with **16** commits in the range,
+so it was a fast-forward and nothing was rewritten; and `eaeac9c7` still resolves with patch-id
+`f69b7760c33c83dd9a47717d5aac06549e906df1`, re-derived post-push and identical to the value
+recorded at fix time. Outcome verified; actor reported.
+
+**One incidental datapoint for the SHA-plus-patch-id rule.** The archived bug file cites its fix
+as both. The fast-forward preserved the SHA — but `experiments` is rebased after every ship, and
+a rebase would have orphaned `eaeac9c7` and left that citation dead. The pair survived what the
+SHA alone would not, observed rather than argued.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** reading `git log origin/<branch>..HEAD --stat` before pushing
@@ -869,6 +916,7 @@ session that reached it, which is the only surface that can hold it now.
    broadcast — and does not remove it. A field that is present, accurate, and
    answers the **adjacent** question is this file's own subject, arriving one
    layer down.
+
 ## Fix
 
 Not applied — the useful remedy is a convention, and it should be agreed rather
@@ -941,6 +989,7 @@ exactly when the stack is deep — which is when anyone reaches for it. It also 
 author **cleared**, not merely *identified*: the `Session-Id` trailer answers the second
 question completely and the first not at all, which is the distinction the whole file
 turns on.
+
 ## Resume
 
 Decide whether the "cannot publish → do not commit" convention is adopted, and
