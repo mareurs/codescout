@@ -137,8 +137,28 @@ pub enum JobState {
 impl JobState {
     /// Whether the job may still be writing to its log. Used by eviction, which
     /// must not unlink a file a live process still holds open.
-    pub fn is_running(&self) -> bool {
-        matches!(self, JobState::Running)
+    ///
+    /// **`Failed` answers `true`, and that is the whole point of this function.**
+    /// `Failed` does not mean "terminated" — it means the supervisor's `wait()`
+    /// returned `Err`, so nothing observed the child exit and it may still hold
+    /// the log's fd open. Its own renderer says `unobservable`. Retaining it
+    /// costs a dropped handle, a case `store_background` already handles;
+    /// evicting it strands a live process's output in an unlinked inode, which
+    /// nothing recovers and nothing reports.
+    ///
+    /// Exhaustive match rather than `matches!` deliberately: a fifth variant must
+    /// be classified here rather than inherit the evictable default. Inheriting it
+    /// is exactly the defect this replaced, and the name was half of it — a
+    /// predicate called `is_running` reads as answering a question about the
+    /// process, so the one state where liveness is UNKNOWN got the answer for
+    /// "not running" instead of the answer for "may still be writing".
+    ///
+    /// docs/issues/archive/2026-09-15-eviction-unlinks-the-log-of-a-job-whose-liveness-is-unknown.md
+    pub fn may_still_be_writing(&self) -> bool {
+        match self {
+            JobState::Running | JobState::Failed { .. } => true,
+            JobState::Exited { .. } => false,
+        }
     }
 
     /// One-line rendering for the response envelope.
@@ -681,9 +701,11 @@ impl OutputBuffer {
         let id = format!("@bg_{:08x}", inner.counter as u32);
 
         if inner.background_jobs.len() >= inner.max_pending {
-            // Oldest job that is no longer running, if any. A handle present in
-            // `background_order` but absent from `background_jobs` is already
-            // gone and is safe to drop.
+            // Oldest job that CANNOT still be writing, if any — see
+            // `JobState::may_still_be_writing`, which answers `true` for the
+            // unobservable state precisely so it is never selected here. A handle
+            // present in `background_order` but absent from `background_jobs` is
+            // already gone and is safe to drop.
             let terminated = inner
                 .background_order
                 .iter()
@@ -691,7 +713,7 @@ impl OutputBuffer {
                     inner
                         .background_jobs
                         .get(*oid)
-                        .is_none_or(|j| !j.state.is_running())
+                        .is_none_or(|j| !j.state.may_still_be_writing())
                 })
                 .cloned();
 
@@ -1916,6 +1938,21 @@ mod tests {
         }
     }
 
+    /// Same fixture, unobservable: the supervisor's `wait()` returned `Err`, so
+    /// nothing observed the child exit and it may still hold the log open. The
+    /// `Failed` state is the entire point here — swap it for `Exited` and the two
+    /// eviction tests below stop reaching the branch they exist to pin and pass
+    /// by asserting the already-correct case.
+    fn bg_job_failed(log_path: std::path::PathBuf) -> BackgroundJob {
+        BackgroundJob {
+            log_path,
+            command: "test-cmd".to_string(),
+            state: JobState::Failed {
+                error: "no child processes".to_string(),
+            },
+        }
+    }
+
     /// `max_pending`, mirrored from `OutputBuffer::new`. If that changes and this
     /// does not, the eviction tests below stop reaching the eviction branch at
     /// all and pass by never filling the buffer.
@@ -1995,6 +2032,79 @@ mod tests {
             evicted_path.exists(),
             "a LIVE job's log must survive eviction of its handle"
         );
+    }
+
+    #[test]
+    fn eviction_never_unlinks_the_log_of_an_unobservable_job() {
+        // `Failed` is not "terminated" — it is "the supervisor could not reap the
+        // child, so nothing observed it exit". The process may still be alive and
+        // still writing into the log's fd, which it inherited at spawn. Unknown
+        // liveness must be treated as live: the handle may go, the file may not.
+        // docs/issues/2026-09-15-eviction-unlinks-the-log-of-a-job-whose-liveness-is-unknown.md
+        let buf = OutputBuffer::new(10);
+        let dir = tempfile::tempdir().unwrap();
+
+        let mut ids = Vec::new();
+        for i in 0..TEST_MAX_PENDING {
+            let p = dir.path().join(format!("unobservable{i}.log"));
+            std::fs::write(&p, "x").unwrap();
+            ids.push((buf.store_background(bg_job_failed(p.clone())), p));
+        }
+
+        let new_path = dir.path().join("new.log");
+        std::fs::write(&new_path, "x").unwrap();
+        buf.store_background(bg_job_running(new_path));
+
+        let (evicted_id, evicted_path) = &ids[0];
+        assert!(
+            buf.get_background_log(evicted_id).is_none(),
+            "the oldest handle should be dropped when nothing is KNOWN to have terminated"
+        );
+        assert!(
+            evicted_path.exists(),
+            "an unobservable job's log must survive eviction of its handle"
+        );
+    }
+
+    #[test]
+    fn eviction_takes_a_newer_exited_job_over_older_unobservable_ones() {
+        // Pins the direction the test above is monotone under. That one is
+        // satisfied by a fix that simply stops unlinking anything, ever — which
+        // would leak a log file per background command. Here the only evictable
+        // job sits BEHIND nineteen unobservable ones in the queue, so the victim
+        // search must skip past them and still reclaim it.
+        let buf = OutputBuffer::new(10);
+        let dir = tempfile::tempdir().unwrap();
+
+        let mut unobservable = Vec::new();
+        for i in 0..(TEST_MAX_PENDING - 1) {
+            let p = dir.path().join(format!("unobservable{i}.log"));
+            std::fs::write(&p, "x").unwrap();
+            unobservable.push((buf.store_background(bg_job_failed(p.clone())), p));
+        }
+        let done_path = dir.path().join("done.log");
+        std::fs::write(&done_path, "x").unwrap();
+        let done_id = buf.store_background(bg_job(done_path.clone()));
+
+        // Trip eviction.
+        let new_path = dir.path().join("new.log");
+        std::fs::write(&new_path, "x").unwrap();
+        buf.store_background(bg_job_running(new_path));
+
+        assert!(
+            buf.get_background_log(&done_id).is_none(),
+            "the job observed to have exited should have been evicted"
+        );
+        assert!(
+            !done_path.exists(),
+            "an exited job's log is safe to unlink and must still be reclaimed"
+        );
+        let (oldest_id, oldest_path) = &unobservable[0];
+        assert!(
+            buf.get_background_log(oldest_id).is_some(),
+            "the oldest UNOBSERVABLE job must survive while an exited one exists"
+        );
+        assert!(oldest_path.exists(), "its log must still be on disk");
     }
 
     #[test]
