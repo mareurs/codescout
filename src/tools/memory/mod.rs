@@ -563,7 +563,11 @@ async fn resolve_memory_dirs(input: &Value, ctx: &ToolContext) -> anyhow::Result
     } else {
         // No workspace — fall back to the active project's memory dir. That store
         // is already `MemoryStore::open(p.root)`, i.e. the project-local layout,
-        // so there is no second directory to union in.
+        // so there is no second directory to union in. The sibling `if` above
+        // resolves the caller's `workspace=` pin from `ctx.workspace_override`.
+        //
+        // pin-exempt: no workspace means there is no pin to honour on this path.
+        // Guarded by tests/workspace_pin_parity.rs.
         let p = inner.active_project().ok_or_else(|| {
             super::RecoverableError::with_hint(
                 "No active project.",
