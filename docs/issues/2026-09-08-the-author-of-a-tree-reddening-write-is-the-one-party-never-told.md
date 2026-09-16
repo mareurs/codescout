@@ -130,6 +130,53 @@ compile and keeps working. Nothing in A's session mentions this. B's `cargo test
 
 ## Fix
 
+**PARTLY SHIPPED, and this section's "Not implemented" is stale — corrected 2026-09-16.**
+`src/agent/build_check.rs` is the author-side half this file asks for: *"tell the author their
+own uncommitted write broke the shared tree."* It is wired and REACHED, not merely present —
+`on_source_write` is called on every source write (`src/agent/mod.rs:914`), delivered through
+`take_build_notice` / `pending_notice` (`:920-921`), consumed in `server.rs`, and its
+reachability is pinned by `marking_a_rust_file_dirty_reaches_the_build_check`, whose own
+comment notes that a skip-guard would be monotone under the deletion it exists to catch.
+
+**THE RESIDUAL IS A SCOPE GAP, AND THE MODULE STATES THE INVARIANT IT CANNOT MEET.** The check
+runs `cargo check --workspace --all-targets` (`build_check.rs:439-442`). The gate runs
+`cargo test`. `--all-targets` makes it COMPILE test targets — load-bearing, and the module says
+so — but `check` never RUNS them. Its own header reads *"The gate runs tests, so a broken test
+module reds peers the same as a broken lib does; the check has to match the gate's blast
+radius"*; it matches on compilation and cannot match on execution. So **an uncommitted edit that
+COMPILES and reds a TEST still tells its author nothing**, which is the same distinction
+CLAUDE.md § Development Commands already draws for the gate itself (*"it is `test`, not `check`:
+a `check` compiles the lean test targets and never runs them, so a lean-only runtime failure is
+invisible to it"*).
+
+**Measured 2026-09-16, and every red that day was in the uncovered half.** Three failures in one
+gate run, all on code that compiled clean:
+`tools::read_file::tests::read_file_buffer_single_oversized_line_still_fits_the_threshold`
+(`read_file.rs:2277`), `librarian::tools::doctor::tests::admits_relevance_exemption_allow_list_stays_exhaustive_over_check_all`
+(`doctor.rs:13572`), and
+`librarian::tools::update::tests::doctor_does_not_observe_a_catalog_row_that_has_fallen_behind_its_file`
+(`update.rs:1182`). The **reader** side worked exactly as designed — `run_command`'s attribution
+named both holders, `29420e72` and `9e022ef0`, and routing by it reached both in one message
+each. The **author** side could not fire by construction. Both holders confirmed the reds were
+deliberate or in-flight rather than regressions, which no instrument in the tree could have
+established.
+
+**AND THE CONCLUSION TWO SESSIONS REACHED OUT LOUD THAT DAY WAS WRONG, which is why this
+correction is worth more than the datapoint.** `e5691fad` and `9e022ef0` agreed in writing that
+*no mechanism exists for this and the nearest one backfires* — reasoned from `gate.sh` isolating
+build artifacts but not source, and from `OB-23`'s stand-down shape. Neither of us opened
+`build_check.rs`. A mechanism exists, ships, is reached, and has a **scope gap**; "absent" and
+"narrower than its name" prescribe opposite work, and we were one file-read from the second.
+That is `81d2cdcbbdfc03a6`'s class arriving here too — a shipped remedy implying a scope it does
+not have, where the false coverage is the half that stops the next person looking.
+
+**Not implemented for the test-failure half, and deliberately not designed here.** Running the
+gate's tests on every source write is not a candidate on cost, and the cheap alternative — an
+advisory that a peer *might* be mid-edit — is `OB-23`'s measured shape, where the prescribed
+response is stand down and complying removes the observer whose build log resolves the anomaly.
+What is owed first is the bound stated at the mechanism: the notice's own text should say it
+covers compilation and not test outcomes, so its silence stops reading as an all-clear.
+
 Not implemented. The shape has to fire **without anyone being worried**, which rules out
 anything the author must remember.
 
