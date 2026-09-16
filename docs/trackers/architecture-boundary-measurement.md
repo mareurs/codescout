@@ -207,7 +207,7 @@ Derived 2026-09-16 from the slice records and the bug ledger below. Deliberately
 
 1. **[DONE 2026-09-16]** ~~Archive the six architecture-probe bug files.~~ All six read `status: investigating` and *"No fix commit has been made. SHA and patch-id are therefore not available"*. That blocker had cleared: the fix is `d3a2c24f`, which introduced `scripts/architecture-boundary-probe.py` and its 218-line control suite in one commit. **Prerequisite re-run at current HEAD: 14/14 pass, `self-test: ok`** — re-run rather than cited because `40fb2843` later touched the script (inspected: it only de-hardcodes the `--runtime-binary` default). Recorded `d3a2c24f` + patch-id `f7ee24322b07702e7e87e5f4e17d78422089f2d1` on each file, flipped to `fixed` **through the catalog** (a raw frontmatter edit does not reach it — BL-48), archived via `doc(action="move")`, and repointed the twelve stale citations the moves created — six paths **and** six ids, since `id = sha256(abs_path)` re-keys every row. Verified zero stale remaining, with a control showing the grep fires.
 
-2. **Commit the `W-3` session-log entry**, uncommitted in the working tree. The other two dirty files are not ours: `src/librarian/tools/doctor.rs` is attributed to a live peer by `scripts/file-provenance.py`, and the audit `jsonl` is machine noise.
+2. **[DONE 2026-09-16]** ~~Commit the `W-3` session-log entry.~~ Landed in `215a5cad`, committed by peer `9403d62d` alongside the six archive moves after the joint-archive guard deadlock (`152f17f5`). The other two dirty files are not ours: `src/librarian/tools/doctor.rs` is attributed to a live peer by `scripts/file-provenance.py`, and the audit `jsonl` is machine noise.
 
 3. **[DONE 2026-09-16, by peer `29420e72`]** ~~`c617b7bbbf85fa0c` — mutation-probe cannot verify a multi-file uncommitted change.~~ Fixed in `d8268215`, archived in `8ab825d6`, while this list was being written. Archiving re-keys the catalog row — `id = sha256(abs_path)` — so the id above is the post-archive one and any id cached for this bug before then has stopped resolving. The probe now carries the **whole working tree** into the isolated worktree — tracked edits, deletions and renames as one applied patch, plus untracked files — instead of only `--file`, and **refuses rather than falling back to `HEAD`** when the patch will not apply, since a verdict from a tree that is neither `HEAD` nor yours describes code nobody has. On a shared checkout it deliberately carries peers' in-flight work too, so the isolated tree matches what your own `cargo test` would compile and an `INCONCLUSIVE` means your real run would also have failed. This is the limitation that forced slice 1's mutations to be staged into the probe worktree by hand.
 
@@ -219,9 +219,11 @@ Slice 4 is not a next step; slice 3's prerequisite is now discharged but slice 3
 
 5. **[PREREQUISITE DISCHARGED 2026-09-16]** ~~Slice 3 prerequisite — audit the unresolved helper paths.~~ Audited; see *Follow-up measurements — 2026-09-16* § *Slice 3's prerequisite*. **Negative result: the unresolved routes hide no context dependency.** All three genuinely-unresolved helpers are pure string/URI functions with zero `ctx` references (control: the same method finds `ctx` in `grep.rs`'s `call`); the five unresolved `edit_file` actions dispatch in a span with zero `ctx` references; `unresolved_live_tools` is 0. So the baseline's helper-expanded footprints are complete with respect to every unresolved route, and slice 3 can be **designed** against them rather than against a population with unknown holes. **This does not authorize slice 3** and does not pick its migration target — the footprints remain lexical and scoped to the five declared populations, and complete-with-respect-to-unresolved-routes is not a call graph. Found on the way: the audit population was **5, not 28** — `86e44eba4bbdd891`.
 
-6. **Slice 4 prerequisite — a crash-injection or shared-edit parity experiment.** None was ever performed, so the file/SQLite ordering and rollback semantics the slice would consolidate are currently claims rather than observations. **Unchanged by the 2026-09-16 run** — nothing measured there touches crash recovery.
+6. **[PREREQUISITE DISCHARGED 2026-09-16]** ~~Slice 4 prerequisite — a crash-injection or shared-edit parity experiment.~~ Run; see *Slice 4 — prerequisite experiment RUN 2026-09-16*. **The result argues against the slice's framing.** The divergence is reachable, `reindex` repairs it, and `doctor` reports nothing — each with a control. So the gap is a missing **detector**, not missing recovery, and the consolidation the slice proposes would force two deliberately-opposite orderings (`create` catalog-first, `update` disk-first) onto one and break whichever lost. Recommended instead: a `doctor` check comparing `file_sha256` to disk. Filed `bd117fbc0d1a0308`. **Still only half-measured** — one writer pair injected; `move`, `append_entry`, `augment` and `edit_file`'s catalog sync are untouched.
 
-7. **`86e44eba4bbdd891` — the probe counts Rust keywords as unresolved helpers.** Filed 2026-09-16 from the slice-3 audit; `cluster/addressing-without-an-escape-hatch`. Open. Fixing it does not change any conclusion recorded above — it changes the number a future reader must audit to reach them.
+7. **`bd117fbc0d1a0308` — a catalog row left behind by a failed update is repairable but invisible.** Filed 2026-09-16 from the slice-4 experiment; `cluster/selector-narrower-than-its-population`. Open. The recommended fix is a `doctor` predicate, not a change to either write ordering.
+
+8. **`86e44eba4bbdd891` — the probe counts Rust keywords as unresolved helpers.** Filed 2026-09-16 from the slice-3 audit; `cluster/addressing-without-an-escape-hatch`. Open. Fixing it does not change any conclusion recorded above — it changes the number a future reader must audit to reach them.
 
 ## Status
 
@@ -338,6 +340,60 @@ So *"classify earlier"* is the wrong instruction: one of the three genuinely is 
 **The limit of this scout, stated because the recommendation depends on it.** What was verified is that every pinnable tool's production source **references** the pin, and that the adapter resolves it. That is **not** the same as every tool honoring it on every path — presence of an identifier is not correctness, and no instrument here reaches the stronger claim. **That gap is the argument for the guard rather than a caveat on it:** the guard is what would establish what this scout cannot.
 
 **Doc-vs-code drift corrected on the way.** `src/tools/core/types.rs:89` read *"No tool reads it yet — Phase 3 wires the selector-aware accessors"* — false since 2026-05-31, three and a half months stale, sitting on the field itself where a designer would look first. `cluster/doc-contradicted-by-code`.
+
+### Slice 4 — prerequisite experiment RUN 2026-09-16
+
+The tracker listed *"a crash-injection or shared-edit parity experiment"* as never performed, which made the file/SQLite ordering and rollback semantics claims rather than observations. Run. **The result argues against the slice's own framing.**
+
+**The experiment the production code had already specified.** `src/librarian/tools/update.rs` carried a comment saying the failure join was *"NOT REACHED BY ANY UNIT TEST … needs real lock contention (a second connection holding `BEGIN IMMEDIATE` past the 5s busy_timeout) to exercise, which no test in this suite constructs."* That is the prerequisite, written into the source by whoever last looked. Three tests now construct exactly that — on-disk catalog, second `rusqlite` connection holding the write lock — and each takes ~5 s of wall clock, which is the `busy_timeout` being genuinely paid rather than short-circuited.
+
+| question | answer | how |
+|---|---|---|
+| Is the divergence **reachable**? | **Yes** | file carries the edit, row keeps the pre-edit `file_sha256`; the error names both halves |
+| Is it **recoverable**? | **Yes** | `reindex` reconciles the row against a freshly computed hash of the bytes |
+| Is it **observable**? | **NO** | `doctor` never names the artifact |
+
+**The sibling asymmetry the slice was reaching for is real, and it is deliberate on both sides.** `create.rs` orders catalog-first / disk-last so a catalog failure leaves no orphan file (BUG-058, with a `RAISE(ABORT)` trigger test). `update.rs` orders disk-first / catalog-last. Opposite, and each is right for its own case: `create` has nothing to lose if the file never lands, while `update` has a caller holding a patch that must not be blindly re-applied — which is precisely what `file_written_but_catalog_failed` exists to say. **Consolidating them onto one ordering would break one of the two.**
+
+**The finding that changes the slice.** Recovery exists and nothing triggers it. The caller who receives the error is told exactly what happened; the party the recovery actually depends on — a later session reading the catalog — gets no signal, because `doctor`'s catalog-health family has no predicate over stored-hash versus on-disk bytes. `missing_file` is adjacent and does not cover it: a changed file is present. So the window is not *"until the next reindex"* but *"until somebody reindexes for an unrelated reason"*, which is not a bound. Filed as `bd117fbc0d1a0308`, `cluster/selector-narrower-than-its-population`.
+
+**The control is what makes that silence a measurement.** A `doctor` that reports nothing because the tree is healthy and one that reports nothing because the question is outside its scan return the same JSON. So the same fixture is broken a second, known-detectable way — the file is deleted, which `missing_file` owns — and doctor **does** name the artifact. Silent on the divergence, loud on the deletion, same scan, same run.
+
+```
+**Decision:** Do not build slice 4 as scoped. The consolidation it proposes would
+    force two deliberately-opposite orderings onto one, and the rollback machinery
+    it budgets for is answering a durability problem the experiment shows does not
+    exist. Make the state OBSERVABLE instead.
+**Context:** Reachable, repairable, unreported — measured, not argued. The gap is
+    a missing detector, not missing recovery.
+**Alternatives considered:**
+    - Reorder `update` to match `create` — rejected: `create` can afford
+      catalog-first because it has nothing to lose if the file never lands;
+      `update` cannot, and its caller holds a non-idempotent patch.
+    - Two-phase commit / rollback across file and SQLite — rejected: prices a
+      durable divergence, and reindex already reconciles.
+    - A `doctor` check comparing `file_sha256` to disk (recommended) — makes the
+      existing recovery triggerable without touching either ordering.
+**Consequences:**
+    now easier: a row that has fallen behind its file becomes findable, so the
+      repair that already works can be aimed.
+    now harder: hashing every artifact per run is O(corpus), and `doctor` is a
+      manual cadence rather than a gate. An `file_mtime` pre-filter is the obvious
+      narrowing and is ITSELF a selector that can be narrower than its population —
+      the exact class this defect was filed under.
+**Change scenarios absorbed:** a write fails between its file half and its catalog
+    half and nobody is watching the session that saw the error.
+**Revisit-when:** a second writer pair appears with the same split (a catalog row
+    plus a non-file side effect — a vector upsert, a remote index), at which point
+    consolidation has two concretes instead of one; OR the `doctor` check is added
+    and its cost is measured against a real corpus rather than estimated.
+**Confidence:** high on all three experimental answers — each has a control and an
+    observed outcome. Medium on the recommendation's cost estimate, which is a
+    guess about hashing a corpus nobody has timed. Low that any of it is urgent:
+    the defect class has zero live instances.
+```
+
+**What this does NOT establish.** One writer pair was exercised — `doc(action="update")`. `doc(action="move")`, `append_entry`, `augment` and `edit_file`'s catalog sync each have their own ordering and none was injected. The slice's phrase *"across actual sibling implementations"* is therefore still only half-measured: two siblings compared, four unexamined. That is the next experiment, not a caveat on this one.
 
 ## Follow-up measurements — 2026-09-16
 

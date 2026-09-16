@@ -716,12 +716,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         file_sha256: crate::librarian::util::sha_of_bytes(new_content.as_bytes()),
         confidence: row.confidence,
     };
-    // NOT REACHED BY ANY UNIT TEST: `file_written_but_catalog_failed` is tested
-    // directly against a hand-built error, but the join here -- an ACTUAL
-    // `upsert_and_mint_slug` failure after the file write above has already landed
-    // on disk -- needs real lock contention (a second connection holding
-    // `BEGIN IMMEDIATE` past the 5s busy_timeout) to exercise, which no test in
-    // this suite constructs.
+    // Reached by `a_real_catalog_failure_after_the_file_write_leaves_disk_ahead_of_the
+    // _catalog` (below), which constructs the real lock contention this comment used to
+    // say no test did: an on-disk catalog and a second connection holding
+    // `BEGIN IMMEDIATE` past the 5 s busy_timeout. `file_written_but_catalog_failed` is
+    // ALSO tested directly against a hand-built error — that proves the WORDING; this
+    // join proves the ordering actually produces the state the wording describes.
+    //
+    // What the experiment established, beyond that this line runs: the resulting
+    // divergence is repairable by `reindex` and reported by NOTHING —
+    // docs/issues/2026-09-16-a-catalog-row-behind-its-file-is-repairable-but-invisible.md.
     if let Err(e) = artifact::upsert_and_mint_slug(&cat, &updated_row) {
         return Err(file_written_but_catalog_failed(e, &full));
     }
@@ -945,6 +949,242 @@ mod tests {
         assert!(content.contains("title: New"), "file should have new title");
         let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
         assert_eq!(row.title.as_deref(), Some("New"));
+    }
+
+    /// **Slice 4's prerequisite, run.** `docs/trackers/architecture-boundary-measurement.md`
+    /// listed "a crash-injection or shared-edit parity experiment" as never performed, so
+    /// the file/catalog ordering and recovery semantics were claims rather than
+    /// observations. This is the observation, and it is placed here because the production
+    /// code above says in a comment that nothing reaches it: *"NOT REACHED BY ANY UNIT
+    /// TEST … needs real lock contention (a second connection holding `BEGIN IMMEDIATE`
+    /// past the 5s busy_timeout) to exercise, which no test in this suite constructs."*
+    ///
+    /// Real contention, not a hand-built error: an on-disk catalog and a second
+    /// `rusqlite` connection that takes the write lock and keeps it. The existing
+    /// `file_written_but_catalog_failed` unit test builds the error directly and therefore
+    /// proves the WORDING; only this proves the JOIN — that the ordering actually produces
+    /// the state the wording describes.
+    ///
+    /// **What it establishes, and the sibling asymmetry that is the real finding.**
+    /// `create` orders catalog-first / disk-last on purpose (`create.rs`, BUG-058) so a
+    /// catalog failure leaves no file. `update` orders disk-first / catalog-last, so the
+    /// same failure leaves the file ahead of its row. Both orderings are defensible alone;
+    /// they are opposite, and only one had a crash-injection test until this one.
+    ///
+    /// Costs ~5 s of wall clock: the failure only arrives when `busy_timeout` expires, and
+    /// shortening it would test a different system than the one that ships.
+    #[tokio::test]
+    async fn a_real_catalog_failure_after_the_file_write_leaves_disk_ahead_of_the_catalog() {
+        let tmp = TempDir::new().unwrap();
+        // On-disk, not in-memory: a second connection is the whole instrument, and
+        // `:memory:` gives each connection a private database.
+        let db = tmp.path().join("catalog.db");
+        let ctx = TestToolContextBuilder::new(Catalog::open(&db).unwrap())
+            .with_root(Root {
+                name: "r".into(),
+                path: tmp.path().to_path_buf(),
+            })
+            .build();
+        let id = mk_doc(&ctx).await;
+
+        let sha_before = artifact::get(&ctx.catalog.lock(), &id)
+            .unwrap()
+            .unwrap()
+            .file_sha256;
+
+        // Take the write lock and hold it past the 5 s budget.
+        let blocker = rusqlite::Connection::open(&db).unwrap();
+        blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+        let err = call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body": "REPLACED-BY-THE-EXPERIMENT"}}),
+        )
+        .await
+        .expect_err("the catalog write must fail while another connection holds the lock");
+
+        // 1. The caller is told BOTH halves, not just the failure.
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("wrote the file but the catalog record failed"),
+            "the error must name the file half as well as the catalog half; got: {msg}"
+        );
+
+        // 2. The file half LANDED. This is the fact a bare rusqlite error hides.
+        let disk = std::fs::read_to_string(tmp.path().join("doc.md")).unwrap();
+        assert!(
+            disk.contains("REPLACED-BY-THE-EXPERIMENT"),
+            "the file write precedes the catalog write, so the edit is on disk; got: {disk}"
+        );
+
+        // 3. The catalog half did NOT. Divergence is reachable in the shipped ordering.
+        let after = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+        assert_eq!(
+            after.file_sha256, sha_before,
+            "the catalog row must still carry the PRE-edit hash — that divergence is the \
+         state slice 4 asks whether anything can recover"
+        );
+
+        drop(blocker);
+    }
+
+    /// The second half of slice 4's question: the divergence above is REACHABLE — is it
+    /// RECOVERABLE, and by what?
+    ///
+    /// Runs the same real-contention injection, then releases the lock and asks `reindex`
+    /// to reconcile. The answer decides whether `update`'s disk-first ordering is a
+    /// recoverable hazard (the catalog catches up on the next scan, so the window is
+    /// transient) or a durable one (the row stays wrong until someone notices), and slice
+    /// 4's cost estimate turns on which.
+    ///
+    /// Deliberately asserts the OBSERVED outcome rather than the desired one. If reindex
+    /// does not reconcile, this test records that as the finding — a red here on a future
+    /// change means the recovery property moved, which is exactly what wants a guard.
+    #[tokio::test]
+    async fn whether_reindex_reconciles_a_catalog_left_behind_by_a_failed_update() {
+        let tmp = TempDir::new().unwrap();
+        let db = tmp.path().join("catalog.db");
+        let ctx = TestToolContextBuilder::new(Catalog::open(&db).unwrap())
+            .with_root(Root {
+                name: "r".into(),
+                path: tmp.path().to_path_buf(),
+            })
+            .build();
+        let id = mk_doc(&ctx).await;
+        let sha_before = artifact::get(&ctx.catalog.lock(), &id)
+            .unwrap()
+            .unwrap()
+            .file_sha256;
+
+        let blocker = rusqlite::Connection::open(&db).unwrap();
+        blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let _ = call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body": "REPLACED-THEN-RECONCILED"}}),
+        )
+        .await
+        .expect_err("catalog write must fail under the held lock");
+        // Release: reconciliation cannot be tested while the lock that broke it is held.
+        drop(blocker);
+
+        // Control — the divergence this test is about must actually exist before we ask
+        // whether anything repairs it. Without this, a reindex that does nothing and a
+        // divergence that never happened are the same green tick.
+        let diverged = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+        assert_eq!(
+            diverged.file_sha256, sha_before,
+            "precondition: the catalog must be behind disk before reconciliation is tested"
+        );
+
+        let reindexed = crate::librarian::tools::reindex::call(&ctx, serde_json::json!({})).await;
+
+        let after = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+        let on_disk = crate::librarian::util::sha_of_bytes(
+            std::fs::read_to_string(tmp.path().join("doc.md"))
+                .unwrap()
+                .as_bytes(),
+        );
+
+        // The observed answer, recorded either way. `reindex` re-walks and upserts rows
+        // whose content hash no longer matches the stored one, so the expectation is that
+        // it catches up; if it does not, the message below is the finding rather than a
+        // failure of the test.
+        assert_eq!(
+            after.file_sha256,
+            on_disk.clone(),
+            "reindex did NOT reconcile the row with disk (reindex result: {:?}). That makes \
+         update's disk-first ordering a DURABLE divergence, not a transient one, and \
+         slice 4's recovery mechanics have to own it.",
+            reindexed.as_ref().map(|v| v.to_string())
+        );
+        assert_ne!(
+            after.file_sha256, sha_before,
+            "the reconciled hash must differ from the pre-edit one, or the comparison above \
+         passed because nothing ever changed"
+        );
+    }
+
+    /// The third arm, and the one that decides slice 4's shape: the divergence is
+    /// reachable and reindex repairs it — but is it **observable** in the meantime?
+    ///
+    /// Recovery that requires someone to run `reindex` is only as good as the reason they
+    /// would run it. If nothing reports a row that has fallen behind its file, the window
+    /// is not "until the next reindex" but "until someone reindexes for an unrelated
+    /// reason", which is not a bound.
+    ///
+    /// **The control is the point.** A `doctor` that reports nothing because it is
+    /// healthy and a `doctor` that reports nothing because this scan cannot express the
+    /// question return the same JSON. So the same fixture is then broken a SECOND,
+    /// known-detectable way — the file is deleted, which `missing_file` owns — and doctor
+    /// must speak. A silent first half is a finding only if the second half is loud.
+    #[tokio::test]
+    async fn doctor_does_not_observe_a_catalog_row_that_has_fallen_behind_its_file() {
+        let tmp = TempDir::new().unwrap();
+        let db = tmp.path().join("catalog.db");
+        let ctx = TestToolContextBuilder::new(Catalog::open(&db).unwrap())
+            .with_root(Root {
+                name: "r".into(),
+                path: tmp.path().to_path_buf(),
+            })
+            .build();
+        let id = mk_doc(&ctx).await;
+        let sha_before = artifact::get(&ctx.catalog.lock(), &id)
+            .unwrap()
+            .unwrap()
+            .file_sha256;
+
+        let blocker = rusqlite::Connection::open(&db).unwrap();
+        blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let _ = call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body": "DIVERGED-FROM-ITS-ROW"}}),
+        )
+        .await
+        .expect_err("catalog write must fail under the held lock");
+        drop(blocker);
+
+        let doc_path = tmp.path().join("doc.md");
+        assert!(
+            std::fs::read_to_string(&doc_path)
+                .unwrap()
+                .contains("DIVERGED-FROM-ITS-ROW"),
+            "precondition: the file must carry the edit"
+        );
+        assert_eq!(
+            artifact::get(&ctx.catalog.lock(), &id)
+                .unwrap()
+                .unwrap()
+                .file_sha256,
+            sha_before,
+            "precondition: the row must still carry the pre-edit hash"
+        );
+
+        let diverged_report = crate::librarian::tools::doctor::call(&ctx, serde_json::json!({}))
+            .await
+            .expect("doctor runs");
+        let diverged_text = diverged_report.to_string();
+
+        // CONTROL, run first so a dead doctor cannot be read as a clean one: break the
+        // same fixture a way doctor demonstrably owns.
+        std::fs::remove_file(&doc_path).unwrap();
+        let missing_report = crate::librarian::tools::doctor::call(&ctx, serde_json::json!({}))
+            .await
+            .expect("doctor runs");
+        let missing_text = missing_report.to_string();
+        assert!(
+            missing_text.contains(&id),
+            "CONTROL FAILED — doctor did not name the artifact even with its file deleted, \
+         so its silence on the divergence above proves nothing about the divergence. \
+         Report: {missing_text}"
+        );
+
+        // With the control live, the first silence is a measurement.
+        assert!(
+            !diverged_text.contains(&id),
+            "doctor DID name the artifact whose file had moved ahead of its row — the \
+         observability gap this test records has been closed, and slice 4's recovery \
+         story should be re-read against it. Report: {diverged_text}"
+        );
     }
 
     /// One artifact, created and ready to update. Returns its id.
