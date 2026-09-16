@@ -149,6 +149,9 @@ no refusal emitted — the exact capture the guard exists to prevent. Named here
 nothing in the guard closes it.
 ## Fix
 
+**Directions 4, 5 and 6 SHIPPED 2026-09-16. Direction 2 remains open and 1 and 3 stay dead.**
+The deadlock is **half** resolved and the table below says which half.
+
 **Not designed.** Directions recorded so the next session does not re-derive them — and
 two of the original three are now measured dead, which is most of what this section is
 worth.
@@ -246,6 +249,50 @@ worth.
    decision on one push. **No reasoning is attributed to them** — the pushing session reported
    the trade-off and did not ask why, and putting a rationale in an operator's mouth is `IC-24`'s
    shape, a value correct in one frame published under a name that states another.
+**Three of six shipped. The deadlock is HALF resolved, and which half is the point.**
+
+| direction | state | citation |
+|---|---|---|
+| 1 teach the guard about renames | shipped, does not reach this shape | `b37b888a` |
+| 2 let a commit declare two authors | **open** — the remaining one | — |
+| 3 move the frontmatter edit off the archiver | **dead** — targets authorship, which the guard never reads | — |
+| 4 name the performable route | **shipped** | `fc1ad175`, patch-id `fef5458a8316af21fd0ed2db92289dfbda29ab01` |
+| 5 warn when a move strands a citation | **shipped** | `6853c517`, patch-id `3616d2f2fd5ae7e2633c939b568cb4d5cfd28519` |
+| 6 give the ack reach | **shipped**, same commit as 4 | `fc1ad175` |
+
+**4 and 6 had to ship together**, which is direction 6's own finding: text alone would have
+advertised a remedy the guard then refuses. The predicate is
+`pathspec && theirs && mine empty`, restricted to the pathspec form because a bare commit
+takes the entire shared index rather than a set the committer named — `mine` empty there is
+the whole-index sweep this guard exists for, not a corner with no compliant route.
+
+**WHICH HALF IS UNBLOCKED, stated because it would otherwise be read wider.** Side B named
+only foreign paths, so `mine` was empty and the ack now fires for them. Side A held twelve
+rename halves of its own, so `mine` was non-empty, `all_contested` does not fire, and side A
+stays refused — **correctly**, because a narrowing route still exists for them and the guard
+prints it. Anyone citing this file for *"the deadlock is fixed"* is citing it wrong.
+
+**Direction 5 shipped as its own script rather than a branch of this guard**, and the first
+design could not have worked: this guard has five early `exit 0` paths and builds its rename
+maps after all of them, so `215a5cad` — the commit that stranded the citations — is recorded
+as **Passed** by it. A warning hosted here would have been structurally unable to fire on the
+case it was built for. Reach verified against real history instead of a fixture: at
+`215a5cad^` exactly two files cited the six moved stems, and the new check names the one
+that was not in the commit while staying silent about the one that was.
+
+**A defect found by the design review and fixed first, because it is a tightening:**
+`CODESCOUT_INDEX_ACK="-"` cleared refusals the ack was never meant to reach — the recorder's
+unattributable sentinel was accepted as a session id, a wildcard at a gate whose own text
+says it deliberately has none. Filed separately and fixed at `96d839c3`, patch-id
+`caa8669f048c56e0dd09ced10823b9f2a2131cc6`. It had to land **before** the widening rather
+than after: `all_contested` reaches far more rows than `joint`, and every `-` among them
+would have been ackable by one character.
+
+**And the coverage that should have existed first.** `b37b888a` shipped `joint` and the ack
+with **zero** tests — `grep -rn "CODESCOUT_INDEX_ACK\|joint" tests/` returned nothing while it
+was reported as *"101 passed"*. That backfill landed at `ed0cce92` **before** any change to
+the admitting side, so the widening reds against a real baseline rather than against tests
+written alongside it.
 ## Workarounds
 
 **One, and the second thing this section used to recommend is now measured WRONG.**
