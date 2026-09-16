@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 163
+entry_high_water_F: 164
 entry_high_water_W: 143
 ---
 
@@ -229,6 +229,7 @@ entry_high_water_W: 143
 | F-90 | 2026-09-01 | med | self-friction | fixed-verified | Published "the worktree guard MANDATES `git -C`, so the two guards are in direct tension" to five surfaces — three commit messages, a bug file, and a source comment — without probing it. One command refutes it: `git add --dry-run <path>` exits 0, unblocked. The guard refuses only commit-family verbs; both my blocked commands merely CONTAINED `git commit`. Attribution is recorded at STAGING time, so no tension exists on the path that matters. Population inflated too: `-C` is 32 of 1586 real `git add` calls (2.0%), not the mandated form. Being blocked twice felt like having tested it — refusal establishes what a guard refuses, never what it permits |
 | F-161 | 2026-09-15 | med | cross-session | open | **Selected an already-fixed bug for work: `doc(find)` returned it `open` while its fix (`e79fa902`, 08:27:23) and archive (`3c4c3b61`, 08:28:49) had landed mid-triage.** The catalog was never stale — `doctor` reported `missing_file: 0`, because the peer archived properly through `doc(action="move")`, which re-keys the row atomically; the SNAPSHOT aged. **Distinct from the promoted substrate law**, which is about reading the wrong world: here one world was read correctly and then moved, so the discriminator is *when*, not *which*. Corpus rate at the time: 88 commits touching `docs/issues/` in 24h, 5 sessions live in the checkout. Caught only because two surfaces disagreed — `grep` listed the archive path while the catalog reported it live — and the reflex that has to be beaten is *"one of my instruments is broken"*. Remedy is ordering, not mechanism: re-verify at CLAIM time, since `status: taken` + `claimed_by` re-reads the row anyway |
 | F-162 | 2026-09-15 | med | self-friction | open | **Three mis-scoped instruments in one verification, two of them a commit RANGE read as authorship — while the rule against it sat quoted in my context.** `85642b1b^..HEAD` reported **7** peer commits as my `IC-12` citations; a line-granularity `grep -c` on the `**Members:**` line (IC-6's, ~38k chars at that instant and 40,018 two appends later — the scalar decays, see the entry) reported a bare `n=` I had not written, because appending re-writes the whole line and any other author's `n=` anywhere in it counts. Both corrected readings came back clean, and what caught the first two was their **impossibility** (7 citations in a session that wrote none) rather than vigilance — `shared-checkout-commit-sequence.md` § 2 forbids exactly this and was in context, quoted by the peer message that prompted the check. Remedies, both one-liners: enumerate your own shas explicitly instead of a range, and use `--word-diff` when the unit you care about is a phrase inside a mega-line. Generalises past the positive-control law: **when an instrument's UNIT (line, commit, file) is coarser than the thing asked about (a word, an author, a field), its answer can be neither right nor wrong** |
+| F-164 | 2026-09-16 | med | measurement | mitigated | **A nullable JSON field that returns the EMPTY STRING makes an `is None` guard fail open, and the failure direction is ALARM.** `gh run view --json jobs` emits `conclusion: ""` for a still-running job, not `null`, so `not in ('success','skipped',None)` flagged **12 of 24 jobs as failures on a run with zero failures**. Caught by a contradiction, not by suspicion: the flagged list contained a job my own output also reported as succeeded, and two contradictory statements about one job from one payload is an instrument fault (`W-139`'s discriminator). Worth an entry because it fails toward alarm — it manufactures failures, and the next actions (report broken CI, go debug a green pipeline) both feel like diligence. One step from the publish path, so `W-140` from the reporting side again. **Denominator:** peer `9403d62d`'s independent predicate `if c and c not in (...)` IS safe, since `bool('')` is False — and their note is the useful half, *"I would not have found mine safe by inspection; I ran the truth table."* Two implementations, one safe, neither author able to tell by reading. Prefer an **allowlist of terminal values** to a denylist of non-terminal ones: the allowlist fails toward *not finished yet*, the denylist toward *broken*. Scope checked before filing — nothing in this repo consumes `gh run --json`, so it is a lesson and not a defect. |
 
 ## Wins Index
 <!-- audit-doc-refs:ignore-refs `1f8784f932f042bc` — a CATALOG DIGEST, not an artifact id — the sentence reads "4786 rows, digest ...". Sixteen lowercase hex, same shape, different namespace. -->
@@ -16351,6 +16352,52 @@ evidence for a subtractive-only claim.
 entry extends rather than corrects.
 
 **Status:** validated
+
+## F-164 — A nullable JSON field that returns the EMPTY STRING makes an is-None guard fail open, and the failure direction is alarm
+
+**Valid:** dated 2026-09-16
+
+**Observed.** Reading CI run `35055091243` through `gh run view --json status,conclusion,jobs`
+to check a peer's push. My predicate was
+`j.get('conclusion') not in ('success','skipped',None)`, which flagged **12 of 24 jobs as
+failures on a run with zero failures**. `gh` emits `conclusion: ""` — the **empty string** —
+for a job still running, not `null`, so allowing `None` allowed nothing.
+
+**Caught before publishing, and by a contradiction rather than by suspicion.** The flagged
+list contained `Test (macos-latest / no-features)`, which my *own* output also reported as
+succeeded. Two contradictory statements about one job, from one read of one payload, is an
+instrument fault and not a finding — the same discriminator as the `0/0/0` control in `W-139`,
+where the control returning an impossible value was the entire signal.
+
+**Why it is worth an entry rather than a shrug: the failure direction is ALARM.** A nullable
+field read wrongly usually goes quiet. This one manufactures failures that do not exist, and
+the natural next actions — report a broken CI to the operator, or go debug a green pipeline —
+are both expensive and both feel like diligence. It was one step from the publish path, which
+is `W-140`'s law about an instrument's two consumers, met from the reporting side again.
+
+**Denominator, from an independent implementation.** Peer `9403d62d` checked their own
+predicate at my prompting: `if c and c not in ('success','skipped')`, which is safe because
+`bool('')` is `False`. Their note is the useful half — *"I would not have found mine safe by
+inspection; I ran the truth table."* Two implementations of one check, one safe and one not,
+and neither author could tell which by reading it.
+
+**Generalisation, offered narrowly.** A truthy/falsy or `is None` check over a JSON API
+conflates **absent**, **null** and **empty**, which mean different things and which the same
+endpoint may use for different states. Where a field is documented nullable, read what the
+implementation actually emits, and prefer an **allowlist of terminal values** over a denylist
+of non-terminal ones — the allowlist fails toward "not finished yet", the denylist fails
+toward "broken".
+
+**Scope checked before filing, which is why this is an `F-N` and not a bug file.** Nothing in
+this repo consumes `gh run --json`: `grep -rn "gh run" scripts/ tests/ .github/` returns
+nothing, and both `conclusion` hits under `scripts/*.py` are prose. The defect existed only
+in an ad-hoc probe, so there is no in-tree instrument to repair.
+
+**Status:** mitigated
+
+**Rests on:** `W-139` (run the positive control before believing a probe's zero — the
+alarming-zero half) and `W-140` (an instrument's verdict has two consumers, and gating
+protects only one).
 
 ## Template for new entries
 
