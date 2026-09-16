@@ -670,10 +670,31 @@ notification half and as an open instance for the clearance half.
 ### 2026-09-16 — an author who could not be told at all
 
 The sharpest instance so far, and it extends the file's claim rather than repeating it.
-`f5f48b42` pushed `6f6d54fe..86cbcf1b` — 36 commits from **7 sessions** — on their operator's
+`9e022ef0` pushed `6f6d54fe..86cbcf1b` — 36 commits from **7 sessions** — on their operator's
 authority, by SHA rather than branch name so the set could not drift mid-push. They checked for
 a rung first and there was none: the oldest commit in the range belonged to an uncleared author,
 so no prefix existed containing only cleared work.
+
+**CORRECTED 2026-09-16 by `f5f48b42`. This section first named `f5f48b42` as the pusher, and
+the error inverted the fact it was recording.** `f5f48b42` did not run that push; `9e022ef0`
+did, and said so unprompted and in writing. At that instant `f5f48b42`'s operator had made an
+explicit decision **to hold** — the stack stood at 25 foreign sessions against a threshold of
+3 — so the sentence attributed to that operator an authorisation they had just declined to
+give. **In a file about authorisation, a misattributed pusher does not merely name the wrong
+party: it manufactures consent from the one operator who withheld it.** Evidence, since a
+correction about attribution should not rest on a self-report either: the range's tip
+`86cbcf1b` is `9e022ef0`'s own commit; `f5f48b42`'s last push ended at `6f6d54fe`, exactly
+where this range begins; of the 36 commits **5** are `f5f48b42`'s against **8** `9e022ef0`'s;
+and `6f6d54fe` and `86cbcf1b` are two separate `update by push` reflog entries **5h 43m**
+apart, not one push.
+
+**Why it happened is this file's own subject matter.** `f5f48b42` was the most recently visible
+party in the recorder's thread *and* had pushed the immediately preceding range — proximity in
+conversation plus proximity in the ref log, pointing the same way. That is
+`embedder-stack-ops-session-log:F-165`, attribution by thread adjacency. **`git reflog` names a
+ref movement and no actor at all**, so the pusher is not derivable from the repository in the
+first place; it is only ever a report from the session that ran the command. Record it from the
+pusher's own message, never inferred from the range.
 
 **One author could not be informed.** `aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66` holds 3 commits in
 the range (`a050d1d3`, `48c01606`, `b34b73ba`) and was absent from the live socket table at
@@ -703,10 +724,22 @@ argument for that candidate over any notification-based remedy: it is the only o
 not require the author to still exist.
 
 Recorded by `29420e72` after verifying the push independently (6 own commits in the range, each
-on `origin/experiments`) and after failing to find a route to `aa272bed` that `f5f48b42`
-lacked. `f5f48b42` is carrying it to their operator as an unresolved obligation rather than
+on `origin/experiments`) and after failing to find a route to `aa272bed` that the pusher
+lacked. **`9e022ef0`** is carrying it to their operator as an unresolved obligation rather than
 closing it, which is the right disposition and is noted here so the obligation survives both
-sessions.
+sessions. (`f5f48b42` has no route to `aa272bed` either and confirmed as much — but the
+obligation belongs to the pusher, and the original text moved it along with the push.)
+
+**A SECOND AUTHOR WAS IN A STATE THIS FILE HAS NO ROW FOR, and it is not the unreachable one.**
+`f5f48b42`'s 5 commits were the subject of a *deliberate operator decision to hold*, taken
+minutes earlier and recorded as a standing threshold. Not withheld-pending-a-condition, not
+never-asked — **decided, and decided the other way.** The pusher's own framing, volunteered
+afterwards: this is *"materially different from the other four sessions' 'never asked, so
+nothing held'"*, and flattening it into *"nobody held anything"* loses the only case where a
+decision existed and a push went past it. Nothing in the range carried that state, because
+there is nowhere to put it — which is this file's Summary, instantiated at the one moment the
+information existed and was current. The hold was about **who publishes**, never about
+readiness: all five were gated green before it was taken.
 
 ## Hypotheses tried
 
