@@ -652,6 +652,64 @@ asserting the literal token `all` never appears as a sid was **vacuous** before 
 nothing printed at all — and became load-bearing only once the `has` rows could red on
 silence. A negative assertion is worth what the positive assertions beside it are worth.
 
+## A red does not survive its assertion being edited
+
+`CLAUDE.md` § *Testing Discipline* states the law; this is the run behind it.
+
+**Setting.** `scripts/mutation-probe.sh`'s `ran_lines == 0` refusal named three causes, none of
+which fits a non-cargo runner
+(`docs/issues/archive/2026-09-16-mutation-probe-renders-no-verdict-for-a-non-cargo-runner.md`).
+The fix adds a fourth cause plus a remedy sentence, and case 21 of `tests/mutation-probe.sh`
+guards it with two needles: that the cause is named, and that the remedy says where the verdict
+IS readable.
+
+**The red that was observed.** Test written and run first: 2 of its 4 assertions red, on needles
+`not CARGO` and `summary line`; the other two green — itself the control, since it shows the
+fixture reaches the branch under test rather than failing for an unrelated reason.
+
+**The edit that discarded it.** `has` is `grep -qF`, so `not CARGO` reds on any rewording that
+keeps the meaning — while the comment beside it promised it survived one. The repair looked
+obvious, and is what this document prescribes elsewhere: assert the ENTITY, case-insensitively
+— *"does this message still say cargo at all"* — the form that reds on deletion and survives
+rewording (§ *Loudness is a property of a PATH*, the two-addressee shape test).
+
+**The measurement.** Arming the mutation the case exists to kill — delete the non-cargo clause,
+`--replace` a cargo-free string, `-- bash tests/mutation-probe.sh`, against a known-clean
+`50 passed, 0 failed` baseline:
+
+| assertion form | mutation | result |
+|---|---|---|
+| entity, case-insensitive `cargo` | clause deleted | `50 passed, 0 failed` — **SURVIVED** |
+| phrase, `not CARGO` | clause deleted | `49 passed, 1 failed` — KILLED |
+| phrase, `summary line` | remedy reworded | `49 passed, 1 failed` — KILLED |
+
+The entity needle was vacuous because the fix's own remedy paragraph, two lines below the
+clause, says *"On the NON-CARGO cause"* — so deleting the clause left `cargo` in the output.
+That is § *Scope, not direction* (an assertion computed over a POPULATION cannot verify a claim
+about a MEMBER) arriving through a door nobody watches.
+
+**What makes it a law of its own rather than an instance of that one.** The author held an
+observed red and believed it covered the assertion. It did not — that red was produced by the
+text then deleted. Re-reading the new assertion returns a true sentence, the suite is green, and
+the red-then-green cycle has been performed in full. **Every signal TDD generates was present,
+and none of them was about the assertion that shipped.** The scope law tells you an assertion
+can be vacuous; this one tells you why your evidence that it is not has quietly expired.
+
+**Why the trigger is counter-intuitive.** The dangerous edit is not a careless one — it is the
+improvement. The rewrite above was made *toward* this document's own prescription, by an author
+who had just read it, inside a commit fixing a bug about guards narrower than their names.
+Confidence was highest exactly where the evidence had lapsed.
+
+**The remedy is one line, and it is not "be careful":** treat any edit to an assertion as
+invalidating its red, and re-run the mutation. On this checkout that is
+`./scripts/mutation-probe.sh` at ~11 s per run (`docs/PROBES.md` carries the cost and the
+caveats). What it cannot be answered by is re-reading at any level of attention — both forms
+read as correct, which is the whole difficulty.
+
+**Attribution:** measured by sessionId `a3bf229c-658b-42f9-8f4b-794fcf0d35c7`, 2026-09-16, while
+fixing the bug above. The vacuity was found by the mutation and by nothing else — including the
+author's own re-reading of the line they had written minutes earlier.
+
 ## Related
 
 - The laws themselves: [`CLAUDE.md`](../../CLAUDE.md) § *Testing Discipline*.

@@ -301,6 +301,24 @@ premise that every addition falsifies.
   transfer to independence of repairs** (measured 2026-09-16, `fbddd86d`; the author had derived
   the independence by reading, which cannot separate them). Index row and every caveat →
   [`docs/PROBES.md`](docs/PROBES.md).
+- **A red is evidence for the assertion that PRODUCED it and for no other — least of all its own
+  replacement.** The laws above are about what an assertion cannot DETECT; this is about what a
+  red licenses you to believe about a DIFFERENT one, and the two come apart at a single site.
+  Rewriting an assertion after observing its red silently discards that evidence: the new text
+  has never been observed failing, the suite is green, and the red-then-green ritual has been
+  performed in full, so nothing anywhere is shaped like a gap. Measured 2026-09-16
+  (`tests/mutation-probe.sh` case 21): two needles went red pre-fix, and one was then rewritten
+  **toward this section's own prescription** — from a phrase to the ENTITY it names, the form
+  that reds on deletion and survives rewording. The rewrite was **vacuous**: a sibling sentence
+  of the same message satisfied it, so the clause it guarded could be deleted whole and the
+  assertion stayed green — `50 passed, 0 failed`, SURVIVED its own mutation — while re-reading
+  it returned a true sentence. Only re-running the mutation separates that from coverage.
+  **So re-observe the red after ANY edit to an assertion, including — especially — one made to
+  improve it:** an improvement is exactly when the old red feels most transferable, and the TDD
+  cycle has no step that asks. Derivation →
+  [`docs/conventions/what-green-is-evidence-for.md`](docs/conventions/what-green-is-evidence-for.md)
+  § *A red does not survive its assertion being edited*.
+
 ## Bug Tracking
 
 **Per-file bug tracking lives in `docs/issues/`.** Every bug noticed during work gets its own file, copied from `docs/issues/_TEMPLATE.md`. Path, slug, the `status:` vocabulary (`open | taken | investigating | fixed | mitigated | wontfix | zombie`), and the archive flow are documented in **`get_guide("tracker-conventions")` § Bug files**.
