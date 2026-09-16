@@ -259,7 +259,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 | OB-15 | 2026-09-02 | **a mechanism that is GATED OFF and one that was never BUILT produce identical observations** — no output, every call, forever. The diagnostician's evidence cannot discriminate, and the two have opposite remedies. Runs in both directions: *no output ⇒ no mechanism*, and *a published limitation ⇒ this instance is covered by it* | **anyone diagnosing a missing output from the output.** Not carelessness — they hold the *complete* observation, which is what disqualifies a care-based remedy. The discriminator is in the code, never in the absence | wrong instrument, and **asymmetrically pulled**: *build it* is actionable and ends in a plan, *ungate it* asks you to believe in something you have no evidence for — so the tie breaks toward building predictably rather than randomly, which is what earns a standing check | none yet — candidate is one line in reconnaissance Phase 1: *an output you have never seen is not evidence that nothing emits it; grep the emitter.* 3 instances, 2 substrates, 3 sessions; instance 3 argues it should reach **records** too, not only emitters (`.git/session-stage-log` answered in one command a question three sessions were answering from memory) |
 | OB-14 | 2026-09-02 | **the sampling frame — what the corpus contains, what one row means, how rows were selected — is the premise every number rests on and the one no downstream check reads.** A frame error moves numerator and denominator together, so every consistency check passes | **the analyst**, whose entire access to the population runs *through* the frame; auditing it needs a view of the population that does not come through it | wrong instrument, and uniquely so for the **review** half: 13 rounds plus a sustained adversarial review that reversed 4 conclusions, and none of five parties questioned the frame — `OB-4`'s shared-substrate law applied to reviewers rather than instruments | **designed** — show the data owner the corpus census and the sampling frame *before* the findings; census is 3 queries plus a per-producer byte share. Not promoted: 2 instances, 1 work stream |
 | OB-13 | 2026-09-02 | **deleting a token makes every negative assertion naming it vacuously true — permanently, silently, while staying green.** The instance was *written as a forward-looking guard and made vacuous by the very event it anticipated* (`prompts/mod.rs:2603`, "After Task 14 lands…") | **the author performing the deletion.** The diff enumerates removals; the assertions that MENTION the token are not in it — they survive untouched, compile, pass, and read as guards. Nothing in the act of deleting points backwards | wrong instrument — the reverse direction is **closed**: token→assertions is a grep, assertions→"which go vacuous" is unanswerable, since the discriminator is who OWNS the token and that is not in the text. Measured: a selector over 93 assertions returned **28**, overwhelmingly fixtures | `designed, not built` — H-N: trigger on a token leaving the tree, `grep -rn '!.*contains.*<token>'`. **Plus a repair-side check**, because the blindness recurs in the fix: the prescribed replacement needle was itself vacuous, by a different mechanism, and passed |
-| OB-12 | 2026-09-02 | a section that falsifies a sibling emits no signal — documents have no dependency edges; 5 instances, 2 documents, one of them falsified by its own review in the same pass | the author adding the new section, who is facing forward | wrong instrument — three claims survived a full session of a reader actively ruling on that document | **partial** — currency marker shipped 2026-09-02 (0/5 marked misleading, 3/3 unmarked stale); the un-noticed case has no mechanism and none is proposed |
+| OB-12 | 2026-09-02 | a section that falsifies a sibling emits no signal — documents have no dependency edges; 5 instances, 2 documents, one of them falsified by its own review in the same pass. **Sub-pattern 2026-09-16: referential capture**, where the sibling stays TRUE and loses its antecedent, in a runtime-assembled message rather than a document — the parent's predicted detector cannot reach it, because there is no contradiction to find | the author adding the new section, who is facing forward | wrong instrument — three claims survived a full session of a reader actively ruling on that document | **partial** — currency marker shipped 2026-09-02 (0/5 marked misleading, 3/3 unmarked stale); the un-noticed FALSIFICATION case still has no mechanism and none is proposed. A candidate exists for the *referential-capture* sub-pattern only — a bare-demonstrative lint over conditionally-assembled blocks — named, costed, and NOT built |
 | OB-11 | 2026-09-01 | a session-keyed ledger answers for a party the protocol never named — a subagent's FIRST fetch reports as a repeat, and its auto-inject is suppressed as already-delivered | the codescout MCP server: `agent_id` rides harness `SubagentStart`/`Stop` events and no MCP tool call ever carries it | wrong instrument — the guide text told the parent to make it *worse* | **partial** — wording fixed at 3 sites, note pinned negatively, companion hook overrides the brief; the **keying** is unfixable from inside this repo |
 | OB-10 | 2026-09-01 | a mutual-exclusion resource is invisible to the session HOLDING it — the holder's own workflow succeeds and clears the condition as a side effect of finishing | the holder, a population of one against everyone else | wrong instrument | **none yet** — owner field on the resource is the candidate; enumeration is 1 verified / 4 unverified |
 | OB-9 | 2026-09-01 | plausibility is a filter with a resolution limit — a near-miss number fits inside it; 4 instances, 4 caught by re-derivation, 0 by reading | the reader | wrong instrument | **partial** — remedy shipped under `OB-1`; this row adds its scope condition |
@@ -1553,6 +1553,60 @@ mechanism; it has none yet, so there is nothing to hand it.
 | `F-8` | Concern 1 introducing Strategy C | Concern 2's *"before `pipeline=` goes anywhere"* prerequisite, which C dissolves |
 | `CAP-12` corpus | CAP-7's status block | CAP-7 § *Resume*'s *"Next: check 1"*, already shipped at `b34bf10e` |
 
+
+### Sub-pattern — referential capture: the sibling stays TRUE and loses its subject
+
+**Valid:** dated 2026-09-16
+
+**Rests on:**
+`docs/issues/archive/2026-09-16-file-provenance-unknown-branch-omits-the-window-it-names.md`
+§ *Tests*; repair at `a26c9bc2`, patch-id `f5e3d70dd29de09d6e4a75149128387ea5a0d7c2`.
+
+**What the parent does not cover, and it is the DETECTOR that breaks.** All five instances
+above are **falsifications** — the sibling becomes false, so the party whose task forces the
+two into contact finds a *contradiction*, which is exactly what § *Who can see it* predicts.
+Here both sentences stay **true** and the addition takes the sibling's **antecedent**. `no
+record … in the window. That is a statement about coverage` was unambiguous while it was the
+first line after the verdict: the demonstrative could bind only to the record absence. A
+`LIKELY CAUSE:` line inserted between them displaced the referent, and that line's own closing
+clause was *"rather than a coverage gap"* — so two adjacent lines opened `That is` and asserted
+opposite things about the same word. **No truth check on either line reds**, so the parent's
+predicted detector has nothing to find.
+
+**A second substrate, and it is worse than "no dependency edges".** The instances above are
+markdown sections co-located in one file, where the adjacency at least *exists* to be noticed.
+Here the colliding lines are separate `print` calls about ten source lines apart in different
+`if` branches of `scripts/file-provenance.py`. **A reader of the source never sees them
+adjacent at all** — the adjacency is *produced by the renderer*, conditionally, for one
+combination of verdict and git state. So the defect is absent from the artifact the author
+edits AND absent from the diff: every changed byte sat inside the inserted line, and the
+damaged line was untouched.
+
+**Who can see it — narrower than the parent's, and not staffable.** The parent's detector is a
+*differently-tasked* reader. Here a differently-tasked reader renders the output and sees
+nothing, because both sentences are true. The party who found it (sessionId `9e022ef0`, which
+is incident 1 of the bug being repaired) had held **the wrong reading the original defect
+produced** four hours earlier and re-ran the fixed tool against that specific memory. Their
+formulation: *"a reader who had never been misled would have seen nothing"* — so the detector
+is not *render the output* but *render it for the reader the old defect actually caught*, a
+population of about one that no policy can staff.
+
+**Why "re-read the rendered output after inserting a line" is the wrong instrument** — in the
+parent's sense, not as a weaker version of it. The author **did** re-read it: the rendered
+block appeared in that session's transcript twice before the commit and read as correct both
+times, because the author knows which sentence they meant the demonstrative to point at.
+Holding the intended referent is precisely what makes the ambiguity invisible, which is `OB-1`
+(the parameter your own context supplies for free) operating on a **pronoun**.
+
+**Mechanism status: none built. One candidate, costed, and NOT credited.** A lint over
+conditionally-assembled message blocks: *no line after the first may open with a bare
+demonstrative* (`That is`, `This is`, `These are`, `It is`) — name the subject instead. The
+predicate is mechanical, it runs in a suite unprompted rather than needing anyone to worry,
+and it reds on exactly the two events that produce this class: inserting a line above a
+demonstrative-opening one, and writing a new one. **Its stated limit:** sound only where
+emission is *conditional*, since a fixed block has stable adjacency — so it is a rule about
+assembly, not about prose, and it would be wrong to apply it to a static document. Not built
+here; what shipped is the one-word scoping at the single known site.
 ## OB-13 — deleting a token cannot enumerate the negative assertions that survive it
 
 **Valid:** invariant
