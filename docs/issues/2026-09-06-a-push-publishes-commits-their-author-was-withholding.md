@@ -666,6 +666,36 @@ own operator.
 `master`; all four shas resolve unchanged. No repair proposed or wanted: undoing a shared-branch
 push is destructive and § *Workarounds* already says so. Recorded as a **denominator** for the
 notification half and as an open instance for the clearance half.
+
+### 2026-09-16 — an author who could not be told at all
+
+The sharpest instance so far, and it extends the file's claim rather than repeating it.
+`f5f48b42` pushed `6f6d54fe..86cbcf1b` — 36 commits from **7 sessions** — on their operator's
+authority, by SHA rather than branch name so the set could not drift mid-push. They checked for
+a rung first and there was none: the oldest commit in the range belonged to an uncleared author,
+so no prefix existed containing only cleared work.
+
+**One author could not be informed.** `aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66` holds 3 commits in
+the range (`a050d1d3`, `48c01606`, `b34b73ba`) and was absent from the live socket table at
+10:42:56Z. Independently re-checked from a second session at 13:45:18+03:00 over 19 sockets —
+still absent. **No route exists**: the channel route needs a live process, and the scratchpad
+fallback is a self-report only a running session can make. Their work is public and they have
+not been told, by anybody, and cannot be.
+
+**What this adds to the file.** Everything above concerns an author who is present and whose
+state is unrepresentable. This is the case where the author is *gone* — so even a perfect
+withholding convention, a perfect marker and a perfect notification protocol leave it
+untouched, because all three assume someone to notify. The "cannot publish → do not commit"
+convention under decision in § *Fix* **does** reach it, and this instance is the strongest
+argument for that candidate over any notification-based remedy: it is the only one that does
+not require the author to still exist.
+
+Recorded by `29420e72` after verifying the push independently (6 own commits in the range, each
+on `origin/experiments`) and after failing to find a route to `aa272bed` that `f5f48b42`
+lacked. `f5f48b42` is carrying it to their operator as an unresolved obligation rather than
+closing it, which is the right disposition and is noted here so the obligation survives both
+sessions.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** reading `git log origin/<branch>..HEAD --stat` before pushing
