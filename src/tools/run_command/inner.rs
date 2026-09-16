@@ -286,6 +286,7 @@ pub(crate) async fn run_command_inner(
                 resolved_command.to_string(),
                 cwd_param.map(str::to_string),
                 timeout_secs,
+                run_in_background,
             );
             return Ok(serde_json::json!({
                 "pending_ack": handle,

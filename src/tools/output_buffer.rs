@@ -88,6 +88,11 @@ pub struct PendingAckCommand {
     pub command: String,
     pub cwd: Option<String>,
     pub timeout_secs: u64,
+    /// Carried so an ack re-dispatch honours it. Dropping it made
+    /// `run_command(run_in_background: true)` on a dangerous command run
+    /// FOREGROUND after the ack, with nothing saying so
+    /// (`docs/issues/archive/2026-09-15-acking-a-dangerous-command-drops-run-in-background.md`).
+    pub run_in_background: bool,
 }
 /// A pending out-of-scope write held for acknowledgment. Carries the full
 /// original tool input so replay needs no re-sent content.
@@ -625,17 +630,23 @@ impl OutputBuffer {
     /// Store a dangerous command pending acknowledgment.
     ///
     /// Returns an opaque `@ack_<8hex>` handle. The handle carries the full
-    /// execution context so the ack call needs no extra parameters.
+    /// execution context so the ack call needs no extra parameters — which
+    /// includes `run_in_background`. That claim was false until 2026-09-16:
+    /// the flag was accepted, dropped here, and the re-dispatch hardcoded
+    /// foreground, so a backgrounded dangerous command blocked after its ack
+    /// with nothing reporting the change.
     pub fn store_dangerous(
         &self,
         command: String,
         cwd: Option<String>,
         timeout_secs: u64,
+        run_in_background: bool,
     ) -> String {
         self.store_pending(PendingAck::Command(PendingAckCommand {
             command,
             cwd,
             timeout_secs,
+            run_in_background,
         }))
     }
 
@@ -1551,6 +1562,7 @@ mod tests {
             "rm -rf /dist".to_string(),
             Some("frontend/".to_string()),
             30,
+            false,
         );
         assert!(
             handle.starts_with("@ack_"),
@@ -1565,6 +1577,7 @@ mod tests {
             "rm -rf /dist".to_string(),
             Some("frontend/".to_string()),
             10,
+            false,
         );
         let cmd = buf
             .get_dangerous(&handle)
@@ -1585,7 +1598,7 @@ mod tests {
         let buf = OutputBuffer::new(10);
         let mut handles = Vec::new();
         for i in 0..21u64 {
-            handles.push(buf.store_dangerous(format!("cmd_{}", i), None, 30));
+            handles.push(buf.store_dangerous(format!("cmd_{}", i), None, 30, false));
         }
         assert!(
             buf.get_dangerous(&handles[0]).is_none(),
@@ -1600,7 +1613,7 @@ mod tests {
     #[test]
     fn resolve_refs_rejects_ack_handle_interpolation() {
         let buf = OutputBuffer::new(10);
-        let handle = buf.store_dangerous("rm -rf /dist".to_string(), None, 30);
+        let handle = buf.store_dangerous("rm -rf /dist".to_string(), None, 30, false);
         let result = buf.resolve_refs(&format!("grep pattern {handle}"));
         assert!(
             result.is_err(),
@@ -1621,7 +1634,7 @@ mod tests {
         // than of either arm -- two tests with two different tokens would let a
         // shape-only check keep passing, because shape cannot separate them.
         let live = OutputBuffer::new(10);
-        let handle = live.store_dangerous("rm -rf /dist".to_string(), None, 30);
+        let handle = live.store_dangerous("rm -rf /dist".to_string(), None, 30, false);
         let cmd = format!("stat -c %s {handle}");
 
         assert!(
@@ -2365,7 +2378,7 @@ mod tests {
     #[test]
     fn get_pending_write_returns_none_for_command_handle() {
         let buf = OutputBuffer::new(10);
-        let handle = buf.store_dangerous("rm -rf /x".to_string(), None, 30);
+        let handle = buf.store_dangerous("rm -rf /x".to_string(), None, 30, false);
         assert!(buf.get_pending_write(&handle).is_none());
     }
 

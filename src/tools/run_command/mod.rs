@@ -197,7 +197,7 @@ impl Tool for RunCommand {
                 true, // acknowledge_risk
                 stored.cwd.as_deref(),
                 false, // buffer_only
-                false, // run_in_background — ack re-dispatch is always foreground
+                stored.run_in_background,
                 &root,
                 &security,
                 ctx,

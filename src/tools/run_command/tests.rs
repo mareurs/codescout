@@ -3179,7 +3179,7 @@ async fn ack_handle_executes_stored_command() {
     let (_dir, ctx) = project_ctx().await;
     let handle = ctx
         .output_buffer
-        .store_dangerous("echo hello_ack".to_string(), None, 30);
+        .store_dangerous("echo hello_ack".to_string(), None, 30, false);
 
     let tool = RunCommand;
     let input = serde_json::json!({ "command": handle });
@@ -3192,6 +3192,71 @@ async fn ack_handle_executes_stored_command() {
     assert!(
         stdout.contains("hello_ack"),
         "expected 'hello_ack' in stdout, got: {stdout}"
+    );
+}
+
+/// Regression: `run_in_background` was accepted, dropped into `store_dangerous`,
+/// and the ack re-dispatch hardcoded `false` — so a backgrounded dangerous
+/// command ran FOREGROUND after its ack with nothing reporting the change
+/// (`cluster/accepted-parameter-silently-dropped`, IC-15).
+///
+/// The discriminator is deliberately the ABSENCE of `exit_code` plus a `@bg_`
+/// handle, not stdout: a foreground `sleep` also returns stdout — empty — so a
+/// stdout assertion is satisfied by the broken behaviour and would not red under
+/// the mutation this test exists to catch. Slice 1 made "no `exit_code` key"
+/// true by construction for a spawn response, which is what makes it usable here.
+#[tokio::test]
+async fn ack_re_dispatch_honours_run_in_background() {
+    let (_dir, ctx) = project_ctx().await;
+    let handle = ctx
+        .output_buffer
+        // `true` is the load-bearing argument: with `false` this test asserts
+        // nothing, because a foreground response is then the correct one.
+        .store_dangerous("sleep 30".to_string(), None, 30, true);
+
+    let tool = RunCommand;
+    let result = tool
+        .call(serde_json::json!({ "command": handle }), &ctx)
+        .await
+        .expect("ack call should succeed");
+
+    assert!(
+        result.get("exit_code").is_none(),
+        "a backgrounded job has not exited yet, so the spawn response must carry \
+         no exit_code; got: {result}"
+    );
+    let output_id = result["output_id"].as_str().unwrap_or("");
+    assert!(
+        output_id.starts_with("@bg_"),
+        "expected a @bg_ background handle, got: {output_id:?} in {result}"
+    );
+}
+
+/// Companion to the above, pinning the OTHER direction so the pair is not
+/// monotone: an ack stored with `false` must still re-dispatch foreground.
+/// Without this, honouring the flag unconditionally — backgrounding every acked
+/// command — would pass the test above and break every other ack caller.
+#[tokio::test]
+async fn ack_re_dispatch_stays_foreground_when_not_requested() {
+    let (_dir, ctx) = project_ctx().await;
+    let handle = ctx
+        .output_buffer
+        .store_dangerous("echo fg_ack".to_string(), None, 30, false);
+
+    let tool = RunCommand;
+    let result = tool
+        .call(serde_json::json!({ "command": handle }), &ctx)
+        .await
+        .expect("ack call should succeed");
+
+    assert_eq!(
+        result["exit_code"].as_i64(),
+        Some(0),
+        "a foreground ack must report the command's own exit code; got: {result}"
+    );
+    assert!(
+        result["stdout"].as_str().unwrap_or("").contains("fg_ack"),
+        "expected foreground stdout, got: {result}"
     );
 }
 
