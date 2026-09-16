@@ -7,7 +7,7 @@ tags: ["embeddings", "retrieval", "docker", "gpu"]
 topic: embedder stack ops
 entry_prefix: ["F", "W"]
 entry_high_water_F: 6
-entry_high_water_W: 3
+entry_high_water_W: 4
 ---
 
 # Session Log — Embedder Stack Ops
@@ -79,6 +79,7 @@ entry_high_water_W: 3
 | W-1 | 2026-08-29 | high | test-via-real-invocation-path | .env's stale CODESCOUT_MODEL_DIR would have stayed masked indefinitely, first breaking on the unit's own first real boot | validated |
 | W-2 | 2026-09-14 | high | call-graph-before-recommending-removal | Would have recommended mirroring v1's dimension-migration machinery for v2 (doubling it) instead of retargeting and deleting v1 | validated |
 | W-3 | 2026-09-15 | high | measure-the-remedy-not-only-the-diagnosis | The approved fix (`wal_checkpoint`) would have shipped the same stale backup while reading as diligence; measuring it inverted the remedy to `VACUUM INTO` | validated |
+| W-4 | 2026-09-16 | high | publish-figures-specific-enough-to-be-refuted | Five instruments returned plausible unsupported values in one session; the detector was a second party's independent figure, not care — and only a contradictable report can collide | validated |
 
 ---
 
@@ -586,6 +587,35 @@ So mtime is uninformative in **both** directions, and that is strictly stronger 
 A session trusting mtime gets a false negative in the first row and a false positive in the second. The two checks that *do* discriminate are the ones to run: `git log --since=@<binary mtime>` over `*.rs` + manifests for whether a rebuild was even owed, and the scratch-`LIBRARIAN_DB` schema probe for what the binary actually does. Neither is about the file's metadata.
 
 **Status:** open.
+
+## W-4 — Five plausible-but-unsupported values in one session, and the detector was a peer's independent figure
+
+**Valid:** dated 2026-09-16
+
+**Observed:** 2026-09-15/16, across one PR review and the cross-session thread it produced. **Five** instruments in one session returned a plausible value none of them established. None failed with an error; every one returned a well-formed result of the expected *shape*.
+
+| instrument | returned | actually |
+|---|---|---|
+| `strings \| grep -c 'DROP TABLE…'` | `0` | correct verdict, method could not support it — and the control (`LIBRARIAN_ARTIFACT_VEC_MIGRATE`, present in both source versions) also returned `0` |
+| `ldd \| grep onnxruntime` | empty | non-discriminating: `local-embed` links ONNX **statically**, so absence is identical either way |
+| a hand-rolled mutation | `PASS` | the patch **never applied** — the anchor had moved in a refactor |
+| *"does the test still red?"* | `FAILED` | it did — on an `unwrap`, not the assertion. The discriminator (`left:`/`right:` absent) was in my own output |
+| `… \| tr -d '[:space:]' \| sort -u \| grep -c .` | `1` session | **6** — `tr -d '[:space:]'` strips newlines, concatenating every sid into one record |
+
+**Pattern:** the detector that worked was **two parties deriving the same figure separately and disagreeing** — not care, not re-reading, not a checklist. Of the five, **two** were caught that way and the rest by a control run *because* a peer had asked for one.
+
+**Counterfactual, and it is not hypothetical — it is the two that nothing else caught.** The `ldd` error survived **two deliberate revisions of `F-6` by its own author**; I read past it both times and found it only while auditing a *different* session's bug file on a different framing. The `tr -d` error I published as `1` and re-derived only because sessionId `9403d62d-116b-46ea-ac9b-004acff2b1cb` had independently said `6`. Neither catch came from either session looking harder. Both came from a second derivation existing at all.
+
+**The refinement that makes this actionable is `aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66`'s, relayed by `9403d62d`: the value is in being CONTRADICTABLE.** A report that says *"looks fine"* collides with nothing and cannot be the detector for anything. *"28 commits, 6 sessions, 4 mine, tip `43fdc0ea`"* can be **wrong**, and that is precisely what makes it load-bearing. This reframes the practice from *publish your conclusions* to **publish figures specific enough to be refuted** — which is the same instruction CLAUDE.md § *Testing Discipline* gives for counts (*"arrive with its unit or not at all"*), arriving here from the cross-session direction rather than the measurement one.
+
+**Why it is a win and not simply five mistakes:** the mistakes are the denominator. Publishing the confirmations *and* the refutations is what made the population countable at all — CLAUDE.md § *Testing Discipline* asks for exactly that (*"instrument the DOUBT, not the correction"*), and this is the first entry in this ledger with enough instances to show the shape. The corpus of five is the finding; no single one of them would have been.
+
+**Confirming data points:**
+1. Both directions observed by this session in one day — my `28` was the control that caught `9403d62d`'s heading-scan; their `6` was the control that caught my `tr -d`.
+2. `9403d62d` independently reproduced the broken pipeline on the real range (`1` vs `6`) rather than accepting my explanation, and added the sum-to-28 check that neither count alone provides.
+3. A third instance in the same thread, theirs: they attributed `c3135fa3` to `29420e72` from **thread memory** rather than the `Session-Id` trailer — adjacency, the one method CLAUDE.md names as *anti*-evidence, inside a message about an attribution fix. Caught by the party misattributed.
+
+**Promote-when:** at a third independent work stream. This is two (the PR-review stream and the cross-session verification thread), and the instances are correlated — same day, same participants. Do **not** promote on this entry alone; the population is small and the sessions were talking to each other, which is exactly the shared-blind-spot condition CLAUDE.md warns makes agreement worthless.
 
 ## Template for new entries
 
