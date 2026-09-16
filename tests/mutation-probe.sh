@@ -206,7 +206,12 @@ run "$R" "$SID" --shared --file src/lib.rs --find 'guard();' --replace '' \
     -- sh -c 'echo "running 0 tests"; echo "test result: ok. 0 passed"; exit 0'
 has  "12 zero tests selected -> INCONCLUSIVE" "$OUT" "INCONCLUSIVE"
 eq   "12 and NOT survived" "$(printf '%s' "$OUT" | grep -c 'SURVIVED')" "0"
-has  "12 names the uncommitted-test cause" "$OUT" "only the mutated file is carried across"
+# The remedy text changed with the behaviour, and that is the point: the old wording
+# named "your test is uncommitted" as a cause, which cases 19-20 have now made
+# impossible. A predicate fix that left the remedy naming a retired cause would send
+# the reader to commit a test that is already carried.
+has  "12 names a cause that is still REAL" "$OUT" "names a HELPER or a module"
+has  "12 and retires the one the fix removed" "$OUT" "is NOT a cause here"
 
 # 13. No count line at all (a compile failure looks like this) -> INCONCLUSIVE,
 #     and specifically NOT KILLED despite the non-zero exit.
@@ -279,6 +284,36 @@ run "$R" "$SID" --shared --strict --file src/lib.rs --find 'guard();' --replace 
     -- sh -c 'echo "running 2 tests"; echo "test result: FAILED. 1 passed; 1 failed"; exit 101'
 eq   "18 strict leaves KILLED at the command's rc" "$RC" "101"
 has  "18 and it is still a verdict" "$OUT" "KILLED"
+
+# --- 19-20. A MULTI-FILE uncommitted change reaches the worktree ------------
+# Case 6 pins that the MUTATED file's uncommitted content is carried. These pin the
+# REST of the change. A slice that alters a type and its call sites is the ordinary
+# shape of real work, and carrying only `--file` left the worktree not compiling:
+# the run paid a full cold build and ended INCONCLUSIVE, having reported the fact
+# ("N other .rs file(s) are dirty") without its consequence.
+#
+# The test command runs INSIDE the worktree, so `cat` is a DIRECT observation of what
+# was carried. Inferring it from a build outcome would conflate "not carried" with
+# "carried and still broken", which is the distinction under test.
+R=$(newrepo)
+printf 'pub fn helper() -> u8 {\n    7\n}\n' > "$R/src/other.rs"
+git -C "$R" add -A >/dev/null; git -C "$R" commit -qm other
+printf 'fn a() {\n    guard();\n    return;\n}\n// EDIT-IN-MUTATED-FILE\n' > "$R/src/lib.rs"
+printf 'pub fn helper() -> u8 {\n    7\n}\n// EDIT-IN-SIBLING-FILE\n' > "$R/src/other.rs"
+run "$R" "$SID" --file src/lib.rs --find 'guard();' --replace '' \
+    -- sh -c 'cat src/lib.rs src/other.rs; echo "running 1 test"; echo "test result: ok. 1 passed"'
+has  "19 the mutated file's own edit is carried (case 6, observed directly)" "$OUT" "EDIT-IN-MUTATED-FILE"
+has  "19 a SIBLING dirty file's edit is carried too" "$OUT" "EDIT-IN-SIBLING-FILE"
+
+# 20. An UNTRACKED file is part of the change too — a new module is the commonest
+#     way a slice adds a call site, and it has no HEAD version to fall back to, so
+#     omitting it is a compile error rather than a stale build.
+R=$(newrepo)
+printf 'fn a() {\n    guard();\n    return;\n}\n' > "$R/src/lib.rs"
+printf '// EDIT-IN-UNTRACKED-FILE\n' > "$R/src/newmod.rs"
+run "$R" "$SID" --file src/lib.rs --find 'guard();' --replace '' \
+    -- sh -c 'cat src/newmod.rs 2>/dev/null; echo "running 1 test"; echo "test result: ok. 1 passed"'
+has  "20 an untracked new file is carried" "$OUT" "EDIT-IN-UNTRACKED-FILE"
 
 echo
 echo "mutation-probe: $PASS passed, $FAIL failed"

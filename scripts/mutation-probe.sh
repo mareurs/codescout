@@ -148,6 +148,7 @@ fi
 TARGET="$TREE/$FILE"
 BACKUP=$(mktemp)
 RUNLOG=$(mktemp)
+WTPATCH=$(mktemp)
 
 # Revert and unmark BEFORE this process exits — not after the test command does.
 # `cargo test` returning is the same event as the shared build lock freeing, so a
@@ -187,19 +188,56 @@ if [ "$MODE" = "isolated" ]; then
 
     # A worktree is created at HEAD, so it does NOT carry your uncommitted work —
     # and mutation testing is at its most useful on code you have just written and
-    # not yet committed. Without this copy the probe would silently test the
-    # COMMITTED version and report a survival for a guard that does not exist
-    # there yet, which is the "mutation never applied" failure wearing a different
-    # hat. Found by using this script, not by reading it.
+    # not yet committed. Without this the probe would silently test the COMMITTED
+    # version and report a survival for a guard that does not exist there yet, which
+    # is the "mutation never applied" failure wearing a different hat. Found by using
+    # this script, not by reading it.
+    #
+    # THE WHOLE WORKING TREE IS CARRIED, not just --file. Until 2026-09-16 this was a
+    # single `cp` of the mutated file, with every other dirty file built at HEAD — correct
+    # for a single-file mutation and silently insufficient for anything wider. A slice
+    # that alters a type and its call sites is the ordinary shape of real work, and it
+    # then did not compile: the run paid a full cold build to end INCONCLUSIVE, having
+    # announced the FACT ("N other .rs file(s) are dirty") and never its CONSEQUENCE.
+    # BUG docs/issues/2026-09-15-mutation-probe-cannot-verify-a-multi-file-uncommitted-change.md
+    #
+    # Two mechanisms, because git reports the two populations separately and neither
+    # covers the other:
+    #   tracked edits, deletions, renames -> one patch, applied
+    #   untracked files                   -> copied. A NEW module has no HEAD version to
+    #                                        fall back to, so omitting it is a compile
+    #                                        error rather than a stale build.
+    #
+    # ON A SHARED CHECKOUT THIS CARRIES PEERS' IN-FLIGHT WORK TOO, and that is deliberate:
+    # it makes the isolated tree match the one your own `cargo test` would compile, so an
+    # INCONCLUSIVE here means your real run would have failed too — rather than meaning the
+    # probe is lying to you. Isolation of the MUTATION is untouched; nothing is published.
+    git -C "$TREE" clean -fdq 2>/dev/null   # no -x: target/ is ignored and must survive
+
+    carried_tracked=0
+    if git -C "$ROOT" diff HEAD --binary --no-ext-diff > "$WTPATCH" 2>/dev/null && [ -s "$WTPATCH" ]; then
+        if git -C "$TREE" apply --whitespace=nowarn "$WTPATCH" 2>/dev/null; then
+            carried_tracked=$(git -C "$ROOT" diff HEAD --name-only | wc -l)
+        else
+            echo "mutation-probe: REFUSING — your working-tree patch did not apply to the" >&2
+            echo "  isolated worktree, which would leave it neither HEAD nor yours. A verdict" >&2
+            echo "  from that tree would be about code nobody has. Nothing armed, nothing run." >&2
+            exit 2
+        fi
+    fi
+
+    carried_untracked=0
+    while IFS= read -r -d '' f; do
+        mkdir -p "$TREE/$(dirname "$f")" && cp "$ROOT/$f" "$TREE/$f" \
+            && carried_untracked=$((carried_untracked + 1))
+    done < <(git -C "$ROOT" ls-files --others --exclude-standard -z)
+
+    # Belt and braces: --file is carried whatever git thinks its status is.
     cp "$ROOT/$FILE" "$TARGET"
 
-    # Only the file under test is carried across. If your uncommitted work spans
-    # several files the worktree build may not match the one in your head, so say
-    # so rather than let a confusing result be read as a finding.
-    others=$(git -C "$ROOT" status --porcelain -- '*.rs' | awk '{print $2}' | grep -v -F -x -- "$FILE" | wc -l)
-    if [ "$others" -gt 0 ]; then
-        echo "mutation-probe: NOTE — $others other .rs file(s) are dirty in the shared tree and" >&2
-        echo "  are NOT carried into the isolated worktree, which builds them at HEAD." >&2
+    if [ "$carried_tracked" -gt 0 ] || [ "$carried_untracked" -gt 0 ]; then
+        echo "mutation-probe: carried the working tree into the isolated worktree —" >&2
+        echo "  $carried_tracked tracked change(s), $carried_untracked untracked file(s)." >&2
     fi
 fi
 
@@ -294,8 +332,9 @@ elif [ "$executed" -eq 0 ]; then
     inconclusive=1
     echo "mutation-probe: INCONCLUSIVE — the runner started and selected 0 tests, so nothing" >&2
     echo "  could have caught this mutation. Most often the filter matches no test NAME, or" >&2
-    echo "  the test is in a file this worktree built at HEAD because it is uncommitted —" >&2
-    echo "  only the mutated file is carried across. Commit the test, or name one that exists." >&2
+    echo "  the filter names a HELPER or a module rather than a test. Name one that exists." >&2
+    echo "  Since 2026-09-16 an uncommitted test is NOT a cause here: the isolated worktree" >&2
+    echo "  carries your whole working tree, tracked and untracked, not only the mutated file." >&2
 elif [ "$rc" -eq 0 ]; then
     echo "mutation-probe: SURVIVED (rc=0, $executed test(s) ran) — no test caught the mutation." >&2
     echo "  Two readings, and they take opposite repairs: the line is UNTESTED (write the test)," >&2
