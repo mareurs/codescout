@@ -571,11 +571,7 @@ fn tokenize_code_span(s: &str) -> impl Iterator<Item = (u32, &str)> + '_ {
 fn is_markup_display(content: &str) -> bool {
     content.contains('`')
 }
-/// True when an HTML comment carries the suppression marker.
-///
-/// Deliberately a `contains`, not an exact match: the marker is written inside a
-/// comment that usually explains WHY, and requiring an exact string would force the
-/// reason to live somewhere the next reader will not find it.
+/// The marker token a comment DECLARES, or `None` if it merely mentions one.
 ///
 /// **Scope is the enclosing section, not the file** — suppression clears at the next
 /// heading of any level, so a marker cannot leak past the passage it was reasoned
@@ -583,8 +579,34 @@ fn is_markup_display(content: &str) -> bool {
 /// notice naming the path it removed, an example of what a citation looks like, a
 /// quoted truncation. Do not use it to silence a reference you have not checked — the
 /// whole value of the gate is that an unchecked stale path is loud.
-fn is_ignore_marker(html: &str) -> bool {
-    html.contains("audit-doc-refs:ignore")
+///
+/// **Positional, not `contains` — and that is the whole of `bc79a20e28c9ad1b`.** The
+/// original test was `html.contains("audit-doc-refs:ignore")`, which cannot tell a
+/// declaration from a QUOTATION of one. `docs/PROBES.md`'s own scoped marker explained
+/// why it had not used the coarse form, quoting the bare token in its prose — and
+/// because a multi-line comment reaches this function as MORE THAN ONE event, that
+/// quotation re-parsed as a fresh bare marker and silenced the 73 refs the scoped form
+/// existed to protect. The author wrote *"a bare marker would silence every one of
+/// them"* and, in writing it, silenced every one of them. Measured 2026-09-15: 36 refs
+/// found in that file, against 207 once the sentence was reworded.
+///
+/// Requiring the token at the comment's start makes a mention **unrepresentable** as a
+/// declaration rather than policing it, so a marker's own documentation can name the
+/// form it did not use. `-refs` is tested first because it is the longer prefix; a
+/// `starts_with` on the bare form would swallow it.
+///
+/// Continuation lines of a multi-line comment carry no `<!--` and so return `None`,
+/// which leaves an active suppression untouched — the call site's guard fires only on
+/// `Some`, and that is what keeps a scoped marker scoped across its own explanation.
+fn marker_token(html: &str) -> Option<&'static str> {
+    let body = html.trim_start().strip_prefix("<!--")?.trim_start();
+    if body.starts_with("audit-doc-refs:ignore-refs") {
+        Some("audit-doc-refs:ignore-refs")
+    } else if body.starts_with("audit-doc-refs:ignore") {
+        Some("audit-doc-refs:ignore")
+    } else {
+        None
+    }
 }
 
 /// Which refs a marker suppresses.
@@ -646,10 +668,10 @@ impl Suppression {
 /// Returns `None` for a comment that is not a marker at all, so the caller can leave
 /// the current suppression untouched rather than clearing it.
 fn parse_ignore_marker(html: &str) -> Option<Suppression> {
-    if !is_ignore_marker(html) {
-        return None;
-    }
-    if !html.contains("audit-doc-refs:ignore-refs") {
+    // Positional: which form is DECLARED, never which form is mentioned anywhere in
+    // the body. A bare marker whose prose quotes `ignore-refs` must stay coarse, and a
+    // scoped one whose prose quotes the bare form must stay scoped.
+    if marker_token(html)? == "audit-doc-refs:ignore" {
         return Some(Suppression::All);
     }
     let targets: Vec<String> = backtick_re()
@@ -1218,6 +1240,47 @@ A 200-char cut leaves a truncated path (`src/serve`, `src/lsp/m`); the real prob
             got.contains(&"scripts/peer-sessions.sh"),
             "a ref the marker did NOT name must still be audited — without this the \
              test cannot tell `ignore-refs` from a bare `ignore`, got {got:?}"
+        );
+    }
+
+    /// A scoped marker that QUOTES the bare form in its own body stays scoped.
+    ///
+    /// **This is the regression that actually happened** (`bc79a20e28c9ad1b`), and the
+    /// assertion is over a whole parse rather than over `Suppression`'s methods for a
+    /// reason: `blocks` and `blocks_everything` were both correct throughout, so a unit
+    /// test on either passes against the defect. What failed is that a LATER event
+    /// overwrote a correct `Only` with `All`, which is visible only to a caller that
+    /// reads the marker and the refs after it in one pass.
+    ///
+    /// The fixture mirrors `docs/PROBES.md`: a multi-line comment whose prose explains
+    /// why the coarse form was not used and therefore names it. Measured on that file
+    /// before the fix — 36 refs found, against 207 after.
+    ///
+    /// **The surviving refs are the load-bearing half.** Assert only that the named
+    /// target is gone and the test passes just as well against `Suppression::All`,
+    /// which is the whole defect.
+    #[test]
+    fn a_scoped_marker_quoting_the_bare_form_does_not_widen_to_the_bare_form() {
+        let md = "\
+## Examples
+
+<!-- audit-doc-refs:ignore-refs `src/serve` — a truncation example, not a citation.
+     Scoped by token rather than by section, because a bare `audit-doc-refs:ignore`
+     would silence every real ref below it. -->
+
+A 200-char cut leaves a truncated path (`src/serve`); the real probe is
+`scripts/peer-sessions.sh` and the gate is `scripts/fmt-mine.sh`.
+";
+        let (refs, _) = parse_refs(md, Path::new("d.md"), PathSyntax::DottedModules);
+        let got: Vec<&str> = refs.iter().map(|r| r.raw_ref.as_str()).collect();
+        assert!(
+            !got.contains(&"src/serve"),
+            "the named target must still be suppressed, got {got:?}"
+        );
+        assert!(
+            got.contains(&"scripts/peer-sessions.sh") && got.contains(&"scripts/fmt-mine.sh"),
+            "a marker must survive its own explanation: quoting the bare form inside a \
+             scoped marker must not widen it to Suppression::All, got {got:?}"
         );
     }
 
