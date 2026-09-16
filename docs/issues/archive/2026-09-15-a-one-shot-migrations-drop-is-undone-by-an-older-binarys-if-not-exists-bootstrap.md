@@ -1,5 +1,5 @@
 ---
-id: '7f0ebb4edab5e82b'
+id: c58de31617420294
 kind: bug
 status: mitigated
 title: 'BUG: schema v13 dropped artifact_vec, an older binary re-created it from schema.sql, and v13 is one-shot so nothing will drop it again'

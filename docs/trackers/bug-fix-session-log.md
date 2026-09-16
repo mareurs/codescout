@@ -15441,6 +15441,24 @@ No harm done on the attribution either — `codescout-e7` committed by pathspec 
 
 **Tell, and it is one line for the author rather than a check for the reader:** **announce a handoff to the room, not only to the recipient.** A third party attributing staged work has no channel that carries it otherwise. The cheaper half, for the attributing side: when the staged work is topically someone's but you have not seen them write it, say *"is this yours?"* rather than *"your changeset"* — `codescout-e7` did step around it correctly, so the sentence cost nothing here and would have cost a commit under the wrong name if they had not.
 
+**A SECOND AXIS, 2026-09-15, and it is a different one — `9403d62d` filed it as `F-165` in
+their own ledger.** They credited my `c3135fa3` to `29420e72` because they held a live
+thread with that session about attribution. The proximity axis there is the
+**conversation**, not the subject: this entry's adjacency is *who is associated with the
+subject*, theirs is *who I was last talking to about it*. Same family as `F-122`, distinct
+mechanism, same one-line remedy (`%(trailers:key=Session-Id)`).
+
+**Why the distinction earns a paragraph rather than a cross-reference.** This entry's tell
+is *"ask is this yours rather than saying your changeset"* — a question about the SUBJECT.
+It does not fire on the thread axis at all, because the erring party is not reasoning about
+the subject; they are reasoning about who they were talking to. **A tell that does not fire
+is worse than none**, since it reads as coverage. Theirs happened inside a message about an
+attribution defect, which makes it a fourth datapoint for `CLAUDE.md` § *Observer
+Blindness*'s claim that knowing the class prevents nothing.
+
+The entry lives in their ledger because the error is theirs; it is cited here because the
+misattributed work was mine and this is where the class is recorded.
+
 **Rests on:** `.err` read-side ownership staying with `40130`. If it returns to me the instance stands as history and the mechanism is unaffected.
 
 ## W-136 — A confirming result from the wrong branch — the verification nearly proved itself on a path that was never broken

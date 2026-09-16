@@ -590,7 +590,7 @@ const ROW_GRAIN_SCOPED_CHECKS: &[Check] = &[
 /// source and asserts this list equals it, rather than asking the next author to remember.
 ///
 /// Why the check this feeds exists at all:
-/// `docs/issues/2026-09-15-a-one-shot-migrations-drop-is-undone-by-an-older-binarys-if-not-exists-bootstrap.md`.
+/// `docs/issues/archive/2026-09-15-a-one-shot-migrations-drop-is-undone-by-an-older-binarys-if-not-exists-bootstrap.md`.
 /// `schema.sql` runs on EVERY catalog open under `CREATE ... IF NOT EXISTS`, a shape that
 /// cannot distinguish *missing because this database is new* from *missing because a
 /// migration deliberately removed it* — so a binary built before the retirement re-creates
