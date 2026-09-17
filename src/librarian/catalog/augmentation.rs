@@ -340,9 +340,11 @@ pub fn update_entry(
     if patch.contains_key("id") {
         return Err(LibrarianRecoverableError::with_hint(
             "update_entry: `id` cannot be changed through a field patch".to_string(),
-            "Entry ids key entry_cite rows (`<slug>:<local>`), so re-keying one would strand \
-             every citation of it with nothing to repair them. Append a new entry and mark this \
-             one superseded instead."
+            "Entry ids key entry_cite rows (`<slug>:<local>`), so re-keying one HERE would \
+             strand every citation of it. To move a whole PREFIX-N namespace — ids, schema \
+             pattern, headings and citation rows together — use \
+             doc(action=\"rekey_prefix\", id=…, from=\"T\", to=\"SRI\"), which is dry-run by \
+             default. To retire one entry, append a new one and mark this superseded."
                 .to_string(),
         ));
     }

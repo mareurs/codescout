@@ -1923,7 +1923,8 @@ fn index_class_sections(text: &str) -> Vec<&str> {
 /// (`skill-frictions:SKF-22`).
 ///
 /// Deliberately NOT solved by declaring `entry_prefix: IC` in the per-class files: 23
-/// co-declarers would raise `link_scan`'s `prefix_conflicts` from its baseline of 2. That is
+/// co-declarers would raise `link_scan`'s `prefix_conflicts`, whose baseline is **4**
+/// (`F`, `IC`, `T`, `W`; measured 2026-09-17 — this comment said 2 until then). That is
 /// the tempting repair, and the instrument already rejects it. The real closure is a
 /// target-file param on `append_entry`; filed separately.
 ///

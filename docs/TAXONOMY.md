@@ -208,6 +208,21 @@ If you find yourself wanting to introduce a new project-wide prefix, ask first
 whether it really earns a slot or whether it's a variant of one of the **eleven**
 in the table above.
 
+**If two ledgers already share one, the rename is a single sanctioned call:**
+`doc(action="rekey_prefix", id=<ledger>, from="T", to="SRI")` — dry-run by default. It moves
+the params entry ids, the `params_schema` id pattern, the augmentation prompt, the defining
+headings, the in-body citations and the `entry_cite` rows in one transaction, and refuses
+rather than half-landing. Precedent for *which* ledger moves: the wider-cited claimant keeps
+the prefix (`d3282868`, where `fable-tuning-tasks` gave up `T` for `FT`).
+
+Two things it deliberately does **not** do, because both are decisions rather than mechanics.
+It does not touch **citing files outside the ledger** — they are reported, and
+`librarian(action="link_scan", write=true)` re-derives their edges once their prose is
+repointed; until then the citations are genuinely unresolved and `doctor` says so. And it
+does not **add** an `entry_prefix` declaration where none existed: that is a new claim on a
+namespace, not a rename, and it is what makes a future collision on the new prefix visible at
+all (`prefix_conflicts` only fires for a prefix with at least one declarer).
+
 ### Measured drift — 2026-08-19, re-derived 2026-08-28
 
 **Re-derived 2026-08-28.** The 2026-08-19 figures below are kept because the *shape* they

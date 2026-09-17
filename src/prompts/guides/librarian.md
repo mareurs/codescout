@@ -191,7 +191,13 @@ doc(action="update_entry", id=…, entry_collection="tasks",
 key, every other entry and every unnamed field is untouched — and returns
 `changed_fields` plus `entries_total`. An unknown `entry_id` is refused **with the list of
 ids that do exist**, never a silent no-op. `id` is rejected as a field: entry ids key
-`entry_cite` rows, so re-keying one would strand its citations.
+`entry_cite` rows, so re-keying one *here* would strand its citations. Moving a whole
+`PREFIX-N` namespace is a different operation and has its own action —
+`doc(action="rekey_prefix", id=…, from="T", to="SRI")` moves the params ids, the
+`params_schema` pattern, the defining headings, the in-body citations and the `entry_cite`
+rows in one transaction, dry-run by default. It does **not** touch citing files outside the
+ledger: those are reported, and `librarian(action="link_scan", write=true)` re-derives their edges once their
+prose is repointed.
 
 The wholesale replace is still available for a genuine bulk rewrite. It now reports
 `entries_before` / `entries_after` on every params write, and adds `entries_removed` plus a

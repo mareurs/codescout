@@ -139,7 +139,12 @@ impl DefinitionIndex {
     /// Both halves of that pairing are the discriminator, and dropping either makes the
     /// check useless in a different way:
     ///
-    /// - **Declared.** Eight session logs define `F-N` and none declares `entry_prefix`.
+    /// - **Declared.** Twenty artifacts define `F-N` and fifteen of them declare
+    ///   `entry_prefix` (measured 2026-09-17 off this check's own output; it read *"eight
+    ///   session logs … and none declares"* until then, describing a corpus that stopped
+    ///   existing once `get_guide("tracker-conventions")` began instructing every ledger
+    ///   author to declare one — the exemption was keyed on a property the convention then
+    ///   went and changed).
     ///   That is the documented per-work-stream convention — each log owns its own counter
     ///   and citations are qualified by file stem — so reporting it would flag a blessed
     ///   pattern, and `ambiguous` already quantifies its real cost (~400 citations, 49 of
@@ -765,9 +770,10 @@ mod tests {
         );
     }
 
-    /// The false positive this check exists to avoid. Eight session logs define `F-N`
-    /// and **none declares `entry_prefix`** — that is the documented per-work-stream
-    /// convention, whose remedy is a file-stem-qualified citation rather than a rename.
+    /// The false positive this check exists to avoid. Twenty artifacts define `F-N` and
+    /// **fifteen declare `entry_prefix`** (measured 2026-09-17) — that is the documented
+    /// per-work-stream convention, whose remedy is a file-stem-qualified citation rather
+    /// than a rename.
     /// Firing here would report a blessed pattern, and `ambiguous` already quantifies
     /// its real cost (~400 citations, 49 of 50 sampled being F/W).
     ///
