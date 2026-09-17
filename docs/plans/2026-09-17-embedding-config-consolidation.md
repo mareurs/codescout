@@ -11,10 +11,10 @@ tags:
 topic: embedding configuration
 ---
 
-**Status:** approved in outline 2026-09-17 (three rulings below). **Tasks 1, 2 and 3
-landed** — `654e1f18`, `de0a1e07`, `87e434dd`.
+**Status:** approved in outline 2026-09-17 (three rulings below). **Tasks 1–4 landed**
+— `654e1f18`, `de0a1e07`, `87e434dd`, `c76d43de`.
 **Bugs this closes:** `aae547c917c329b5` (**fixed**), `4cd387ba07bc8d2a` (**fixed**),
-`f720f7708e32d881` (**fixed**), `6ec9c313893fd21f`, `efd14d6c5eb56905`,
+`f720f7708e32d881` (**fixed**), `5de82c05bd449fdc` (**fixed**), `6ec9c313893fd21f`,
 `eb3417ec7e02c66e`.
 
 ## The problem, measured
@@ -244,7 +244,8 @@ now false. The escape still exists but must be asked for explicitly
 
 ### Task 4 — correct the docs
 
-**Landed 2026-09-17** (SHA recorded at commit). Closes `efd14d6c5eb56905`.
+**Landed 2026-09-17** — `c76d43de37b828a5b4a946d56a6037a9fce96e63`, patch-id
+`d32bb8ad57542e3b0577e4ba9ce14c25fb63dd70`. Closes `5de82c05bd449fdc`.
 
 Sequenced after Tasks 1–3 as planned, so the pages were rewritten **once** against
 settled behaviour. That sequencing paid: two of the corrections below describe fixes

@@ -1,7 +1,7 @@
 ---
-id: efd14d6c5eb56905
+id: 5de82c05bd449fdc
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: the embeddings docs invert which config fields are live'
 tags:
 - cluster/doc-contradicted-by-code
@@ -184,7 +184,8 @@ which layer wins, and the HTTPS-or-loopback drop.
 Item 3 of the original report — the duplicated `(default)` marker at
 `src/config/project.rs:82` — was already fixed in Task 2, which rewrote that doc block.
 
-SHA / patch-id: pending.
+- **SHA:** `c76d43de37b828a5b4a946d56a6037a9fce96e63` (on `experiments`)
+- **patch-id:** `d32bb8ad57542e3b0577e4ba9ce14c25fb63dd70`
 
 ## Tests added
 
