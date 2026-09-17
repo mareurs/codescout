@@ -1,10 +1,11 @@
 ---
 id: '7018ce840e36b942'
 kind: bug
-status: open
+status: fixed
 title: The worktree guard reads a quoted regex alternation as a bare git verb, and neither printed escape applies
 tags:
 - cluster/addressing-without-an-escape-hatch
+closed: 2026-09-17
 ---
 
 # BUG: The worktree guard reads a quoted regex alternation as a bare git verb, and neither printed escape applies
@@ -116,6 +117,10 @@ the alternation. `grep -e pat1 -e pat2` also avoids it.
 
 ## Candidate fixes (not implemented)
 
+**Candidate 1 shipped.** The other two were not needed: anchoring `TRIGGER` to segment start
+would have been a second mechanism for the same claim, and the refusal text is left alone
+because the parse it would have explained no longer happens.
+
 1. **Strip quoted spans before segmenting**, as `stripHeredocs` already does for heredocs
    — same claim (data, not syntax), same place.
 2. **Require the segment to start with the verb**: anchor `TRIGGER` so `git` must be at
@@ -139,6 +144,59 @@ Closest is the archived whole-command-scan fix cited in the guard's own header: 
 detection from whole-string to per-segment and added heredoc stripping. **This bug is the
 residue of that fix** — the segmenting it introduced is the mechanism here.
 
+
+## Fix provenance
+
+Fixed in the **`claude-plugins`** repo rather than this one — the guard is a
+`codescout-companion` hook — so the citation carries the cross-repo `<repo>:` prefix.
+
+- **SHA:** `claude-plugins:579b9c1` (main) — positional; does not survive a rebase.
+- **patch-id:** `e57bce0f2eb4c93efad86c3094b85b233af58850` — content hash of the diff; survives rebase and cherry-pick.
+
+`stripQuoted()` collapses each complete `'…'` / `"…"` span to one inert token before
+segmenting, mirroring the claim `stripHeredocs` already makes about heredoc bodies. A token
+rather than a deletion, because `git -C "<path>" commit` and `cd "<path>"` need the path to
+survive as a single `\S+` word.
+
+**Shipped, not merely committed** — the distinction this corpus pays for repeatedly. Released
+as `codescout-companion` 1.20.12 (`claude-plugins:c769ea4`), seeded into all three profile
+caches with install records repointed, parity checks green. Verified **live** after
+`/reload-plugins`: the exact command in § *Symptom* now runs, and both directions were
+re-probed against the cached bytes the running instance actually loads — 6/6, zero
+mismatches. The `cache = working tree` column was checked with a control pair rather than a
+presence grep (`function stripQuoted` is 1× in each 1.20.12 cache, 0× in the 1.20.11 cache
+beside it), so that green is known to be able to read otherwise.
+
+One profile's live state is **not** established: `/reload-plugins` was run in `~/.claude-kat`
+only. Sessions in `~/.claude` and `~/.claude-sdd` hold the pre-fix hook in memory until they
+reload, since CC resolves hook commands at process launch.
+
+If the SHA stops resolving, recover the commit by patch-id.
+
 ## Tests added
 
-None — bug filed, not fixed.
+Five, in `claude-plugins:tests/test-git-worktree-guard.sh`, all written **before** the fix
+and three observed RED (40 passed / 3 failed, each showing `Offender: grep -rn -E "git push`).
+
+Must ALLOW — the direction the suite had no coverage for:
+
+- a git verb inside a **double-quoted** regex alternation
+- the same inside a **single-quoted** alternation
+- a chained `cd` whose quoted path contains a **space**. The space is load-bearing and the
+  first version of this fixture lacked it: an unspaced quoted path already satisfies `\S+`
+  quotes-and-all, so that version passed *pre-fix* and was monotone under the absence of the
+  thing it existed to pin. Caught only because it passed on its first run
+  (`shell-gating-session-log:W-3`).
+
+Must still DENY — without these the fix trades a false refusal for a missed mutation, which
+is the direction that actually matters:
+
+- a bare mutation following a quoted alternation
+- a bare mutation following an **unterminated** quote
+
+Suite after: **43 passed, 0 failed**. Full `claude-plugins:tests/run-all.sh` green.
+
+Note what the pre-existing suite did and did not cover: three tests asserted *a quoted
+mention must not DISARM the guard*, none asserted *must not TRIGGER it*. One direction of
+one mention problem, by authors who demonstrably knew the problem existed — and the defect
+lived in the untested direction.

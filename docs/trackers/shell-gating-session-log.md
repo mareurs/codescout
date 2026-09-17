@@ -9,8 +9,8 @@ tags:
 entry_prefix:
   - F
   - W
-entry_high_water_F: 2
-entry_high_water_W: 2
+entry_high_water_F: 4
+entry_high_water_W: 3
 ---
 
 # Session Log — Shell Gating (`shell_command_mode` / `run_command` exposure)
@@ -70,6 +70,8 @@ entry_high_water_W: 2
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-08-27 | med | companion-hooks | fixed-verified | CLAUDE.md asserts native `Bash` is hard-denied; a positive control shows it is not |
 | F-2 | 2026-09-16 | med | companion-hooks | promoted-to-bug-tracker | A gate's refusal echoed the input it actually received; I reconstructed it from memory instead |
+| F-3 | 2026-09-17 | low | tracker-navigation | mitigated | A zero from the wrong FILE read as a zero from the corpus; only the commit gate could tell them apart |
+| F-4 | 2026-09-17 | low | workspace-state | open | Activation dies with the MCP process; reads warn and writes refuse, and the hint names a worktree first |
 
 ## Wins Index
 
@@ -77,6 +79,7 @@ entry_high_water_W: 2
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-08-27 | high | Grep the config struct for the capability before designing the knob a request implies is missing | Would have re-added the `shell_enabled` switch this repo deleted as redundant, given two knobs for one behaviour, and missed the real gap — `run_command` still advertised in `list_tools` | validated |
 | W-2 | 2026-09-16 | med | Pair every confirming read with a member that must read NEGATIVE — and re-pick the control when the old one gains the property | Would have reported "correctly scoped to `refs/heads/experiments`" from a reading an `~ALL`-scoped ruleset produces identically — a true-sounding claim to the user about a setting that would govern every branch | validated |
+| W-3 | 2026-09-17 | med | Write the test first so an immediate PASS is itself a signal — a fixture that cannot reach the failing value looks exactly like coverage | Would have shipped a test monotone under the absence of the fix: green pre-fix, green post-fix, credited with pinning the token-vs-deletion choice it could not detect | validated |
 
 ---
 
@@ -498,6 +501,150 @@ confirmation, so the population does not read as self-correcting.
 branch, observed twice (on `master` pre-protection, on `refactoring` post-); and
 `current_user_can_bypass: "always"` read back from the ruleset row rather than inferred from the
 create response that set it.
+
+## F-3 — A zero from the wrong FILE read as a zero from the corpus; only the commit gate could tell them apart
+
+**Valid:** dated 2026-09-17
+
+**Observed:** Filing the guard bug, I needed `IC-6`'s `**Members:**` field. I grepped the
+roster — `docs/trackers/issue-clusters.md` — for `^\*\*Slug:\*\* \`cluster/addressing-without-an-escape-hatch\``
+and got **0 matches**. I read that zero as "this ledger does not carry a per-class Slug
+block" and moved on, tagging the bug and committing. The **pre-commit gate** caught it, and
+its refusal text says the thing I should have:
+
+> *"Grepping your slug there returns 0, and that zero means WRONG FILE, not `no such class`
+> — while a generic `cluster/` grep returns dozens, which is what makes the wrong file look
+> like the right one."*
+
+Since the per-class split the field lives in `docs/trackers/issue-clusters/IC-6-addressing-without-an-escape-hatch.md`.
+The roster retains a `**Members:**` for exactly ONE slug (`cluster/unclassified`), so the
+corpus contains just enough of the shape I was looking for to make the miss invisible.
+
+**Why the zero was convincing, and it was not carelessness.** A bare `cluster/` grep in that
+file returns dozens of hits, so every signal said *right file, this class just has no Slug
+block*. The instrument answered in its own terms, completely, without complaint — the
+`seam-classes.md` Shape case exactly: a query that answers *"what is in this file?"* never
+answers *"where does this field live?"*.
+
+**What makes it worth an entry rather than a shrug.** I had **read that law this session**,
+in this skill's own `references/seam-classes.md`, roughly an hour earlier. Knowing the class
+prevented nothing — § *Observer Blindness*'s result, arriving inside the session that had
+just cited it. And the law was **widened by a peer the same morning** (`2b7c70d`, `ea6eb36`,
+09:42 and 09:44 +0300) with the expectation-priming half: *"a zero that confirms what you
+were just told is the one to distrust — the more reliable the source, the worse it is."* My
+copy predated that edit, though the pre-existing Shape case already covered my miss, so the
+widening is not what I lacked.
+
+**Cost:** one refused commit, no wrong data — the gate held. Cheap here *because* a
+mechanism caught it; there is nothing in the reading path that would have.
+
+**Lesson, and it is about the mechanism rather than the care:** when a grep for a FIELD
+returns zero in a file that is clearly about the right SUBJECT, the next question is "does
+this field live here?", not "does this value exist?". The corpus made the wrong file look
+right; only the gate distinguished them.
+
+**Rests on:** the gate's own refusal text naming the per-class path; `2b7c70d` / `ea6eb36`
+timestamps read from `git log --date=iso`; the served `SKILL.md` verified byte-identical to
+the repo and unchanged since 2026-09-15, so only `references/seam-classes.md` was stale in
+my context.
+
+## F-4 — Activation dies with the MCP process; reads warn and writes refuse, and the hint names a worktree first
+
+**Valid:** dated 2026-09-17
+
+**Observed:** Workspace activation is scoped to the **MCP server process**, and a `/mcp`
+reconnect starts a fresh one. Nothing announces the loss. The asymmetry is the finding:
+
+| path | behaviour when unactivated, with worktrees present |
+|---|---|
+| reads (`read_file`, `grep`, `doc(get)`) | **succeed**, with a `⚠` workspace notice prepended |
+| writes (`doc(create)`, `append_entry`, `edit_file`) | **hard refuse**: *"Write blocked: git worktrees detected but workspace(action='activate') has not been called"* |
+
+So the warning rides along on ~20 successful calls and is easy to read as ambient noise,
+and enforcement arrives only at the first write — typically mid-task, with the payload
+already composed. Observed twice this session: once in a fresh session that had simply
+never activated, and once **after a `/mcp` reconnect silently dropped a prior activation**.
+The third time I pre-empted it by activating before the first write, which is the only
+reason there were two and not three.
+
+**The remedy text names the wrong target first.** The refusal hint reads:
+
+> `Call workspace(action='activate', path="…/codescout.worktrees/check-codescout-integration")`
+> `to select the write target (or use "…/codescout" for the main repo).`
+
+The **first-named** option is a worktree; the main repo is the parenthetical. This checkout
+carries nine worktrees, eight of them short-lived `mutation-*` probe trees, and the session
+that hits this is overwhelmingly working in the main repo. A reader following the hint
+literally pins the wrong tree and their writes land somewhere they did not mean — quietly,
+because activation then succeeds. This is § *Testing Discipline*'s remedy-text law: the
+predicate is right (writes really are ambiguous here), and nothing tests where the refusal
+sends you. The first worktree in the enumeration appears to be whichever the walker yields
+first, so the hint is not even naming a stable target.
+
+**Cost:** two refused writes, both recoverable, no data lost. Low per occurrence — but it
+recurs on every reconnect, and the reconnect is exactly when a session is least primed to
+expect it, having just watched the server come back healthy.
+
+**Why it is filed rather than absorbed:** the fix shape is cheap and belongs in the
+mechanism, not in anyone's memory — either carry activation across a reconnect, or name the
+main repo first in the hint and the worktrees as the alternative. "Remember to re-activate
+after `/mcp`" is a policy the model must notice, which `skill-frictions:SKF-22` already
+records as not a mechanism.
+
+**Rests on:** the two refusal payloads quoted verbatim from this session; the read path
+observed succeeding with the `⚠` notice on many calls in between; the worktree count read
+from the refusal's own enumeration.
+
+## W-3 — A test that passes on its first run is a fixture that cannot reach the failing value
+
+**Valid:** dated 2026-09-17
+
+**Pattern:** Fixing the quoted-alternation defect, I added a fourth test pinning a
+*consequence* of the chosen implementation. `stripQuoted` replaces each quoted span with an
+inert TOKEN rather than deleting it, because `git -C "<path>" commit` and `cd "<path>"` need
+the path to survive as a single `\S+` word. That is a design choice a later "simplification"
+could undo, so it wanted a test. I wrote:
+
+```
+cd '$MAIN/.worktrees/feature' && git commit -m x     → expect allowed
+```
+
+It **passed immediately**, which this skill and the TDD skill both read the same way: you
+are testing existing behaviour. The fixture path had no space, so `\S+` already matched the
+whole quoted token, quotes and all — the case passed *before* the fix and therefore said
+nothing about it. Replacing the fixture with a genuinely spaced path (`'/tmp/some dir/with
+space'`) produced the RED, and the suite went 40/2 → 40/3.
+
+**The counterfactual is not "no test" — it is a test that looks like coverage.** Work out
+what the vacuous version could actually detect:
+
+| world | vacuous fixture (no space) | corrected fixture (space) |
+|---|---|---|
+| pre-fix | **passes** — proves nothing | **reds** ✓ |
+| tokenise (shipped) | passes | passes |
+| deletion refactor | reds ✓ | reds ✓ |
+
+So the vacuous fixture was **monotone under the absence of the fix**: the one world it could
+not distinguish is the world the test exists for. It would still have caught a later
+deletion-refactor, and that is exactly what makes it dangerous rather than merely useless —
+it works often enough to be trusted, and its green gets credited to a property it never
+tested. § *Testing Discipline*'s "demand an observed RED, never an assertion's existence",
+met by a fixture that could not reach the failing value.
+
+**What actually caught it was the ORDER, not attention.** Written after the fix — the normal
+way, and the way it would have been written had I not been running red-first — it passes on
+the first run and nothing distinguishes that pass from a correct one. The pass *is* the
+signal, and only if you were expecting a failure.
+
+**Second-order note worth keeping:** the pre-existing suite had three tests asserting *"a
+quoted mention must not DISARM the guard"* and none asserting *"must not TRIGGER it"* — one
+direction of one mention problem, by authors who demonstrably knew the problem existed. The
+bug I was fixing lived in the untested direction. Monotone-direction blindness at the level
+of a whole suite, not a single assertion.
+
+**Rests on:** the observed 40/2 → 40/3 → 43/0 progression; the table above derived by
+reasoning about `CD_TO_PATH`'s `\S+` against each implementation, with the pre-fix and
+post-fix rows both observed rather than argued.
 
 ## Template for new entries
 
