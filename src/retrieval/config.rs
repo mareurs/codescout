@@ -137,7 +137,7 @@ pub struct RetrievalConfig {
     ///
     /// That untestability was not incidental: it is why `[embeddings].model`
     /// could be discarded on the url path with a green suite. See
-    /// `docs/issues/2026-09-17-the-configured-embedding-model-is-discarded-whenever-a-url-is-set.md`.
+    /// `docs/issues/archive/2026-09-17-the-configured-embedding-model-is-discarded-whenever-a-url-is-set.md`.
     pub dense_model_name_override: Option<String>,
     pub profile: String,
     /// Multiplier for the sparse (BM25) prefetch candidate pool relative to dense.

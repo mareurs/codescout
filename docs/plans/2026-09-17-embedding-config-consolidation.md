@@ -11,9 +11,10 @@ tags:
 topic: embedding configuration
 ---
 
-**Status:** approved in outline 2026-09-17 (three rulings below); tasks not started.
-**Bugs this closes:** `a9c8df45aca1ede5`, `da26a27026bb9f41`, `6ec9c313893fd21f`,
-`efd14d6c5eb56905`, `c09210c5bcd74208`, `eb3417ec7e02c66e`.
+**Status:** approved in outline 2026-09-17 (three rulings below). **Task 1 landed** —
+`654e1f18` / patch-id `2a45699854551182`, bug archived as `aae547c917c329b5`.
+**Bugs this closes:** `aae547c917c329b5` (**fixed**), `da26a27026bb9f41`,
+`6ec9c313893fd21f`, `efd14d6c5eb56905`, `c09210c5bcd74208`, `eb3417ec7e02c66e`.
 
 ## The problem, measured
 
@@ -81,7 +82,7 @@ docker-compose wiring sets it. What *can* change is that the machine's
    `EmbeddingsSection` **and** `GlobalEmbeddingsSection`, and the second is
    already four fields behind (bug `da26a27026bb9f41` is that drift realised).
 2. *A second HTTP-backed embedder is introduced* — today it would re-read env
-   inside its own constructor, which is exactly how bug `a9c8df45aca1ede5`
+   inside its own constructor, which is exactly how bug `aae547c917c329b5`
    arose.
 3. *A project needs a different model from the machine* — today impossible when
    the machine's value came from the startup dotenv.
@@ -100,22 +101,37 @@ Ordered so each lands independently and the tree is shippable between steps.
 
 ### Task 1 — the configured model reaches the wire
 
-Closes `a9c8df45aca1ede5`.
+**Landed 2026-09-17** — `654e1f187c63c79673c771ea25890bf517da6f43`, patch-id
+`2a456998545511824432cf69d9351f5af434b2ff`. Closed `aae547c917c329b5`.
 
-- Add `dense_model_name_for_test()` to `EmbedderHttp`
-  (`src/retrieval/embedder.rs`), beside the existing `api_key_for_test()`.
-- Add a test in `src/retrieval/client.rs`'s test module asserting
-  `RetrievalClient::build_http_embedder(url, &cfg, false)` carries `cfg.model`.
-  **Observe it RED first** — that red is the only evidence the assertion
-  discriminates.
-- Give `EmbedderHttp::new` a `model: &str` parameter; pass `config.model` from
-  `build_http_embedder` (`src/retrieval/client.rs:232`) and from
-  `from_config_only` (`:406`). `with_config` already takes one.
-- Keep `CODESCOUT_EMBEDDER_MODEL_NAME` working as an override; warn once when it
-  shadows a configured value.
-- Make `require_model`'s bail name the knob. Per `CLAUDE.md` § Testing
-  Discipline, assert on the **shape** — that the message names a config field
-  *and* an env var — not on the prose.
+What shipped, and the one place it diverged from the plan above:
+
+- `EmbedderHttp::new` gained a `dense_model_name` parameter and **stopped reading**
+  `CODESCOUT_EMBEDDER_MODEL_NAME`. The plan said "keep the env read, add a fallback";
+  that was wrong, and the test caught it. A fallback leaves the read inside a
+  constructor, where exercising it needs `set_var` — so the assertion could not be
+  written, which is the property that let the defect survive. The read moved to
+  `RetrievalConfig::dense_model_name_override`, resolved by a pure
+  `dense_model_name()`. **The plan's own step 1 would have closed the symptom and left
+  the cause.**
+- Prefix stripping extracted to `codescout_embed::bare_model_name`, shared with
+  `create_embedder_with_config`'s url arm.
+- Three tests in `selection_tests` via a new `dense_model_name_for_test()`; two observed
+  RED before the fix. The third's red came from the override path rather than from
+  stripping, so it was settled by mutation instead — `scripts/mutation-probe.sh` on
+  `bare_model_name` reports KILLED.
+- `tests/embedder_env_isolation.rs`'s rationale updated: its guard stops *tests* taking
+  the env-reading path, and this removes the cause it was policing for the model var.
+
+Still owed from this task, deliberately deferred rather than forgotten: the shadowing
+warning. `RetrievalConfig` cannot yet distinguish a chosen `model` from a defaulted one,
+so a warning keyed on difference alone would fire on every deployment that exists. It
+needs the provenance channel and lands with Task 5.
+
+`require_model`'s message was **not** changed. On this path it is now unreachable —
+`RetrievalConfig.model` always carries a value — so rewording it would have been a
+change no caller can reach; it stays live for `RemoteEmbedder::from_url`'s other
+constructors.
 
 ### Task 2 — one settings type at both levels
 

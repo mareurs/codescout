@@ -1,7 +1,7 @@
 ---
-id: a9c8df45aca1ede5
+id: aae547c917c329b5
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: the configured embedding model is discarded whenever a url is set'
 tags:
 - cluster/accepted-parameter-silently-dropped
@@ -160,27 +160,79 @@ weakly. Grep for `dense_model_name` in `src/retrieval/client.rs`: no matches.
 
 ## Fix
 
-Plan, not yet implemented. Give `EmbedderHttp::new` the model name as a
-parameter and pass `config.model` from `build_http_embedder`
-(`src/retrieval/client.rs:232`), keeping `CODESCOUT_EMBEDDER_MODEL_NAME` as a
-deprecated override that warns when it shadows a configured value. `with_config`
-already has the parameter, so the change is to `new()`'s signature and its two
-production call sites.
+Landed. `EmbedderHttp::new` gained a `dense_model_name: &str` parameter and **stopped
+reading `CODESCOUT_EMBEDDER_MODEL_NAME`**; that read moved to
+`RetrievalConfig::dense_model_name_override`, resolved by the pure
+`RetrievalConfig::dense_model_name()`. Both production call sites
+(`build_http_embedder`, `from_config_only`) pass it.
 
-The error text from `require_model` should also name the knob — it is correct
-about the state and unactionable about the remedy, which is the
-`CLAUDE.md` § *Testing Discipline* "loudness is a property of a path" rule: the
-alarm fires, reaches the right person, and sends them nowhere.
+**The env read MOVED rather than merely gaining a fallback, and that is the fix.** A
+fallback would have closed the symptom and left the cause: an env read inside a
+constructor is only exercisable by mutating process env, which is UB against the suite's
+concurrent `getenv` readers and banned by `docs/conventions/test-env-isolation.md` — so
+the resolution had no reachable assertion, which is *why* it could be wrong for a
+release behind a green suite. With the value on the config struct, both directions are
+ordinary unit tests. The api_key sibling on the same constructor was already resolved at
+the config edge and already had a test; that asymmetry is the whole story.
 
-SHA / patch-id: pending.
+Prefix stripping moved to `codescout_embed::bare_model_name`, shared with
+`create_embedder_with_config`'s url arm. Wiring config through the second path without
+sharing the rule would have reproduced the defect one layer down — two paths agreeing
+today and diverging on the next prefix added.
+
+`CODESCOUT_EMBEDDER_MODEL_NAME` stays **on top**, per the 2026-09-17 ruling. Every stack
+deployment sets it while leaving `[embeddings].model` at the built-in default, so letting
+`model` win would have silently repointed all of them at `AllMiniLML6V2Q`. The shadowing
+WARNING that makes the override visible is deliberately *not* here: `RetrievalConfig`
+cannot yet distinguish a chosen `model` from a defaulted one, so a warning keyed on
+difference alone would fire on every deployment that exists. That provenance is Task 5 of
+`docs/plans/2026-09-17-embedding-config-consolidation.md`.
+
+`require_model`'s message is unchanged and is **not** owed here: on this path it is now
+unreachable, because `RetrievalConfig.model` always carries a value. It stays live for
+`RemoteEmbedder::from_url`'s other callers.
+
+- **SHA:** `654e1f187c63c79673c771ea25890bf517da6f43` (on `experiments`)
+- **patch-id:** `2a456998545511824432cf69d9351f5af434b2ff`
 
 ## Tests added
 
-None yet. Owed, and the shape matters: a `dense_model_name_for_test()` accessor
-plus an assertion on the **production** path (`build_http_embedder`), mirroring
-the existing api_key test rather than re-implementing the resolution in the test.
-An assertion over `with_config` would be testing the seam no production caller
-uses.
+All in `src/retrieval/client.rs` `selection_tests`, asserted through
+`build_http_embedder` — the function `build_embedder`/`from_env` actually run — via a new
+`EmbedderHttp::dense_model_name_for_test()` mirroring the existing `api_key_for_test()`.
+Deliberately **not** through `EmbedderHttp::with_config`, whose every caller in the tree
+is a test and which therefore covers no production path.
+
+- `build_http_embedder_sends_the_configured_model_when_no_override_is_set` — the defect
+  itself. Observed RED before the fix.
+- `build_http_embedder_lets_the_env_override_win_over_the_configured_model` — pins the
+  back-compat half so a later change cannot invert the ladder while the first test still
+  passes. Observed RED before the fix.
+- `a_routing_prefix_is_stripped_before_the_model_goes_on_the_wire` — observed RED before
+  the fix, **but for the wrong reason**: it failed because the override was winning, not
+  because stripping was absent, so that red was evidence for its siblings' claim and not
+  its own. Settled by mutation instead — `scripts/mutation-probe.sh` replacing
+  `bare_model_name`'s body with `model` reports KILLED (`local:AllMiniLML6V2Q` vs
+  `AllMiniLML6V2Q`), so the assertion discriminates the stripping specifically.
+
+Each test sets `dense_model_name_override` explicitly rather than inheriting it. This is
+load-bearing, not hygiene: the ambient environment carries
+`CODESCOUT_EMBEDDER_MODEL_NAME` on every host configured for the stack, so an inherited
+override would make these tests assert nothing on exactly the machines where the defect
+lives. That is the failure mode `tests/embedder_env_isolation.rs` records from the CI
+side (`9c03b32f`, 36 hours red for CI and green for every developer).
+
+**End-to-end, beyond the unit tests** — the probe that found the defect, re-run against
+the fixed binary:
+
+```json
+{"path": "/v1/embeddings", "model": "DISTINCTIVE-MODEL-FROM-PROJECT-TOML",
+ "auth": "Bearer KEY-FROM-PROJECT-TOML"}
+```
+
+Plus both back-compat directions: an env-driven stack config with no `[embeddings]` block
+still sends `CodeRankEmbed-Q4_K_M.gguf`, and an exported-but-blank override falls back to
+the configured value rather than winning.
 
 ## Workarounds
 
@@ -192,11 +244,12 @@ so no configuration in the tree exercises the broken path.
 
 ## Resume
 
-Add `dense_model_name_for_test()` beside `api_key_for_test()` in
-`src/retrieval/embedder.rs`, then a test in `src/retrieval/client.rs`'s test
-module asserting `RetrievalClient::build_http_embedder(url, &cfg, false)` carries
-`cfg.model`. Observe it RED first, then thread the parameter through
-`EmbedderHttp::new`.
+N/A — fixed and verified.
+
+The surrounding work continues in
+`docs/plans/2026-09-17-embedding-config-consolidation.md`; the next task is the shared
+`EmbeddingSettings` type (bug `da26a27026bb9f41`), and the shadowing warning this fix
+deliberately defers is Task 5.
 
 ## References
 

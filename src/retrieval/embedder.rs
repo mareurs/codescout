@@ -299,7 +299,7 @@ impl EmbedderHttp {
     /// config struct, both directions are ordinary unit tests. Same shape as
     /// `EmbedEnv::from_real_env` feeding the pure `merge_embed_config`.
     ///
-    /// See `docs/issues/2026-09-17-the-configured-embedding-model-is-discarded-whenever-a-url-is-set.md`.
+    /// See `docs/issues/archive/2026-09-17-the-configured-embedding-model-is-discarded-whenever-a-url-is-set.md`.
     pub fn new(
         dense_base: impl Into<String>,
         sparse_base: impl Into<String>,
@@ -412,7 +412,7 @@ impl EmbedderHttp {
     /// rule. Its absence is why the configured model could be discarded on the
     /// url path with a green suite — the api_key half of this constructor had
     /// such an accessor and was tested; the model half had neither. See
-    /// `docs/issues/2026-09-17-the-configured-embedding-model-is-discarded-whenever-a-url-is-set.md`.
+    /// `docs/issues/archive/2026-09-17-the-configured-embedding-model-is-discarded-whenever-a-url-is-set.md`.
     #[cfg(test)]
     pub(crate) fn dense_model_name_for_test(&self) -> &str {
         &self.dense_model_name
