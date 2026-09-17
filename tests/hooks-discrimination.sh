@@ -1167,6 +1167,55 @@ eq "citer repointed in the same commit -> exits 0"   "$RC" "0"
 eq "and prints nothing at all"                       "$(printf '%s' "$OUT" | wc -c)" "0"
 rm -rf "$T"
 
+# THE SAME SILENCE, WITH THE CITER ITSELF RENAMED -- and the control above cannot express
+# this case, which is why it shipped broken. That one repoints the citer with `sed` + `git
+# add`, so the citer is an `M` and its path is IDENTICAL in both of the hook's inputs. Here
+# it is an `R`, and the two inputs disagree:
+#
+#   git diff --cached --name-only   -> the rename's DESTINATION only   (suppression set)
+#   git grep -l -F "$stem" HEAD     -> the PRE-rename name             (citer list)
+#
+# A literal path match between those can never succeed, so the hook warns on the one shape
+# its own header calls "the correct shape [that] must stay silent". Both bug files archived
+# at 5a61efee hit it live.
+#
+# LOAD-BEARING: the citer must move to a directory at a DIFFERENT DEPTH, so its repointed
+# link is `../../issues/archive/...` rather than `../issues/...`. A same-depth move would
+# leave the two relative links textually equal and the case would pass for the wrong reason.
+# LOAD-BEARING, AND THE REASON THE FIRST VERSION OF THIS CASE PASSED AGAINST THE BROKEN
+# SCRIPT: the citer must be big enough that git DETECTS its rename. `--name-only` reports a
+# detected rename as its DESTINATION ONLY, but reports an undetected one as a `D` plus an
+# `A` -- which puts the old path back in the list and suppresses the warning for the wrong
+# reason. A one-line citer whose only line is rewritten scores below git's 50% similarity
+# cutoff, so the defect is invisible to it. Forty filler lines put this at R090; the two
+# real archives that hit this live were R096 and R097.
+#
+# That is the `R`-is-a-similarity-verdict caveat from doc(action="move")'s stage_hint,
+# reaching a test fixture: the same change is one row or two depending on content size.
+new_repo
+mkdir -p docs/issues/archive docs/trackers/archive
+echo '# foo' > docs/issues/2026-09-13-foo.md
+{ echo '# tracker'
+  for i in $(seq 1 40); do echo "filler line $i"; done
+  echo 'See [foo](../issues/2026-09-13-foo.md) for the detail.'
+} > docs/trackers/t.md
+git add -A > /dev/null 2>&1
+git commit -qm base
+
+git mv docs/issues/2026-09-13-foo.md docs/issues/archive/2026-09-13-foo.md
+git mv docs/trackers/t.md docs/trackers/archive/t.md
+sed -i 's|\.\./issues/2026-09-13-foo\.md|../../issues/archive/2026-09-13-foo.md|' \
+    docs/trackers/archive/t.md
+git add docs/trackers/archive/t.md
+# The fixture's own precondition: if git stopped detecting this rename the case would pass
+# vacuously, exactly as its first version did.
+eq "fixture: the citer's rename IS detected" \
+   "$(git diff --cached --name-status -M | awk '$1 ~ /^R/ && $2 == "docs/trackers/t.md" {print "yes"}')" "yes"
+orph
+eq "a citer RENAMED in the same commit -> exits 0"     "$RC" "0"
+eq "a renamed citer is suppressed like a modified one" "$(printf '%s' "$OUT" | wc -c)" "0"
+rm -rf "$T"
+
 # Self-gating: a commit staging no rename must not pay for a scan, and must say nothing.
 new_repo
 echo a > a.md

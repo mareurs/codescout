@@ -56,7 +56,15 @@ set -uo pipefail
 # commit runs hooks with GIT_INDEX_FILE pointing at `next-index-<pid>.lock`, holding only
 # the named paths. Reading the shared index instead would compute the committed set from
 # content this commit is not taking.
-committed="$(git diff --cached --name-only --diff-filter=ACMRD 2>/dev/null)" || exit 0
+# `--name-status -M`, and BOTH columns of an `R` row -- never `--name-only`. A DETECTED
+# rename is reported by its DESTINATION alone, while the citer list below comes from
+# `git grep ... HEAD` and is therefore in PRE-rename names. Comparing those two literally
+# means a citer renamed in THIS commit can never be suppressed, so the check fires on the
+# one shape the header above calls correct. Detection is a similarity verdict, so the bug
+# appears only above git's ~50% cutoff: a small citer is reported as `D`+`A`, puts its old
+# path back in this list, and hides the defect.
+committed="$(git diff --cached --name-status -M --diff-filter=ACMRD 2>/dev/null |
+    awk -F'\t' '$1 ~ /^R/ { print $2; print $3; next } { print $2 }')" || exit 0
 [ -n "$committed" ] || exit 0
 
 # Rename SOURCES only. A destination is a path this commit creates; nothing at HEAD can
