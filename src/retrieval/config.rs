@@ -205,6 +205,9 @@ impl RetrievalConfig {
     /// provenance `RetrievalConfig` does not yet carry — it cannot distinguish a
     /// chosen `model` from a defaulted one — and lands with Task 5 of
     /// `docs/plans/2026-09-17-embedding-config-consolidation.md`.
+    // Its only caller, `build_http_embedder`, is `remote-embed`-gated; the lean
+    // lane compiles this and reaches it from nowhere.
+    #[cfg_attr(not(feature = "remote-embed"), allow(dead_code))]
     pub(crate) fn dense_model_name(&self) -> String {
         self.dense_model_name_override
             .clone()

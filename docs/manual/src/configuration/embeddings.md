@@ -255,6 +255,13 @@ for benchmark results across three models, real-world usage data, and recommenda
 60-point benchmark, indexes 21x faster, and requires zero setup. Keep it unless you have
 a specific reason to change.
 
+On a first `onboarding` run the default is not what you get unconditionally —
+the model written into `.codescout/project.toml` is ranked from the host's RAM,
+cores, GPU and reachable Ollama, and from the features the binary was built
+with. What each probe is evidence for, and the 16 GB / 8-core crossover above
+which the code-specialized model leads, are in
+[Onboarding § Hardware-Aware Model Selection](../concepts/onboarding-improvements.md).
+
 ## Troubleshooting
 
 ### Model mismatch after changing config

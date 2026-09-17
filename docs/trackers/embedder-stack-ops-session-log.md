@@ -6,8 +6,8 @@ owners: ["marius"]
 tags: ["embeddings", "retrieval", "docker", "gpu"]
 topic: embedder stack ops
 entry_prefix: ["F", "W"]
-entry_high_water_F: 9
-entry_high_water_W: 4
+entry_high_water_F: 10
+entry_high_water_W: 5
 ---
 
 # Session Log — Embedder Stack Ops
@@ -74,6 +74,8 @@ entry_high_water_W: 4
 | F-7 | 2026-09-16 | high | claim-scope | open | A value that is CORRECT about a question you were not asked — re-verification returns the same correct value, so "verify harder" is a no-op |
 | F-8 | 2026-09-16 | med | observer-blindness | open | Authored a class's tell and tripped it 3h 25m later — no instrument ran, so there was nothing to re-derive and no control to fire |
 | F-9 | 2026-09-16 | high | claim-scope | open | Every wrong claim in a five-instance day asserted an ABSENCE — the first testing law (monotone-under-removal) applied to claims, not tests |
+| F-10 | 2026-09-17 | high | data-loss | open | A heading-only `replace` silently wipes the section body — the shrink guard is whole-file, so a single-section wipe is 7.7% and invisible |
+| W-5 | 2026-09-17 | — | shared-checkout | validated | A peer's in-flight doc edit red the gate; positive attribution (HEAD-vs-worktree + file-provenance) beat reading my own diff, and the red cleared itself |
 
 ## Wins Index
 
@@ -949,6 +951,87 @@ resolved this entry only from the SHA I happened to include; without `4006e9c6` 
 **Qualify the prefix or give the SHA.** The parallel is exact and unflattering: an entry
 whose subject is *a true value published under an under-specified name* was itself
 published under one.
+
+## F-10 — Renaming a section heading with `replace` deleted its body; the shrink guard is whole-file and cannot see a single-section wipe
+
+**Valid:** dated 2026-09-17
+
+**Observed:** Renaming a plan section's heading from `**NOT STARTED**` to
+`**LANDED**` via `doc(action="update", patch={body_edits: [{heading: "<old>",
+action: "replace", content: "### <new heading line>\n"}]})` **deleted the
+section's 34-line body.** The file went 442 → 428 lines. No error, no warning,
+no `replaced_subsections` notice — the call returned `{"updated": true}`.
+
+**Cause:** `replace`'s `content` is the section's new body, and a body whose
+FIRST LINE parses as a heading is taken as the replacement heading rather than
+placed under the existing one. So content that is *only* a heading line yields a
+section that is only a heading line. This is `CLAUDE.md` § *Parsers Over a
+Namespace* holding exactly as written — *"content whose first line looks like a
+heading deleting the heading it was replacing"* — which I had read in this same
+session, three hours earlier, in the reload payload.
+
+**Cost:** recovered from `git show HEAD:<path>` only because the section had
+been committed 40 minutes earlier as part of `70ec79d5`. Had the plan been
+uncommitted — the normal state of a plan being written — the 34 lines were gone,
+and the catalog is not in git either.
+
+**Why no guard fired:** the body-shrink guard compares **whole-file** totals.
+A 34-line deletion inside a 442-line file is 7.7%, nowhere near the 50%
+threshold, so the guard is structurally unable to see a single-section wipe. It
+is an aggregate assertion about a per-member claim — § *Testing Discipline*'s
+scope law, in a guard rather than a test.
+
+**What to do instead:** there is no rename action. To change a heading, `replace`
+with the new heading line **followed by the full existing body**, which means
+reading the section first. `doc(get, id=…, heading=…)` then paste. The two-step
+is not optional and nothing in the tool's surface says so.
+
+**Rests on:** `doc` tool behaviour at `6d5cc540`; the shrink-guard threshold
+documented in `get_guide("librarian")` § *The shrink guard*.
+
+## W-5 — A gate red owned by a live peer's uncommitted markdown — attributed positively, not by adjacency, and gone on re-run
+
+**Valid:** dated 2026-09-17
+
+**Observed:** `./scripts/gate.sh` came back `FMT=0 CLIPPY=0 LEAN=101 DEFAULT=101`.
+The single failure was `tests/doc_tool_refs.rs::a_documented_call_names_a_live_tool`,
+reporting `src/prompts/guides/librarian.md:199` — *"`link_scan(…)` names no
+registered tool."* My diff that session was `src/hardware.rs`,
+`src/tools/onboarding.rs`, `src/retrieval/config.rs` and five docs. Nothing I
+touched could reach that test.
+
+**What the pattern bought:** two checks, neither of which is "read my own diff":
+
+1. `git show HEAD:src/prompts/guides/librarian.md | grep -c "link_scan(write=true)"`
+   → **0**; working tree → **1**. The offending text exists only uncommitted.
+2. `python3 scripts/file-provenance.py src/prompts/guides/librarian.md src/hardware.rs`
+   → `PEER` / `MINE`, naming sessionId `a3bf229c-…`, name
+   `rekey-prefix-entry-id-namespace`, profile `.claude-kat`, **[LIVE]**, with the
+   socket to reach it.
+
+**Counterfactual.** The failing line is prose about `link_scan`, sitting in a
+guide, one plausible edit away from "fix the stale tool name". Doing that would
+have rewritten a live peer's uncommitted markdown mid-edit — the defect
+`fmt-mine.sh` exists to prevent, arrived at through a different door. The other
+branch is cheaper but still wrong: reading my own 350-line diff for a cause that
+was never in it.
+
+**And the red cleared on its own.** A `--no-fail-fast` re-run ~12 minutes later
+was **green, zero failures**, and the offending text was gone from the working
+tree (the peer's file now staged). So the window was minutes, and CLAUDE.md's
+`cli_doc` prescription generalises past `cli_doc`: *re-run before reading your
+own diff* — the second run is both the cheapest discriminator and, here, the
+whole repair.
+
+**The generalisation worth keeping:** the shared-tree trap CLAUDE.md documents is
+stated for a *binary* (`target/debug/codescout` left librarian-less by a lean
+lane). This instance had no binary in it. Any test that reads a **working-tree
+file** a peer is editing has the same shape — `doc_tool_refs`, `audit_doc_refs`,
+`issue_clusters`, `committed_paths` and `claude_md_*` all scan tracked files, so
+the population is larger than the binary case and nothing marks it.
+
+**Rests on:** gate run at 2026-09-17T12:2x; re-run at 12:4x, both this session
+(`458a8a26`). Attribution re-derived at use, per § *Reaching a Peer Session*.
 
 ## Template for new entries
 

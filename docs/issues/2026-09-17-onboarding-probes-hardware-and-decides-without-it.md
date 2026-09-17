@@ -109,28 +109,87 @@ fn model_options_cpu_only_recommends_jina() {
 
 ## Fix
 
-Plan, not yet implemented; part of the 2026-09-17 embeddings-config work.
+Implemented 2026-09-17 as Task 7 of `docs/plans/2026-09-17-embedding-config-consolidation.md`.
 
-1. Make the ranking a real function of hardware: VRAM and RAM should move
-   `local:JinaEmbeddingsV2BaseCode` (768d, ~300 MB, code-specialised) above the
-   22 MB default on a machine that can afford it, and should keep the small
-   model first on a constrained one.
-2. Rank on **compiled features** as well — a binary without `local-embed` must
-   not recommend a `local:` model at all (see the sibling bug on default
-   features).
-3. Give the url entry a distinct variant rather than `id: "url"`, so a selection
-   cannot be written into `model` verbatim.
-4. Rename `model_options_cpu_only_recommends_jina` to match its assertion, and
-   make at least one test's expectation **vary with hardware** — otherwise the
-   ranking added in step 1 is uncovered by construction.
+1. `model_options_for` is the ranking proper; `model_options_for_hardware`
+   delegates to it with `CompiledBackends::current()`. `ram_gb` and
+   `cpu_cores` choose between the two local models at a 16 GB / 8-core
+   crossover; `gpu` promotes the Ollama entry.
+2. Compiled features are carried as **data** (`CompiledBackends`), not read
+   from `cfg!` inside the ranking. A `cfg!` in the body would make the
+   no-local case unreachable in the default lane and the local case
+   unreachable in the lean one — each lane would exercise half the branches
+   and report a full pass, the same vacuity shape `CLAUDE.md` records for the
+   lean and `server-stack` lanes.
+3. `ModelOption.id: String` became `ModelOption.target: OptionTarget`, a tagged
+   enum of `Model { model }` / `Server { url, model }`. `ModelOption::embeddings_section()`
+   performs the mapping onboarding used to do inline.
+4. `model_options_cpu_only_recommends_jina` → `a_small_host_leads_with_the_light_model`.
+
+**Two corrections the reproduction forced on this plan** — both found by running
+it before reading the plan, per `CLAUDE.md` § Bug Tracking:
+
+- **Step 1 named VRAM, and VRAM must not rank a `local:` model.** The local
+  ONNX path is CPU-only in every shipped configuration:
+  `crates/codescout-embed/Cargo.toml` selects `ort`'s CPU prebuilt
+  (`ort-download-binaries-native-tls`) or the dynamic C ABI, and `local.rs`
+  registers no execution provider. Ranking a local model on GPU presence would
+  have replaced a constant with a confidently wrong recommendation. `gpu` ranks
+  the **Ollama** entry instead, which is the one thing on the list a GPU
+  actually accelerates.
+- **Step 2, done naively, is a panic.** `--no-default-features` drops
+  `remote-embed` as well as `local-embed`, so a feature-gated list can come back
+  **empty** — and `onboarding.rs` calls `.first().expect(...)`. The lean lane
+  ships that combination. A terminal fallback entry names the missing backend
+  and still writes the built-in default, so a later rebuild finds a usable
+  config.
+
+A third defect was introduced by the fix and caught by its own new test before
+commit: `recommended: options.is_empty()` on the external-server entry was
+evaluated *after* the OpenAI entry had been pushed, so a `local:false,
+remote:true` build recommended **nothing**. That is the configuration
+`scripts/build-windows.sh` shipped before `local-embed-dynamic` became its
+default.
 
 SHA / patch-id: pending.
 
 ## Tests added
 
-None yet. The owed shape is specific: a test that asserts *different* hardware
-yields *different* `opts[0].id`. Every existing test is monotone under "delete
-the hardware ranking", which is exactly the mutation that would have to fail.
+`src/hardware.rs` — 15 tests, up from 7. The load-bearing one is the
+differential this file asked for:
+
+```rust
+assert_ne!(small[0].target, large[0].target)   // 8GB/4-core vs 32GB/16-core
+```
+
+It is the only shape that is not monotone under deleting the ranking: a
+constant makes the two sides equal and reds it. `a_gpu_promotes_ollama_over_a_cpu_bound_local_model`
+is the same shape on the GPU axis, and `a_gpu_without_ollama_changes_nothing`
+pins the other direction — a GPU with nothing to serve it must change nothing.
+
+**Mutation-probed once per guarded site** (`./scripts/mutation-probe.sh`,
+isolated worktree, 2026-09-17). Eight sites, eight KILLs, each by a distinct
+named test:
+
+| site | mutation | killed by |
+|---|---|---|
+| the ranking | `let roomy = false` | `model_options_rank_differs_across_hosts` |
+| RAM bound | drop the conjunct | `either_bound_alone_is_not_enough_for_the_code_model` |
+| cores bound | drop the conjunct | `either_bound_alone_is_not_enough_for_the_code_model` |
+| GPU gate | `if ollama_usable` | `a_gpu_promotes_ollama_over_a_cpu_bound_local_model` |
+| feature gate | `if true` | `a_build_without_a_local_backend_never_recommends_a_local_model` |
+| empty fallback | `if false` | `every_backend_combination_yields_at_least_one_option` |
+| mapping → url | `url: None` | `taking_an_option_writes_the_fields_that_option_names` |
+| mapping → model | `model: None` | `taking_an_option_writes_the_fields_that_option_names` |
+
+The two bounds were mutated **separately** rather than as a conjunction, per
+`CLAUDE.md` § Testing Discipline's guard-ordering twin: a pair of tests that
+kills only the conjunction leaves each bound individually uncovered.
+
+`taking_an_option_writes_the_fields_that_option_names` exists because
+onboarding probes the real host, so on any machine with a local backend the
+recommended entry is a `Model` and the url-writing branch never runs — coverage
+of it would otherwise have been a property of the test machine.
 
 ## Workarounds
 

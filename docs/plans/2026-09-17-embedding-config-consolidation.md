@@ -319,9 +319,9 @@ config layers set nothing, which is the state of a machine configured entirely t
 audience would be tuned out, and the law it would violate is the one about alarms nobody
 acts on.
 
-### 5b — the `CODESCOUT_EMBEDDING_*` family — **NOT STARTED**
+### 5b — the `CODESCOUT_EMBEDDING_*` family — **LANDED 2026-09-17** (`70ec79d5`)
 
-**LANDED 2026-09-17** (SHA recorded at commit), with one deliberate exception named below.
+One deliberate exception, named below.
 
 The fix is the **declaration**, not the rename. Eight variables reached three settings
 because nothing declared the set — each reader spelled its own name at its own call site,
@@ -385,22 +385,40 @@ keeps the capability and removes the trap.
 
 ## Phase 3 — onboarding and visibility
 
-### Task 7 — onboarding decides on facts it actually has
+### Task 7 — onboarding decides on facts it actually has — **LANDED 2026-09-17**
 
 Closes `eb3417ec7e02c66e`.
 
-- `model_options_for_hardware` (`src/hardware.rs:37-86`) must consume `ctx.gpu`
-  and `ctx.ram_gb` — today it reads only `ollama_available` and returns a
-  constant first entry.
-- Rank on **compiled features** too: a binary without `local-embed` must not
-  recommend a `local:` model.
-- Replace the `id: "url"` pseudo-option with a typed variant. It is inert today
-  only because onboarding reads `.first()`; the moment selection becomes
-  interactive it writes `model = "url"` into `project.toml`.
-- Rename `model_options_cpu_only_recommends_jina` to match its assertion, and
-  add a test whose expectation **varies with hardware**. Every existing test is
-  monotone under "delete the ranking" — the mutation that must fail.
-- Offer the options rather than silently writing `.first()`.
+- **Done.** `model_options_for` ranks on `ram_gb` / `cpu_cores` (16 GB + 8-core
+  crossover between `local:AllMiniLML6V2Q` and `local:JinaEmbeddingsV2BaseCode`)
+  and on `gpu`.
+- **Done, with a correction to this plan.** The plan said VRAM should promote
+  the local code model. It must not: the local ONNX path is CPU-only in every
+  shipped build (`ort` CPU prebuilt or the dynamic C ABI; no execution provider
+  registered), so a GPU accelerates only what **Ollama** serves. `gpu` promotes
+  the Ollama entry instead. Ranking a local model on GPU presence would have
+  swapped a constant for a confidently wrong recommendation.
+- **Done.** Compiled features rank, carried as `CompiledBackends` **data**
+  rather than `cfg!` inside the ranking — a `cfg!` there makes each lane
+  exercise half the branches and report a full pass.
+  **Second correction:** `--no-default-features` drops `remote-embed` too, so a
+  naively gated list comes back **empty** and `onboarding.rs`'s
+  `.first().expect(...)` panics. A terminal fallback entry names the missing
+  backend and still writes the built-in default.
+- **Done.** `id: "url"` → `OptionTarget::{Model, Server}`, with
+  `ModelOption::embeddings_section()` owning the mapping onboarding did inline.
+- **Done.** Renamed to `a_small_host_leads_with_the_light_model`; the
+  differential is `model_options_rank_differs_across_hosts`. 15 tests, and
+  **eight mutation sites killed by eight distinct named tests** — see the bug
+  file's *Tests added* table.
+- **Not done, deliberately.** *"Offer the options rather than silently writing
+  `.first()`."* The ranked list is surfaced (it already travelled in
+  `subagent_prompt` under **Model options**, now with a `target` and a stated
+  reason per entry), so the agent can present alternatives. But onboarding still
+  writes `.first()` eagerly: the MCP tool has no channel to prompt a human
+  mid-call, so genuine interactivity belongs to the agent layer, not here.
+  Writing a ranked default the agent can then change is the honest shape for a
+  tool that cannot ask.
 
 ### Task 8 — show the resolved value and its source
 

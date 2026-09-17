@@ -1022,11 +1022,14 @@ async fn perform_full_onboarding(
     // Resolve hardware detection and derive model options
     let hw = hw_future.await;
     let model_options = model_options_for_hardware(&hw);
-    let recommended_model = model_options
+    // The recommended entry names BOTH fields it wants set. Reading a single
+    // `id` string here is what let the former `id: "url"` sentinel reach
+    // `[embeddings].model`; `OptionTarget` splits them so a server option
+    // configures `url` and a model option configures `model`.
+    let recommended_embeddings = model_options
         .first()
         .expect("model_options_for_hardware guarantees ≥1 entry")
-        .id
-        .clone();
+        .embeddings_section();
 
     // Create .codescout/project.toml if it doesn't exist
     let config_dir = root.join(".codescout");
@@ -1054,10 +1057,7 @@ async fn perform_full_onboarding(
                 onboarding_version: None,
                 system_prompt_sha256: None,
             },
-            embeddings: crate::config::project::EmbeddingsSection {
-                model: Some(recommended_model),
-                ..Default::default()
-            },
+            embeddings: recommended_embeddings,
             ignored_paths: Default::default(),
             security: Default::default(),
             memory: Default::default(),
