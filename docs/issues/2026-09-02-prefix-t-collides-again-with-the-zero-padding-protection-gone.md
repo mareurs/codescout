@@ -1,8 +1,9 @@
 ---
 kind: bug
-status: open
+status: investigating
 tags:
 - cluster/addressing-without-an-escape-hatch
+claimed_at: 2026-09-17
 closed: null
 opened: 2026-09-02
 owner: marius
@@ -268,3 +269,42 @@ resolve to nothing) rather than by any wrong resolution observed today.
 missing feature rather than a wrong rule — or a decision that this ledger drops its augmentation
 before renaming, which discards the `notes` provenance and is worse. The first is a real design
 question and is not this file's to settle.
+
+### Re-derived 2026-09-17 — the damage is ACCRETING, and the open question has an answer
+
+Run before reading this file's fix sections, per `CLAUDE.md`'s reproduction-first rule. Read from
+`librarian(action="link_scan", write=false)` at HEAD `37d47fe3`, not counted by eye:
+
+| token | definers | citing sources | citing mentions |
+|---|---:|---:|---:|
+| `T-14` | 2 | 15 | 36 |
+| `T-15` | 2 | 3 | 6 |
+| `T-16` | 2 | 4 | 8 |
+| `T-17` | 2 | 6 | 21 |
+| **total** | | **28** | **71** |
+
+**Against this file's own 17 sites on 2026-09-02: +65% in fifteen days, and `T-15` joined the
+collision from zero.** So the population is not static, which changes what deferring costs: every
+week the rename is blocked, the citation surface that a rename must re-point grows. The founding
+record predicted the collision; nothing predicted the rate.
+
+**And § *Symptom*'s closing sentence — *"the second has not been derived"* — is now answered, by a
+tool change rather than by anyone revisiting this bug.** `link_scan` reports `citing_mentions`
+alongside `citing_sources`, so the edit-count unit exists today: **71 mentions across 28 sources**.
+A reader reaching for "how many edits repair it" no longer has to derive it, and a reader who
+quotes `28` for that purpose is short by 43.
+
+**The blocker re-verified, because its citation had decayed.** § *The rename is BLOCKED* cites
+`src/librarian/catalog/augmentation.rs:273`, `:309`. At HEAD the refusal is at **`:340`** — same
+refusal, same hint (*"Entry ids key entry_cite rows (`<slug>:<local>`), so re-keying one would
+strand their citations"*), moved file. The blocker stands: no sanctioned surface re-keys a params
+entry, and `doc` exposes no `rekey_entry` action.
+
+**Scope check, so nobody widens this file by mistake.** `link_scan` reports **4** prefix conflicts
+(`F`, `IC`, `T`, `W`) and **650** ambiguous citations project-wide. `T` is **28** of the 650
+(4.3%). `IC` has 24 definers and **zero** colliding tokens — disjoint by construction, benign.
+`F`/`W` are multi-ledger BY DESIGN (`docs/trackers/<topic>-session-log.md`, cited qualified as
+`<slug>:F-9`), and their ambiguity is a different question with a different remedy — spot-checked
+rather than assumed: a sampled `W-13` finding's `src_id` is **not** among its four candidates, so
+those are genuine cross-file citations and not self-references the resolver mis-handles. **Do not
+fold them into this bug.**
