@@ -9,7 +9,7 @@ tags:
 entry_prefix:
   - F
   - W
-entry_high_water_F: 4
+entry_high_water_F: 5
 entry_high_water_W: 3
 ---
 
@@ -72,6 +72,7 @@ entry_high_water_W: 3
 | F-2 | 2026-09-16 | med | companion-hooks | promoted-to-bug-tracker | A gate's refusal echoed the input it actually received; I reconstructed it from memory instead |
 | F-3 | 2026-09-17 | low | tracker-navigation | mitigated | A zero from the wrong FILE read as a zero from the corpus; only the commit gate could tell them apart |
 | F-4 | 2026-09-17 | low | workspace-state | open | Activation dies with the MCP process; reads warn and writes refuse, and the hint names a worktree first |
+| F-5 | 2026-09-17 | med | verification | mitigated | A "confirm it's live" check is one-sided by construction, and I ran one on the claim that mattered most |
 
 ## Wins Index
 
@@ -648,6 +649,58 @@ of a whole suite, not a single assertion.
 **Rests on:** the observed 40/2 → 40/3 → 43/0 progression; the table above derived by
 reasoning about `CD_TO_PATH`'s `\S+` against each implementation, with the pre-fix and
 post-fix rows both observed rather than argued.
+
+## F-5 — A "confirm it's live" check is one-sided by construction, and I ran one on the claim that mattered most
+
+**Valid:** dated 2026-09-17
+
+**Observed:** After releasing the guard fix I verified it "live" by reissuing the originally
+blocked `grep` following `/reload-plugins`. It passed. I reported the fix live, and
+separately asserted that sessions in the other two profiles still held the pre-fix hook
+until they reloaded. A peer refuted the second claim (`claude-plugins:4984aa8`); the first
+was true, but **my check could not have established it**.
+
+**The check was one-sided by construction, and this is the reusable half.** *"Confirm X is
+now live"* compares the current world against a remembered one. To discriminate you need the
+not-live state available to contrast against — and after a release you cannot produce it:
+the change is already on disk in every path that serves. So the pass is equally consistent
+with
+
+- the release and reload made it live, and
+- it was already live and neither changed anything observable.
+
+I reported the first. The second was true. **A green from a confirm-it-shipped check is
+monotone under "the change was never needed"** — § *Testing Discipline*'s law, in the one
+shape where the remedy "mutate the other way" is not available to you.
+
+**What would have discriminated was a READING, not a better experiment.** `hooks.json`
+invokes `node ${CLAUDE_PLUGIN_ROOT}/…`, and one `sort -u` over
+`.buddy/.session-start-trace.log` returns the single `plugin_root` value it has ever held: a
+working-tree path. One call, no experiment, settles it. When the symptom test cannot be made
+two-sided, **name the load path instead of testing the behaviour**.
+
+**Why this is an entry and not a shrug: the discipline was in my hands and had just worked
+twice.** `W-3` and `W-2` in this same ledger are me, in this same session, pairing a
+confirming read with a member that must read NEGATIVE — the control branch for the branch
+rulesets, and the `1×`/`0×` cache pair for the plugin copy. Then I omitted it on the single
+most load-bearing claim of the session. The class was not unknown; it was applied
+**selectively**.
+
+**The selection rule, since that is the actionable part.** I used a control where I was
+CHECKING something, and dropped it where I was CONFIRMING something I had just built. A
+verification of your own change arrives already believing its conclusion. That is the
+expectation-priming half of the positive-control law — widened by a peer the same morning in
+`claude-plugins:2b7c70d` / `ea6eb36`: *a zero (or a green) that confirms what you were just
+told is the one to distrust, and the more reliable the source the worse it is.* Here the
+reliable source was **me, an hour earlier**.
+
+**Cost:** a false claim reaching three surfaces — this bug's record, the version-bump
+checklist, and two summaries to the operator — caught by a peer within hours and retracted at
+`dc34e883`. No wrong code, and the fix itself was never in doubt.
+
+**Rests on:** the retraction's evidence re-derived here rather than accepted on report, and
+deliberately adopting only ONE of the peer's two grounds — their `<2 worktrees` carve-out is
+scoped to a one-worktree checkout and does not transfer to this nine-worktree one.
 
 ## Template for new entries
 
