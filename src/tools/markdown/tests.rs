@@ -1015,6 +1015,75 @@ fn replace_with_heading() {
     );
 }
 
+/// THE SEPARATOR BEFORE A SIBLING HEADING BELONGS TO THE DOCUMENT, NOT TO THE SECTION.
+/// `compute_section_end` returns the next heading's line index, so the blank line before
+/// it falls INSIDE the replaced span; the replacement then ends with exactly one `\n`
+/// (`ensure_trailing_newline`), and the separator is gone. Silent: content is intact, the
+/// heading map still reads correctly, and the response is `{updated: true}`.
+///
+/// LOAD-BEARING FIXTURE DETAIL — the blank lines. Every other fixture in this file is
+/// compact markdown (`"# Title\n## Setup\nold content\n"`) with no blank line anywhere, so
+/// the separator question CANNOT ARISE in them and all of them passed throughout the
+/// defect's life. Tidying the blank lines out of these three tests leaves them green and
+/// no longer discriminating.
+///
+/// Fix is PRESERVATION, not normalisation: the number of blank lines before the boundary
+/// heading is counted in the original and re-emitted, so a genuinely compact document is
+/// still returned byte-identical. That is why the compact fixtures above stay green.
+/// See `docs/issues/2026-09-15-doc-section-replace-drops-the-blank-line-before-the-next-heading.md`.
+#[test]
+fn replace_preserves_the_blank_line_before_the_next_heading() {
+    let content = "# Title\n\n## Setup\n\nold content\n\n## Usage\n\nuse it\n";
+    let result =
+        perform_section_edit(content, "## Setup", "replace", Some("new content\n")).unwrap();
+    assert_eq!(
+        result,
+        "# Title\n\n## Setup\n\nnew content\n\n## Usage\n\nuse it\n"
+    );
+}
+
+/// Same boundary, different action. `insert_before` splices at the target heading's line
+/// start, so the document's existing blank line ends up ABOVE the inserted text and the
+/// inserted text butts against the heading it was inserted before. Nothing is destroyed
+/// here — the separation is displaced — which is why "preserve what the span destroyed"
+/// is the wrong frame and "the boundary before a heading carries the document's
+/// separation" is the right one.
+#[test]
+fn insert_before_keeps_the_new_section_separated_from_the_target() {
+    let content = "# Title\n\n## Setup\n\nsteps\n";
+    let result = perform_section_edit(
+        content,
+        "## Setup",
+        "insert_before",
+        Some("## Intro\n\nwords\n"),
+    )
+    .unwrap();
+    assert_eq!(
+        result,
+        "# Title\n\n## Intro\n\nwords\n\n## Setup\n\nsteps\n"
+    );
+}
+
+/// The third arm, and the one measured in the wild on 2026-09-16: two
+/// `insert_after` + `at: "end-of-section"` calls into two bug files each cost the blank
+/// line before the NEXT `##`. The bug file originally named `replace` as the trigger, so a
+/// reader would not have checked after an insert.
+#[test]
+fn insert_after_keeps_the_new_section_separated_from_the_following_heading() {
+    let content = "# Title\n\n## Setup\n\nsteps\n\n## Usage\n\nuse it\n";
+    let result = perform_section_edit(
+        content,
+        "## Setup",
+        "insert_after",
+        Some("### Detail\n\nmore\n"),
+    )
+    .unwrap();
+    assert_eq!(
+        result,
+        "# Title\n\n## Setup\n\nsteps\n\n### Detail\n\nmore\n\n## Usage\n\nuse it\n"
+    );
+}
+
 #[test]
 fn replace_empty_section() {
     let content = "# Title\n## Empty\n## Next\nstuff\n";
@@ -3108,6 +3177,29 @@ fn replace_preserves_hr_separator_with_trailing_blank_lines() {
     assert!(
         result.contains("---"),
         "HR with multiple trailing blank lines must survive: {result:?}"
+    );
+}
+
+/// The F-3 horizontal-rule boundary has the SAME defect, and here it is not cosmetic.
+///
+/// In CommonMark a `---` line directly beneath paragraph text is a SETEXT HEADING
+/// UNDERLINE, not a horizontal rule. So dropping the blank line turns `new A\n---` into an
+/// H2 titled "new A": F-3 preserves the separator's BYTES and inverts its MEANING, which
+/// is strictly worse than having dropped it.
+///
+/// WHY THE FIVE EXISTING HR TESTS CANNOT SEE THIS: every one of them asserts
+/// `result.contains("---")`. That is an existence assertion, monotone under widening —
+/// the bytes are all still present in the damaged output, so it is satisfied either way.
+/// § Testing Discipline's first law, holding inside the suite that guards F-3.
+/// Assert on the BOUNDARY, which is the thing that changes.
+#[test]
+fn replace_preserves_the_blank_line_before_a_trailing_hr_separator() {
+    let content = "## A\n\nbody A\n\n---\n\n## B\n\nbody B\n";
+    let result = perform_section_edit(content, "A", "replace", Some("new A\n")).unwrap();
+    assert_eq!(result, "## A\n\nnew A\n\n---\n\n## B\n\nbody B\n");
+    assert!(
+        !result.contains("new A\n---"),
+        "a `---` directly under text is a setext H2 underline, not an HR: {result:?}"
     );
 }
 

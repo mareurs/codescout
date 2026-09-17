@@ -1,7 +1,7 @@
 ---
 id: '7f5fe0e00732b494'
 kind: bug
-status: open
+status: taken
 title: 'BUG: doc(update) section replace drops the blank line before the next heading, silently'
 tags:
 - cluster/accepted-parameter-silently-dropped
@@ -9,6 +9,8 @@ tags:
 - doc-tool
 - markdown
 topic: librarian document editing
+claimed_at: 2026-09-17
+claimed_by: a3bf229c-658b-42f9-8f4b-794fcf0d35c7
 closed: null
 opened: 2026-09-15
 severity: low
@@ -56,13 +58,44 @@ did not reproduce it in 4 attempts.
 
 ## Root cause
 
-Unknown — not read in the source. What is established is the **boundary**: the defect is
-specific to the `replace` action and not to section writing in general, because `action: "edit"`
-on the same artifact in the same call shape preserved and restored the separator.
+**Read in the source 2026-09-17, and the boundary claim below was WRONG.**
 
-Inferred, not measured: `replace` appears to trim trailing whitespace from `content` and then
-join sections without re-inserting a separator, while `edit` performs a substring replacement
-inside an already-assembled body and never touches the boundary.
+`src/tools/markdown/edit_markdown.rs`, `plan_section_edit`. `compute_section_end` returns the
+line index of the NEXT SIBLING HEADING, so a section's span runs up to that heading and the
+blank line before it is *inside* the span. `replace` then plans
+`span = line_start(heading_idx)..line_start(replace_end_idx)` and builds
+`heading + separator + ensure_trailing_newline(new)` — which guarantees exactly ONE trailing
+`\n`. The separator is emitted *before* the body and never *after* it, so the blank line the
+span swallowed is not put back.
+
+**It was never specific to `replace`.** Measured on 2026-09-16 and confirmed by unit test:
+`insert_before` and `insert_after` + `at: "end-of-section"` exhibit it too, by a different
+route — they splice AT the boundary, so the document's blank line ends up above the inserted
+text and the inserted text butts against the heading. Nothing is destroyed there; the
+separation is displaced. `remove` is the one arm whose author handled it
+(`if lines[remove_end].trim().is_empty() { remove_end += 1 }`), and `edit` never exhibits it
+because it routes through `perform_scoped_edit`, a substring swap inside an assembled body
+that never touches the boundary — which is what the earlier reading correctly observed and
+then over-generalised into "specific to `replace`".
+
+The superseded paragraph's inference — *"`replace` appears to trim trailing whitespace from
+`content`"* — was also wrong in a way worth one line, because it points at the caller's bytes:
+nothing trims the caller's content. The separator loss is entirely a property of the span and
+the single-newline guarantee, which is why the fix keys on the DOCUMENT and not on what the
+caller passed.
+
+### A second defect at the same site, and it is not cosmetic
+
+The F-3 horizontal-rule boundary loses its blank line too, and there the damage inverts a
+meaning rather than a layout. In CommonMark a `---` line directly beneath paragraph text is a
+**setext heading underline**, so `new A\n---` renders the last line of the new body as an H2.
+F-3 exists to preserve that separator and was preserving its BYTES while changing what they
+mean.
+
+**Five existing tests could not see it, by construction.** Every HR case asserts
+`result.contains("---")` — an existence assertion, monotone under widening. The bytes are all
+present in the damaged output, so they pass either way. `CLAUDE.md` § *Testing Discipline*'s
+first law, holding inside the suite that guards F-3.
 
 ## Evidence
 
@@ -143,16 +176,57 @@ change that removes headings entirely, and it is a boundary check rather than a 
 
 ## Fix
 
-Not attempted. Either preserve a caller-supplied trailing newline, or unconditionally emit the
-separator when a section is followed by a heading. The second is probably right: the separator
-is a property of the *document*, not of the section's content, so making it depend on caller
-bytes is what produced the bug.
+**Shipped 2026-09-17.** One rule in `plan_section_edit`, applied at three sites: count the blank
+lines immediately preceding the boundary in the ORIGINAL document (`blank_run_before`) and make
+the planned replacement end with that many (`ensure_trailing_blank_lines`).
+
+**PRESERVATION, not the normalisation this section originally recommended.** The earlier text
+argued for emitting the separator unconditionally, on the grounds that it is a property of the
+document rather than of the section's content. The first half of that is right and is exactly
+what the fix keys on — but unconditional emission would also rewrite documents that never had a
+separator, and the defect is DESTRUCTION, not absence. A formatting opinion does not belong in
+an edit the caller did not ask for. A compact document yields `0` and is returned byte-identical,
+which is why this repo's compact-markdown fixtures stayed green across the change: that they did
+is a property of the fix, not a coincidence to be read as weak coverage.
+
+Sites: `replace` (restores what the span destroyed), `insert_before` and `insert_after` +
+`end-of-section` (re-establish separation the splice displaced). The `replace` arm covers the
+heading boundary AND the F-3 horizontal-rule boundary — `replace_end_idx < lines.len()` rather
+than a heading-only test, because of the setext reading above.
+
+Not touched: `at: "after-heading-line"`, whose boundary is the first body line rather than a
+heading, so `blank_run_before` returns 0 there by construction and the arm is a no-op. Whether a
+blank line belongs immediately AFTER a heading is a different axis and is not addressed here.
 
 ## Tests added
 
-None. Shape: a `replace` against a section followed by a heading, asserting the rendered file
-still matches `\n\n## ` at that boundary — plus the `edit` case as a control, so a fix that
-makes both paths equally wrong cannot pass.
+Four, in `src/tools/markdown/tests.rs`, each written before the fix and each observed RED with
+the exact missing `\n` in its diff:
+
+| test | site | pre-fix red |
+|---|---|---|
+| `replace_preserves_the_blank_line_before_the_next_heading` | `replace`, heading boundary | `new content\n## Usage` |
+| `insert_before_keeps_the_new_section_separated_from_the_target` | `insert_before` | `words\n## Setup` |
+| `insert_after_keeps_the_new_section_separated_from_the_following_heading` | `insert_after` | `more\n## Usage` |
+| `replace_preserves_the_blank_line_before_a_trailing_hr_separator` | `replace`, F-3 HR boundary | `new A\n---` |
+
+One per guarded SITE rather than one for the feature, and the reds are per-site evidence: each
+assertion produced its own red and none has been edited since, so no red here is being credited
+to an assertion that did not earn it.
+
+**The fixture detail is load-bearing and annotated on the fixtures.** Every pre-existing fixture
+in that file is compact markdown — `"# Title\n## Setup\nold content\n"` — with no blank line
+anywhere, so the separator question CANNOT ARISE in them and all 193 passed throughout the
+defect's life. That is not carelessness; it is a population selected, years of commits ago, so
+that no member could falsify. The new tests exist to carry the blank lines, and tidying them out
+would leave the tests green and no longer discriminating.
+
+**The control this section originally asked for is now structural rather than a test.** It
+proposed an `edit`-action case "so a fix that makes both paths equally wrong cannot pass". The
+fix does not touch the `edit` path at all — `edit` routes through `perform_scoped_edit`, a
+different function — so that failure mode is unreachable by construction here. The 193 compact
+fixtures serve the same purpose in the other direction: they pin that the fix is preservation
+rather than normalisation.
 
 ## Workarounds
 

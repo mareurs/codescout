@@ -259,6 +259,17 @@ pub(crate) fn plan_section_edit<'q, Q: Into<crate::tools::file_summary::HeadingQ
                     ensure_trailing_newline(new)
                 )
             };
+            // Restore the document's own separation at the boundary, which the span above
+            // swallowed. Covers BOTH boundary kinds: the next sibling heading, and the F-3
+            // horizontal rule the shrink above stops short of. The HR case is not cosmetic
+            // — in CommonMark a `---` directly beneath text is a SETEXT HEADING UNDERLINE,
+            // so dropping the blank line preserves the separator's bytes and inverts its
+            // meaning, turning the last line of the new body into an H2.
+            let replacement = if replace_end_idx < lines.len() {
+                ensure_trailing_blank_lines(replacement, blank_run_before(&lines, replace_end_idx))
+            } else {
+                replacement
+            };
             Ok(vec![PlannedEdit {
                 span,
                 replacement,
@@ -272,9 +283,16 @@ pub(crate) fn plan_section_edit<'q, Q: Into<crate::tools::file_summary::HeadingQ
                 anyhow::anyhow!("the section body is required for the insert_before action — `body` at the top level, `content` inside edits[]")
             })?;
             let span = off.line_start(heading_idx)..off.line_start(heading_idx);
+            // The splice lands after whatever blank lines precede the target heading, so
+            // those stay ABOVE the inserted text and the text would butt against the
+            // heading. Re-establish the same separation below it.
+            let replacement = ensure_trailing_blank_lines(
+                ensure_trailing_newline(new),
+                blank_run_before(&lines, heading_idx),
+            );
             Ok(vec![PlannedEdit {
                 span,
-                replacement: ensure_trailing_newline(new),
+                replacement,
                 edit_index,
                 order: edit_index,
             }])
@@ -304,6 +322,16 @@ pub(crate) fn plan_section_edit<'q, Q: Into<crate::tools::file_summary::HeadingQ
             // legacy before-boundary when `i == lines.len()`.
             let prefix = if insert_idx == lines.len() { "\n" } else { "" };
             let replacement = format!("{prefix}{}", ensure_trailing_newline(new));
+            // Same boundary as `insert_before`, one section further on: at
+            // `end-of-section` the splice lands immediately before the NEXT sibling
+            // heading, after the blank line that separated it. Without this the inserted
+            // section butts against that heading — measured twice in the wild on
+            // 2026-09-16, which is what widened this defect past `replace`.
+            let replacement = if insert_idx < lines.len() {
+                ensure_trailing_blank_lines(replacement, blank_run_before(&lines, insert_idx))
+            } else {
+                replacement
+            };
             Ok(vec![PlannedEdit {
                 span,
                 replacement,
@@ -397,6 +425,46 @@ fn compute_section_end(lines: &[&str], start_idx: usize, level: usize) -> usize 
         }
     }
     lines.len()
+}
+
+/// How many blank lines sit immediately before `boundary_idx` — the separation the
+/// DOCUMENT carries at that boundary, as distinct from anything the caller's content
+/// happens to end with.
+///
+/// This is the whole of the fix for
+/// `docs/issues/2026-09-15-doc-section-replace-drops-the-blank-line-before-the-next-heading.md`.
+/// `compute_section_end` returns the next sibling heading's line index, so a section's
+/// span runs up to that heading and the blank line before it is INSIDE the span. Three
+/// actions then wrote a replacement ending in exactly one `\n` and the separator was gone:
+/// `replace` destroyed it, while `insert_before`/`insert_after` displaced it above the
+/// inserted text and butted that text against the heading.
+///
+/// PRESERVATION RATHER THAN NORMALISATION, deliberately. Emitting a separator
+/// unconditionally would also rewrite documents that never had one — the bug is
+/// destruction, not absence, and a formatting opinion does not belong in an edit the
+/// caller did not ask for. A compact document returns `0` here and is left byte-identical,
+/// which is why this repo's compact-markdown fixtures stayed green across the fix.
+fn blank_run_before(lines: &[&str], boundary_idx: usize) -> usize {
+    let mut n = 0;
+    while boundary_idx > n && lines[boundary_idx - 1 - n].trim().is_empty() {
+        n += 1;
+    }
+    n
+}
+
+/// Extend `s` so it ends with at least `n` blank lines, counting a blank line as a `\n`
+/// beyond the single one that terminates the last line of content. Never shortens: a
+/// caller who supplied more separation than the document had keeps it.
+fn ensure_trailing_blank_lines(s: String, n: usize) -> String {
+    let have = (s.len() - s.trim_end_matches('\n').len()).saturating_sub(1);
+    if have >= n {
+        return s;
+    }
+    let mut out = s;
+    for _ in 0..(n - have) {
+        out.push('\n');
+    }
+    out
 }
 
 /// List the sub-heading texts that a `replace` on `heading_query` would wipe.
