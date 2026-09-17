@@ -2025,7 +2025,7 @@ mod tests {
     /// field names is invisible to every caller of the tool — and the bug this closes
     /// was reported by a `move` whose return value carried a four-field INBOUND
     /// citation block while destroying the outbound ones in silence.
-    /// docs/issues/2026-09-17-graft-cascade-deletes-the-source-ledgers-outgoing-entry-citations.md
+    /// docs/issues/archive/2026-09-17-graft-cascade-deletes-the-source-ledgers-outgoing-entry-citations.md
     #[tokio::test]
     async fn move_carries_durable_outgoing_citations_and_reports_the_count() {
         use crate::librarian::catalog::entry_cite::{self, EntryCiteRow};

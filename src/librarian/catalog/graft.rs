@@ -57,6 +57,22 @@ fn row_exists(conn: &rusqlite::Connection, id: &str) -> Result<bool> {
 /// Runs in a single `IMMEDIATE` transaction: either the whole graft lands or
 /// none of it does, so a mid-graft failure can never leave `from_id` partially
 /// re-pointed and orphaned.
+///
+/// **Precondition, currently satisfied by accident at every call site:** `into_id` must
+/// not hold a slug that has `entry_cite` children. When `from_id` has a slug it is
+/// written over `into_id`'s, and `entry_cite.src_slug` has no `ON UPDATE` clause, so the
+/// displaced slug's rows reference a value no row holds and the transaction fails at
+/// COMMIT with a bare `FOREIGN KEY constraint failed` naming no table. It rolls back
+/// whole — no data loss — but the message is unactionable.
+///
+/// No caller reaches it today: `mv.rs` and `merge_worktree.rs::reseat_one` both seed the
+/// destination with plain `artifact::upsert`, and `upsert_and_mint_slug` documents that
+/// it is deliberately NOT for `mv`/`graft_rows`, so `into_id` arrives slug-less. That is
+/// a property of those two call sites, not of this function — **if you add a caller that
+/// grafts onto an established artifact, this is the case to handle**, by re-pointing the
+/// displaced slug's rows before the handover. Measured 2026-09-17 at sqlite; stated here
+/// rather than guarded in code because a refusal on an unreachable path is an alarm no
+/// observer arrives at.
 pub fn graft_rows(cat: &mut Catalog, from_id: &str, into_id: &str) -> Result<GraftReport> {
     if from_id == into_id {
         return Err(LibrarianRecoverableError::new(
