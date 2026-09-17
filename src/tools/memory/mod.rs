@@ -208,7 +208,7 @@ async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> an
         .with_project_at(ctx.workspace_override.as_deref(), |p| {
             Ok((
                 p.config.project.name.clone(),
-                p.config.embeddings.model.clone(),
+                p.config.embeddings.model_or_default(),
             ))
         })
         .await?;
@@ -267,7 +267,7 @@ async fn create_semantic_anchors(
                 p.config.project.name.clone(),
                 p.config.memory.semantic_anchor_min_similarity,
                 p.config.memory.semantic_anchor_top_n,
-                p.config.embeddings.model.clone(),
+                p.config.embeddings.model_or_default(),
             ))
         })
         .await?;

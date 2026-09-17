@@ -407,7 +407,7 @@ impl Tool for ProjectStatus {
                 Ok((
                     p.root.clone(),
                     p.config.project.languages.clone(),
-                    p.config.embeddings.model.clone(),
+                    p.config.embeddings.model_or_default(),
                     lib_count,
                     lib_indexed,
                 ))

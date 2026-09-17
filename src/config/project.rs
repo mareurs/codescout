@@ -78,20 +78,34 @@ pub struct ProjectSection {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingsSection {
-    /// Model identifier — prefix determines the backend:
-    ///   "ollama:<model>"                    → Ollama local daemon (default)
-    ///   "openai:<model>"                    → OpenAI API (requires OPENAI_API_KEY)
-    ///   "local:<EmbeddingModel variant>"    → fastembed-rs, no daemon needed,
-    ///                                         CPU/WSL2-friendly. Downloads model
-    ///                                         on first use to ~/.cache/huggingface/
+    /// Model identifier — the prefix selects the backend:
+    ///   "local:<variant>"      → fastembed ONNX in-process, no daemon
+    ///   "local-dir:<path>"     → ONNX weights from disk, never the network
+    ///   "ollama:<model>"       → Ollama daemon at $OLLAMA_HOST
+    ///   "openai:<model>"       → OpenAI API (`api_key` or OPENAI_API_KEY)
+    ///   bare name              → sent verbatim as the model name when `url` is set
     ///
-    /// Recommended local models (rebuild with: cargo build --features local-embed):
-    ///   "local:AllMiniLML6V2Q"              → 384d, INT8-quantized, ~22MB, **default**
-    ///   "local:BGESmallENV15"               → 384d, full precision
-    ///   "local:NomicEmbedTextV15Q"          → 768d, INT8-quantized, ~158MB
-    ///   "local:JinaEmbeddingsV2BaseCode"    → 768d, code-specific, ~300MB
-    #[serde(default = "default_embed_model")]
-    pub model: String,
+    /// The `local:` variants, from `crates/codescout-embed/src/local.rs`:
+    ///   "local:AllMiniLML6V2Q"           → 384d, INT8, ~22MB — the built-in default
+    ///   "local:AllMiniLML6V2"            → 384d, full precision
+    ///   "local:BGESmallENV15"            → 384d, full precision
+    ///   "local:NomicEmbedTextV15Q"       → 768d, INT8, ~158MB
+    ///   "local:NomicEmbedTextV15"        → 768d, full precision, ~547MB
+    ///   "local:JinaEmbeddingsV2BaseCode" → 768d, code-specific, ~300MB
+    ///
+    /// (local:BGESmallENV15Q still parses but is GPU-only and crashes on CPU;
+    /// `parse_model`'s own error text says so while still accepting it.)
+    ///
+    /// **`None` means "not configured at this level"**, and that is the whole
+    /// reason it is an `Option`. This struct is deserialised at BOTH config
+    /// levels, so a global `~/.config/codescout/config.toml` setting only `url`
+    /// must not also assert a model it never mentioned — with a `serde(default)`
+    /// of the built-in model it would, and the global layer would silently pin
+    /// every project to `local:AllMiniLML6V2Q`. The default is applied once at
+    /// RESOLUTION ([`Self::model_or_default`], `merge_embed_config`), never at
+    /// deserialisation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// Base URL for an OpenAI-compatible embedding endpoint.
     ///
     /// When set, the `model` field is sent as the model name in the request body.
@@ -346,9 +360,19 @@ impl Default for MemorySection {
 }
 
 impl Default for EmbeddingsSection {
+    /// Every field is `None` — "nothing configured at this level".
+    ///
+    /// `model` used to default to `default_embed_model()` here, which was
+    /// correct while this struct existed only at the project level and wrong the
+    /// moment it also became the global one: `serde(default)` fires for an
+    /// ABSENT `[embeddings]` table, so a global config that never mentioned a
+    /// model would have serialised one into the merge base and pinned every
+    /// project to it. The default now lives at resolution
+    /// ([`Self::model_or_default`], `merge_embed_config`), which is the only
+    /// layer that can see every level at once.
     fn default() -> Self {
         Self {
-            model: default_embed_model(),
+            model: None,
             url: None,
             api_key: None,
             _chunk_size_ignored: None,
@@ -360,6 +384,25 @@ impl Default for EmbeddingsSection {
 }
 
 impl EmbeddingsSection {
+    /// The configured model, or the built-in default when no level set one.
+    ///
+    /// The single place the `[embeddings]`-side default is applied. Callers that
+    /// want "what model is this project using?" ask here rather than reading the
+    /// field, so an unset value cannot be mistaken for a configured one.
+    ///
+    /// **This is not the same question as "what goes on the wire".** When a url
+    /// is configured, the name sent to the server is
+    /// `RetrievalConfig::dense_model_name()`, which also applies the operator's
+    /// override and strips the routing prefix. Reading this field to size a
+    /// request or label a backend is how the two copies drift — `src/main.rs`
+    /// carries a comment about exactly that hazard.
+    pub fn model_or_default(&self) -> String {
+        self.model
+            .clone()
+            .filter(|m| !m.trim().is_empty())
+            .unwrap_or_else(default_embed_model)
+    }
+
     /// Resolve the concurrent in-flight embedding request limit for indexing.
     /// Defaults to 8. See `max_inflight` doc for tuning guidance.
     pub fn effective_max_inflight(&self) -> usize {
@@ -481,9 +524,14 @@ impl ProjectConfig {
     /// Pure — takes the values rather than reading `CODESCOUT_EMBED_*` itself, so the
     /// precedence rule is testable without `set_var`. See
     /// `docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
+    ///
+    /// A `Some` override wins; a `None` leaves the configured value alone. Note
+    /// that `None` here means "the variable was unset", never "clear the field" —
+    /// the two are distinct and conflating them would let an absent env var erase
+    /// a project's config.
     pub(crate) fn apply_embed_overrides(&mut self, model: Option<String>, url: Option<String>) {
         if let Some(model) = model {
-            self.embeddings.model = model;
+            self.embeddings.model = Some(model);
         }
         if let Some(url) = url {
             self.embeddings.url = Some(url);
@@ -663,7 +711,7 @@ mod tests {
     #[test]
     fn default_config_has_expected_embeddings() {
         let cfg = ProjectConfig::default_for("my-project".into());
-        assert_eq!(cfg.embeddings.model, "local:AllMiniLML6V2Q");
+        assert_eq!(cfg.embeddings.model_or_default(), "local:AllMiniLML6V2Q");
     }
 
     #[test]
@@ -834,7 +882,10 @@ fetch_timeout_secs = 120
         assert_eq!(config.project.name, "test");
         // The neighbouring key in the same section still lands — proof the stale
         // key was skipped rather than the whole section being dropped.
-        assert_eq!(config.embeddings.model, "local:BGESmallENV15");
+        assert_eq!(
+            config.embeddings.model.as_deref(),
+            Some("local:BGESmallENV15")
+        );
     }
 
     #[test]
@@ -1029,7 +1080,7 @@ model = "local:AllMiniLML6V2Q"
                 .unwrap();
 
         let cfg = ProjectConfig::load_with_global_base(dir.path(), global_base).unwrap();
-        assert_eq!(cfg.embeddings.model, "local:BGESmallENV15");
+        assert_eq!(cfg.embeddings.model.as_deref(), Some("local:BGESmallENV15"));
     }
 
     #[test]
@@ -1047,7 +1098,8 @@ model = "local:AllMiniLML6V2Q"
 
         let cfg = ProjectConfig::load_with_global_base(dir.path(), global_base).unwrap();
         assert_eq!(
-            cfg.embeddings.model, "project-model",
+            cfg.embeddings.model.as_deref(),
+            Some("project-model"),
             "project.toml must override the global layer"
         );
     }
@@ -1068,7 +1120,7 @@ model = "local:AllMiniLML6V2Q"
             toml::from_str::<toml::Value>("[security]\nmax_index_bytes = 12345\n").unwrap();
 
         let cfg = ProjectConfig::load_with_global_base(dir.path(), global_base).unwrap();
-        assert_eq!(cfg.embeddings.model, "project-model");
+        assert_eq!(cfg.embeddings.model.as_deref(), Some("project-model"));
         assert_eq!(
             cfg.security.max_index_bytes, 12345,
             "global layer must fill fields the project layer does not set"
@@ -1091,7 +1143,7 @@ model = "local:AllMiniLML6V2Q"
         let cfg = ProjectConfig::load_with_global_base(dir.path(), empty).unwrap();
         assert_eq!(cfg.project.name, "proj");
         assert_eq!(
-            cfg.embeddings.model,
+            cfg.embeddings.model_or_default(),
             default_embed_model(),
             "with no global layer the built-in defaults stand"
         );
@@ -1104,7 +1156,7 @@ model = "local:AllMiniLML6V2Q"
         // seam rather than by mutating process env — see the module note in
         // config/global.rs on why no test here may call set_var.
         let mut cfg = ProjectConfig::default_for("proj".into());
-        cfg.embeddings.model = "config-model".into();
+        cfg.embeddings.model = Some("config-model".into());
         cfg.embeddings.url = Some("http://config-host/v1".into());
 
         cfg.apply_embed_overrides(
@@ -1112,19 +1164,19 @@ model = "local:AllMiniLML6V2Q"
             Some("http://env-host/v1".to_string()),
         );
 
-        assert_eq!(cfg.embeddings.model, "EnvModel");
+        assert_eq!(cfg.embeddings.model.as_deref(), Some("EnvModel"));
         assert_eq!(cfg.embeddings.url.as_deref(), Some("http://env-host/v1"));
     }
 
     #[test]
     fn absent_env_vars_leave_config_untouched() {
         let mut cfg = ProjectConfig::default_for("proj".into());
-        cfg.embeddings.model = "config-model".into();
+        cfg.embeddings.model = Some("config-model".into());
         cfg.embeddings.url = Some("http://config-host/v1".into());
 
         cfg.apply_embed_overrides(None, None);
 
-        assert_eq!(cfg.embeddings.model, "config-model");
+        assert_eq!(cfg.embeddings.model.as_deref(), Some("config-model"));
         assert_eq!(cfg.embeddings.url.as_deref(), Some("http://config-host/v1"));
     }
 

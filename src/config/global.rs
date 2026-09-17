@@ -5,18 +5,37 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GlobalConfig {
     #[serde(default)]
-    pub embeddings: GlobalEmbeddingsSection,
+    pub embeddings: crate::config::project::EmbeddingsSection,
     #[serde(default)]
     pub security: GlobalSecuritySection,
     #[serde(default)]
     pub ignored_paths: GlobalIgnoredPathsSection,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct GlobalEmbeddingsSection {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-}
+/// The global `[embeddings]` block is **the same type as the project one**
+/// ([`crate::config::project::EmbeddingsSection`]), re-exported here only so
+/// existing `use` sites keep resolving.
+///
+/// It used to be a separate struct carrying a single field, `model`. That is the
+/// defect this alias closes: the project twin carries `model`, `url`, `api_key`,
+/// `max_inflight` and `file_group_size`, so serde silently discarded a global
+/// `url` or `api_key` at parse time — and `to_toml_value` re-serialised the
+/// struct, meaning the dropped keys could not reach the merge even in principle.
+/// A user who set all three globally got a failure whose first suggested remedy
+/// was *"Set url in [embeddings]"*, which is what they had just done.
+/// `docs/issues/2026-09-17-the-global-embeddings-section-holds-one-field-and-drops-the-rest.md`.
+///
+/// **An alias rather than a second struct kept in step, because "kept in step"
+/// is what failed.** Two structs describing one config block drift silently and
+/// in only one direction — the level a developer is editing gains the field and
+/// the other does not — and nothing in the type system or the tests objects. One
+/// type cannot drift from itself.
+///
+/// `merge_toml` already deep-merges `[embeddings]` field-by-field
+/// (`merge_toml_base_fills_missing_key` pins it), so the levels compose as
+/// global-default-then-project-override for free once both sides can express the
+/// same fields.
+pub type GlobalEmbeddingsSection = crate::config::project::EmbeddingsSection;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GlobalSecuritySection {
@@ -355,6 +374,7 @@ mod tests {
         let config = GlobalConfig {
             embeddings: GlobalEmbeddingsSection {
                 model: Some("local:BGESmallENV15".to_string()),
+                ..Default::default()
             },
             security: GlobalSecuritySection {
                 shell_command_mode: Some("safe".to_string()),

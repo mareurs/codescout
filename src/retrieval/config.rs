@@ -357,7 +357,7 @@ fn merge_embed_config(
 ) -> (Option<String>, String, Option<String>, Option<usize>) {
     let (proj_model, proj_url, proj_key) = match project {
         Some(e) => (
-            non_empty(Some(e.model)),
+            non_empty(e.model),
             non_empty(e.url),
             non_empty(e.api_key.map(|k| k.as_str().to_string())),
         ),
@@ -606,6 +606,109 @@ mod merge_tests {
         .unwrap();
     }
 
+    /// The global layer supplies `url` and `api_key` when the project sets
+    /// neither, and the project's own `model` still wins.
+    ///
+    /// **Routed through `GlobalConfig::load_from_dir` + `to_toml_value`
+    /// deliberately, not through a hand-built `toml::Value`.** The defect this
+    /// pins lived in the *type*: the global `[embeddings]` was a separate struct
+    /// carrying only `model`, so serde discarded `url` and `api_key` at parse
+    /// time and `to_toml_value` re-serialised the struct — meaning the dropped
+    /// keys could not reach the merge even in principle. A test that constructs
+    /// the merge base directly never touches that struct and therefore passes
+    /// both before and after the fix: it would assert about `merge_toml`, which
+    /// was never broken. The parse-and-re-serialise round trip is the whole
+    /// subject.
+    ///
+    /// `docs/issues/2026-09-17-the-global-embeddings-section-holds-one-field-and-drops-the-rest.md`
+    #[test]
+    fn a_global_url_and_key_survive_the_round_trip_into_the_resolved_config() {
+        let global_dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            global_dir.path().join("config.toml"),
+            "[embeddings]\nurl = \"https://global.example.com/v1\"\napi_key = \"sk-global\"\n",
+        )
+        .unwrap();
+        let global = crate::config::global::GlobalConfig::load_from_dir(global_dir.path())
+            .unwrap()
+            .expect("the global config file exists, so this must parse to Some");
+
+        let proj_dir = tempfile::tempdir().unwrap();
+        write_project_toml(proj_dir.path(), "[embeddings]\nmodel = \"project-model\"\n");
+        let cfg = crate::config::project::ProjectConfig::load_with_global_base(
+            proj_dir.path(),
+            global.to_toml_value(),
+        )
+        .unwrap();
+
+        // `EmbedEnv::default()`, never `from_real_env()` — this machine exports
+        // the CODESCOUT_EMBEDDER_* family, so a real-env read would decide the
+        // verdict instead of the merge under test.
+        let (url, model, api_key, _dim) = resolve_embed_fields_from(EmbedEnv::default(), Some(cfg));
+
+        assert_eq!(
+            url.as_deref(),
+            Some("https://global.example.com"),
+            "a global url must reach the resolved config; the trailing /v1 is \
+             stripped by normalize_embedder_url, which is why this is not the \
+             literal configured string"
+        );
+        assert_eq!(
+            api_key.as_deref(),
+            Some("sk-global"),
+            "a global api_key must survive too — it rides the same round trip, \
+             and SensitiveString is serde(transparent) so the value passes \
+             through rather than being redacted into the merge base"
+        );
+        assert_eq!(
+            model, "project-model",
+            "the project layer must still win the field it DOES set — the point \
+             is global-default-then-project-override, not global replacing the \
+             project"
+        );
+    }
+
+    /// The other half of the same merge, and the one a per-field fix would miss:
+    /// the global layer fills a gap *within* `[embeddings]` while the project
+    /// sets a sibling field in the same table.
+    ///
+    /// This is what `merge_toml`'s recursion buys, and it is the behaviour
+    /// `docs/manual/src/configuration/global-config.md` § Merge semantics
+    /// currently denies in writing — it claims a project `[embeddings]` replaces
+    /// the global table wholesale. `merge_toml_base_fills_missing_key` already
+    /// pins the recursion at the `toml::Value` level; this pins that the shared
+    /// struct does not undo it one layer up, which is the layer that was broken.
+    #[test]
+    fn the_global_layer_fills_a_gap_inside_the_project_embeddings_table() {
+        let global_dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            global_dir.path().join("config.toml"),
+            "[embeddings]\nmodel = \"global-model\"\nurl = \"https://global.example.com/v1\"\n",
+        )
+        .unwrap();
+        let global = crate::config::global::GlobalConfig::load_from_dir(global_dir.path())
+            .unwrap()
+            .expect("the global config file exists, so this must parse to Some");
+
+        let proj_dir = tempfile::tempdir().unwrap();
+        write_project_toml(proj_dir.path(), "[embeddings]\nmodel = \"project-model\"\n");
+        let cfg = crate::config::project::ProjectConfig::load_with_global_base(
+            proj_dir.path(),
+            global.to_toml_value(),
+        )
+        .unwrap();
+
+        let (url, model, _key, _dim) = resolve_embed_fields_from(EmbedEnv::default(), Some(cfg));
+
+        assert_eq!(model, "project-model", "the project overrides what it sets");
+        assert_eq!(
+            url.as_deref(),
+            Some("https://global.example.com"),
+            "and inherits what it does not — a project that names only `model` \
+             must not lose the global `url` sitting beside it"
+        );
+    }
+
     #[test]
     fn unset_everything_no_longer_fabricates_anything() {
         let (url, model, api_key, dim) = merge_embed_config(EmbedEnv::default(), None);
@@ -631,7 +734,7 @@ mod merge_tests {
             dim: None,
         };
         let project = EmbeddingsSection {
-            model: "local-dir:/weights".to_string(),
+            model: Some("local-dir:/weights".to_string()),
             url: Some("http://from-toml:9".to_string()),
             api_key: Some(SensitiveString::new("sk-toml")),
             ..Default::default()
@@ -716,7 +819,7 @@ mod merge_tests {
             dim: None,
         };
         let project = EmbeddingsSection {
-            model: "local-dir:/weights".to_string(),
+            model: Some("local-dir:/weights".to_string()),
             url: Some("http://from-toml:9".to_string()),
             ..Default::default()
         };
@@ -728,7 +831,7 @@ mod merge_tests {
     #[test]
     fn empty_string_project_url_is_treated_as_absent() {
         let project = EmbeddingsSection {
-            model: "local-dir:/weights".to_string(),
+            model: Some("local-dir:/weights".to_string()),
             url: Some(String::new()),
             ..Default::default()
         };
@@ -760,7 +863,7 @@ mod merge_tests {
         // that straight into `EmbedderHttp` (which appends `/v1/embeddings`
         // unconditionally) produced `.../v1/v1/embeddings` -> 404.
         let project = EmbeddingsSection {
-            model: default_embed_model(),
+            model: Some(default_embed_model()),
             url: Some("http://127.0.0.1:43300/v1".to_string()),
             ..Default::default()
         };

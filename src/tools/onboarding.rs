@@ -1055,7 +1055,7 @@ async fn perform_full_onboarding(
                 system_prompt_sha256: None,
             },
             embeddings: crate::config::project::EmbeddingsSection {
-                model: recommended_model,
+                model: Some(recommended_model),
                 ..Default::default()
             },
             ignored_paths: Default::default(),

@@ -135,20 +135,54 @@ constructors.
 
 ### Task 2 — one settings type at both levels
 
-Closes `da26a27026bb9f41`.
+**Landed 2026-09-17** (SHA recorded at commit). Closes `da26a27026bb9f41`.
 
-- Replace `GlobalEmbeddingsSection` (`src/config/global.rs:16-19`, one field)
-  with a reuse of the project type, all fields `Option`.
-  `EmbeddingsSection::model` moves `String` → `Option<String>`; the
-  `default_embed_model()` default moves from deserialisation to resolution.
-- Two real implementors exist (global, project), so the shared type is earned,
-  not speculative.
-- Test: a global `url` reaches `RetrievalConfig.embedder_url` when the project
-  sets none. Assert on the resolution path, never on a re-implementation of the
-  merge.
-- Warn once, listing unknown keys under `[embeddings]` in either layer. Keep
-  tolerance (`src/config/project.rs:834` documents that policy deliberately) —
-  add the *warning*, not a rejection.
+`GlobalEmbeddingsSection` is now a **type alias** for
+`crate::config::project::EmbeddingsSection`, not a second struct kept in step — because
+"kept in step" is exactly what failed. Two structs describing one config block drift in
+only one direction, silently: the level a developer is editing gains the field and the
+other does not, and neither the type system nor the tests object. One type cannot drift
+from itself.
+
+`EmbeddingsSection::model` became `Option<String>`, and that was **forced, not
+cosmetic**. `serde(default)` fires for an absent `[embeddings]` table, so with the old
+`default = "default_embed_model"` the shared struct would have made every global config
+serialise `model = "local:AllMiniLML6V2Q"` into the merge base — a global layer
+asserting a model it never mentioned, and pinning every project to it. The default moved
+to resolution: `EmbeddingsSection::model_or_default()` and `merge_embed_config`.
+
+Verified at runtime, both directions of the thing the task is actually for:
+
+| global sets | project sets | reaches the wire |
+|---|---|---|
+| model + url + api_key | *(no `[embeddings]`)* | all three — previously `Unknown model`, zero requests |
+| model + url + api_key | `model` only | model **from project**, api_key **from global** |
+
+The second row is the deliverable: field-by-field layering inside `[embeddings]`, not
+whole-table replacement.
+
+**Both tests were written after the fix, so neither had an observed red.** Settled by
+mutation instead, once per guarded field rather than once for the feature — `url` and
+`api_key` are separate sites and a single probe would have proved only one. Adding
+`skip_serializing` to `url` kills both new tests with `left: None`, the exact historical
+symptom; adding it to `api_key` kills only the assertion that names it, leaving the
+gap-filling test green. Each assertion catches its own field, and the twelve
+pre-existing merge tests stayed green under both, confirming the mutations were isolated
+to the global round trip.
+
+One test-design note worth keeping, because the obvious version of this test is vacuous:
+both go through `GlobalConfig::load_from_dir` + `to_toml_value`, never a hand-built
+`toml::Value`. The defect lived in the **type** — serde discarded the keys at parse time
+and `to_toml_value` re-serialised the struct — so a test that constructs the merge base
+directly bypasses the broken component entirely and passes before and after the fix,
+asserting only about `merge_toml`, which was never broken.
+
+**Deferred out of this task, deliberately: the unknown-key warning.** It is listed below
+and is not done. With the shared type, the remaining silent drop is a genuinely unknown
+key (a typo like `modle = …`), which is a different residual from the one this bug
+names, and the warning needs machinery Task 5 introduces anyway — the provenance channel
+and a warn-once surface. Doing half of it here would mean building that surface twice.
+Moved to Task 5; `doctor` is the other candidate host.
 
 ### Task 3 — the default build runs the default model
 
