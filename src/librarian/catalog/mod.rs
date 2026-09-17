@@ -18,6 +18,7 @@ pub mod graft;
 pub mod links;
 mod migrate_v6;
 pub mod observations;
+pub mod rekey;
 pub mod sources;
 pub mod worktree;
 
