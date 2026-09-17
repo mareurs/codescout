@@ -329,10 +329,49 @@ pub fn index_repo_sync(
         }
     }
 
+    // Canonicalized ONCE per walk for the symlink check inside the loop; see there for
+    // why BOTH sides of that comparison have to be canonical. `None` when the root
+    // cannot be resolved, which the check reads as "do not skip".
+    let canonical_root = std::fs::canonicalize(abs_root).ok();
+
     for path in &candidate_paths {
         let path = path.as_path();
         if !path.is_file() || path.extension().and_then(|s| s.to_str()) != Some("md") {
             continue;
+        }
+        // A symlink resolving back INSIDE this root is a second NAME for a document the
+        // walk already reaches by its real path. `is_file()` above FOLLOWS links, so it
+        // answers `true` here, and `artifact_id_from_abs` then keys on the LINK's path —
+        // minting a second artifact id, a second chunk set and a second catalog row for
+        // one set of bytes, with no error anywhere. Measured 2026-09-16: `AGENTS.md ->
+        // CLAUDE.md` gave 2 artifact rows and 84 chunk rows for one 68,939-byte file, and
+        // `doctor` reported every per-artifact finding for it twice
+        // (docs/issues/2026-09-16-a-symlinked-instruction-file-is-cataloged-as-a-second-artifact.md).
+        //
+        // A link pointing OUTSIDE the root is deliberately KEPT: it is the only path by
+        // which this walk reaches those bytes, so skipping it would trade a silent
+        // duplicate for a silent omission, which is the worse direction. This repo has
+        // exactly one (`.claude/skills/claude-traces`), which is why the predicate is
+        // "resolves inside" and not "is a symlink".
+        //
+        // BOTH SIDES ARE CANONICALIZED, and that is load-bearing rather than defensive.
+        // `abs_root` is whatever the caller held, while `canonicalize` always returns a
+        // fully-resolved path — and on macOS `tempfile::tempdir()` hands back `/var/...`,
+        // itself a symlink to `/private/var/...`. Comparing a canonical target against a
+        // raw root makes `starts_with` false for EVERY link, so the skip silently never
+        // fires, on the one platform CI runs and most sessions do not. That is
+        // `docs/issues/archive/2026-09-06-the-unpushed-ledger-guard-goes-silent-on-a-symlinked-path.md`
+        // exactly, one layer up: same asymmetry, same silent-allow direction.
+        //
+        // An unresolvable link (broken, or a permission error) falls through and is
+        // indexed. Deliberate: we have not established that it duplicates anything, and
+        // the cost of being wrong that way is a duplicate row rather than a lost document.
+        if path.is_symlink() {
+            if let (Ok(target), Some(root)) = (std::fs::canonicalize(path), &canonical_root) {
+                if target.starts_with(root) {
+                    continue;
+                }
+            }
         }
         let rel = crate::librarian::util::normalize_rel_path(
             &path.strip_prefix(abs_root)?.to_string_lossy(),
@@ -1422,6 +1461,78 @@ kind = "memory"
             index_repo_sync(&cat, &rules, &fixture, &ignore, false, false, false).unwrap();
         assert_eq!(r2.unchanged, 3);
         assert_eq!(r2.added, 0);
+    }
+
+    /// A symlink pointing back INSIDE the walk root is a second name for one document
+    /// and must not become a second artifact; one pointing OUTSIDE is the only route to
+    /// its bytes and must survive.
+    ///
+    /// Both halves are in ONE test on purpose. Split apart, the inside case alone is
+    /// killed by `skip every symlink` — a mutation that is wrong in the expensive
+    /// direction (silent omission) and that a passing suite would have called correct.
+    /// The outward fixture is what makes the assertion discriminate between
+    /// `is_symlink()` and `is_symlink() && resolves_inside`.
+    ///
+    /// LOAD-BEARING FIXTURE DETAIL: `outside` is a SEPARATE TempDir, and it is bound to
+    /// a named local rather than used inline. A `TempDir` temporary is dropped at the end
+    /// of the statement that creates it, which would delete the directory and leave the
+    /// symlink dangling — `canonicalize` would then fail, the link would fall through the
+    /// unresolvable branch, and the test would still pass while testing nothing.
+    ///
+    /// Unix-only because it needs real symlinks; Windows requires elevation to create
+    /// them, and the walk has no platform-specific branch for this.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_resolving_inside_the_root_is_not_indexed_as_a_second_artifact() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = md_rules();
+        let ignore = globset::GlobSet::empty();
+
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("elsewhere.md"), "# Elsewhere\n\nbody\n").unwrap();
+
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("real.md"), "# Real\n\nbody\n").unwrap();
+        std::os::unix::fs::symlink("real.md", root.path().join("alias.md")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("elsewhere.md"),
+            root.path().join("outward.md"),
+        )
+        .unwrap();
+
+        // The walk's own precondition: `is_file()` follows links, so all three ARE
+        // candidates. Without this the test could pass because the links were never
+        // reached, which is a different world from the one being asserted.
+        assert!(root.path().join("alias.md").is_file());
+        assert!(root.path().join("outward.md").is_file());
+
+        let (report, _) =
+            index_repo_sync(&cat, &rules, root.path(), &ignore, false, false, false).unwrap();
+
+        assert_eq!(
+            report.added, 2,
+            "expected real.md + outward.md; alias.md resolves inside the root and is a \
+             second name for real.md, so indexing it mints a second artifact id for one \
+             set of bytes"
+        );
+
+        // Name WHICH two, not just how many. A count of 2 is also what `skip real.md,
+        // keep both links` produces, and that is the opposite defect.
+        let ids: std::collections::HashSet<String> = ["real.md", "outward.md"]
+            .iter()
+            .map(|n| crate::librarian::ids::artifact_id_from_abs(&root.path().join(n)))
+            .collect();
+        let alias_id = crate::librarian::ids::artifact_id_from_abs(&root.path().join("alias.md"));
+        for id in &ids {
+            assert!(
+                artifact::get(&cat, id).unwrap().is_some(),
+                "a path that is not an inside-resolving symlink must still be indexed"
+            );
+        }
+        assert!(
+            artifact::get(&cat, &alias_id).unwrap().is_none(),
+            "the inside-resolving symlink must have no row of its own"
+        );
     }
 
     #[test]
