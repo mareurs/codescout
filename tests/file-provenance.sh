@@ -765,7 +765,7 @@ hasnt "and gains no footer"                    "$out" "named session(s) live at"
 # exited, its resources are reclaimable" -- and disk exhaustion is exactly the
 # condition under which someone goes looking for reclaimable per-session state, so
 # the instrument degrades precisely when it is being consulted.
-# docs/issues/2026-09-17-a-full-disk-truncates-a-live-sessions-registry-row-so-provenance-reports-it-dead.md
+# docs/issues/archive/2026-09-17-a-full-disk-truncates-a-live-sessions-registry-row-so-provenance-reports-it-dead.md
 sleep 300 & TRUNCPID=$!
 # 0 bytes is not a contrived fixture: it is exactly what a truncating rewrite under
 # ENOSPC leaves behind, and it is the state the real incident was observed in.

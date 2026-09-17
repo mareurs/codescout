@@ -353,7 +353,7 @@ def live_sessions() -> tuple[dict[str, list[dict]], list[dict]]:
     direction: the reader concludes the session exited and its resources are
     reclaimable, and disk exhaustion is exactly when someone goes looking for
     reclaimable per-session state. Measured 2026-09-17, on the session that was reading.
-    docs/issues/2026-09-17-a-full-disk-truncates-a-live-sessions-registry-row-so-provenance-reports-it-dead.md
+    docs/issues/archive/2026-09-17-a-full-disk-truncates-a-live-sessions-registry-row-so-provenance-reports-it-dead.md
 
     The FILENAME is what rescues it. Rows are keyed `<pid>.json`, so the pid survives
     the bytes being destroyed -- enough to say *someone is running here and I cannot say

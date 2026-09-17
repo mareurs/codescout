@@ -1,12 +1,13 @@
 ---
-id: '2acf08f71ba49b82'
+id: c23d86ebd07cffc2
 kind: bug
-status: open
+status: fixed
 title: a full disk truncates a live session's registry row, so every provenance instrument reports it dead
 owners:
 - marius
 tags:
 - cluster/transient-shared-state-lies-to-readers
+closed: 2026-09-17
 opened: 2026-09-17
 related: []
 severity: high
@@ -99,22 +100,72 @@ Not settled; recorded so the next session does not re-derive them.
 
 ## Fix
 
-Not yet fixed.
+`live_sessions()` now returns `(live, unreadable)`. A row that cannot be parsed, or that
+parses without a `sessionId`, no longer vanishes: the pid is read from the FILENAME —
+which survives the bytes being destroyed, because rows are keyed `<pid>.json` — and if
+that pid is alive the row is recorded as a live session whose identity could not be read.
+Both callers print it with pid and profile.
+
+In `file-provenance.py` the notice sits **outside** the named-sessions footer,
+deliberately: the verdict carrying no session line is `UNKNOWN`, and `UNKNOWN` plus a
+live-but-unnameable session is exactly when *"nobody owns this file"* is the wrong
+conclusion to draw.
+
+**Scoped narrowly on purpose.** Only a row that cannot say WHO it is counts. A known sid
+whose socket is gone is a session we can still name — merely unreachable — and the
+existing dead-session path already reports that. Widening to every skipped row would make
+every stale file on disk shout and bury the one row that means something.
+
+The chosen shape was already in the file, one function up: `_pid_alive` documents that
+`PermissionError` means *alive, not absent*, and refuses to collapse the two. The same
+three-state distinction was owed one function down and had not been made.
+
+**Fixed:** `c7c72638`
+**patch-id:** `623307653dc7c6b57504013b2202c279cb23a6a6`
 
 ## Tests added
 
-None yet.
+Five cases in `tests/file-provenance.sh` (156 → 161), in the registry-join section as
+case **I**. **Red observed first**, on all five.
+
+The fixture is a genuinely zero-byte file (`: > "$REG_B/$TRUNCPID.json"`) against a pid
+held alive by a backgrounded `sleep` — not a malformed-JSON stand-in, because 0 bytes is
+precisely what a truncating rewrite under `ENOSPC` leaves behind and is the state the real
+incident was observed in.
+
+**One assertion was rewritten before implementing, and the reason is the point.**
+`has "and names the profile holding it" "$out" "regB"` **PASSED in the red state** —
+satisfied by the profile label on an unrelated live row elsewhere in the same output. It
+would never have discriminated. It was folded into a single unique needle,
+`pid $TRUNCPID (regB)`, and per *a red does not survive its assertion being edited* the
+red was then re-observed (157/5 → 156/5) rather than carried over.
+
+**The discriminator case is what keeps the others honest:** a corrupt row for a DEAD pid
+must stay silent. Without it, every assertion above is satisfied by reporting any
+unparseable file, and every stale row on disk would shout.
+
+Four guarded sites, one mutation each, all KILLED against a re-derived green baseline of
+161/0:
+
+| site | verdict |
+|---|---|
+| liveness gate on the pid (`if _pid_alive(f.stem)` → `if True`) | KILLED — 160/1, the dead-pid case alone |
+| parse failure keeps the row (`rec = None` → `continue`) | KILLED — 156/5 |
+| the unreadable record itself (`unreadable.append(…)` → `pass`) | KILLED — 156/5 |
+| the warning is printed (`if unreadable:` → `if False:`) | KILLED — 156/5 |
+
+**`mutation-probe` reports INCONCLUSIVE for every one of these, by design**, because its
+parse keys on cargo's `^running N tests` and this is a shell suite. Its own message names
+the substitute reading — the runner's summary line against a known-clean baseline, never
+the exit code — and that is what the verdicts above are read off. The probe still applied
+each mutation exactly once and reverted it, so only the verdict was missing.
 
 ## Workarounds
 
-Treat any liveness or authorship result as a lower bound while the disk is near full, and
-confirm a session's absence against `/proc/<pid>` plus its socket before acting on it.
-
-## Resume
-
-Add the third state to `scripts/file-provenance.py`: read the registry row, and when it is
-empty or unparseable while `/proc/<pid>` and the socket both exist, emit `UNKNOWN` naming
-the pid rather than omitting the session. Assert it with a fixture holding a zero-length row.
+None needed — fixed. Before `c7c72638`, the workaround was to treat any liveness or
+authorship result as a lower bound while the disk is near full, and to confirm a session's
+absence against `/proc/<pid>` plus its socket before acting on it. The tool now says this
+itself, which is the whole repair.
 
 ## References
 
