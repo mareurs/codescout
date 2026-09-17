@@ -123,8 +123,9 @@ of the reindex report.
 ## Fix
 
 Not fixed. The candidate query has already established the fact the loop needs, so the smallest
-correct change is to stop re-deriving it — or, if a liveness check is still wanted as a
-safeguard, use `symlink_metadata()`, which does not traverse.
+change is to stop re-deriving it — **but see `## Resume`, which refutes this section's original
+second suggestion (`symlink_metadata()`) at the bytes and records why the first is not free
+either.**
 
 **Do not fix this without re-running site 1's mutations too.** The two predicates now interact:
 a reclamation that deletes every unseen row would delete rows site 1 skips, which is correct
@@ -145,10 +146,47 @@ harmful, costing one duplicate `find` hit and one doubled `doctor` line.
 
 ## Resume
 
-Decide between dropping the `exists()` re-check and switching it to `symlink_metadata()`. The
-former is smaller and provably equivalent for the pre-`0c8ff65d` population; the latter keeps a
-safeguard whose value is now unclear, since the query it guards is the authority. Either way,
-re-run both mutations from `cdcad7a0257ec7c0`'s Tests section afterwards.
+**Correction, same day, before anyone acted on it: the `symlink_metadata()` remedy this section
+originally named DOES NOT WORK, and the `Fix` section above carried it too.** Kept visible
+rather than edited away, because the reasoning error is the one this file is about — I reached
+for "the non-traversing twin" without asking what it returns for the case at hand.
+
+`symlink_metadata()` does not traverse, which is true and irrelevant: it succeeds on a symlink
+whose target is present, because **the link itself exists**. Measured:
+
+```
+path        stat(-e)  lstat(-L)
+real.md     true      false
+alias.md    true      true      <- inside-resolving link, live target
+broken.md   false     true      <- broken link
+```
+
+So `!symlink_metadata(p).is_ok()` is `false` for `AGENTS.md` exactly as `!exists()` is, and the
+row survives either way. The two predicates differ only on a **broken** link, which is not this
+population.
+
+### The three directions that remain, and why the obvious one is not free
+
+1. **Drop the `!exists()` re-check and trust `candidates`.** The query already establishes the
+   fact the loop needs. **But it is not a free deletion of dead code**, and the reason is
+   `walker.flatten()` at the top of the walk: `flatten()` on an iterator of `Result` **silently
+   discards `Err` entries**. A transient IO error during the walk therefore shrinks `seen_ids`,
+   which *widens* `candidates` — and with no liveness check, widened candidates are deleted
+   rows. `!exists()` is currently the only thing standing between a silently-partial walk and
+   mass reclamation. That safety property is real and was not noticed when this record first
+   called the change "provably equivalent".
+2. **Replicate the skip predicate here** — delete when the file is gone **or** the path is an
+   inside-resolving symlink. Correct, and it puts the same law at two call sites, which is the
+   defect that produced this record in the first place.
+3. **Record the decision at the site that makes it.** The skip in the candidate loop already
+   knows the path is a duplicate; have it push that path's id onto a list the reclamation
+   consults alongside `!exists()`. One source of truth, no predicate duplicated, and the
+   `!exists()` safety net against a partial walk is preserved intact.
+
+Direction 3 is the one to take unless something argues against it. Whichever lands, re-run both
+mutations from `cdcad7a0257ec7c0`'s Tests section afterwards — the two predicates now interact,
+and a reclamation that deletes every unseen row would delete exactly the rows the other site
+skips.
 
 ## References
 
