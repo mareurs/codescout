@@ -372,6 +372,6 @@ did not exist when they were written.
 ### Known-incomplete, filed separately
 
 The committed augmentation sidecar was left on the old shape and had to be republished by
-hand — `docs/issues/2026-09-17-rekey-prefix-leaves-the-committed-augmentation-sidecar-on-the-old-shape.md`.
+hand — `docs/issues/archive/2026-09-17-rekey-prefix-leaves-the-committed-augmentation-sidecar-on-the-old-shape.md`.
 That is a defect in the new action, not in this repair, and this ledger is correct on disk and
 in git.

@@ -1,13 +1,13 @@
 ---
-status: open
-opened: 2026-09-17
-closed:
-severity: medium
-owner: marius
-related: []
+kind: bug
+status: fixed
 tags:
 - cluster/blast-radius-exceeds-visibility
-kind: bug
+closed: 2026-09-17
+opened: 2026-09-17
+owner: marius
+related: []
+severity: medium
 ---
 
 # BUG: `rekey_prefix` moves the catalog augmentation and leaves the committed sidecar on the old shape
@@ -82,34 +82,57 @@ Not settled — recorded so the next session does not re-derive them:
 
 ## Fix
 
-Not yet fixed. Worked around once — see below.
+Fixed on `experiments` at **`b9e8680c`**, patch-id
+**`7d28c1c2d722a19923d70c555ac2983d580caf2e`**.
+
+**The diagnosis changed on contact, and the chosen remedy was the wrong shape.** This file
+costed three fixes and picked *"give the sidecar writer a refresh mode"*. That mode already
+existed: `augmentation_sidecar::write_through` keeps an already-committed sidecar true after a
+shape change, never CREATES one, byte-compares so an unchanged shape leaves the file and its
+mtime alone, and `Authored::Only` refuses to republish a field the call did not author.
+`doc(action="augment")` has used it since `2a8decc5`, and its doc comment's worked example is
+this bug almost verbatim — a `params_schema` edit that reported success while the committed
+YAML kept the superseded shape.
+
+So `rekey_prefix` was never missing a capability. It was **the one shape-editing surface that
+did not call the write-through the others already use** — which is a smaller fix, and one that
+adds no second publisher to drift out of step with the first.
+
+**One cost that could not be designed away, so it is documented instead.** `write_through`
+takes a `&Catalog` and the rekey's transaction holds that borrow, so the sidecar publishes
+*after* the commit. A failure there leaves the catalog moved and the file not — the harmful
+state `write_through`'s own doc comment names. The error says exactly that, including which
+half is ahead and how to republish, rather than reporting a generic write failure. A
+`refused` disagreement on an unauthored field is a separate refusal, because which side is
+right is `sidecar_shape_drift`'s call and not this one's.
 
 ## Tests added
 
-None yet. Note what the missing test looks like: a rekey against a ledger WITH a sidecar on
-disk, asserting the sidecar's `pattern` moved too. Every existing test constructs its
-augmentation directly in the catalog, so none has a sidecar and none can observe this.
+`the_committed_sidecar_follows_the_rekey` — `src/librarian/catalog/rekey.rs`. Observed red
+first, failing for the right reason: the sidecar still held `pattern: ^T-\d+$` after the
+rekey.
+
+Its load-bearing fixture detail is the `expects_augmentation:` frontmatter key **and** a real
+file at that path — `write_through` publishes only to a sidecar the artifact DECLARES and that
+already exists, so dropping either turns the test green while guarding nothing. That is also
+the answer to why no existing test caught this: every other catalog test builds its
+augmentation straight into SQL, and none has a sidecar on disk, so the omission was invisible
+to a green suite by construction.
+
+Mutating `Authored::Only(&["params_schema", "prompt"])` to `Only(&[])` KILLS — which is what
+shows the test exercises the real publish path rather than merely observing that some write
+reached the file.
 
 ## Workarounds
 
-What was done for `404fbbe1`, and it is not obvious, because the export fix creates rather
-than refreshes:
-
-```
-rm docs/augmentations/<sidecar>.yaml
-librarian(action="doctor", fix="export_augmentations", scope="project", confirm=true)
-```
-
-The tool's own hint names this path: *"Establish which side is correct first; if it is the
-catalog, delete the sidecar and re-run to republish its shape."* Verify the catalog is the
-correct side before deleting anything — after a rekey it is, by construction.
+No longer needed. The hand repair used for `404fbbe1` — `rm` the sidecar, then
+`librarian(action="doctor", fix="export_augmentations", confirm=true)` — is now what the code
+does by itself. It remains the right recovery if the post-commit publish ever fails, and the
+refusal message names it.
 
 ## Resume
 
-Decide between the three candidates above. If the refresh mode wins, it is a change to
-`export_augmentations` rather than to `rekey_prefix`, and the test belongs with it. Then add
-the missing rekey test: a ledger with a real sidecar on disk, asserting both representations
-moved.
+N/A — fixed.
 
 ## References
 

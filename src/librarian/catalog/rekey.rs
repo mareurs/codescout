@@ -640,7 +640,7 @@ pub fn rekey_prefix_rows(
     // restoring the old `pattern` over ids that have all moved, then failing at some later
     // `append_entry` naming a pattern nobody there changed. Shipped that way and repaired by
     // hand once:
-    // `docs/issues/2026-09-17-rekey-prefix-leaves-the-committed-augmentation-sidecar-on-the-old-shape.md`.
+    // `docs/issues/archive/2026-09-17-rekey-prefix-leaves-the-committed-augmentation-sidecar-on-the-old-shape.md`.
     //
     // `write_through` is the mechanism `doc(action="augment")` already uses and was built for
     // this exact hazard — its own worked example is a `params_schema` edit that reported
@@ -1549,7 +1549,7 @@ mod tests {
     /// later `append_entry` naming a pattern nobody there changed.
     ///
     /// **This is a regression test for a shipped defect, not a hypothetical** —
-    /// `docs/issues/2026-09-17-rekey-prefix-leaves-the-committed-augmentation-sidecar-on-the-old-shape.md`,
+    /// `docs/issues/archive/2026-09-17-rekey-prefix-leaves-the-committed-augmentation-sidecar-on-the-old-shape.md`,
     /// found on the action's first real use and repaired by hand.
     ///
     /// The fixture's load-bearing detail is the `expects_augmentation:` frontmatter key AND a
