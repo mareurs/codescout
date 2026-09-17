@@ -334,6 +334,26 @@ pub fn index_repo_sync(
     // cannot be resolved, which the check reads as "do not skip".
     let canonical_root = std::fs::canonicalize(abs_root).ok();
 
+    // Ids of paths this walk DELIBERATELY skipped as duplicates, so the reclamation pass
+    // below can tell them from paths it merely did not reach.
+    //
+    // WHY THIS EXISTS RATHER THAN A SECOND PREDICATE. Reclamation selects rows this walk
+    // did not see and then re-asks liveness with `Path::exists()`. That was exactly
+    // co-extensive with `unseen` until the symlink skip below created a SECOND reason to
+    // go unseen, and `exists()` follows links, so a skipped duplicate answers `true` on
+    // the strength of its target and is never reclaimed
+    // (docs/issues/2026-09-17-the-reclamation-predicate-follows-the-symlink-it-was-asked-about.md).
+    //
+    // Two repairs were considered and both are worse. Re-deriving the symlink predicate at
+    // the reclamation site puts one law at two call sites, which is the defect that
+    // produced that record. And DELETING the `exists()` check to trust this set alone is
+    // not the free removal of a redundant guard it looks like: `walker.flatten()` above
+    // silently discards `Err` entries, so a transient IO error shrinks `seen_ids`, widens
+    // the candidate set, and with no liveness check would turn a partial walk into mass
+    // reclamation. The decision is recorded HERE, where it is made, and consulted there.
+    let mut skipped_duplicate_ids: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+
     for path in &candidate_paths {
         let path = path.as_path();
         if !path.is_file() || path.extension().and_then(|s| s.to_str()) != Some("md") {
@@ -369,6 +389,10 @@ pub fn index_repo_sync(
         if path.is_symlink() {
             if let (Ok(target), Some(root)) = (std::fs::canonicalize(path), &canonical_root) {
                 if target.starts_with(root) {
+                    // Recorded, not just skipped: a row may already exist for this path
+                    // from before this guard, and reclamation cannot re-derive that it is
+                    // a duplicate. See `skipped_duplicate_ids`.
+                    skipped_duplicate_ids.insert(crate::librarian::ids::artifact_id_from_abs(path));
                     continue;
                 }
             }
@@ -610,7 +634,12 @@ pub fn index_repo_sync(
 
     let mut removed = 0usize;
     for (cand_id, cand_abs_path) in &candidates {
-        if !std::path::Path::new(cand_abs_path).exists() {
+        // Two disjoint reasons a row must go, and `exists()` can only see the first:
+        // the file is gone, or this walk deliberately skipped the path as a duplicate
+        // (where `exists()` answers `true` via the symlink's target). Neither subsumes
+        // the other; `skipped_duplicate_ids` says why the second is not a re-derivation.
+        if !std::path::Path::new(cand_abs_path).exists() || skipped_duplicate_ids.contains(cand_id)
+        {
             cat.conn.execute(
                 "DELETE FROM artifact WHERE id = ?1",
                 rusqlite::params![cand_id],
@@ -1533,6 +1562,87 @@ kind = "memory"
             artifact::get(&cat, &alias_id).unwrap().is_none(),
             "the inside-resolving symlink must have no row of its own"
         );
+    }
+
+    /// A row that ALREADY EXISTS for a path this walk now skips must be reclaimed.
+    ///
+    /// The sibling test above covers the walk declining to MINT a row. This covers the
+    /// other half, which does not follow from it: every catalog written before that guard
+    /// existed still holds the duplicate rows, and reclamation cannot re-derive that they
+    /// are duplicates — `Path::exists()` answers `true` for an inside-resolving symlink on
+    /// the strength of its target
+    /// (docs/issues/2026-09-17-the-reclamation-predicate-follows-the-symlink-it-was-asked-about.md).
+    ///
+    /// The fixture reaches that state the way reality does rather than by writing a row by
+    /// hand: index a REAL file, then replace it with a symlink. A hand-inserted row would
+    /// test the reclamation loop against a catalog shape the indexer never produces.
+    ///
+    /// LOAD-BEARING: the first index must report `added == 3`. Without that assertion the
+    /// test passes trivially if the first walk never created the alias row at all, and the
+    /// second phase's `removed == 1` would then be asserting about a row that never was.
+    #[cfg(unix)]
+    #[test]
+    fn a_row_for_a_path_the_walk_now_skips_is_reclaimed_rather_than_stranded() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = md_rules();
+        let ignore = globset::GlobSet::empty();
+
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("elsewhere.md"), "# Elsewhere\n\nbody\n").unwrap();
+
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("real.md"), "# Real\n\nbody\n").unwrap();
+        // A REAL file for now — this is the pre-guard catalog being reconstructed.
+        std::fs::write(root.path().join("alias.md"), "# Alias\n\nbody\n").unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("elsewhere.md"),
+            root.path().join("outward.md"),
+        )
+        .unwrap();
+
+        let (first, _) =
+            index_repo_sync(&cat, &rules, root.path(), &ignore, false, false, false).unwrap();
+        assert_eq!(
+            first.added, 3,
+            "fixture precondition: real.md, alias.md and outward.md must all be indexed \
+             before alias.md becomes a symlink, or the second phase asserts about nothing"
+        );
+
+        let alias_id = crate::librarian::ids::artifact_id_from_abs(&root.path().join("alias.md"));
+        assert!(artifact::get(&cat, &alias_id).unwrap().is_some());
+
+        // alias.md becomes a second NAME for real.md. Its row is now a duplicate.
+        std::fs::remove_file(root.path().join("alias.md")).unwrap();
+        std::os::unix::fs::symlink("real.md", root.path().join("alias.md")).unwrap();
+
+        let (second, _) =
+            index_repo_sync(&cat, &rules, root.path(), &ignore, false, false, false).unwrap();
+
+        assert_eq!(
+            second.removed, 1,
+            "the stranded duplicate row must be reclaimed; `Path::exists()` alone answers \
+             true for it via real.md and would leave it forever"
+        );
+        assert!(
+            artifact::get(&cat, &alias_id).unwrap().is_none(),
+            "alias.md's row must be gone"
+        );
+        assert!(
+            second.removed_ids.contains(&alias_id),
+            "the id must be reported so the async caller can drop its VECTORS too — on \
+             Qdrant nothing else can reach them"
+        );
+
+        // The controls. `removed == 1` alone is also what "reclaim everything unseen"
+        // produces if the other two happened to be unseen, and it is what a reclamation
+        // that deleted the WRONG row produces too.
+        for name in ["real.md", "outward.md"] {
+            let id = crate::librarian::ids::artifact_id_from_abs(&root.path().join(name));
+            assert!(
+                artifact::get(&cat, &id).unwrap().is_some(),
+                "{name} must survive: it is not a duplicate and the walk still indexes it"
+            );
+        }
     }
 
     #[test]
