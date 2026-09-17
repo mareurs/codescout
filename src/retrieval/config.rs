@@ -715,7 +715,7 @@ mod merge_tests {
     /// resolver as process env — the highest-precedence layer — so it silently beats
     /// every project's own `[embeddings]`. `codescout index` then reports success,
     /// exit 0, against an endpoint the project did not configure.
-    /// `docs/issues/2026-09-17-the-machine-default-dotenv-outranks-every-per-project-override.md`
+    /// `docs/issues/archive/2026-09-17-the-machine-default-dotenv-outranks-every-per-project-override.md`
     #[test]
     fn a_dotenv_value_that_overrides_a_configured_one_is_named() {
         let env = EmbedEnv {

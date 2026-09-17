@@ -150,7 +150,7 @@ pub(crate) fn startup_env_assignments(
 ///
 /// The failure mode is not an error. `codescout index` reports success, exit 0,
 /// against an endpoint the project did not configure.
-/// `docs/issues/2026-09-17-the-machine-default-dotenv-outranks-every-per-project-override.md`
+/// `docs/issues/archive/2026-09-17-the-machine-default-dotenv-outranks-every-per-project-override.md`
 ///
 /// The set is empty when no dotenv was loaded — a missing file, an unreadable one,
 /// or a `CODESCOUT_ENV_FILE` that does not exist. Empty therefore means "nothing was

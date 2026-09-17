@@ -1,5 +1,5 @@
 ---
-id: '6ec9c313893fd21f'
+id: 26d098a04a1613d6
 kind: bug
 status: fixed
 title: 'BUG: the machine-default dotenv outranks every per-project override'
@@ -178,7 +178,9 @@ consumers; this bug is about *precedence*, not about the count, and the consolid
 the other half of Task 5 in
 `docs/plans/2026-09-17-embedding-config-consolidation.md`.
 
-SHA / patch-id: pending.
+- **SHA:** `91dede5a9ddfa72f61c731b506f0a2077b2c2732` (on `experiments`) — the provenance
+  half. The global-layer half is `de0a1e0703a79a458cd0293a225ce7cb970d8cb7`.
+- **patch-id:** `d33ceab59d56977d00e4bbe4f91407790d178497`
 
 ## Tests added
 

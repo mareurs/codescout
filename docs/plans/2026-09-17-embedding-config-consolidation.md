@@ -11,11 +11,11 @@ tags:
 topic: embedding configuration
 ---
 
-**Status:** approved in outline 2026-09-17 (three rulings below). **Tasks 1–4 landed**
-— `654e1f18`, `de0a1e07`, `87e434dd`, `c76d43de`.
+**Status:** approved in outline 2026-09-17 (three rulings below). **Tasks 1–4 landed,
+plus task 5a** — `654e1f18`, `de0a1e07`, `87e434dd`, `c76d43de`, `91dede5a`.
 **Bugs this closes:** `aae547c917c329b5` (**fixed**), `4cd387ba07bc8d2a` (**fixed**),
-`f720f7708e32d881` (**fixed**), `5de82c05bd449fdc` (**fixed**), `6ec9c313893fd21f`,
-`eb3417ec7e02c66e`.
+`f720f7708e32d881` (**fixed**), `5de82c05bd449fdc` (**fixed**), `26d098a04a1613d6`
+(**fixed**), `eb3417ec7e02c66e`.
 
 ## The problem, measured
 
@@ -289,8 +289,10 @@ checkout has no `.codescout/config.toml`" is a waiver about **absence**, and it 
 
 ### 5a — provenance and the shadowing warning — **LANDED 2026-09-17**
 
-Closes `6ec9c313893fd21f`, which is the complaint this whole plan started from: the
+Closes `26d098a04a1613d6`, which is the complaint this whole plan started from: the
 machine's `~/.config/codescout/.env` silently outranked every project's `[embeddings]`.
+SHA `91dede5a9ddfa72f61c731b506f0a2077b2c2732`, patch-id
+`d33ceab59d56977d00e4bbe4f91407790d178497`.
 
 `startup_env_assignments` already computed exactly the keys it injected and threw the
 list away. It is now recorded in `DOTENV_INJECTED` (`src/config/global.rs`), read once at
