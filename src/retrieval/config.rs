@@ -388,15 +388,22 @@ impl EmbedEnv {
         // shadowing rule untestable without `set_var` — the same trap that hid the
         // model-discard defect for a release.
         let injected = crate::config::global::dotenv_injected_keys();
+        use crate::config::embedding_env as envs;
+        // Provenance is per CANONICAL setting, so it must be true when ANY of that
+        // setting's names was dotenv-injected — a value that arrived under a
+        // deprecated alias is no less a dotenv default than one under the new name.
+        let any_injected = |n: &envs::EnvName| {
+            injected.contains(n.canonical) || n.deprecated.iter().any(|d| injected.contains(*d))
+        };
         Self {
-            url: std::env::var("CODESCOUT_EMBEDDER_URL").ok(),
-            model: std::env::var("CODESCOUT_EMBEDDER_MODEL").ok(),
-            api_key: std::env::var("EMBED_API_KEY").ok(),
-            dim: parse_model_dim(std::env::var("CODESCOUT_MODEL_DIM").ok()),
+            url: envs::read(&envs::URL),
+            model: envs::read(&envs::MODEL),
+            api_key: envs::read(&envs::API_KEY),
+            dim: parse_model_dim(envs::read(&envs::DIM)),
             from_dotenv: DotenvProvenance {
-                url: injected.contains("CODESCOUT_EMBEDDER_URL"),
-                model: injected.contains("CODESCOUT_EMBEDDER_MODEL"),
-                api_key: injected.contains("EMBED_API_KEY"),
+                url: any_injected(&envs::URL),
+                model: any_injected(&envs::MODEL),
+                api_key: any_injected(&envs::API_KEY),
             },
         }
     }

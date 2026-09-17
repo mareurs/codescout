@@ -1,3 +1,4 @@
+pub mod embedding_env;
 pub mod global;
 pub mod project;
 pub mod sensitive;

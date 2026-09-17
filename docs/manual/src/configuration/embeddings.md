@@ -170,34 +170,48 @@ When codescout needs to embed text, it resolves the backend in this order:
 Every variable here **overrides both config layers**. They exist for CI and
 benchmark runs; they are not a third place to keep settings.
 
-| Variable | Overrides | Description |
-|----------|-----------|-------------|
-| `CODESCOUT_EMBEDDER_URL` | `[embeddings].url` | Endpoint base URL |
-| `CODESCOUT_EMBEDDER_MODEL` | `[embeddings].model` | Model spec |
-| `CODESCOUT_EMBED_URL` | `[embeddings].url` | Older name, applied a layer earlier |
-| `CODESCOUT_EMBED_MODEL` | `[embeddings].model` | Older name, applied a layer earlier |
-| `CODESCOUT_EMBEDDER_MODEL_NAME` | the name sent on the wire | Only when a `url` is set — see below |
-| `EMBED_API_KEY` | `[embeddings].api_key` | Bearer token; dropped unless the endpoint is https or loopback |
-| `OPENAI_API_KEY` | — | Fallback for the `openai:` prefix only |
-| `OLLAMA_HOST` | — | Ollama daemon URL, for the `ollama:` prefix |
-| `CODESCOUT_MODEL_DIM` | — | Pin the expected dimension; unset means "ask the model" |
-| `CODESCOUT_QUERY_PREFIX` | — | Query-side prefix for asymmetric models |
+Since 2026-09-17 they share one prefix, `CODESCOUT_EMBEDDING_*`, so the surface is
+greppable as a set. **Every older name still works** and warns once naming its
+replacement.
 
-**`CODESCOUT_EMBEDDER_MODEL_NAME` is the one to know about.** When a `url` is
-configured, it sets the model name sent in the request body and wins over
-`[embeddings].model`. Every deployment built around the retrieval stack sets it,
-which is why it stays on top: letting `model` win would silently repoint those
-deployments at the built-in default. Leave it unset and `[embeddings].model` is
-used, with its routing prefix stripped (`local:X` is sent as `X`).
+| Canonical | Deprecated alias(es) | Description |
+|---|---|---|
+| `CODESCOUT_EMBEDDING_URL` | `CODESCOUT_EMBEDDER_URL`, `CODESCOUT_EMBED_URL` | Endpoint base URL |
+| `CODESCOUT_EMBEDDING_MODEL` | `CODESCOUT_EMBEDDER_MODEL`, `CODESCOUT_EMBED_MODEL` | Model spec, or the wire name when `url` is set |
+| `CODESCOUT_EMBEDDING_API_KEY` | `EMBED_API_KEY` | Bearer token; dropped unless https or loopback |
+| `CODESCOUT_EMBEDDING_DIM` | `CODESCOUT_MODEL_DIM` | Pin the expected dimension; unset means "ask the model" |
+| `CODESCOUT_EMBEDDING_QUERY_PREFIX` | `CODESCOUT_QUERY_PREFIX` | Query-side prefix for asymmetric models |
 
-**Three of the names above are duplicates** — `CODESCOUT_EMBED_*` and
-`CODESCOUT_EMBEDDER_*` reach the same setting at different layers. That is
-history, not design, and it is being consolidated; prefer the `CODESCOUT_EMBEDDER_*`
-spellings.
+**Why they were deprecated rather than left alone.** Eight names reached three
+settings, and the two families applied at *different layers of the same
+resolution* — `CODESCOUT_EMBED_*` inside the project-config load,
+`CODESCOUT_EMBEDDER_*` in the merge below it. Which one won depended on where you
+looked, and nothing declared the set, so it could grow without anyone noticing.
 
-`~/.config/codescout/.env` is read into the environment at startup, so anything
-set there behaves as an override of every project — not as a default beneath them.
-Point `CODESCOUT_ENV_FILE` elsewhere, or leave that file for secrets only.
+Not in the family, and deliberately so — these configure separate services rather
+than the dense embedder:
+
+| Variable | Description |
+|---|---|
+| `CODESCOUT_SPARSE_EMBEDDER_URL` | SPLADE sparse leg |
+| `CODESCOUT_RERANKER_URL` | Cross-encoder reranker |
+| `OPENAI_API_KEY` | Fallback for the `openai:` prefix only — a third-party convention, not ours |
+| `OLLAMA_HOST` | Ollama daemon URL, for the `ollama:` prefix |
+| `CODESCOUT_EMBEDDER_MODEL_NAME` | **Deprecated override**, see below |
+
+**`CODESCOUT_EMBEDDER_MODEL_NAME` is now redundant.** It sets the model name sent
+on the wire when a `url` is configured, and it wins over everything else. It exists
+because `[embeddings].model` used to be *discarded* on that path — that defect is
+fixed, so the configured model reaches the wire on its own. It is kept on top
+because every stack deployment sets it while leaving `model` at the built-in
+default: letting `model` win would silently repoint all of them. Unset it and the
+resolved model is used, with its routing prefix stripped (`local:X` is sent as `X`).
+
+`~/.config/codescout/.env` is read into the environment at startup, so anything set
+there behaves as an override of every project — not as a default beneath them.
+codescout warns when a value from that file shadows one your config set. Put
+machine-wide defaults in `~/.config/codescout/config.toml` instead, where the
+project layer can override them.
 
 ## Model Recommendations
 

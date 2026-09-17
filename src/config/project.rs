@@ -554,8 +554,8 @@ impl ProjectConfig {
 
         let mut config = Self::load_with_global_base(root, global_base)?;
         config.apply_embed_overrides(
-            std::env::var("CODESCOUT_EMBED_MODEL").ok(),
-            std::env::var("CODESCOUT_EMBED_URL").ok(),
+            crate::config::embedding_env::read(&crate::config::embedding_env::MODEL),
+            crate::config::embedding_env::read(&crate::config::embedding_env::URL),
         );
         Ok(config)
     }

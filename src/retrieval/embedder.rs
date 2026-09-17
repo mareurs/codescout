@@ -307,11 +307,12 @@ impl EmbedderHttp {
         dense_model_name: &str,
     ) -> Self {
         let dense_base = dense_base.into();
-        let query_prefix = std::env::var("CODESCOUT_QUERY_PREFIX").unwrap_or_default();
-        // Never transmit EMBED_API_KEY over plaintext HTTP (loopback exempt for
+        let query_prefix =
+            crate::config::embedding_env::read(&crate::config::embedding_env::QUERY_PREFIX)
+                .unwrap_or_default();
+        // Never transmit the embedding API key over plaintext HTTP (loopback exempt for
         // local llama.cpp / Ollama) — mirrors RemoteEmbedder's HTTPS guard.
-        let api_key = std::env::var("EMBED_API_KEY")
-            .ok()
+        let api_key = crate::config::embedding_env::read(&crate::config::embedding_env::API_KEY)
             .filter(|s| !s.is_empty())
             .and_then(|key| {
                 if codescout_embed::remote::is_https_or_loopback(&dense_base) {

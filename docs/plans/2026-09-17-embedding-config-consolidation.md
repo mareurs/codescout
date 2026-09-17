@@ -321,12 +321,59 @@ acts on.
 
 ### 5b — the `CODESCOUT_EMBEDDING_*` family — **NOT STARTED**
 
-Still eleven env vars naming a model, url or key across three independent consumers. The
-deprecation table below stands as written. This is a different complaint about the same
-surface — 5a was *precedence*, 5b is the *count* — and closing the bug did not close it.
+**LANDED 2026-09-17** (SHA recorded at commit), with one deliberate exception named below.
 
-The unknown-key warning deferred out of Task 2 belongs here too: it needs the warn-once
-surface this half introduces.
+The fix is the **declaration**, not the rename. Eight variables reached three settings
+because nothing declared the set — each reader spelled its own name at its own call site,
+so the duplicates were visible only to somebody grepping the whole tree at once, and the
+surface could grow without a diff anyone would question.
+`src/config/embedding_env.rs` is now that declaration: a table of canonical names and
+their deprecated aliases, plus a pure `pick` over an injected lookup.
+
+| canonical | deprecated, still working |
+|---|---|
+| `CODESCOUT_EMBEDDING_MODEL` | `CODESCOUT_EMBEDDER_MODEL`, `CODESCOUT_EMBED_MODEL` |
+| `CODESCOUT_EMBEDDING_URL` | `CODESCOUT_EMBEDDER_URL`, `CODESCOUT_EMBED_URL` |
+| `CODESCOUT_EMBEDDING_API_KEY` | `EMBED_API_KEY` |
+| `CODESCOUT_EMBEDDING_DIM` | `CODESCOUT_MODEL_DIM` |
+| `CODESCOUT_EMBEDDING_QUERY_PREFIX` | `CODESCOUT_QUERY_PREFIX` |
+
+The worse half of the old surface is closed by this too: `CODESCOUT_EMBED_*` applied
+inside `ProjectConfig::load_or_default` while `CODESCOUT_EMBEDDER_*` applied in
+`merge_embed_config` beneath it, so two independently-named variables reached one
+effective setting at two points in the same resolution. Both call sites now read the same
+canonical name through the same function, so the layers agree by construction rather than
+by coincidence.
+
+Alias precedence is **preserved, not reinvented** — `CODESCOUT_EMBEDDER_*` still beats
+`CODESCOUT_EMBED_*`, pinned by `the_older_alias_order_is_preserved`. Re-ordering that list
+would change the effective model on any machine setting both: a config change disguised as
+a refactor.
+
+Verified at runtime, all three directions: old names work **and warn once**; new names
+work silently; both set → canonical wins, silent.
+
+### The exception: the live `.env.*` files are NOT migrated
+
+`~/.config/codescout/.env` is a symlink to `.env.amd`, which configures the **running**
+MCP server, and `target/release/codescout` is whatever `cargo rb` last produced — checked
+at the time of writing: built from a SHA predating this rename. Renaming the variables in
+that file before that binary is rebuilt would leave the server with **no embedder config
+at all, silently** — precisely the failure class this whole plan exists to end. Shipping
+the cleanup would have caused the defect the cleanup is about.
+
+So `.env.amd` keeps the old names and carries a header stating why, and the migration
+order: rebuild, reconnect, confirm the binary's SHA, *then* rename. `.env.example` — a
+template nothing reads live — shows the target shape today.
+
+`CODESCOUT_EMBEDDER_MODEL_NAME` is deliberately **not** folded into the family. It is a
+different setting (the wire name, winning over the model spec), it is now redundant
+because Task 1 made the configured model reach the wire, and every stack deployment sets
+it — collapsing it would silently repoint them. It stays as a documented, deprecated
+override.
+
+Still owed from this half: `LIBRARIAN_EMBED_*` (Task 6) and the unknown-key warning
+deferred from Task 2, which now has the warn-once surface it needed.
 
 ### Task 6 — the librarian shares the resolution
 

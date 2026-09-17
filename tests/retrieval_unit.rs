@@ -7,43 +7,47 @@ fn config_from_env_uses_defaults_when_unset() {
     // serializes within a single test binary's parallel scheduler, so it does
     // not prevent cross-binary CODESCOUT_* writes that occur during a full
     // `cargo test` run (BUG: 2026-05-24-ci-retrieval-env-test-cross-binary-flake).
-    temp_env::with_vars_unset(
-        [
-            "CODESCOUT_QDRANT_URL",
-            "CODESCOUT_EMBEDDER_URL",
-            "CODESCOUT_EMBEDDER_MODEL",
-            "CODESCOUT_SPARSE_EMBEDDER_URL",
-            "CODESCOUT_RERANKER_URL",
-            "CODESCOUT_MODEL_DIM",
-            "CODESCOUT_RETRIEVAL_PROFILE",
-            "EMBED_API_KEY",
-        ],
-        || {
-            let cfg = RetrievalConfig::from_env().expect("defaults");
-            assert_eq!(cfg.qdrant_url, "http://127.0.0.1:6334");
-            assert_eq!(
-                cfg.embedder_url, None,
-                "an unset url must mean 'resolve from the model', not 'assume 8081'"
-            );
-            // 48084/48083 are the HOST ports docker-compose.yml publishes. These
-            // read as literals because the constants behind them are pub(crate) and
-            // this is an integration test; the in-crate guard
-            // `config::default_port_tests::retrieval_default_ports_match_published_compose_ports`
-            // is what proves they still match the compose file. Until 2026-08-14
-            // these asserted 8084/8083 — container-internal ports nothing listens on
-            // from the host — so this test pinned the bug in place rather than
-            // catching it.
-            assert_eq!(cfg.sparse_embedder_url, "http://127.0.0.1:48084");
-            assert_eq!(cfg.reranker_url, "http://127.0.0.1:48083");
-            assert_eq!(
-                cfg.model_dim, None,
-                "an unpinned dim must let the model decide"
-            );
-            assert_eq!(cfg.model, "local:AllMiniLML6V2Q");
-            assert_eq!(cfg.api_key, None);
-            assert_eq!(cfg.profile, "cpu");
-        },
-    );
+    // The embedding names are DERIVED from the declaration rather than re-typed.
+    // This list used to be written out by hand, and when the deprecated-alias chain
+    // was introduced on 2026-09-17 it silently stopped covering what the resolver
+    // reads: a machine exporting `CODESCOUT_EMBED_URL` failed this test, whose
+    // subject had not changed. A hand-kept list is the same shape as the scattered
+    // `env::var` calls `config::embedding_env` exists to replace.
+    let mut unset: Vec<&'static str> = vec![
+        "CODESCOUT_QDRANT_URL",
+        "CODESCOUT_SPARSE_EMBEDDER_URL",
+        "CODESCOUT_RERANKER_URL",
+        "CODESCOUT_RETRIEVAL_PROFILE",
+        // Not part of the embedding family: a separate, deprecated override for the
+        // name put on the wire. Still read directly, so still neutralised by hand.
+        "CODESCOUT_EMBEDDER_MODEL_NAME",
+    ];
+    unset.extend(codescout::config::embedding_env::all_names());
+    temp_env::with_vars_unset(unset, || {
+        let cfg = RetrievalConfig::from_env().expect("defaults");
+        assert_eq!(cfg.qdrant_url, "http://127.0.0.1:6334");
+        assert_eq!(
+            cfg.embedder_url, None,
+            "an unset url must mean 'resolve from the model', not 'assume 8081'"
+        );
+        // 48084/48083 are the HOST ports docker-compose.yml publishes. These
+        // read as literals because the constants behind them are pub(crate) and
+        // this is an integration test; the in-crate guard
+        // `config::default_port_tests::retrieval_default_ports_match_published_compose_ports`
+        // is what proves they still match the compose file. Until 2026-08-14
+        // these asserted 8084/8083 — container-internal ports nothing listens on
+        // from the host — so this test pinned the bug in place rather than
+        // catching it.
+        assert_eq!(cfg.sparse_embedder_url, "http://127.0.0.1:48084");
+        assert_eq!(cfg.reranker_url, "http://127.0.0.1:48083");
+        assert_eq!(
+            cfg.model_dim, None,
+            "an unpinned dim must let the model decide"
+        );
+        assert_eq!(cfg.model, "local:AllMiniLML6V2Q");
+        assert_eq!(cfg.api_key, None);
+        assert_eq!(cfg.profile, "cpu");
+    });
 }
 
 #[test]
