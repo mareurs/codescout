@@ -1,10 +1,11 @@
 ---
-id: '0d3426f903c8cd61'
+id: bfe07abae27a3dc1
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the orphaned-citation hook compares post-rename paths against pre-rename citers, so it warns on the shape it exists to bless'
 tags:
 - cluster/unclassified
+closed: 2026-09-17
 ---
 
 # BUG: the orphaned-citation hook compares post-rename paths against pre-rename citers, so it warns on the shape it exists to bless
@@ -109,12 +110,45 @@ re-discovered.
 rename as an unrelated add and delete, and the check's whole subject — rename sources — becomes
 unreadable. The script's own comment says so.
 
+## Fix provenance
+
+- **SHA:** `a6e06961` (`experiments`)
+- **patch-id:** `5f8e8bbcd335d88d770f5ac7136bfe0646aee589`
+
+`committed` now comes from `git diff --cached --name-status -M`, emitting **both** columns of
+every `R` row.
+
+Built and `bash -n`'d in a copy before installing. pre-commit.com is retired here, so this
+script is live for every session in the checkout the moment it is saved, and a parse error
+fails `pre-commit-run.sh` and blocks their commits. The copy was validated against the defect
+case (silent) **and** a control where the citer is genuinely outside the commit (906 bytes,
+naming the citer) before it was moved in.
+
 ## Tests added
 
-None. `tests/hooks-discrimination.sh` § 12 covers this hook with 9 cases; none constructs a
-**renamed citer**, which is why a hook whose comment names this exact case shipped unable to
-handle it. A fix owes a case there: two files renamed in one commit, each citing the other,
-asserting silence.
+`tests/hooks-discrimination.sh` § *orphaned citations* — a new case renaming the citer in the
+same commit, asserting silence in **bytes** (exit 0 is true of a warning too).
+
+**THE FIRST VERSION OF THAT CASE PASSED AGAINST THE BROKEN SCRIPT, and that is the finding
+worth keeping.** A one-line citer whose only line is rewritten scores **below git's ~50%
+similarity cutoff**, so git reports it as `D`+`A` rather than `R` — which puts the old path
+back into `--name-only`'s output and suppresses the warning *for the wrong reason*. The defect
+is invisible below the threshold and live above it.
+
+That is `doc(action="move")`'s `stage_hint` caveat — *`R` is a **similarity** verdict, not a
+staging or a content one* — reaching a test fixture: the same logical change is one row or two
+depending on how big the file is. Forty filler lines put the fixture at **R090**; the two real
+archives that hit this at `5a61efee` were **R096** and **R097**.
+
+The case therefore carries its own precondition — `fixture: the citer's rename IS detected` —
+so it cannot silently go vacuous again if similarity ever drifts back under the cutoff.
+
+**Observed RED before the fix:** `a renamed citer is suppressed like a modified one` FAIL, with
+the precondition PASS beside it, so the red was the defect and not a broken fixture.
+
+Suite: `tests/hooks-discrimination.sh` **145/0**; `tests/hook_config.rs` **12/0**. No mutation
+probe — it renders INCONCLUSIVE on a shell runner by construction (`6213a09765698cfa`), so the
+evidence here is the observed red against a known-clean baseline.
 
 ## Workarounds
 
@@ -123,10 +157,7 @@ Read the named citers against `git diff --cached --name-status -M`. If a citer a
 
 ## Resume
 
-Change the `committed=` assignment in `scripts/pre-commit-orphaned-citations.sh` to parse
-`--name-status -M` and emit both columns for `R` rows. Add the mutual-rename case to
-`tests/hooks-discrimination.sh` § 12 and confirm it RED before the change — the existing 9
-cases all pass against the broken script.
+N/A — fixed.
 
 ## References
 
