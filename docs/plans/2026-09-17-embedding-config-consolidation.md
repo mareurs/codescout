@@ -285,32 +285,46 @@ checkout has no `.codescout/config.toml`" is a waiver about **absence**, and it 
 
 ### Task 5 — one env family, provenance-aware
 
-Closes `6ec9c313893fd21f`.
+**Split in two, and only the first half is done.**
 
-New family, one name per field: `CODESCOUT_EMBEDDING_{MODEL,URL,API_KEY,DIM,QUERY_PREFIX}`.
+### 5a — provenance and the shadowing warning — **LANDED 2026-09-17**
 
-Deprecated aliases keep working for ≥1 release, each warning once on first read:
+Closes `6ec9c313893fd21f`, which is the complaint this whole plan started from: the
+machine's `~/.config/codescout/.env` silently outranked every project's `[embeddings]`.
 
-| deprecated | → |
-|---|---|
-| `CODESCOUT_EMBED_MODEL`, `CODESCOUT_EMBEDDER_MODEL`, `CODESCOUT_EMBEDDER_MODEL_NAME` | `CODESCOUT_EMBEDDING_MODEL` |
-| `CODESCOUT_EMBED_URL`, `CODESCOUT_EMBEDDER_URL` | `CODESCOUT_EMBEDDING_URL` |
-| `EMBED_API_KEY` | `CODESCOUT_EMBEDDING_API_KEY` |
-| `CODESCOUT_MODEL_DIM` | `CODESCOUT_EMBEDDING_DIM` |
-| `CODESCOUT_QUERY_PREFIX` | `CODESCOUT_EMBEDDING_QUERY_PREFIX` |
+`startup_env_assignments` already computed exactly the keys it injected and threw the
+list away. It is now recorded in `DOTENV_INJECTED` (`src/config/global.rs`), read once at
+the edge by `EmbedEnv::from_real_env`, and carried as per-field `DotenvProvenance` data so
+the pure `dotenv_shadowed_fields` can decide without touching a global — the same
+discipline that keeps `merge_embed_config` testable without `set_var`.
 
-`OPENAI_API_KEY` stays as-is — it is a third-party convention, not ours.
+**Precedence is unchanged.** Env still wins, per the ruling. That was never the defect:
+the defect is that a *file read on every start* is indistinguishable from an export by
+the time anything can act on it, so a machine DEFAULT silently acquired OVERRIDE
+precedence. Half the fix was Task 2 — the global `config.toml` can now hold `url` and
+`api_key`, so those values finally have a place to live *beneath* the project layer.
+Before that, the dotenv was not a bad habit; it was the only place they fit.
 
-**The provenance half is the actual fix.** `startup_env_assignments`
-(`src/config/global.rs:113-118`) already returns exactly the keys it injected
-and currently discards that list. Capture it, and have the resolver warn when a
-**dotenv-injected** value shadows a value a TOML layer set. An
-operator-exported value still wins silently — that is the escape hatch working.
+Five tests, all on the pure predicate, mutation-settled once per **condition**: dropping
+the provenance check kills exactly the two tests that assert provenance matters; dropping
+the config-is-set check kills exactly the one that asserts quiet-when-nothing-shadowed.
+Verified end-to-end on the real binary — the warning fires for a dotenv value and is
+silent for the same value exported.
 
-Migrate `.env.amd` / `.env.gpu` / `.env.cpu` / `.env.example`,
-`contrib/pi/mcp.json.example`, `scripts/sweep-*.sh`, `docker-compose.yml` in the
-same commit as the aliases, so the tree exercises the new names while the old
-ones stay supported for others.
+The third gate condition is what keeps this from becoming noise: it stays quiet when the
+config layers set nothing, which is the state of a machine configured entirely through
+`.env` — this repo's own. A warning that fired on every resolution for its largest
+audience would be tuned out, and the law it would violate is the one about alarms nobody
+acts on.
+
+### 5b — the `CODESCOUT_EMBEDDING_*` family — **NOT STARTED**
+
+Still eleven env vars naming a model, url or key across three independent consumers. The
+deprecation table below stands as written. This is a different complaint about the same
+surface — 5a was *precedence*, 5b is the *count* — and closing the bug did not close it.
+
+The unknown-key warning deferred out of Task 2 belongs here too: it needs the warn-once
+surface this half introduces.
 
 ### Task 6 — the librarian shares the resolution
 

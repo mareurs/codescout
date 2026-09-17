@@ -136,6 +136,43 @@ pub(crate) fn startup_env_assignments(
     pairs.into_iter().filter(|(key, _)| !is_set(key)).collect()
 }
 
+/// Keys that [`load_startup_env`] wrote into the process environment from the
+/// startup dotenv, as opposed to variables the operator exported themselves.
+///
+/// **Why this exists.** By the time any config resolution runs, a value that came
+/// from `~/.config/codescout/.env` is indistinguishable from one a human exported
+/// for this run — both are simply process env, and process env is the highest
+/// precedence layer. That is correct for an export (it is the documented escape
+/// hatch) and wrong for a file read on every start, which is a machine *default*
+/// wearing an *override's* clothes: it silently outranks every project's own
+/// `.codescout/project.toml`, the layer that exists to let a project differ from
+/// the machine.
+///
+/// The failure mode is not an error. `codescout index` reports success, exit 0,
+/// against an endpoint the project did not configure.
+/// `docs/issues/2026-09-17-the-machine-default-dotenv-outranks-every-per-project-override.md`
+///
+/// The set is empty when no dotenv was loaded — a missing file, an unreadable one,
+/// or a `CODESCOUT_ENV_FILE` that does not exist. Empty therefore means "nothing was
+/// injected", never "not yet known": `load_startup_env` runs once from `main` before
+/// any worker thread, so every later reader sees the finished set.
+static DOTENV_INJECTED: std::sync::OnceLock<std::collections::BTreeSet<String>> =
+    std::sync::OnceLock::new();
+
+/// Read the set recorded by [`load_startup_env`]. Empty unless a dotenv was loaded.
+pub fn dotenv_injected_keys() -> &'static std::collections::BTreeSet<String> {
+    DOTENV_INJECTED.get_or_init(std::collections::BTreeSet::new)
+}
+
+/// Record which keys came from the dotenv. Called once, from [`load_startup_env`].
+///
+/// A second call is ignored rather than panicking: `OnceLock::set` returning `Err`
+/// means somebody already recorded, and in a test binary that is another test, not a
+/// bug worth aborting the process over.
+fn record_dotenv_injected(keys: std::collections::BTreeSet<String>) {
+    let _ = DOTENV_INJECTED.set(keys);
+}
+
 /// Load a startup dotenv into the process environment before config resolution.
 ///
 /// Path: `$CODESCOUT_ENV_FILE` if set, else [`global_env_path`]. An explicit process
@@ -173,9 +210,17 @@ pub fn load_startup_env() {
             return;
         }
     };
-    for (key, value) in startup_env_assignments(pairs, |k| std::env::var_os(k).is_some()) {
+    // Compute the assignments once, then record WHICH keys they were before applying
+    // them. The list is exactly what distinguishes a dotenv-injected value from an
+    // operator export later on — see `dotenv_injected_keys`. It was previously
+    // computed and discarded in the same expression.
+    let assignments = startup_env_assignments(pairs, |k| std::env::var_os(k).is_some());
+    let injected: std::collections::BTreeSet<String> =
+        assignments.iter().map(|(k, _)| k.clone()).collect();
+    for (key, value) in assignments {
         std::env::set_var(key, value);
     }
+    record_dotenv_injected(injected);
     tracing::debug!("loaded startup env from {}", path.display());
 }
 

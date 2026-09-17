@@ -303,15 +303,101 @@ struct EmbedEnv {
     model: Option<String>,
     api_key: Option<String>,
     dim: Option<usize>,
+    /// Which of the fields above arrived via the **startup dotenv** rather than an
+    /// operator export.
+    ///
+    /// Env wins over both config layers, and that is deliberate — it is the
+    /// documented escape hatch for benchmark cells and CI. But
+    /// `~/.config/codescout/.env` is read into the environment on every start, so a
+    /// machine *default* written there becomes the highest-precedence *override* and
+    /// silently outranks every project's own `[embeddings]`. By the time this struct
+    /// is built the two are indistinguishable: both are just process env.
+    ///
+    /// Carrying the provenance is what lets the resolver tell them apart — warning on
+    /// the second case while staying silent on the first. Held as plain data on the
+    /// struct rather than read from a global inside the merge, so
+    /// `dotenv_shadowed_fields` stays pure and both directions are ordinary unit
+    /// tests — the same discipline that keeps `merge_embed_config` testable without
+    /// `set_var`.
+    from_dotenv: DotenvProvenance,
+}
+
+/// Per-field provenance for [`EmbedEnv`]. `true` means "this value came from the
+/// startup dotenv", which is the only case that warrants a shadowing warning — an
+/// operator export winning is the escape hatch working as designed.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+struct DotenvProvenance {
+    url: bool,
+    model: bool,
+    api_key: bool,
+}
+
+/// Pure: which `[embeddings]` fields a **dotenv-injected** env value silently
+/// overrode.
+///
+/// Returns field names, not a message, so the caller owns the wording and this stays
+/// a value function with an ordinary equality assertion.
+///
+/// Three conditions must hold for a field to be named, and dropping any one of them
+/// turns this into noise:
+///
+/// 1. the env value came from the dotenv (an export is the sanctioned override);
+/// 2. the env value is actually present and non-blank (a blank never wins anyway,
+///    per `non_empty`);
+/// 3. the config layers actually set that field — if the project and global are both
+///    silent there is nothing being shadowed, which is the ordinary case on a machine
+///    configured entirely through `.env`.
+///
+/// `project` is the already-**merged** section (global beneath project), so a global
+/// `config.toml` value being shadowed is reported exactly like a project one. That is
+/// correct: both are files the user edited and expected to take effect.
+fn dotenv_shadowed_fields(
+    env: &EmbedEnv,
+    project: Option<&crate::config::project::EmbeddingsSection>,
+) -> Vec<&'static str> {
+    let Some(p) = project else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let shadows = |from_dotenv: bool, env_val: Option<&String>, cfg_val: Option<&String>| {
+        from_dotenv
+            && env_val.is_some_and(|v| !v.trim().is_empty())
+            && cfg_val.is_some_and(|v| !v.trim().is_empty())
+    };
+    if shadows(env.from_dotenv.url, env.url.as_ref(), p.url.as_ref()) {
+        out.push("url");
+    }
+    if shadows(env.from_dotenv.model, env.model.as_ref(), p.model.as_ref()) {
+        out.push("model");
+    }
+    let cfg_key = p.api_key.as_ref().map(|k| k.as_str().to_string());
+    if shadows(
+        env.from_dotenv.api_key,
+        env.api_key.as_ref(),
+        cfg_key.as_ref(),
+    ) {
+        out.push("api_key");
+    }
+    out
 }
 
 impl EmbedEnv {
     fn from_real_env() -> Self {
+        // Read the dotenv-injected key set ONCE here at the edge, then carry the
+        // answer as data. Consulting the global inside the merge would make the
+        // shadowing rule untestable without `set_var` — the same trap that hid the
+        // model-discard defect for a release.
+        let injected = crate::config::global::dotenv_injected_keys();
         Self {
             url: std::env::var("CODESCOUT_EMBEDDER_URL").ok(),
             model: std::env::var("CODESCOUT_EMBEDDER_MODEL").ok(),
             api_key: std::env::var("EMBED_API_KEY").ok(),
             dim: parse_model_dim(std::env::var("CODESCOUT_MODEL_DIM").ok()),
+            from_dotenv: DotenvProvenance {
+                url: injected.contains("CODESCOUT_EMBEDDER_URL"),
+                model: injected.contains("CODESCOUT_EMBEDDER_MODEL"),
+                api_key: injected.contains("EMBED_API_KEY"),
+            },
         }
     }
 }
@@ -408,11 +494,27 @@ fn resolve_embed_fields_with(
 /// layer, exactly like the sibling `load_or_default_*` tests in
 /// `src/config/project.rs`) so real project.toml file I/O is exercised
 /// end-to-end without inheriting `load_or_default`'s own env overlay.
+///
+/// This is also where the dotenv-shadowing warning is emitted, because it is the
+/// one place holding both sides of the comparison. The decision itself lives in
+/// the pure [`dotenv_shadowed_fields`]; only the wording is here.
 fn resolve_embed_fields_from(
     env: EmbedEnv,
     project_config: Option<crate::config::project::ProjectConfig>,
 ) -> (Option<String>, String, Option<String>, Option<usize>) {
-    merge_embed_config(env, project_config.map(|c| c.embeddings))
+    let section = project_config.map(|c| c.embeddings);
+    for field in dotenv_shadowed_fields(&env, section.as_ref()) {
+        tracing::warn!(
+            "[embeddings].{field} is set in your config but was overridden by the \
+                 startup dotenv (CODESCOUT_ENV_FILE, else ~/.config/codescout/.env). \
+                 Environment wins over both config layers by design — but a dotenv is \
+                 read on every start, so a machine-wide DEFAULT written there silently \
+                 outranks every project. Move it to ~/.config/codescout/config.toml to \
+                 make it a default the project can override, or unset it there if the \
+                 override was intended for one run."
+        );
+    }
+    merge_embed_config(env, section)
 }
 
 #[cfg(test)]
@@ -606,6 +708,127 @@ mod merge_tests {
         .unwrap();
     }
 
+    /// A dotenv-injected value that overrides a configured one is NAMED.
+    ///
+    /// This is the defect the provenance channel exists for: the operator's
+    /// `~/.config/codescout/.env` is a machine-wide default, but it reaches the
+    /// resolver as process env — the highest-precedence layer — so it silently beats
+    /// every project's own `[embeddings]`. `codescout index` then reports success,
+    /// exit 0, against an endpoint the project did not configure.
+    /// `docs/issues/2026-09-17-the-machine-default-dotenv-outranks-every-per-project-override.md`
+    #[test]
+    fn a_dotenv_value_that_overrides_a_configured_one_is_named() {
+        let env = EmbedEnv {
+            url: Some("http://from-dotenv:1".into()),
+            from_dotenv: DotenvProvenance {
+                url: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let project = EmbeddingsSection {
+            url: Some("http://from-project:2".into()),
+            ..Default::default()
+        };
+        assert_eq!(dotenv_shadowed_fields(&env, Some(&project)), vec!["url"]);
+    }
+
+    /// An EXPORTED value that overrides a configured one is silent.
+    ///
+    /// The half that makes the warning worth having. Env-beats-config is the
+    /// documented escape hatch — benchmark cells and CI depend on it — so a warning
+    /// keyed on "env won" rather than on provenance would fire on every legitimate
+    /// override and be tuned out. The inputs here are byte-identical to the test
+    /// above except `from_dotenv`, which is the entire claim.
+    #[test]
+    fn an_exported_value_that_overrides_a_configured_one_is_silent() {
+        let env = EmbedEnv {
+            url: Some("http://from-export:1".into()),
+            from_dotenv: DotenvProvenance::default(),
+            ..Default::default()
+        };
+        let project = EmbeddingsSection {
+            url: Some("http://from-project:2".into()),
+            ..Default::default()
+        };
+        assert!(dotenv_shadowed_fields(&env, Some(&project)).is_empty());
+    }
+
+    /// A dotenv value with nothing to shadow is silent.
+    ///
+    /// The ordinary case on a machine configured entirely through `.env` — which is
+    /// this repo's own setup. Without this condition the warning would fire on every
+    /// resolution for every such user, which is the shape that gets a warning
+    /// deleted rather than heeded.
+    #[test]
+    fn a_dotenv_value_with_no_configured_counterpart_is_silent() {
+        let env = EmbedEnv {
+            url: Some("http://from-dotenv:1".into()),
+            from_dotenv: DotenvProvenance {
+                url: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let project = EmbeddingsSection::default();
+        assert!(dotenv_shadowed_fields(&env, Some(&project)).is_empty());
+        // and with no project section at all
+        assert!(dotenv_shadowed_fields(&env, None).is_empty());
+    }
+
+    /// Each field is judged on its OWN provenance, not the struct's.
+    ///
+    /// `EmbedEnv` carries three independently-sourced values: a user can export one
+    /// for a single run while the dotenv supplies the others. A per-struct flag would
+    /// report all three or none, and be wrong in both directions on the same call.
+    #[test]
+    fn provenance_is_per_field_not_per_struct() {
+        let env = EmbedEnv {
+            url: Some("http://from-dotenv:1".into()),
+            model: Some("model-from-export".into()),
+            api_key: Some("key-from-dotenv".into()),
+            from_dotenv: DotenvProvenance {
+                url: true,
+                model: false,
+                api_key: true,
+            },
+            ..Default::default()
+        };
+        let project = EmbeddingsSection {
+            url: Some("http://from-project:2".into()),
+            model: Some("model-from-project".into()),
+            api_key: Some(SensitiveString::new("key-from-project")),
+            ..Default::default()
+        };
+        assert_eq!(
+            dotenv_shadowed_fields(&env, Some(&project)),
+            vec!["url", "api_key"],
+            "the exported `model` must not be named even though it also won"
+        );
+    }
+
+    /// A blank dotenv value is not a shadow.
+    ///
+    /// `merge_embed_config` treats an exported-but-empty value as absent via
+    /// `non_empty`, so the configured value wins and nothing was overridden. Warning
+    /// here would describe an override that did not happen.
+    #[test]
+    fn a_blank_dotenv_value_shadows_nothing() {
+        let env = EmbedEnv {
+            url: Some("   ".into()),
+            from_dotenv: DotenvProvenance {
+                url: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let project = EmbeddingsSection {
+            url: Some("http://from-project:2".into()),
+            ..Default::default()
+        };
+        assert!(dotenv_shadowed_fields(&env, Some(&project)).is_empty());
+    }
+
     /// The global layer supplies `url` and `api_key` when the project sets
     /// neither, and the project's own `model` still wins.
     ///
@@ -732,6 +955,7 @@ mod merge_tests {
             model: Some("local:BGESmallENV15".to_string()),
             api_key: Some("sk-env".to_string()),
             dim: None,
+            ..Default::default()
         };
         let project = EmbeddingsSection {
             model: Some("local-dir:/weights".to_string()),
@@ -817,6 +1041,7 @@ mod merge_tests {
             model: Some("   ".to_string()),
             api_key: None,
             dim: None,
+            ..Default::default()
         };
         let project = EmbeddingsSection {
             model: Some("local-dir:/weights".to_string()),

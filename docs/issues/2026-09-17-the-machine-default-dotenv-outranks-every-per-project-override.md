@@ -1,13 +1,15 @@
 ---
 id: '6ec9c313893fd21f'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the machine-default dotenv outranks every per-project override'
 tags:
 - cluster/unclassified
 - embeddings
 - config
 - precedence
+claimed_at: 2026-09-17
+claimed_by: 458a8a26-c380-4f5b-b967-2181f592917e
 ---
 
 ## Summary
@@ -133,25 +135,85 @@ namespace.
 
 ## Fix
 
-Plan, not yet implemented, per the 2026-09-17 ruling:
+Landed in two halves, both already in the tree.
 
-1. Machine defaults move to `~/.config/codescout/config.toml` (requires the
-   global section to stop dropping `url`/`api_key` — separately filed). The
-   dotenv keeps only secrets and genuine per-machine overrides.
-2. `merge_embed_config` learns the **provenance** of each env value (exported vs
-   injected by `load_startup_env`) so it can warn — `startup_env_assignments`
-   already returns exactly the list of keys it assigned, so the provenance is
-   available and currently discarded.
-3. When an env value shadows a value set in either TOML layer, emit a one-time
-   warning naming the field and both sources.
+**1. The global layer can now hold what the dotenv was holding.** Until 2026-09-17 the
+global `[embeddings]` was a one-field struct, so `url` and `api_key` could only be
+expressed as env — the dotenv was not a bad habit, it was the *only* place those values
+fit. Fixed by the shared settings type (`de0a1e07`). Machine defaults now belong in
+`~/.config/codescout/config.toml`, which sits BENEATH the project layer where a default
+belongs.
+
+**2. Provenance, so the remaining overrides can be told apart.** `startup_env_assignments`
+already computed exactly the keys it injected and discarded the list; it is now recorded
+in `DOTENV_INJECTED` (`src/config/global.rs`) and read once at the edge by
+`EmbedEnv::from_real_env`, which carries it as per-field `DotenvProvenance` data.
+`dotenv_shadowed_fields` (pure) names the fields where a **dotenv-injected** value beat a
+configured one, and `resolve_embed_fields_from` warns.
+
+**The precedence itself is unchanged, deliberately.** Env still wins. That was the
+2026-09-17 ruling and it is right: benchmark cells, `scripts/sweep-*.sh`, CI and
+docker-compose wiring all depend on it, and an operator export is the sanctioned escape
+hatch. What was wrong was never that env wins — it is that a *file read on every start*
+is indistinguishable from an export by the time anything can act on it, so a machine
+DEFAULT silently acquired OVERRIDE precedence over the layer that exists to differ from
+the machine.
+
+Three conditions gate the warning, and dropping any one makes it noise rather than
+signal: the value came from the dotenv (an export is silent); the env value is present
+and non-blank (a blank never wins anyway); and the config layers actually set that field
+(nothing shadowed → nothing to say). The third is why this stays quiet on a machine
+configured entirely through `.env` with projects that set no `[embeddings]` — which is
+this repo's own setup, and the population that would otherwise see the warning on every
+resolution and learn to ignore it.
+
+The remedy the message names is performable by the person reading it — move the value to
+`config.toml`, or unset it — which is the check `CLAUDE.md` § *Testing Discipline* asks
+for when shipping a guard: name the next action its message produces, and ask whether
+that party can perform it.
+
+**Not done, and carried rather than dropped:** the `CODESCOUT_EMBEDDING_*` family
+consolidation. Eleven env vars still name a model, url or key across three independent
+consumers; this bug is about *precedence*, not about the count, and the consolidation is
+the other half of Task 5 in
+`docs/plans/2026-09-17-embedding-config-consolidation.md`.
 
 SHA / patch-id: pending.
 
 ## Tests added
 
-None yet. Owed: a test that a project-level `url` survives when the *dotenv*
-supplies one, and is overridden when the *process* supplies one — the two must
-be distinguishable, which is the whole claim.
+Five in `src/retrieval/config.rs` `merge_tests`, all against the pure
+`dotenv_shadowed_fields`:
+
+- `a_dotenv_value_that_overrides_a_configured_one_is_named` — the defect.
+- `an_exported_value_that_overrides_a_configured_one_is_silent` — byte-identical inputs
+  except `from_dotenv`, which is the entire claim.
+- `a_dotenv_value_with_no_configured_counterpart_is_silent` — the ordinary case on a
+  `.env`-configured machine.
+- `provenance_is_per_field_not_per_struct` — one export among two dotenv values.
+- `a_blank_dotenv_value_shadows_nothing`.
+
+**Written alongside the implementation, so no observed red.** Settled by mutation
+instead, once per condition in the predicate rather than once for the feature:
+
+| mutation | killed |
+|---|---|
+| ignore `from_dotenv` (warn on every env override) | `an_exported_…_is_silent`, `provenance_is_per_field…` — and **only** those two |
+| ignore whether the config set the field | `a_dotenv_value_with_no_configured_counterpart_is_silent` — and only that one |
+
+Each condition is caught by exactly the assertions written for it, with the others
+staying green: the tests discriminate individually rather than as a block.
+
+**End-to-end on the real binary**, which is what makes the warning a reached path rather
+than a decoration:
+
+```
+dotenv supplies the url, project.toml sets its own
+  -> WARN [embeddings].url is set in your config but was overridden by the startup dotenv …
+
+same value EXPORTED instead
+  -> warnings emitted: 0
+```
 
 ## Workarounds
 
@@ -160,10 +222,12 @@ Export the desired value in the MCP server's own env block, or set
 
 ## Resume
 
-Thread `startup_env_assignments`'s returned key list into a process-global
-`OnceLock<Vec<String>>` so `merge_embed_config` can distinguish dotenv-injected
-keys from exported ones, then add the shadowing warning. Do **not** change the
-precedence itself — the ruling keeps env on top.
+N/A — fixed and verified.
+
+The `CODESCOUT_EMBEDDING_*` family consolidation is carried on Task 5 of
+`docs/plans/2026-09-17-embedding-config-consolidation.md`, not on this bug. It is a
+different complaint about the same surface: this one was *precedence*, that one is the
+eleven-variable *count*.
 
 ## References
 
