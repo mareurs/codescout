@@ -1,13 +1,15 @@
 ---
-id: da26a27026bb9f41
+id: 4cd387ba07bc8d2a
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the global [embeddings] section holds one field and silently drops the rest'
 tags:
 - cluster/accepted-parameter-silently-dropped
 - embeddings
 - config
 - global-config
+claimed_at: 2026-09-17
+claimed_by: 458a8a26-c380-4f5b-b967-2181f592917e
 ---
 
 ## Summary
@@ -123,23 +125,77 @@ So the page's only embeddings example fails even for the one field that works.
 
 ## Fix
 
-Plan, not yet implemented. Make the global layer the **same type** as the
-project layer — one `EmbeddingsSection` with all-`Option` fields, used at both
-levels — so the two cannot drift again by construction. This is the shape the
-deep-merging `merge_toml` already assumes. Two real implementors exist (global,
-project), so the shared type is earned rather than speculative.
+Landed. `GlobalEmbeddingsSection` is now a **type alias** for
+`crate::config::project::EmbeddingsSection` — not a second struct kept in step, because
+"kept in step" is exactly what failed here. Two structs describing one config block
+drift in one direction and silently: the level a developer is editing gains the field,
+the other does not, and neither the type system nor the tests object. One type cannot
+drift from itself.
 
-Independently: emit a one-time warning listing unknown keys under
-`[embeddings]` in either layer, so a typo or an unsupported key is visible
-rather than inferred from a downstream failure.
+`EmbeddingsSection::model` became `Option<String>`, and that was **forced, not
+cosmetic**. `serde(default)` fires for an ABSENT `[embeddings]` table, so with the old
+`#[serde(default = "default_embed_model")]` the now-shared struct would have made every
+global config serialise `model = "local:AllMiniLML6V2Q"` into the merge base — a global
+layer asserting a model nobody wrote, pinning every project to it. That would have been
+a strictly worse bug than the one being fixed, produced BY the fix. The default moved to
+resolution: `EmbeddingsSection::model_or_default()` and `merge_embed_config`.
 
-SHA / patch-id: pending.
+The merge beneath was never at fault and is better than documented: `merge_toml` recurses
+and `merge_toml_base_fills_missing_key` pins field-by-field merging of `[embeddings]`
+specifically. Only the struct above it could not express the fields.
+
+**Not done here, and listed rather than dropped:** the unknown-key warning. With the
+shared type the remaining silent drop is a genuinely unknown key — a typo like
+`modle = …` — which is a different residual from the one this bug names, and it needs a
+warn-once surface plus the provenance channel that Task 5 of
+`docs/plans/2026-09-17-embedding-config-consolidation.md` introduces anyway. Building
+that surface here would mean building it twice.
+
+- **SHA:** `de0a1e0703a79a458cd0293a225ce7cb970d8cb7` (on `experiments`)
+- **patch-id:** `95e9301f095b51cd862e81f304a1f64d52dd8483`
 
 ## Tests added
 
-None yet. Owed: a test asserting a global `url` reaches
-`RetrievalConfig.embedder_url` when the project sets none — asserted on the
-resolution path, not on a re-implementation of the merge.
+Two, in `src/retrieval/config.rs` `merge_tests`:
+
+- `a_global_url_and_key_survive_the_round_trip_into_the_resolved_config` — a global
+  `url` and `api_key` reach the resolved config while the project's own `model` still
+  wins.
+- `the_global_layer_fills_a_gap_inside_the_project_embeddings_table` — the project sets
+  `model` and inherits the global `url` sitting beside it in the same table. This is the
+  half a per-field fix would miss, and the behaviour
+  `docs/manual/src/configuration/global-config.md` § *Merge semantics* denies in writing.
+
+**Both were written AFTER the fix, so neither had an observed red.** That is a real gap
+in the evidence, not a formality, and it was closed by mutation rather than by asserting
+harder — once per guarded **field**, since `url` and `api_key` are separate sites and one
+probe would have proved only one of them:
+
+| mutation (`scripts/mutation-probe.sh`, isolated worktree) | result |
+|---|---|
+| `skip_serializing` on `EmbeddingsSection::url` | **KILLED** — both tests, `left: None` |
+| `skip_serializing` on `EmbeddingsSection::api_key` | **KILLED** — only the assertion naming it |
+
+`left: None` is the exact historical symptom, and the second probe leaving the
+gap-filling test green shows each assertion catches its own field rather than the pair
+riding on one. The twelve pre-existing merge tests stayed green under both mutations,
+confirming they were isolated to the global round trip.
+
+**One design point worth keeping, because the obvious version of this test is vacuous:**
+both route through `GlobalConfig::load_from_dir` + `to_toml_value`, never a hand-built
+`toml::Value`. The defect lived in the **type** — serde discarded the keys at parse time
+and `to_toml_value` re-serialised the struct — so a test that constructs the merge base
+directly bypasses the broken component entirely and passes both before and after the fix,
+asserting only about `merge_toml`, which was never broken.
+
+**End-to-end**, against a logging `/v1/embeddings` server:
+
+```
+global: model+url+api_key   project: no [embeddings]  -> all three on the wire
+                                                         (before: "Unknown model", 0 requests)
+global: model+url+api_key   project: model only       -> model from project,
+                                                         api_key from global
+```
 
 ## Workarounds
 
@@ -150,12 +206,10 @@ outranks every project's own config; see the sibling bug.
 
 ## Resume
 
-Replace `GlobalEmbeddingsSection` with a reuse of `EmbeddingsSection` whose
-fields are all `Option`, adjusting `EmbeddingsSection::model` from `String` to
-`Option<String>` and moving `default_embed_model()` to the point of resolution
-rather than deserialisation. Check `GlobalConfig::to_toml_value`'s
-`skip_serializing_if` behaviour still emits only set fields
-(`src/config/global.rs:350-373` pins that).
+N/A — fixed and verified.
+
+The unknown-key warning noted under *Fix* is carried on Task 5 of
+`docs/plans/2026-09-17-embedding-config-consolidation.md`, not on this bug.
 
 ## References
 

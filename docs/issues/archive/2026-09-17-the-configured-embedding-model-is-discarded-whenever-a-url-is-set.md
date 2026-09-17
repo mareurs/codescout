@@ -248,7 +248,7 @@ N/A — fixed and verified.
 
 The surrounding work continues in
 `docs/plans/2026-09-17-embedding-config-consolidation.md`; the next task is the shared
-`EmbeddingSettings` type (bug `da26a27026bb9f41`), and the shadowing warning this fix
+`EmbeddingSettings` type (bug `4cd387ba07bc8d2a`), and the shadowing warning this fix
 deliberately defers is Task 5.
 
 ## References

@@ -620,7 +620,7 @@ mod merge_tests {
     /// was never broken. The parse-and-re-serialise round trip is the whole
     /// subject.
     ///
-    /// `docs/issues/2026-09-17-the-global-embeddings-section-holds-one-field-and-drops-the-rest.md`
+    /// `docs/issues/archive/2026-09-17-the-global-embeddings-section-holds-one-field-and-drops-the-rest.md`
     #[test]
     fn a_global_url_and_key_survive_the_round_trip_into_the_resolved_config() {
         let global_dir = tempfile::tempdir().unwrap();

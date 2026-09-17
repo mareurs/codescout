@@ -23,7 +23,7 @@ pub struct GlobalConfig {
 /// struct, meaning the dropped keys could not reach the merge even in principle.
 /// A user who set all three globally got a failure whose first suggested remedy
 /// was *"Set url in [embeddings]"*, which is what they had just done.
-/// `docs/issues/2026-09-17-the-global-embeddings-section-holds-one-field-and-drops-the-rest.md`.
+/// `docs/issues/archive/2026-09-17-the-global-embeddings-section-holds-one-field-and-drops-the-rest.md`.
 ///
 /// **An alias rather than a second struct kept in step, because "kept in step"
 /// is what failed.** Two structs describing one config block drift silently and

@@ -11,9 +11,9 @@ tags:
 topic: embedding configuration
 ---
 
-**Status:** approved in outline 2026-09-17 (three rulings below). **Task 1 landed** —
-`654e1f18` / patch-id `2a45699854551182`, bug archived as `aae547c917c329b5`.
-**Bugs this closes:** `aae547c917c329b5` (**fixed**), `da26a27026bb9f41`,
+**Status:** approved in outline 2026-09-17 (three rulings below). **Tasks 1 and 2
+landed** — `654e1f18` and `de0a1e07`.
+**Bugs this closes:** `aae547c917c329b5` (**fixed**), `4cd387ba07bc8d2a` (**fixed**),
 `6ec9c313893fd21f`, `efd14d6c5eb56905`, `c09210c5bcd74208`, `eb3417ec7e02c66e`.
 
 ## The problem, measured
@@ -80,7 +80,7 @@ docker-compose wiring sets it. What *can* change is that the machine's
 **Change scenarios absorbed:**
 1. *A new embedding setting is added* — today it must be added to
    `EmbeddingsSection` **and** `GlobalEmbeddingsSection`, and the second is
-   already four fields behind (bug `da26a27026bb9f41` is that drift realised).
+   already four fields behind (bug `4cd387ba07bc8d2a` is that drift realised).
 2. *A second HTTP-backed embedder is introduced* — today it would re-read env
    inside its own constructor, which is exactly how bug `aae547c917c329b5`
    arose.
@@ -135,7 +135,8 @@ constructors.
 
 ### Task 2 — one settings type at both levels
 
-**Landed 2026-09-17** (SHA recorded at commit). Closes `da26a27026bb9f41`.
+**Landed 2026-09-17** — `de0a1e0703a79a458cd0293a225ce7cb970d8cb7`, patch-id
+`95e9301f095b51cd862e81f304a1f64d52dd8483`. Closes `4cd387ba07bc8d2a`.
 
 `GlobalEmbeddingsSection` is now a **type alias** for
 `crate::config::project::EmbeddingsSection`, not a second struct kept in step — because
