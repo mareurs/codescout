@@ -28,10 +28,12 @@
 //! until the prose sweep lands, and `doctor` says so instead of a stale row hiding it.
 
 use crate::librarian::catalog::entry_cite;
-use crate::librarian::catalog::Catalog;
+use crate::librarian::catalog::{augmentation, Catalog};
 use crate::librarian::tools::LibrarianRecoverableError;
 use anyhow::Result;
+use regex::Regex;
 use rusqlite::{params, OptionalExtension};
+use serde_json::Value;
 
 /// What a rekey moved. Counted separately because they are different kinds of fact —
 /// a dropped derived row is not a loss, a re-pointed durable one is a migration.
@@ -50,6 +52,15 @@ pub struct RekeyReport {
     /// Whether an `entry_reservation` row existed and moved. `false` is normal, not a failure:
     /// a params-backed ledger never allocates through `allocate_entry_id` and so has no row.
     pub reservation_moved: bool,
+    /// Entry ids rewritten inside the augmentation's `entry_collection` array.
+    pub params_ids_repointed: usize,
+    /// `pattern` strings in `params_schema` retargeted from the old prefix to the new one.
+    /// **Zero alongside a non-zero `params_ids_repointed` is not automatically wrong** — a
+    /// ledger may pin no id pattern at all — but it is the shape that would ship a schema
+    /// rejecting every id, which is why the validation below is not optional.
+    pub schema_patterns_repointed: usize,
+    /// Whether the augmentation's `prompt` text mentioned the old prefix and was rewritten.
+    pub prompt_rewritten: bool,
 }
 
 /// Retarget one entry token, **preserving its numeric tail byte-for-byte**.
@@ -97,6 +108,162 @@ fn drop_superseded(
         "DELETE FROM entry_cite WHERE src_slug=?1 AND src_local=?2 AND dst_ref=?3 AND rel=?4",
         params![src_slug, src_local, dst_ref, rel],
     )?)
+}
+
+/// Retarget `pattern` strings that pin the id namespace, recursively, returning how many
+/// moved.
+///
+/// **Deliberately exact-match on the canonical form `^<prefix>-\d+$`, not a substring
+/// replace.** A `pattern` may constrain something that merely contains the prefix's letters,
+/// and rewriting it would corrupt a schema this rekey has no business touching. Recognising
+/// only the one form the corpus actually uses, and letting the caller's validation catch
+/// anything else, trades a silent wrong edit for a loud refusal — which is the trade this
+/// whole module is about.
+fn retarget_patterns(v: &mut Value, from_prefix: &str, to_prefix: &str) -> usize {
+    let canonical = format!("^{from_prefix}-\\d+$");
+    let replacement = format!("^{to_prefix}-\\d+$");
+    let mut moved = 0;
+    match v {
+        Value::Object(map) => {
+            for (key, val) in map.iter_mut() {
+                if key == "pattern" && val.as_str() == Some(canonical.as_str()) {
+                    *val = Value::String(replacement.clone());
+                    moved += 1;
+                    continue;
+                }
+                moved += retarget_patterns(val, from_prefix, to_prefix);
+            }
+        }
+        Value::Array(arr) => {
+            for val in arr.iter_mut() {
+                moved += retarget_patterns(val, from_prefix, to_prefix);
+            }
+        }
+        _ => {}
+    }
+    moved
+}
+
+/// Retarget namespace mentions in prose: concrete ids (`T-9`) **and the template form
+/// `T-N`**, where `N` is the literal letter.
+///
+/// The template form is not a nicety — it is how augmentation prompts teach the entry shape.
+/// The live `system-retrospective-improvements` prompt reads *"every task also keeps its own
+/// `## T-N — <title>` body section (that heading is what makes T-N citable)"*, so a rewrite
+/// that handled only digits would leave the ledger instructing its own maintainer to write
+/// headings under the prefix it just abandoned.
+///
+/// `\b` on both sides is what keeps `TX-2` and `FT-1` out of a rekey of `T`: the first has no
+/// `-` where one is required, and the second has no word boundary before its `T`.
+fn retarget_prose(text: &str, from_prefix: &str, to_prefix: &str) -> Result<String> {
+    let re = Regex::new(&format!(r"\b{}-(\d+|N)\b", regex::escape(from_prefix)))?;
+    Ok(re
+        .replace_all(text, format!("{to_prefix}-$1").as_str())
+        .into_owned())
+}
+
+/// Move the augmentation's half of the namespace: the `entry_collection` row ids, the
+/// `params_schema` id pattern, and the `prompt` text — in the caller's transaction.
+///
+/// **Why this cannot be a separate call from the row work, and why the schema cannot be a
+/// separate call from the ids.** `params_schema` is validated against the MERGED params
+/// (`augment.rs:36-52` `validate_merged_against_schema`), so a ledger pinning
+/// `pattern: ^T-\d+$` refuses `SRI-1` on the first row written. Ids and schema are therefore
+/// not two steps that happen to be adjacent; either both move or neither can. This is not a
+/// deduction — it is the recorded experience of `d3282868`, the one time this was done by
+/// hand: *"Schema is validated against the merged params, so schema and ids had to move in
+/// one atomic call."*
+///
+/// **The validation at the end is a safety net over this function's own pattern rewriting,
+/// not a formality.** Recognising which schema strings constrain an id is a heuristic — the
+/// canonical `^<prefix>-\d+$` is recognised, and a hand-rolled equivalent
+/// (`^(T)-[0-9]+$`, say) is not. Left there, an unrecognised pattern would ship a schema
+/// that rejects every id in the ledger, and nothing would notice until the next
+/// `append_entry` failed for reasons pointing nowhere near this rekey. Validating the new
+/// params against the new schema converts that silent trap into a refusal at the moment of
+/// the rekey, which is the only moment anyone has the context to act on it.
+fn rekey_augmentation(
+    tx: &rusqlite::Transaction<'_>,
+    artifact_id: &str,
+    from_prefix: &str,
+    to_prefix: &str,
+    report: &mut RekeyReport,
+) -> Result<()> {
+    let Some(row) = augmentation::get_by_conn(tx, artifact_id)? else {
+        return Ok(());
+    };
+
+    // --- 1. Entry ids in the declared collection.
+    let mut params: Value = serde_json::from_str(&row.params).map_err(|e| {
+        LibrarianRecoverableError::new(format!(
+            "rekey_prefix: `{artifact_id}`'s stored params are not valid JSON: {e}"
+        ))
+    })?;
+    if let Some(coll) = row.entry_collection.as_deref() {
+        if let Some(arr) = params.get_mut(coll).and_then(|v| v.as_array_mut()) {
+            for entry in arr.iter_mut() {
+                let Some(id) = entry.get("id").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let Some(new_id) = retarget_token(id, from_prefix, to_prefix) else {
+                    continue;
+                };
+                entry["id"] = Value::String(new_id);
+                report.params_ids_repointed += 1;
+            }
+        }
+    }
+
+    // --- 2. The id pattern in `params_schema`.
+    let mut schema: Option<Value> = match row.params_schema.as_deref() {
+        Some(text) => Some(serde_json::from_str(text).map_err(|e| {
+            LibrarianRecoverableError::new(format!(
+                "rekey_prefix: `{artifact_id}`'s stored params_schema is not valid JSON: {e}"
+            ))
+        })?),
+        None => None,
+    };
+    if let Some(s) = schema.as_mut() {
+        report.schema_patterns_repointed += retarget_patterns(s, from_prefix, to_prefix);
+    }
+
+    // --- 3. The augmentation prompt, which teaches the entry shape by quoting it.
+    let new_prompt = retarget_prose(&row.prompt, from_prefix, to_prefix)?;
+    report.prompt_rewritten = new_prompt != row.prompt;
+
+    // --- 4. The safety net. See this function's doc comment: pattern recognition is a
+    // heuristic, and the cost of a miss is a ledger that refuses its own ids at some later
+    // `append_entry`, far from anything naming this rekey.
+    if let Some(s) = schema.as_ref() {
+        crate::librarian::tools::schema_validate::validate(s, &params).map_err(|e| {
+            LibrarianRecoverableError::with_hint(
+                format!(
+                    "rekey_prefix: the rewritten ids violate `{artifact_id}`'s params_schema: {e}"
+                ),
+                format!(
+                    "The schema pins the old namespace in a form this rekey does not \
+                     recognise — only the canonical `^{from_prefix}-\\d+$` is retargeted \
+                     automatically. Nothing has been written. Update the pattern to accept \
+                     `{to_prefix}` and re-run, so the ids and the schema still move in one \
+                     transaction."
+                ),
+            )
+        })?;
+    }
+
+    tx.execute(
+        "UPDATE artifact_augmentation
+            SET params=?1, params_schema=?2, prompt=?3,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE artifact_id=?4",
+        params![
+            params.to_string(),
+            schema.as_ref().map(|s| s.to_string()),
+            new_prompt,
+            artifact_id
+        ],
+    )?;
+    Ok(())
 }
 
 /// Move every `<from_prefix>-N` entry id owned by `artifact_id` to `<to_prefix>-N`, across the
@@ -261,6 +428,8 @@ pub fn rekey_prefix_rows(
         "UPDATE entry_reservation SET prefix=?1 WHERE artifact_id=?2 AND prefix=?3",
         params![to_prefix, artifact_id, from_prefix],
     )? > 0;
+
+    rekey_augmentation(&tx, artifact_id, from_prefix, to_prefix, &mut report)?;
 
     tx.commit()?;
     Ok(report)
@@ -550,5 +719,254 @@ mod tests {
             )
             .unwrap();
         assert_eq!(f, 172, "the refusal must leave both counters intact");
+    }
+    // ---- augmentation: params ids, schema pattern, prompt ----
+
+    /// Minimal augmentation row. `entry_collection` names the params array holding the rows
+    /// whose `id` field is the citable token.
+    fn aug(
+        cat: &Catalog,
+        artifact_id: &str,
+        coll: Option<&str>,
+        params: serde_json::Value,
+        schema: Option<serde_json::Value>,
+        prompt: &str,
+    ) {
+        let row = crate::librarian::catalog::augmentation::AugmentationRow {
+            artifact_id: artifact_id.into(),
+            prompt: prompt.into(),
+            params: params.to_string(),
+            last_refreshed_at: None,
+            refresh_count: 0,
+            created_at: "2026-01-01T00:00:00.000Z".into(),
+            updated_at: "2026-01-01T00:00:00.000Z".into(),
+            render_template: None,
+            params_schema: schema.map(|s| s.to_string()),
+            append_mode: false,
+            history_cap: None,
+            entry_collection: coll.map(|c| c.into()),
+            refreshed_at_commit: None,
+        };
+        crate::librarian::catalog::augmentation::upsert(cat, &row).unwrap();
+    }
+
+    fn params_of(cat: &Catalog, artifact_id: &str) -> serde_json::Value {
+        let row = crate::librarian::catalog::augmentation::get(cat, artifact_id)
+            .unwrap()
+            .unwrap();
+        serde_json::from_str(&row.params).unwrap()
+    }
+
+    fn schema_of(cat: &Catalog, artifact_id: &str) -> serde_json::Value {
+        let row = crate::librarian::catalog::augmentation::get(cat, artifact_id)
+            .unwrap()
+            .unwrap();
+        serde_json::from_str(&row.params_schema.unwrap()).unwrap()
+    }
+
+    /// The canonical id pattern this corpus uses, in the exact stored form: read off the live
+    /// `system-retrospective-improvements` augmentation, where it is `"^T-\\d+$"` in JSON.
+    fn id_schema(prefix: &str) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": { "id": { "type": "string", "pattern": format!("^{prefix}-\\d+$") } }
+                    }
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn params_entry_ids_move_with_the_prefix() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "led", "/repo/ledger.md", "my-ledger");
+        aug(
+            &cat,
+            "led",
+            Some("tasks"),
+            serde_json::json!({"tasks": [{"id": "T-1", "task": "a"}, {"id": "T-2", "task": "b"}]}),
+            Some(id_schema("T")),
+            "keep the table",
+        );
+
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+
+        assert_eq!(report.params_ids_repointed, 2);
+        let p = params_of(&cat, "led");
+        assert_eq!(p["tasks"][0]["id"], "SRI-1");
+        assert_eq!(p["tasks"][1]["id"], "SRI-2");
+        assert_eq!(p["tasks"][0]["task"], "a", "sibling fields are untouched");
+    }
+
+    #[test]
+    fn the_id_pattern_in_params_schema_moves_in_the_same_write() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "led", "/repo/ledger.md", "my-ledger");
+        aug(
+            &cat,
+            "led",
+            Some("tasks"),
+            serde_json::json!({"tasks": [{"id": "T-1"}]}),
+            Some(id_schema("T")),
+            "p",
+        );
+
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+
+        assert_eq!(report.schema_patterns_repointed, 1);
+        let s = schema_of(&cat, "led");
+        assert_eq!(
+            s["properties"]["tasks"]["items"]["properties"]["id"]["pattern"],
+            "^SRI-\\d+$"
+        );
+    }
+
+    /// **This is the atomicity requirement made executable**, and it is a claim about the
+    /// domain rather than about this function's internals: the ids this rekey just wrote are
+    /// rejected by the schema it replaced. So ids and schema are not two adjacent steps that
+    /// could be split into two calls — either both move or the ledger is left refusing its
+    /// own rows. `d3282868` learned this by hand; this pins it.
+    #[test]
+    fn the_new_ids_would_violate_the_old_schema_which_is_why_both_must_move_together() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "led", "/repo/ledger.md", "my-ledger");
+        aug(
+            &cat,
+            "led",
+            Some("tasks"),
+            serde_json::json!({"tasks": [{"id": "T-1"}]}),
+            Some(id_schema("T")),
+            "p",
+        );
+
+        rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+
+        let new_params = params_of(&cat, "led");
+        let err = crate::librarian::tools::schema_validate::validate(&id_schema("T"), &new_params)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("pattern") || err.to_string().contains("SRI-1"),
+            "the OLD schema must reject the NEW ids — that is the whole reason for one write; got: {err}"
+        );
+        crate::librarian::tools::schema_validate::validate(&id_schema("SRI"), &new_params)
+            .expect("and the NEW schema must accept them");
+    }
+
+    /// The safety net over this function's own pattern-recognition heuristic. `^(T)-[0-9]+$`
+    /// constrains the id exactly as the canonical form does and is not recognised by it. Left
+    /// unrewritten, the ledger would ship a schema rejecting every one of its ids, and the
+    /// failure would surface at some later `append_entry` pointing nowhere near this rekey.
+    ///
+    /// The fixture's load-bearing detail is that the pattern is *equivalent to* the canonical
+    /// one but not *equal to* it. Replace it with `^T-\d+$` and the rewrite succeeds, the
+    /// validation passes, and this test silently stops testing anything.
+    #[test]
+    fn a_schema_pattern_the_rewrite_cannot_reach_is_refused_rather_than_shipped_broken() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "led", "/repo/ledger.md", "my-ledger");
+        let hand_rolled = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": { "id": { "type": "string", "pattern": "^(T)-[0-9]+$" } }
+                    }
+                }
+            }
+        });
+        aug(
+            &cat,
+            "led",
+            Some("tasks"),
+            serde_json::json!({"tasks": [{"id": "T-1"}]}),
+            Some(hand_rolled),
+            "p",
+        );
+
+        let err = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap_err();
+
+        assert!(
+            err.to_string().contains("params_schema"),
+            "the refusal must name the schema as the thing that needs a human; got: {err}"
+        );
+        assert_eq!(
+            params_of(&cat, "led")["tasks"][0]["id"],
+            "T-1",
+            "and the transaction must have rolled back — a refused rekey leaves nothing moved"
+        );
+    }
+
+    #[test]
+    fn the_prompt_text_follows_the_prefix() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "led", "/repo/ledger.md", "my-ledger");
+        aug(
+            &cat,
+            "led",
+            Some("tasks"),
+            serde_json::json!({"tasks": [{"id": "T-1"}]}),
+            Some(id_schema("T")),
+            "every task keeps its own `## T-N — <title>` body section; see T-3 for the shape",
+        );
+
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+
+        assert!(report.prompt_rewritten);
+        let row = crate::librarian::catalog::augmentation::get(&cat, "led")
+            .unwrap()
+            .unwrap();
+        assert!(
+            row.prompt.contains("## SRI-N —") && row.prompt.contains("see SRI-3"),
+            "both the literal-N template form and a concrete id must move; got: {}",
+            row.prompt
+        );
+        assert!(!row.prompt.contains("T-N"), "no old token may survive");
+    }
+
+    /// A ledger owning two namespaces must keep the one not being rekeyed. Same law as the
+    /// `entry_reservation` case, one layer up.
+    #[test]
+    fn a_params_id_under_a_different_prefix_is_left_alone() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "led", "/repo/ledger.md", "my-ledger");
+        aug(
+            &cat,
+            "led",
+            Some("items"),
+            serde_json::json!({"items": [{"id": "T-1"}, {"id": "W-4"}, {"id": "TX-2"}]}),
+            None,
+            "p",
+        );
+
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+
+        assert_eq!(report.params_ids_repointed, 1);
+        let p = params_of(&cat, "led");
+        assert_eq!(p["items"][0]["id"], "SRI-1");
+        assert_eq!(p["items"][1]["id"], "W-4", "a different namespace");
+        assert_eq!(p["items"][2]["id"], "TX-2", "shares a leading letter only");
+    }
+
+    #[test]
+    fn a_ledger_with_no_augmentation_is_not_an_error() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "led", "/repo/ledger.md", "my-ledger");
+        cite(&cat, "my-ledger", "T-4", "abcdef0123456789", "write");
+
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+
+        assert_eq!(
+            report.durable_outbound_repointed, 1,
+            "the rekey must have run — without this the absences below are vacuous"
+        );
+        assert_eq!(report.params_ids_repointed, 0);
+        assert!(!report.prompt_rewritten);
     }
 }
