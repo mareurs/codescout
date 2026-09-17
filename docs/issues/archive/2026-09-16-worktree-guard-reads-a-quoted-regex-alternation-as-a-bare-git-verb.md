@@ -167,9 +167,33 @@ mismatches. The `cache = working tree` column was checked with a control pair ra
 presence grep (`function stripQuoted` is 1× in each 1.20.12 cache, 0× in the 1.20.11 cache
 beside it), so that green is known to be able to read otherwise.
 
-One profile's live state is **not** established: `/reload-plugins` was run in `~/.claude-kat`
-only. Sessions in `~/.claude` and `~/.claude-sdd` hold the pre-fix hook in memory until they
-reload, since CC resolves hook commands at process launch.
+**CORRECTED 2026-09-17 — the restart claim below was wrong, and it was inherited rather than
+measured.** This record originally said live state was established for `~/.claude-kat` only,
+and that sessions in `~/.claude` and `~/.claude-sdd` held the pre-fix hook in memory until
+they reloaded. That is false on this machine. `hooks.json` invokes
+`node ${CLAUDE_PLUGIN_ROOT}/hooks/git-worktree-guard.mjs`, and `CLAUDE_PLUGIN_ROOT` resolves
+to the **repo working tree**, not to `installPath` — this is a `source=directory`
+marketplace. So the hook-body fix was live at the moment it was written, in every profile,
+needing neither the release nor a restart.
+
+Evidence, two independent readings: `.buddy/.session-start-trace.log` has logged exactly one
+`plugin_root` value ever (`sort -u` → one line), a working-tree path with `plugin_root_env=N`;
+and the same line carries `recon_skill=<repo>/codescout-companion/skills/…`, which is a
+working-tree path for **this** plugin rather than for buddy. Raised by sessionId
+`458a8a26-c380-4f5b-b967-2181f592917e` in `claude-plugins:4984aa8`, re-derived here.
+
+**What the restart IS still needed for:** skills and commands read by path under
+`installPath`. That half was correct. And note their second ground — the `<2 worktrees`
+carve-out at `git-worktree-guard.mjs:126-129` — is scoped to the `claude-plugins` checkout,
+which has one worktree. It does **not** transfer to codescout, which has nine; the guard
+fires here, which is why this bug exists at all.
+
+**How the false claim got in, since that is the reusable part:** inference from "CC resolves
+hook commands at process launch", never checked against the load path. It was then restated
+in three places — this record, the session log, and the version-bump-checklist — and a
+restated claim reads as corroborated when it has only been repeated. The live verification
+run after `/reload-plugins` was real, but it could not discriminate: a fix that was already
+live produces the identical pass.
 
 If the SHA stops resolving, recover the commit by patch-id.
 
