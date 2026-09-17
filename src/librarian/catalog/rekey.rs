@@ -61,6 +61,12 @@ pub struct RekeyReport {
     pub schema_patterns_repointed: usize,
     /// Whether the augmentation's `prompt` text mentioned the old prefix and was rewritten.
     pub prompt_rewritten: bool,
+    /// Body lines whose text changed — defining headings, index rows and prose self-citations
+    /// together, because one fence-aware pass handles all three and splitting the count would
+    /// invite the reader to treat a heading and a mention as different kinds of edit. They are
+    /// not: `link_scan` binds a citable token to a `## <ID> — <title>` heading, and everything
+    /// else on the page is a citation of it.
+    pub body_lines_rewritten: usize,
 }
 
 /// Retarget one entry token, **preserving its numeric tail byte-for-byte**.
@@ -300,6 +306,122 @@ fn rekey_augmentation(
     Ok(())
 }
 
+/// Move the namespace through the ledger's markdown: defining headings, index rows and prose
+/// self-citations, in one fence-aware pass, written before the caller commits.
+///
+/// **Writing the file inside the transaction is the established shape here, not an
+/// improvisation** — `allocate_entry_id` (`augmentation.rs:1495-1510`) writes frontmatter
+/// before `tx.commit()` for the same reason: a failed file write must roll the catalog back,
+/// or the two disagree and nothing notices.
+///
+/// **Fenced blocks are skipped using the scanner's own idiom** (`entry_token.rs:57-58`), and
+/// that sharing is load-bearing rather than tidy. A rewriter that disagreed with `link_scan`
+/// about what counts as a citation would edit text the scanner never treats as one, or leave
+/// text it does — and the disagreement would be invisible until a rescan produced edges the
+/// prose does not support.
+///
+/// **Unbalanced fences are REFUSED, which is the opposite of what the reading side does with
+/// the same fact.** `fences_balanced`'s own doc comment explains that an *editor* facing an
+/// unclosed fence would rather treat it as plain text so trailing headings stay addressable
+/// (`archive/2026-05-21-edit-markdown-last-heading-unaddressable.md`). That is right for
+/// addressing and wrong for rewriting: treating an unclosed fence as prose means editing
+/// tokens inside what the author wrote as code, destroying the one escape this namespace has
+/// (§ *Parsers Over a Namespace* — the fence IS the escape). Reading a heading you should not
+/// have is recoverable; rewriting a token you should not have is not.
+fn rekey_body(
+    tx: &rusqlite::Transaction<'_>,
+    artifact_id: &str,
+    from_prefix: &str,
+    to_prefix: &str,
+    own_slug: Option<&str>,
+    report: &mut RekeyReport,
+) -> Result<()> {
+    let abs_path: Option<String> = tx
+        .query_row(
+            "SELECT abs_path FROM artifact WHERE id=?1",
+            [artifact_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(abs_path) = abs_path else {
+        return Ok(());
+    };
+
+    let text = match std::fs::read_to_string(&abs_path) {
+        Ok(t) => t,
+        Err(e) => {
+            // Nothing in params moved, so nothing on disk has to stay in step with the
+            // catalog: an unreadable file is `doctor`'s `missing_file` to report, not a
+            // reason to refuse a citation-only rekey.
+            if report.params_ids_repointed == 0 {
+                return Ok(());
+            }
+            return Err(LibrarianRecoverableError::with_hint(
+                format!("rekey_prefix: cannot read `{abs_path}` to move its headings: {e}"),
+                "This ledger's params ids were rewritten earlier in this same transaction. \
+                 Letting the body keep the old headings would leave every params row \
+                 anchoring an id the body no longer defines — `doctor`'s \
+                 `entry_without_definition`, one per entry, which the bug this feature \
+                 exists for calls trading one finding for seventeen. Nothing has been \
+                 written."
+                    .to_string(),
+            ));
+        }
+    };
+
+    let (frontmatter, body) = crate::librarian::frontmatter::parse(&text)?;
+
+    if !crate::util::markdown_fence::fences_balanced(body.lines()) {
+        return Err(LibrarianRecoverableError::with_hint(
+            format!("rekey_prefix: `{abs_path}` leaves a code fence unclosed"),
+            "Fence tracking is not trustworthy past an unclosed fence, and a fenced block is \
+             the only way this corpus can MENTION an entry id without citing it. Rewriting \
+             blind would edit tokens the author deliberately escaped. Close the fence and \
+             re-run; nothing has been written."
+                .to_string(),
+        ));
+    }
+
+    let ends_with_newline = body.ends_with('\n');
+    let mut fence = crate::util::markdown_fence::FenceState::new();
+    let mut out = String::with_capacity(body.len());
+    for line in body.lines() {
+        let is_delimiter = fence.feed(line);
+        if is_delimiter || fence.in_fence() {
+            out.push_str(line);
+        } else {
+            let rewritten = retarget_prose(line, from_prefix, to_prefix, own_slug)?;
+            if rewritten != line {
+                report.body_lines_rewritten += 1;
+            }
+            out.push_str(&rewritten);
+        }
+        out.push('\n');
+    }
+    if !ends_with_newline {
+        out.pop();
+    }
+
+    if report.body_lines_rewritten == 0 {
+        return Ok(());
+    }
+
+    // `replace_body` preserves the frontmatter block byte-for-byte and returns `None` when
+    // there is none to preserve — in which case the body IS the document.
+    let new_doc = if frontmatter.is_some() {
+        crate::librarian::frontmatter::replace_body(&text, &out).ok_or_else(|| {
+            LibrarianRecoverableError::new(format!(
+                "rekey_prefix: `{abs_path}` parsed as having frontmatter but its block could \
+                 not be preserved"
+            ))
+        })?
+    } else {
+        out
+    };
+    std::fs::write(&abs_path, new_doc)?;
+    Ok(())
+}
+
 /// Move every `<from_prefix>-N` entry id owned by `artifact_id` to `<to_prefix>-N`, across the
 /// catalog tables keyed on it.
 ///
@@ -463,6 +585,14 @@ pub fn rekey_prefix_rows(
     )? > 0;
 
     rekey_augmentation(
+        &tx,
+        artifact_id,
+        from_prefix,
+        to_prefix,
+        slug.as_deref(),
+        &mut report,
+    )?;
+    rekey_body(
         &tx,
         artifact_id,
         from_prefix,
@@ -866,7 +996,7 @@ mod tests {
     #[test]
     fn params_entry_ids_move_with_the_prefix() {
         let mut cat = Catalog::open_in_memory().unwrap();
-        art(&cat, "led", "/repo/ledger.md", "my-ledger");
+        let _l = led(&cat, "led", "my-ledger", LEDGER_DOC);
         aug(
             &cat,
             "led",
@@ -888,7 +1018,7 @@ mod tests {
     #[test]
     fn the_id_pattern_in_params_schema_moves_in_the_same_write() {
         let mut cat = Catalog::open_in_memory().unwrap();
-        art(&cat, "led", "/repo/ledger.md", "my-ledger");
+        let _l = led(&cat, "led", "my-ledger", LEDGER_DOC);
         aug(
             &cat,
             "led",
@@ -916,7 +1046,7 @@ mod tests {
     #[test]
     fn the_new_ids_would_violate_the_old_schema_which_is_why_both_must_move_together() {
         let mut cat = Catalog::open_in_memory().unwrap();
-        art(&cat, "led", "/repo/ledger.md", "my-ledger");
+        let _l = led(&cat, "led", "my-ledger", LEDGER_DOC);
         aug(
             &cat,
             "led",
@@ -988,7 +1118,7 @@ mod tests {
     #[test]
     fn the_prompt_text_follows_the_prefix() {
         let mut cat = Catalog::open_in_memory().unwrap();
-        art(&cat, "led", "/repo/ledger.md", "my-ledger");
+        let _l = led(&cat, "led", "my-ledger", LEDGER_DOC);
         aug(
             &cat,
             "led",
@@ -1017,7 +1147,7 @@ mod tests {
     #[test]
     fn a_params_id_under_a_different_prefix_is_left_alone() {
         let mut cat = Catalog::open_in_memory().unwrap();
-        art(&cat, "led", "/repo/ledger.md", "my-ledger");
+        let _l = led(&cat, "led", "my-ledger", LEDGER_DOC);
         aug(
             &cat,
             "led",
@@ -1050,5 +1180,218 @@ mod tests {
         );
         assert_eq!(report.params_ids_repointed, 0);
         assert!(!report.prompt_rewritten);
+    }
+    // ---- body: headings, index rows, prose self-citations ----
+
+    /// A ledger backed by a REAL file, because a body rewriter cannot be tested against a
+    /// fabricated path. Holds its `TempDir` so the file outlives the call.
+    struct Led {
+        _dir: tempfile::TempDir,
+        path: String,
+    }
+
+    fn led(cat: &Catalog, id: &str, slug: &str, doc: &str) -> Led {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ledger.md");
+        std::fs::write(&path, doc).unwrap();
+        let path = path.to_string_lossy().into_owned();
+        let row = TestArtifactRowBuilder::new(id)
+            .with_abs_path(&path)
+            .with_kind("tracker")
+            .build();
+        crate::librarian::catalog::artifact::upsert(cat, &row).unwrap();
+        cat.conn
+            .execute("UPDATE artifact SET slug=?1 WHERE id=?2", params![slug, id])
+            .unwrap();
+        Led { _dir: dir, path }
+    }
+
+    fn body_of(l: &Led) -> String {
+        std::fs::read_to_string(&l.path).unwrap()
+    }
+
+    /// The body every params-bearing fixture gets. **A params test needs a real file on
+    /// purpose, and that is the invariant showing up in the fixture rather than two
+    /// conventions in one module:** once params ids move, the body must move with them or the
+    /// ledger is left with rows anchoring ids it no longer defines, so `rekey_prefix_rows`
+    /// refuses when it cannot read the file. A fixture with a fabricated path would be
+    /// asserting against a state the code is designed to reject.
+    const LEDGER_DOC: &str = "---\nkind: tracker\n---\n\n## T-1 — first\n\nbody\n";
+
+    #[test]
+    fn defining_headings_and_index_rows_and_prose_all_move_in_one_pass() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let l = led(
+            &cat,
+            "led",
+            "my-ledger",
+            "---\nkind: tracker\n---\n\n# Title\n\n| ID | What |\n|---|---|\n| T-1 | first |\n\n## T-1 — first\n\nClosed by T-2, see also my-ledger:T-1.\n\n## T-2 — second\n\ntail\n",
+        );
+
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+
+        let out = body_of(&l);
+        assert!(out.contains("## SRI-1 — first"), "heading; got:\n{out}");
+        assert!(out.contains("## SRI-2 — second"), "heading; got:\n{out}");
+        assert!(out.contains("| SRI-1 | first |"), "index row; got:\n{out}");
+        assert!(out.contains("Closed by SRI-2"), "prose; got:\n{out}");
+        assert!(
+            out.contains("my-ledger:SRI-1"),
+            "own qualified; got:\n{out}"
+        );
+        assert!(!out.contains("T-1") && !out.contains("T-2"), "got:\n{out}");
+        assert_eq!(report.body_lines_rewritten, 4);
+        assert!(
+            out.starts_with("---\nkind: tracker\n---\n"),
+            "the frontmatter block must survive byte-for-byte; got:\n{out}"
+        );
+    }
+
+    /// A fenced block is the ONLY way this corpus can mention an entry id without citing it
+    /// (CLAUDE.md § *Parsers Over a Namespace*). A rewriter that edits inside one destroys
+    /// that escape — and the example it destroys is usually documentation teaching the very
+    /// syntax being rekeyed.
+    ///
+    /// The fixture's load-bearing detail is the FOUR-backtick outer fence wrapping a
+    /// three-backtick inner one. A parity counter reads the inner fence as closing the outer
+    /// and resumes rewriting mid-block; `FenceState` tracks the opening run length instead.
+    /// Flatten this to a single plain fence and the test still passes while no longer
+    /// discriminating between the two implementations.
+    #[test]
+    fn tokens_inside_a_fence_are_not_rewritten_even_across_a_nested_fence() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let l = led(
+            &cat,
+            "led",
+            "my-ledger",
+            "---\nkind: tracker\n---\n\n## T-1 — real\n\n````markdown\nAn example teaching the syntax:\n\n```\n## T-9 — not a definition\n```\n\nstill inside: T-8\n````\n\nafter the fence: T-7\n",
+        );
+
+        rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+
+        let out = body_of(&l);
+        assert!(out.contains("## SRI-1 — real"), "real heading moves");
+        assert!(
+            out.contains("## T-9 — not a definition"),
+            "a token inside the nested fence must survive; got:\n{out}"
+        );
+        assert!(
+            out.contains("still inside: T-8"),
+            "the outer fence is not closed by the inner one; got:\n{out}"
+        );
+        assert!(
+            out.contains("after the fence: SRI-7"),
+            "and rewriting resumes once the outer fence really closes; got:\n{out}"
+        );
+    }
+
+    /// The reading side treats an unclosed fence as plain text so trailing headings stay
+    /// addressable. A REWRITER must not inherit that: past the unclosed fence it cannot tell
+    /// escaped text from prose, and editing an escaped token is unrecoverable.
+    #[test]
+    fn an_unbalanced_fence_is_refused_rather_than_rewritten_blind() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let l = led(
+            &cat,
+            "led",
+            "my-ledger",
+            "---\nkind: tracker\n---\n\n## T-1 — real\n\n```\nunclosed, and below it: T-5\n",
+        );
+
+        let err = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap_err();
+
+        assert!(
+            err.to_string().contains("fence"),
+            "the refusal must name the fence; got: {err}"
+        );
+        assert!(
+            body_of(&l).contains("## T-1 — real"),
+            "and nothing may have been written"
+        );
+    }
+
+    /// Params and body must never diverge: a params row anchoring an id the body no longer
+    /// defines is `doctor`'s `entry_without_definition`, which the motivating bug calls
+    /// trading one finding for seventeen. If the ids moved and the body could not, refuse.
+    #[test]
+    fn params_moving_while_the_body_cannot_be_read_is_refused() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "led", "/nonexistent/ledger.md", "my-ledger");
+        aug(
+            &cat,
+            "led",
+            Some("tasks"),
+            serde_json::json!({"tasks": [{"id": "T-1"}]}),
+            None,
+            "p",
+        );
+
+        let err = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap_err();
+
+        assert!(err.to_string().contains("cannot read"), "got: {err}");
+        assert_eq!(
+            params_of(&cat, "led")["tasks"][0]["id"],
+            "T-1",
+            "the transaction must have rolled the params back"
+        );
+    }
+
+    /// The mirror of the case above, and the reason that refusal is conditional rather than
+    /// absolute: with no params to keep in step, an unreadable file is `doctor`'s
+    /// `missing_file` to report, not grounds to refuse a citation-only rekey.
+    #[test]
+    fn a_missing_file_with_no_params_to_keep_in_step_is_not_an_error() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "led", "/nonexistent/ledger.md", "my-ledger");
+        cite(&cat, "my-ledger", "T-4", "abcdef0123456789", "write");
+
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+
+        assert_eq!(report.durable_outbound_repointed, 1);
+        assert_eq!(report.body_lines_rewritten, 0);
+    }
+
+    /// A file with no frontmatter block has no frontmatter to preserve, and `replace_body`
+    /// correctly returns `None` for it — the body IS the document. Without the branch that
+    /// handles this, a bug file or plain markdown ledger would refuse.
+    #[test]
+    fn a_document_without_frontmatter_is_rewritten_whole() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let l = led(
+            &cat,
+            "led",
+            "my-ledger",
+            "# Notes\n\n## T-3 — a\n\nsee T-4\n",
+        );
+
+        rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+
+        let out = body_of(&l);
+        assert!(out.contains("## SRI-3 — a"), "got:\n{out}");
+        assert!(out.contains("see SRI-4"), "got:\n{out}");
+        assert!(out.starts_with("# Notes\n"), "got:\n{out}");
+    }
+
+    /// A body with nothing to move must not be rewritten at all — an unnecessary `fs::write`
+    /// churns mtime for every watcher and every peer's `git status`.
+    #[test]
+    fn a_body_with_no_tokens_is_left_untouched() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let l = led(
+            &cat,
+            "led",
+            "my-ledger",
+            "---\nkind: tracker\n---\n\n# Nothing here\n",
+        );
+        let before = std::fs::metadata(&l.path).unwrap().modified().unwrap();
+
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+
+        assert_eq!(report.body_lines_rewritten, 0);
+        assert_eq!(
+            std::fs::metadata(&l.path).unwrap().modified().unwrap(),
+            before,
+            "no write may have happened"
+        );
     }
 }
