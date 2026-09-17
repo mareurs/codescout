@@ -5,7 +5,8 @@ closed:
 severity: medium
 owner: marius
 related: []
-tags: []
+tags:
+- cluster/<slug>          # REQUIRED -- replace with a real slug; see step 3
 kind: bug
 ---
 
@@ -15,7 +16,23 @@ BUG TRACKER TEMPLATE — do not edit content; copy this file.
 To open a bug:
   1. Copy this file to docs/issues/$(date -I)-<slug>.md
   2. Replace this comment block with the bug content.
-  3. Done — the librarian discovers the file on next reindex via its
+  3. Replace the `cluster/<slug>` placeholder above with EXACTLY ONE reserved
+     slug from the closed set. The slugs are listed in
+     docs/trackers/issue-clusters.md (the roster); each class's definition,
+     and the `**Members:**` field you must also append a derivation to, lives
+     in its own file under docs/trackers/issue-clusters/.
+     Two gates enforce this and BOTH refuse the commit, not the edit:
+       - a bug file with no cluster/ tag, two of them, or an unknown slug
+       - a class that GAINS a member without `**Members:**` naming that
+         file's dateless stem
+     Set the tag through the catalog --
+       doc(action="update", id=..., patch={tags: [...]})
+     -- never by hand-editing frontmatter: a direct edit does not reach the
+     catalog, so the tag sits on disk while every find reports the bug
+     unclassified (BL-48). If no class genuinely fits, `cluster/unclassified`
+     is the sanctioned escape hatch -- use it rather than forcing a fit, which
+     corrupts the counts promotion reads.
+  4. Done — the librarian discovers the file on next reindex via its
      `kind: bug` frontmatter. List active bugs with:
        doc(action="find", kind="bug",
            filter={"status": {"in": ["open", "taken", "investigating", "zombie"]}})
