@@ -11,10 +11,11 @@ tags:
 topic: embedding configuration
 ---
 
-**Status:** approved in outline 2026-09-17 (three rulings below). **Tasks 1 and 2
-landed** — `654e1f18` and `de0a1e07`.
+**Status:** approved in outline 2026-09-17 (three rulings below). **Tasks 1, 2 and 3
+landed** — `654e1f18`, `de0a1e07`, `87e434dd`.
 **Bugs this closes:** `aae547c917c329b5` (**fixed**), `4cd387ba07bc8d2a` (**fixed**),
-`6ec9c313893fd21f`, `efd14d6c5eb56905`, `c09210c5bcd74208`, `eb3417ec7e02c66e`.
+`f720f7708e32d881` (**fixed**), `6ec9c313893fd21f`, `efd14d6c5eb56905`,
+`eb3417ec7e02c66e`.
 
 ## The problem, measured
 
@@ -187,7 +188,8 @@ Moved to Task 5; `doctor` is the other candidate host.
 
 ### Task 3 — the default build runs the default model
 
-**Landed 2026-09-17** (SHA recorded at commit). Closes `c09210c5bcd74208`.
+**Landed 2026-09-17** — `87e434dd488c8b98d600c2c8c4ba457ff259ad68`, patch-id
+`0d32f175662fee9ba250ae632ba12797ecb939c8`. Closes `f720f7708e32d881`.
 `default = ["remote-embed", "http", "librarian", "local-embed"]`.
 
 **First, the defect was measured rather than left inferred** — the bug file had admitted

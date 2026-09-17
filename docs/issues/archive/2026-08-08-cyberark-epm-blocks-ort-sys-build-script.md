@@ -122,7 +122,7 @@ N/A — this is a host/tooling block, not a code defect; there is nothing in cod
 `Cargo.toml`'s `default` gained `local-embed` on 2026-09-17, because the default model
 is `local:AllMiniLML6V2Q` and a lean default shipped a binary that could not construct
 its own default configuration (measured; see
-`docs/issues/2026-09-17-the-default-build-cannot-run-the-default-embedding-model.md`).
+`docs/issues/archive/2026-09-17-the-default-build-cannot-run-the-default-embedding-model.md`).
 So a plain `cargo build` now DOES pull `ort-sys` into the graph and WILL hit this block
 on an EPM-locked host. The escape still exists but must now be asked for explicitly:
 

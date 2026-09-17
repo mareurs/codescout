@@ -32,7 +32,7 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 # for: a default build must work for someone with no server at all, and
 # `default_embed_model()` names a `local:` model, so a lean default shipped a
 # binary that could not construct its own default config (measured; see
-# `docs/issues/2026-09-17-the-default-build-cannot-run-the-default-embedding-model.md`).
+# `docs/issues/archive/2026-09-17-the-default-build-cannot-run-the-default-embedding-model.md`).
 #
 # The text below is kept rather than deleted because it records a check worth not
 # repeating — that no config file on this machine names a `local:` model — and

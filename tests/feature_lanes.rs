@@ -408,7 +408,7 @@ fn every_exempt_feature_is_still_compiled_somewhere() {
 /// real reason (ONNX Runtime; `local-embed-dynamic` exists for EDR-constrained
 /// Windows) and `local:AllMiniLML6V2Q` is the right default — they were simply never
 /// reconciled.
-/// `docs/issues/2026-09-17-the-default-build-cannot-run-the-default-embedding-model.md`
+/// `docs/issues/archive/2026-09-17-the-default-build-cannot-run-the-default-embedding-model.md`
 ///
 /// **Why this reads the MANIFEST rather than calling the constructor.** The natural
 /// form — call `create_embedder_with_config(default_embed_model(), …)` and assert it
