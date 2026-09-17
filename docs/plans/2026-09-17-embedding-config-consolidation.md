@@ -15,7 +15,7 @@ topic: embedding configuration
 plus task 5a** — `654e1f18`, `de0a1e07`, `87e434dd`, `c76d43de`, `91dede5a`.
 **Bugs this closes:** `aae547c917c329b5` (**fixed**), `4cd387ba07bc8d2a` (**fixed**),
 `f720f7708e32d881` (**fixed**), `5de82c05bd449fdc` (**fixed**), `26d098a04a1613d6`
-(**fixed**), `eb3417ec7e02c66e`.
+(**fixed**), `f5151cd081ed3a01`.
 
 ## The problem, measured
 
@@ -387,7 +387,8 @@ keeps the capability and removes the trap.
 
 ### Task 7 — onboarding decides on facts it actually has — **LANDED 2026-09-17**
 
-Closes `eb3417ec7e02c66e`.
+Closes `f5151cd081ed3a01` (archived). Fixed in `3aa12d8c`, patch-id
+`40bdc6e202a50137561f80c495802f14b96f5526`.
 
 - **Done.** `model_options_for` ranks on `ram_gb` / `cpu_cores` (16 GB + 8-core
   crossover between `local:AllMiniLML6V2Q` and `local:JinaEmbeddingsV2BaseCode`)

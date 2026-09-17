@@ -1,7 +1,7 @@
 ---
-id: eb3417ec7e02c66e
+id: f5151cd081ed3a01
 kind: bug
-status: open
+status: fixed
 title: 'BUG: onboarding probes hardware and then decides without it'
 tags:
 - cluster/assertion-that-cannot-fail
@@ -151,7 +151,13 @@ remote:true` build recommended **nothing**. That is the configuration
 `scripts/build-windows.sh` shipped before `local-embed-dynamic` became its
 default.
 
-SHA / patch-id: pending.
+**SHA:** `3aa12d8c` · **patch-id:** `40bdc6e202a50137561f80c495802f14b96f5526`
+
+Gate green at that commit: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`. Not credited from
+that run: `local::tests::from_dir_produces_a_stable_384d_vector` and
+`from_dir_matches_the_hub_path_for_the_same_model` printed `ok` under
+`CODESCOUT_SKIP_ONNX_TESTS=1` and asserted nothing — their real lane is CI's
+`local-embed` matrix job.
 
 ## Tests added
 
