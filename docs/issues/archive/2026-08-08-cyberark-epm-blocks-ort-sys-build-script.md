@@ -116,10 +116,41 @@ N/A — this is a host/tooling block, not a code defect; there is nothing in cod
 
 ## Workarounds
 
+**⚠ REVISED 2026-09-17 — the command below changed. `local-embed` is now in
+`default`.**
+
+`Cargo.toml`'s `default` gained `local-embed` on 2026-09-17, because the default model
+is `local:AllMiniLML6V2Q` and a lean default shipped a binary that could not construct
+its own default configuration (measured; see
+`docs/issues/2026-09-17-the-default-build-cannot-run-the-default-embedding-model.md`).
+So a plain `cargo build` now DOES pull `ort-sys` into the graph and WILL hit this block
+on an EPM-locked host. The escape still exists but must now be asked for explicitly:
+
+```
+cargo build --no-default-features --features remote-embed,http,librarian
+```
+
+That is the same graph the paragraph below verified — `remote-embed` resolves to
+`codescout-embed/remote-embed` = `["dep:reqwest", "dep:rustls"]`, with no `ort`
+anywhere in it — just no longer reachable by typing nothing. An EPM-locked host remains
+blocked on `local-embed` / `local-embed-dynamic` only, not on codescout.
+
+**The severity reasoning below is therefore weaker than it was, and is left standing
+deliberately rather than re-raised.** `low` was set because a workaround existed and the
+file had wrongly read as "codescout does not build on this host". A workaround still
+exists and that reading is still wrong; what changed is that it is no longer the default
+command, so a developer on such a host now meets the failure first and the remedy second.
+Re-raise it if that ordering actually costs someone — this is a prediction, and nobody
+has hit it yet.
+
+---
+
+*Superseded text, kept because it records a verification worth not repeating:*
+
 Revised 2026-08-15 — the original "None found this session" was too pessimistic,
 and the severity that followed from it (`high`) was set on a false premise.
 
-**Build with default features.** `Cargo.toml:175` declares
+**Build with default features.** `Cargo.toml` then declared
 `default = ["remote-embed", "http", "librarian"]`, and `remote-embed` resolves
 to `codescout-embed/remote-embed` = `["dep:reqwest", "dep:rustls"]`. **No `ort`
 anywhere in that graph.** An EPM-locked host is therefore blocked on

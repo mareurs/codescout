@@ -90,12 +90,31 @@ rustup target list --installed | grep -qx "$TARGET" || {
 CMD="${1:-build}"
 shift || true
 
-# --edr swaps default features for the runtime-loaded-ONNX shape used on windows-gnu.
-FEATURES=()
+# Feature set for the windows-gnu target.
+#
+# `local-embed` entered Cargo's `default` on 2026-09-17, and it CANNOT build for this
+# target: `ort` publishes no prebuilt binary for `x86_64-pc-windows-gnu`, which is the
+# reason `local-embed-dynamic` (runtime-loaded onnxruntime.dll) exists at all. Taking
+# cargo's default here therefore fails in the build script, not the compiler:
+#
+#   error: ort-sys@2.0.0-rc.11: ort does not provide prebuilt binaries for the
+#          target `x86_64-pc-windows-gnu` with feature set (no features).
+#
+# Measured 2026-09-17 by running `scripts/build-windows.sh check` with the new default
+# before changing this line. CI runs this script at three steps (`build`, `clippy`,
+# `test`), so leaving it would have redded all three.
+#
+# So the DEFAULT here is now the windows-gnu spelling of cargo's default: the same
+# feature set with `local-embed` swapped for `local-embed-dynamic`. This is not an
+# opt-in shape any more — it is the only one this target has.
+FEATURES=(--no-default-features --features "remote-embed,http,librarian,local-embed-dynamic")
 ARGS=()
 for a in "$@"; do
   case "$a" in
-    --edr) FEATURES=(--no-default-features --features "remote-embed,http,librarian,local-embed-dynamic") ;;
+    # Retained as a no-op alias: it named the shape that is now unconditional, and
+    # CI/docs/muscle memory still pass it. Accepting it silently is better than
+    # failing on a flag whose request is already satisfied.
+    --edr) : ;;
     *)     ARGS+=("$a") ;;
   esac
 done

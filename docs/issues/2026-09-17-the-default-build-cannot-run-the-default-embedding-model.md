@@ -1,13 +1,15 @@
 ---
 id: c09210c5bcd74208
 kind: bug
-status: open
+status: taken
 title: 'BUG: the default build cannot run the default embedding model'
 tags:
 - cluster/repro-env-diverges-from-gate-env
 - embeddings
 - cargo-features
 - onboarding
+claimed_at: 2026-09-17
+claimed_by: 458a8a26-c380-4f5b-b967-2181f592917e
 ---
 
 ## Summary
@@ -57,30 +59,34 @@ Any default-feature build. `Cargo.toml` `[features]`, tree `35b622f8`.
 
 ## Root cause
 
-`Cargo.toml:2` — `default = ["remote-embed", "http", "librarian"]`.
-`local-embed` is declared (`Cargo.toml`, `local-embed = ["codescout-embed/local-embed"]`)
-but not defaulted.
+**This is now measured rather than inferred.** The earlier version of this section said
+the mechanism was read from the cfg gates and not observed; it has since been reproduced.
+The debug binary built by `cargo build` (default features, no flags) indexing a fresh
+project with no `[embeddings]`, no ambient `CODESCOUT_*` and an empty
+`CODESCOUT_ENV_FILE`:
 
-`default_embed_model()` (`src/config/project.rs:389-391`) returns
-`"local:AllMiniLML6V2Q"`, and it is the `serde(default)` for
-`EmbeddingsSection::model` (`:93-95`), so it applies to every project with no
-`[embeddings]` block.
+```
+Error: could not build the 'local:AllMiniLML6V2Q' embedder: Local embedding requires
+the 'local-embed' feature.
+Rebuild with: cargo build --features local-embed
 
-In `create_embedder_with_config` (`crates/codescout-embed/src/lib.rs:197-326`),
-the `local:` arm is gated
-`#[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]`. Without
-it, resolution reaches the un-cfg-gated bail at the bottom, which fires on the
-`local:` prefix and prints the rebuild instructions.
+Recommended: local:AllMiniLML6V2Q (384d, quantized, 22MB)
+```
 
-**Why nobody here observes it — the gate diverges from the user's build.**
-`CLAUDE.md` § Development Commands makes lane 2
-`cargo clippy --workspace --all-targets --features local-embed`, and the two
-test lanes are `--no-default-features` and default. The default lane compiles
-the `local:` arm out, and the lean lane compiles it out too; only the clippy
-lane compiles it in, and clippy does not run. Separately, every `.env*` in the
-tree sets `CODESCOUT_EMBEDDER_URL`, so no local configuration exercises the
-urlless path at all. This is `IC-5` exactly: the environment that validates is
-not the environment that ships.
+The message recommends, as the remedy, the model that just failed — accurate only if
+read as "after you rebuild", which is not how it reads in sequence.
+
+Mechanism as filed: `Cargo.toml`'s `default` omitted `local-embed`;
+`default_embed_model()` (`src/config/project.rs`) returns `local:AllMiniLML6V2Q`; the
+`local:` arm of `create_embedder_with_config`
+(`crates/codescout-embed/src/lib.rs`) is `#[cfg(any(feature = "local-embed", feature =
+"local-embed-dynamic"))]`, so resolution falls through to the rebuild-instructions bail.
+
+**Why nobody here observed it** stands as filed, and is `IC-5` exactly: the gate's clippy
+lane passes `--features local-embed` while neither test lane does — the arm is compiled
+in the lane that does not run tests and absent from the two that do — and every `.env*`
+in the tree sets `CODESCOUT_EMBEDDER_URL`, so no local configuration exercised the urlless
+path at all.
 
 ## Evidence
 

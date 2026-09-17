@@ -391,3 +391,70 @@ fn every_exempt_feature_is_still_compiled_somewhere() {
          covers the whole family it enables."
     );
 }
+
+/// The **default feature set** must be able to construct the **default embedding
+/// model**.
+///
+/// Two decisions made independently and never checked against each other: `default`
+/// in `Cargo.toml`, and `default_embed_model()` in `src/config/project.rs`. Until
+/// 2026-09-17 they disagreed — `default` omitted `local-embed` while the default
+/// model was `local:AllMiniLML6V2Q` — so `cargo build` produced a binary that could
+/// not construct its own default configuration.
+///
+/// Measured rather than reasoned: a default-feature build indexing a fresh project
+/// with no `[embeddings]` and no ambient env aborted with *"Local embedding requires
+/// the 'local-embed' feature"*, and offered as its remedy the very model that had
+/// just failed. Neither decision was wrong alone — `local-embed` was omitted for a
+/// real reason (ONNX Runtime; `local-embed-dynamic` exists for EDR-constrained
+/// Windows) and `local:AllMiniLML6V2Q` is the right default — they were simply never
+/// reconciled.
+/// `docs/issues/2026-09-17-the-default-build-cannot-run-the-default-embedding-model.md`
+///
+/// **Why this reads the MANIFEST rather than calling the constructor.** The natural
+/// form — call `create_embedder_with_config(default_embed_model(), …)` and assert it
+/// is not the unsupported-feature bail — must be `#[cfg(feature = "local-embed")]`
+/// to survive the lean lane, and that cfg switches the test OFF in precisely the
+/// configuration whose breakage it exists to catch: deleting `local-embed` from
+/// `default` would silently disable the guard instead of redding it. Monotone under
+/// the exact change it guards, which is the failure mode `CLAUDE.md` § *Testing
+/// Discipline* names first. Reading the manifest is not cfg-dependent, so this test
+/// runs, and means the same thing, in every lane.
+#[test]
+fn the_default_feature_set_can_construct_the_default_embedding_model() {
+    let features = declared_features();
+    let defaults = default_closure(&features);
+
+    // Non-vacuity control, inline because it is one line: the closure must contain
+    // its own seed. If it does not, `declared_features()` parsed something that is
+    // not the `[features]` table and this guard is standing in front of nothing.
+    assert!(
+        defaults.contains("default"),
+        "the default closure must contain its own seed; got {defaults:?}"
+    );
+
+    let model = codescout::config::project::default_embed_model();
+    assert!(
+        !model.trim().is_empty(),
+        "a blank default model would make the check below trivially satisfiable"
+    );
+
+    // Mirrors `create_embedder_with_config`'s resolution ladder
+    // (`crates/codescout-embed/src/lib.rs`). A bare name falls through to arm 6,
+    // which is also a local backend, so it carries the local requirement too.
+    let acceptable: &[&str] = if model.starts_with("ollama:") || model.starts_with("openai:") {
+        &["remote-embed"]
+    } else {
+        &["local-embed", "local-embed-dynamic"]
+    };
+
+    assert!(
+        acceptable.iter().any(|f| defaults.contains(*f)),
+        "the default embedding model is {model:?}, which needs one of {acceptable:?}, \
+         but the default feature closure is {defaults:?}.\n\
+         Either add that feature to `default` in Cargo.toml, or change \
+         `default_embed_model()` — the two are set independently and nothing else \
+         compares them. Otherwise a plain `cargo build` ships a binary that cannot \
+         construct its own default configuration, and the failure names the model it \
+         just refused as the recommended fix."
+    );
+}

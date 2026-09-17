@@ -64,6 +64,34 @@ mkdir -p "$CARGO_TARGET_DIR" || exit 2
 echo "gate.sh: CARGO_TARGET_DIR=$CARGO_TARGET_DIR"
 echo
 
+# The two ONNX weight tests in `crates/codescout-embed/src/local.rs`
+# (`from_dir_produces_a_stable_384d_vector`,
+# `from_dir_matches_the_hub_path_for_the_same_model`) demand real AllMiniLM-L6-v2
+# weights on disk via `CODESCOUT_TEST_ONNX_DIR`, and PANIC rather than skip when it
+# is unset — deliberately, so they cannot go quietly missing.
+#
+# They only COMPILE when `local-embed` is on, which until 2026-09-17 no lane here
+# had, so the gate never met them. `local-embed` then entered Cargo's `default`
+# (the default model is `local:AllMiniLML6V2Q`, so a lean default shipped a binary
+# that could not construct its own default config), and the default lane below
+# started building them — redding the gate on every machine without the weights,
+# which is every machine here.
+#
+# Opting out matches what CI already does for every non-`local-embed` lane
+# (.github/workflows/ci.yml, "Opt out of ONNX tests"). It is set for the WHOLE
+# script rather than per-lane because the lean lane does not compile those tests
+# and the clippy lane does not run any, so the narrower form would read as a
+# distinction that does not exist.
+#
+# WHAT THIS GIVES UP, stated because it is real: those two are the only tests that
+# catch a correctly-shaped but silently WRONG vector (wrong tokenizer or pooling).
+# A green gate here is not evidence about that property. Their lane is CI's
+# `local-embed` matrix config, which seeds the weights and runs them; read that job,
+# not this script, before trusting a change to the local ONNX path. To run them here,
+# set CODESCOUT_TEST_ONNX_DIR to a directory holding `onnx/model_quantized.onnx` plus
+# the tokenizer files and unset this.
+export CODESCOUT_SKIP_ONNX_TESTS="${CODESCOUT_SKIP_ONNX_TESTS:-1}"
+
 # `;` throughout, never `&&` — see the heredoc above. The default lane does two jobs,
 # reporting AND rebuilding, and only the first should ever be short-circuited.
 ./scripts/fmt-mine.sh

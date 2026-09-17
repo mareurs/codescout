@@ -429,7 +429,7 @@ fn default_encoding() -> String {
 fn default_timeout() -> u64 {
     60
 }
-pub(crate) fn default_embed_model() -> String {
+pub fn default_embed_model() -> String {
     "local:AllMiniLML6V2Q".into()
 }
 

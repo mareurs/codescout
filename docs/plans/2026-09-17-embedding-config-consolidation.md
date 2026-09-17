@@ -187,18 +187,58 @@ Moved to Task 5; `doctor` is the other candidate host.
 
 ### Task 3 — the default build runs the default model
 
-Closes `c09210c5bcd74208`. Operator ruling: add `local-embed` to `default`.
+**Landed 2026-09-17** (SHA recorded at commit). Closes `c09210c5bcd74208`.
+`default = ["remote-embed", "http", "librarian", "local-embed"]`.
 
-- `Cargo.toml`: `default = ["remote-embed", "http", "librarian", "local-embed"]`.
-- Guard: a test in the **default** lane calling
-  `create_embedder_with_config(default_embed_model(), None, None)` and asserting
-  it is not the unsupported-feature bail. Annotate the fixture — this test is
-  vacuous under `--features local-embed` and meaningful under plain `default`,
-  the opposite polarity from the librarian case in `CLAUDE.md`.
-- Verify the Windows / EDR lane stays green:
-  `docs/manual/src/configuration/embeddings-edr-windows.md` and
-  `docs/issues/archive/2026-08-08-cyberark-epm-blocks-ort-sys-build-script.md`
-  are the constraints; `local-embed-dynamic` must remain the escape hatch.
+**First, the defect was measured rather than left inferred** — the bug file had admitted
+it was read from the cfg gates and never observed. A default-feature build indexing a
+fresh project with no `[embeddings]` aborts with *"Local embedding requires the
+'local-embed' feature"* and recommends, as the remedy, the model it just refused. After
+the change the same command indexes and writes a store: no server, no env, no config.
+
+The guard is `the_default_feature_set_can_construct_the_default_embedding_model`
+(`tests/feature_lanes.rs`), observed RED before the Cargo.toml edit. It reads the
+**manifest**, and that is the load-bearing choice: the natural runtime form must be
+`#[cfg(feature = "local-embed")]` to survive the lean lane, and that cfg switches the
+test OFF under exactly the change it guards — monotone under its own subject. Reading
+the manifest is not cfg-dependent, so it runs and means the same thing in every lane.
+
+**Three consequences found by checking rather than assuming, none of them predicted by
+the plan.** Each would have shipped a break:
+
+1. **`cargo rb` inherits it.** The alias passes no `--no-default-features`, so the live
+   MCP binary regains `local-embed`, undoing a documented 2026-09-15 decision to keep it
+   lean (~21MB + the ort/fastembed compile). Operator ruled 2026-09-17 to accept that;
+   `.cargo/config.toml`'s comment now records the supersession beside the old reasoning
+   rather than replacing it, since that reasoning holds a verification worth not
+   repeating.
+2. **`scripts/build-windows.sh` broke, and it runs in CI three times** (`ci.yml:575`,
+   `:583`, `:778`). `ort` publishes no prebuilt for `x86_64-pc-windows-gnu` — which is
+   why `local-embed-dynamic` exists — so taking cargo's default there fails in the build
+   script: *"ort does not provide prebuilt binaries for the target"*. Measured locally
+   before landing. The script's default is now the windows-gnu spelling of cargo's
+   default (`local-embed-dynamic` substituted), and its `--edr` flag became a no-op
+   alias. Verified with the exact CI commands, `check` and `clippy --all-targets -- -D
+   warnings`.
+3. **The gate itself went red, on a machine with no ONNX weights.** The default lane now
+   COMPILES `local.rs`'s two weight tests, which panic unless `CODESCOUT_TEST_ONNX_DIR`
+   is set. CI was already safe (it sets `CODESCOUT_SKIP_ONNX_TESTS=1` on non-`local-embed`
+   lanes); `gate.sh` was not, and would have redded for every session on this checkout.
+   `gate.sh` now exports the same opt-out.
+
+Consequence 3 creates a **new vacuity, and it is the dangerous polarity**: those two
+tests are the only ones that catch a correctly-shaped but silently wrong vector, and
+they now print `... ok` while asserting nothing. The other two lane-vacuities in this
+repo are absences — code a lane never compiled. This one is a green line a reader would
+credit. Recorded in `CLAUDE.md` § *Development Commands* beside its two siblings, because
+§ *Observer Blindness* says a bound living only in the enforcement layer (`gate.sh`'s own
+comment) is published to an audience that never reads it.
+
+Also revised: `docs/issues/archive/2026-08-08-cyberark-epm-blocks-ort-sys-build-script.md`,
+whose documented workaround was *"build with default features — no `ort` anywhere in that
+graph"*, and whose severity was lowered `high` → `low` **because** of it. That sentence is
+now false. The escape still exists but must be asked for explicitly
+(`--no-default-features --features remote-embed,http,librarian`), and the file says so.
 
 ### Task 4 — correct the docs
 

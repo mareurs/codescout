@@ -116,6 +116,23 @@ Why each part, one line each. Every measurement, date and superseded form →
   `CLAUDE.md` is where it has to be said. **Never report "gate green" as coverage for
   `server-stack` work; read the CI job.** (The OB rule this obeys is § *Observer Blindness*:
   move the scope to the read surface rather than recording the lesson.)
+- **AND THE GATE IS VACUOUS FOR THE LOCAL ONNX VECTOR — a third polarity, and this one
+  reports `ok` rather than staying absent.** `local-embed` joined `default` on 2026-09-17
+  (the default model is `local:AllMiniLML6V2Q`, so a lean default shipped a binary that
+  could not construct its own default config), so the default lane now **compiles**
+  `crates/codescout-embed/src/local.rs`'s two weight tests —
+  `from_dir_produces_a_stable_384d_vector` and
+  `from_dir_matches_the_hub_path_for_the_same_model`, the only two that catch a
+  correctly-shaped but silently **WRONG** vector (wrong tokenizer, wrong pooling). They
+  need real AllMiniLM weights at `CODESCOUT_TEST_ONNX_DIR` and **panic** without it, so
+  `gate.sh` exports `CODESCOUT_SKIP_ONNX_TESTS=1` for you, matching what CI already does
+  on every non-`local-embed` lane. **They then print `... ok`.** The two bullets above
+  describe code a lane never compiled — an absence; this is a green line you would
+  credit, for an assertion that never ran, and `cargo test` captures the `SKIP …` notice
+  the test does emit. Their real lane is CI's `local-embed` matrix config, which seeds
+  the weights and runs them: **read that job before trusting a change to the local ONNX
+  path.** To run them here, point `CODESCOUT_TEST_ONNX_DIR` at a directory holding
+  `onnx/model_quantized.onnx` plus the tokenizer files and unset the opt-out.
 
 The gate sentence above is pinned byte-for-byte by
 `claude_md_gate_lists_its_four_commands_in_the_load_bearing_order` (`src/prompts/mod.rs`). If it

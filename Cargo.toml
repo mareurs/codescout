@@ -176,7 +176,17 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [features]
-default = ["remote-embed", "http", "librarian"]
+# `local-embed` is in `default` since 2026-09-17, and it is not decoration: the
+# default model is `local:AllMiniLML6V2Q` (`default_embed_model()`), so without it
+# a plain `cargo build` produces a binary that cannot construct its own default
+# configuration. Measured before the change — a default build indexing a fresh
+# project with no `[embeddings]` aborted with "Local embedding requires the
+# 'local-embed' feature" and offered, as its remedy, the model it had just
+# refused. `the_default_feature_set_can_construct_the_default_embedding_model`
+# (tests/feature_lanes.rs) reds if the two ever disagree again; it reads the
+# manifest rather than calling the constructor, because the cfg-gated form would
+# switch itself off under exactly the change it guards.
+default = ["remote-embed", "http", "librarian", "local-embed"]
 # Embedded librarian (workspace doc/spec/plan index). Compiled in by
 # default for dev; turn off for production publishes via `--no-default-features`.
 # Runtime registration is **enabled by default** when compiled in.
