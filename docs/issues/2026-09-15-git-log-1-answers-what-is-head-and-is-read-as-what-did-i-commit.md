@@ -1,12 +1,14 @@
 ---
-status: fixed
-opened: 2026-09-15
+kind: bug
+status: mitigated
+tags:
+- cluster/transient-shared-state-lies-to-readers
 closed: 2026-09-15
-severity: high
+no_fix_commit: 'The mitigation is a practice change only — identify your own last commit POSITIVELY by its `Session-Id` trailer instead of `git log -1` — so nothing was committed and no anchor is owed. It also does not close the hazard: this record''s own `## Fix` says reading the sha and then amending is still two steps, a peer can commit between them, and no form that closes it is known. No regression test is possible — the failure is a two-command sequence a session types, not a code path. Verified 2026-09-17 that the prescription landed NOWHERE durable: `docs/conventions/shared-checkout-commit-sequence.md` § 2 carries the general rule (identify positively, never by a commit range) without this command, and `docs/trackers/observer-blindness.md`''s OB-22 table carries a `Session-Id` derivation for a DIFFERENT question — how many of my commits a peer''s push carried, which is over a range. So the mitigation is unwritten as well as uncommitted, and nothing enforces it. Status was `fixed` from birth until 2026-09-17 and that overstated it; the record was never open, and `fixed` requires a root cause addressed and a regression test, neither of which exists or can.'
+opened: 2026-09-15
 owner: marius
 related: []
-tags: [cluster/transient-shared-state-lies-to-readers]
-kind: bug
+severity: high
 ---
 
 # `git log -1` answers "what is HEAD" and is read as "what did I just commit"
@@ -73,6 +75,16 @@ amending is still two steps, and a peer can commit between them. No form that cl
 is known. What this buys is that the *read* is now about the right object, so the
 failure mode shrinks from "amends a stranger's commit" to "amends nothing, because your
 sha is no longer HEAD" — which `--amend` refuses rather than silently doing.
+
+**None of the six commit hashes in this file is a fix anchor, and that is exactly the trap
+`doctor`'s `terminal_status_without_fix_anchor` names:** a record carrying loose hashes does
+not merely LACK provenance, it *reads as* anchored, so a reader scanning for it finds one
+and stops looking. Their real roles — `4f21a6b1` is what I committed immediately before the
+incident; `8289a448`, `65796b00` and `83d55f9f` are the peer commits that landed in the
+window; `66dd88ba` is the malformed object the `--amend` produced; and `05251908` is the
+subject of a word-diff measurement three sections below. The declaration is
+`no_fix_commit:` in frontmatter, which is where a query reads — this paragraph is for the
+human who got here first.
 
 ## Repro
 
