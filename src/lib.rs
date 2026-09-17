@@ -1,7 +1,18 @@
 //! codescout: high-performance coding agent MCP server.
 //!
 //! Provides IDE-grade code intelligence to LLMs via the Model Context Protocol.
-#![recursion_limit = "256"]
+//
+// Forced by ONE expression: the `json!` literal that builds `doc`'s input schema
+// (`librarian/tools/artifact.rs`). `json_internal!` recurses once per token of the
+// literal, so the limit tracks that schema's size and nothing else — it was raised to
+// 256 when the librarian crate was dissolved in (`d48bf992`), and to 512 when
+// `rekey_prefix` added its 18th action and two parameters. The failure is a hard
+// `error: recursion limit reached while expanding $crate::json_internal!` pointing at
+// the literal, so it is loud; what is not obvious from that message is that the cause
+// is cumulative schema growth rather than whatever was just added. If this needs
+// raising a third time, that is the signal to split the schema out of one macro
+// invocation rather than to keep doubling.
+#![recursion_limit = "512"]
 
 /// Install rustls' ring crypto provider as the default. Idempotent — safe to
 /// call from multiple entry points (binary `main`, integration tests, library

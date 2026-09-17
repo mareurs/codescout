@@ -938,6 +938,7 @@ fn is_mutating_doc_action(action: &str) -> bool {
             | "link"
             | "append_entry"
             | "update_entry"
+            | "rekey_prefix"
             | "event_create"
             | "augment"
     )

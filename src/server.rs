@@ -5028,8 +5028,42 @@ mod tests {
     /// `|---|---|---|` nine times, so that anchor silently places a `W-N` row into the `F-N`
     /// table (`context-injection-session-log:F-9`). That deletion is a correctness fix that
     /// happens to save bytes, not a trim.
+    /// **Ratcheted UP 2026-09-17, 55_977 → 56_817 (+840), for the 18th `doc` action,
+    /// `rekey_prefix`.** It is the surface `update_entry`'s `id` refusal points at: entry ids
+    /// key `entry_cite` rows, so re-keying one through a field patch strands its citations —
+    /// correct, and its remedy ("append a new entry and mark this one superseded") does not
+    /// repair a prefix collision, which is what
+    /// `docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`
+    /// has been blocked on three times.
+    ///
+    /// DERIVATION, and the baseline is MEASURED rather than read off this log. Report run in
+    /// a detached worktree at `6d5cc540`: TOTAL (21 tools) = 55_977, `doc` = 18_818
+    /// (desc 1_422 / schema 17_396) — equal to the constant, so headroom was 0 and gross
+    /// equals net. With the change: TOTAL = 56_817, `doc` = 19_658 (desc 1_613 /
+    /// schema 18_045). **`doc` is the only row that moves, and 18_818 + 840 = 19_658**, so
+    /// the whole delta is this change and none of it is drift elsewhere.
+    ///
+    /// Split: desc **+191** (one sentence naming the action, required by
+    /// `tool_descriptions_name_every_action_they_claim_to_enumerate` — a description that
+    /// promises an inventory and omits an action leaves an agent unable to learn it exists).
+    /// Schema **+649**, of which 484 is genuinely new — `from` 186, `to` 283, the enum entry
+    /// 15, all measured as serialized JSON — and the remaining 165 extends three existing
+    /// descriptions (`force`, `fields`, `id`) to route to the new action.
+    ///
+    /// **What the bytes bought, in the one case where it is not the new capability:** the
+    /// 165. `fields`' description said *"`id` is rejected — entry ids key entry_cite rows, so
+    /// re-keying one would strand its citations."* True of `update_entry` and, from this
+    /// commit, misleading — its implication is that re-keying is impossible, which is exactly
+    /// what this action overturns. A schema that describes a capability as unavailable is the
+    /// `cluster/doc-contradicted-by-code` shape, and no reference check reaches prose.
+    ///
+    /// **Cut before measuring, not after:** `from` and `to` were first written at 175 and 295
+    /// serialized chars. Dropped from `to` the fact that an over-long prefix is *"accepted
+    /// into frontmatter"* — a caller cannot act on it and the consequence that matters is
+    /// kept: it is honoured by the allocator and INVISIBLE to the citation scanner, which is
+    /// the silent half.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_977;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_817;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

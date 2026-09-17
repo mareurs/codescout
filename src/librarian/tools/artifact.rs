@@ -74,7 +74,7 @@ impl Tool for Artifact {
     }
 
     fn description(&self) -> &'static str {
-        "Document catalog: find/get/create/update/move/delete markdown documents (specs, plans, ADRs, trackers, bug files) with YAML frontmatter, plus their events, augmentations and entries. Defaults: scope=project; archived/superseded hidden unless the filter constrains status; kind/status shortcuts AND with filter. Trackers are kind=tracker documents that may carry an augmentation (persistent prompt + params) — call librarian(tracker_design) before creating one. Entries: append_entry assigns the next PREFIX-N id atomically — with entry_collection it appends a params row; without it the ledger is prose and, given anchor_heading+title+body, the server writes the `## PREFIX-N — title` section itself. update_entry patches ONE row in place — use it rather than patch={params:…}, whose RFC 7396 array semantics replace the whole collection. Events: event_create appends an immutable record (kind inside the `event` object); event_list reads them newest-first. augment attaches or replaces the augmentation — merge=false (default) overwrites it wholesale, so fields you omit silently reset, merge=true patches only what you pass; gather collects refresh context without writing (write back with update, commit_refresh=true); list_stale lists augmentations older than threshold_hours. graph walks links; link adds a manual rel; graft folds one row's history into another; state_at shows a document as of a commit or timestamp."
+        "Document catalog: find/get/create/update/move/delete markdown documents (specs, plans, ADRs, trackers, bug files) with YAML frontmatter, plus their events, augmentations and entries. Defaults: scope=project; archived/superseded hidden unless the filter constrains status; kind/status shortcuts AND with filter. Trackers are kind=tracker documents that may carry an augmentation (persistent prompt + params) — call librarian(tracker_design) before creating one. Entries: append_entry assigns the next PREFIX-N id atomically — with entry_collection it appends a params row; without it the ledger is prose and, given anchor_heading+title+body, the server writes the `## PREFIX-N — title` section itself. update_entry patches ONE row in place — use it rather than patch={params:…}, whose RFC 7396 array semantics replace the whole collection. rekey_prefix moves a whole PREFIX-N namespace at once — params ids, schema pattern, headings and citation rows together, dry-run by default; it is what update_entry's `id` refusal points at. Events: event_create appends an immutable record (kind inside the `event` object); event_list reads them newest-first. augment attaches or replaces the augmentation — merge=false (default) overwrites it wholesale, so fields you omit silently reset, merge=true patches only what you pass; gather collects refresh context without writing (write back with update, commit_refresh=true); list_stale lists augmentations older than threshold_hours. graph walks links; link adds a manual rel; graft folds one row's history into another; state_at shows a document as of a commit or timestamp."
     }
     fn description_cap(&self) -> usize {
         1_800
@@ -87,7 +87,7 @@ impl Tool for Artifact {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["find", "get", "create", "update", "move", "delete", "graft", "link", "graph", "state_at", "append_entry", "update_entry", "event_create", "event_list", "augment", "gather", "list_stale"],
+                    "enum": ["find", "get", "create", "update", "move", "delete", "graft", "link", "graph", "state_at", "append_entry", "update_entry", "rekey_prefix", "event_create", "event_list", "augment", "gather", "list_stale"],
                     "description": "Operation to perform"
                 },
                 "filter": {
@@ -147,7 +147,7 @@ impl Tool for Artifact {
                 },
                 "id": {
                     "type": "string",
-                    "description": "get/update/move/delete/graph/state_at/append_entry/update_entry/event_create/event_list/gather/augment: document id (16-hex). find and create take none."
+                    "description": "get/update/move/delete/graph/state_at/append_entry/update_entry/rekey_prefix/event_create/event_list/gather/augment: document id (16-hex). find and create take none."
                 },
                 "threshold_hours": {
                     "type": "integer",
@@ -247,7 +247,7 @@ impl Tool for Artifact {
                 "force": {
                     "type": "boolean",
                     "default": false,
-                    "description": "update/delete/graft: apply rather than preview. update — bypass the body-shrink guard, required when a body write would cut the file by >50% in bytes or lines; see get_guide(\"librarian\") § Body Editing Surfaces. delete and graft are DRY RUNS by default and return what WOULD be destroyed: delete cascades to the augmentation, events, links and observations (catalog-only — the file is git-restorable, these are not), and graft DELETES from_id. Default false."
+                    "description": "update/delete/graft/rekey_prefix: apply rather than preview. update — bypass the body-shrink guard, required when a body write would cut the file by >50% in bytes or lines; see get_guide(\"librarian\") § Body Editing Surfaces. delete, graft and rekey_prefix are DRY RUNS by default and return what WOULD change: delete cascades to the augmentation, events, links and observations (catalog-only — the file is git-restorable, these are not), graft DELETES from_id, and rekey_prefix rewrites the ledger's markdown as well as its catalog rows. Default false."
                 },
                 "commit_refresh": {
                     "type": "boolean",
@@ -290,7 +290,15 @@ impl Tool for Artifact {
                 },
                 "fields": {
                     "type": "object",
-                    "description": "update_entry: fields to set on that one entry, merged shallowly; a null value deletes the key. Every other entry, and every field this patch does not name, is left untouched. NOTE the asymmetry with append_entry, which takes `entry` (a whole new row) — this action takes `fields` (the subset to change); passing `entry` here is refused rather than silently ignored. An empty patch is refused too. `id` is rejected — entry ids key entry_cite rows, so re-keying one would strand its citations."
+                    "description": "update_entry: fields to set on that one entry, merged shallowly; a null value deletes the key. Every other entry, and every field this patch does not name, is left untouched. NOTE the asymmetry with append_entry, which takes `entry` (a whole new row) — this action takes `fields` (the subset to change); passing `entry` here is refused rather than silently ignored. An empty patch is refused too. `id` is rejected — entry ids key entry_cite rows, so re-keying one HERE would strand its citations. Use `rekey_prefix`, which moves the citations with the id."
+                },
+                "from": {
+                    "type": "string",
+                    "description": "rekey_prefix: the prefix to move away from, e.g. 'T'. Only exact <from>-<digits> tokens move; 'TX-1' under from='T' is a different namespace."
+                },
+                "to": {
+                    "type": "string",
+                    "description": "rekey_prefix: the new prefix, e.g. 'SRI'. Must be free — check link_scan's prefix_conflicts. Max 3 uppercase ASCII: the token grammar is [A-Z]{1,3}-\\d+, so a longer prefix is honoured by the allocator but INVISIBLE to the citation scanner."
                 },
                 "id_prefix": {
                     "type": "string",
@@ -351,7 +359,7 @@ impl Tool for Artifact {
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let action = args["action"].as_str().ok_or_else(|| {
                 LibrarianRecoverableError::new(
-                    "action required — one of: find, get, create, update, move, graft, link, graph, state_at, append_entry, update_entry, event_create, event_list, augment, gather, list_stale",
+                    "action required — one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry, rekey_prefix, event_create, event_list, augment, gather, list_stale",
                 )
             })?;
         // Best-effort: identity enrichment must never fail a tool call; a failed
@@ -372,13 +380,14 @@ impl Tool for Artifact {
                 "state_at" => super::state_at::call(ctx, args).await,
                 "append_entry" => super::append_entry::call(ctx, args).await,
                 "update_entry" => super::update_entry::call(ctx, args).await,
+                "rekey_prefix" => super::rekey_prefix::call(ctx, args).await,
                 "event_create" => super::event_create::call(ctx, flatten_event_args(&args)?).await,
                 "event_list"   => super::timeline::call(ctx, id_as_artifact_id(&args)).await,
                 "augment"      => super::augment::call(ctx, flatten_augment_args(&args)?).await,
                 "gather"       => super::refresh::call(ctx, args).await,
                 "list_stale"   => super::refresh_stale::call(ctx, args).await,
                 other => Err(LibrarianRecoverableError::new(format!(
-                    "unknown action '{other}' — expected one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry, event_create, event_list, augment, gather, list_stale"
+                    "unknown action '{other}' — expected one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry, rekey_prefix, event_create, event_list, augment, gather, list_stale"
                 ))),
             }
     }
@@ -563,18 +572,21 @@ mod tests {
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
         use crate::tools::param_probe::assert_all_honored;
 
-        // Floor is **action/key pairs**, not keys, and measured not chosen: 95 pairs over
-        // the 17 actions, read 2026-09-11 from `sweep`'s own `checked`. The previous 80 was
-        // a correct reading of a sweep that walked one level; recursion added the 15 nested
-        // pairs it could reach — `event`'s 9 described children and `augment`'s 8 less the
-        // two `Option<Value>` keys declared blind in `probe_spec`. Set at the measurement:
-        // the gap between floor and count is how many labels can go missing silently, so a
+        // Floor is **action/key pairs**, not keys, and measured not chosen: 99 pairs over
+        // the 18 actions, read 2026-09-17 from `sweep`'s own `checked`. Was 95 over 17
+        // actions (2026-09-11); `rekey_prefix` adds exactly four — `id`, `from`, `to`,
+        // `force` — and 95 + 4 reconciles, which is the check that the new action's labels
+        // are all being swept rather than silently skipped. The 80 before that was a correct
+        // reading of a sweep that walked one level; recursion added the 15 nested pairs it
+        // could reach — `event`'s 9 described children and `augment`'s 8 less the two
+        // `Option<Value>` keys declared blind in `probe_spec`. Set AT the measurement: the
+        // gap between floor and count is how many labels can go missing silently, so a
         // deliberate schema shrink moves this number.
         assert_all_honored(
             "doc",
             &Artifact.input_schema(),
             &probe_spec(),
-            95,
+            99,
             |args| async move { Artifact.call(&mk_ctx(), args).await },
         )
         .await;
@@ -582,7 +594,57 @@ mod tests {
 
     const PROBE_NO_SUCH_ID: &str = "0000000000000000";
 
-    const PROBE_ACTIONS: [&str; 17] = [
+    /// Every action the schema ADVERTISES must reach a dispatch arm.
+    ///
+    /// **Nothing else in this repo checks that, in either direction.** The enum in
+    /// `input_schema` and the `match` in `call` are two hand-maintained lists of the same set,
+    /// and the failure is silent both ways: an enum entry with no arm falls to the
+    /// `other =>` fallback and is a runtime-only error with a fully green suite, while an arm
+    /// with no enum entry works and is undiscoverable. `PROBE_ACTIONS` does not cover it —
+    /// that is a THIRD hand-maintained list, so it agrees with whichever of the other two it
+    /// was last edited beside.
+    ///
+    /// The oracle is deliberately the SCHEMA rather than a literal here: a list written in
+    /// this test would be a fourth copy, and a guard satisfiable by editing itself guards
+    /// nothing. Drift of exactly this shape was live in this file — the
+    /// `"action required — one of: …"` message omitted `delete` for an unknown period,
+    /// because nothing compares it to anything.
+    ///
+    /// Asserting on the ERROR TEXT rather than on success is what lets this run without a
+    /// populated catalog: every action is called with no arguments beyond `action`, so each
+    /// legitimately fails. The claim is only that it failed for its OWN reason rather than by
+    /// falling through.
+    #[tokio::test]
+    async fn every_advertised_action_reaches_a_dispatch_arm() {
+        let schema = Artifact.input_schema();
+        let actions: Vec<String> = schema["properties"]["action"]["enum"]
+            .as_array()
+            .expect("the action enum is this test's oracle — if that shape moved, fix this")
+            .iter()
+            .map(|v| v.as_str().expect("enum entries are strings").to_string())
+            .collect();
+        assert!(
+            actions.len() >= 18,
+            "anti-vacuity floor: the advertised set should not shrink; got {}",
+            actions.len()
+        );
+
+        let mut fell_through = Vec::new();
+        for action in &actions {
+            if let Err(e) = Artifact.call(&mk_ctx(), json!({"action": action})).await {
+                if e.to_string().contains("unknown action") {
+                    fell_through.push(action.clone());
+                }
+            }
+        }
+        assert!(
+            fell_through.is_empty(),
+            "advertised but not dispatched — these fall to the `other =>` arm at runtime \
+             while the whole suite stays green: {fell_through:?}"
+        );
+    }
+
+    const PROBE_ACTIONS: [&str; 18] = [
         "find",
         "get",
         "create",
@@ -595,6 +657,7 @@ mod tests {
         "state_at",
         "append_entry",
         "update_entry",
+        "rekey_prefix",
         "event_create",
         "event_list",
         "augment",
@@ -644,6 +707,16 @@ mod tests {
                 m.insert("entry_collection".into(), json!("nope"));
                 m.insert("entry_id".into(), json!("ZZ-1"));
                 m.insert("fields".into(), json!({}));
+            }
+            // Must fail AFTER deserialisation, like every arm here: the id resolves to
+            // nothing, so `rekey_prefix` reaches its unknown-artifact path rather than a
+            // deser error. `from`/`to` differ so the same-prefix refusal does not own the
+            // input first — a case only exercises the guard it NAMES if every other guard
+            // admits it.
+            "rekey_prefix" => {
+                m.insert("id".into(), json!(PROBE_NO_SUCH_ID));
+                m.insert("from".into(), json!("ZZ"));
+                m.insert("to".into(), json!("YY"));
             }
             "link" => {
                 m.insert("src_id".into(), json!(PROBE_NO_SUCH_ID));

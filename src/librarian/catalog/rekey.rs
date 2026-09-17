@@ -35,6 +35,21 @@ use regex::Regex;
 use rusqlite::{params, OptionalExtension};
 use serde_json::Value;
 
+/// Whether a rekey reports what it would do, or does it.
+///
+/// **A preview cannot be "run it and roll back".** `rekey_body` calls `fs::write`, and the
+/// filesystem is not inside the transaction — a rollback would leave the markdown rewritten
+/// with the catalog reverted, which is worse than either outcome alone. Nor is it a separate
+/// counting function: two implementations of "what this rekey does" drift, and the preview is
+/// precisely the one nobody notices has gone wrong. One code path, one flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RekeyMode {
+    /// Compute the full report and write nothing — no file, no commit.
+    Preview,
+    /// Apply it.
+    Apply,
+}
+
 /// What a rekey moved. Counted separately because they are different kinds of fact —
 /// a dropped derived row is not a loss, a re-pointed durable one is a migration.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -334,6 +349,7 @@ fn rekey_body(
     from_prefix: &str,
     to_prefix: &str,
     own_slug: Option<&str>,
+    mode: RekeyMode,
     report: &mut RekeyReport,
 ) -> Result<()> {
     let abs_path: Option<String> = tx
@@ -402,7 +418,7 @@ fn rekey_body(
         out.pop();
     }
 
-    if report.body_lines_rewritten == 0 {
+    if report.body_lines_rewritten == 0 || mode == RekeyMode::Preview {
         return Ok(());
     }
 
@@ -433,6 +449,7 @@ pub fn rekey_prefix_rows(
     artifact_id: &str,
     from_prefix: &str,
     to_prefix: &str,
+    mode: RekeyMode,
 ) -> Result<RekeyReport> {
     if from_prefix == to_prefix {
         return Err(LibrarianRecoverableError::new(
@@ -598,10 +615,16 @@ pub fn rekey_prefix_rows(
         from_prefix,
         to_prefix,
         slug.as_deref(),
+        mode,
         &mut report,
     )?;
 
-    tx.commit()?;
+    // Preview drops the transaction unread. Every refusal above has already fired, so a
+    // preview that returns Ok is a statement that the apply would too — which is the only
+    // thing that makes a dry run worth reading.
+    if mode == RekeyMode::Apply {
+        tx.commit()?;
+    }
     Ok(report)
 }
 
@@ -754,7 +777,7 @@ mod tests {
         art(&cat, "led", "/repo/ledger.md", "my-ledger");
         cite(&cat, "my-ledger", "T-19", "4059035cf39e6aab", "write");
 
-        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         assert_eq!(report.durable_outbound_repointed, 1);
         assert_eq!(locals(&cat, "my-ledger"), vec!["SRI-19".to_string()]);
@@ -767,7 +790,7 @@ mod tests {
         art(&cat, "other", "/repo/other.md", "other-log");
         cite(&cat, "other-log", "F-3", "my-ledger:T-7", "write");
 
-        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         assert_eq!(report.durable_inbound_repointed, 1);
         assert_eq!(dsts(&cat), vec!["my-ledger:SRI-7".to_string()]);
@@ -791,7 +814,7 @@ mod tests {
         cite(&cat, "my-ledger", "T-5", "abcdef0123456789", "write");
         cite(&cat, "my-ledger", "SRI-5", "abcdef0123456789", "write");
 
-        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         assert_eq!(report.duplicates_merged, 1);
         assert_eq!(report.durable_outbound_repointed, 0, "the move was refused");
@@ -813,7 +836,7 @@ mod tests {
         cite(&cat, "my-ledger", "T-3", "abcdef0123456789", ORIGIN_SCAN);
         cite(&cat, "other-log", "F-1", "my-ledger:T-3", ORIGIN_SCAN);
 
-        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         assert_eq!(report.derived_rows_dropped, 2);
         assert_eq!(report.durable_outbound_repointed, 0);
@@ -841,7 +864,7 @@ mod tests {
         art(&cat, "led", "/repo/ledger.md", "my-ledger");
         cite(&cat, "my-ledger", "T-4", "abcdef0123456789", "write");
 
-        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         assert_eq!(
             report.durable_outbound_repointed, 1,
@@ -862,7 +885,7 @@ mod tests {
         cite(&cat, "session-log", "F-9", "abcdef0123456789", "write");
         cite(&cat, "session-log", "W-4", "abcdef0123456789", "write");
 
-        let report = rekey_prefix_rows(&mut cat, "led", "F", "FRIC").unwrap();
+        let report = rekey_prefix_rows(&mut cat, "led", "F", "FRIC", RekeyMode::Apply).unwrap();
 
         assert!(report.reservation_moved);
         assert_eq!(report.durable_outbound_repointed, 1, "only the F row moves");
@@ -898,7 +921,7 @@ mod tests {
         let mut cat = Catalog::open_in_memory().unwrap();
         art(&cat, "led", "/repo/ledger.md", "my-ledger");
 
-        let err = rekey_prefix_rows(&mut cat, "led", "T", "T").unwrap_err();
+        let err = rekey_prefix_rows(&mut cat, "led", "T", "T", RekeyMode::Apply).unwrap_err();
 
         assert!(err.to_string().contains("same prefix"), "got: {err}");
     }
@@ -915,7 +938,7 @@ mod tests {
         reserve(&cat, "led", "F", 172);
         reserve(&cat, "led", "W", 144);
 
-        let err = rekey_prefix_rows(&mut cat, "led", "F", "W").unwrap_err();
+        let err = rekey_prefix_rows(&mut cat, "led", "F", "W", RekeyMode::Apply).unwrap_err();
 
         assert!(
             err.to_string()
@@ -1006,7 +1029,7 @@ mod tests {
             "keep the table",
         );
 
-        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         assert_eq!(report.params_ids_repointed, 2);
         let p = params_of(&cat, "led");
@@ -1028,7 +1051,7 @@ mod tests {
             "p",
         );
 
-        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         assert_eq!(report.schema_patterns_repointed, 1);
         let s = schema_of(&cat, "led");
@@ -1056,7 +1079,7 @@ mod tests {
             "p",
         );
 
-        rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         let new_params = params_of(&cat, "led");
         let err = crate::librarian::tools::schema_validate::validate(&id_schema("T"), &new_params)
@@ -1102,7 +1125,7 @@ mod tests {
             "p",
         );
 
-        let err = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap_err();
+        let err = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap_err();
 
         assert!(
             err.to_string().contains("params_schema"),
@@ -1128,7 +1151,7 @@ mod tests {
             "every task keeps its own `## T-N — <title>` body section; see T-3 for the shape",
         );
 
-        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         assert!(report.prompt_rewritten);
         let row = crate::librarian::catalog::augmentation::get(&cat, "led")
@@ -1157,7 +1180,7 @@ mod tests {
             "p",
         );
 
-        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         assert_eq!(report.params_ids_repointed, 1);
         let p = params_of(&cat, "led");
@@ -1172,7 +1195,7 @@ mod tests {
         art(&cat, "led", "/repo/ledger.md", "my-ledger");
         cite(&cat, "my-ledger", "T-4", "abcdef0123456789", "write");
 
-        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         assert_eq!(
             report.durable_outbound_repointed, 1,
@@ -1228,7 +1251,7 @@ mod tests {
             "---\nkind: tracker\n---\n\n# Title\n\n| ID | What |\n|---|---|\n| T-1 | first |\n\n## T-1 — first\n\nClosed by T-2, see also my-ledger:T-1.\n\n## T-2 — second\n\ntail\n",
         );
 
-        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         let out = body_of(&l);
         assert!(out.contains("## SRI-1 — first"), "heading; got:\n{out}");
@@ -1267,7 +1290,7 @@ mod tests {
             "---\nkind: tracker\n---\n\n## T-1 — real\n\n````markdown\nAn example teaching the syntax:\n\n```\n## T-9 — not a definition\n```\n\nstill inside: T-8\n````\n\nafter the fence: T-7\n",
         );
 
-        rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         let out = body_of(&l);
         assert!(out.contains("## SRI-1 — real"), "real heading moves");
@@ -1298,7 +1321,7 @@ mod tests {
             "---\nkind: tracker\n---\n\n## T-1 — real\n\n```\nunclosed, and below it: T-5\n",
         );
 
-        let err = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap_err();
+        let err = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap_err();
 
         assert!(
             err.to_string().contains("fence"),
@@ -1326,7 +1349,7 @@ mod tests {
             "p",
         );
 
-        let err = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap_err();
+        let err = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap_err();
 
         assert!(err.to_string().contains("cannot read"), "got: {err}");
         assert_eq!(
@@ -1345,7 +1368,7 @@ mod tests {
         art(&cat, "led", "/nonexistent/ledger.md", "my-ledger");
         cite(&cat, "my-ledger", "T-4", "abcdef0123456789", "write");
 
-        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         assert_eq!(report.durable_outbound_repointed, 1);
         assert_eq!(report.body_lines_rewritten, 0);
@@ -1364,7 +1387,7 @@ mod tests {
             "# Notes\n\n## T-3 — a\n\nsee T-4\n",
         );
 
-        rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         let out = body_of(&l);
         assert!(out.contains("## SRI-3 — a"), "got:\n{out}");
@@ -1385,7 +1408,7 @@ mod tests {
         );
         let before = std::fs::metadata(&l.path).unwrap().modified().unwrap();
 
-        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI").unwrap();
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
 
         assert_eq!(report.body_lines_rewritten, 0);
         assert_eq!(
@@ -1393,5 +1416,68 @@ mod tests {
             before,
             "no write may have happened"
         );
+    }
+    /// A preview must report the real numbers and write NOTHING — not the file, not the
+    /// catalog. Both halves are asserted because they fail independently: the transaction
+    /// rollback covers the catalog, and only the explicit mode check covers the file, which
+    /// is not inside the transaction at all.
+    #[test]
+    fn preview_reports_the_full_report_and_writes_nothing() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let l = led(
+            &cat,
+            "led",
+            "my-ledger",
+            "---\nkind: tracker\n---\n\n## T-1 — first\n\nsee T-2\n",
+        );
+        aug(
+            &cat,
+            "led",
+            Some("tasks"),
+            serde_json::json!({"tasks": [{"id": "T-1"}]}),
+            Some(id_schema("T")),
+            "keeps `## T-N — <title>`",
+        );
+        cite(&cat, "my-ledger", "T-1", "abcdef0123456789", "write");
+        let before_body = body_of(&l);
+
+        let report = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Preview).unwrap();
+
+        // The report is the real thing, not a separate estimate.
+        assert_eq!(report.params_ids_repointed, 1);
+        assert_eq!(report.schema_patterns_repointed, 1);
+        assert_eq!(report.durable_outbound_repointed, 1);
+        assert_eq!(report.body_lines_rewritten, 2);
+        assert!(report.prompt_rewritten);
+
+        // And nothing moved, on either side of the transaction boundary.
+        assert_eq!(body_of(&l), before_body, "the FILE must be untouched");
+        assert_eq!(
+            params_of(&cat, "led")["tasks"][0]["id"],
+            "T-1",
+            "the CATALOG must be untouched"
+        );
+        assert_eq!(
+            locals(&cat, "my-ledger"),
+            vec!["T-1".to_string()],
+            "and so must the citations"
+        );
+    }
+
+    /// A preview that returned `Ok` while the apply would refuse is worse than no preview:
+    /// it is a green light for a call that cannot succeed. Every refusal fires in both modes.
+    #[test]
+    fn preview_refuses_exactly_where_apply_would() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let _l = led(
+            &cat,
+            "led",
+            "my-ledger",
+            "---\nkind: tracker\n---\n\n```\nunclosed T-5\n",
+        );
+
+        let err = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Preview).unwrap_err();
+
+        assert!(err.to_string().contains("fence"), "got: {err}");
     }
 }

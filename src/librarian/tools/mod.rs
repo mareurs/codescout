@@ -424,6 +424,7 @@ pub mod append_entry;
 pub mod delete;
 pub mod graft;
 pub mod mv;
+pub mod rekey_prefix;
 pub mod update_entry;
 
 pub mod event_create;
@@ -619,6 +620,12 @@ mod required_param_routing_tests {
             (
                 "update_entry",
                 update_entry::call(&c, json!({"id": "0000000000000000"}))
+                    .await
+                    .unwrap_err(),
+            ),
+            (
+                "rekey_prefix",
+                rekey_prefix::call(&c, json!({"id": "0000000000000000"}))
                     .await
                     .unwrap_err(),
             ),
