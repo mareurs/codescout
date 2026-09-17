@@ -1,13 +1,15 @@
 ---
 id: efd14d6c5eb56905
 kind: bug
-status: open
+status: taken
 title: 'BUG: the embeddings docs invert which config fields are live'
 tags:
 - cluster/doc-contradicted-by-code
 - embeddings
 - docs
 - config
+claimed_at: 2026-09-17
+claimed_by: 458a8a26-c380-4f5b-b967-2181f592917e
 ---
 
 ## Summary
@@ -130,28 +132,83 @@ disavows it.
 
 ## Fix
 
-Documentation-only for this file; the code defects are filed separately and
-their fixes will change what the corrected text should say. Sequence matters —
-correct the docs **after** the model-discard fix lands, or the page will be
-rewritten twice.
+Documentation-only, sequenced **after** Tasks 1–3 so the pages were rewritten once
+against settled behaviour rather than twice.
 
-1. Rewrite `embeddings.md`'s banner to describe the real surface.
-2. Correct `global-config.md` § Merge semantics to state deep-merge, and replace
-   its non-resolvable `jinaai/jina-embeddings-v2-base-code` example.
-3. Fix the duplicated `(default)` marker in `src/config/project.rs:82`.
-4. Document the API-key path on a page that is not self-disclaiming.
+The filed scope was three items. Reading the pages against the code found **nine**, and
+the two worst were not in the report — both are surfaces that tell a reader where to put
+something, or hand them syntax to paste:
+
+**`docs/manual/src/configuration/embeddings.md`**
+
+1. The banner claimed `[embeddings]` was superseded and that `model` was the only live
+   field. Inverted in both directions; replaced with the real two-place ladder, and it
+   now states what it used to say, since a reader may remember the old claim.
+2. § *Environment Variables* listed three variables. It now lists ten, says every one
+   **overrides both config layers**, names `CODESCOUT_EMBEDDER_MODEL_NAME` explicitly
+   (the one that decides the wire name when a `url` is set), and warns that
+   `~/.config/codescout/.env` is read into the environment at startup — so values there
+   behave as an override of every project rather than a default beneath them.
+
+**`docs/manual/src/configuration/global-config.md`** — five errors on one short page:
+
+3. **The "File locations" table named the project file `.codescout/config.toml`.**
+   Nothing reads that path; the file is `.codescout/project.toml`. A reader following
+   the table got no effect and no warning. Verified by grep: no reader exists.
+4. The intro repeated the same wrong filename.
+5. § *Merge semantics* said tables do **not** deep-merge — the opposite of `merge_toml`,
+   which recurses, and of the test that pins it. It discouraged the exact pattern the
+   two layers exist for. Rewritten with a worked example.
+6. The `[embeddings]` example used a bare HuggingFace repo id, which resolves to nothing.
+7. The same example set `chunk_size`, an inert key (`CODESCOUT_CHUNK_TARGET` is live).
+8. § *Load behaviour* claimed a 64 KB file-size guard. The code has always enforced
+   1 MiB (`src/config/global.rs`). Also adds the unknown-key-is-dropped-silently note,
+   since that is the residual after the shared type landed.
+
+**`docs/manual/src/configuration/embedding-backends.md` and
+`docs/manual/src/semantic-search-guide.md`**
+
+9. **Both presented `custom:<model>@<url>` as a live backend** — an entire section with
+   four copy-pasteable provider examples in one, a table row in the other. That prefix
+   was **removed** and now hard-errors with a migration message. Every example failed.
+   Rewritten to the `url` + `model` pair. `embeddings.md` § *Migration* had documented
+   the removal correctly all along, which is what makes this a drift between surfaces
+   rather than an unknown.
+
+The API-key half of the report is closed by the above rather than by a new page: the
+only surface documenting `[embeddings].api_key` was `embeddings.md`, whose banner told
+readers to treat it as historical. That banner is gone, and `embedding-backends.md`
+gained an § *Authentication* section naming both the config field and `EMBED_API_KEY`,
+which layer wins, and the HTTPS-or-loopback drop.
+
+Item 3 of the original report — the duplicated `(default)` marker at
+`src/config/project.rs:82` — was already fixed in Task 2, which rewrote that doc block.
 
 SHA / patch-id: pending.
 
 ## Tests added
 
-None yet. A prose page cannot be pinned without redding on every rewording
-(`CLAUDE.md` § Testing Discipline). What **is** cheaply assertable and reds on
-exactly the regression that happened: that `merge_toml`'s deep-merge behaviour
-and the global-config page's description of it do not contradict — e.g. an
-`audit_doc_refs`-style check, or at minimum keeping
-`merge_toml_base_fills_missing_key` cited from the page so a reader lands on the
-executable statement.
+None, and the reason is worth stating rather than leaving as a blank.
+
+Pinning prose reds on every rewording, which `CLAUDE.md` § *Testing Discipline* rightly
+warns against. What is cheaply assertable — and what actually failed here — is whether a
+doc's claim and the code's behaviour contradict. Two of the nine errors were refuted by
+tests that already existed and were simply never read against the prose:
+`merge_toml_base_fills_missing_key` refutes the "no deep-merge" claim, and the `custom:`
+bail in `create_embedder_with_config` refutes two pages of examples.
+
+So the honest statement is: **this class is caught by `librarian(action="audit_doc_refs")`
+only for path-shaped tokens**, and every error above except the wrong filename was prose
+that no linter reaches. Run after this change: `exit_code=0`, zero `high` findings across
+the four edited pages.
+
+The one mechanical guard that would have caught error 3 — the wrong project filename — is
+that `audit_doc_refs` treats `.codescout/config.toml` as a user-created path and
+explicitly ignores it (`audit-doc-refs:ignore` comments at the top of that page, with the
+reason "a clean checkout has no .codescout/config.toml, and that is the normal state, not
+drift"). The suppression is correct for its stated purpose and is exactly what let the
+wrong name sit there — a waiver written for absence covering a **misspelling**. Left in
+place; noted here because the next person to widen that lint should know it.
 
 ## Workarounds
 
@@ -161,10 +218,12 @@ until the model-discard bug is fixed.
 
 ## Resume
 
-Hold until the model-discard fix lands, then rewrite `embeddings.md` against the
-then-current resolution ladder. `global-config.md` § Merge semantics and the
-`src/config/project.rs:82` marker can be corrected immediately — neither depends
-on the code fix.
+N/A — fixed and verified.
+
+One thing knowingly left: the `CODESCOUT_EMBED_*` vs `CODESCOUT_EMBEDDER_*` duplication
+is now *documented* as history rather than design, but not yet removed. That is Task 5 of
+`docs/plans/2026-09-17-embedding-config-consolidation.md`, which will make these pages
+need one more pass — a smaller one, since the ladder itself is now stated correctly.
 
 ## References
 

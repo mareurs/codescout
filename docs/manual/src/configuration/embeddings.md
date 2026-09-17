@@ -1,29 +1,37 @@
 # Embeddings
 
+> **Status, corrected 2026-09-17.** This banner previously said the `[embeddings]`
+> block was superseded and that "the `model` / `url` / `api_key` fields in
+> project.toml no longer drive search", qualified to say only `model` still worked.
+> **That was inverted in both directions**, and following it produced the one
+> configuration that fails. Measured against a logging `/v1/embeddings` server:
+> `url` and `api_key` drove search; `model` was the field being discarded.
+>
+> All three are live now. The `model` half was a real defect and is fixed — see
+> `docs/issues/archive/2026-09-17-the-configured-embedding-model-is-discarded-whenever-a-url-is-set.md`.
+>
+> **Where embeddings are configured — two places, in this order:**
+>
+> | | |
+> |---|---|
+> | `~/.config/codescout/config.toml` | machine-wide default |
+> | `<project>/.codescout/project.toml` | per-project override, optional |
+>
+> They deep-merge **per field**, so a project can override `model` and inherit
+> `url` and `api_key` — see [Global Config](global-config.md).
+>
+> `CODESCOUT_*` environment variables override **both**, and are an escape hatch
+> for CI and benchmark runs rather than a third place to keep settings. Note that
+> `~/.config/codescout/.env` is loaded into the environment at startup, so values
+> written there outrank every project's own config.
+>
+> **The [Retrieval Stack](../concepts/retrieval-stack.md) is a different axis, not
+> a replacement.** It covers Qdrant, the sparse SPLADE leg and the cross-encoder
+> reranker — which are configured by `CODESCOUT_*` only. `[embeddings]` configures
+> the **dense embedder** on either substrate.
+
 codescout uses embeddings for semantic search — finding code by meaning rather than
 exact text matches. This guide covers how to configure the embedding backend.
-
-> **⚠ This page describes the pre-v0.12 single-service embedding model and is
-> being phased out.** As of v0.12 the default substrate is the
-> [Retrieval Stack](../concepts/retrieval-stack.md) (Qdrant + dense embedder +
-> sparse SPLADE + cross-encoder reranker, configured via `CODESCOUT_*`
-> environment variables, not `[embeddings]` in `project.toml`). The
-> `[embeddings]` config block still loads but only the `model = "local:..."`
-> path is honoured — and only when the binary was built with the
-> `local-embed` Cargo feature.
->
-> **If you are setting up a fresh install:** read
-> [Retrieval Stack](../concepts/retrieval-stack.md) instead. It covers the
-> docker-compose stack, Ollama / llama.cpp / OpenAI integration, and the
-> benchmark we used to pick defaults.
->
-> **If you are upgrading from <v0.12:** the `model` / `url` / `api_key`
-> fields in `project.toml` no longer drive search. Run
-> `codescout migrate-memories` to move legacy memory data into Qdrant, then
-> bring up the stack.
->
-> The remainder of this page is kept as a reference for the legacy code
-> path; treat it as historical.
 
 ## Quick Start
 
@@ -159,11 +167,37 @@ When codescout needs to embed text, it resolves the backend in this order:
 
 ### Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `EMBED_API_KEY` | API key for the embedding endpoint (alternative to config field) |
-| `OPENAI_API_KEY` | OpenAI API key (used with `openai:` prefix) |
-| `OLLAMA_HOST` | Ollama daemon URL (deprecated — use `url` field) |
+Every variable here **overrides both config layers**. They exist for CI and
+benchmark runs; they are not a third place to keep settings.
+
+| Variable | Overrides | Description |
+|----------|-----------|-------------|
+| `CODESCOUT_EMBEDDER_URL` | `[embeddings].url` | Endpoint base URL |
+| `CODESCOUT_EMBEDDER_MODEL` | `[embeddings].model` | Model spec |
+| `CODESCOUT_EMBED_URL` | `[embeddings].url` | Older name, applied a layer earlier |
+| `CODESCOUT_EMBED_MODEL` | `[embeddings].model` | Older name, applied a layer earlier |
+| `CODESCOUT_EMBEDDER_MODEL_NAME` | the name sent on the wire | Only when a `url` is set — see below |
+| `EMBED_API_KEY` | `[embeddings].api_key` | Bearer token; dropped unless the endpoint is https or loopback |
+| `OPENAI_API_KEY` | — | Fallback for the `openai:` prefix only |
+| `OLLAMA_HOST` | — | Ollama daemon URL, for the `ollama:` prefix |
+| `CODESCOUT_MODEL_DIM` | — | Pin the expected dimension; unset means "ask the model" |
+| `CODESCOUT_QUERY_PREFIX` | — | Query-side prefix for asymmetric models |
+
+**`CODESCOUT_EMBEDDER_MODEL_NAME` is the one to know about.** When a `url` is
+configured, it sets the model name sent in the request body and wins over
+`[embeddings].model`. Every deployment built around the retrieval stack sets it,
+which is why it stays on top: letting `model` win would silently repoint those
+deployments at the built-in default. Leave it unset and `[embeddings].model` is
+used, with its routing prefix stripped (`local:X` is sent as `X`).
+
+**Three of the names above are duplicates** — `CODESCOUT_EMBED_*` and
+`CODESCOUT_EMBEDDER_*` reach the same setting at different layers. That is
+history, not design, and it is being consolidated; prefer the `CODESCOUT_EMBEDDER_*`
+spellings.
+
+`~/.config/codescout/.env` is read into the environment at startup, so anything
+set there behaves as an override of every project — not as a default beneath them.
+Point `CODESCOUT_ENV_FILE` elsewhere, or leave that file for secrets only.
 
 ## Model Recommendations
 

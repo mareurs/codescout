@@ -11,19 +11,35 @@ individual tools, see [Semantic Search Tools](tools/semantic-search.md).
 
 ## Choosing an Embedding Backend
 
-codescout supports four embedding backends. The model string prefix in
-`project.toml` selects which one is used:
+codescout selects a backend from the `[embeddings]` block in
+`.codescout/project.toml` — or from `~/.config/codescout/config.toml`, which supplies
+the same fields as a machine-wide default.
+
+**Setting `url` selects an endpoint directly**, and `model` is then the name sent in
+the request body:
+
+```toml
+[embeddings]
+model = "mxbai-embed-large"
+url = "http://localhost:1234/v1"
+```
+
+With no `url`, the model string's prefix selects the backend:
 
 | Prefix | Example | When to use |
 |--------|---------|-------------|
-| `ollama:` | `ollama:mxbai-embed-large` | Local development — free, private, no API key |
-| `openai:` | `openai:text-embedding-3-small` | Best retrieval quality, cloud cost |
-| `custom:` | `custom:my-model@http://host:8080` | Any OpenAI-compatible endpoint |
-| `local:` | `local:AllMiniLML6V2Q` | Offline / air-gapped, no daemon required |
+| `local:` | `local:AllMiniLML6V2Q` | Offline / air-gapped, no daemon, no server |
+| `local-dir:` | `local-dir:/path/to/weights` | Offline host with no network at all |
+| `ollama:` | `ollama:mxbai-embed-large` | A running Ollama daemon |
+| `openai:` | `openai:text-embedding-3-small` | OpenAI directly, cloud cost |
 
-**Recommended starting point:** The bundled `local:AllMiniLML6V2Q` model — no setup
-required, works offline, and downloads only ~22 MB on first use. For higher search
-quality or multi-project setups, see [Embedding Backends](configuration/embedding-backends.md).
+The `custom:<model>@<url>` prefix this table listed until 2026-09-17 was **removed**
+and now hard-errors. Use the `url` + `model` pair above.
+
+**Recommended starting point:** the bundled `local:AllMiniLML6V2Q` — no setup
+required, works offline, downloads ~22 MB on first use, and is what you get with no
+`[embeddings]` block at all. For higher search quality or multi-project setups, see
+[Embedding Backends](configuration/embedding-backends.md).
 
 ## Setting Up Ollama
 

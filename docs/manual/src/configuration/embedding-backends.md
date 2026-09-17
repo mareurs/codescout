@@ -116,7 +116,9 @@ Calls the OpenAI embeddings API. Requires an active OpenAI account and an API ke
 
 **Endpoint:** `https://api.openai.com/v1/embeddings`
 
-**Authentication:** `$OPENAI_API_KEY` environment variable (required)
+**Authentication:** `[embeddings].api_key`, or the `$OPENAI_API_KEY` environment
+variable. One of the two is required; the config field is checked first, so a key
+set there works without touching the environment.
 
 ### Setup
 
@@ -145,44 +147,64 @@ model = "openai:text-embedding-3-small"
 
 ## Custom Endpoint
 
-Points at any OpenAI-compatible embeddings API — useful for self-hosted models, Azure OpenAI,
-Together AI, or other third-party providers.
+Points at any OpenAI-compatible `/v1/embeddings` API — self-hosted models, llama.cpp,
+vLLM, TEI, Azure OpenAI, Together AI, or any other provider.
 
-**Model string format:** `"custom:<model-name>@<base-url>"`
+> **The `custom:<model>@<url>` prefix was removed.** It is not deprecated-but-working:
+> it is a **hard error** carrying a migration message. This section documented it as
+> live until 2026-09-17, including four copy-pasteable examples, every one of which
+> fails.
 
-codescout appends `/v1/embeddings` to `<base-url>`, so a base URL of
-`http://localhost:1234` becomes `http://localhost:1234/v1/embeddings`.
-
-**Authentication:** `$EMBED_API_KEY` environment variable (optional — set it if the server
-requires a bearer token)
-
-### Setup
-
-Start your compatible server, then set the API key if needed:
-
-```bash
-export EMBED_API_KEY=your-token-here
-```
-
-### Configuration
+Set two separate fields instead — the endpoint and the model name are no longer
+packed into one string:
 
 ```toml
 [embeddings]
-model = "custom:mxbai-embed-large@http://localhost:1234"
+model = "mxbai-embed-large"          # sent as the model name in the request body
+url = "http://localhost:1234/v1"     # any OpenAI-compatible base URL
+# api_key = "your-token"             # optional; or set EMBED_API_KEY
 ```
+
+codescout normalises the URL, so a bare host, a `/v1` suffix and a
+`/v1/embeddings` suffix are all equivalent.
 
 Examples for common providers:
 
 ```toml
 # Azure OpenAI
-model = "custom:text-embedding-3-small@https://my-resource.openai.azure.com/openai/deployments/my-deployment"
+model = "text-embedding-3-small"
+url = "https://my-resource.openai.azure.com/openai/deployments/my-deployment"
 
 # Together AI
-model = "custom:togethercomputer/m2-bert-80M-8k-retrieval@https://api.together.xyz"
+model = "togethercomputer/m2-bert-80M-8k-retrieval"
+url = "https://api.together.xyz/v1"
 
 # Hugging Face Text Embeddings Inference (TEI)
-model = "custom:BAAI/bge-large-en-v1.5@http://localhost:8080"
+model = "BAAI/bge-large-en-v1.5"
+url = "http://localhost:8080/v1"
 ```
+
+### Authentication
+
+Either the config field or the environment variable; the environment wins.
+
+```toml
+[embeddings]
+api_key = "your-token"
+```
+
+```bash
+export EMBED_API_KEY=your-token-here
+```
+
+**The key is dropped unless the endpoint is HTTPS or loopback**, with a warning,
+rather than being sent in cleartext. `localhost`, `127.0.0.1` and `[::1]` are exempt
+so a local llama.cpp or Ollama that expects a token still works.
+
+Either config layer can hold it — `~/.config/codescout/config.toml` for a key shared
+across projects, `<project>/.codescout/project.toml` for one project.
+
+---
 
 ---
 

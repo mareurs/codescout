@@ -244,19 +244,41 @@ now false. The escape still exists but must be asked for explicitly
 
 ### Task 4 — correct the docs
 
-Closes `efd14d6c5eb56905`. **Sequenced after tasks 1–3**, or the pages get
-rewritten twice.
+**Landed 2026-09-17** (SHA recorded at commit). Closes `efd14d6c5eb56905`.
 
-- `configuration/embeddings.md`: the banner currently states the inverse of
-  reality in both directions. Rewrite against the then-current ladder.
-- `configuration/global-config.md` § Merge semantics: states "no deep-merge"
-  where `merge_toml` recurses and `merge_toml_base_fills_missing_key` pins it.
-  Replace the non-resolvable `jinaai/jina-embeddings-v2-base-code` example.
-- `src/config/project.rs:82`: two conflicting `(default)` markers in one doc
-  block — `ollama:` is not the default.
-- Document the API-key path somewhere that is not self-disclaiming. Today
-  `[embeddings].api_key` is documented on exactly one page, and that page's
-  banner says to treat it as historical.
+Sequenced after Tasks 1–3 as planned, so the pages were rewritten **once** against
+settled behaviour. That sequencing paid: two of the corrections below describe fixes
+that only became true earlier today.
+
+The filed scope was three items; reading the pages against the code found **nine**, and
+the two worst were not in the report. Both are surfaces that tell a reader where to put
+a file, or hand them syntax to paste — the two things a doc can get wrong that cost more
+than a misleading sentence:
+
+- **`global-config.md`'s "File locations" table named the project file
+  `.codescout/config.toml`.** Nothing reads that path; it is `.codescout/project.toml`.
+  A reader following the table got no effect and no warning. Confirmed by grep — no
+  reader exists anywhere in `src/`.
+- **`embedding-backends.md` and `semantic-search-guide.md` both presented
+  `custom:<model>@<url>` as a live backend** — a whole section with four
+  copy-pasteable provider examples in the first, a table row in the second. That prefix
+  was removed and now **hard-errors**. `embeddings.md` § *Migration* had documented the
+  removal correctly all along, so this was drift between surfaces rather than an
+  unknown: one page knew.
+
+The rest: the inverted banner; a three-entry env-var table replaced by ten with their
+precedence stated; a `[embeddings]` example using an unresolvable model id; the same
+example setting the inert `chunk_size`; a documented 64 KB size guard the code has always
+enforced at 1 MiB; and § *Merge semantics* asserting the opposite of `merge_toml`.
+
+**No tests added, and the reason is the finding.** Pinning prose reds on every rewording.
+Two of the nine errors were already refuted by tests nobody had read against the prose —
+`merge_toml_base_fills_missing_key` against the no-deep-merge claim, and the `custom:`
+bail against two pages of examples. `audit_doc_refs` reaches only path-shaped tokens
+(run after: `exit_code=0`, zero `high`), and the one error it *could* have caught was
+suppressed by an `audit-doc-refs:ignore` waiver written for a different reason — "a clean
+checkout has no `.codescout/config.toml`" is a waiver about **absence**, and it covered a
+**misspelling**. Left in place; recorded on the bug for whoever widens that lint.
 
 ## Phase 2 — consolidate the surface behind deprecations
 
