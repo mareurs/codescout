@@ -1,4 +1,4 @@
-# Catalog Audit Trail (T-1) Implementation Plan
+# Catalog Audit Trail (SRI-1) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -26,7 +26,7 @@ The spec says triggers read `COALESCE((SELECT actor FROM audit_ctx), 'unknown')`
 - Errors: input-driven failures use `crate::librarian::tools::RecoverableError::new/with_hint` (`src/librarian/tools/mod.rs:69`); real failures use `anyhow`.
 - Zero results name their scope (`docs/adrs/2026-08-27-negative-results-name-their-scope.md`).
 - No FK, no `REFERENCES`, on `catalog_audit` — audit rows must survive their subjects.
-- `seq` is `INTEGER PRIMARY KEY AUTOINCREMENT` (never-reused; a gap is a tamper signal). `catalog_meta` key `audit_exported_through_seq` is reserved for phase 2 (T-7) — do not use it here.
+- `seq` is `INTEGER PRIMARY KEY AUTOINCREMENT` (never-reused; a gap is a tamper signal). `catalog_meta` key `audit_exported_through_seq` is reserved for phase 2 (SRI-7) — do not use it here.
 - Timestamps are epoch-**ms** UTC; label the unit in any output (memory `catalog-sql-hazards`).
 
 ## File Structure
@@ -181,7 +181,7 @@ Expected: compile error — `audit` module does not exist yet.
 - [ ] **Step 3: Implement `src/librarian/catalog/audit.rs`**
 
 ```rust
-//! Append-only catalog audit trail (T-1, spec: docs/superpowers/specs/
+//! Append-only catalog audit trail (SRI-1, spec: docs/superpowers/specs/
 //! 2026-09-01-catalog-audit-trail-design.md + this plan's Design Correction).
 //!
 //! Main-schema triggers capture every writer's mutations with actor DEFAULT
@@ -823,14 +823,14 @@ git commit -m "feat(librarian): doctor reports audit-trail health incl. unknown-
 
 **Files:**
 - Modify: the `get_guide("librarian")` action-table source — locate with `grep(pattern="merge_worktree", glob="**/*.md")` restricted to non-tracker sources plus `grep(pattern=\"merge_worktree\", glob=\"src/**\")`; the reference table that renders in `librarian(action=...)` — Reference gains one row: `audit_log | Query the catalog audit trail (who mutated what, when; actor 'unknown' = unidentified writer). prune_before_ms + confirm prunes.`
-- Modify: `docs/issues/2026-08-25-sdd-ledger-and-catalog-rows-vanished.md` — Resume section gains: "Prospective instrument now exists: `librarian(action=\"audit_log\")` records every catalog mutation incl. foreign writers (T-1, this plan). The historical loss stays undeterminable; any recurrence is now answerable. Re-open trigger unchanged."
+- Modify: `docs/issues/2026-08-25-sdd-ledger-and-catalog-rows-vanished.md` — Resume section gains: "Prospective instrument now exists: `librarian(action=\"audit_log\")` records every catalog mutation incl. foreign writers (SRI-1, this plan). The historical loss stays undeterminable; any recurrence is now answerable. Re-open trigger unchanged."
 - Modify: tracker `docs/trackers/system-retrospective-improvements.md` (artifact `6f5ec09c63aef864`) — through the librarian, never by hand:
   ```
   artifact(action="update_entry", id="6f5ec09c63aef864", entry_collection="tasks",
-           entry_id="T-1", fields={status: "done"})
+           entry_id="SRI-1", fields={status: "done"})
   artifact(action="update", id="6f5ec09c63aef864", patch={body_edits: [{
     heading: "## History", action: "insert_after", at: "end-of-section",
-    content: "### <date> — T-1 landed\n<fix SHA + patch-id, gate numbers>"}]})
+    content: "### <date> — SRI-1 landed\n<fix SHA + patch-id, gate numbers>"}]})
   ```
 - [ ] **Step 1: Update the guide action table** (find it first; it is the table this session saw rendered under "librarian(action=...) — Reference"). Add the `audit_log` row. Run the deprecated-tool-name/prompt-surface gates: `cargo test -p codescout prompt_surfaces && cargo test -p codescout claude_md_contains`.
 - [ ] **Step 2: Update the vanished-rows bug file** Resume (text above) — `edit_markdown` is fine for `docs/issues/*` (not librarian-managed).
@@ -845,7 +845,7 @@ git commit -m "docs(librarian): audit_log guide row; vanished-rows bug gains its
 
 ---
 
-## Explicitly Out of Scope (phase 2 = tracker T-7)
+## Explicitly Out of Scope (phase 2 = tracker SRI-7)
 
 Committed JSONL shards, `merge=union` gitattribute, `audit_exported_through_seq` watermark, export-on-reindex. Nothing in this plan may write files under `.codescout/audit/`.
 

@@ -1,4 +1,4 @@
-# Committed Audit Shards (T-7) Implementation Plan
+# Committed Audit Shards (SRI-7) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust, rusqlite (bundled SQLite), `fs4` file locking, `serde_json`, existing `librarian` tool dispatch.
 
-**Spec:** `docs/superpowers/specs/2026-09-01-catalog-audit-trail-design.md` — read § *Phase 2*, including its `### Revised 2026-09-01` and `### Settled design` subsections. Phase 1 shipped at `10972335`; the volume prerequisites (T-13) shipped at `40ab56f6`.
+**Spec:** `docs/superpowers/specs/2026-09-01-catalog-audit-trail-design.md` — read § *Phase 2*, including its `### Revised 2026-09-01` and `### Settled design` subsections. Phase 1 shipped at `10972335`; the volume prerequisites (SRI-13) shipped at `40ab56f6`.
 
 ## Global Constraints
 
@@ -1199,7 +1199,7 @@ Append to `.gitignore`, in the `.codescout` block:
 
 ```gitignore
 # NOT ignored, deliberately: /.codescout/audit/*.jsonl are the committed audit
-# shards (T-7). Adding a blanket `.codescout/` rule would silently stop sharing
+# shards (SRI-7). Adding a blanket `.codescout/` rule would silently stop sharing
 # them, with no error anywhere — the same shape as the projects/ note above.
 ```
 

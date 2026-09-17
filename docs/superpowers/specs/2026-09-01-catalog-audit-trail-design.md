@@ -1,6 +1,6 @@
 # Catalog Audit Trail — Design
 
-**Date:** 2026-09-01 · **Status:** approved-pending-review · **Tracker:** `system-retrospective-improvements` T-1 (local WAL) + export phase (committed shards)
+**Date:** 2026-09-01 · **Status:** approved-pending-review · **Tracker:** `system-retrospective-improvements` SRI-1 (local WAL) + export phase (committed shards)
 
 ## Problem
 
@@ -20,7 +20,7 @@ Requirements settled in brainstorming (2026-09-01):
 2. **Payload depth:** full OLD-row image on DELETE; changed-fields diff (old→new pairs) on
    UPDATE; id only on INSERT.
 3. **Retention:** keep forever; manual GC only (dry-run-by-default prune verb).
-4. **Phasing:** T-1 ships the local WAL + query surface; the committed-shard export is a
+4. **Phasing:** SRI-1 ships the local WAL + query surface; the committed-shard export is a
    follow-up phase (tracker task of its own), but the row format is designed for it NOW so
    the export lands without schema churn.
 
@@ -142,7 +142,7 @@ with no `WHEN` clause firing on statements that changed nothing — and **88% of
 sat in 23 `artifact_augmentation` update rows averaging 34KB. Unfiltered, that is ~380k
 rows/day into a committed file; phase 2 was not shippable on that population.
 
-Both are fixed (T-13, `40ab56f6`), and **the fix belongs upstream rather than in the export
+Both are fixed (SRI-13, `40ab56f6`), and **the fix belongs upstream rather than in the export
 filter**: filtering at export would have left the local query surface unusable and the
 database growing, while the trail's own `seq`-gap tamper signal stayed diluted by noise.
 Post-fix, a reindex writes 20 rows instead of ~2,750, and a tracker append writes 441 chars
@@ -225,7 +225,7 @@ privacy have the same fix here.
 - **Read path: merge-on-query, stateless.** `audit_log` reads the local `catalog_audit` and
   streams the shard files, merging on `(at_ms, host, seq)` — never on line position. There is
   no import and no second table. An imported replica is exactly the two-representations-one-
-  truth shape T-6 exists to remove, and it would add a sync step that can silently not have
+  truth shape SRI-6 exists to remove, and it would add a sync step that can silently not have
   run. Shard filenames encode host and `YYYYMM`, so `since`/`until` prunes whole files before
   opening them.
 - **Shard scope: every audited table except `commits`.** `commits` is a cache of git, so

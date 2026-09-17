@@ -36,14 +36,14 @@ frictions, SR-14 ranked recommendations, SR-15 the standing question only the op
 **The sibling review — found on a second pass (2026-09-01):**
 `docs/trackers/system-retrospective-improvements.md` ("System Retrospective 2026-09 —
 Improvement Tasks", artifact `6f5ec09c63aef864`), committed in `3a422b31` — the same commit that
-added the catalog-audit-trail design its T-1 prescribed, exactly as Marius remembered it: the
+added the catalog-audit-trail design its SRI-1 prescribed, exactly as Marius remembered it: the
 review created the design. The first search missed it because the file's name and title contain
 neither "review" nor "fable"; the semantic search's TOP hit was the design spec the review
 produced, and the lineage was not chased one commit further — title-matching found the output,
 not the source, the same error shape the IC ledger records for title-matched tag assignment.
 
 The two documents are complementary units over one subject. The retrospective is TASK-shaped —
-what to build; its T-1 audit trail went design → implementation → close-out within a day
+what to build; its SRI-1 audit trail went design → implementation → close-out within a day
 (`3a422b31` → `40ab56f6` → `33fb28c9`), a same-day capture→mechanism loop that is itself
 evidence for SR-1. This tracker is FINDING-shaped — what is true. Convergences, recorded so
 neither document re-derives the other:
@@ -51,11 +51,11 @@ neither document re-derives the other:
 - SR-3 ≈ the retrospective's meta-insight (the observer is disqualified by construction; only
   standing mechanisms catch; the ~12% SDD wrong-ruling rate calibrates how far vigilance can be
   trusted).
-- SR-7's classification pass is prescribed there as system-retrospective-improvements:T-5
+- SR-7's classification pass is prescribed there as system-retrospective-improvements:SRI-5
   (archive back-tagging; 377/531 files untagged).
 - SR-10 and SR-11 ≈ its "biggest structural liability" (machine-local silent-by-design state,
-  id-by-path) plus system-retrospective-improvements:T-6 (two-representations-one-truth seams).
-- SR-15 ≈ system-retrospective-improvements:T-3 — its "two products in one binary" (System A
+  id-by-path) plus system-retrospective-improvements:SRI-6 (two-representations-one-truth seams).
+- SR-15 ≈ system-retrospective-improvements:SRI-3 — its "two products in one binary" (System A
   ~56K LOC tools vs System B ~56.5K LOC librarian) is the sharper, measured form of the
   tool-vs-methodology question.
 - New here, absent there: SR-2 (meta-closure as the emergent property), SR-4 (eval as
@@ -213,7 +213,7 @@ being the kind of system it is. IC-6's 30 members are mostly the librarian's own
 machinery. Genuine product-bug classes (IC-13, IC-15, parts of IC-3 and IC-14) share the corpus
 with a large meta-fraction. **Nobody has run the meta-vs-product classification pass; the ratio
 is one tagging sweep away and this entry is falsifiable by it.** The 2026-09 retrospective
-prescribes exactly that sweep as system-retrospective-improvements:T-5; when it runs, this
+prescribes exactly that sweep as system-retrospective-improvements:SRI-5; when it runs, this
 entry's ratio falls out of it. Mitigating context: the repo is
 dogfooding its own substrate, so bookkeeping frictions double as product bug reports — the skew
 is partly the point, but only partly, and only here.

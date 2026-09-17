@@ -14,7 +14,7 @@ entry_high_water_F: 5
 entry_high_water_W: 3
 ---
 
-# Session Log — Catalog Audit Trail (T-1 → T-13 → T-7)
+# Session Log — Catalog Audit Trail (SRI-1 → SRI-13 → SRI-7)
 
 > **Purpose:** Two-sided observation log for a multi-session work stream.
 > Captures frictions (F-N) and wins (W-N) that the session producing it
@@ -257,11 +257,11 @@ Codified so the Index column means the same thing across sessions.
 
 ## F-1 — Spec's Phase 2 volume analysis named the 0.4% term and missed the 98.5% one
 
-**Observed:** 2026-09-01, scoping T-7 (committed audit shards). Before reading the spec's
+**Observed:** 2026-09-01, scoping SRI-7 (committed audit shards). Before reading the spec's
 Phase 2 bullets I histogrammed the live `catalog_audit` table, per CLAUDE.md's *"run the
 reproduction before reading the fix plan — the plan is a hypothesis about the reproduction."*
 
-**When:** Immediately before writing the T-7 implementation plan. No code written yet.
+**When:** Immediately before writing the SRI-7 implementation plan. No code written yet.
 
 **Expected (spec):** `docs/superpowers/specs/2026-09-01-catalog-audit-trail-design.md`
 § Phase 2: *"exports filter pure reindex churn by default (update rows whose changed-set ⊆
@@ -313,11 +313,11 @@ tracker append wrote **441 chars** where it would have written 7,364.
 catalog exercises at that scale.
 
 **Fix idea / Pointer:** `docs/issues/archive/2026-09-01-audit-records-the-statement-not-the-change-so-98-percent-is-empty.md`,
-`docs/trackers/system-retrospective-improvements.md` T-13.
+`docs/trackers/system-retrospective-improvements.md` SRI-13.
 
 ## F-2 — Spec prescribed a stamp line inside a file it also declared merge=union
 
-**Observed:** 2026-09-01, writing the T-7 plan's shard-format section.
+**Observed:** 2026-09-01, writing the SRI-7 plan's shard-format section.
 
 **When:** Drafting Task 2, deciding what a shard file's first line is.
 
@@ -410,7 +410,7 @@ observed directly via `symbols()` output, not inferred.
 
 ## W-1 — Histogram the substrate before reading a design whose central claim is a volume
 
-**Observed:** 2026-09-01, at the start of T-7 scoping, before reading the spec's Phase 2
+**Observed:** 2026-09-01, at the start of SRI-7 scoping, before reading the spec's Phase 2
 section in detail and before writing any plan text.
 
 **Pattern:** When a design's central claim is a **volume, rate, or population** — "filter
@@ -636,7 +636,7 @@ Commands if a second instance appears.
 
 ## W-3 — Pre-flight scan as a row-per-pair table caught 3 of 5 tasks' inherited defects
 
-**Observed:** 2026-09-01, immediately before dispatching Task 1 of the T-7 SDD run — a plan I
+**Observed:** 2026-09-01, immediately before dispatching Task 1 of the SRI-7 SDD run — a plan I
 had written myself 40 minutes earlier, after scouting each seam it names.
 
 **Pattern:** **Run the pre-flight scan against your own plan as if a stranger wrote it, and
@@ -660,13 +660,13 @@ exist (`catalog-audit-trail-session-log:F-4`). Without it:
 - Task 2 ships a second copy of the shard-filename convention, and Task 1's round-trip test
   guards a function the export never calls. Green, and covering nothing.
 
-Concretely: **3 of 5 tasks carried a defect**, matching the T-1 run's 5-of-10 rate for the
+Concretely: **3 of 5 tasks carried a defect**, matching the SRI-1 run's 5-of-10 rate for the
 same cause. Cost of the scan: ~8 minutes and four symbol reads.
 
 **Confirming data points:**
 1. This session — 6 gaps, 4 of them non-existent interfaces, in a plan whose author had
    scouted those very files while writing it.
-2. The T-1 SDD run (2026-09-01, same day) — *"A plan's reference code is a sketch — 5 of 10
+2. The SRI-1 SDD run (2026-09-01, same day) — *"A plan's reference code is a sketch — 5 of 10
    tasks carried a defect inherited from the plan, none caught by its author"*, already
    promoted into CLAUDE.md § SDD Rulings.
 3. `codescout:R-49` — three session-authored artifacts failing later scrutiny in one sitting,

@@ -1,5 +1,5 @@
 schema_version: 1
-prompt: 'Maintain the task table. Mark tasks done as commits land; add new tasks as scope expands; never delete completed tasks — they are part of the record. Task one-liners live in params; every task also keeps its own `## T-N — <title>` body section (that heading is what makes T-N citable). Append dated entries under ## History for status changes.'
+prompt: 'Maintain the task table. Mark tasks done as commits land; add new tasks as scope expands; never delete completed tasks — they are part of the record. Task one-liners live in params; every task also keeps its own `## SRI-N — <title>` body section (that heading is what makes SRI-N citable). Append dated entries under ## History for status changes.'
 entry_collection: tasks
 params_schema:
   type: object
@@ -17,7 +17,7 @@ params_schema:
         properties:
           id:
             type: string
-            pattern: ^T-\d+$
+            pattern: ^SRI-\d+$
           task:
             type: string
           status:
