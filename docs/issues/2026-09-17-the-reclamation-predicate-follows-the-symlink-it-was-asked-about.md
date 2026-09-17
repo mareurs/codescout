@@ -1,10 +1,11 @@
 ---
 id: '7b1458c4ede1a86f'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the reclamation predicate asks exists() about a symlink, so a row the walk deliberately skipped is never reclaimed'
 tags:
 - cluster/selector-narrower-than-its-population
+closed: 2026-09-17
 ---
 
 # BUG: the reclamation predicate asks `exists()` about a symlink, so a row the walk deliberately skipped is never reclaimed
@@ -132,11 +133,47 @@ a reclamation that deletes every unseen row would delete rows site 1 skips, whic
 here and would be catastrophic if site 1's predicate were ever widened. CLAUDE.md § *Testing
 Discipline*: *"after adding or changing any bound, re-run the mutation set for EVERY bound."*
 
+## Fix provenance
+
+- **SHA:** `59f47f00` (`experiments`)
+- **patch-id:** `59acd06d7a1251a2633390dd28dbd341bb28fe02`
+
+Direction 3 of the three below — the skip site records the id it skips, and reclamation consults
+that set **alongside** `!exists()` rather than instead of it. Directions 1 and 2 were both
+refuted before implementation, one at the bytes and one by the suite; the refutations are kept
+in `## Resume` rather than deleted.
+
 ## Tests added
 
-None yet — no fix chosen. Named rather than left blank: the existing symlink test covers site 1
-only, and crediting it with coverage here is the false-coverage failure this repo treats as
-worse than no test.
+`librarian::indexer::tests::a_row_for_a_path_the_walk_now_skips_is_reclaimed_rather_than_stranded`
+(`src/librarian/indexer.rs`). Unix-only — needs real symlinks.
+
+It reaches the stranded-row state **the way reality does** — index a real `alias.md`, then
+replace it with a symlink — rather than inserting a row by hand, which would exercise the
+reclamation loop against a catalog shape the indexer never produces. The `added == 3`
+precondition is annotated load-bearing: without it the test passes trivially if the first walk
+never created the row, and `removed == 1` would then be asserting about a row that never was.
+
+**All four mutations, because adding a bound means re-running the set for every bound:**
+
+| mutation | meaning | verdict |
+|---|---|---|
+| M3 | reclamation ignores the skipped set | KILLED |
+| M4 | reclamation ignores liveness | KILLED — by the *pre-existing* vanished-file tests |
+| M1 | skip every symlink (re-run) | KILLED |
+| M2 | skip guard never fires (re-run) | KILLED |
+
+M1 and M2 were already killed before this change, and re-running them is **not** ceremony: the
+new reclamation clause deletes based on what the skip site recorded, so widening the skip now
+widens a *deletion*. Under M1 the outward link's existing row is reclaimed rather than merely
+un-indexed — an edit fifteen lines away grew that mutation's blast radius, which is the whole
+argument for the rule.
+
+**M4 is the one that settles the `!exists()` question.** Dropping that clause — the change this
+record originally called "provably equivalent" — is caught by tests that predate all of this
+work. The suite disagreed with the claim before it could ship.
+
+Gate: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, 0 failures, both symlink tests read by name.
 
 ## Workarounds
 
@@ -145,6 +182,15 @@ cascade. Not recommended while several sessions share the catalog; the row is in
 harmful, costing one duplicate `find` hit and one doubled `doctor` line.
 
 ## Resume
+**FIXED at `59f47f00` — direction 3.** Everything below is the refutation history that produced
+that choice, and it is kept rather than trimmed: two of the three directions were mine, both
+published, and both wrong for reasons a reader would otherwise have to rediscover.
+
+**What a later reader should NOT conclude from a clean `doctor` run.** The duplicate row is
+reclaimed only when a walk runs on a binary containing `59f47f00`; until the live MCP server is
+rebuilt, `AGENTS.md`'s row and its 44 chunks are still present and `row_behind_file` may still
+name it. That is a stale binary, not a stale fix — discriminate with `codescout version`'s
+`git_sha` against `git merge-base --is-ancestor 59f47f00 <that sha>`.
 
 **Correction, same day, before anyone acted on it: the `symlink_metadata()` remedy this section
 originally named DOES NOT WORK, and the `Fix` section above carried it too.** Kept visible
