@@ -231,6 +231,58 @@ different function — so that failure mode is unreachable by construction here.
 fixtures serve the same purpose in the other direction: they pin that the fix is preservation
 rather than normalisation.
 
+## Verified on the LIVE server, 2026-09-17
+
+The fix was green in unit tests at archive time, and that is a claim about the
+compiled-from-source path, not about the tool any session actually calls. The live MCP
+binary is `target/release/codescout` behind a `~/.cargo/bin` symlink, so the fix reached
+no running session until someone ran `cargo rb` and reconnected with `/mcp`. That happened
+at 09:56:12 on 2026-09-17; this is the first measurement through the served surface.
+
+Probe — a fixture in the discriminating shape, i.e. one carrying the blank lines the
+pre-existing test fixtures did not have (compact markdown is why the defect survived a
+passing suite in the first place):
+
+```
+# Title
+
+## Setup
+
+old content
+
+## Next
+
+tail
+```
+
+`edit_file(heading="## Setup", action="replace", body="rewritten content")` through the
+live server, then `cat -A`:
+
+```
+rewritten content$
+$
+## Next$
+```
+
+**PASS** — the blank line before the next heading survives. `edit_file`'s heading grammar
+and `doc(update, patch={body_edits})` both route through `perform_section_edit_ext` ->
+`plan_section_edit`, which is the repaired function, so this exercises the reported surface
+rather than a sibling of it.
+
+**A note on the verdict, because it nearly went the other way.** The first check was
+`grep -qz 'rewritten content\n\n## Next'`, which printed `FAIL`. grep does not interpret
+`\n` in that pattern and said so — `warning: stray \ before n` — while the `cat -A` output
+immediately above it showed the blank line plainly present. The instrument was broken, not
+the fix, and the failing verdict line was the more legible of the two outputs. Recorded
+here rather than dropped: this file's own defect was a silent write, and a probe for it
+that reports a confident false FAIL is the same failure shape pointed the other way.
+
+Binary freshness confirmed two ways before trusting any of this — `readlink /proc/<pid>/exe`
+on the serving process (not a deleted inode), and `scripts/peer-sessions.sh` reporting this
+session as `cs current`. Both were worth doing: the same run showed **15 of 19 live sessions
+on a REPLACED binary**, so "the fix is in the tree" and "the fix is in the server you are
+talking to" are different facts.
+
 ## Workarounds
 
 Use `action: "edit"` with `old_string`/`new_string` when the section's tail matters, and run
