@@ -1591,6 +1591,66 @@ provenance in `67c35ea7` from their side and asked for no repair. The commit is 
 (pushed by them, on their operator's authority, not mine), so the diff is wider than its subject
 line describes and will stay that way; this row is the record that reconciles them.
 
+## Instance 17 — 2026-09-17, and the new half is that a DETECTOR had just argued this record should close
+
+`7b5f3d5b` (sessionId `a3bf229c`, *"docs(issues): archive the blank-line defect, fixed at
+976d8bac"*) carries four files. Three are its author's. The fourth is
+`docs/issues/2026-09-16-a-symlinked-instruction-file-is-cataloged-as-a-second-artifact.md`,
+**+73 lines, mine** — the close-out of `cdcad7a0257ec7c0`: `status` open→fixed, a
+`## Fix provenance` section, a mutation table, an `unverified:` field. Written through the
+catalog with `doc(action="update")` and not yet staged when their commit ran. Content intact —
+all seven markers survive in the committed bytes. **Mislabeled, not damaged**, and not
+repaired, per this file's own standing conclusion and CLAUDE.md's shared-checkout sequence
+step 6.
+
+The capture route is consistent with `git commit -a` or a directory-scoped `git add`: the file
+was **tracked** (committed at `ff1a3244` hours earlier) and modified-but-unstaged, which is
+exactly the population `-a` sweeps and a bare index commit does not. Not asserted beyond that —
+the capturing command is not recoverable from outside the session that ran it.
+
+### What is new: a purpose-built heuristic had just reasoned, in writing, that this bug was probably fixed
+
+Sixteen instances make the *mechanism* well covered, and this entry would be noise on that
+ground alone. It is filed for something else.
+
+Ninety minutes before the capture, `librarian(action="doctor")` reported this very record
+under `open_bug_cited_from_source`, with this reasoning:
+
+> status is `open` but 2 source file(s) cite this bug by path — `scripts/pre-commit-unreviewed-content.sh`,
+> `scripts/post-index-change-stage-log.sh` — and none has been edited or committed against for 7
+> days. Code that names a bug file is usually code written BECAUSE of it, so the fix has probably
+> shipped while the record stayed open. … CHECK, then archive with its SHA and patch-id.
+
+The check is careful and says so — *"This is a worklist, not a verdict: a doc comment may cite a
+bug as RATIONALE rather than as a fix, and nothing in the path distinguishes the two."* That
+caveat is correct and it is **exactly** the case here: all three citations are comments and one
+refusal message, none a fix pointer.
+
+The datapoint is what happened next. The finding was surfaced to an operator as a candidate
+next action, alongside the reasoning that the guards it motivated *had demonstrably fired and
+passed* earlier the same session — which reads as corroboration and is not: a guard passing
+says the commit it inspected was clean, never that the class is closed. Ninety minutes later
+the mechanism fired.
+
+**So the entry this file owes is about the INSTRUMENT, not the bug.** `open_bug_cited_from_source`
+ranks a record for closure by **citation age**, and the population it is aimed at — a bug whose
+fix shipped under an unrelated message — is indistinguishable, from the citation graph alone,
+from a bug that is *still live and whose citations are warnings about it*. Both look like
+"7 days since anyone touched the citing file". The second population is the one this record has
+been in for seventeen instances, and the heuristic's confidence is inversely related to how
+well-documented the live bug is: the better the warnings, the longer they sit unedited.
+
+No change is proposed to the check — its own text already refuses to be read as a verdict, which
+is more than most instruments do. What is recorded is that the caveat did its job on the page and
+not in the reader, which is § *Observer Blindness* position 3 in its usual place.
+
+### Both anti-capture guards passed, and that is not a defect in them
+
+`refuse a pathspec commit carrying unstaged content` and `refuse an index commit carrying another
+session's staged paths` both returned `Passed` on this session's own commits minutes either side
+of the capture. Neither is aimed at the capturing side of a commit that sweeps **tracked,
+modified, unstaged** files belonging to someone else — my file was never staged, so there was no
+foreign *staged* path to refuse, and the capturing commit was not the pathspec form.
 ## Resume
 
 **Discharged 2026-09-16.** Both halves are done, and the gap between them is worth one line
