@@ -436,9 +436,12 @@ guard should never have fired.
 harness lifts a leading `cd` into a real working-directory change and removes it from the string
 the hook is handed, so the guard's exemption was keyed on a token that no longer existed.
 
-**Two defects, composed; neither alone refuses this command.** The quote-naive split is real and
-newly filed (`docs/issues/2026-09-16-worktree-guard-reads-a-quoted-regex-alternation-as-a-bare-git-verb.md`,
-`7018ce840e36b942`, `cluster/addressing-without-an-escape-hatch`). The `cd` strip is already filed
+**Two defects, composed; neither alone refuses this command.** The quote-naive split is real,
+and was filed from this entry, then fixed and archived
+(`docs/issues/archive/2026-09-16-worktree-guard-reads-a-quoted-regex-alternation-as-a-bare-git-verb.md`,
+`15c6773f542cc9f0`, `cluster/addressing-without-an-escape-hatch`; the fix anchor lives in that
+record's `## Fix provenance`, not here — a patch-id in running prose is read as a CLAIM by
+`doctor`'s fix-anchor check, which is `8713b680435c878a`). The `cd` strip is already filed
 and open (`docs/issues/2026-09-13-worktree-guards-cd-chain-remedy-is-stripped-before-the-guard-sees-it.md`,
 `cluster/gate-keyed-on-unobservable-event`).
 

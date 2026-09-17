@@ -1,5 +1,5 @@
 ---
-id: '7018ce840e36b942'
+id: 15c6773f542cc9f0
 kind: bug
 status: fixed
 title: The worktree guard reads a quoted regex alternation as a bare git verb, and neither printed escape applies
