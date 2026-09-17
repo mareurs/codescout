@@ -1,7 +1,7 @@
 ---
-id: '7f5fe0e00732b494'
+id: 99904f10f3084ee1
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: doc(update) section replace drops the blank line before the next heading, silently'
 tags:
 - cluster/accepted-parameter-silently-dropped
@@ -11,7 +11,7 @@ tags:
 topic: librarian document editing
 claimed_at: 2026-09-17
 claimed_by: a3bf229c-658b-42f9-8f4b-794fcf0d35c7
-closed: null
+closed: 2026-09-17
 opened: 2026-09-15
 severity: low
 ---
@@ -175,6 +175,9 @@ change that removes headings entirely, and it is a boundary check rather than a 
    `## Root cause` replace passed `content` ending in `\n` explicitly and still lost it.
 
 ## Fix
+
+**Fixed in `976d8bac`** — patch-id `2e217cff164a3e316028625337719f4dc1fed8f3`. Gate green:
+FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0.
 
 **Shipped 2026-09-17.** One rule in `plan_section_edit`, applied at three sites: count the blank
 lines immediately preceding the boundary in the ORIGINAL document (`blank_run_before`) and make

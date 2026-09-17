@@ -1,10 +1,12 @@
 ---
 id: cdcad7a0257ec7c0
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a symlink inside the project is cataloged as a second artifact, so one document has two ids and 84 chunks'
 tags:
 - cluster/unclassified
+closed: 2026-09-17
+unverified: 'Not established END-TO-END: that an ALREADY-MINTED duplicate row disappears. The walk no longer mints one (gate green, two mutations killed), but the running MCP binary predates 0c8ff65d, so no reindex has yet been run through the fixed code. Re-check AGENTS.md''s row after cargo rb + /mcp + reindex; a surviving row is a SEPARATE defect (stale row, no live file), not this one.'
 ---
 
 # BUG: a symlink inside the project is cataloged as a second artifact, so one document has two ids and 84 chunks
@@ -134,9 +136,18 @@ Without that control the reading is "nothing is vectorised", which is flatly fal
 Not yet fixed. Direction, not yet chosen:
 
 1. **Skip symlinks in the walk** whose resolved target is already inside the project root.
-   Cheapest, and matches what a reader expects. Risk: a symlink into a directory *outside*
-   the project is a real document a user may want indexed, and this would silently drop it —
-   trading a silent duplicate for a silent omission.
+   **SHIPPED — see `## Fix provenance` below.** Cheapest, and matches what a reader expects.
+   **The risk this bullet originally named did not survive contact with the repo, and the
+   correction is recorded rather than quietly edited:** it read *"a symlink into a directory
+   outside the project is a real document a user may want indexed, and this would silently
+   drop it — trading a silent duplicate for a silent omission."* That is false of the
+   predicate as written. `find . -type l` returns exactly one outward-pointing link in this
+   repo (`.claude/skills/claude-traces` → `/home/marius/agents/llm-proxy/…`), and a predicate
+   keyed on *resolves **inside*** does not touch it. The risk was real for a predicate keyed
+   on *is a symlink* — which is not what was written — and the two were indistinguishable to
+   me until I ran the check this file's own `## Resume` prescribed. **It is now the fixture
+   that discriminates them**: mutating `starts_with(root)` to `true` turns the shipped
+   predicate into the one this paragraph feared, and the test kills it.
 2. **Canonicalise before hashing the id.** Makes identity follow the document rather than the
    path. Larger blast radius: `id = sha256(abs_path)` is relied on throughout, and changing
    what feeds it re-keys artifacts. **Canonicalisation asymmetry has already cost this repo
@@ -153,10 +164,50 @@ Whichever lands, note the archived precedent: `2026-05-17-reindex-abs-path-uniqu
 Reproduction names "symlink resolution" as a way to get "two artifact rows for the same
 logical file". That bug fixed the *crash*; the duplicate row it describes is still reachable.
 
+## Fix provenance
+
+- **SHA:** `0c8ff65d` (`experiments`)
+- **patch-id:** `ab4bc1c4efee0b25541f00b1f24f9ff21b055721`
+
+Direction 1, at `src/librarian/indexer.rs`. Direction 2 (canonicalise the id) was **not**
+taken: it re-keys every artifact, and the seam it touches is the one
+`docs/issues/archive/2026-09-06-the-unpushed-ledger-guard-goes-silent-on-a-symlinked-path.md`
+already shows this project disagreeing with itself about. Direction 3 (document it) is
+superseded.
+
+**The fix canonicalises BOTH sides**, and that is the half a reviewer should check rather
+than assume. `abs_root` is whatever the caller held; `canonicalize()` always fully resolves.
+On macOS `tempfile::tempdir()` returns `/var/…`, itself a symlink to `/private/var/…`, so
+comparing a canonical target against a raw root makes `starts_with` false for **every** link
+and the skip silently never fires — on the one platform CI runs and most sessions do not.
+That is `3a9eb5153e5311a8` one layer up: same asymmetry, same silent-allow direction.
 ## Tests added
 
-None yet — no fix chosen.
+`librarian::indexer::tests::a_symlink_resolving_inside_the_root_is_not_indexed_as_a_second_artifact`
+(`src/librarian/indexer.rs`). Unix-only — Windows needs elevation to create symlinks and the
+walk has no platform branch here.
 
+**The pre-fix RED is a mutation, stated because the test was written after the fix and an
+unobserved red is not evidence.** Both sites mutated via `./scripts/mutation-probe.sh`, in an
+isolated worktree, so no peer's `cargo test` ever saw an armed red:
+
+| mutation | meaning | verdict |
+|---|---|---|
+| `starts_with(root)` → `true` | skip **every** symlink | KILLED — `left: 1, right: 2` |
+| `path.is_symlink()` → `false` | guard never fires | KILLED — `left: 3, right: 2` |
+
+Two-sided from one fixture, and the second reproduces the pre-fix behaviour exactly: three
+artifacts for two documents.
+
+**Why both links live in ONE case.** Split apart, the inside-resolving case alone does not
+kill the first mutation — skipping every symlink still yields no `alias.md` row. That
+mutation is the *expensive-direction* defect (silent omission), so a suite without the
+outward fixture would have gone green on it. The outward link is the only thing that
+discriminates `is_symlink()` from `is_symlink() && resolves_inside`.
+
+Gate: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, read by **name** out of the default lane, with the
+lean lane returning **0** tests for `librarian::indexer` — the documented vacuity, which is
+why the default lane is the one read.
 ## Workarounds
 
 `librarian(action="reindex")` does not help: the walk re-derives both rows. Deleting the
@@ -165,11 +216,15 @@ remove the symlink; that costs non-Claude harnesses their instruction file.
 
 ## Resume
 
-Decide between the three Fix directions above. Before implementing 1, check whether any
-in-repo symlink points *outside* the project root (`find . -type l -not -path './.git/*'`),
-since that is the case direction 1 would silently drop. `src/librarian/indexer.rs` is the
-site; it has no symlink branch today.
+N/A — fixed.
 
+One thing a later reader may want and this fix does **not** do: existing duplicate rows are
+not swept. The walk stops *minting* them, and a row whose file it no longer visits is
+removed by the normal missing-file path on the next reindex — but that has not been observed
+end-to-end here, because the running MCP binary predates this commit. Re-check
+`doc(action="find", filter={"rel_path": {"eq": "AGENTS.md"}})` after a `cargo rb` + `/mcp` +
+`librarian(action="reindex")`; if the row survives, that is a **separate** defect (a stale
+row with no live file), not this one.
 ## References
 
 - `docs/manual/src/concepts/after-onboarding.md:77-79` — the manual prescribing `AGENTS.md`

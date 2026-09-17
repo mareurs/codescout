@@ -432,7 +432,7 @@ fn compute_section_end(lines: &[&str], start_idx: usize, level: usize) -> usize 
 /// happens to end with.
 ///
 /// This is the whole of the fix for
-/// `docs/issues/2026-09-15-doc-section-replace-drops-the-blank-line-before-the-next-heading.md`.
+/// `docs/issues/archive/2026-09-15-doc-section-replace-drops-the-blank-line-before-the-next-heading.md`.
 /// `compute_section_end` returns the next sibling heading's line index, so a section's
 /// span runs up to that heading and the blank line before it is INSIDE the span. Three
 /// actions then wrote a replacement ending in exactly one `\n` and the separator was gone:

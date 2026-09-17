@@ -1030,7 +1030,7 @@ fn replace_with_heading() {
 /// Fix is PRESERVATION, not normalisation: the number of blank lines before the boundary
 /// heading is counted in the original and re-emitted, so a genuinely compact document is
 /// still returned byte-identical. That is why the compact fixtures above stay green.
-/// See `docs/issues/2026-09-15-doc-section-replace-drops-the-blank-line-before-the-next-heading.md`.
+/// See `docs/issues/archive/2026-09-15-doc-section-replace-drops-the-blank-line-before-the-next-heading.md`.
 #[test]
 fn replace_preserves_the_blank_line_before_the_next_heading() {
     let content = "# Title\n\n## Setup\n\nold content\n\n## Usage\n\nuse it\n";
