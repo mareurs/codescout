@@ -342,7 +342,7 @@ pub fn index_repo_sync(
     // co-extensive with `unseen` until the symlink skip below created a SECOND reason to
     // go unseen, and `exists()` follows links, so a skipped duplicate answers `true` on
     // the strength of its target and is never reclaimed
-    // (docs/issues/2026-09-17-the-reclamation-predicate-follows-the-symlink-it-was-asked-about.md).
+    // (docs/issues/archive/2026-09-17-the-reclamation-predicate-follows-the-symlink-it-was-asked-about.md).
     //
     // Two repairs were considered and both are worse. Re-deriving the symlink predicate at
     // the reclamation site puts one law at two call sites, which is the defect that
@@ -366,7 +366,7 @@ pub fn index_repo_sync(
         // one set of bytes, with no error anywhere. Measured 2026-09-16: `AGENTS.md ->
         // CLAUDE.md` gave 2 artifact rows and 84 chunk rows for one 68,939-byte file, and
         // `doctor` reported every per-artifact finding for it twice
-        // (docs/issues/2026-09-16-a-symlinked-instruction-file-is-cataloged-as-a-second-artifact.md).
+        // (docs/issues/archive/2026-09-16-a-symlinked-instruction-file-is-cataloged-as-a-second-artifact.md).
         //
         // A link pointing OUTSIDE the root is deliberately KEPT: it is the only path by
         // which this walk reaches those bytes, so skipping it would trade a silent
@@ -1571,7 +1571,7 @@ kind = "memory"
     /// existed still holds the duplicate rows, and reclamation cannot re-derive that they
     /// are duplicates — `Path::exists()` answers `true` for an inside-resolving symlink on
     /// the strength of its target
-    /// (docs/issues/2026-09-17-the-reclamation-predicate-follows-the-symlink-it-was-asked-about.md).
+    /// (docs/issues/archive/2026-09-17-the-reclamation-predicate-follows-the-symlink-it-was-asked-about.md).
     ///
     /// The fixture reaches that state the way reality does rather than by writing a row by
     /// hand: index a REAL file, then replace it with a symlink. A hand-inserted row would

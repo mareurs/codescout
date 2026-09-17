@@ -1,12 +1,12 @@
 ---
-id: cdcad7a0257ec7c0
+id: '2491607fdeb0e6c8'
 kind: bug
 status: fixed
 title: 'BUG: a symlink inside the project is cataloged as a second artifact, so one document has two ids and 84 chunks'
 tags:
 - cluster/unclassified
 closed: 2026-09-17
-unverified: 'RESOLVED 2026-09-17. Was: not established end-to-end that an already-minted duplicate row disappears. It does NOT disappear -- reindex on a binary containing 0c8ff65d reports removed: 0 and the row survives. Cause is a SECOND defect at a different call site (reclamation''s Path::exists() follows symlinks), filed as 7b1458c4ede1a86f. This fix stops the minting, which is what it claimed; nothing about it is outstanding.'
+unverified: 'RESOLVED 2026-09-17. Was: not established end-to-end that an already-minted duplicate row disappears. It did NOT -- reindex on a binary containing 0c8ff65d reported removed: 0 and the row survived. Cause was a SECOND defect at a different call site (reclamation''s Path::exists() follows symlinks), filed as f49cf14a09572fda and since fixed at 59f47f00. This fix stopped the minting, which is what it claimed; nothing about it is outstanding.'
 ---
 
 # BUG: a symlink inside the project is cataloged as a second artifact, so one document has two ids and 84 chunks
@@ -222,7 +222,7 @@ N/A — fixed, and the check this section previously named has been RUN. Result 
 `AGENTS.md` row **survives** with its 44 chunk rows. That is the branch this record's
 `unverified:` field named in advance — *"a surviving row is a SEPARATE defect (stale row, no
 live file), not this one"* — and it is now filed as
-`docs/issues/2026-09-17-the-reclamation-predicate-follows-the-symlink-it-was-asked-about.md`:
+`docs/issues/archive/2026-09-17-the-reclamation-predicate-follows-the-symlink-it-was-asked-about.md`:
 the reclamation loop's `Path::exists()` traverses the symlink, so a row the walk deliberately
 skips is never examined for removal.
 

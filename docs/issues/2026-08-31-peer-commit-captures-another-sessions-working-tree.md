@@ -1637,8 +1637,8 @@ prevents nothing.
 
 `7b5f3d5b` (sessionId `a3bf229c`, *"docs(issues): archive the blank-line defect, fixed at
 976d8bac"*) carries four files. Three are its author's. The fourth is
-`docs/issues/2026-09-16-a-symlinked-instruction-file-is-cataloged-as-a-second-artifact.md`,
-**+73 lines**, belonging to `9403d62d` — the close-out of `cdcad7a0257ec7c0`: `status`
+`docs/issues/archive/2026-09-16-a-symlinked-instruction-file-is-cataloged-as-a-second-artifact.md`,
+**+73 lines**, belonging to `9403d62d` — the close-out of `2491607fdeb0e6c8`: `status`
 open→fixed, a `## Fix provenance` section, a mutation table, an `unverified:` field. Content
 intact — `git diff 7b5f3d5b -- <path>` is empty, so the commit captured exactly what the worktree
 held, across 236 lines. **Mislabeled, not damaged**, and not repaired, per this file's own

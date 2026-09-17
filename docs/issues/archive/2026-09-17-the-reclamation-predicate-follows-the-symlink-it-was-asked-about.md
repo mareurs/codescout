@@ -1,5 +1,5 @@
 ---
-id: '7b1458c4ede1a86f'
+id: f49cf14a09572fda
 kind: bug
 status: fixed
 title: 'BUG: the reclamation predicate asks exists() about a symlink, so a row the walk deliberately skipped is never reclaimed'
@@ -18,7 +18,7 @@ symlinked path whose target is still present survives forever. The walk stops up
 nothing ever removes it, and the report says `removed: 0` — which reads as *nothing to reclaim*
 rather than *one row was not examined*.
 
-Introduced as a live defect by `0c8ff65d` (the fix for `cdcad7a0257ec7c0`), which is the honest
+Introduced as a live defect by `0c8ff65d` (the fix for `2491607fdeb0e6c8`), which is the honest
 framing: before that commit, *unseen* and *file deleted* were the same set, so `exists()` was a
 harmless second opinion. That commit created a **second reason** for a row to be unseen —
 deliberately skipped — and the predicate cannot tell the two apart.
@@ -230,13 +230,13 @@ population.
    `!exists()` safety net against a partial walk is preserved intact.
 
 Direction 3 is the one to take unless something argues against it. Whichever lands, re-run both
-mutations from `cdcad7a0257ec7c0`'s Tests section afterwards — the two predicates now interact,
+mutations from `2491607fdeb0e6c8`'s Tests section afterwards — the two predicates now interact,
 and a reclamation that deletes every unseen row would delete exactly the rows the other site
 skips.
 
 ## References
 
-- `docs/issues/2026-09-16-a-symlinked-instruction-file-is-cataloged-as-a-second-artifact.md` —
+- `docs/issues/archive/2026-09-16-a-symlinked-instruction-file-is-cataloged-as-a-second-artifact.md` —
   site 1, fixed at `0c8ff65d`; its `unverified:` field named this branch before it was found
 - `docs/issues/archive/2026-09-06-the-unpushed-ledger-guard-goes-silent-on-a-symlinked-path.md` —
   the same seam a third time, from the path-form side
