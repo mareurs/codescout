@@ -1,9 +1,10 @@
 ---
 kind: bug
-status: investigating
+status: taken
 tags:
 - cluster/addressing-without-an-escape-hatch
 claimed_at: 2026-09-17
+claimed_by: a3bf229c-658b-42f9-8f4b-794fcf0d35c7
 closed: null
 opened: 2026-09-02
 owner: marius
