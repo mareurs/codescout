@@ -6,7 +6,7 @@ title: The skill ledger writes to a deleted worktree and re-stamps every first-s
 owners:
 - marius
 tags:
-- cluster/unclassified
+- cluster/value-correct-in-a-frame-its-name-does-not-state
 topic: hook state resolution and worktree residue
 opened: 2026-09-11
 owner: marius

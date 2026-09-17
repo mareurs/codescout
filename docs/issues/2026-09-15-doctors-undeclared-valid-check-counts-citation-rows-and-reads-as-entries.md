@@ -4,7 +4,7 @@ kind: bug
 status: open
 title: 'BUG: doctor''s undeclared-Valid check counts citation rows, and its worklist reads as entries — 18 rows, 9 entries'
 tags:
-- cluster/unclassified
+- cluster/value-correct-in-a-frame-its-name-does-not-state
 ---
 
 ## Summary

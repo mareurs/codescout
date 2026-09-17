@@ -4,7 +4,7 @@ kind: bug
 status: open
 title: 'BUG: PROBES.md offers inspection as co-equal to a behavioural probe, and every inspection instrument''s miss proves nothing'
 tags:
-- cluster/unclassified
+- cluster/selector-narrower-than-its-population
 ---
 
 ## Summary

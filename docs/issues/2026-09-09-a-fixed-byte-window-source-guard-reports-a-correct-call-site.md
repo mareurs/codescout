@@ -2,7 +2,7 @@
 kind: bug
 status: open
 tags:
-- cluster/unclassified
+- cluster/gate-keyed-on-unobservable-event
 - testing-discipline
 - source-scanning-guard
 - monotone-assertion

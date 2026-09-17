@@ -4,7 +4,7 @@ kind: bug
 status: open
 title: 'BUG: a push publishes every local commit, and nothing records that an author was withholding one pending their operator''s say-so'
 tags:
-- cluster/unclassified
+- cluster/shared-resource-carries-no-owner
 - multi-session
 - shared-checkout
 - git-workflow
