@@ -421,6 +421,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "observations": r.observations_repointed,
             "links": r.links_repointed,
             "event_edges": r.event_edges_repointed,
+            // Both of these are here because their ABSENCE was the bug, twice. This
+            // object is a hand-picked projection, so a new `GraftReport` field does not
+            // reach a caller until someone adds a line here — and a graft that quietly
+            // dropped a table was, both times, reported by a `history_grafted` block
+            // that looked complete. `entry_reservation` rows were the first
+            // (`doc(move)` reset a ledger's id counter); outgoing `entry_cite` rows the
+            // second.
+            "entry_reservations": r.entry_reservations_folded,
+            "entry_citations": r.entry_citations_carried,
         })),
         "old_abs_path": to_forward_slash(&old_full),
         "new_abs_path": to_forward_slash(&new_full),
@@ -2005,6 +2014,81 @@ mod tests {
                 "the event history must survive the reindex"
             );
         }
+    }
+
+    /// A `doc(move)` on a ledger holding durable outgoing citations must carry them
+    /// across AND say that it did.
+    ///
+    /// The catalog-level guard lives in `catalog::graft`; this one exists because the
+    /// number has to survive a SECOND hand-written surface. `history_grafted` is a
+    /// hand-picked projection of `GraftReport`, so a row the graft preserves but no
+    /// field names is invisible to every caller of the tool — and the bug this closes
+    /// was reported by a `move` whose return value carried a four-field INBOUND
+    /// citation block while destroying the outbound ones in silence.
+    /// docs/issues/2026-09-17-graft-cascade-deletes-the-source-ledgers-outgoing-entry-citations.md
+    #[tokio::test]
+    async fn move_carries_durable_outgoing_citations_and_reports_the_count() {
+        use crate::librarian::catalog::entry_cite::{self, EntryCiteRow};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+        let old_id = "aabbccdd11223344";
+
+        {
+            let cat = ctx.catalog.lock();
+            cat.conn
+                .execute(
+                    "UPDATE artifact SET slug='foo-tracker' WHERE id=?1",
+                    [old_id],
+                )
+                .unwrap();
+            // `origin: "write"` is load-bearing: a scan-origin row is rebuilt by the
+            // next write-mode `link_scan`, so losing one would prove nothing. Only a
+            // durable row makes this about data no rescan can bring back.
+            entry_cite::insert_with(
+                &cat.conn,
+                &EntryCiteRow {
+                    src_slug: "foo-tracker".into(),
+                    src_local: "T-1".into(),
+                    dst_ref: "somewhere:F-2".into(),
+                    rel: "cites".into(),
+                    origin: "write".into(),
+                    created_at: 1,
+                },
+            )
+            .unwrap();
+        }
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": old_id,
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        {
+            let cat = ctx.catalog.lock();
+            let rows = entry_cite::outgoing(&cat, "foo-tracker").unwrap();
+            assert_eq!(
+                rows.len(),
+                1,
+                "the durable outgoing citation must survive the archive move — \
+                 `doc(move)` is the route CLAUDE.md mandates over `git mv` precisely \
+                 to protect catalog state"
+            );
+            assert_eq!(rows[0].origin, "write", "and must still be durable");
+        }
+
+        assert_eq!(
+            result["history_grafted"]["entry_citations"], 1,
+            "and `move` must REPORT it: a preservation no caller can observe is \
+             indistinguishable from the silent destruction it replaced, which is how \
+             this went unnoticed through a whole citation-accounting block"
+        );
     }
 
     /// A move RE-FILES the artifact's chunk vectors onto the new id — it does not

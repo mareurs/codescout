@@ -31,6 +31,11 @@ pub struct GraftReport {
     /// two marks per prefix. Without this the graft's cascade-delete dropped them,
     /// so `doc(move)` reset a ledger's id counter.
     pub entry_reservations_folded: usize,
+    /// Outgoing `entry_cite` rows carried across with the slug. Reported rather than
+    /// merely preserved: `doc(move)` already returns a four-field inbound-citation
+    /// block and said nothing about the outgoing edges it was destroying, so a caller
+    /// had no number that would have moved when they went missing.
+    pub entry_citations_carried: usize,
     pub remap: BTreeMap<String, String>,
     pub suspicious: Vec<Value>,
 }
@@ -81,22 +86,51 @@ pub fn graft_rows(cat: &mut Catalog, from_id: &str, into_id: &str) -> Result<Gra
     //    on `artifact_augmentation`, which also cascade-deletes with the source).
     merge_augmentation(&tx, from_id, into_id, &mut report)?;
 
-    // 6. Carry the slug forward, then delete source LAST — cascades any leftover
-    //    dup links / edges / augmentation. Capture, THEN delete, THEN write: `slug`
-    //    is UNIQUE, so writing `from_id`'s slug onto `into_id` while `from_id` still
-    //    holds it would violate the index — both rows can't hold the same slug at
-    //    once, even mid-transaction. `into_id` keeps whatever slug it already had
-    //    (freshly minted or otherwise) when `from_id` had none.
+    // 6. Hand the slug over, then delete source LAST — cascades any leftover
+    //    dup links / edges / augmentation. `into_id` keeps whatever slug it already
+    //    had (freshly minted or otherwise) when `from_id` had none.
+    //
+    //    **The handover is a three-step under deferred foreign keys, and the order is
+    //    load-bearing.** `slug` is UNIQUE, so both rows cannot hold it at once — but
+    //    the obvious resolution (delete the source first, then write its slug onto the
+    //    destination) silently destroys data: `entry_cite.src_slug` is
+    //    `REFERENCES artifact(slug) ON DELETE CASCADE` (mod.rs:201), so deleting the
+    //    row that holds the slug takes every outgoing entry-grain citation with it, and
+    //    the slug then lands on a destination that cites nothing. `origin='scan'` rows
+    //    are rebuilt by the next write-mode `link_scan`; `origin='write'` rows are
+    //    written only by `append_entry(cites=…)` and nothing recreates them.
+    //
+    //    Deferring the FK check is what makes the NULL step legal: between statement 1
+    //    and 2 the child rows reference a slug no row holds, which an immediate check
+    //    rejects and a deferred one tolerates. **It is NOT what saves the rows** —
+    //    measured 2026-09-17: `defer_foreign_keys` with the delete-first order still
+    //    leaves 0 rows, because `ON DELETE CASCADE` is an ACTION that fires at statement
+    //    time and the pragma governs only when the CHECK runs. What saves them is that
+    //    step 3 deletes a row that no longer owns a slug, so there is nothing to cascade.
+    //    At commit the slug is held by `into_id` and every child resolves again.
     let from_slug: Option<String> =
         tx.query_row("SELECT slug FROM artifact WHERE id=?1", [from_id], |r| {
             r.get(0)
         })?;
-    tx.execute("DELETE FROM artifact WHERE id=?1", [from_id])?;
-    if let Some(slug) = from_slug {
+    if let Some(slug) = from_slug.as_deref() {
+        tx.execute_batch("PRAGMA defer_foreign_keys = ON")?;
+        tx.execute("UPDATE artifact SET slug=NULL WHERE id=?1", [from_id])?;
         tx.execute(
             "UPDATE artifact SET slug=?1 WHERE id=?2",
             params![slug, into_id],
         )?;
+    }
+    tx.execute("DELETE FROM artifact WHERE id=?1", [from_id])?;
+    if let Some(slug) = from_slug.as_deref() {
+        // Counted AFTER the delete, deliberately. The same query before it would report
+        // rows FOUND, and "found, then destroyed by the next statement" is exactly the
+        // defect being fixed — a pre-delete count is green in both worlds and so cannot
+        // be the number that moves when the handover breaks.
+        report.entry_citations_carried = tx.query_row(
+            "SELECT COUNT(*) FROM entry_cite WHERE src_slug=?1",
+            [slug],
+            |r| r.get::<_, i64>(0),
+        )? as usize;
     }
 
     tx.commit()?;
@@ -404,6 +438,7 @@ mod tests {
     use super::*;
     use crate::librarian::catalog::artifact::TestArtifactRowBuilder;
     use crate::librarian::catalog::augmentation::{self, AugmentationRow};
+    use crate::librarian::catalog::entry_cite::{self, EntryCiteRow};
     use crate::librarian::catalog::observations::{self, ObservationRow};
     use crate::librarian::catalog::Catalog;
     use crate::librarian::catalog::{event_edges, events, events::TestEventRowBuilder};
@@ -523,6 +558,92 @@ mod tests {
             slug.as_deref(),
             Some("my-tracker"),
             "the slug must follow the artifact across the graft, not stay orphaned on the row this deletes"
+        );
+    }
+
+    /// The sibling test above asserts the slug ARRIVES on the destination. This one
+    /// asserts the rows KEYED BY that slug arrive with it. `entry_cite.src_slug` is
+    /// `REFERENCES artifact(slug) ON DELETE CASCADE` (catalog/mod.rs:201), so deleting
+    /// the source artifact destroys every outgoing entry-grain citation before the slug
+    /// is written onto the destination — the slug lands on a row that now cites nothing,
+    /// and the sibling test is green throughout because it only asks where the slug went.
+    #[test]
+    fn graft_carries_durable_entry_citations_forward_not_only_the_slug() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "from", "/wt/x.md");
+        art(&cat, "into", "/main/x.md");
+        art(&cat, "third", "/main/y.md");
+        cat.conn
+            .execute("UPDATE artifact SET slug='my-tracker' WHERE id='from'", [])
+            .unwrap();
+        cat.conn
+            .execute("UPDATE artifact SET slug='elsewhere' WHERE id='third'", [])
+            .unwrap();
+
+        // `origin: "write"` is load-bearing. A scan-origin row is derived state that the
+        // next write-mode `link_scan` rebuilds from prose, so losing one proves nothing;
+        // only a durable row makes this a test about data nothing can reconstruct. Change
+        // it to ORIGIN_SCAN and this test still passes its own assertion while ceasing to
+        // be about the defect.
+        entry_cite::insert_with(
+            &cat.conn,
+            &EntryCiteRow {
+                src_slug: "my-tracker".into(),
+                src_local: "T-1".into(),
+                dst_ref: "elsewhere:F-2".into(),
+                rel: "cites".into(),
+                origin: "write".into(),
+                created_at: 1,
+            },
+        )
+        .unwrap();
+
+        // Positive control, and the reason this test can name its own cause: an INBOUND
+        // row is keyed on `dst_ref`, which carries no foreign key, so the cascade cannot
+        // reach it. If the outgoing assertion reds while this one stays green, the FK
+        // cascade is what did it. If both red, the test is measuring something else.
+        entry_cite::insert_with(
+            &cat.conn,
+            &EntryCiteRow {
+                src_slug: "elsewhere".into(),
+                src_local: "F-9".into(),
+                dst_ref: "my-tracker:T-1".into(),
+                rel: "cites".into(),
+                origin: "write".into(),
+                created_at: 1,
+            },
+        )
+        .unwrap();
+
+        let report = graft_rows(&mut cat, "from", "into").unwrap();
+
+        let inbound = entry_cite::incoming(&cat, "my-tracker:T-1").unwrap();
+        assert_eq!(
+            inbound.len(),
+            1,
+            "control: `dst_ref` has no foreign key, so an inbound citation is untouched \
+             by the cascade — if this one reds, the test is not measuring the cascade"
+        );
+
+        let outbound = entry_cite::outgoing(&cat, "my-tracker").unwrap();
+        assert_eq!(
+            outbound.len(),
+            1,
+            "the durable outgoing citation must follow the slug across the graft; \
+             ON DELETE CASCADE on entry_cite.src_slug destroys it when the source row goes, \
+             and no rescan rebuilds an origin='write' row"
+        );
+        assert_eq!(outbound[0].src_local, "T-1");
+        assert_eq!(
+            outbound[0].origin, "write",
+            "and it must arrive still durable — re-pointing it as a scan row would make \
+             the next link_scan prune it"
+        );
+        assert_eq!(
+            report.entry_citations_carried, 1,
+            "and the report must SAY it carried one. `doc(move)` returns a four-field \
+             inbound-citation block; the outgoing edges had no field at all, so their \
+             loss moved no number a caller could read"
         );
     }
 
