@@ -331,8 +331,8 @@ def _pid_alive(pid: object) -> bool:
     return True
 
 
-def live_sessions() -> dict[str, list[dict]]:
-    """sessionId -> live registry rows, across every profile.
+def live_sessions() -> tuple[dict[str, list[dict]], list[dict]]:
+    """`(sessionId -> live registry rows, rows that could not be READ)`, every profile.
 
     A registry row carries sessionId, pid, name, cwd and messagingSocketPath in ONE
     record, so a sid resolves to a reachable address offline, with nothing to ask.
@@ -345,11 +345,27 @@ def live_sessions() -> dict[str, list[dict]]:
     (skills/reaching-peer-sessions § "Two readings to get right"), so the reader
     mis-diagnoses it as an addressing mistake and retries.
 
+    AN UNREADABLE ROW IS NOT AN ABSENT SESSION, which is why there is a second return
+    value rather than a `continue`. The row is a derived cache of state the process
+    already holds, rewritten in place, so a write interrupted by a full disk leaves it
+    ZERO BYTES with the session still running -- pid alive, socket open, mid-tool-call.
+    `json.loads("")` raises, and folding that into "not live" is wrong in the DANGEROUS
+    direction: the reader concludes the session exited and its resources are
+    reclaimable, and disk exhaustion is exactly when someone goes looking for
+    reclaimable per-session state. Measured 2026-09-17, on the session that was reading.
+    docs/issues/2026-09-17-a-full-disk-truncates-a-live-sessions-registry-row-so-provenance-reports-it-dead.md
+
+    The FILENAME is what rescues it. Rows are keyed `<pid>.json`, so the pid survives
+    the bytes being destroyed -- enough to say *someone is running here and I cannot say
+    who*, which is the honest third value `_pid_alive` above already models for its own
+    case (`PermissionError` means alive, not absent).
+
     NEVER CACHE THIS. Measured 2026-09-07: a peer's pid AND registry name both moved
     in a single hop while a message was in flight. The sessionId is the only durable
     component; every other field here is valid at its instant and no longer.
     """
     out: dict[str, list[dict]] = {}
+    unreadable: list[dict] = []
     for d in registry_roots():
         # ~/.claude/sessions -> ".claude". A fixture root that is not named
         # "sessions" labels itself, so tests read as their own directory names.
@@ -362,9 +378,22 @@ def live_sessions() -> dict[str, list[dict]]:
             try:
                 rec = json.loads(f.read_text(encoding="utf-8", errors="replace"))
             except (OSError, ValueError):
+                rec = None
+            sid = rec.get("sessionId") if isinstance(rec, dict) else None
+            if not sid:
+                # The row cannot name its session. Whether that MATTERS is decided by
+                # the pid, read from the filename rather than from the bytes: a dead
+                # pid's corrupt row is ordinary garbage and must stay silent, or every
+                # stale file on disk shouts and the one row that means something is
+                # buried in the noise.
+                if _pid_alive(f.stem):
+                    unreadable.append({"pid": f.stem, "profile": prof or str(d)})
                 continue
-            sid, sock = rec.get("sessionId"), rec.get("messagingSocketPath") or ""
-            if not sid or not sock:
+            sock = rec.get("messagingSocketPath") or ""
+            # A KNOWN sid whose socket is gone is a session we can still NAME -- it is
+            # simply unreachable, which the dead-session path below already reports.
+            # Only a row that cannot say who it is belongs in `unreadable`.
+            if not sock:
                 continue
             if not Path(sock).exists() or not _pid_alive(rec.get("pid")):
                 continue
@@ -376,7 +405,7 @@ def live_sessions() -> dict[str, list[dict]]:
                 "cwd": rec.get("cwd") or "?",
                 "status": rec.get("status") or "?",
             })
-    return out
+    return out, unreadable
 
 
 def address_lines(sid: str, live: dict[str, list[dict]], indent: str) -> tuple[str, list[str]]:
@@ -622,7 +651,7 @@ def main(argv: list[str]) -> int:
     owners = scan(root)
     # Resolved ONCE per invocation, deliberately: a snapshot the whole run shares is
     # honest about being an instant, where a per-path re-read would silently mix two.
-    live = live_sessions()
+    live, unreadable = live_sessions()
     named_sids: set[str] = set()
 
     unknown = 0
@@ -730,6 +759,18 @@ def main(argv: list[str]) -> int:
               f"{datetime.now().astimezone().isoformat(timespec='seconds')}, across "
               f"{len(registry_roots())} profile(s). pid, name and socket decay "
               f"continuously; the sessionId does not — re-derive at use.")
+
+    # Printed OUTSIDE the block above, and that placement is the point: the verdict
+    # with no session line is UNKNOWN, and UNKNOWN plus a live-but-unnameable session
+    # is exactly when "nobody owns this file" is the wrong conclusion to draw.
+    if unreadable:
+        where = ", ".join(f"pid {u['pid']} ({u['profile']})" for u in unreadable)
+        print(f"-- {len(unreadable)} unreadable registry row(s) for LIVE pid(s): "
+              f"{where}. A session is running there whose identity could not be read "
+              f"— an empty or malformed row, which is what a rewrite interrupted by a "
+              f"full disk leaves behind. Every count and every absence above is "
+              f"therefore a LOWER BOUND; resolve these by hand before concluding a "
+              f"file is unowned or a session has exited.")
     return 1 if unknown == len(paths) else 0
 
 

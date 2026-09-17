@@ -216,7 +216,7 @@ def main(argv: list[str]) -> int:
 
     # --- stage 3: 7.0 s, and only now. --------------------------------------------
     owners = fp.scan(root)
-    live = fp.live_sessions()
+    live, unreadable = fp.live_sessions()
     me = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
 
     lines, foreign_any = [], False
@@ -274,6 +274,16 @@ def main(argv: list[str]) -> int:
     print("\n  Scope: uncommitted state only, from Claude transcripts across every "
           "discovered\n  profile. Native `Bash` bypasses run_command, so a peer working "
           "through Bash can be\n  invisible here — silence is not 'nobody'.")
+    # The sentence above already tells the reader silence is not 'nobody'. This names a
+    # case where that is not a caveat but a KNOWN instance: a session is running whose
+    # row could not be read, so it cannot appear in any attribution above, and a red
+    # is exactly the moment someone is looking for a party to blame.
+    if unreadable:
+        where = ", ".join(f"pid {u['pid']} ({u['profile']})" for u in unreadable)
+        print(f"  And here it is not hypothetical: {len(unreadable)} unreadable "
+              f"registry row(s) for LIVE pid(s): {where}.\n  A session is running "
+              f"there whose identity could not be read — resolve it by hand before "
+              f"attributing this red.")
     return 0
 
 

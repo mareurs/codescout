@@ -755,6 +755,46 @@ has "UNKNOWN survives the join"                "$out" "UNKNOWN"
 hasnt "and gains no liveness claim"            "$out" "not live"
 hasnt "and gains no footer"                    "$out" "named session(s) live at"
 
+# -- I. a row that cannot be READ is not a session that is ABSENT ----------------
+# Measured 2026-09-17 on a 100%-full btrfs: a live session's own registry row was
+# truncated to 0 bytes by an ENOSPC rewrite. pid alive, socket open, mid-tool-call --
+# and `json.loads("")` raises ValueError, so the row was skipped and the session read
+# as exited by this tool, by ListAgents, and by a hand-rolled socket walk alike.
+#
+# The DIRECTION is what makes it dangerous. The reader concludes "that session has
+# exited, its resources are reclaimable" -- and disk exhaustion is exactly the
+# condition under which someone goes looking for reclaimable per-session state, so
+# the instrument degrades precisely when it is being consulted.
+# docs/issues/2026-09-17-a-full-disk-truncates-a-live-sessions-registry-row-so-provenance-reports-it-dead.md
+sleep 300 & TRUNCPID=$!
+# 0 bytes is not a contrived fixture: it is exactly what a truncating rewrite under
+# ENOSPC leaves behind, and it is the state the real incident was observed in.
+: > "$REG_B/$TRUNCPID.json"
+out="$(runr src/registry_probe.rs)"
+has "an unreadable row for a LIVE pid is reported"      "$out" "unreadable registry row"
+# One needle, not two: asserted separately, `regB` is satisfied by the profile label
+# on an unrelated live row elsewhere in the same output -- it passed in the pre-fix
+# red state, which is the tell for an assertion that can never discriminate.
+has "and names the pid WITH its profile, so it resolves by hand" "$out" "pid $TRUNCPID (regB)"
+has "and says which way the error runs"                 "$out" "LOWER BOUND"
+
+# The discriminator, and the reason the case above is not satisfied by accident: a
+# corrupt row for a DEAD pid is ordinary garbage, not a hidden session. Without this,
+# the assertion passes for any unparseable file and every stale row on disk shouts.
+: > "$REG_B/$DEADPID.json"
+out="$(runr src/registry_probe.rs)"
+hasnt "a corrupt row for a DEAD pid stays silent"       "$out" "pid $DEADPID"
+has "while the live one still speaks"                   "$out" "pid $TRUNCPID (regB)"
+
+# The case that matters most. UNKNOWN plus a live-but-unidentifiable session is
+# exactly when "nobody owns this file" is the wrong conclusion to draw -- so this
+# warning must reach the verdict that carries no session line at all.
+out="$(runr src/no_such_write.rs)"
+has "UNKNOWN carries the warning too"                   "$out" "unreadable registry row"
+
+kill "$TRUNCPID" 2>/dev/null
+rm -f "$REG_B/$TRUNCPID.json" "$REG_B/$DEADPID.json"
+
 echo
 echo "== profile DISCOVERY: the default path every case above bypasses =="
 #
