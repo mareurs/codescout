@@ -7,7 +7,7 @@ closed: 2026-09-06
 opened: 2026-09-02
 owner: marius
 related:
-- docs/issues/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md
+- docs/issues/archive/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md
 - docs/issues/archive/2026-09-04-doc-update-stamps-the-content-hash-without-rebuilding-chunks.md
 severity: high
 ---

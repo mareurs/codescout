@@ -135,7 +135,7 @@ nothing reports the distance to it.
 
 ### It corrects a claim in the sibling record
 
-`docs/issues/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md`
+`docs/issues/archive/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md`
 states: *"**Why chunk grain does not have this problem:** chunks are built to a 2,048-char
 budget, so all but a handful sit under the limit by construction."*
 
@@ -277,7 +277,7 @@ parser is why the line is one line.
 
 ## References
 
-- `docs/issues/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md`
+- `docs/issues/archive/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md`
   — same HTTP 500, other grain; its chunk-grain exemption is corrected by this record
 - `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md` — why the failure
   is permanent rather than retried

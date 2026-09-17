@@ -340,7 +340,7 @@ The live coverage gap, stated in the units that now apply: **31,548 Qdrant point
 mechanism, already filed, and it is not this bug's grain defect:
 `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md` (the absorbing
 stamped-as-seen state) and
-`docs/issues/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md`
+`docs/issues/archive/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md`
 (observed again in tonight's reindex as one `input is too large to process` failure). Neither is
 reopened by this record and neither is closed by it.
 

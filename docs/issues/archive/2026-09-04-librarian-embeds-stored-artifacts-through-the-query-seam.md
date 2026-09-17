@@ -18,7 +18,7 @@ fix_sha: 306dffbd702c5239a9b7e67e438ec80b57dcf38a
 opened: 2026-09-04
 related:
 - docs/issues/archive/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md
-- docs/issues/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md
+- docs/issues/archive/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md
 severity: high
 unverified: Every artifact vector currently stored is still query-prefixed. The code no longer produces them, but the existing rows are only corrected by a full `reindex(reembed=true)`, which has not been run.
 ---
@@ -175,7 +175,7 @@ the one outcome to avoid.
 
 - `docs/issues/archive/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md`
   — the sibling, now fixed at `8acec9c7`; that commit is where this defect was found
-- `docs/issues/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md`
+- `docs/issues/archive/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md`
   — the other grain, still open
 - `docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md` — the same
   defect, closed for memories

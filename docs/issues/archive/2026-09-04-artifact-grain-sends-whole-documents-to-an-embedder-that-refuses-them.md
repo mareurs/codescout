@@ -1,12 +1,14 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - librarian
 - embedding
 - retrieval
 - chunk-grain
 - cluster/gate-keyed-on-unobservable-event
+claimed_at: 2026-09-17
+claimed_by: 29420e72-c262-4236-82c2-52d769fdc549
 closed: null
 opened: 2026-09-04
 owner: marius
@@ -144,7 +146,20 @@ nobody read it as a rate.
 
 ## Fix
 
-*Plan only.*
+**FIXED** in `8acec9c7` (2026-09-04), patch-id `de0b0990236e69bf18ef2cbff041cbaa3d565652`.
+
+**The shipped fix took a THIRD option this plan does not name, and it dissolves both cautions
+rather than satisfying them.** `embed_artifact` now segments an over-budget text with
+`segment_for_budget` and mean-pools the segment vectors (`mean_pool_normalized`). Nothing is
+discarded, so there is no clip to count and no "represents 5% of the document" vector to
+report — the second caution's whole subject is gone. And the chunk ROW is untouched, which is
+what the first caution asked for, obtained for free rather than by care.
+
+The plan's two options were *clip at the embed boundary* and *fall back to chunking*; the
+second was rejected here as making `chunk_grain = false` stop meaning what it says. Worth
+keeping, because the pattern recurs: a plan that enumerates options and weighs their caveats
+can be answered by a change that removes the caveats' shared premise — here, that something
+must be thrown away.
 
 The narrow fix is to clip the text `embed_artifact` sends to the model's input
 budget. Two cautions:
@@ -163,8 +178,28 @@ The alternative — refuse artifact grain for oversized artifacts and fall back 
 chunking them — makes the mode self-repairing but means `chunk_grain = false` no
 longer means what it says. Not obviously wrong; not decided here.
 
-SHA: *(not fixed)*
-patch-id: *(not fixed)*
+### Verified in effect, 2026-09-17, with its denominator
+
+A fixed call site is not evidence that stored vectors moved, so this was measured rather than
+inferred — and stated at the grain the sample supports:
+
+- **No global deficit.** `artifact_chunks_codescout_dc6a871595179329` holds **40,444** points
+  against **33,984** catalog chunks for this project. The imbalance runs the OTHER way from
+  this bug: there are ~6,460 surplus points (vectors outliving their chunk rows), not missing
+  ones. That is a different, milder issue and is deliberately not filed here.
+- **Nothing missing in the population most at risk.** Six oldest codescout artifacts
+  (`updated_at` 2026-09-03, untouched since before the fix) — every one had a stored point,
+  none absent.
+
+**What this does NOT establish**, said plainly because the title carries a 32% figure: six
+artifacts is not a corpus census, and the surplus-points count is an aggregate that cannot
+verify a per-member claim. It rules out the global deficit the 32% described; it does not prove
+every artifact has a vector. Re-derive with `index(action="verify")` if a per-member answer is
+needed — noting that call reports on `code_chunks`, a DIFFERENT collection, and says nothing
+about artifact vectors. That trap cost a reading during this very verification.
+
+SHA: `8acec9c7`
+patch-id: `de0b0990236e69bf18ef2cbff041cbaa3d565652`
 
 ## Tests added
 
@@ -189,7 +224,7 @@ the resulting state is absorbing rather than merely missing.
 
 - `docs/trackers/retrieval-benchmark.md` — the 2026-09-04 grain comparison that
   produced the 473 figure as a side effect of building the comparison collection.
-- `docs/issues/2026-09-03-artifact-documents-are-embedded-through-the-query-method.md`
+- `docs/issues/archive/2026-09-03-artifact-documents-are-embedded-through-the-query-method.md`
   — a second defect on the same three lines of `embed_artifact`.
 
 ### Cluster adjudication

@@ -1,12 +1,14 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - librarian
 - embedding
 - retrieval
 - qdrant
 - cluster/repro-env-diverges-from-gate-env
+claimed_at: 2026-09-17
+claimed_by: 29420e72-c262-4236-82c2-52d769fdc549
 closed: null
 opened: 2026-09-03
 owner: marius
@@ -137,7 +139,51 @@ The artifact benchmark's misses were attributed 2026-09-03 to page policy
 
 ## Fix
 
-*Plan only.*
+**FIXED** in `306dffbd` (2026-09-05), patch-id `40eabdfa91698ff366909bb3f0356a42188b9aee`.
+`embed_artifact` now goes through `EmbeddingService::embed_document_one`, which calls
+`Embedder::embed(&[text])` — the document seam, which never prefixes.
+
+**THIS RECORD WAS A DUPLICATE AND THAT IS WHY IT STAYED OPEN.** The same defect was filed
+again a day later as
+`docs/issues/archive/2026-09-04-librarian-embeds-stored-artifacts-through-the-query-seam.md`,
+which is the record the fix cited and archived against. One defect, two files; the later one
+closed and this one was left behind. It cost a session on 2026-09-17 most of an hour — claimed,
+reproduced, and taken to the call site before the doc comment on `embed_artifact` revealed the
+fix had shipped twelve days earlier.
+
+**The re-embed half is DONE and was verified, not assumed.** Both this file and `306dffbd`'s own
+message insisted the code change and a full `reindex(reembed=true)` were one operation — "land
+them together, or not at all" — so a fixed call site is not evidence the stored vectors moved.
+Re-ran this file's own cosine method 2026-09-17 against
+`artifact_chunks_codescout_dc6a871595179329`, sampling the SIX OLDEST codescout artifacts
+(`updated_at` 2026-09-03, i.e. untouched since before the fix — the population that would still
+be stranded if the re-embed had been skipped or partial):
+
+```
+2026-09-03  plain=1.000000 pfx=0.984620  PLAIN  ADR-2026-05-13 — Semantic Anchors…
+2026-09-03  plain=1.000000 pfx=0.986037  PLAIN  ADR-2026-06-11 — kotlin-lsp Upgrade…
+2026-09-03  plain=1.000000 pfx=0.968591  PLAIN  ADR-2026-06-11 — Mux Single-Owner…
+2026-09-03  plain=1.000000 pfx=0.985039  PLAIN  ADR-2026-06-13 — name_collision…
+2026-09-03  plain=1.000000 pfx=0.987435  PLAIN  ADR-2026-08-31 — Write responses…
+2026-09-03  plain=1.000000 pfx=0.986520  PLAIN  ADR-2026-08-27 — negative result…
+6 sampled, oldest-first: 6 PLAIN, 0 PREFIXED, 0 with no stored point
+```
+
+`plain = 1.000000` exactly is what makes this a measurement rather than a lean: it confirms the
+text reconstruction matches what the indexer composed, so the 1.5–3% gap to the prefixed variant
+is the real discriminator and not reconstruction noise.
+
+**A first sample was DISCARDED rather than reported**, because it was drawn from the three
+chunks of an artifact edited the previous day — necessarily re-embedded after the fix, so unable
+to express the failure. The oldest-first sample above is the one that can.
+
+**And the composition drifted since this file was written.** § *Reproduction* above says the
+embedded text is `{entry_token}\n\n{content}`; `src/librarian/catalog/chunk.rs:327` now says
+`{entry_token} — {entry_title}\n\n{content}`. The 2026-09-17 probe sidestepped it by sampling
+only chunks with a NULL `entry_token`, where the composition is unambiguously
+`{title}\n\n{content}`. Anyone re-running the original script should expect it to miss.
+
+The durable half below is still unbuilt and is the part worth keeping.
 
 `embed_artifact` should call `Embedder::embed(&[text])` and take the single
 vector, leaving `embed_query` to queries. One line, plus the batch unwrap.
@@ -153,8 +199,8 @@ single-text method would make this unrepresentable rather than merely
 discouraged — which is what the four-files-away comment is currently substituting
 for.
 
-SHA: *(not fixed)*
-patch-id: *(not fixed)*
+SHA: `306dffbd`
+patch-id: `40eabdfa91698ff366909bb3f0356a42188b9aee`
 
 ## Tests added
 
