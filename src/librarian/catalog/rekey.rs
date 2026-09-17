@@ -155,10 +155,43 @@ fn retarget_patterns(v: &mut Value, from_prefix: &str, to_prefix: &str) -> usize
 ///
 /// `\b` on both sides is what keeps `TX-2` and `FT-1` out of a rekey of `T`: the first has no
 /// `-` where one is required, and the second has no word boundary before its `T`.
-fn retarget_prose(text: &str, from_prefix: &str, to_prefix: &str) -> Result<String> {
-    let re = Regex::new(&format!(r"\b{}-(\d+|N)\b", regex::escape(from_prefix)))?;
+///
+/// **`\b` is NOT sufficient for the qualified form, which is why `own_slug` exists.** In
+/// `tool-usage-patterns:T-14` the character before `T` is `:` — a non-word character — so a
+/// word boundary matches there exactly as it does at the start of a bare token. Four ledgers
+/// share the `T` namespace across three repos in this corpus, so a rewriter blind to the
+/// qualifier silently re-points a CORRECT citation of someone else's ledger at a token they
+/// do not define, and no rescan repairs it because the prose itself is now wrong. Observed
+/// before it was fixed: the test below asserted the defective output and passed.
+/// § *Parsers Over a Namespace* — the qualifier is the disambiguator the grammar owes.
+///
+/// `own_slug = None` therefore means "leave every qualified token alone", which is the safe
+/// reading when the caller cannot say which ledger it is.
+fn retarget_prose(
+    text: &str,
+    from_prefix: &str,
+    to_prefix: &str,
+    own_slug: Option<&str>,
+) -> Result<String> {
+    let re = Regex::new(&format!(
+        r"(?:(?P<q>[a-z][a-z0-9_-]*):)?\b{}-(?P<n>\d+|N)\b",
+        regex::escape(from_prefix)
+    ))?;
     Ok(re
-        .replace_all(text, format!("{to_prefix}-$1").as_str())
+        .replace_all(text, |c: &regex::Captures| {
+            let n = &c["n"];
+            match c.name("q") {
+                // A qualifier naming someone else is a citation of THEIR namespace. Leave the
+                // whole match byte-for-byte; this rekey has no authority over it.
+                Some(q) if Some(q.as_str()) != own_slug => {
+                    c.get(0).map_or(String::new(), |m| m.as_str().to_string())
+                }
+                // Our own slug: the token moves, the qualifier stays correct.
+                Some(q) => format!("{}:{to_prefix}-{n}", q.as_str()),
+                // Unqualified: belongs to this ledger by definition.
+                None => format!("{to_prefix}-{n}"),
+            }
+        })
         .into_owned())
 }
 
@@ -187,6 +220,7 @@ fn rekey_augmentation(
     artifact_id: &str,
     from_prefix: &str,
     to_prefix: &str,
+    own_slug: Option<&str>,
     report: &mut RekeyReport,
 ) -> Result<()> {
     let Some(row) = augmentation::get_by_conn(tx, artifact_id)? else {
@@ -228,7 +262,7 @@ fn rekey_augmentation(
     }
 
     // --- 3. The augmentation prompt, which teaches the entry shape by quoting it.
-    let new_prompt = retarget_prose(&row.prompt, from_prefix, to_prefix)?;
+    let new_prompt = retarget_prose(&row.prompt, from_prefix, to_prefix, own_slug)?;
     report.prompt_rewritten = new_prompt != row.prompt;
 
     // --- 4. The safety net. See this function's doc comment: pattern recognition is a
@@ -301,7 +335,7 @@ pub fn rekey_prefix_rows(
         .optional()?
         .flatten();
 
-    if let Some(slug) = slug {
+    if let Some(slug) = slug.as_deref() {
         // --- Outbound: this ledger is the CITER, and the token sits in `src_local`.
         let mut stmt =
             tx.prepare("SELECT src_local, dst_ref, rel, origin FROM entry_cite WHERE src_slug=?1")?;
@@ -334,8 +368,7 @@ pub fn rekey_prefix_rows(
             )?;
             report.durable_outbound_repointed += moved;
             if moved == 0 {
-                report.duplicates_merged +=
-                    drop_superseded(&tx, &slug, &src_local, &dst_ref, &rel)?;
+                report.duplicates_merged += drop_superseded(&tx, slug, &src_local, &dst_ref, &rel)?;
             }
         }
 
@@ -429,7 +462,14 @@ pub fn rekey_prefix_rows(
         params![to_prefix, artifact_id, from_prefix],
     )? > 0;
 
-    rekey_augmentation(&tx, artifact_id, from_prefix, to_prefix, &mut report)?;
+    rekey_augmentation(
+        &tx,
+        artifact_id,
+        from_prefix,
+        to_prefix,
+        slug.as_deref(),
+        &mut report,
+    )?;
 
     tx.commit()?;
     Ok(report)
@@ -530,6 +570,48 @@ mod tests {
         assert_eq!(retarget_token("T1", "T", "SRI"), None);
         assert_eq!(retarget_token("T-", "T", "SRI"), None);
         assert_eq!(retarget_token("T-1a", "T", "SRI"), None);
+    }
+    /// A QUALIFIED citation naming a different ledger must survive a rekey untouched.
+    ///
+    /// `tool-usage-patterns:T-14` cites *another* ledger's `T-14`, and four ledgers share the
+    /// `T` namespace across three repos here. Rewriting it re-points a correct citation at a
+    /// token that ledger does not define and never will — silent, and unrecoverable by any
+    /// rescan, because the prose itself is now wrong.
+    ///
+    /// **Observed before it was fixed.** This test first asserted the defective output
+    /// (`tool-usage-patterns:SRI-14`) and passed, against code already committed at
+    /// `f45301f6`. `\b` does not save you: the character before `T` is `:`, a non-word
+    /// character, so a word boundary matches there exactly as at the start of a bare token.
+    ///
+    /// The three cases sit in one fixture on purpose — they are the three branches of a
+    /// single decision, and splitting them lets one rot while the others pass.
+    #[test]
+    fn a_qualified_citation_of_another_ledger_is_not_rewritten() {
+        let text = "see tool-usage-patterns:T-14, and my-ledger:T-3, and bare T-7";
+
+        let out = retarget_prose(text, "T", "SRI", Some("my-ledger")).unwrap();
+
+        assert!(
+            out.contains("tool-usage-patterns:T-14"),
+            "a foreign ledger's token must survive verbatim; got: {out}"
+        );
+        assert!(
+            out.contains("my-ledger:SRI-3"),
+            "the ledger's own qualified self-citation must move; got: {out}"
+        );
+        assert!(
+            out.contains("bare SRI-7"),
+            "an unqualified token belongs to this ledger; got: {out}"
+        );
+    }
+    /// With no slug known, every qualified token is someone else's as far as this rewriter
+    /// can tell, and the safe reading is to leave it alone. Bare tokens still move.
+    #[test]
+    fn without_a_known_slug_every_qualified_token_is_left_alone() {
+        let out = retarget_prose("my-ledger:T-3 and bare T-7", "T", "SRI", None).unwrap();
+
+        assert!(out.contains("my-ledger:T-3"), "got: {out}");
+        assert!(out.contains("bare SRI-7"), "got: {out}");
     }
 
     // ---- rekey_prefix_rows ----
