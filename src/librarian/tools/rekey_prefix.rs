@@ -27,7 +27,7 @@ struct Args {
 /// [`RekeyMode`](crate::librarian::catalog::rekey::RekeyMode) for why that distinction is
 /// load-bearing here.
 ///
-/// Motivating case: `docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`.
+/// Motivating case: `docs/issues/archive/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`.
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
         crate::tools::RecoverableError::with_hint(

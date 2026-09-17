@@ -5033,7 +5033,7 @@ mod tests {
     /// key `entry_cite` rows, so re-keying one through a field patch strands its citations —
     /// correct, and its remedy ("append a new entry and mark this one superseded") does not
     /// repair a prefix collision, which is what
-    /// `docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`
+    /// `docs/issues/archive/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`
     /// has been blocked on three times.
     ///
     /// DERIVATION, and the baseline is MEASURED rather than read off this log. Report run in

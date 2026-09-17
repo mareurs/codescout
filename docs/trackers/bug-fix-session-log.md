@@ -10994,7 +10994,7 @@ in the code.
 **Valid:** dated 2026-09-02
 
 **Rests on:** `tracker-hygiene-log:HY-21` (the D12 proposal), and
-`docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`
+`docs/issues/archive/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`
 
 ## W-102 — Re-deriving a number dominates checking it — it tests the population and catches the arithmetic for free
 

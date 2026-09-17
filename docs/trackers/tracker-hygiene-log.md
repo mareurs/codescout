@@ -2141,7 +2141,7 @@ population was deferred intact. **Measured 2026-09-11 ~09:45 local, at HEAD `1a3
 | `entry_cited_from_outside_but_undeclared` | 17 | Each needs a decision on whether the entry should declare a `**Valid:**` class, priced by cross-file citation count (`exposure ≥ 5`), not by age. |
 | `cited_prefix_with_no_definer` | 9 | A prefix cited with no `## PREFIX-N` heading anywhere. `TC-N` alone is cited 120× across 15 files and declared by nothing — and `docs/issues/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md` argues some of these are namespaces owned *outside* this corpus, which cannot declare themselves here. |
 | `entry_conditional_past_due` | 5 | A `conditional — <event>` whose event has passed. Retire, repoint, or re-date — three different verdicts. |
-| `prefix_conflicts_live` | 3 | From `link_scan`, not `doctor`. `T-N` is the known case (`docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`, open). |
+| `prefix_conflicts_live` | 3 | From `link_scan`, not `doctor`. `T-N` is the known case (`docs/issues/archive/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`, open). |
 | `entry_dated_stale` | 2 | `dated` past the freshness threshold; needs re-derivation of the underlying fact, which is the work. |
 | `params_status_drift` | 2 | `doctor` calls it a HEURISTIC, silent on ~8.6% of real disagreements, and both error directions possible. Requires reading the body and deciding which side is right. |
 | `terminal_status_without_fix_anchor` | 1 | `docs/issues/archive/2026-09-10-a-conflicted-merge-yields-a-patch-id-and-it-is-the-wrong-one.md` — needs the real fix SHA + patch-id, and `doctor` warns the two hashes already in its prose are the commits it was *observed* at, so a reader scanning for provenance finds one and stops. |
@@ -2216,7 +2216,7 @@ approved, C-judge deferred as a named task (`HY-28`).
 
 | item | what | verification |
 |---|---|---|
-| A1 | `28f197a703b6f903` `taken` → `investigating` — `status: taken` with no readable `claimed_by:`, so the claim named nobody and nothing could ever check it | `doctor`'s own prescribed remedy |
+| A1 | `268459412845a31f` `taken` → `investigating` — `status: taken` with no readable `claimed_by:`, so the claim named nobody and nothing could ever check it | `doctor`'s own prescribed remedy |
 | A2 | `9c7c5bc9168404be` `taken` → `investigating` — claimed by session `26cb9b5b-…`, absent from all 18 live sessions on this machine. Operator-gated, because `doctor` is explicit that a claim made on another host is unresolvable here **by construction** and absence is not evidence of death | peer `codescout-75` confirmed it holds no claim on it |
 | B | `librarian(action="link_scan", write=true)` — **305 edges added, 3 pruned** | **fixpoint proven**: a second read-only scan returned `edges_missing[0]`, `edges_stale[0]`. The write reporting success is not the proof. |
 

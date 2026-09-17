@@ -106,7 +106,7 @@ cited ids have no heading:
   pattern*, extracted as an entry token. It also cannot ever resolve to `TC-01`: the grammar is
   `\b[A-Z]{1,3}-\d+\b`, so `TC-1` and `TC-01` are different tokens, kept apart by zero-padding alone
   — the hazard already open as
-  `docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`.
+  `docs/issues/archive/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`.
 
 Net effect of the prescribed fix: **−1 finding, +6 findings**, and the six are in a category that
 *is* reported while the one was not. A reader who applied it would see the `cited_prefix` line
@@ -190,5 +190,5 @@ exist in neither `scripts/tc-suites/legacy-natural.json` nor
 - `src/librarian/tools/doctor.rs:3766-3811` — the check's doc comment and its two silence conditions.
 - `scripts/tc-suites/legacy-natural.json` — the actual `TC-01`…`TC-20` authority.
 - `docs/research/2026-04-03-embedding-model-benchmark.md` — 20 `#### TC-NN:` headings, colon-separated.
-- `docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md` — the `TC-1` / `TC-01` half.
+- `docs/issues/archive/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md` — the `TC-1` / `TC-01` half.
 - `docs/issues/archive/2026-08-26-cited-prefix-with-no-definer-is-invisible.md` — why the check exists.

@@ -1,11 +1,9 @@
 ---
 kind: bug
-status: taken
+status: fixed
 tags:
 - cluster/addressing-without-an-escape-hatch
-claimed_at: 2026-09-17
-claimed_by: a3bf229c-658b-42f9-8f4b-794fcf0d35c7
-closed: null
+closed: 2026-09-17
 opened: 2026-09-02
 owner: marius
 related: []
@@ -309,3 +307,71 @@ entry, and `doc` exposes no `rekey_entry` action.
 rather than assumed: a sampled `W-13` finding's `src_id` is **not** among its four candidates, so
 those are genuine cross-file citations and not self-references the resolver mis-handles. **Do not
 fold them into this bug.**
+
+## FIXED 2026-09-17 — renamed to `SRI`, through an action built for it
+
+`system-retrospective-improvements` gave up `T` for `SRI`. `prefix_conflicts` **4 → 3**,
+re-baselined to 3 and never to 4, per this file's own argument.
+
+**The blocker this file identified was real and is now gone.** § *The rename is BLOCKED*
+concluded that params ids were "not movable through any sanctioned surface" and that the fix
+needed "an entry-id rename path that moves `entry_cite` rows with the id — the reason the
+current refusal exists, so the refusal is a missing feature rather than a wrong rule". That
+was correct, and it is what was built.
+
+### The fix, in two parts
+
+**The capability** — `doc(action="rekey_prefix", id=…, from=…, to=…)`, dry-run by default,
+moving the params ids, the `params_schema` pattern, the augmentation prompt, the defining
+headings, the in-body citations, the `entry_cite` rows and the `entry_reservation` row in one
+transaction:
+
+| commit (experiments) | patch-id | what |
+|---|---|---|
+| `638fdc1f` | `0be678d88cbd5b8f7bd7abbbe9731d7259631f33` | catalog rows + reservation |
+| `f45301f6` | `a3744f3a5bd47ff47c4814948b1cdcc18131b1d2` | params ids + schema + prompt |
+| `71aa304d` | `72452f3cd4ebfdffe0a10f6d47931a85af60e6a6` | qualified-citation guard |
+| `6d5cc540` | `2c9b2728815014a4137b3506986bb2eb8bf185e7` | body rewrite, fence-aware |
+| `3b43541d` | `673444b4743a4ed433eb7cf942f63ca84ac9686e` | the `doc` action surface |
+| `0588558d` | `103b0f8c5e412d60ce160dab8b65a16bbc006995` | guides, and two stale counts |
+
+**The repair** — `404fbbe1`, patch-id `bf19d8c1800ca5449b9c13da6f27a80893bbfd8d`.
+
+### Two corrections to this file's own record
+
+**It says two ledgers; the catalog said four.** § *What this says about the check* counted
+within `docs/`. `entry_cite` is umbrella-wide, and at the time of the fix four artifacts owned
+a `T-` namespace across three repos — this ledger, `tool-usage-patterns`,
+`buddy-specialists-active-plan` (claude-plugins) and
+`section-gen-post-generation-tail-refactor` (an unrelated repo). Both readings are correct at
+their own scope, which is the point: **neither number means anything without it.** The two
+foreign ledgers are not ours to rename, and the rename did not need them to be.
+
+**It says the collision "currently costs nothing in resolved citations"; that was measured
+over the four colliding tokens only.** Over the full namespace, **37 of 70 inbound edges were
+false by construction** — `docs/superpowers/plans/2026-05-17-i1-refactor.md` was created
+2026-05-17 and this ledger 2026-09-01, so a May document was binding its own task numbers to a
+September ledger. Present-tense wrong resolution, not future hazard. The severity was right;
+the reason given for it was incomplete.
+
+### What the fix confirms, which reading could not
+
+**`dangling` rose 588 → 676, and the rise IS the repair.** Those 37 false edges now bind to
+nothing and are reported honestly. `resolve.rs` says it outright — *"citations repaired" and
+"citations mis-bound" move that number in the same direction* — and this file's own
+§ *What the citation surface actually measures* warned about it. A success criterion of
+"dangling must not rise" would have called a correct repair a failure.
+
+**The repointing surface was smaller than any count suggested, and required judgment no tool
+should make.** 24 live files mention `T-1`…`T-17`; exactly **five** cite this ledger. The
+rest use `T-N` for their own namespaces — which is the founding bug's *three ledgers* still
+standing. `rekey_prefix` deliberately reports external citers rather than rewriting them, and
+that is why: a bulk rewrite would have re-pointed a May plan's task numbers at a ledger that
+did not exist when they were written.
+
+### Known-incomplete, filed separately
+
+The committed augmentation sidecar was left on the old shape and had to be republished by
+hand — `docs/issues/2026-09-17-rekey-prefix-leaves-the-committed-augmentation-sidecar-on-the-old-shape.md`.
+That is a defect in the new action, not in this repair, and this ledger is correct on disk and
+in git.

@@ -43,7 +43,7 @@ pub struct PrefixConflict {
     /// nothing in this payload can, because both are one declarer with several definers. Read
     /// a non-empty list as work, an empty one as a claim to re-check when either side
     /// allocates.
-    /// docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md
+    /// docs/issues/archive/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md
     pub colliding_tokens: Vec<TokenCollision>,
 }
 
@@ -175,7 +175,7 @@ impl DefinitionIndex {
     /// defined twice and 17 citations of them resolve to nothing. The founding record
     /// predicted this in the sentence above, which is what a class with no mechanism looks
     /// like from the inside.
-    /// docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md
+    /// docs/issues/archive/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md
     ///
     /// The rename also settled what no count could: `T-1`…`T-12` had been binding ~65
     /// citations that were never about fable tasks — three retired `T-N` ledgers plus

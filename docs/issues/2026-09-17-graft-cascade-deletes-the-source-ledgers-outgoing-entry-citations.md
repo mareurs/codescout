@@ -145,5 +145,5 @@ Observe the red, then decide between the three candidates above.
 - `src/librarian/catalog/entry_cite.rs:16-26` — why `origin` sits outside the PK
 - `src/librarian/tools/mv.rs:344-357` — `move`'s two-transaction shape and its `graft_rows` call
 - Found while designing `rekey_prefix` for
-  `docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`,
+  `docs/issues/archive/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`,
   which needs the same `entry_cite` migration this omits.
