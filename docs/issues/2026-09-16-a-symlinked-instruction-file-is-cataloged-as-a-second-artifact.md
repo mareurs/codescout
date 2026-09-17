@@ -6,7 +6,7 @@ title: 'BUG: a symlink inside the project is cataloged as a second artifact, so 
 tags:
 - cluster/unclassified
 closed: 2026-09-17
-unverified: 'Not established END-TO-END: that an ALREADY-MINTED duplicate row disappears. The walk no longer mints one (gate green, two mutations killed), but the running MCP binary predates 0c8ff65d, so no reindex has yet been run through the fixed code. Re-check AGENTS.md''s row after cargo rb + /mcp + reindex; a surviving row is a SEPARATE defect (stale row, no live file), not this one.'
+unverified: 'RESOLVED 2026-09-17. Was: not established end-to-end that an already-minted duplicate row disappears. It does NOT disappear -- reindex on a binary containing 0c8ff65d reports removed: 0 and the row survives. Cause is a SECOND defect at a different call site (reclamation''s Path::exists() follows symlinks), filed as 7b1458c4ede1a86f. This fix stops the minting, which is what it claimed; nothing about it is outstanding.'
 ---
 
 # BUG: a symlink inside the project is cataloged as a second artifact, so one document has two ids and 84 chunks
@@ -216,15 +216,22 @@ remove the symlink; that costs non-Claude harnesses their instruction file.
 
 ## Resume
 
-N/A — fixed.
+N/A — fixed, and the check this section previously named has been RUN. Result below, because it did not come out the way the happy branch expected.
 
-One thing a later reader may want and this fix does **not** do: existing duplicate rows are
-not swept. The walk stops *minting* them, and a row whose file it no longer visits is
-removed by the normal missing-file path on the next reindex — but that has not been observed
-end-to-end here, because the running MCP binary predates this commit. Re-check
-`doc(action="find", filter={"rel_path": {"eq": "AGENTS.md"}})` after a `cargo rb` + `/mcp` +
-`librarian(action="reindex")`; if the row survives, that is a **separate** defect (a stale
-row with no live file), not this one.
+`librarian(action="reindex")` on a binary containing `0c8ff65d` reports `removed: 0`, and the
+`AGENTS.md` row **survives** with its 44 chunk rows. That is the branch this record's
+`unverified:` field named in advance — *"a surviving row is a SEPARATE defect (stale row, no
+live file), not this one"* — and it is now filed as
+`docs/issues/2026-09-17-the-reclamation-predicate-follows-the-symlink-it-was-asked-about.md`:
+the reclamation loop's `Path::exists()` traverses the symlink, so a row the walk deliberately
+skips is never examined for removal.
+
+**Two things a later reader should not take from that reindex.** It does **not** confirm this
+fix fired: `CLAUDE.md` was unchanged, so both rows' stored hashes read the live content and
+*"skipped"* and *"visited, unchanged"* predict identical catalog state. The evidence for this
+fix is the regression test and its two killed mutations, nothing else. And it does **not** mean
+this fix is incomplete — the sibling is a distinct predicate at a distinct call site with its own
+repair, which is why it is a separate record rather than a reopening of this one.
 ## References
 
 - `docs/manual/src/concepts/after-onboarding.md:77-79` — the manual prescribing `AGENTS.md`
