@@ -76,12 +76,16 @@ pub struct RekeyReport {
     pub schema_patterns_repointed: usize,
     /// Whether the augmentation's `prompt` text mentioned the old prefix and was rewritten.
     pub prompt_rewritten: bool,
-    /// Body lines whose text changed — defining headings, index rows and prose self-citations
-    /// together, because one fence-aware pass handles all three and splitting the count would
+    /// Body lines whose text changed — defining headings, index rows and prose self-citations    /// together, because one fence-aware pass handles all three and splitting the count would
     /// invite the reader to treat a heading and a mention as different kinds of edit. They are
     /// not: `link_scan` binds a citable token to a `## <ID> — <title>` heading, and everything
     /// else on the page is a citation of it.
     pub body_lines_rewritten: usize,
+    /// Whether the COMMITTED sidecar under `docs/augmentations/` was republished. `false` is
+    /// the normal case for a ledger that declares none — but `false` on a ledger that DOES
+    /// declare one means the two halves have parted, which is why the apply path refuses
+    /// rather than reporting it.
+    pub sidecar_republished: bool,
 }
 
 /// Retarget one entry token, **preserving its numeric tail byte-for-byte**.
@@ -624,7 +628,63 @@ pub fn rekey_prefix_rows(
     // thing that makes a dry run worth reading.
     if mode == RekeyMode::Apply {
         tx.commit()?;
+    } else {
+        return Ok(report);
     }
+
+    // --- The COMMITTED projection of the augmentation row, published AFTER the commit.
+    //
+    // The catalog is machine-local and gitignored; the sidecar under `docs/augmentations/` is
+    // what travels in git, and `reindex` re-attaches a declared shape from it. A rekey that
+    // moved only the row is correct on the machine that ran it and reverts on every other —
+    // restoring the old `pattern` over ids that have all moved, then failing at some later
+    // `append_entry` naming a pattern nobody there changed. Shipped that way and repaired by
+    // hand once:
+    // `docs/issues/2026-09-17-rekey-prefix-leaves-the-committed-augmentation-sidecar-on-the-old-shape.md`.
+    //
+    // `write_through` is the mechanism `doc(action="augment")` already uses and was built for
+    // this exact hazard — its own worked example is a `params_schema` edit that reported
+    // success while the committed YAML kept the superseded shape. Reusing it rather than
+    // adding a second publisher is the point: it never CREATES a sidecar (a rekey must not
+    // start committing files a repo never asked for), it byte-compares so an unchanged shape
+    // leaves the file and its mtime alone, and `Authored::Only` makes it refuse to republish a
+    // field this call did not author — which is what stops a stale row overwriting a correct
+    // committed value on some OTHER field.
+    //
+    // **After the commit, not inside it, and the cost is real**: `write_through` needs a
+    // `&Catalog` and the transaction holds that borrow. So a failure here leaves the catalog
+    // moved and the file not — the harmful state its doc comment names. That is why the error
+    // below says so explicitly rather than reporting a generic write failure: the reader has
+    // to know the halves have parted, and which one is ahead.
+    let published = crate::librarian::augmentation_sidecar::write_through(
+        cat,
+        artifact_id,
+        crate::librarian::augmentation_sidecar::Authored::Only(&["params_schema", "prompt"]),
+    )
+    .map_err(|e| {
+        LibrarianRecoverableError::with_hint(
+            format!("rekey_prefix: the catalog moved but its committed sidecar did not: {e}"),
+            "The rekey itself is COMMITTED — ids, schema and body have all moved. Only the \
+             sidecar under `docs/augmentations/` is behind, which matters on other machines \
+             because `reindex` re-attaches the declared shape from it. Republish with \
+             librarian(action=\"doctor\", fix=\"export_augmentations\") after removing the stale \
+             file; that fix creates rather than refreshes."
+                .to_string(),
+        )
+    })?;
+    if !published.refused.is_empty() {
+        return Err(LibrarianRecoverableError::with_hint(
+            format!(
+                "rekey_prefix: the catalog moved, and the committed sidecar disagrees on {:?} — \
+                 fields this rekey did not author, so it will not publish over them",
+                published.refused
+            ),
+            "Which side is right is not decidable here; that is `sidecar_shape_drift`'s \
+             position. Reconcile those fields, then republish the sidecar."
+                .to_string(),
+        ));
+    }
+    report.sidecar_republished = published.written.is_some();
     Ok(report)
 }
 
@@ -1479,5 +1539,94 @@ mod tests {
         let err = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Preview).unwrap_err();
 
         assert!(err.to_string().contains("fence"), "got: {err}");
+    }
+    /// A rekey must keep the COMMITTED sidecar true, not only the catalog row.
+    ///
+    /// The catalog is machine-local and gitignored; the sidecar under `docs/augmentations/` is
+    /// what travels in git, and `reindex` re-attaches a declared shape from it. A rekey that
+    /// moves only the row is correct on the machine that ran it and reverts on every other —
+    /// restoring `pattern: ^T-\d+$` over ids that are all now `SRI-N`, and failing at some
+    /// later `append_entry` naming a pattern nobody there changed.
+    ///
+    /// **This is a regression test for a shipped defect, not a hypothetical** —
+    /// `docs/issues/2026-09-17-rekey-prefix-leaves-the-committed-augmentation-sidecar-on-the-old-shape.md`,
+    /// found on the action's first real use and repaired by hand.
+    ///
+    /// The fixture's load-bearing detail is the `expects_augmentation:` frontmatter key AND a
+    /// real file at that path: `write_through` publishes only to a sidecar the artifact
+    /// DECLARES and that already exists, so dropping either turns this test green while
+    /// guarding nothing. That is also why no existing test here catches this — they all build
+    /// their augmentation straight into the catalog and none has a sidecar on disk.
+    #[test]
+    fn the_committed_sidecar_follows_the_rekey() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let aug_dir = dir.path().join("docs/augmentations");
+        std::fs::create_dir_all(&aug_dir).unwrap();
+        std::fs::create_dir_all(dir.path().join("docs/trackers")).unwrap();
+        std::fs::write(dir.path().join(".git"), "gitdir: x").ok();
+        std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+
+        let led_path = dir.path().join("docs/trackers/led.md");
+        std::fs::write(
+            &led_path,
+            "---\nkind: tracker\nexpects_augmentation: docs/augmentations/led.yaml\n---\n\n## T-1 — first\n",
+        )
+        .unwrap();
+        let sidecar = aug_dir.join("led.yaml");
+
+        let row = TestArtifactRowBuilder::new("led")
+            .with_abs_path(&led_path)
+            .with_kind("tracker")
+            .build();
+        crate::librarian::catalog::artifact::upsert(&cat, &row).unwrap();
+        cat.conn
+            .execute(
+                "UPDATE artifact SET slug='my-ledger' WHERE id='led'",
+                params![],
+            )
+            .unwrap();
+        aug(
+            &cat,
+            "led",
+            Some("tasks"),
+            serde_json::json!({"tasks": [{"id": "T-1"}]}),
+            Some(id_schema("T")),
+            "keeps `## T-N — <title>`",
+        );
+
+        // The committed projection, as `doctor(fix="export_augmentations")` would have written it.
+        let augrow = crate::librarian::catalog::augmentation::get(&cat, "led")
+            .unwrap()
+            .unwrap();
+        crate::librarian::augmentation_sidecar::write(
+            &sidecar,
+            &crate::librarian::augmentation_sidecar::AugmentationSidecar::from_row(&augrow),
+        )
+        .unwrap();
+        assert!(
+            std::fs::read_to_string(&sidecar).unwrap().contains("^T-"),
+            "fixture must start on the OLD shape or this test proves nothing"
+        );
+
+        rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
+
+        let on_disk = std::fs::read_to_string(&sidecar).unwrap();
+        assert!(
+            on_disk.contains(r"^SRI-\d+$"),
+            "the committed schema pattern must move with the catalog; got:\n{on_disk}"
+        );
+        assert!(
+            !on_disk.contains("^T-"),
+            "no trace of the old pattern may survive; got:\n{on_disk}"
+        );
+        assert!(
+            on_disk.contains("## SRI-N"),
+            "and the prompt too — it teaches the heading shape; got:\n{on_disk}"
+        );
     }
 }
