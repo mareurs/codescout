@@ -1593,20 +1593,57 @@ line describes and will stay that way; this row is the record that reconciles th
 
 ## Instance 17 — 2026-09-17, and the new half is that a DETECTOR had just argued this record should close
 
+The capture route was **wrong in the first version of this entry, and the correction is kept
+visible because the error is the same one this entry is about.** It read: *"consistent with
+`git commit -a` or a directory-scoped `git add`: the file was tracked and
+modified-but-unstaged, which is exactly the population `-a` sweeps and a bare index commit does
+not."* Every clause of that is false.
+
+**What actually happened**, settled by the capturing session supplying the one observation an
+outside reader cannot have — its own index read — and by the captured session then finding the
+cause in its own transcript:
+
+1. `a3bf229c` ran `git add -- <its 3 explicit paths>`, then `git status --short`. That output
+   shows the captured file as `" M …"` — leading space, worktree-modified, **unstaged** — while
+   its own paths read `M ` and `R `, so the column-1 distinction was live.
+2. **`9403d62d` then ran `git add` on that path.** Its own transcript holds the call and the
+   `git diff --cached --name-only` that followed, listing four paths: its one plus the other
+   session's three.
+3. `a3bf229c` ran `git commit` with **no pathspec**, which correctly took the whole index — by
+   then holding both sessions' work.
+
+Ordering is pinned without a clock: the captured session's *next* call was
+`git diff --cached --stat -- <its path>`, which returned **empty**, so HEAD already matched and
+the commit landed between its own `add` and that read.
+
+So this is **not** a scope gap in either guard, and not a sweeping command. It is
+`docs/issues/2026-09-02-staging-is-not-a-state-you-can-hold.md`: a two-step index operation on a
+shared checkout, where the window sits between one session's `git status` and its own
+`git commit`, and the occupant was another session's `git add`. **The fix direction follows from
+that and is the practical half — widening the guards' scope cannot close a race they win and
+then lose**, because the guard runs against an index that is still correct and the tree is
+written from one that is not.
+
+**Why the wrong version is recorded rather than quietly replaced.** It reasoned from a commit's
+END STATE (tracked, modified, present in someone else's commit) to the command that must have
+produced it — an inference the end state cannot support, since a bare index commit and a `-a`
+sweep leave identical evidence. That is the *identical* error this entry was filed to describe
+one paragraph down, committed inside the same hour, by the session writing the description. The
+staging call was four calls earlier in its own transcript: not a mechanism it could not see, one
+it did not look for. § *Observer Blindness*'s opening measurement, again — knowing the class
+prevents nothing.
+
+---
+
 `7b5f3d5b` (sessionId `a3bf229c`, *"docs(issues): archive the blank-line defect, fixed at
 976d8bac"*) carries four files. Three are its author's. The fourth is
 `docs/issues/2026-09-16-a-symlinked-instruction-file-is-cataloged-as-a-second-artifact.md`,
-**+73 lines, mine** — the close-out of `cdcad7a0257ec7c0`: `status` open→fixed, a
-`## Fix provenance` section, a mutation table, an `unverified:` field. Written through the
-catalog with `doc(action="update")` and not yet staged when their commit ran. Content intact —
-all seven markers survive in the committed bytes. **Mislabeled, not damaged**, and not
-repaired, per this file's own standing conclusion and CLAUDE.md's shared-checkout sequence
-step 6.
+**+73 lines**, belonging to `9403d62d` — the close-out of `cdcad7a0257ec7c0`: `status`
+open→fixed, a `## Fix provenance` section, a mutation table, an `unverified:` field. Content
+intact — `git diff 7b5f3d5b -- <path>` is empty, so the commit captured exactly what the worktree
+held, across 236 lines. **Mislabeled, not damaged**, and not repaired, per this file's own
+standing conclusion and CLAUDE.md's shared-checkout sequence step 6.
 
-The capture route is consistent with `git commit -a` or a directory-scoped `git add`: the file
-was **tracked** (committed at `ff1a3244` hours earlier) and modified-but-unstaged, which is
-exactly the population `-a` sweeps and a bare index commit does not. Not asserted beyond that —
-the capturing command is not recoverable from outside the session that ran it.
 
 ### What is new: a purpose-built heuristic had just reasoned, in writing, that this bug was probably fixed
 
@@ -1647,10 +1684,16 @@ not in the reader, which is § *Observer Blindness* position 3 in its usual plac
 ### Both anti-capture guards passed, and that is not a defect in them
 
 `refuse a pathspec commit carrying unstaged content` and `refuse an index commit carrying another
-session's staged paths` both returned `Passed` on this session's own commits minutes either side
-of the capture. Neither is aimed at the capturing side of a commit that sweeps **tracked,
-modified, unstaged** files belonging to someone else — my file was never staged, so there was no
-foreign *staged* path to refuse, and the capturing commit was not the pathspec form.
+session's staged paths` both returned `Passed` on the captured session's own commits minutes
+either side of the capture. Neither is a coverage gap here, and the first version of this entry
+misdescribed why.
+
+The real reason is the race above: at the moment `a3bf229c`'s pre-commit guard ran, the index it
+inspected was **correct** — or, if the `git add` had already landed, the guard's question is about
+the *committing* session's staged paths and there is no earlier read to compare against. Either
+way the guard's check and git's tree write are not atomic, so a guard can pass truthfully and the
+tree still be written from a different index. **No widening of scope reaches that**, which is the
+one actionable sentence in this instance.
 ## Resume
 
 **Discharged 2026-09-16.** Both halves are done, and the gap between them is worth one line
