@@ -235,6 +235,7 @@ impl RetrievalClient {
             config
                 .model_dim
                 .unwrap_or(crate::retrieval::config::DEFAULT_MODEL_DIM),
+            &config.dense_model_name(),
         )
         .dense_only(dense_only);
         // `[embeddings].api_key` is a separate, project-aware key from the
@@ -412,6 +413,7 @@ impl RetrievalClient {
             config
                 .model_dim
                 .unwrap_or(crate::retrieval::config::DEFAULT_MODEL_DIM),
+            &config.dense_model_name(),
         ));
         let reranker = RerankerHttp::new(&config.reranker_url);
         let client = qdrant_client::Qdrant::from_url(&config.qdrant_url)
@@ -979,6 +981,73 @@ mod selection_tests {
             None,
             "a configured api_key must never reach a non-loopback plaintext HTTP embedder"
         );
+    }
+
+    #[cfg(feature = "remote-embed")]
+    #[test]
+    fn build_http_embedder_sends_the_configured_model_when_no_override_is_set() {
+        // The model twin of the api_key test above, and it exists because its
+        // absence was load-bearing: `EmbedderHttp::new` took no model, so
+        // `config.model` sat in scope at the call site and was never passed,
+        // and the wire name came from CODESCOUT_EMBEDDER_MODEL_NAME alone. The
+        // api_key half of this same constructor had an accessor and a test; the
+        // model half had neither, so the suite stayed green while the
+        // documented `model` + `url` pair failed outright.
+        //
+        // Asserted through `build_http_embedder` — what `build_embedder` /
+        // `from_env` actually run — and deliberately NOT through
+        // `EmbedderHttp::with_config`, whose every caller in the tree is a test.
+        // An assertion there would cover no production path.
+        //
+        // `dense_model_name_override` is set explicitly rather than inherited,
+        // per this module's rule: the ambient environment DOES carry
+        // CODESCOUT_EMBEDDER_MODEL_NAME on any host configured for the stack
+        // (this repo's own dotenv sets it), and an inherited override would make
+        // this test assert nothing on exactly the machines it matters on.
+        let mut c = cfg_with(Some("https://embed.example.com"), "model-from-config");
+        c.dense_model_name_override = None;
+        let http = RetrievalClient::build_http_embedder("https://embed.example.com", &c, false);
+        assert_eq!(
+            http.dense_model_name_for_test(),
+            "model-from-config",
+            "with no override, the configured model must reach the dense \
+             embedder: setting a url must not discard [embeddings].model"
+        );
+    }
+
+    #[cfg(feature = "remote-embed")]
+    #[test]
+    fn build_http_embedder_lets_the_env_override_win_over_the_configured_model() {
+        // The other direction, and not symmetry for its own sake: every stack
+        // deployment that exists sets CODESCOUT_EMBEDDER_MODEL_NAME while
+        // leaving [embeddings].model at the built-in default, so a fix letting
+        // `model` win would silently repoint all of them at "AllMiniLML6V2Q".
+        // This pins the back-compat half of the 2026-09-17 ruling — env stays on
+        // top as a warned escape hatch — so a later change cannot quietly invert
+        // the ladder while the sibling test above still passes.
+        let mut c = cfg_with(Some("https://embed.example.com"), "model-from-config");
+        c.dense_model_name_override = Some("model-from-override".to_string());
+        let http = RetrievalClient::build_http_embedder("https://embed.example.com", &c, false);
+        assert_eq!(
+            http.dense_model_name_for_test(),
+            "model-from-override",
+            "an explicit CODESCOUT_EMBEDDER_MODEL_NAME must still win"
+        );
+    }
+
+    #[cfg(feature = "remote-embed")]
+    #[test]
+    fn a_routing_prefix_is_stripped_before_the_model_goes_on_the_wire() {
+        // `local:`/`ollama:`/`openai:` are codescout's backend selectors, not
+        // names any server knows. `create_embedder_with_config`'s url arm has
+        // always stripped them; this pins that the EmbedderHttp path agrees,
+        // which is the drift the shared `bare_model_name` helper exists to
+        // prevent. Without it a url-configured project would send the literal
+        // "local:AllMiniLML6V2Q" and get an opaque server-side rejection.
+        let mut c = cfg_with(Some("https://embed.example.com"), "local:AllMiniLML6V2Q");
+        c.dense_model_name_override = None;
+        let http = RetrievalClient::build_http_embedder("https://embed.example.com", &c, false);
+        assert_eq!(http.dense_model_name_for_test(), "AllMiniLML6V2Q");
     }
 
     #[tokio::test]

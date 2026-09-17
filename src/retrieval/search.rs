@@ -613,6 +613,7 @@ mod dim_guard_tests {
                 model_dim,
                 model: "local:AllMiniLML6V2Q".into(),
                 api_key: None,
+                dense_model_name_override: None,
                 profile: "cpu".into(),
                 bm25_boost: 1.0,
                 disable_sparse: false,

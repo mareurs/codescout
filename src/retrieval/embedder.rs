@@ -276,13 +276,37 @@ where
 
 #[cfg(feature = "remote-embed")]
 impl EmbedderHttp {
+    /// Production entry point. `dense_model_name` is the **already-resolved**
+    /// name sent in the `/v1/embeddings` request body — see
+    /// [`crate::retrieval::config::RetrievalConfig::dense_model_name`], which
+    /// applies the override-then-configured-model ladder and strips routing
+    /// prefixes.
+    ///
+    /// **This constructor deliberately does NOT read
+    /// `CODESCOUT_EMBEDDER_MODEL_NAME`.** It did until 2026-09-17, and that was
+    /// the whole defect: the env var was the only source, so `[embeddings].model`
+    /// was discarded whenever a url was set, and an unset var failed the entire
+    /// index with *"embedding model name is required and was empty or blank"* —
+    /// a message naming none of the knobs that resolve the model.
+    ///
+    /// The env read moved to `RetrievalConfig` rather than merely gaining a
+    /// fallback here, and the reason is testability, not tidiness. An env read
+    /// inside a constructor can only be exercised by mutating process env, which
+    /// is UB against the suite's concurrent `getenv` readers and banned
+    /// crate-wide by `docs/conventions/test-env-isolation.md` — so the
+    /// resolution had no reachable assertion, which is precisely why it could be
+    /// wrong for a release with a green suite. With the value resolved on the
+    /// config struct, both directions are ordinary unit tests. Same shape as
+    /// `EmbedEnv::from_real_env` feeding the pure `merge_embed_config`.
+    ///
+    /// See `docs/issues/2026-09-17-the-configured-embedding-model-is-discarded-whenever-a-url-is-set.md`.
     pub fn new(
         dense_base: impl Into<String>,
         sparse_base: impl Into<String>,
         expected_dim: usize,
+        dense_model_name: &str,
     ) -> Self {
         let dense_base = dense_base.into();
-        let dense_model_name = std::env::var("CODESCOUT_EMBEDDER_MODEL_NAME").unwrap_or_default();
         let query_prefix = std::env::var("CODESCOUT_QUERY_PREFIX").unwrap_or_default();
         // Never transmit EMBED_API_KEY over plaintext HTTP (loopback exempt for
         // local llama.cpp / Ollama) — mirrors RemoteEmbedder's HTTPS guard.
@@ -377,6 +401,21 @@ impl EmbedderHttp {
     #[cfg(test)]
     pub(crate) fn api_key_for_test(&self) -> Option<&str> {
         self.api_key.as_deref()
+    }
+
+    /// Test-only accessor for the resolved dense model name — the value that
+    /// goes on the wire as `"model"` in the `/v1/embeddings` request body.
+    ///
+    /// Exists for the same reason as [`Self::api_key_for_test`]: to bind an
+    /// assertion to the embedder `RetrievalClient::build_http_embedder`
+    /// actually constructs, rather than to a re-derivation of the resolution
+    /// rule. Its absence is why the configured model could be discarded on the
+    /// url path with a green suite — the api_key half of this constructor had
+    /// such an accessor and was tested; the model half had neither. See
+    /// `docs/issues/2026-09-17-the-configured-embedding-model-is-discarded-whenever-a-url-is-set.md`.
+    #[cfg(test)]
+    pub(crate) fn dense_model_name_for_test(&self) -> &str {
+        &self.dense_model_name
     }
 
     /// Inject the `CODESCOUT_EMBED_BATCH` override directly. Builder-style;

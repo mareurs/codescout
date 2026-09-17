@@ -121,6 +121,24 @@ pub struct RetrievalConfig {
     pub model: String,
     /// Embedding API key, used only when `embedder_url` is set.
     pub api_key: Option<String>,
+    /// Operator override for the model name sent in the `/v1/embeddings`
+    /// request body, from `CODESCOUT_EMBEDDER_MODEL_NAME`. `None` means "no
+    /// override" — the name is then derived from `model`.
+    ///
+    /// Read here, at the config edge, rather than inside `EmbedderHttp::new`
+    /// where it used to live. Two reasons, and the second is the one that
+    /// matters: every other `CODESCOUT_*` read already happens in this file, and
+    /// an env read buried in a constructor is untestable without `set_var`,
+    /// which is UB against the suite's concurrent `getenv` readers and banned
+    /// crate-wide by `docs/conventions/test-env-isolation.md`. With the value on
+    /// the struct, a test sets the field and asserts the resolution both ways —
+    /// the same shape as `EmbedEnv::from_real_env` feeding the pure
+    /// `merge_embed_config`.
+    ///
+    /// That untestability was not incidental: it is why `[embeddings].model`
+    /// could be discarded on the url path with a green suite. See
+    /// `docs/issues/2026-09-17-the-configured-embedding-model-is-discarded-whenever-a-url-is-set.md`.
+    pub dense_model_name_override: Option<String>,
     pub profile: String,
     /// Multiplier for the sparse (BM25) prefetch candidate pool relative to dense.
     /// 1.0 = equal weight (default), 2.0 = BM25 gets 2× more candidates in RRF.
@@ -168,6 +186,31 @@ impl RetrievalConfig {
         format!("{}{}", self.collection_prefix, kind)
     }
 
+    /// The model name to put in the `/v1/embeddings` request body.
+    ///
+    /// Pure over the struct — no env access — so both directions are testable
+    /// without `set_var`. Precedence matches the project-wide ladder: the
+    /// operator's `CODESCOUT_EMBEDDER_MODEL_NAME` override wins, otherwise the
+    /// configured `model` with its routing prefix stripped.
+    ///
+    /// The strip uses [`codescout_embed::bare_model_name`], shared with
+    /// `create_embedder_with_config`'s url arm rather than re-derived, so a
+    /// `local:`/`ollama:`/`openai:` model resolves to the same wire name on both
+    /// paths. Re-deriving it here is precisely how the two drifted before.
+    ///
+    /// Note the override is kept on top by the 2026-09-17 ruling: every stack
+    /// deployment in existence sets it while leaving `[embeddings].model` at the
+    /// built-in default, so letting `model` win would silently repoint them at
+    /// the wrong model. The shadow WARNING that makes this visible needs
+    /// provenance `RetrievalConfig` does not yet carry — it cannot distinguish a
+    /// chosen `model` from a defaulted one — and lands with Task 5 of
+    /// `docs/plans/2026-09-17-embedding-config-consolidation.md`.
+    pub(crate) fn dense_model_name(&self) -> String {
+        self.dense_model_name_override
+            .clone()
+            .unwrap_or_else(|| codescout_embed::bare_model_name(&self.model).to_string())
+    }
+
     /// Env-only construction. Equivalent to `from_env_and_project(None)`.
     pub fn from_env() -> Result<Self> {
         Self::from_env_and_project(None)
@@ -191,6 +234,13 @@ impl RetrievalConfig {
             model,
             api_key,
             model_dim,
+            // Blank-is-absent, matching `non_empty`'s policy for the sibling
+            // embed fields: an exported-but-empty `FOO=` must not win over a
+            // configured model, which is the same silent-loss class this
+            // override was implicated in.
+            dense_model_name_override: non_empty(
+                std::env::var("CODESCOUT_EMBEDDER_MODEL_NAME").ok(),
+            ),
             sparse_embedder_url: std::env::var("CODESCOUT_SPARSE_EMBEDDER_URL")
                 .unwrap_or_else(|_| DEFAULT_SPARSE_EMBEDDER_URL.into()),
             reranker_url: std::env::var("CODESCOUT_RERANKER_URL")

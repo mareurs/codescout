@@ -25,10 +25,20 @@ const SCANNED: &[(&str, usize)] = &[
     ("src/tools/semantic/semantic_search.rs", 1),
 ];
 
-/// `EmbedderHttp::new` reads `CODESCOUT_EMBEDDER_MODEL_NAME`, `CODESCOUT_QUERY_PREFIX`,
-/// `EMBED_API_KEY`, `CODESCOUT_EMBED_BATCH` and `CODESCOUT_EMBED_INFLIGHT` from the
-/// process environment. Every shell on a developer machine supplies the first from a
-/// gitignored `.env`; CI supplies none of them.
+/// `EmbedderHttp::new` reads `CODESCOUT_QUERY_PREFIX`, `EMBED_API_KEY`,
+/// `CODESCOUT_EMBED_BATCH` and `CODESCOUT_EMBED_INFLIGHT` from the process
+/// environment. CI supplies none of them.
+///
+/// It read `CODESCOUT_EMBEDDER_MODEL_NAME` as well until 2026-09-17, and that one
+/// is why this guard exists: every developer shell supplies it from a gitignored
+/// `.env` and CI supplies nothing, so a test constructing through `new()`
+/// asserted about the developer's shell. That variable has since moved to the
+/// config edge (`RetrievalConfig::dense_model_name_override`) — not as tidying,
+/// but because the unreadability that made *tests* environment-dependent made the
+/// *production* resolution untestable by the same mechanism, and
+/// `[embeddings].model` was silently discarded on the url path for a full release
+/// behind a green suite. The four variables above keep this scan necessary; the
+/// story below is why it is not decoration.
 ///
 /// That divergence was latent and harmless for weeks. `9c03b32f` — a correct hardening
 /// that refuses a blank model at the constructor — turned the empty default into a hard

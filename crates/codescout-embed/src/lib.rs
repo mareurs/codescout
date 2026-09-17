@@ -47,6 +47,30 @@ pub fn normalize_embeddings_base(url: &str) -> &str {
     }
 }
 
+/// Strip a backend-routing prefix (`ollama:`, `openai:`, `local:`) from a model
+/// spec, leaving the bare name a server expects in an OpenAI-compatible
+/// `/v1/embeddings` request body.
+///
+/// Shared for the same reason as [`normalize_embeddings_base`] above, and the
+/// history is more pointed here. Two code paths send a model name over HTTP:
+/// [`create_embedder_with_config`]'s url arm, which has always stripped these
+/// prefixes inline, and the root crate's `EmbedderHttp`, which until 2026-09-17
+/// did not take a model at all and read `CODESCOUT_EMBEDDER_MODEL_NAME`
+/// instead. Wiring the config through the second path without sharing the rule
+/// would have reproduced the original defect one layer down — the two paths
+/// agreeing today and diverging on the next prefix added.
+///
+/// `local-dir:` is deliberately absent: it names a filesystem path, never a
+/// remote model, and `create_embedder_with_config` rejects it outright when a
+/// url is set rather than stripping it.
+pub fn bare_model_name(model: &str) -> &str {
+    model
+        .strip_prefix("ollama:")
+        .or_else(|| model.strip_prefix("openai:"))
+        .or_else(|| model.strip_prefix("local:"))
+        .unwrap_or(model)
+}
+
 /// Returns the chunk size in characters appropriate for the given model spec.
 ///
 /// Derived from each model's documented maximum sequence length using a
@@ -221,11 +245,9 @@ pub async fn create_embedder_with_config(
         }
         // Strip known routing prefixes so "ollama:nomic-embed-text" + url
         // sends "nomic-embed-text" as the model name in the HTTP request.
-        let bare_model = model
-            .strip_prefix("ollama:")
-            .or_else(|| model.strip_prefix("openai:"))
-            .or_else(|| model.strip_prefix("local:"))
-            .unwrap_or(model);
+        // Shared with the root crate's `EmbedderHttp::new`, which sends a
+        // model name over the same wire format — see `bare_model_name`.
+        let bare_model = crate::bare_model_name(model);
         return Ok(Box::new(remote::RemoteEmbedder::from_url(
             url, bare_model, api_key,
         )?));
