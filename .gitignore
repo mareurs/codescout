@@ -131,7 +131,7 @@ docs/**/.codescout/
 # Benchmark artifacts (regenerated locally)
 /results-*.tsv
 /.codescout/crash.log
-/scripts/__pycache__/
+__pycache__/
 
 # Personal Pi MCP config — holds API keys; see contrib/pi/mcp.json.example
 /contrib/pi/mcp.json
