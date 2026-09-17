@@ -104,7 +104,16 @@ Three separate traps, each measured:
 - **A bare `git commit` commits the whole index**, including whatever a peer staged in the
   interval. `1b40dabd` took a peer's entire `OB-6` entry that way — the session staged one
   file, printed `git diff --cached --name-only`, and chained `&& git commit`, so the check
-  ran and changed nothing.
+  ran and changed nothing. **Again on 2026-09-17 at `7b5f3d5b`, which is why this bullet
+  carries two dates: the trap is live, not historical.** Same shape — explicit paths on the
+  `add`, a check, `&& git commit` — and it took a peer's 73-line bug-file close-out. The peer
+  had staged it in the window and confirmed so from their own transcript. **The variation
+  worth naming is the check: that session ran `git status --short` instead of `git diff
+  --cached --name-only`.** It carries the same fact — staged paths are lettered in column 1 —
+  but buries it among every peer's unstaged path, so it reads as a SURVEY of the tree rather
+  than a question about the index, and the reader confirms "my paths are there" without
+  noticing what else is. Run the `--cached` form: its output is the commit's contents and
+  nothing else.
 - **`-m` goes before `--`.** After `--` everything is a pathspec: `git commit -- <paths> -m
   "msg"` exits 1 with `pathspec '-m' did not match any file(s)`.
 - **Staging is what satisfies the unreviewed-content check, not the pathspec.** A pathspec
@@ -126,6 +135,25 @@ identical to one that succeeded. Check the post-condition — `git diff --name-o
 empty, `git show --stat HEAD` after — rather than the command's return.
 
 Check **after**, not only before: the index moves between your check and your commit.
+
+**And when it has already moved, an empty `git diff --cached` pins the ORDERING after the
+fact, without a clock.** Two sessions reconstructing a capture disagree about sequence, and
+the instrument they reach for is timestamps — the one thing this checkout has already lost
+time to, since a pair of stamps in mixed zones once read as a two-hour gap that was really
+2 min 22 s. The git-native form needs no shared clock: a session that staged a path and then
+finds `git diff --cached -- <path>` **empty** has learned that HEAD already matches, so
+someone's commit landed between their `add` and that read. Combined with the committer's own
+pre-commit index read, the window closes from both ends and every observation is a fact
+rather than an inference.
+
+**Its limit, which is the reason to state it rather than just use it:** it orders events
+against *your own* commit and says nothing about WHO acted. Identity still comes from the
+actor's own transcript, or from the socket route in `CLAUDE.md` § *Reaching a Peer Session* —
+never from the commit's contents, which is exactly the inference that produced a wrong
+mechanism claim in the record this technique then corrected.
+
+(Technique from sessionId `9403d62d-116b-46ea-ac9b-004acff2b1cb`, 2026-09-17, resolving the
+`7b5f3d5b` capture above.)
 
 ### 6. If a commit captures another session's file, stop
 
@@ -204,6 +232,7 @@ in the tail pointing here rather than the construction itself.
 leaves a complete tree in the object store and `git restore --staged` only un-references it, so
 `git fsck --unreachable` recovers it byte-exact — which is how 35 lines deleted during exactly
 this procedure were restored. `bug-fix-session-log:W-142`.
+
 ## The empty intersection, which no sequence fixes
 
 `foreign-index` accepts **only** a pathspec commit when the index holds a peer's paths.
