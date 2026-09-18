@@ -57,6 +57,38 @@ processes WITHOUT the marker started at `19:55:18`, *after* the `19:49:05` mtime
 seventeen with it started before. A filter matching nothing and a fleet that is fully
 updated would both print `0`; they are told apart by the two that legitimately match.
 
+Measured 2026-09-18, after SIGKILLing the seventeen stale servers:
+
+```
+09:57:40  after the kill   servers alive: 1 (mine, stale)
+10:01:15  after /mcp here  mine respawns on the CURRENT inode
+10:01:21  peer 40130's server reappears,   CURRENT inode
+10:01:46  peer 3818904's server reappears, CURRENT inode
+10:02:03  fleet: stale=0 current=4
+```
+
+**A killed server comes back, and it comes back on the current binary.** Nothing was done
+to those two peers; their servers reappeared on their own. That materially cheapens the
+second remedy above — `rb.sh` reaping stale servers after a build needs no follow-up action
+from any operator, because the reap IS the update.
+
+**Confidence, stated because the obvious reading is not the only one.** This cannot fully
+separate *auto-respawn on the session's next codescout call* from *the operator ran `/mcp`
+on two of the three*. The discriminator pointing at the former is the session that did
+**not** come back: peer `3288266` had no server at all at `10:02:03`. An operator
+reconnecting sessions would plausibly have covered it; a use-triggered respawn would not,
+because that session was idle and had made no call. Suggestive, not settled — the clean
+experiment is to kill one idle session's server and watch whether it returns before that
+session is touched.
+
+**Two things this does NOT weaken.** The seventeen ran stale for roughly fourteen hours
+without being killed, so respawn repairs nothing on its own — it is triggered by the
+process dying, never by the binary changing. And SIGTERM did not end them: all seventeen
+survived it with identical pids and start times, and only `kill -9` worked. So any reaper
+must use SIGKILL, which is safe only against an idle server; all seventeen parents were
+`idle` and all seventeen processes were sleeping when this was done, and a reaper would
+have to check the same thing rather than assume it.
+
 ## Environment
 
 codescout `experiments`, Linux, one checkout shared by several sessions across profiles;
