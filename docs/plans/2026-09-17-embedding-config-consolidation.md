@@ -405,7 +405,8 @@ outage-causing `.env.amd`-style files work); the project-scoped override is a
 separate, larger change and is left as a follow-up rather than rushed in
 alongside it.
 
-SHA / patch-id: pending.
+SHA: `25aa20bb` · patch-id: `1c6d78d9126c80dab8bb52535ea18b607fef39ce`. Gate green:
+`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`.
 
 ## Phase 3 — onboarding and visibility
 
