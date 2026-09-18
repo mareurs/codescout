@@ -74,6 +74,32 @@ session running to observe the deletion. Best leads are under **Hypotheses tried
 
 `git rev-parse HEAD` at detection: `047dd433`.
 
+### 2026-09-18 — re-open trigger checked, NOT met. Recorded as a DENOMINATOR
+
+The frontmatter trigger asks whether catalog rows have disappeared for files **still on disk**.
+Two `librarian(action="reindex")` runs that day answer it directly:
+
+| field | run 1 | run 2 | reads as |
+|---|---|---|---|
+| `added` | 1 | **0** | run 1's single add was a genuinely new file created that morning; run 2 found **no** on-disk file lacking a row |
+| `removed` | 0 | 0 | no reclamation in the window |
+| `orphans_removed` | 0 | 0 | — |
+| `unknown_count` | 0 | 0 | the trigger's `unindexed_files` half |
+| `unchanged` | 1716 | 1730 | the population the zeros are over |
+
+`added == 0` is the load-bearing cell: a row lost for a file still present is exactly what a
+reindex re-mints, so a second run finding nothing to add is the trigger's own question answered
+in the negative. `librarian(action="doctor")` the same day reported `missing_file: 0` and
+`frontmatter_id_mismatch: 0`, which is the other direction (rows whose file is gone) and not this
+trigger.
+
+**Weaker than it looks, and said so deliberately:** this is a point-in-time reading, while the
+defect is defined by a change **between** sessions. It cannot see a loss that happened and was
+repaired by an intervening reindex — which is how the original instance was repaired. So it
+lowers nothing about the mechanism and only adds a dated observation to the denominator, per
+`CLAUDE.md` § *Testing Discipline*'s rule that a confirming re-derivation gets published rather
+than absorbed. Stays `zombie`. Recorded by sessionId `3aa55c01-9663-44ca-82d2-48b6b8d76d66`.
+
 ## Environment
 
 - codescout `experiments`, main checkout `/home/marius/work/claude/codescout`

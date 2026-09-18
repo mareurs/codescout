@@ -89,6 +89,23 @@ still 31 references. Probe reverted; `types.rs` clean.
 
 A plain `activate` does not reproduce it either — it does not cold-start an
 already-warm rust-analyzer.
+### 2026-09-18 — non-repro datapoint, recorded as a DENOMINATOR
+
+`references(symbol="index_repo_sync", path="src/librarian/indexer.rs")` resolved **49 references
+across 4 files on the FIRST call**, issued immediately after an `/mcp` reconnect — a freshly
+started server with a cold LSP, which is the condition this record was filed against. No
+`symbol not found`, no retry.
+
+Published because a re-derivation that **confirms** is a denominator and never a catch: a record
+listing only the occasions something fired makes the population look more self-correcting than it
+is (`CLAUDE.md` § *Testing Discipline*).
+
+**What this is NOT evidence for**, stated because the datapoint invites the stronger reading: the
+originally-filed mechanism is already REFUTED — deliberate cold-start probes produce the *guarded*
+false-zero, not this record's hard resolution error. So a single cold call cannot separate "the
+defect is gone" from "the defect was never cold-start in the first place", which is the standing
+position. It moves the denominator and nothing else. Stays `zombie`. Recorded by sessionId
+`3aa55c01-9663-44ca-82d2-48b6b8d76d66`.
 ## Environment
 - Project: codescout (Rust, rust-analyzer), branch `experiments`
 - Transport: MCP stdio, Claude Code

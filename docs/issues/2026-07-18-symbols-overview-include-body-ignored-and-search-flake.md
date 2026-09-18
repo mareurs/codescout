@@ -50,6 +50,19 @@ severity: medium
 >
 > Trigger 3 is the one to watch: it converts this from "wait for a flake" into "apply a known fix",
 > and it is the reason this is `zombie` rather than `wontfix`.
+>
+> **2026-09-18 — trigger 2 checked directly, DID NOT FIRE. Stays `zombie`.** Published as a
+> **denominator**, not a catch: this record otherwise shows only the occasions something fired,
+> which makes the population look more self-correcting than it is (`CLAUDE.md` § *Testing
+> Discipline*, *instrument the doubt*). Method: grep for the Bug B instrumentation's log string
+> `symbols: project walk entry unreadable` (`src/tools/symbol/symbols.rs:700`) across all seven
+> `.codescout/diagnostic-*.log` files, every one written that day — **0 firings**, and 0 lines
+> matching `completeness_warning` / `may be a false negative` / `0 matches`. **The control is what
+> makes that zero a measurement rather than a broken grep:** the same corpus holds 8,072 lines,
+> 156 `symbols` references, and WARN-level lines are demonstrably captured (two in the first three
+> lines of `diagnostic-e8e5.log`), so a firing would have been visible to the method. Trigger 1
+> not observed this session; trigger 3 not re-derived. Recorded by sessionId
+> `3aa55c01-9663-44ca-82d2-48b6b8d76d66`.
 
 > **2026-08-06 — verify-open pass. Bug A confirmed closed at the source; Bug B still open, one more non-repro recorded.**
 >

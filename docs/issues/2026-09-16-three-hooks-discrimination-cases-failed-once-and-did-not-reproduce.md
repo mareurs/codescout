@@ -1,10 +1,10 @@
 ---
 id: '24ea8fd4e40fb821'
 kind: bug
-status: zombie
+status: open
 title: Three hooks-discrimination cases failed once inside a mutation run and did not reproduce in 12 runs
 tags:
-- cluster/unclassified
+- cluster/gate-keyed-on-unobservable-event
 - testing
 - shared-checkout
 - flaky
@@ -51,7 +51,9 @@ working change.
 
 ## Reproduction
 
-**None.** Not reproduced in 12 subsequent runs:
+**REPRODUCED 2026-09-18** — 4 failures in 45 runs (~9%), the same three cases every time, on the
+main checkout with **no mutation applied and no probe worktree**. Recorded by sessionId
+`3aa55c01-9663-44ca-82d2-48b6b8d76d66`.
 
 | runs | environment | result |
 |---|---|---|
@@ -59,9 +61,51 @@ working change.
 | 1 | inert mutation (comment reworded), probe worktree | `132/0` |
 | 6 | clean, serial, main checkout | `132/0` each |
 | 3 | clean, concurrent with each other | `132/0` each |
+| 15 | clean, serial, main checkout (2026-09-18) | **1 failure** — `142/3` |
+| 30 | clean, serial, main checkout (2026-09-18) | **3 failures** — `142/3` each; runs 1 and 2 CONSECUTIVE |
 
 The inert-mutation run is the one that matters for triage: it isolates the probe's worktree
 as an environment and finds nothing, so *"the worktree is different"* is not the explanation.
+The 2026-09-18 batches close the other half — neither the mutation nor the worktree is
+required. **Two consecutive failures rule out a uniform per-run coin flip**; whatever gates it
+persists across at least one run boundary.
+
+The pass counts differ between the two dates (`132` then `145`) because the suite gained cases
+in between. The three FAILING cases are the same three.
+
+### Root cause — § 2b's hypothesis is confirmed, and the three failures are ONE cause
+
+The earlier runs recorded only the `FAIL` lines. Capturing full output surfaced the line that
+names it:
+
+```
+awk: fatal: cannot open file `.git/session-stage-log': No such file or directory
+  FAIL  cold log + peer status -> unknown, not the passer-by
+        want '-' got ''
+```
+
+End to end:
+
+1. The case (`tests/hooks-discrimination.sh:187`) runs `rm -f .git/session-stage-log`, then
+   `git status` as peer B, **expecting `post-index-change` to recreate the log**.
+2. `post-index-change` fires on index **writes** (`man githooks`, quoted at
+   `scripts/post-index-change-stage-log.sh:26`). `git status` rewrites the index only when it
+   has stat information to refresh — sometimes it has none. No write, no hook, no log.
+3. `owner_of()` (`tests/hooks-discrimination.sh:100`) awks that path with **no existence
+   guard**, so it fatals and yields `''` where the case wants `-`. → failure 1.
+4. `guard "$B"` then reaches `scripts/pre-commit-foreign-index.sh:153`'s
+   `[ -s "$log" ] || exit 0` and exits silently → failures 2 and 3 (`missing: EXIT=1`, and no
+   `del.txt` in the refusal).
+
+So these are not three flaky cases. They are **one absent file observed at three points**,
+which is why they have only ever failed together. § 2b predicted exactly this shape — *"a hook
+that does not fire, or fires late, would produce exactly this shape"* — and called it a
+direction to probe rather than a finding. It is now a finding.
+
+**Noted, not asserted:** step 4 means the foreign-index guard **fails open whenever its state
+file is absent**. That may well be deliberate — a fresh clone has no log and must not refuse
+every commit. Deciding it needs the author's intent and a measurement of how often a real
+checkout sits in that state; neither was done here.
 
 ## Environment
 
@@ -93,8 +137,13 @@ probe, not a finding.
    discriminator that resolved this instance was a second run, and it was reached by
    judgement; a suite that self-re-runs a failing case once and reports *"failed 1 of 2
    attempts"* makes intermittency visible instead of leaving it to be noticed.
-3. **Leave it.** Defensible at this evidence level, and the reason this is `zombie` rather
-   than `open`: there is nothing here to work, only something to watch for.
+3. ~~**Leave it.**~~ **Withdrawn 2026-09-18.** This read *"defensible at this evidence level,
+   and the reason this is `zombie` rather than `open`: there is nothing here to work, only
+   something to watch for."* Both halves are now false: it reproduces at ~9% on a clean main
+   checkout, and the root cause is named above. Direction 1 is the repair — and it was the
+   right call before the cause was known, because a case asserting its own precondition would
+   have reported *"the hook did not recreate the log"* on the very first failure instead of
+   `want '-' got ''`.
 
 ## Workarounds
 
