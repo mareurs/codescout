@@ -200,16 +200,31 @@ fn topic_not_found_error(topic: &str, available: Vec<String>) -> RecoverableErro
     err
 }
 
+/// The chunk budget for memory content, from the RESOLVED model — never
+/// `p.config.embeddings.model_or_default()`, which is the raw project.toml-only
+/// copy that can diverge from what the shared embedder (`ctx.agent.memory_embedder`)
+/// was actually built from whenever an env var overrides project.toml. Shared by
+/// [`cross_embed_memory`] and [`create_semantic_anchors`], which segment the SAME
+/// point id and must therefore agree with each other, not just with the config.
+///
+/// Does not reuse the CACHED `memory_embedder`'s own model — that would need
+/// `memory_embedder()` to expose the config it resolved on first construction,
+/// which it does not (the cell only stores the type-erased `Arc<dyn
+/// DenseEmbedder>`). Re-resolving here can disagree with an already-cached
+/// embedder if config changes between the two, which is a narrower, separate
+/// risk from the one this fixes (env vs project.toml) and is not addressed here.
+fn resolved_chunk_budget(root: &std::path::Path) -> anyhow::Result<usize> {
+    let model = crate::retrieval::config::RetrievalConfig::from_env_and_project(Some(root))?.model;
+    Ok(crate::embed::chunk_size_for_model(&model))
+}
+
 /// Best-effort cross-embed a markdown memory into the semantic store.
 /// Called on `write` so that structured memories are also discoverable via `recall`.
 async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> anyhow::Result<()> {
-    let (project_id, model_spec) = ctx
+    let (project_id, root) = ctx
         .agent
         .with_project_at(ctx.workspace_override.as_deref(), |p| {
-            Ok((
-                p.config.project.name.clone(),
-                p.config.embeddings.model_or_default(),
-            ))
+            Ok((p.config.project.name.clone(), p.root.clone()))
         })
         .await?;
 
@@ -217,14 +232,21 @@ async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> an
     // the query side and carries an asymmetric model's query prefix.
     // docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md
     //
-    // Budget from the CONFIGURED MODEL, not a constant. `chunk_size_for_model` was
-    // kept alive precisely for consumers like this one — the decision in
+    // Budget from the RESOLVED model, not `p.config.embeddings.model_or_default()`
+    // (the raw project.toml-only copy) — that field can diverge from the model the
+    // shared embedder was actually built from whenever an env var overrides
+    // project.toml. Same divergence `src/main.rs` warns about for `client.config.model`
+    // vs `p.config.embeddings.model`; Task 8 of
+    // docs/plans/2026-09-17-embedding-config-consolidation.md names this exact site.
+    //
+    // `chunk_size_for_model` was kept alive precisely for consumers like this one —
+    // the decision in
     // docs/issues/archive/2026-08-11-chunk-size-for-model-dead-on-production-path.md
     // rejected it for sizing CODE CHUNKS (where 1200 chars is benchmark-backed and
     // model-independent), while keeping the function because it is correct for the
     // per-model arms. Memory content has no such benchmarked size; its only real
     // constraint is the ceiling, which is what this returns.
-    let budget_chars = crate::embed::chunk_size_for_model(&model_spec);
+    let budget_chars = resolved_chunk_budget(&root)?;
     let embedder = ctx.agent.memory_embedder().await?;
     let dense =
         crate::embed::document::embed_document_pooled(embedder.as_ref(), content, budget_chars)
@@ -260,14 +282,14 @@ async fn create_semantic_anchors(
     content: &str,
     path_anchor_files: &HashSet<String>,
 ) -> anyhow::Result<()> {
-    let (project_id, min_sim, top_n, model_spec) = ctx
+    let (project_id, min_sim, top_n, root) = ctx
         .agent
         .with_project_at(ctx.workspace_override.as_deref(), |p| {
             Ok((
                 p.config.project.name.clone(),
                 p.config.memory.semantic_anchor_min_similarity,
                 p.config.memory.semantic_anchor_top_n,
-                p.config.embeddings.model_or_default(),
+                p.root.clone(),
             ))
         })
         .await?;
@@ -280,7 +302,7 @@ async fn create_semantic_anchors(
     // this call re-upserts the SAME point id, so leaving it unsegmented would let the
     // anchor pass overwrite a correctly-pooled vector with a truncated or missing one
     // — the second write silently undoing the first.
-    let budget_chars = crate::embed::chunk_size_for_model(&model_spec);
+    let budget_chars = resolved_chunk_budget(&root)?;
     let embedder = ctx.agent.memory_embedder().await?;
     let dense =
         crate::embed::document::embed_document_pooled(embedder.as_ref(), content, budget_chars)

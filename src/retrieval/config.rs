@@ -108,16 +108,20 @@ pub struct RetrievalConfig {
     /// Model identifier in codescout-embed's grammar (`local:`, `local-dir:`,
     /// `ollama:`, `openai:`, or a bare name sent to `embedder_url`).
     ///
-    /// Precedence, highest first: `CODESCOUT_EMBEDDER_MODEL` (read directly
-    /// below) > `[embeddings].model` in project.toml > the built-in default.
-    /// **Surprise**: a *different* env var, `CODESCOUT_EMBED_MODEL`, is
-    /// applied even earlier, inside `ProjectConfig::load_or_default` itself —
-    /// so a project's `[embeddings].model` can already have been silently
-    /// overwritten before it ever reaches the project-config side of this
-    /// merge. Two independently-named env vars reach the same effective
-    /// setting at two different layers; `CODESCOUT_EMBEDDER_MODEL` (this
-    /// field) is the one Task 6 introduced, `CODESCOUT_EMBED_MODEL` predates
-    /// it and lives in `src/config/project.rs`.
+    /// Precedence, highest first: `CODESCOUT_EMBEDDING_MODEL` (or its deprecated
+    /// aliases `CODESCOUT_EMBEDDER_MODEL`/`CODESCOUT_EMBED_MODEL`, in that
+    /// order — see [`crate::config::embedding_env::MODEL`]) > `[embeddings].model`
+    /// in project.toml > the built-in default (`local:AllMiniLML6V2Q`).
+    ///
+    /// Resolved in ONE place, [`resolve_embed_fields_with`], through
+    /// [`crate::config::embedding_env::read`] — not at two independent layers.
+    /// It used to be two: `CODESCOUT_EMBED_MODEL` applied inside
+    /// `ProjectConfig::load_or_default` while `CODESCOUT_EMBEDDER_MODEL` applied
+    /// here, so which one won depended on where you looked. Fixed 2026-09-17,
+    /// `docs/plans/2026-09-17-embedding-config-consolidation.md` Task 5b
+    /// (`70ec79d5`) — this comment used to describe the old two-layer bug as
+    /// current behaviour, which was itself doc-vs-code drift nobody was
+    /// reading closely enough to catch.
     pub model: String,
     /// Embedding API key, used only when `embedder_url` is set.
     pub api_key: Option<String>,
@@ -269,6 +273,142 @@ impl RetrievalConfig {
                 .unwrap_or_default(),
             sqlite_dir: resolve_sqlite_dir(std::env::var("CODESCOUT_SQLITE_DIR").ok(), root)?,
         })
+    }
+}
+
+/// Where an effective embedding setting's value actually came from —
+/// [`effective_embedding_settings`]'s per-field answer to Task 8's "which one
+/// won?" question (`docs/plans/2026-09-17-embedding-config-consolidation.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingSource {
+    /// A `CODESCOUT_EMBEDDING_*` env var (canonical or deprecated alias) set it.
+    Env,
+    /// `[embeddings]` in project.toml or the global `config.toml` set it. The
+    /// two are deep-merged into one `EmbeddingsSection` before this struct
+    /// exists (`merge_toml`, before deserialisation), so they are not
+    /// distinguished further here — telling them apart needs loading each
+    /// layer alone, which this reporting pass does not do. Noted in the plan
+    /// as a scoping choice, not an oversight.
+    Config,
+    /// Neither env nor config set it; this is the built-in literal.
+    Default,
+    /// `dim` only: no `CODESCOUT_EMBEDDING_DIM` override, so the model's own
+    /// dimension applies. There is no project.toml `dim` field to check —
+    /// `EmbeddingsSection` has no such field, by design (see its own doc).
+    Model,
+}
+
+/// One resolved setting, paired with where it came from.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ResolvedSetting<T> {
+    pub value: T,
+    pub source: SettingSource,
+}
+
+/// Every effective `[embeddings]` setting, each paired with its source —
+/// Task 8's "show the resolved value and its source", consumed by
+/// `workspace(action="status")` and `librarian(action="doctor")` so the two
+/// can never disagree with each other, or with what the embedder was
+/// actually built from.
+///
+/// Reads exactly the same layers `RetrievalConfig::from_env_and_project`
+/// reads (env, then project.toml/global config.toml, then the built-in
+/// default) — this is a REPORTING PASS over that same resolution, not a
+/// second one, which is what keeps it from drifting: the exact defect named
+/// in `src/main.rs`'s comment about `p.config.embeddings.model` diverging
+/// from `client.config.model`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EffectiveEmbeddingSettings {
+    pub model: ResolvedSetting<String>,
+    pub url: ResolvedSetting<Option<String>>,
+    /// Never the key itself — only whether one is set, and where from.
+    pub api_key_set: ResolvedSetting<bool>,
+    pub dim: ResolvedSetting<Option<usize>>,
+}
+
+/// Build [`EffectiveEmbeddingSettings`] for `root` (or the process env alone
+/// when `None`, matching [`RetrievalConfig::from_env`]'s own convention).
+pub fn effective_embedding_settings(
+    root: Option<&std::path::Path>,
+) -> anyhow::Result<EffectiveEmbeddingSettings> {
+    let resolved = RetrievalConfig::from_env_and_project(root)?;
+    Ok(effective_embedding_settings_for(&resolved, root))
+}
+
+/// Same as [`effective_embedding_settings`], but takes an ALREADY-RESOLVED
+/// config instead of resolving one. For a caller (`ProjectStatus`, `doctor`)
+/// that constructed a `RetrievalConfig` moments earlier for its own purposes
+/// (backend classification, an index client, ...) and must not build a
+/// *second*, separately-resolved one just to report its provenance — two
+/// resolutions in one response is exactly the "second copy that can diverge"
+/// shape this whole task exists to end, even if both happen to agree today.
+/// Only re-reads `root`'s project.toml, for provenance classification; the
+/// reported VALUES are always `resolved`'s own, never re-derived here.
+pub(crate) fn effective_embedding_settings_for(
+    resolved: &RetrievalConfig,
+    root: Option<&std::path::Path>,
+) -> EffectiveEmbeddingSettings {
+    let env = EmbedEnv::from_real_env();
+    let project_embeddings = root
+        .and_then(|r| crate::config::project::ProjectConfig::load_or_default(r).ok())
+        .map(|c| c.embeddings);
+    effective_embedding_settings_from(resolved, &env, project_embeddings.as_ref())
+}
+
+/// The pure core of [`effective_embedding_settings`] — genuinely no env or file
+/// I/O: `env` is [`EmbedEnv`], already resolved by the caller, not re-read here.
+/// An earlier version called [`crate::config::embedding_env::read`] directly
+/// inside this function — which LOOKED pure (no explicit env param) but silently
+/// read real process env on every call, exactly the untestable-without-`set_var`
+/// shape `docs/conventions/test-env-isolation.md` exists to prevent. Caught before
+/// commit by trying to write a test for it. Takes the ALREADY-RESOLVED config, the
+/// ALREADY-RESOLVED env layer, and the raw (pre-default) project `[embeddings]`
+/// section — all three of which the real entry point below has to load anyway.
+fn effective_embedding_settings_from(
+    resolved: &RetrievalConfig,
+    env: &EmbedEnv,
+    project: Option<&crate::config::project::EmbeddingsSection>,
+) -> EffectiveEmbeddingSettings {
+    let source_for = |env_val: Option<&String>, cfg_val: Option<&String>| {
+        if non_empty(env_val.cloned()).is_some() {
+            SettingSource::Env
+        } else if non_empty(cfg_val.cloned()).is_some() {
+            SettingSource::Config
+        } else {
+            SettingSource::Default
+        }
+    };
+
+    let model_source = source_for(env.model.as_ref(), project.and_then(|p| p.model.as_ref()));
+    let url_source = source_for(env.url.as_ref(), project.and_then(|p| p.url.as_ref()));
+    let api_key_cfg = project
+        .and_then(|p| p.api_key.as_ref())
+        .map(|k| k.as_str().to_string());
+    let api_key_source = source_for(env.api_key.as_ref(), api_key_cfg.as_ref());
+    let dim_source = if env.dim.is_some() {
+        SettingSource::Env
+    } else {
+        SettingSource::Model
+    };
+
+    EffectiveEmbeddingSettings {
+        model: ResolvedSetting {
+            value: resolved.model.clone(),
+            source: model_source,
+        },
+        url: ResolvedSetting {
+            value: resolved.embedder_url.clone(),
+            source: url_source,
+        },
+        api_key_set: ResolvedSetting {
+            value: resolved.api_key.is_some(),
+            source: api_key_source,
+        },
+        dim: ResolvedSetting {
+            value: resolved.model_dim,
+            source: dim_source,
+        },
     }
 }
 
@@ -1155,6 +1295,164 @@ mod merge_tests {
         assert_eq!(url, None);
         assert_eq!(api_key, None);
         assert_eq!(dim, None);
+    }
+}
+
+#[cfg(test)]
+mod effective_settings_tests {
+    use super::{effective_embedding_settings_from, EmbedEnv, RetrievalConfig, SettingSource};
+    use crate::config::project::EmbeddingsSection;
+
+    /// Same discipline `client.rs::cfg_with` uses: build off the real
+    /// `from_env_and_project(None)` base, then set every field these tests
+    /// actually depend on explicitly, so no ambient env can decide a verdict.
+    fn resolved(
+        model: &str,
+        url: Option<&str>,
+        api_key: Option<&str>,
+        dim: Option<usize>,
+    ) -> RetrievalConfig {
+        let mut c = RetrievalConfig::from_env_and_project(None).unwrap();
+        c.model = model.to_string();
+        c.embedder_url = url.map(str::to_string);
+        c.api_key = api_key.map(str::to_string);
+        c.model_dim = dim;
+        c
+    }
+
+    fn env(
+        model: Option<&str>,
+        url: Option<&str>,
+        api_key: Option<&str>,
+        dim: Option<usize>,
+    ) -> EmbedEnv {
+        EmbedEnv {
+            model: model.map(str::to_string),
+            url: url.map(str::to_string),
+            api_key: api_key.map(str::to_string),
+            dim,
+            ..Default::default()
+        }
+    }
+
+    fn project_with_model(model: &str) -> EmbeddingsSection {
+        EmbeddingsSection {
+            model: Some(model.to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn env_set_reports_env_regardless_of_config() {
+        let r = resolved("ollama:nomic-embed-text", None, None, None);
+        let e = env(Some("ollama:nomic-embed-text"), None, None, None);
+        let p = project_with_model("local:AllMiniLML6V2Q");
+        let out = effective_embedding_settings_from(&r, &e, Some(&p));
+        assert_eq!(out.model.source, SettingSource::Env);
+    }
+
+    #[test]
+    fn env_absent_config_set_reports_config() {
+        let r = resolved("local:JinaEmbeddingsV2BaseCode", None, None, None);
+        let e = env(None, None, None, None);
+        let p = project_with_model("local:JinaEmbeddingsV2BaseCode");
+        let out = effective_embedding_settings_from(&r, &e, Some(&p));
+        assert_eq!(out.model.source, SettingSource::Config);
+    }
+
+    #[test]
+    fn both_absent_reports_default() {
+        let r = resolved("local:AllMiniLML6V2Q", None, None, None);
+        let e = env(None, None, None, None);
+        let out = effective_embedding_settings_from(&r, &e, None);
+        assert_eq!(out.model.source, SettingSource::Default);
+    }
+
+    /// The precedence order matters here, not just the two endpoints: with
+    /// BOTH env and config set (to different values), the source must still
+    /// read "env" — that's the case an either/or pair of tests cannot catch,
+    /// since each of the two above only clears one side.
+    #[test]
+    fn env_wins_the_source_label_even_when_config_also_set_a_different_value() {
+        let r = resolved("openai:text-embedding-3-small", None, None, None);
+        let e = env(Some("openai:text-embedding-3-small"), None, None, None);
+        let p = project_with_model("local:AllMiniLML6V2Q");
+        let out = effective_embedding_settings_from(&r, &e, Some(&p));
+        assert_eq!(out.model.source, SettingSource::Env);
+    }
+
+    #[test]
+    fn a_blank_env_value_does_not_report_env() {
+        // Blank-is-absent, matching `non_empty`'s policy everywhere else in this
+        // consolidation — an exported-but-empty var must not be reported as the
+        // winning source.
+        let r = resolved("local:AllMiniLML6V2Q", None, None, None);
+        let e = env(Some("  "), None, None, None);
+        let out = effective_embedding_settings_from(&r, &e, None);
+        assert_eq!(out.model.source, SettingSource::Default);
+    }
+
+    #[test]
+    fn url_and_api_key_resolve_independently_of_model() {
+        let r = resolved(
+            "CodeRankEmbed",
+            Some("http://127.0.0.1:48081"),
+            Some("secret"),
+            None,
+        );
+        let e = env(None, Some("http://127.0.0.1:48081"), None, None);
+        let p = EmbeddingsSection {
+            api_key: Some(crate::config::sensitive::SensitiveString::from("secret")),
+            ..Default::default()
+        };
+        let out = effective_embedding_settings_from(&r, &e, Some(&p));
+        assert_eq!(out.url.source, SettingSource::Env);
+        assert_eq!(out.api_key_set.source, SettingSource::Config);
+        assert!(out.api_key_set.value);
+    }
+
+    #[test]
+    fn no_api_key_anywhere_reports_default_and_unset() {
+        let r = resolved("local:AllMiniLML6V2Q", None, None, None);
+        let e = env(None, None, None, None);
+        let out = effective_embedding_settings_from(&r, &e, None);
+        assert_eq!(out.api_key_set.source, SettingSource::Default);
+        assert!(!out.api_key_set.value);
+    }
+
+    #[test]
+    fn dim_source_is_env_or_model_never_config() {
+        // There is no project.toml `dim` field — EmbeddingsSection has none by
+        // design — so dim's only two sources are env and "derived from model".
+        let with_env = effective_embedding_settings_from(
+            &resolved("local:AllMiniLML6V2Q", None, None, Some(768)),
+            &env(None, None, None, Some(768)),
+            None,
+        );
+        assert_eq!(with_env.dim.source, SettingSource::Env);
+        assert_eq!(with_env.dim.value, Some(768));
+
+        let without_env = effective_embedding_settings_from(
+            &resolved("local:AllMiniLML6V2Q", None, None, None),
+            &env(None, None, None, None),
+            None,
+        );
+        assert_eq!(without_env.dim.source, SettingSource::Model);
+        assert_eq!(without_env.dim.value, None);
+    }
+
+    /// The value reported must be `resolved`'s, not re-derived from `env`/
+    /// `project` — this function REPORTS the resolution `RetrievalConfig`
+    /// already performed, it does not perform a second one. A mutation that
+    /// swapped in the config value here would still pass every source-only
+    /// assertion above.
+    #[test]
+    fn the_reported_value_is_the_resolved_configs_own_value() {
+        let r = resolved("openai:text-embedding-3-small", None, None, None);
+        let e = env(Some("openai:text-embedding-3-small"), None, None, None);
+        let p = project_with_model("local:AllMiniLML6V2Q");
+        let out = effective_embedding_settings_from(&r, &e, Some(&p));
+        assert_eq!(out.model.value, "openai:text-embedding-3-small");
     }
 }
 

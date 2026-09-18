@@ -7,6 +7,44 @@ fn lsp() -> Arc<dyn crate::lsp::LspProvider> {
     crate::lsp::LspManager::new_arc()
 }
 
+/// `resolved_chunk_budget`'s wiring, not `chunk_size_for_model`'s own correctness
+/// (tested in `codescout_embed`'s own `smoke::` module) — a differential over the
+/// RESOLVED model, so a mutation that hardcoded a constant or read the wrong field
+/// (`p.config.embeddings.model_or_default()`, the divergent copy this replaced)
+/// cannot pass by coincidence. Fixed as part of Task 8,
+/// docs/plans/2026-09-17-embedding-config-consolidation.md.
+#[test]
+fn resolved_chunk_budget_reflects_the_projects_configured_model() {
+    let small = tempdir().unwrap();
+    std::fs::create_dir_all(small.path().join(".codescout")).unwrap();
+    std::fs::write(
+        small.path().join(".codescout/project.toml"),
+        "[project]\nname = \"small\"\n\n[embeddings]\nmodel = \"local:AllMiniLML6V2Q\"\n",
+    )
+    .unwrap();
+
+    let large = tempdir().unwrap();
+    std::fs::create_dir_all(large.path().join(".codescout")).unwrap();
+    std::fs::write(
+        large.path().join(".codescout/project.toml"),
+        "[project]\nname = \"large\"\n\n[embeddings]\nmodel = \"local:JinaEmbeddingsV2BaseCode\"\n",
+    )
+    .unwrap();
+
+    let small_budget = super::resolved_chunk_budget(small.path()).unwrap();
+    let large_budget = super::resolved_chunk_budget(large.path()).unwrap();
+
+    assert_ne!(
+        small_budget, large_budget,
+        "two roots with different configured models must not yield the same budget"
+    );
+    assert_eq!(
+        large_budget,
+        crate::embed::chunk_size_for_model("local:JinaEmbeddingsV2BaseCode"),
+        "the large root's budget must be the one its OWN configured model implies"
+    );
+}
+
 /// Memory writes may return either `"ok"` (no best-effort side-effect
 /// failures) or `{"status":"ok", "warnings":[…]}` (one or more non-fatal
 /// side effects failed — e.g. no semantic index built in the test fixture

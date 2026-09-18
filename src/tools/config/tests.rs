@@ -382,7 +382,28 @@ async fn project_status_compact_shape() {
     assert!(result["libraries"].is_object(), "libraries section missing");
 }
 
+// `#[serial_test::serial]` on this test and the four below it (two backend-
+// classification tests that read ambient CODESCOUT_EMBEDDING_* env as ground
+// truth, and two Task 8 tests that MUTATE it via `temp_env`): all five touch
+// the same process-global env without going through a mutex that protects
+// against an UNTAGGED reader. Bare `#[serial_test::serial]` (no group name,
+// matching this file's own existing use at `index_status_cache_serves_stale_
+// then_refreshes`) puts all five in the crate's one default serial group, so
+// they can no longer interleave with EACH OTHER — which is the whole
+// property needed, since no OTHER test in this file sets or unsets these
+// specific names.
+//
+// Found the hard way, not designed in: the first version of the two Task 8
+// tests below had no `#[serial]`, and one gate run failed
+// `status_reports_the_live_backend_and_what_is_compiled_in` with
+// `left: "remote-http" right: "local-onnx"` — its own ground-truth read landed
+// inside the window where `project_status_embeddings_model_reflects_an_env_
+// override_not_project_toml`'s `temp_env::async_with_vars` had the real
+// CODESCOUT_EMBEDDING_MODEL set to an openai: value. `temp_env`'s own docs
+// (and this crate's `tests/retrieval_unit.rs` comment on `set_var`) say a lock
+// only protects its participants — an untagged reader was never one.
 #[tokio::test]
+#[serial_test::serial]
 async fn status_reports_the_live_backend_and_what_is_compiled_in() {
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
@@ -433,30 +454,24 @@ async fn status_reports_the_live_backend_and_what_is_compiled_in() {
         "must name exactly which backends this binary was compiled with"
     );
 
-    // Two env-var families reach the effective embedder url, at different
-    // layers: `CODESCOUT_EMBEDDER_URL` (read directly by `EmbedEnv::from_real_env`)
-    // takes precedence over `CODESCOUT_EMBED_URL` (applied inside
-    // `ProjectConfig::load_or_default`, see src/retrieval/config.rs:41-51).
-    // A dev shell that exports a local embedder daemon's address commonly
-    // sets both -- checking only one family here would make this test's
-    // ground truth wrong on exactly that shell, independent of any mutation.
-    // The fresh tempdir has no project.toml, so no third (file-based) layer
-    // is in play.
-    let embedder_url_set = std::env::var("CODESCOUT_EMBEDDER_URL")
-        .ok()
-        .or_else(|| std::env::var("CODESCOUT_EMBED_URL").ok())
-        .filter(|s| !s.is_empty())
+    // The embedding_env family (`CODESCOUT_EMBEDDING_URL`, or its deprecated
+    // aliases `CODESCOUT_EMBEDDER_URL`/`CODESCOUT_EMBED_URL`) reaches the
+    // effective embedder url through ONE resolver now (`embedding_env::read`,
+    // Task 5b, `70ec79d5`) — reused here as a shared UTILITY, not as the
+    // implementation under test: this test still derives `expected_backend`
+    // itself rather than calling `backend_is_local`, which is the part that
+    // would make it a tautology. The fresh tempdir has no project.toml, so no
+    // file-based layer is in play.
+    let embedder_url_set = crate::config::embedding_env::read(&crate::config::embedding_env::URL)
+        .filter(|s| !s.trim().is_empty())
         .is_some();
-    // Effective model, derived independently of the implementation with the
-    // same precedence `RetrievalConfig::from_env_and_project` uses:
-    // `CODESCOUT_EMBEDDER_MODEL` first, then `CODESCOUT_EMBED_MODEL`, else the
-    // built-in default. The fresh tempdir has no project.toml, so no
-    // file-based layer is in play. This ladder must NOT call
-    // `backend_is_local` itself -- that would make the check a tautology
-    // against the implementation it's supposed to independently verify.
-    let effective_model = std::env::var("CODESCOUT_EMBEDDER_MODEL")
-        .ok()
-        .or_else(|| std::env::var("CODESCOUT_EMBED_MODEL").ok())
+    // Effective model, derived independently of `backend_is_local`/
+    // `RetrievalConfig::from_env_and_project` but through the SAME shared
+    // alias resolver those use (`embedding_env::read`), so this ladder tracks
+    // whichever name a future rename adds rather than re-hardcoding today's
+    // three. The fresh tempdir has no project.toml, so no file-based layer is
+    // in play.
+    let effective_model = crate::config::embedding_env::read(&crate::config::embedding_env::MODEL)
         .unwrap_or_else(|| "local:AllMiniLML6V2Q".to_string());
     let model_is_local =
         effective_model.starts_with("local:") || effective_model.starts_with("local-dir:");
@@ -477,6 +492,105 @@ async fn status_reports_the_live_backend_and_what_is_compiled_in() {
         "must name the backend this config actually resolves to, not a fixed string"
     );
 }
+
+/// The divergence Task 8 exists to end: before this fix, `embeddings_model`
+/// was `p.config.embeddings.model_or_default()` — a raw project.toml-only
+/// read that never consulted env. Set project.toml to one model and
+/// `CODESCOUT_EMBEDDING_MODEL` (the canonical env name) to a DIFFERENT one:
+/// if `ProjectStatus` still read the old field, this would report the
+/// project.toml value and fail. It must report the env value, with
+/// `source: "env"`, matching exactly what `RetrievalConfig` — and therefore
+/// the actual embedder — resolves to.
+#[tokio::test]
+#[serial_test::serial]
+async fn project_status_embeddings_model_reflects_an_env_override_not_project_toml() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::write(
+        dir.path().join(".codescout/project.toml"),
+        "[project]\nname = \"t\"\n\n[embeddings]\nmodel = \"local:AllMiniLML6V2Q\"\n",
+    )
+    .unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = temp_env::async_with_vars(
+        [(
+            "CODESCOUT_EMBEDDING_MODEL",
+            Some("openai:text-embedding-3-small"),
+        )],
+        async { ProjectStatus.call(json!({}), &ctx).await.unwrap() },
+    )
+    .await;
+
+    assert_eq!(
+        result["embeddings_model"],
+        json!("openai:text-embedding-3-small"),
+        "embeddings_model must be the RESOLVED value, not project.toml's own copy: {result}"
+    );
+    assert_eq!(
+        result["embeddings"]["model"]["value"],
+        json!("openai:text-embedding-3-small")
+    );
+    assert_eq!(result["embeddings"]["model"]["source"], json!("env"));
+}
+
+/// The other side of the same fix: no env override, so project.toml's OWN
+/// model wins and the source says so — this is the "old field, still
+/// correct in the no-env case" sanity check the env-override test above
+/// cannot provide by itself (it only proves env-wins; this proves
+/// config-still-works).
+#[tokio::test]
+#[serial_test::serial]
+async fn project_status_embeddings_model_reports_config_when_no_env_overrides() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::write(
+        dir.path().join(".codescout/project.toml"),
+        "[project]\nname = \"t\"\n\n[embeddings]\nmodel = \"local:JinaEmbeddingsV2BaseCode\"\n",
+    )
+    .unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let unset: Vec<(&str, Option<&str>)> = crate::config::embedding_env::all_names()
+        .into_iter()
+        .map(|name| (name, None))
+        .collect();
+    let result = temp_env::async_with_vars(unset, async {
+        ProjectStatus.call(json!({}), &ctx).await.unwrap()
+    })
+    .await;
+
+    assert_eq!(
+        result["embeddings_model"],
+        json!("local:JinaEmbeddingsV2BaseCode")
+    );
+    assert_eq!(result["embeddings"]["model"]["source"], json!("config"));
+}
+
 /// I1 (final whole-branch review): the old rule computed `backend` purely
 /// from "is local-onnx compiled in", never looking at the configured model
 /// string. That misreports two real configurations: a lean build (no
@@ -500,6 +614,7 @@ async fn status_reports_the_live_backend_and_what_is_compiled_in() {
 /// that has the feature — which is every default build, including CI's.
 /// docs/issues/archive/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md
 #[tokio::test]
+#[serial_test::serial]
 async fn status_reports_remote_http_for_an_urlless_ollama_model_regardless_of_compiled_backends() {
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
@@ -582,6 +697,7 @@ async fn status_reports_remote_http_for_an_urlless_ollama_model_regardless_of_co
 /// local backend exists to answer for; the `local-embed` CI lane runs this.
 #[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]
 #[tokio::test]
+#[serial_test::serial]
 async fn status_reports_local_onnx_for_an_urlless_bare_model_name() {
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();

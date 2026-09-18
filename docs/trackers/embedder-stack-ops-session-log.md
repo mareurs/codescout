@@ -6,8 +6,8 @@ owners: ["marius"]
 tags: ["embeddings", "retrieval", "docker", "gpu"]
 topic: embedder stack ops
 entry_prefix: ["F", "W"]
-entry_high_water_F: 10
-entry_high_water_W: 5
+entry_high_water_F: 11
+entry_high_water_W: 6
 ---
 
 # Session Log — Embedder Stack Ops
@@ -75,7 +75,9 @@ entry_high_water_W: 5
 | F-8 | 2026-09-16 | med | observer-blindness | open | Authored a class's tell and tripped it 3h 25m later — no instrument ran, so there was nothing to re-derive and no control to fire |
 | F-9 | 2026-09-16 | high | claim-scope | open | Every wrong claim in a five-instance day asserted an ABSENCE — the first testing law (monotone-under-removal) applied to claims, not tests |
 | F-10 | 2026-09-17 | high | data-loss | open | A heading-only `replace` silently wipes the section body — the shrink guard is whole-file, so a single-section wipe is 7.7% and invisible |
+| F-11 | 2026-09-18 | med | test-isolation | fixed-verified | `temp_env`'s lock protects only its participants — a plain ambient-env reader in the same test binary raced two new env-mutating tests and reproduced in the real gate |
 | W-5 | 2026-09-17 | — | shared-checkout | validated | A peer's in-flight doc edit red the gate; positive attribution (HEAD-vs-worktree + file-provenance) beat reading my own diff, and the red cleared itself |
+| W-6 | 2026-09-18 | — | test-design | validated | A differential assertion for one function surfaced an unrelated, previously-unfiled bug (a malformed project.toml silently resolving the default model) as a side effect |
 
 ## Wins Index
 
@@ -1032,6 +1034,81 @@ the population is larger than the binary case and nothing marks it.
 
 **Rests on:** gate run at 2026-09-17T12:2x; re-run at 12:4x, both this session
 (`458a8a26`). Attribution re-derived at use, per § *Reaching a Peer Session*.
+
+## W-6 — A differential test for chunk-budget wiring surfaced an unrelated silent-fallback bug in project.toml parse-error handling
+
+**Valid:** dated 2026-09-18
+
+**Observed:** Writing a differential test for `resolved_chunk_budget` (Task 8,
+2026-09-18), the first fixture — `[embeddings]\nmodel = "..."\n` with no `[project]`
+table — produced the SAME budget (652) for two roots configured with two
+DIFFERENT models. The assertion `assert_ne!` **caught it** (red, not a silent
+false-pass), but the cause was one layer removed from what the assertion named:
+`ProjectSection.name` is required, so `ProjectConfig::load_or_default` returned
+`Err("missing field project")` for both fixtures, and
+`resolve_embed_fields_with`'s `root.and_then(|r| ...load_or_default(r).ok())`
+turned that into `None` → both roots silently fell through to the built-in
+default model.
+
+**Cost:** one probe cycle (a throwaway `cargo run --example` reading
+`ProjectConfig::load_or_default` and `RetrievalConfig::from_env_and_project`
+directly) to separate "my test fixture is wrong" from "the function under test
+is wrong" — resolved in favour of the fixture, but only after checking, not by
+assuming. Filed the masking defect itself as `980b98ef4dc66eac` (open, scoped
+out of Task 8) rather than fixing it inline, since it's a separate, pre-existing
+call site from the sibling bug `f73130523241a666` already fixed for the
+workspace-pin memory-read path.
+
+**Why this is a WIN, not just a friction:** the differential-assertion
+discipline (two configured values, one `assert_ne!`, established this session
+for the hardware-ranking work) is what surfaced a REAL, previously-unfiled bug
+as a side effect of testing something else entirely. A single-value assertion
+("budget == 1305") would have needed the SAME fix to the fixture but would have
+just read as "test passed" once corrected — nothing would have pointed at the
+`.ok()` swallow at all.
+
+**Rests on:** `src/tools/memory/tests.rs::resolved_chunk_budget_reflects_the_projects_configured_model`;
+bug `980b98ef4dc66eac`; the archived sibling `f73130523241a666`.
+
+## F-11 — temp_env's lock only protects its participants — an unguarded ambient-env reader raced two new tests and red the real gate
+
+**Valid:** dated 2026-09-18
+
+**Observed:** The first gate run for Task 8 (`workspace(status)` reporting the
+resolved embedding settings) red on `status_reports_the_live_backend_and_what_is_compiled_in`
+— a test I hadn't touched's logic, only its ground-truth derivation (fixed a
+separate staleness earlier in the same edit). `left: "remote-http" right:
+"local-onnx"`: its own real response said remote-http; its own independently-
+computed ground truth said local-onnx.
+
+**Cause:** two NEW tests I added (`project_status_embeddings_model_reflects_an_
+env_override_not_project_toml`, using `temp_env::async_with_vars` to set
+`CODESCOUT_EMBEDDING_MODEL`) ran CONCURRENTLY with the pre-existing test, which
+reads the SAME ambient env directly (`embedding_env::read`) with NO
+serialization at all. `temp_env`'s mutex only protects its own participants —
+an untagged reader in the SAME test binary sees the transient value mid-flight.
+This is the EXACT hazard `tests/retrieval_unit.rs`'s own header comment already
+names for `set_var` vs `temp_env`, generalized one level: it also applies to
+`temp_env` (a participant) vs a plain `std::env::var`/`embedding_env::read`
+call (a non-participant) — the lock only ever protects who takes it.
+
+**Fix:** `#[serial_test::serial]` (bare, this crate's existing default group —
+no new group name introduced) on the two new tests AND the three pre-existing
+tests in `src/tools/config/tests.rs` that read this same ambient env as ground
+truth. Verified by running the affected module 5× consecutively post-fix
+(all green) and then the real full gate (green).
+
+**Why this counts as a WIN too, not purely friction:** the race was caught by
+the ACTUAL GATE, not merely inferred — "run the reproduction" applied to my own
+new code, not just to a bug report. And fixing it surfaced a second, unrelated
+staleness in the same test (`status_reports_the_live_backend_...`'s own
+ground-truth derivation only checked the two PRE-Task-5b deprecated env names,
+missing the canonical `CODESCOUT_EMBEDDING_*` family entirely) — fixed
+alongside, using the shared `embedding_env::read` utility rather than
+re-hardcoding the (now three-name) list a second time.
+
+**Rests on:** `src/tools/config/tests.rs`; `tests/retrieval_unit.rs`'s own
+`set_var`-vs-`temp_env` comment, generalized.
 
 ## Template for new entries
 

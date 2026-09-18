@@ -448,24 +448,54 @@ Closes `f5151cd081ed3a01` (archived). Fixed in `3aa12d8c`, patch-id
 
 ### Task 8 — show the resolved value and its source
 
-The durable cure for "settings in too many places" is not only fewer places; it
-is being able to see which one won. Add effective-settings reporting to
-`workspace(action="status")` and a `librarian(action="doctor")` check:
+**Done.** Added `crate::retrieval::config::{SettingSource, ResolvedSetting,
+EffectiveEmbeddingSettings, effective_embedding_settings,
+effective_embedding_settings_for}` — a REPORTING pass over the SAME resolution
+`RetrievalConfig::from_env_and_project` already performs (not a second
+resolution), classifying model/url/api_key/dim as `env` / `config` / `default`
+(`dim` additionally as `model`, since there is no project.toml `dim` field).
 
+`workspace(action="status")` (`ProjectStatus::call`) now reports:
 ```
-embeddings:
-  model   local:AllMiniLML6V2Q   <- .codescout/project.toml
-  url     http://127.0.0.1:48081 <- ~/.config/codescout/.env  ⚠ shadows project.toml
-  api_key (set)                  <- ~/.config/codescout/config.toml
-  dim     768                    <- model
+"embeddings_model": "<resolved value>",
+"embeddings": {
+  "model": {"value": ..., "source": "env"|"config"|"default"},
+  "url": {"value": ..., "source": ...},
+  "api_key_set": {"value": bool, "source": ...},
+  "dim": {"value": ..., "source": "env"|"model"}
+}
 ```
+fixing `src/tools/config/mod.rs`'s named divergence: `embeddings_model` used to be
+`p.config.embeddings.model_or_default()` (project.toml only), now overwritten with
+the resolved value right after `retrieval_config` is built — reusing that SAME
+struct rather than resolving a second one, so the two sections of one response
+cannot disagree with each other. `src/tools/memory/mod.rs`'s two named sites
+(`cross_embed_memory`, `create_semantic_anchors`) moved off
+`model_or_default()` to a shared `resolved_chunk_budget(root)` for the same
+reason.
 
-`src/tools/config/mod.rs:407-413` already surfaces
-`p.config.embeddings.model` — note this is the **second copy** of the setting
-that `src/main.rs:342` warns can diverge from `client.config.model`. Task 8
-should report the *resolved* value, and `src/tools/memory/mod.rs:208-214` (which
-sizes its chunk budget from the same divergent copy) should move to the resolved
-one.
+**Not done, deliberately scoped out:** the `librarian(action="doctor")` check
+the mockup named. That tool (`src/librarian/tools/doctor.rs`) is the LIBRARIAN
+CATALOG doctor specifically — an enumerated `Check` registry
+(`declare_checks!`) keyed to catalog invariants (artifact-id path forms, ADS
+colons, worktree-scoped rows, claim liveness), with `Violation`'s own shape
+(`artifact_id`, `path`) built around catalog rows, not config values. Bolting an
+unrelated embedding-config-drift check onto it would be forcing a fit the tool's
+own architecture doesn't offer, for a property `workspace(status)` already
+reports in full. Revisit only if a THIRD consumer of "resolved value + source"
+emerges that doctor's scan/report shape genuinely fits.
+
+**Found and fixed as a byproduct, not itself Task 8's ask:** a stale doc
+comment on `RetrievalConfig.model` still described the pre-Task-5b two-layer
+env bug as current behaviour. **Found and filed, not fixed** — out of scope,
+recorded separately: `980b98ef4dc66eac`, a malformed `project.toml` (missing
+the required `[project]` table) makes `resolve_embed_fields_with`'s `.ok()`
+silently fall through to the built-in default model rather than erroring — the
+same defect *shape* the archived `f73130523241a666` fixed for the
+workspace-pin memory-read path, but a separate call site that fix did not
+touch.
+
+SHA / patch-id: pending.
 
 ## Verification
 

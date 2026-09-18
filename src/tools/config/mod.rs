@@ -464,6 +464,27 @@ impl Tool for ProjectStatus {
         let retrieval_config =
             crate::retrieval::config::RetrievalConfig::from_env_and_project(Some(&root))?;
 
+        // Overwrite the placeholder set above (`p.config.embeddings.model_or_default()`,
+        // the raw project.toml-only copy) with the RESOLVED value — the two can diverge
+        // whenever an env var overrides project.toml, which is exactly the "second copy"
+        // `src/main.rs`'s divergence comment and Task 8 of
+        // docs/plans/2026-09-17-embedding-config-consolidation.md both name.
+        //
+        // `effective_embedding_settings_for` reuses `retrieval_config` above rather than
+        // resolving a second one, so this can never disagree with the backend
+        // classification a few lines down — both read the SAME resolved struct.
+        let effective = crate::retrieval::config::effective_embedding_settings_for(
+            &retrieval_config,
+            Some(&root),
+        );
+        result["embeddings_model"] = json!(effective.model.value);
+        result["embeddings"] = json!({
+            "model": { "value": effective.model.value, "source": effective.model.source },
+            "url": { "value": effective.url.value, "source": effective.url.source },
+            "api_key_set": { "value": effective.api_key_set.value, "source": effective.api_key_set.source },
+            "dim": { "value": effective.dim.value, "source": effective.dim.source },
+        });
+
         let mut compiled_in = Vec::new();
         if cfg!(feature = "remote-embed") {
             compiled_in.push("remote");
