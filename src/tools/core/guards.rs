@@ -66,7 +66,7 @@ pub async fn guard_worktree_write(ctx: &ToolContext) -> anyhow::Result<()> {
     // and `get_guide("workspace-state")` prescribes pinning in preference to
     // re-activating — activation is process-wide and a peer or subagent can flip
     // it mid-task, which the pin cannot.
-    // docs/issues/2026-09-18-the-worktree-write-block-names-an-arbitrary-worktree-as-the-remedy.md
+    // docs/issues/archive/2026-09-18-the-worktree-write-block-names-an-arbitrary-worktree-as-the-remedy.md
     let hint = format!(
         "Call workspace(action='activate', path=\"{}\") to write to the main repo, or pass \
          workspace=\"<abs path>\" on this call to pin a single write without changing the \

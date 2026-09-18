@@ -1,13 +1,13 @@
 ---
-status: open
-opened: 2026-09-18
-closed:
-severity: medium
-owner: marius
-related: []
+kind: bug
+status: fixed
 tags:
 - cluster/hint-composed-without-the-request
-kind: bug
+closed: 2026-09-18
+opened: 2026-09-18
+owner: marius
+related: []
+severity: medium
 ---
 
 # BUG: the worktree write block names an arbitrary worktree as the remedy, and its trigger is now permanent
@@ -140,7 +140,8 @@ has run the probe) plus `check-codescout-integration`. None is transient.
 
 ## Fix
 
-Not applied. The repair belongs in the hint, not the predicate:
+Applied at `fc6f5bb7`. The repair was in the hint, not the predicate — all three points below
+shipped, with the second resolved as *name none*:
 
 - Lead with `root` — the main repo — and offer the worktree list second. `root` is already
   in scope at `guards.rs:56`.
@@ -155,11 +156,48 @@ writes it should. Only the prose is wrong. Tagging a predicate class with a mess
 would corrupt the count its promotion reads; this is the same line the class's
 `the-pre-push-remedy-names-a-refspec-a-zero-commit-pusher-cannot-form` member draws.
 
+
+## Fix provenance
+
+- **SHA:** `fc6f5bb7` (`experiments`)
+- **patch-id:** `f4d7178a4b92a79fa380ed13d73772bb66ac7d5a`
+
 ## Tests added
 
-None — nothing is fixed yet. A regression test here should assert **shape, not prose**:
-that the hint names the main repo, in the form that reds on its removal and survives
-rewording.
+`guard_worktree_write_hint_names_the_main_repo_not_an_arbitrary_worktree`
+(`src/tools/core/tests.rs:940`), beside the three predicate cases it complements.
+
+It asserts **shape, not prose** — that the hint names the main repo and does not name the
+worktree — so it survives rewording and reds on the regression that actually happened.
+
+**Written as a PAIR because each half is monotone in the direction the other covers.**
+`contains(root)` is monotone under *widening*: the old buggy hint satisfies it, since it
+named the root parenthetically. `!contains(worktree)` is monotone under *removal*: an
+empty hint satisfies it perfectly. Either alone reports coverage it does not have.
+
+**Observed RED before the fix**, and the right one — only the second assertion failed,
+with the first passing beside it, so the red localised to the defect rather than to a
+broken fixture.
+
+**Mutations, one per ASSERTION rather than one per site** (`scripts/mutation-probe.sh`,
+isolated worktree), both **KILLED**:
+
+| mutation | which half catches it |
+|---|---|
+| `root.display()` → `wt_list[0]` | the negative half — reverts the defect exactly |
+| `root.display()` → `"<the project root>"` | the positive half — hint names no real path |
+
+The second is the one worth spending: after the first KILL the pair already *feels*
+proven, and an assertion nobody re-checks is how a guard goes vacuous.
+
+**Fixture detail that is load-bearing:** `seed_linked_worktree` places the tree *beside*
+`root`, never under it. If it were a descendant, `root`'s path would be a prefix of the
+worktree's and the two assertions would stop being independent. Annotated on the fixture
+line in the test.
+
+Gate: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`. The case runs in **both** test lanes —
+`src/tools/core` is not feature-gated, so the lean lane is not vacuous here the way it is
+for librarian code.
 
 ## Workarounds
 
@@ -168,9 +206,7 @@ reconnect, or pass `workspace="<abs path>"` on the individual call.
 
 ## Resume
 
-Rewrite the hint at `src/tools/core/guards.rs:61-65` to lead with `root`, then add a case
-to `src/tools/core/tests.rs` beside the three at `:871-921` asserting the hint names the
-main repo. Observe it RED against the current string first.
+N/A — fixed at `fc6f5bb7`.
 
 ## References
 

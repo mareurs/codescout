@@ -935,7 +935,7 @@ async fn guard_worktree_write_allows_when_no_worktrees_exist() {
 /// Deliberately about the SHAPE, not the prose — it must survive rewording and
 /// red on the regression that actually happened.
 ///
-/// docs/issues/2026-09-18-the-worktree-write-block-names-an-arbitrary-worktree-as-the-remedy.md
+/// docs/issues/archive/2026-09-18-the-worktree-write-block-names-an-arbitrary-worktree-as-the-remedy.md
 #[tokio::test]
 async fn guard_worktree_write_hint_names_the_main_repo_not_an_arbitrary_worktree() {
     let tmp = tempfile::tempdir().unwrap();
