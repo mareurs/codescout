@@ -1,7 +1,7 @@
 ---
-id: '2cf46983347d9136'
+id: b64e425fddb86e4d
 kind: bug
-status: open
+status: fixed
 title: memory(action="read") returns a buffered handle with no navigational hint
 owners:
 - marius
@@ -170,13 +170,17 @@ let hint = format!("use {file_id:?} — start_line/end_line to browse the full c
 merged into both the `missing.is_empty()` and non-empty branches.
 Change lives in `src/tools/memory/mod.rs` (`apply_sections_filter`).
 
-Not yet committed at file-open time — implementing next in this session.
+Fixed in `36f0049b78c337ef134301f1c782eeba58c5d3a6` on `experiments` (patch-id `0aa25506122c203e129f8bd40334a0ebe1b26df6`). `apply_sections_filter` (`src/tools/memory/mod.rs`) now attaches `hint = format!("use {file_id:?} — start_line/end_line to browse the full content")` to both branches of its buffered envelope.
 
 ## Tests added
 
-Extending `memory_large_read_buffers_as_file_ref`
-(`src/tools/memory/tests.rs:1577`) to assert `result["hint"]` is present and
-names the returned `file_id`. Mutation-probed before commit.
+Extended `memory_large_read_buffers_as_file_ref`
+(`src/tools/memory/tests.rs:1577`) to assert `result["hint"]` is present,
+names the returned `file_id`, and does not mention `heading=`. Mutation-probed
+in an isolated worktree 3 ways before commit — blank the hint value, add
+`heading=` to it, drop the `hint` key entirely — each KILLED by a distinct
+assertion. Full gate (`fmt-mine`, `clippy --features local-embed`,
+`test --no-default-features`, `test`) green before commit.
 
 ## Workarounds
 
@@ -187,8 +191,7 @@ convention can route around by guessing.
 
 ## Resume
 
-N/A once fixed — see Fix section for the exact change and
-`src/tools/memory/tests.rs:1577` for the regression test to extend.
+N/A — fixed.
 
 ## References
 

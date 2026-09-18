@@ -1616,7 +1616,7 @@ async fn memory_large_read_buffers_as_file_ref() {
     // file_id, matching every other buffering call site in the tool layer
     // (read_markdown.rs, read_file.rs). Without it an agent has no cue that the
     // buffer needs dereferencing at all — see
-    // docs/issues/2026-09-19-memory-read-buffer-lacks-a-hint.md.
+    // docs/issues/archive/2026-09-19-memory-read-buffer-lacks-a-hint.md.
     let file_id = result["file_id"].as_str().unwrap().to_string();
     let hint = result["hint"]
         .as_str()
