@@ -133,6 +133,45 @@ probe, not a finding.
    does not establish the log state first can pass — or fail — for entirely the wrong reason.
    If the hypothesis above is right, this converts a confusing failure into a clear one that
    names the missing row.
+
+   **SHIPPED 2026-09-18.** Two changes to `tests/hooks-discrimination.sh`:
+   `owner_of()` (and `route_of()`, same shape, not on the observed path) gained an existence
+   guard returning the sentinel `NO-LOG`; and a `log_recreated()` assertion now runs between
+   the `git status` and the three cases that depend on it.
+
+   Before / after on a real non-firing hook:
+
+   ```
+   -- before
+   awk: fatal: cannot open file `.git/session-stage-log': No such file or directory
+     FAIL  cold log + peer status -> unknown, not the passer-by
+           want '-' got ''
+
+   -- after
+     FAIL  precondition: peer status recreated the stage log
+           post-index-change did not fire on the preceding git command, so
+           .git/session-stage-log was never recreated. The cases below read an
+           absent file; their failures are downstream of this one, not independent.
+     FAIL  cold log + peer status -> unknown, not the passer-by
+           want '-' got 'NO-LOG'
+   ```
+
+   **THE FLAKE RATE IS UNCHANGED, AND THAT IS NOT A SHORTFALL OF THE FIX — it is what the fix
+   was for.** 5 failures in 35 runs after (~14%) against 4 in 45 before (~9%); combined 9/80,
+   the same order, and the difference is well inside the noise of two small samples. Nothing in
+   a test can make `git status` rewrite the index. What changed is that a failing run now names
+   its own cause instead of sending a reader to debug an unrelated change — do not read the
+   unchanged rate as the repair having missed.
+
+   Failures per bad run went 3 -> 4, deliberately. The downstream cases are NOT skipped when the
+   precondition fails: a skip shrinks the reported case count on exactly the runs where
+   something went wrong, which is a capped result presented as complete (`IC-13`). The count
+   stays honest and the first failure explains the rest.
+
+   Verified directly rather than by assertion-existence: `owner_of` discriminates all four
+   states (absent -> `NO-LOG`, row -> id, no row -> `''`, `-` -> `-`; the first and third both
+   answered `''` before, which was the whole defect), `log_recreated` was observed both RED and
+   GREEN, `awk: fatal` no longer occurs at all, baseline is 146/0, and the gate is green.
 2. **Re-run on failure before reporting**, in the probe rather than in the reader. The
    discriminator that resolved this instance was a second run, and it was reached by
    judgement; a suite that self-re-runs a failing case once and reports *"failed 1 of 2

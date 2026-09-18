@@ -41,6 +41,28 @@ no() {
 eq() { [ "$2" = "$3" ] && ok "$1" || no "$1" "want '$3' got '$2'"; }
 has() { printf '%s' "$2" | grep -qF "$3" && ok "$1" || no "$1" "missing: $3"; }
 
+# Assert the stage log is THERE, before a case that reads it after deliberately removing
+# it. Nothing here recreates that file directly: `post-index-change` fires on index
+# WRITES, and `git status` rewrites the index only when it has stat information to
+# refresh -- so the recreation is a side effect of an event no case can observe or force.
+# When it does not fire, every downstream read is about an absent file, and the failures
+# describe the SYMPTOM instead of the unmet PRECONDITION.
+#
+# Measured 2026-09-18: 4 failures in 45 clean runs (~9%), always the same three cases and
+# always together, because they are ONE absent file observed at three points. Read at face
+# value they said "your change broke three stage-log cases", which was false, and the
+# natural next action was to go debug a working change
+# (docs/issues/2026-09-16-three-hooks-discrimination-cases-failed-once-and-did-not-reproduce.md).
+#
+# This does NOT make the suite deterministic -- the hook still fires or does not. It makes
+# the first failure name the reason. It deliberately does not SKIP the cases below: a skip
+# shrinks the reported case count on exactly the runs where something went wrong, which is
+# a capped result presented as complete.
+log_recreated() {
+    [ -f .git/session-stage-log ] && ok "$1" || no "$1" \
+        "post-index-change did not fire on the preceding git command, so .git/session-stage-log was never recreated. The cases below read an absent file; their failures are downstream of this one, not independent."
+}
+
 # REFUSE TO RUN ANYWHERE BUT A THROWAWAY. Defence in depth, and not theoretical.
 #
 # This suite runs `git add -A` and `git commit`. On 2026-09-01 its first version defined
@@ -97,7 +119,15 @@ guard() {
         bash "$SRC/pre-commit-foreign-index.sh" 2>&1
     echo "EXIT=$?"
 }
-owner_of() { awk -F'\t' -v p="$1" '$3 == p { print $1; exit }' .git/session-stage-log; }
+# An ABSENT log must not read like a log with no matching row. Both answered '' until
+# 2026-09-18: `awk` fatalled to stderr while the function returned the same empty string a
+# legitimate "no row for this path" produces, so the assertion could not tell them apart
+# and reported `want '-' got ''`. The sentinel makes the two distinguishable AT THE
+# ASSERTION, which is the only place a reader looks.
+owner_of() {
+    [ -f .git/session-stage-log ] || { printf 'NO-LOG'; return; }
+    awk -F'\t' -v p="$1" '$3 == p { print $1; exit }' .git/session-stage-log
+}
 
 A="aaaaaaaa-0000-0000-0000-aaaaaaaaaaaa"
 B="bbbbbbbb-1111-1111-1111-bbbbbbbbbbbb"
@@ -186,6 +216,7 @@ eq "peer's git status does not steal a deletion" "$(owner_of del.txt)" "$A"
 
 rm -f .git/session-stage-log
 CLAUDE_CODE_SESSION_ID="$B" git status --short > /dev/null
+log_recreated "precondition: peer status recreated the stage log"
 eq "cold log + peer status -> unknown, not the passer-by" "$(owner_of s1.txt)" "-"
 out="$(guard "$B")"
 has "unknown reads as foreign -> refuse" "$out" "EXIT=1"
@@ -757,7 +788,14 @@ rm -rf "$WT" "$T"
 #
 # ONE CASE PER BRANCH. A route is written at four sites; a kill at one says nothing
 # about the other three.
-route_of() { awk -F'\t' -v p="$1" '$3 == p { print $4; exit }' .git/session-stage-log; }
+# Same absent-vs-empty guard as `owner_of`, for the same reason. § 7's cases reach this
+# after a `git add`, which writes the index unconditionally, so the non-firing path that
+# hit § 2b is not known to reach here: this guards the SHAPE, and is not evidence of a
+# second observed failure.
+route_of() {
+    [ -f .git/session-stage-log ] || { printf 'NO-LOG'; return; }
+    awk -F'\t' -v p="$1" '$3 == p { print $4; exit }' .git/session-stage-log
+}
 # The ABBREVIATED blob `git diff --raw` emits. A full 40-char sha never matches the log,
 # so a legacy-row fixture built from `git hash-object` is silently re-derived rather than
 # carried over — a case that passes while testing nothing. Cost this suite's author one
