@@ -47,26 +47,112 @@ pub struct LibrarianEnv {
     pub workspace: Option<std::path::PathBuf>,
     /// `LIBRARIAN_DB` — catalog path. `None` → the platform data-local default.
     pub db: Option<std::path::PathBuf>,
-    /// `LIBRARIAN_EMBED_MODEL` — absent disables the embedding service entirely.
+    /// `LIBRARIAN_EMBED_MODEL`, falling back to the resolved `CODESCOUT_EMBEDDING_MODEL`
+    /// family when unset — absent from BOTH disables the embedding service entirely.
+    ///
+    /// The fallback exists because the split used to be **mandatory**: the librarian's
+    /// artifact embedder and codescout's code-retrieval embedder read two entirely
+    /// separate variable families, so configuring one did nothing for the other, and a
+    /// deployment that set `CODESCOUT_EMBEDDER_URL` but forgot `LIBRARIAN_EMBED_MODEL`
+    /// lost artifact search with no error — the 2026-07-10 outage. Making it optional
+    /// keeps the capability (a project that genuinely wants a different model for
+    /// artifacts can still set `LIBRARIAN_EMBED_MODEL` explicitly, and it wins) while
+    /// removing the trap for everyone who doesn't need that.
     pub embed_model: Option<String>,
+    /// `LIBRARIAN_EMBED_URL`, same fallback shape as `embed_model`.
     pub embed_url: Option<String>,
+    /// `LIBRARIAN_EMBED_API_KEY`, same fallback shape as `embed_model`.
     pub embed_api_key: Option<String>,
     /// `LIBRARIAN_CWD` — overrides the process cwd for current-project resolution.
     pub cwd: Option<std::path::PathBuf>,
 }
 
+/// `explicit` (the `LIBRARIAN_EMBED_*` value) wins if set; otherwise falls back to
+/// `fallback` (the already-resolved `CODESCOUT_EMBEDDING_*` value for the same
+/// setting). Pure over both arguments — no env access — so the precedence is an
+/// ordinary unit test, the same discipline `EmbedEnv`/`merge_embed_config` use for
+/// the sibling resolution in `src/retrieval/config.rs`.
+///
+/// Blank-is-absent on both sides: an exported-but-empty `LIBRARIAN_EMBED_MODEL=`
+/// must not shadow a real fallback, matching `non_empty`'s policy for every other
+/// embed field in this consolidation.
+fn librarian_embed_field(explicit: Option<String>, fallback: Option<String>) -> Option<String> {
+    let non_blank = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
+    non_blank(explicit).or_else(|| non_blank(fallback))
+}
+
 impl LibrarianEnv {
     /// Read the real process environment. The production entry point.
+    ///
+    /// The `CODESCOUT_EMBEDDING_*` reads go through [`crate::config::embedding_env::read`],
+    /// the same warning-emitting function `RetrievalConfig` uses — so a deprecated alias
+    /// reached only through this fallback still warns once, not silently.
     pub fn from_env() -> Self {
+        use crate::config::embedding_env as envs;
         use std::path::PathBuf;
         Self {
             workspace: std::env::var_os("LIBRARIAN_WORKSPACE").map(PathBuf::from),
             db: std::env::var_os("LIBRARIAN_DB").map(PathBuf::from),
-            embed_model: std::env::var("LIBRARIAN_EMBED_MODEL").ok(),
-            embed_url: std::env::var("LIBRARIAN_EMBED_URL").ok(),
-            embed_api_key: std::env::var("LIBRARIAN_EMBED_API_KEY").ok(),
+            embed_model: librarian_embed_field(
+                std::env::var("LIBRARIAN_EMBED_MODEL").ok(),
+                envs::read(&envs::MODEL),
+            ),
+            embed_url: librarian_embed_field(
+                std::env::var("LIBRARIAN_EMBED_URL").ok(),
+                envs::read(&envs::URL),
+            ),
+            embed_api_key: librarian_embed_field(
+                std::env::var("LIBRARIAN_EMBED_API_KEY").ok(),
+                envs::read(&envs::API_KEY),
+            ),
             cwd: std::env::var_os("LIBRARIAN_CWD").map(PathBuf::from),
         }
+    }
+}
+
+#[cfg(test)]
+mod librarian_env_tests {
+    use super::librarian_embed_field;
+
+    #[test]
+    fn explicit_wins_when_both_are_set() {
+        assert_eq!(
+            librarian_embed_field(Some("CodeRankEmbed".into()), Some("AllMiniLML6V2Q".into())),
+            Some("CodeRankEmbed".into())
+        );
+    }
+
+    #[test]
+    fn fallback_is_used_when_explicit_is_absent() {
+        assert_eq!(
+            librarian_embed_field(None, Some("AllMiniLML6V2Q".into())),
+            Some("AllMiniLML6V2Q".into())
+        );
+    }
+
+    #[test]
+    fn both_absent_stays_absent() {
+        // This is the "absent disables the embedding service entirely" case the
+        // struct's doc comment names — must not be silently defaulted to
+        // something, or every project would get librarian embedding whether it
+        // configured anything or not.
+        assert_eq!(librarian_embed_field(None, None), None);
+    }
+
+    #[test]
+    fn a_blank_explicit_does_not_shadow_a_real_fallback() {
+        // An exported-but-empty LIBRARIAN_EMBED_MODEL= must not win over a
+        // configured CODESCOUT_EMBEDDING_MODEL — the same class of silent-loss
+        // defect `non_empty` guards against for the sibling fields.
+        assert_eq!(
+            librarian_embed_field(Some("".into()), Some("AllMiniLML6V2Q".into())),
+            Some("AllMiniLML6V2Q".into())
+        );
+    }
+
+    #[test]
+    fn a_blank_fallback_does_not_win_over_nothing() {
+        assert_eq!(librarian_embed_field(None, Some("  ".into())), None);
     }
 }
 

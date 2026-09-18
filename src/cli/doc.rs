@@ -59,7 +59,8 @@ pub struct FindArgs {
     /// Raw FilterNode JSON; AND-merged with shortcuts.
     #[arg(long)]
     pub filter: Option<String>,
-    /// Natural-language semantic search. Requires LIBRARIAN_EMBED_MODEL env.
+    /// Natural-language semantic search. Requires the embedding service —
+    /// LIBRARIAN_EMBED_MODEL, or CODESCOUT_EMBEDDING_MODEL as a fallback.
     #[arg(long)]
     pub semantic: Option<String>,
     /// project|repo|umbrella|all
@@ -138,14 +139,32 @@ pub async fn dispatch(verb: Verb) -> Result<()> {
     }
 }
 
+/// Pure: does `--semantic` need an embedder that isn't configured?
+///
+/// Split out of [`run_find`] so the wiring (does the pre-check actually consult
+/// the same resolution `open_ctx` will use) is an ordinary unit test rather than
+/// a full CLI subprocess spawn. `env.embed_model` already carries the
+/// `LIBRARIAN_EMBED_MODEL`-falls-back-to-`CODESCOUT_EMBEDDING_MODEL` precedence
+/// (see [`crate::librarian::LibrarianEnv`]) — this function adds nothing to that
+/// resolution, it only asks the question `run_find` needs answered.
+fn semantic_search_needs_an_embedder(
+    semantic: &Option<String>,
+    env: &crate::librarian::LibrarianEnv,
+) -> bool {
+    semantic.is_some() && env.embed_model.is_none()
+}
+
 pub(crate) async fn run_find(args: FindArgs) -> Result<()> {
     let common = args.common();
     let output = common.output();
 
-    if args.semantic.is_some() && std::env::var("LIBRARIAN_EMBED_MODEL").is_err() {
+    let lib_env = crate::librarian::LibrarianEnv::from_env();
+    if semantic_search_needs_an_embedder(&args.semantic, &lib_env) {
         return Err(anyhow!(
-            "--semantic requires the embedding service. Set LIBRARIAN_EMBED_MODEL \
-             (and optionally LIBRARIAN_EMBED_URL, LIBRARIAN_EMBED_API_KEY) and re-run."
+            "--semantic requires the embedding service. Set LIBRARIAN_EMBED_MODEL, \
+             or CODESCOUT_EMBEDDING_MODEL (the librarian now falls back to it — see \
+             docs/plans/2026-09-17-embedding-config-consolidation.md § Task 6), and \
+             re-run."
         ));
     }
 
@@ -716,6 +735,37 @@ mod tests {
         let a = args_with_tag(&["goal"]);
         let f = compile_filter(&a).unwrap().unwrap();
         assert_eq!(f, json!({"tags": {"contains": "goal"}}));
+    }
+
+    #[test]
+    fn no_semantic_arg_needs_no_embedder_regardless_of_env() {
+        let env = crate::librarian::LibrarianEnv::default();
+        assert!(!semantic_search_needs_an_embedder(&None, &env));
+    }
+
+    #[test]
+    fn semantic_arg_with_no_embed_model_needs_an_embedder() {
+        let env = crate::librarian::LibrarianEnv::default();
+        assert!(semantic_search_needs_an_embedder(
+            &Some("query".into()),
+            &env
+        ));
+    }
+
+    #[test]
+    fn semantic_arg_is_satisfied_once_embed_model_is_resolved() {
+        // Does not care WHICH source populated embed_model — LibrarianEnv's own
+        // tests (src/librarian/mod.rs) cover the LIBRARIAN_EMBED_MODEL-vs-
+        // CODESCOUT_EMBEDDING_MODEL precedence. This tests only the wiring: a
+        // resolved field satisfies the check.
+        let env = crate::librarian::LibrarianEnv {
+            embed_model: Some("CodeRankEmbed".into()),
+            ..Default::default()
+        };
+        assert!(!semantic_search_needs_an_embedder(
+            &Some("query".into()),
+            &env
+        ));
     }
 
     #[test]

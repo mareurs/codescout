@@ -109,6 +109,20 @@ fn run_cmd(tmp: &TempDir) -> Command {
     cmd.env("LIBRARIAN_DB", &db);
     cmd.env("LIBRARIAN_WORKSPACE", &ws);
     cmd.env_remove("LIBRARIAN_EMBED_MODEL");
+    // Since LibrarianEnv::from_env falls back to the shared CODESCOUT_EMBEDDING_*
+    // family (2026-09-18, Task 6 of the embedding-config-consolidation plan), a
+    // no-embedder assertion needs that whole family cleared too — not just
+    // LIBRARIAN_EMBED_MODEL — or a machine whose shell has CODESCOUT_EMBEDDING_MODEL
+    // (or a deprecated alias) exported ambiently would silently satisfy the
+    // fallback and this test would pass or fail depending on who runs it.
+    // `env_remove` only strips the name from THIS child's inherited environment;
+    // it says nothing about the parent shell, which is exactly the part that
+    // varies machine to machine.
+    for name in codescout::config::embedding_env::all_names() {
+        cmd.env_remove(name);
+    }
+    cmd.env_remove("LIBRARIAN_EMBED_URL");
+    cmd.env_remove("LIBRARIAN_EMBED_API_KEY");
     // Hermeticity: block the startup dotenv (main.rs `load_startup_env`) from
     // re-supplying LIBRARIAN_EMBED_MODEL out of the machine's global
     // ~/.config/codescout/.env. dotenvy does not override already-set vars but
@@ -162,6 +176,29 @@ fn doc_find_semantic_without_embedder_reports_hint() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("LIBRARIAN_EMBED_MODEL"));
+}
+
+#[test]
+fn doc_find_semantic_falls_back_to_codescout_embedding_model() {
+    // LIBRARIAN_EMBED_MODEL absent (run_cmd's default), but CODESCOUT_EMBEDDING_MODEL
+    // set — the pre-check must not report "requires the embedding service", since
+    // LibrarianEnv::from_env now falls back to that family (Task 6, 2026-09-18).
+    // The command may still fail LATER for an unrelated reason (no reachable server
+    // for this bogus model name, an empty catalog, ...) — this asserts only that the
+    // PRE-CHECK'S OWN message is absent, isolating "did the fallback satisfy the
+    // gate" from "did semantic search actually run end to end", which is a separate
+    // concern already covered elsewhere.
+    let tmp = TempDir::new().unwrap();
+    let assert = run_cmd(&tmp)
+        .env("CODESCOUT_EMBEDDING_MODEL", "local:AllMiniLML6V2Q")
+        .args(["doc", "find", "--semantic", "anything"])
+        .assert();
+    let out = assert.get_output();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("requires the embedding service"),
+        "the pre-check's own refusal fired even though CODESCOUT_EMBEDDING_MODEL was set: {stderr}"
+    );
 }
 
 #[test]

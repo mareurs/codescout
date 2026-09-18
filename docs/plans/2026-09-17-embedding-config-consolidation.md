@@ -377,11 +377,35 @@ deferred from Task 2, which now has the warn-once surface it needed.
 
 ### Task 6 — the librarian shares the resolution
 
-`LIBRARIAN_EMBED_{MODEL,URL,API_KEY}` (`src/librarian/mod.rs:65-67`) default to
-the resolved `EmbeddingSettings`, with an explicit `[librarian.embeddings]`
-override retained for the case where artifacts genuinely want a different model.
-The 2026-07-10 outage came from the split being mandatory; making it *optional*
-keeps the capability and removes the trap.
+`LIBRARIAN_EMBED_{MODEL,URL,API_KEY}` (`src/librarian/mod.rs`) now fall back to the
+resolved `CODESCOUT_EMBEDDING_{MODEL,URL,API_KEY}` family (via
+`embedding_env::read`, so a deprecated alias reached only through this fallback
+still warns once) when the explicit `LIBRARIAN_EMBED_*` var is absent. The
+explicit var still wins when set, so a deployment that genuinely wants a
+different model for artifacts than for code retrieval keeps that capability;
+the fix removes the case that caused the 2026-07-10 outage — the split being
+**mandatory** rather than optional.
+
+Also fixed, discovered as a direct consequence: `src/cli/doc.rs`'s `--semantic`
+pre-check read `LIBRARIAN_EMBED_MODEL` directly, bypassing the fallback — a user
+with only `CODESCOUT_EMBEDDING_MODEL` configured would have hit a false
+"requires the embedding service" refusal from the CLI even though the actual
+context build (`open_ctx` → `LibrarianEnv::from_env`) would have worked. Fixed
+by extracting the check as a pure `semantic_search_needs_an_embedder(semantic,
+&LibrarianEnv)` and wiring the pre-check through the same `LibrarianEnv` the
+real construction uses, so the two can no longer disagree.
+
+**Not done, deliberately scoped out:** the `[librarian.embeddings]` project.toml
+override the plan originally named. It would need a new `ProjectConfig` section
+AND restructuring `build_tool_context_with` to resolve the embed model only
+after `current_project` is known (today the embedding init runs before that
+resolution). The env-layer fallback above already kills the *mandatory-split*
+defect for the common case (anyone using env vars, which is exactly how the
+outage-causing `.env.amd`-style files work); the project-scoped override is a
+separate, larger change and is left as a follow-up rather than rushed in
+alongside it.
+
+SHA / patch-id: pending.
 
 ## Phase 3 — onboarding and visibility
 
