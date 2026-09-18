@@ -495,7 +495,9 @@ same defect *shape* the archived `f73130523241a666` fixed for the
 workspace-pin memory-read path, but a separate call site that fix did not
 touch.
 
-SHA / patch-id: pending.
+SHA: `ce43813d` · patch-id: `436a510f1bd323592238eb1ffbeb36ddbf7290d7`. Gate green:
+FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0 (second attempt — first caught a real
+intra-suite env race, `embedder-stack-ops-session-log:F-11`).
 
 ## Verification
 
