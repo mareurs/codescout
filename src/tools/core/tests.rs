@@ -920,6 +920,53 @@ async fn guard_worktree_write_allows_when_no_worktrees_exist() {
     );
 }
 
+/// The refusal's REMEDY, which the three cases above do not touch — they assert
+/// `is_err()` / `is_ok()` and nothing about what the caller is told to do.
+///
+/// `list_git_worktrees` pushes in `std::fs::read_dir` order with no sort, so a
+/// hint naming `wt_list[0]` prescribes a path the FILESYSTEM chose. On the real
+/// checkout that is another session's mutation-probe worktree, and activating it
+/// makes that tree this session's HOME project — so writes land in the wrong
+/// checkout and mint worktree-scoped catalog rows under `id = sha256(abs_path)`.
+///
+/// Asserted as a PAIR because either half alone is monotone: "names the root" is
+/// satisfied by a hint that also names a worktree, and "does not name the
+/// worktree" is satisfied by an empty hint. Only together do they pin the shape.
+/// Deliberately about the SHAPE, not the prose — it must survive rewording and
+/// red on the regression that actually happened.
+///
+/// docs/issues/2026-09-18-the-worktree-write-block-names-an-arbitrary-worktree-as-the-remedy.md
+#[tokio::test]
+async fn guard_worktree_write_hint_names_the_main_repo_not_an_arbitrary_worktree() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    // `seed_linked_worktree` puts the tree BESIDE `root`, never under it. That is
+    // load-bearing here: if the worktree were a descendant, `root`'s path would be
+    // a prefix of it and the two assertions below would stop being independent.
+    let wt = seed_linked_worktree(&root, "feat");
+    let ctx = rooted_ctx(&root).await;
+
+    let err = guard_worktree_write(&ctx).await.unwrap_err();
+    let rec = err
+        .downcast_ref::<RecoverableError>()
+        .expect("the block must stay recoverable so sibling parallel calls survive");
+    let hint = rec
+        .guidance
+        .as_ref()
+        .expect("a refusal whose whole point is naming a route must carry guidance")
+        .text();
+
+    assert!(
+        hint.contains(&root.display().to_string()),
+        "the hint must name the main repo — the answer in essentially every case; got: {hint}"
+    );
+    assert!(
+        !hint.contains(&wt.display().to_string()),
+        "the hint must not prescribe a worktree the caller never named; got: {hint}"
+    );
+}
+
 /// docs/issues/archive/2026-09-02-the-write-guard-refuses-a-correctly-pinned-call.md
 ///
 /// A per-call `workspace=` pin names the write target explicitly — which is the

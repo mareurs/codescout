@@ -54,9 +54,24 @@ pub async fn guard_worktree_write(ctx: &ToolContext) -> anyhow::Result<()> {
         return Ok(());
     }
     let wt_list: Vec<String> = worktrees.iter().map(|p| p.display().to_string()).collect();
+    // Lead with `root`, and name NO worktree. `list_git_worktrees` pushes in
+    // `read_dir` order with no sort, so `wt_list[0]` here prescribed a path the
+    // FILESYSTEM chose — on a shared checkout that is another session's
+    // mutation-probe worktree, and activating it makes that tree THIS session's
+    // home project, so writes land in the wrong checkout and mint worktree-scoped
+    // catalog rows under `id = sha256(abs_path)`. The full list is already in the
+    // message above for a caller who genuinely wants one of them.
+    //
+    // The per-call pin is named because this guard already honours it at the top,
+    // and `get_guide("workspace-state")` prescribes pinning in preference to
+    // re-activating — activation is process-wide and a peer or subagent can flip
+    // it mid-task, which the pin cannot.
+    // docs/issues/2026-09-18-the-worktree-write-block-names-an-arbitrary-worktree-as-the-remedy.md
     let hint = format!(
-        "Call workspace(action='activate', path=\"{}\") to select the write target (or use \"{}\" for the main repo).",
-        wt_list[0],
+        "Call workspace(action='activate', path=\"{}\") to write to the main repo, or pass \
+         workspace=\"<abs path>\" on this call to pin a single write without changing the \
+         session. To write to a linked worktree instead, activate the one you mean from the \
+         list above.",
         root.display()
     );
     Err(RecoverableError::with_hint(
