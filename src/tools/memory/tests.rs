@@ -1612,8 +1612,27 @@ async fn memory_large_read_buffers_as_file_ref() {
     );
     assert_eq!(result["total_lines"].as_u64().unwrap(), 300);
 
-    // Verify the @file_* ref is line-navigable
+    // Regression: the overflow envelope must carry a `hint` naming the returned
+    // file_id, matching every other buffering call site in the tool layer
+    // (read_markdown.rs, read_file.rs). Without it an agent has no cue that the
+    // buffer needs dereferencing at all — see
+    // docs/issues/2026-09-19-memory-read-buffer-lacks-a-hint.md.
     let file_id = result["file_id"].as_str().unwrap().to_string();
+    let hint = result["hint"]
+        .as_str()
+        .expect("buffered memory read must carry a `hint` field");
+    assert!(
+        hint.contains(&file_id),
+        "hint should name the returned file_id; got hint: {hint:?}, file_id: {file_id:?}"
+    );
+    assert!(
+        !hint.contains("heading="),
+        "the memory buffer's source_path is always None (synthetic @-path), so \
+         is_markdown_target never recognizes it as markdown — heading= addressing \
+         does not work on this buffer, and the hint must not advertise it: {hint:?}"
+    );
+
+    // Verify the @file_* ref is line-navigable
     let sub = crate::tools::read_file::ReadFile
         .call(
             json!({"path": file_id, "start_line": 10, "end_line": 10}),

@@ -664,7 +664,7 @@ fn apply_sections_filter(
         if !result.matched {
             let hint = if result.available.is_empty() {
                 "this memory has no headings below the title to filter on \
-                 (searched levels ##..######) — read it without `sections`"
+                     (searched levels ##..######) — read it without `sections`"
                     .to_string()
             } else {
                 format!("available sections: {}", result.available.join(", "))
@@ -681,10 +681,16 @@ fn apply_sections_filter(
         // a non-existent file and immediately evicting the entry.
         let synthetic_path = format!("@memory:{topic}:filtered");
         let file_id = output_buffer.store_file(synthetic_path, content);
+        // `source_path` is always None for a `@`-prefixed handle (see store_file),
+        // so `is_markdown_target` never recognizes this buffer as markdown even
+        // though the topic's content usually is — `heading=` addressing silently
+        // does nothing here. The hint must name only what the buffer actually
+        // supports, or it advertises a capability this handle doesn't have.
+        let hint = format!("use {file_id:?} — start_line/end_line to browse the full content");
         if missing.is_empty() {
-            json!({ "file_id": file_id, "total_lines": total_lines })
+            json!({ "file_id": file_id, "total_lines": total_lines, "hint": hint })
         } else {
-            json!({ "file_id": file_id, "total_lines": total_lines, "missing": missing })
+            json!({ "file_id": file_id, "total_lines": total_lines, "missing": missing, "hint": hint })
         }
     } else if missing.is_empty() {
         json!({ "content": content })
