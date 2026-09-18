@@ -416,6 +416,29 @@ harness does what you asked in a way that reads as something else, and the failu
 *number*, not an error. Don't hand-roll scoring: `prompt-engineering:scripts/run_arms.py --config
 <cfg> --all` runs every arm and prints rate, failure classes and distinct-answer count.
 
+### Deep-agent observation window — 18 September to 2 October 2026
+
+**Until 2026-10-02 00:00 UTC (review 25 September), capture evidence before implementation.**
+In each coordinating session, select the first eligible context decision in
+[DCTX](docs/trackers/deep-agent-context-observations.md) and the first substantive
+multi-step investigation, test, or fix in
+[DWF](docs/trackers/deep-agent-workflow-observations.md), regardless of outcome.
+Use their atomic `doc(action="append_entry")` recipes. Before the dependent action,
+record a short snapshot: session/principal, trigger, intended next action, available
+evidence/revisions, context choice or objective, and expected check. Include ordinary
+successes and choices to add no context; keep aborted samples.
+
+Update the same entry with observed results and verification; preserve its pre-action
+facts. Mark later noteworthy cases `enrichment`, and after-the-fact capture `retrospective`.
+One coordinating collector includes child work under the child's observed identity or
+`unknown`; link canonical U/F/W/bug entries instead of duplicating incidents.
+At session end/handoff, add or update a DCS coverage receipt in the workflow ledger:
+selected IDs, `none-observed` versus `unknown`, capture gaps and recording effort.
+Retain minimal sanitized durable evidence, not secrets, private thoughts or only transient
+buffer handles. Do not add tests/model calls merely to populate the ledgers. These records
+do not authorize new execution or establish usage-wide rates. Stop routine capture at the
+end date unless the user extends it.
+
 ### Querying active trackers (librarian)
 
 The canonical "what's live right now" queries — archived rows are hidden by default:

@@ -1,0 +1,719 @@
+{
+  "calibration": {
+    "direct_sql_aggregate": {
+      "calls": 26052,
+      "codescout_dirty_false": 1772,
+      "codescout_dirty_null": 0,
+      "codescout_dirty_true": 24280,
+      "distinct_nonempty_codescout_sha": 77,
+      "first_called_at_utc": "2026-09-04 00:00:52",
+      "input_json_present": 25435,
+      "last_called_at_utc": "2026-09-17 16:58:27",
+      "non_success_calls": 1517,
+      "output_json_present": 25435,
+      "overflowed_calls": 1926,
+      "recoverable_error_calls": 1499
+    },
+    "direct_sql_by_tool": {
+      "calls_sum": 26052,
+      "groups": 21
+    },
+    "matches_by_tool_calls_sum": true,
+    "matches_projection_summary": true
+  },
+  "comparison_last7_vs_preceding7": {
+    "last7_utc": {
+      "end_exclusive": "2026-09-18",
+      "start_inclusive": "2026-09-11",
+      "summary": {
+        "by_tool": [
+          {
+            "calls": 4934,
+            "non_success_calls": 243,
+            "overflowed_calls": 428,
+            "p50_latency_ms": 91.0,
+            "p95_latency_ms": 56126.29999999972,
+            "tool": "run_command"
+          },
+          {
+            "calls": 2698,
+            "non_success_calls": 198,
+            "overflowed_calls": 280,
+            "p50_latency_ms": 15.0,
+            "p95_latency_ms": 149.30000000000018,
+            "tool": "doc"
+          },
+          {
+            "calls": 1962,
+            "non_success_calls": 191,
+            "overflowed_calls": 46,
+            "p50_latency_ms": 0.0,
+            "p95_latency_ms": 6.0,
+            "tool": "read_file"
+          },
+          {
+            "calls": 1569,
+            "non_success_calls": 6,
+            "overflowed_calls": 114,
+            "p50_latency_ms": 14,
+            "p95_latency_ms": 128.5999999999999,
+            "tool": "grep"
+          },
+          {
+            "calls": 1262,
+            "non_success_calls": 151,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 8.0,
+            "p95_latency_ms": 110.0,
+            "tool": "edit_file"
+          },
+          {
+            "calls": 1062,
+            "non_success_calls": 6,
+            "overflowed_calls": 157,
+            "p50_latency_ms": 52.0,
+            "p95_latency_ms": 8083.349999999995,
+            "tool": "symbols"
+          },
+          {
+            "calls": 511,
+            "non_success_calls": 40,
+            "overflowed_calls": 3,
+            "p50_latency_ms": 78,
+            "p95_latency_ms": 394.0,
+            "tool": "edit_code"
+          },
+          {
+            "calls": 261,
+            "non_success_calls": 0,
+            "overflowed_calls": 4,
+            "p50_latency_ms": 548,
+            "p95_latency_ms": 17508,
+            "tool": "workspace"
+          },
+          {
+            "calls": 198,
+            "non_success_calls": 1,
+            "overflowed_calls": 121,
+            "p50_latency_ms": 6588.5,
+            "p95_latency_ms": 43578.24999999999,
+            "tool": "librarian"
+          },
+          {
+            "calls": 95,
+            "non_success_calls": 5,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 1,
+            "p95_latency_ms": 3.0,
+            "tool": "create_file"
+          },
+          {
+            "calls": 81,
+            "non_success_calls": 3,
+            "overflowed_calls": 3,
+            "p50_latency_ms": 1068,
+            "p95_latency_ms": 9241,
+            "tool": "references"
+          },
+          {
+            "calls": 58,
+            "non_success_calls": 4,
+            "overflowed_calls": 5,
+            "p50_latency_ms": 0.0,
+            "p95_latency_ms": 13.29999999999994,
+            "tool": "memory"
+          },
+          {
+            "calls": 37,
+            "non_success_calls": 0,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 0,
+            "p95_latency_ms": 0.0,
+            "tool": "get_guide"
+          },
+          {
+            "calls": 34,
+            "non_success_calls": 1,
+            "overflowed_calls": 5,
+            "p50_latency_ms": 1093.5,
+            "p95_latency_ms": 2001.5499999999995,
+            "tool": "semantic_search"
+          },
+          {
+            "calls": 26,
+            "non_success_calls": 0,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 17520.0,
+            "p95_latency_ms": 20160.5,
+            "tool": "index"
+          },
+          {
+            "calls": 18,
+            "non_success_calls": 0,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 0.0,
+            "p95_latency_ms": 25.749999999999993,
+            "tool": "tree"
+          },
+          {
+            "calls": 11,
+            "non_success_calls": 0,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 708,
+            "p95_latency_ms": 4719.5,
+            "tool": "symbol_at"
+          },
+          {
+            "calls": 3,
+            "non_success_calls": 1,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 0,
+            "p95_latency_ms": 0.0,
+            "tool": "approve_write"
+          },
+          {
+            "calls": 1,
+            "non_success_calls": 0,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 9426,
+            "p95_latency_ms": 9426,
+            "tool": "call_graph"
+          },
+          {
+            "calls": 1,
+            "non_success_calls": 0,
+            "overflowed_calls": 1,
+            "p50_latency_ms": 0,
+            "p95_latency_ms": 0,
+            "tool": "library"
+          }
+        ],
+        "calls": 14822,
+        "cc_session_id_present": 14822,
+        "distinct_nonempty_cc_session_id": 47,
+        "distinct_nonempty_project_root": 2,
+        "distinct_nonempty_session_id": 200,
+        "input_json_present": 14262,
+        "latency_ms": {
+          "p50": 20.0,
+          "p95": 18688.649999999994,
+          "p99": 109470.5799999999
+        },
+        "non_success_calls": 850,
+        "non_success_rate": 0.05734718661449197,
+        "outcomes": {
+          "error": 13,
+          "recoverable_error": 837,
+          "success": 13972
+        },
+        "output_json_present": 14262,
+        "overflowed_calls": 1167,
+        "overflowed_rate": 0.07873431385777897,
+        "recoverable_error_calls": 837,
+        "recoverable_error_rate": 0.056470111995682096,
+        "session_id_present": 14822
+      }
+    },
+    "preceding7_utc": {
+      "end_exclusive": "2026-09-11",
+      "start_inclusive": "2026-09-04",
+      "summary": {
+        "by_tool": [
+          {
+            "calls": 3448,
+            "non_success_calls": 246,
+            "overflowed_calls": 246,
+            "p50_latency_ms": 44.0,
+            "p95_latency_ms": 30010.199999999997,
+            "tool": "run_command"
+          },
+          {
+            "calls": 1885,
+            "non_success_calls": 7,
+            "overflowed_calls": 168,
+            "p50_latency_ms": 9,
+            "p95_latency_ms": 117.79999999999995,
+            "tool": "grep"
+          },
+          {
+            "calls": 1851,
+            "non_success_calls": 167,
+            "overflowed_calls": 29,
+            "p50_latency_ms": 0,
+            "p95_latency_ms": 5.0,
+            "tool": "read_file"
+          },
+          {
+            "calls": 1086,
+            "non_success_calls": 101,
+            "overflowed_calls": 114,
+            "p50_latency_ms": 16.0,
+            "p95_latency_ms": 51.75,
+            "tool": "doc"
+          },
+          {
+            "calls": 990,
+            "non_success_calls": 1,
+            "overflowed_calls": 130,
+            "p50_latency_ms": 32.0,
+            "p95_latency_ms": 4429.599999999999,
+            "tool": "symbols"
+          },
+          {
+            "calls": 921,
+            "non_success_calls": 113,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 6,
+            "p95_latency_ms": 183,
+            "tool": "edit_file"
+          },
+          {
+            "calls": 355,
+            "non_success_calls": 22,
+            "overflowed_calls": 1,
+            "p50_latency_ms": 317,
+            "p95_latency_ms": 591.6,
+            "tool": "edit_code"
+          },
+          {
+            "calls": 246,
+            "non_success_calls": 0,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 50.0,
+            "p95_latency_ms": 2531.0,
+            "tool": "workspace"
+          },
+          {
+            "calls": 132,
+            "non_success_calls": 5,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 1.0,
+            "p95_latency_ms": 2.0,
+            "tool": "create_file"
+          },
+          {
+            "calls": 117,
+            "non_success_calls": 1,
+            "overflowed_calls": 67,
+            "p50_latency_ms": 6239,
+            "p95_latency_ms": 42159.39999999998,
+            "tool": "librarian"
+          },
+          {
+            "calls": 105,
+            "non_success_calls": 1,
+            "overflowed_calls": 2,
+            "p50_latency_ms": 0,
+            "p95_latency_ms": 1209.3999999999999,
+            "tool": "memory"
+          },
+          {
+            "calls": 37,
+            "non_success_calls": 0,
+            "overflowed_calls": 1,
+            "p50_latency_ms": 0,
+            "p95_latency_ms": 27.599999999999987,
+            "tool": "tree"
+          },
+          {
+            "calls": 25,
+            "non_success_calls": 0,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 0,
+            "p95_latency_ms": 0.0,
+            "tool": "get_guide"
+          },
+          {
+            "calls": 20,
+            "non_success_calls": 1,
+            "overflowed_calls": 1,
+            "p50_latency_ms": 1150.0,
+            "p95_latency_ms": 3398.5500000000043,
+            "tool": "references"
+          },
+          {
+            "calls": 6,
+            "non_success_calls": 0,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 15341.5,
+            "p95_latency_ms": 20586.5,
+            "tool": "index"
+          },
+          {
+            "calls": 2,
+            "non_success_calls": 1,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 0.0,
+            "p95_latency_ms": 0.0,
+            "tool": "approve_write"
+          },
+          {
+            "calls": 1,
+            "non_success_calls": 1,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 0,
+            "p95_latency_ms": 0,
+            "tool": "call_graph"
+          },
+          {
+            "calls": 1,
+            "non_success_calls": 0,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 0,
+            "p95_latency_ms": 0,
+            "tool": "onboarding"
+          },
+          {
+            "calls": 1,
+            "non_success_calls": 0,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 974,
+            "p95_latency_ms": 974,
+            "tool": "semantic_search"
+          },
+          {
+            "calls": 1,
+            "non_success_calls": 0,
+            "overflowed_calls": 0,
+            "p50_latency_ms": 646,
+            "p95_latency_ms": 646,
+            "tool": "symbol_at"
+          }
+        ],
+        "calls": 11230,
+        "cc_session_id_present": 11230,
+        "distinct_nonempty_cc_session_id": 21,
+        "distinct_nonempty_project_root": 4,
+        "distinct_nonempty_session_id": 75,
+        "input_json_present": 11173,
+        "latency_ms": {
+          "p50": 19.0,
+          "p95": 9207.899999999958,
+          "p99": 60048.61999999998
+        },
+        "non_success_calls": 667,
+        "non_success_rate": 0.05939447907390917,
+        "outcomes": {
+          "error": 5,
+          "recoverable_error": 662,
+          "success": 10563
+        },
+        "output_json_present": 11173,
+        "overflowed_calls": 759,
+        "overflowed_rate": 0.06758682101513802,
+        "recoverable_error_calls": 662,
+        "recoverable_error_rate": 0.058949243098842384,
+        "session_id_present": 11230
+      }
+    }
+  },
+  "method": {
+    "db_open": "sqlite URI mode=ro; one BEGIN read transaction",
+    "max_id_source": "argument",
+    "max_tool_calls_id_in_snapshot": 130770,
+    "observed_max_tool_calls_id": 130804,
+    "raw_sensitive_content_persisted": false,
+    "row_filter": "called_at >= start AND called_at < end AND id <= snapshot max id",
+    "scope": "all tool_calls rows in this one usage.db matching the UTC window and id cutoff; not all machine usage and not a single project root",
+    "snapshot_utc": "2026-09-18T09:24:42Z",
+    "window_utc": {
+      "end_exclusive": "2026-09-18",
+      "start_inclusive": "2026-09-04"
+    }
+  },
+  "schema_columns": [
+    "id",
+    "tool_name",
+    "called_at",
+    "latency_ms",
+    "outcome",
+    "overflowed",
+    "error_msg",
+    "codescout_sha",
+    "project_sha",
+    "session_id",
+    "input_json",
+    "output_json",
+    "cc_session_id",
+    "friction_target",
+    "overflow_tokens",
+    "err_family",
+    "project_root",
+    "codescout_dirty"
+  ],
+  "sequence_proxy": {
+    "by_err_family": [
+      {
+        "err_family": "il1_read_overlaps_symbol",
+        "pairs": 16
+      },
+      {
+        "err_family": "il3_shell_on_source",
+        "pairs": 11
+      },
+      {
+        "err_family": "worktree_activate_required",
+        "pairs": 11
+      },
+      {
+        "err_family": "librarian_managed_artifact",
+        "pairs": 10
+      },
+      {
+        "err_family": "edit_stale_match",
+        "pairs": 5
+      },
+      {
+        "err_family": "ambiguous_heading",
+        "pairs": 3
+      },
+      {
+        "err_family": "il3_pipe_to_trimmer",
+        "pairs": 2
+      },
+      {
+        "err_family": "il2_structural_edit",
+        "pairs": 2
+      },
+      {
+        "err_family": "replace_dropped_sibling",
+        "pairs": 2
+      },
+      {
+        "err_family": "missing_required_param",
+        "pairs": 1
+      },
+      {
+        "err_family": "path_not_found",
+        "pairs": 1
+      },
+      {
+        "err_family": "json_path_key_miss",
+        "pairs": 1
+      },
+      {
+        "err_family": "buffer_ref_expired",
+        "pairs": 1
+      },
+      {
+        "err_family": "heading_not_found",
+        "pairs": 1
+      },
+      {
+        "err_family": "unknown_enum_value",
+        "pairs": 1
+      }
+    ],
+    "comparable_adjacent_pairs": 25988,
+    "definition": "adjacent rows ordered by (cc_session_id, called_at, id), both non-success with equal non-null err_family",
+    "repeated_family_pair_rate": 0.002616592273356934,
+    "repeated_family_pairs": 68,
+    "warning": "This is a sequence proxy only. It is not task success, user recovery, or causal evidence; cc_session_id may blend parent/subagent activity."
+  },
+  "window": {
+    "by_tool": [
+      {
+        "calls": 8382,
+        "non_success_calls": 489,
+        "overflowed_calls": 674,
+        "p50_latency_ms": 71.0,
+        "p95_latency_ms": 43054.899999999965,
+        "tool": "run_command"
+      },
+      {
+        "calls": 3813,
+        "non_success_calls": 358,
+        "overflowed_calls": 75,
+        "p50_latency_ms": 0,
+        "p95_latency_ms": 5.0,
+        "tool": "read_file"
+      },
+      {
+        "calls": 3784,
+        "non_success_calls": 299,
+        "overflowed_calls": 394,
+        "p50_latency_ms": 15.0,
+        "p95_latency_ms": 122.0,
+        "tool": "doc"
+      },
+      {
+        "calls": 3454,
+        "non_success_calls": 13,
+        "overflowed_calls": 282,
+        "p50_latency_ms": 13.0,
+        "p95_latency_ms": 124.0,
+        "tool": "grep"
+      },
+      {
+        "calls": 2183,
+        "non_success_calls": 264,
+        "overflowed_calls": 0,
+        "p50_latency_ms": 8,
+        "p95_latency_ms": 166.0,
+        "tool": "edit_file"
+      },
+      {
+        "calls": 2052,
+        "non_success_calls": 7,
+        "overflowed_calls": 287,
+        "p50_latency_ms": 37.0,
+        "p95_latency_ms": 7072.099999999997,
+        "tool": "symbols"
+      },
+      {
+        "calls": 866,
+        "non_success_calls": 62,
+        "overflowed_calls": 4,
+        "p50_latency_ms": 93.0,
+        "p95_latency_ms": 570.5,
+        "tool": "edit_code"
+      },
+      {
+        "calls": 507,
+        "non_success_calls": 0,
+        "overflowed_calls": 4,
+        "p50_latency_ms": 539,
+        "p95_latency_ms": 12238.59999999986,
+        "tool": "workspace"
+      },
+      {
+        "calls": 315,
+        "non_success_calls": 2,
+        "overflowed_calls": 188,
+        "p50_latency_ms": 6391,
+        "p95_latency_ms": 43544.8,
+        "tool": "librarian"
+      },
+      {
+        "calls": 227,
+        "non_success_calls": 10,
+        "overflowed_calls": 0,
+        "p50_latency_ms": 1,
+        "p95_latency_ms": 2.0,
+        "tool": "create_file"
+      },
+      {
+        "calls": 163,
+        "non_success_calls": 5,
+        "overflowed_calls": 7,
+        "p50_latency_ms": 0,
+        "p95_latency_ms": 1057.6000000000013,
+        "tool": "memory"
+      },
+      {
+        "calls": 101,
+        "non_success_calls": 4,
+        "overflowed_calls": 4,
+        "p50_latency_ms": 1078,
+        "p95_latency_ms": 9183,
+        "tool": "references"
+      },
+      {
+        "calls": 62,
+        "non_success_calls": 0,
+        "overflowed_calls": 0,
+        "p50_latency_ms": 0.0,
+        "p95_latency_ms": 0.0,
+        "tool": "get_guide"
+      },
+      {
+        "calls": 55,
+        "non_success_calls": 0,
+        "overflowed_calls": 1,
+        "p50_latency_ms": 0,
+        "p95_latency_ms": 27.89999999999999,
+        "tool": "tree"
+      },
+      {
+        "calls": 35,
+        "non_success_calls": 1,
+        "overflowed_calls": 5,
+        "p50_latency_ms": 1086,
+        "p95_latency_ms": 1991.8999999999994,
+        "tool": "semantic_search"
+      },
+      {
+        "calls": 32,
+        "non_success_calls": 0,
+        "overflowed_calls": 0,
+        "p50_latency_ms": 17372.5,
+        "p95_latency_ms": 20630.7,
+        "tool": "index"
+      },
+      {
+        "calls": 12,
+        "non_success_calls": 0,
+        "overflowed_calls": 0,
+        "p50_latency_ms": 677.0,
+        "p95_latency_ms": 4713.05,
+        "tool": "symbol_at"
+      },
+      {
+        "calls": 5,
+        "non_success_calls": 2,
+        "overflowed_calls": 0,
+        "p50_latency_ms": 0,
+        "p95_latency_ms": 0.0,
+        "tool": "approve_write"
+      },
+      {
+        "calls": 2,
+        "non_success_calls": 1,
+        "overflowed_calls": 0,
+        "p50_latency_ms": 4713.0,
+        "p95_latency_ms": 8954.699999999999,
+        "tool": "call_graph"
+      },
+      {
+        "calls": 1,
+        "non_success_calls": 0,
+        "overflowed_calls": 1,
+        "p50_latency_ms": 0,
+        "p95_latency_ms": 0,
+        "tool": "library"
+      },
+      {
+        "calls": 1,
+        "non_success_calls": 0,
+        "overflowed_calls": 0,
+        "p50_latency_ms": 0,
+        "p95_latency_ms": 0,
+        "tool": "onboarding"
+      }
+    ],
+    "calls": 26052,
+    "cc_session_id_present": 26052,
+    "codescout_build_composition": {
+      "dirty_false_calls": 1772,
+      "dirty_null_calls": 0,
+      "dirty_true_calls": 24280,
+      "distinct_nonempty_sha_count": 77
+    },
+    "coverage_utc": {
+      "first_called_at": "2026-09-04 00:00:52",
+      "last_called_at": "2026-09-17 16:58:27"
+    },
+    "distinct_nonempty_cc_session_id": 64,
+    "distinct_nonempty_project_root": 5,
+    "distinct_nonempty_session_id": 275,
+    "input_json_present": 25435,
+    "latency_ms": {
+      "p50": 20.0,
+      "p95": 15084.899999999994,
+      "p99": 100032.85999999997
+    },
+    "non_success_calls": 1517,
+    "non_success_rate": 0.05822969445723937,
+    "outcomes": {
+      "error": 18,
+      "recoverable_error": 1499,
+      "success": 24535
+    },
+    "output_json_present": 25435,
+    "overflowed_calls": 1926,
+    "overflowed_rate": 0.07392906494702901,
+    "recoverable_error_calls": 1499,
+    "recoverable_error_rate": 0.05753876861661293,
+    "session_id_present": 26052
+  }
+}
