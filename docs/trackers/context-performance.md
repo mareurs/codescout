@@ -53,6 +53,19 @@ previous world.
 
 **Valid:** conditional — the fully-served share at the 1000 B cap falls below ~90%
 
+**Re-checked 2026-09-18 — has NOT fired, and it is the closest of this corpus's conditionals
+to its own line.** The standing value is the **94%** in the re-measure table below
+(2026-09-12, shipped 1000 B cap) against a ~90% trigger: a four-point margin that moved
+98% → 94% in three weeks while the corpus grew. Falling, not stable.
+
+**Deliberately NOT re-measured today, and the reason is this entry's own method note.** The
+sweep is a re-implementation of the two-pass packer in `src/librarian/tools/context.rs`, and
+the section below records that its FIRST version disagreed with the shipped packer by one
+neighbour on `R-3` — caught only by cross-checking against the real thing on two anchors
+spanning both branches. A quick re-run that skipped that cross-check would produce a number
+with no claim on being right, which is worse here than a number six days old. Stated so the
+next reader knows which it is holding.
+
 **Status:** applied
 
 **Measured 2026-08-21**, project-scoped, against `entry_cite` (1513 `origin='scan'` rows) and

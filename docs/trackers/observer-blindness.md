@@ -670,6 +670,17 @@ defended only freshness.
 **Valid:** conditional — reopens if any gate form documented in `CLAUDE.md`
 § *Development Commands* writes `target/debug/codescout` anywhere but last
 
+**Re-checked 2026-09-18 — has NOT fired.** Both documented forms leave the shared binary
+correct at rest: the four commands still end on the default lane, which rewrites
+`target/debug/codescout` after the lean lane has replaced it; and `./scripts/gate.sh` — now
+the leading form in that section — keys `CARGO_TARGET_DIR` on `$CLAUDE_CODE_SESSION_ID` and
+therefore never writes the shared path at all. **What this condition does NOT cover, said
+because the two are easy to conflate:** the concurrency hole in that same guarantee — a
+peer's lean-lane build landing inside your own lane's run phase — is a separate live record
+(`docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md`), and is
+not what reopens this entry. This one is about the documented ORDER; that one is about the
+order being insufficient.
+
 **Rests on:** `docs/issues/archive/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`
 
 **Class:** a shared mutable artifact (here `target/debug/codescout`) left in a degraded

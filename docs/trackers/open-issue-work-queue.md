@@ -1151,6 +1151,14 @@ it was written: `doctor`'s `params_status_drift` now compares the **status** fie
 sides (it fired on `claim-decay:DC-2` on 2026-09-01 and was correct). Every other field is
 still set-difference-on-ids only, so the entry stands. Declared 2026-09-01.
 
+**Re-checked 2026-09-18 at the bytes — has NOT fired, and the confirmation is published
+rather than left silent because it is a denominator.** `doctor` holds exactly three
+params/body scans and no fourth has appeared: `scan_snapshot_drift`,
+`scan_params_behind_body`, `scan_params_status_drift`. The last iterates `ledger.statuses`
+and tests `status_token_present` over that one field; the middle one's own doc comment
+still reads *"Ids only, never statuses"*. Nothing compares any other field, in either
+direction. Checked by reading the scans, not this entry's prose.
+
 Surfaced while executing BL-42's data repair: diffing `windows-platform-support.md`'s body table against `params` field-by-field (not just by id) found 7 rows present on both sides with different content — `WIN-1`, `WIN-4`, `WIN-5`, `WIN-20`, `WIN-27` had a stale pre-archive `ref`; `WIN-28` and `WIN-29` were worse, `params` held an earlier `open` snapshot with a superseded root-cause summary while the body already carried the resolved `fixed` story. This tracker's own `entry_filter={"status":{"eq":"open"}}` convention would have returned two closed issues as open, with the wrong explanation.
 
 `doctor`'s `params_behind_body` (BL-40) does not cover this: it computes set difference on ids, so a row present on both sides with disagreeing fields passes it silently. `update_entry` already warns one direction (`snapshot_stale`, params-changed/body-didn't) but nothing scans the other direction — a body edit that never touches params leaves no trace.
@@ -1277,6 +1285,17 @@ commit's? Option 3 is spent; do not re-raise it.
 ### BL-29 — append_entry writes catalog-only state, so the committed snapshot drifts
 
 **Valid:** conditional — `append_entry` writes the body snapshot itself, rather than reporting that it is stale
+
+**Re-checked 2026-09-18 — has NOT fired, but the PREMISE MOVED and that is the half worth
+recording.** `append_entry` can now write into the body itself: `index_row` (both-or-neither
+with `index_after_line`, or placed against the artifact's declared `snapshot_anchor`) rides
+the same `fs::write` as the section and the high-water mark. So the *writing* capability
+exists. What has not happened is the **substitution** this condition names: the reporting
+path is untouched, still emitting `snapshot_missing` + `snapshot_hint` and telling the
+caller to patch the body via `body_edits`. Writing was added BESIDE reporting, not in place
+of it, so the `rather than` is unsatisfied and the entry stands. Worth stating explicitly
+because a reader checking only *"can append_entry write the body?"* would answer yes and
+retire this entry on a question it does not ask.
 
 ***The previous condition was a transcription artifact, withdrawn 2026-09-12.*** It read *"until the
 snapshot gate reaches majority coverage"* — an event that had already happened before the sentence
