@@ -101,9 +101,16 @@ fields behind. So the correct form exists and works; it is simply never printed.
 
 - **"Two deletion sentinels collide inside one MCP server."** FALSIFIED by
   `git grep -l '__delete__'` returning one file, this one. The sentinel is the harness's,
-  not codescout's; this was a cross-TOOL carry-over, not an intra-server collision. Raised
-  by a peer session against this file's first draft and verified at the bytes before
-  rewriting — the wrong framing would have sent the fix to a non-existent ambiguity.
+  not codescout's; this was a cross-TOOL carry-over, not an intra-server collision. Independently
+  falsified TWICE, by different commands over different scopes: a tracked-tree
+  `git grep -l '__delete__'` returning 0, and a scoped search of `src/**/*.rs` plus positive
+  identification of the real convention — RFC 7396 `null`, implemented at
+  `src/librarian/catalog/augmentation.rs:426`. Only the first was sent; the second is
+  corroboration after the fact. **The second is the stronger half**, and the asymmetry is
+  the reusable part: an absence claim is monotone under "I searched the wrong place", while
+  a located implementation is positive and re-checkable at the line. METHODS are recorded
+  rather than parties — a session name is registry-minted and re-minted by compaction,
+  resume or a restart under another profile, so it decays while the commands stay runnable.
 - **"`doc()` silently dropped the field."** FALSIFIED by reading the file — it wrote it. A
   dropped field leaves the frontmatter unchanged, which is a different and cheaper failure.
 
@@ -125,6 +132,19 @@ particular wrong guess and no other, which is why it is second — the reader is
 because the surface asked them to, and only the printed call stops that. Do not widen it to
 "reject any object-valued `extra`": nested maps are legitimate values under the
 round-trip-safety contract.
+
+
+**A general check was proposed from how this file's own stale title was caught, MEASURED, and found not viable in its naive form — recorded so nobody builds it.**
+
+The detector was not diligence. `doc(action="find")` returns `title` and `abs_path` adjacent in one row, and here they disagreed: the FILENAME already carried the corrected framing while the TITLE carried the retracted one, so the row was self-contradicting on its face. A reader who opened the file would have seen only the corrected body and moved on. The list view put two fields derived from one understanding side by side, where a mismatch is visible without opening anything.
+
+That suggests a corpus check: stem and `title:` are authored from the same understanding, so disagreement means one is stale. Measured over all **922** bug files, flagging any whose stem shares under a third of its >3-char tokens with its title: **46 fire, and NONE is the defect this file had.**
+
+The first explanation — terse legacy slugs against full-sentence titles — was itself wrong and was discarded on the numbers: the 46 span 2026-04 through 2026-09 with **8 in the most recent month**, and their median stem length (5.5 tokens) matches the corpus (6). Inspecting those 8 shows every one is PARAPHRASE rather than staleness — `a-filename-matching-an-ack-handle-is-unreachable` against "a file whose name matches `@ack_<8hex>` is unreachable" is one claim in two vocabularies.
+
+So token overlap detects DISAGREEMENT and cannot tell which side is stale — and disagreement is the normal case, because a title is a prose refinement of a stem rather than a restatement of it. At 46 hits and no true positives the ratio is unusable. Note this file's own instance runs the OTHER way (stem correct, title stale), which a symmetric similarity score cannot express at all.
+
+The sharper form, not built: ask GIT rather than the text. A commit that edits `title:` without renaming the file, or renames without editing `title:`, is precise, rare, and is exactly what happened here. That is a history question; the text-similarity version is a proxy for it that the measurement above falsifies.
 
 ## Tests added
 
