@@ -105,6 +105,31 @@ pub struct ToolContext {
     pub workspace_override: Option<std::path::PathBuf>,
 }
 
+tokio::task_local! {
+    /// True for the duration of a peer-serve dispatch. Set by
+    /// `CodeScoutServer::call_tool_by_name` (`src/server.rs`) — its own doc comment
+    /// says "Used by the peer-serve endpoint" and it is `pub(crate)` with peer
+    /// dispatch as its ONLY production caller — around the single `call_tool_inner`
+    /// future it drives, so it is in scope through every `.await` on that call's
+    /// path (no `tokio::spawn` breaks the task between here and `call_content`).
+    /// `worktree_read_notice` below reads it to decide whether the remedy clause
+    /// (`workspace(action='activate', ...)` / a per-call `workspace=` pin) is one
+    /// the caller can act on: a peer-serve client is refused `workspace` by
+    /// `PEER_EXPOSED_TOOLS` and has its `workspace=` argument stripped before
+    /// dispatch, so prescribing either is advice it cannot follow.
+    ///
+    /// Deliberately NOT a `ToolContext` field: `ToolContext` is built with a bare
+    /// struct literal (`ToolContext { .. }`, no `..Default::default()`) at ~20 call
+    /// sites across the tree outside this fix's file set, so a new required field
+    /// there would ripple into files this fix has no business touching. A
+    /// task-local scopes the fact to exactly the call it describes — set once, at
+    /// the one call site that already means "this is peer-serve" — without
+    /// widening a struct every tool and its tests construct directly.
+    ///
+    /// See docs/issues/2026-09-02-the-worktree-notice-prescribes-two-calls-a-served-peer-cannot-make.md.
+    pub(crate) static PEER_SERVE_DISPATCH: bool;
+}
+
 /// Notice that reads are resolving against a tree the caller never chose.
 ///
 /// `guard_worktree_write` refuses WRITES on exactly these two facts. Reads had
@@ -181,6 +206,30 @@ async fn worktree_read_notice(ctx: &ToolContext, root: Option<&std::path::Path>)
         return None;
     }
     let list: Vec<String> = worktrees.iter().map(|p| p.display().to_string()).collect();
+
+    // Bug 986e8146fc44d17d: the two remedies below (`workspace(action='activate', ...)`
+    // and a per-call `workspace=` pin) are both unavailable to a peer-serve client —
+    // `workspace` is refused by `PEER_EXPOSED_TOOLS` and a supplied `workspace=` is
+    // stripped before dispatch — so prescribing them there is advice the recipient is
+    // structurally forbidden from following, and the `workspace=` failure is silent.
+    // The disclosure half (which tree answered, which worktrees exist) is kept for a
+    // served call — a served agent needs it MORE than an interactive session does: it
+    // is the case with no human reading the envelope, so a wrong-tree read is acted on
+    // rather than noticed. Only the prescription is peer-inappropriate and swapped out.
+    if PEER_SERVE_DISPATCH
+        .try_with(|served| *served)
+        .unwrap_or(false)
+    {
+        return Some(format!(
+            "Reads are resolving against \"{}\". This repo also has linked git \
+             worktrees [{}]. This connection is served against a fixed workspace and \
+             cannot be repinned from here -- the root named above is the tree every \
+             call on this connection resolves against.",
+            root.display(),
+            list.join(", "),
+        ));
+    }
+
     Some(format!(
         "Reads are resolving against \"{}\". This repo also has linked git \
          worktrees [{}] and no project has been explicitly activated, so results \

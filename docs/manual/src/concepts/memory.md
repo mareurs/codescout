@@ -34,6 +34,26 @@ Memories are plain Markdown files in `.codescout/memories/`:
 Topics with forward slashes map to subdirectories. You can version-control
 memory files alongside code, or keep them local.
 
+## Staleness and Anchors
+
+A memory can go stale silently: the code it describes changes, but the note
+sitting in `.codescout/memories/` still reads as current. Codescout tracks this
+by **anchoring** a memory topic to the source files it names — each anchored
+path and a content hash live in a `<topic>.anchors.toml` sidecar next to the
+memory file. `workspace(action: "status")` reports every topic's staleness by
+re-hashing its anchors: **fresh** (all anchored files unchanged), **stale**
+(an anchored file changed or was deleted since the memory was last written),
+or **untracked** (no sidecar exists yet, e.g. a memory written before anchors
+existed).
+
+A stale topic isn't automatically wrong — the anchored file may have changed
+in a way that doesn't affect the fact the memory records. That's why there are
+two ways to clear it: `refresh_anchors` re-hashes without touching content,
+for a reviewed-and-still-accurate memory; `write` replaces the content and
+re-anchors from scratch, for a memory that needs updating. See
+[Memory Tools](../tools/memory.md) for the full `refresh_anchors` vs `write`
+procedure — it isn't repeated here.
+
 ## Typical Workflow
 
 At the start of a session:

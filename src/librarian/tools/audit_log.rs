@@ -254,7 +254,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             },
             "note": "rows above whose host != self_host are a REPLICA of that host's local trail, fresh only as of that host's last export — see the export mode's own note. Scoping asymmetry (Ruling 17, task-6 round-3 review): filtered_total sums local_filtered_total (machine-wide across every repo sharing this catalog — filter_where carries no repo predicate) with these shard rows (repo-scoped, read from THIS repo's .codescout/audit/ only) — the two halves of one number are counted over different populations.",
         },
-        "note": "verb means 'last dispatched verb on the writing connection', not per-statement; actor 'unknown' = a writer that did not identify itself (foreign process or raw sqlite3)."
+        "note": "verb means 'last dispatched verb on the writing connection', not per-statement; actor 'unknown' = a writer that did not identify itself (foreign process or raw sqlite3). actor is CONTACT, not authorship: it names whose connection touched the row, and a librarian.reindex row whose payload changes only embedded_sha256 is a re-embedding pass, not a content write — a real content write changes file_sha256, slug, or source. Reading actor as authorship on a re-embedded row misattributes it to the most recent reindexer."
     });
     let mut shard_warnings: Vec<String> = Vec::new();
     if shards.malformed > 0 {
@@ -406,6 +406,28 @@ mod tests {
         assert_eq!(out["filtered_total"], 1);
         assert_eq!(out["truncated"], false);
         assert!(out.get("hint").is_none());
+    }
+
+    // Bug 84ad63fe45ab6e2e: `actor` records WHO TOUCHED a row (a reindex
+    // counts), not who wrote it — and reads as authorship. Nothing
+    // previously said so; only `verb`'s per-connection-sticky caveat was
+    // documented, and `verb` is not the discriminator (it doesn't vary
+    // per-row). Assert the note draws the actual distinction: contact
+    // (embedded_sha256-only reindex payload) vs a content write
+    // (file_sha256/slug/source).
+    #[tokio::test]
+    async fn note_distinguishes_reindex_contact_from_a_content_write() {
+        let (ctx, _tmp) = mk_ctx();
+        let out = call(&ctx, json!({"action": "audit_log"})).await.unwrap();
+        let note = out["note"].as_str().unwrap();
+        assert!(
+            note.contains("embedded_sha256"),
+            "note must name the reindex-only payload shape that is contact, not authorship: {note}"
+        );
+        assert!(
+            note.contains("not") && note.to_lowercase().contains("author"),
+            "note must say actor is not authorship: {note}"
+        );
     }
 
     // Task review Finding A (2026-09-01): prune_before_ms prunes by time

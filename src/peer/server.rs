@@ -595,6 +595,87 @@ mod tests {
         handle.abort();
     }
 
+    // Reproduction for bug 986e8146fc44d17d: does `worktree_read_notice`
+    // actually fire on a served read when the peer-serve root has linked
+    // git worktrees? The bug file demands this check before any fix —
+    // "the specific thing to check is whether a served read emits at
+    // all, since the whole file rests on that inference."
+    // Bug 986e8146fc44d17d: `worktree_read_notice`'s remedy tells the
+    // caller to run `workspace(action='activate', ...)` or pass
+    // `workspace="<abs path>"` — both denied-by-construction over the
+    // peer protocol (`PEER_EXPOSED_TOOLS` excludes `workspace`, and
+    // `handle_tool_call_inner` strips a caller-supplied `workspace` arg
+    // before dispatch). Reproduced first without the fix: the notice's
+    // disclosure half ("linked git worktrees", the served root) and its
+    // unreachable remedy ("Call workspace(action='activate'", "pass
+    // workspace=") both appeared verbatim in a served read's response —
+    // confirming the bug's premise that a served read does emit the
+    // notice at all. Assert SHAPE post-fix, not the exact sentence: the
+    // disclosure survives, the two unreachable-remedy phrases are gone,
+    // and something naming the connection as fixed/served remains in
+    // their place.
+    #[tokio::test]
+    async fn worktree_notice_on_a_served_read_never_prescribes_an_activate_or_pin_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+
+        // Fabricate a linked worktree the same way
+        // list_git_worktrees_finds_linked_worktrees does: a
+        // .git/worktrees/<name>/gitdir file, no real git binary needed.
+        let wt_root = tempfile::tempdir().unwrap();
+        let wt_entry = root.join(".git").join("worktrees").join("feat");
+        std::fs::create_dir_all(&wt_entry).unwrap();
+        let gitdir_content = format!("{}/.git\n", wt_root.path().display());
+        std::fs::write(wt_entry.join("gitdir"), &gitdir_content).unwrap();
+
+        let sock = root.join("peer.sock");
+        let hints_dir = tempfile::tempdir().unwrap();
+
+        let (sr, ss, hr) = (root.clone(), sock.clone(), hints_dir.path().to_path_buf());
+        let handle = tokio::spawn(async move {
+            let env = test_env(&hr);
+            let ctx = build_server_for_with_env(&sr, true, env).await.unwrap();
+            let listener = bind_peer_socket(&ss).unwrap();
+            accept_one(&listener, &ctx).await.unwrap();
+        });
+
+        let stream = connect_with_retry(&sock).await;
+        let (rd, mut wr) = stream.into_split();
+        let mut rd = BufReader::new(rd);
+        let req = PeerEnvelope::request(
+            "a:1",
+            "tool.call",
+            serde_json::json!({ "tool": "tree", "args": { "path": "." } }),
+        );
+        write_message(&mut wr, &serde_json::to_value(&req).unwrap())
+            .await
+            .unwrap();
+        let resp: PeerEnvelope =
+            serde_json::from_value(read_message(&mut rd).await.unwrap()).unwrap();
+        assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+        let body = serde_json::to_string(&resp.result.unwrap()).unwrap();
+
+        assert!(
+            body.contains("linked git worktrees"),
+            "the disclosure half (which worktrees exist) must survive: {body}"
+        );
+        assert!(
+            !body.contains("workspace(action='activate'"),
+            "must not prescribe an activate call a served peer cannot make: {body}"
+        );
+        assert!(
+            !body.contains("pass workspace="),
+            "must not prescribe a per-call pin a served peer cannot make: {body}"
+        );
+        assert!(
+            body.contains("served") || body.contains("cannot be repinned"),
+            "should name the connection as fixed/served in place of the stripped remedy: {body}"
+        );
+        handle.abort();
+    }
+
     #[tokio::test]
     async fn peer_refuses_unexposed_tools_even_when_read_write() {
         use crate::peer::protocol::ErrorCode;

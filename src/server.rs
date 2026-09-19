@@ -1063,7 +1063,17 @@ impl CodeScoutServer {
         .map_err(|e| {
             McpError::invalid_params(format!("failed to build tool request: {e}"), None)
         })?;
-        self.call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+        // Bug 986e8146fc44d17d: scope `PEER_SERVE_DISPATCH` around this call's
+        // future (not a field on `req` or `ToolContext`) so `worktree_read_notice`
+        // can tell a peer-serve dispatch apart from an ordinary session without a
+        // new required field rippling into every other `ToolContext` construction
+        // site in the tree. This function is peer-serve's only production caller —
+        // see the doc comment above — so `true` is unconditional here.
+        crate::tools::types::PEER_SERVE_DISPATCH
+            .scope(
+                true,
+                self.call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new()),
+            )
             .await
     }
 
