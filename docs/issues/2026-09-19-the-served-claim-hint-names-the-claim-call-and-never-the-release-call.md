@@ -158,6 +158,19 @@ So similarity sees a disagreement it cannot direct, and history looks for an eve
 
 **What actually worked was not a detector at all, and it already exists.** `doc(action="find")` returns `title` and `abs_path` adjacent in one row; here they contradicted each other on their face. Nothing ran. The adjacency did the work, and it costs nothing.
 
+
+**A THIRD proxy was proposed and falsified, and the recurring SHAPE is the finding — not any of the three checks.**
+
+The third: compare the catalog's `slug` against its `title`. It looked like the one both prior failures pointed at. `slug` is MECHANICALLY derived from `title`, so a disagreement is definitionally staleness with no paraphrase problem — what killed proxy 1 — and it is current-state, so the pre-first-commit blindness that killed proxy 2 does not apply. The catalog audit trail even WITNESSES the divergence git could not: this row's `seq 134008` set the slug, `seq 134050` changed the title, and no slug change ever followed.
+
+**It is wrong by DESIGN, not by data.** A slug is immutable once minted — pinned by `ensure_slug_mints_dedups_and_is_idempotent`, `mint_missing_slugs_is_idempotent_and_never_re_mints` and `mint_missing_slugs_leaves_an_already_minted_slug_alone` in `src/librarian/catalog/artifact.rs` — because `entry_cite`'s primary key is `(src_slug, src_local, dst_ref, rel)`, so re-minting would break every citation pointing at the row. `graft_rows` carries the old slug through a move deliberately. So slug-diverged-from-title is CORRECT BEHAVIOUR, and a check over it flags every artifact whose title was ever edited after minting: the same false-positive generator, third flavour.
+
+It was also MEASURED before the design was read — "56 of 1208 fire" — and those numbers were noise about the measurer's own hand-rolled normalisation disagreeing with `slugify`, plus degenerate `BUG:`-only titles taking fallback slugs and `-2` collision suffixes. **A measurement over a proxy whose mechanism you have not checked measures your normalisation, not the corpus.**
+
+**The shape, now at n=2 across two sessions:** each falsification was published together with a successor proposed in the same breath, and the successor read as viable PRECISELY BECAUSE it had not been checked. The second instance was produced by the party who had named the shape one message earlier, which is the same finding as § *Observer Blindness*'s opening measurement — knowing the class prevented none of the four instances. A refutation creates an empty slot, and the next idea falls into it carrying the authority of the work that emptied it.
+
+**Four candidates, three falsified, and the survivor is not a check.** `doc(action="find")` rendered `title` and `abs_path` adjacent and they contradicted on their face — no detector, no derivation, no normalisation. It is the only one of the four that caught a real instance, and it already exists.
+
 ## Tests added
 
 None.
