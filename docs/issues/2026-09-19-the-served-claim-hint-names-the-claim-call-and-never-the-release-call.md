@@ -2,7 +2,7 @@
 id: 9a0157e63fe559b8
 kind: bug
 status: open
-title: 'BUG: doc(update) persists ArtifactData''s __delete__ sentinel into frontmatter as literal data instead of deleting or refusing'
+title: 'BUG: the served claim hint names the claim call concretely and the release call not at all'
 owners:
 - marius
 tags:
@@ -97,6 +97,8 @@ fields behind. So the correct form exists and works; it is simply never printed.
 
 ## Hypotheses tried
 
+**The title carried the retracted framing until 2026-09-19, after the body retraction landed**, and that is this file's own defect one layer up. `doc(action="find")` returns `title`, not bodies, and this file has no H1 — so `title:` was its only headline, and every list query, including the triage queries that found this bug, rendered the framing § *Root cause* had already withdrawn. The correction was complete on the surface written and absent from the surface read. Caught by a peer session reading the frontmatter rather than the prose.
+
 - **"Two deletion sentinels collide inside one MCP server."** FALSIFIED by
   `git grep -l '__delete__'` returning one file, this one. The sentinel is the harness's,
   not codescout's; this was a cross-TOOL carry-over, not an intra-server collision. Raised
@@ -106,6 +108,8 @@ fields behind. So the correct form exists and works; it is simply never printed.
   dropped field leaves the frontmatter unchanged, which is a different and cheaper failure.
 
 ## Fix
+
+**Precedent for the narrower guard, which strengthens it beyond what this file first argued:** `extra` is NOT a contractually-anything-goes field today. It already refuses reserved keys, and `src/librarian/tools/update.rs:2162` asserts "a reserved key is refused whatever its value". So refusing the `{"__delete__": …}` shape is an ADDITION to an existing refusal set, not a new kind of validation imposed on a free field — which answers the obvious objection that round-trip-safety means `extra` must accept everything. (Supplied by a peer session; verified at the cited line.)
 
 Not fixed. The direction that matches the defect: **print the release call, not a sentence
 about it.** The hint already formats one concrete call; formatting its inverse costs the
