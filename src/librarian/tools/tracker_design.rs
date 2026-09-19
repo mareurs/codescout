@@ -219,13 +219,13 @@ fn archetype_audit_issues() -> Value {
         "when_to_use": "Numbered audit output: issue table with severity, status, owner. Examples: 'chunking-pipeline audit', 'production-trace audit'.",
         "params_shape_example": {
             "issues": [
-                { "n": 1, "title": "Long PDFs split mid-sentence", "severity": "high", "status": "fixed", "owner": "@mareurs",
+                { "id": "AI-1", "title": "Long PDFs split mid-sentence", "severity": "high", "status": "fixed", "owner": "@mareurs",
                   "severity_reason": "splits within a paragraph break sentence boundaries; downstream retrieval scores 0.05 lower P@5",
                   "ref_kind": "code_symbol", "md_file": "docs/chunking-audit.md", "md_line": 42,
                   "raw_ref": "src/chunking/splitter.rs::Splitter::next_chunk",
                   "first_seen_commit": "abc1234", "first_seen_at": "2026-04-12T09:30:00Z",
                   "last_verified_at": "2026-05-15T14:20:00Z" },
-                { "n": 2, "title": "Headers lost in xlsx",        "severity": "med",  "status": "open",  "owner": "@mareurs" }
+                { "id": "AI-2", "title": "Headers lost in xlsx",        "severity": "med",  "status": "open",  "owner": "@mareurs" }
             ]
         },
         "params_schema_example": {
@@ -236,9 +236,9 @@ fn archetype_audit_issues() -> Value {
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "required": ["n", "title", "severity", "status"],
+                        "required": ["id", "title", "severity", "status"],
                         "properties": {
-                            "n":                 { "type": "integer", "minimum": 1 },
+                            "id":                { "type": "string", "pattern": "^AI-\\d+$" },
                             "title":             { "type": "string" },
                             "severity":          { "type": "string", "enum": ["high", "med", "low"] },
                             "status":            { "type": "string", "enum": ["open", "in-progress", "fixed", "wontfix"] },
@@ -256,9 +256,10 @@ fn archetype_audit_issues() -> Value {
                 }
             }
         },
-        "render_template_example": "| # | Issue | Severity | Status | Owner |\n|--:|-------|:--------:|:------:|-------|\n{% for i in issues %}| {{ i.n }} | {{ i.title }} | {{ i.severity }} | {{ i.status }} | {{ i.owner or \"—\" }} |\n{% endfor %}",
-        "body_skeleton": "## Audit scope and methodology\n\n_What was audited, when, by whom._\n\n## Per-issue detail\n\n_For each issue: Symptom / Root cause / Fix / Predicted impact._\n\n## History\n\n_### YYYY-MM-DD — <event>_",
-        "prompt_template": "Maintain the numbered issue table. Status flips drive updates: as issues are fixed, mark `fixed` with a body note. Don't renumber. New issues get the next integer. Body has per-issue Symptom/RootCause/Fix sections — update those when status changes."
+        "render_template_example": "| id | Issue | Severity | Status | Owner |\n|----|-------|:--------:|:------:|-------|\n{% for i in issues %}| {{ i.id }} | {{ i.title }} | {{ i.severity }} | {{ i.status }} | {{ i.owner or \"—\" }} |\n{% endfor %}",
+        "body_skeleton": "## Audit scope and methodology\n\n_What was audited, when, by whom._\n\n## AI-N — <title>\n\n_One section per issue, and NOT optional: this heading is the only thing that makes `AI-N` citable — link_scan binds a token to `## <ID> — <title>` and neither a params row nor the render_template table defines one. For each issue: Symptom / Root cause / Fix / Predicted impact._\n\n## History\n\n_### YYYY-MM-DD — <event>_",
+        "prompt_template": "Maintain the numbered issue table. Status flips drive updates: as issues are fixed, mark `fixed` with a body note. Never renumber — new issues get a fresh `AI-N` id, and each also needs its own `## AI-N — <title>` section, which is what makes it citable. Body has per-issue Symptom/RootCause/Fix sections — update those when status changes.",
+        "entry_collection": "issues"
     })
 }
 
@@ -1052,6 +1053,68 @@ mod tests {
                      following it writes a ledger whose entries nothing can cite. Skeleton was: \
                      {skeleton}"
             );
+        }
+    }
+
+    /// Hardens the guard above against the exact gap
+    /// docs/issues/2026-09-17-the-archetype-guard-is-keyed-on-the-field-whose-absence-is-the-defect.md
+    /// describes: the heading-presence guard is keyed on `entry_collection` being
+    /// declared, which makes ITS ABSENCE — the actual defect in `audit_issues` — invisible
+    /// to it, since `continue` on a missing `entry_collection` skips the archetype
+    /// entirely rather than flagging that the field itself is missing.
+    ///
+    /// An archetype that declares NO `entry_collection` at all now has to earn that:
+    /// none of its top-level params arrays may look like a params-kept ledger (an item
+    /// schema requiring both `status` and an id-like field, `id` or `n`) unless that
+    /// field is a reference to another artifact's own entry rather than one minted here
+    /// (`artifact_id` required alongside it — see `goal`'s `children`, which cites C-N
+    /// ids defined in the child tracker, not in `goal` itself).
+    ///
+    /// Deliberately narrower than "every array of objects needs entry_collection": that
+    /// blanket form false-positives on `metric_baseline.sessions` (date-keyed, no
+    /// `status`) and `goal.acceptance_signals`/`progress_log` (no id-like field at all)
+    /// — none of those are ledgers a caller would ever try to `update_entry` into, and
+    /// `task_list.phases` (which does carry `n`+`title`+`status`) is exempt too, but for
+    /// a different reason: `task_list` already declares an `entry_collection`
+    /// (`"tasks"`), so it never reaches this check at all — see the guard above.
+    #[test]
+    fn every_archetype_without_an_entry_collection_has_no_ledger_shaped_array() {
+        for arch in archetypes().as_array().unwrap() {
+            if arch["entry_collection"].as_str().is_some() {
+                continue; // covered by the heading-presence guard above
+            }
+            let name = arch["name"].as_str().unwrap();
+            let Some(props) = arch["params_schema_example"]["properties"].as_object() else {
+                continue;
+            };
+            for (key, field_schema) in props {
+                if field_schema["type"].as_str() != Some("array") {
+                    continue;
+                }
+                let Some(required) = field_schema["items"]["required"].as_array() else {
+                    continue;
+                };
+                let required: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+                let id_field = if required.contains(&"id") {
+                    "id"
+                } else if required.contains(&"n") {
+                    "n"
+                } else {
+                    continue;
+                };
+                if required.contains(&"artifact_id") {
+                    continue; // references another artifact's own entry, mints nothing here
+                }
+                assert!(
+                    !required.contains(&"status"),
+                    "archetype '{name}' declares no entry_collection but its `{key}` array's \
+                     item schema requires `{id_field}` plus `status` — that shape is a \
+                     params-kept ledger. Declare `entry_collection: \"{key}\"` (see \
+                     failure_table, task_list) so update_entry/entry_filter can reach it, and \
+                     give body_skeleton a `## <PREFIX>-N — <title>` heading so link_scan can \
+                     cite it."
+                );
+            }
         }
     }
 

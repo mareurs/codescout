@@ -778,6 +778,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 }
                 (joined, None, extra)
             } else if let (Some(s), Some(e)) = (a.start_line, a.end_line) {
+                // `start_line`/`end_line` are body-relative (deliberately, per F-128 /
+                // docs/issues/archive/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md)
+                // while `preview.headings[].line` is file-relative (the sibling fix in the same
+                // bug). A number taken from the heading map and fed straight back in here is
+                // therefore in the wrong coordinate frame — and used to come back as a silently
+                // empty body rather than an error, reading as "the section moved" rather than
+                // "wrong units". Refuse anything that cannot possibly be a body-relative line,
+                // naming `line_offset` (== `frontmatter_lines`) so the caller can convert.
+                let body_line_count = body.lines().count();
+                let bad = [s, e].into_iter().find(|n| *n == 0 || *n > body_line_count);
+                if let Some(bad) = bad {
+                    return Err(LibrarianRecoverableError::new(format!(
+                        "start_line/end_line are body-relative (frontmatter_lines: {line_offset}), \
+                         but {bad} exceeds this document's {body_line_count}-line body — \
+                         did you take {bad} from preview.headings[].line (file-relative)? \
+                         subtract frontmatter_lines: try {}",
+                        bad.saturating_sub(line_offset)
+                    )));
+                }
                 (
                     slice_lines(body, s, e),
                     None,
@@ -1468,6 +1487,51 @@ mod tests {
 
         let v = call(&ctx, json!({"id": "a"})).await.unwrap();
         assert_eq!(v["frontmatter_lines"], json!(0));
+    }
+
+    /// Regression for docs/issues/2026-09-15-doc-get-numbers-headings-in-file-lines-and-reads-in-body-lines.md.
+    /// `preview.headings[].line` is file-relative (the sibling fix above) but
+    /// `start_line`/`end_line` stay body-relative (deliberately, per F-128) — nothing stopped a
+    /// caller composing this tool's OWN response with itself from feeding a heading's file-relative
+    /// line straight back into `start_line`, which used to silently return an empty body (no
+    /// error), reading as "the section is not there" rather than "wrong units". A number that
+    /// cannot possibly be a body-relative line (it exceeds the body's own line count) must be
+    /// refused, naming `frontmatter_lines` so the caller can convert — not answered with silence.
+    #[tokio::test]
+    async fn start_line_that_cannot_be_body_relative_is_refused_not_silently_empty() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        // 10-line frontmatter block + 1 blank separator, then a 3-line body ("## Only", "", "body").
+        let fixture =
+            "---\nkind: spec\na: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\n---\n\n## Only\n\nbody\n";
+        fs::write(dir.path().join("a.md"), fixture).unwrap();
+
+        // Body line 1 == file line (idx + 1), so the frontmatter offset equals idx.
+        let idx = fixture.lines().position(|l| l == "## Only").unwrap();
+        assert_eq!(idx, 11, "fixture shape changed; recompute");
+
+        let v = call(&ctx, json!({"id": "a"})).await.unwrap();
+        assert_eq!(v["frontmatter_lines"], json!(idx));
+        let heading_line = v["preview"]["headings"][0]["line"].as_u64().unwrap();
+        assert_eq!(heading_line, 12, "fixture shape changed; recompute");
+
+        // Feed the file-relative number straight back in, exactly as composing doc(get)'s own
+        // heading map with itself would — the body is only 3 lines long, so 12 cannot be valid.
+        let res = call(
+            &ctx,
+            json!({"id": "a", "start_line": heading_line, "end_line": heading_line}),
+        )
+        .await;
+        let err = res.expect_err(
+            "start_line taken from preview.headings[].line (12) exceeds this document's 3-line \
+             body and must be refused, not silently answered with an empty body",
+        );
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("11"),
+            "refusal must name the frontmatter offset (11) so the caller can convert: {msg}"
+        );
     }
 
     /// The over-correction guard: a heading that genuinely is not there must still say
