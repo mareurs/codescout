@@ -396,17 +396,21 @@ impl Tool for ProjectStatus {
             // Compaction clears everything. See
             // docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md.
             //
-            // Gated on the SAME condition `ActivateProject::call`'s guarded re-arm
-            // branch uses, converging an asymmetry between two adjacent branches:
-            // see docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md.
-            // A verifiably live companion means conversation-identity changes are
-            // already visible to us via the rendezvous poll elsewhere, so a blunt
-            // clear here is redundant guesswork about a call this server cannot
-            // itself confirm reflects a real compaction. With no rendezvous to
-            // trust, degrade to the historical always-safe behaviour.
-            if !ctx.guide_hints_emitted.lock().rendezvous_active() {
-                ctx.guide_hints_emitted.lock().clear();
-            }
+            // NOT gated on `rendezvous_active()`, and the attempt is recorded here
+            // because it looks obviously right and is not:
+            // docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md.
+            // `ActivateProject::call`'s guarded branch above may skip the blunt clear
+            // because the event it cares about is a `/clear`, which IS visible here —
+            // `Rendezvous::poll` returns the new session id when it CHANGES. A
+            // compaction changes nothing it can see: the session id is identical
+            // across one ("a repeated stamp of the SAME session must be silent"), and
+            // the companion writes only `hook_at`, never the source. So liveness is
+            // not evidence about compaction, and gating on it would mean a genuine
+            // compaction never re-arms the ledger for any session with a live
+            // companion — which is every session in this repo. Clearing
+            // unconditionally over-serves guides on a mistaken call; gating
+            // under-serves them on every real one.
+            ctx.guide_hints_emitted.lock().clear();
             tracing::info!("PostCompact: flushed all LSP clients; they will restart lazily.");
             return Ok(json!({
                 "flushed": true,

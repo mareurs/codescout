@@ -1517,15 +1517,23 @@ async fn activate_project_unknown_id_with_no_slash_returns_error() {
     );
 }
 
-/// Bug `a5054d135acacbe3`: `post_compact=true` unconditionally cleared
-/// `guide_hints_emitted`, with no check that a companion hook is even reachable —
-/// unlike the adjacent guarded branch in `ActivateProject::call` (six lines up in the
-/// same file), which skips its own blunt clear whenever `rendezvous_active()` is true.
-/// That asymmetry is the bug: converging the two means post_compact's clear is gated
-/// on the identical condition its sibling already uses, rather than firing on every
-/// call regardless of whether the signal can be trusted.
+/// `post_compact=true` clears the ledger EVEN when the rendezvous is live, and this test
+/// exists because the opposite is the attractive answer.
+///
+/// Bug `a5054d135acacbe3` observes that the adjacent branch in `ActivateProject::call`
+/// skips its own blunt clear when `rendezvous_active()`, so converging the two looks like
+/// removing an asymmetry. It is not. That branch's event is a `/clear`, which the poll CAN
+/// see: `Rendezvous::poll` returns the new session id when it CHANGES. A compaction changes
+/// nothing it can see — the session id is identical across one ("a repeated stamp of the
+/// SAME session must be silent"), and the companion stamps only `hook_at`, never the
+/// source. A live companion is therefore not evidence about whether a compaction happened.
+///
+/// Gating here would mean a genuine compaction never re-arms the ledger for any session
+/// running the companion — which is every session in this repo — trading an n=1 over-serve
+/// for an under-serve on every real compaction. The gating was implemented, caught in
+/// review, and reverted; this assertion is what makes re-proposing it red.
 #[tokio::test]
-async fn post_compact_skips_the_clear_when_rendezvous_is_active() {
+async fn post_compact_clears_even_when_the_rendezvous_is_active() {
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
 
@@ -1552,10 +1560,11 @@ async fn post_compact_skips_the_clear_when_rendezvous_is_active() {
         .unwrap();
     assert_eq!(result["flushed"], json!(true), "expected flushed:true");
     assert!(
-        ctx.guide_hints_emitted.lock().contains("librarian"),
-        "a verifiably live companion means conversation-identity changes are already \
-         visible via the rendezvous poll elsewhere, so a blunt clear here is redundant \
-         guesswork — it must not fire while the gate is open"
+        !ctx.guide_hints_emitted.lock().contains("librarian"),
+        "post_compact must clear the ledger even with a live rendezvous. The poll reports a \
+         CHANGED session id, which a compaction never produces, so liveness is not evidence \
+         about compaction. Gating on it under-serves guides on every real compaction for any \
+         session running the companion."
     );
 }
 
