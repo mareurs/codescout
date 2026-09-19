@@ -130,6 +130,16 @@ pub(crate) fn insert_below_header(body: String, extra: &str) -> String {
 /// caller its own wording.
 ///
 /// See `docs/issues/archive/2026-08-16-content-free-overflow-envelope-costs-a-round-trip.md`.
+///
+/// **Object-valued keys are descended one level, not dropped.** The scalar pass used to end
+/// in `_ => None` for anything that was not a string/number/bool, which silently reduced an
+/// object-valued key (e.g. a `hints` field carrying `unindexed_files` / `hidden_archived`) to
+/// its bare name in the `keys:` line and nothing else — the magnitude (`count`) reached the
+/// reader verbatim while the qualifier that makes it interpretable did not. The descent is
+/// deliberately ONE level and scalars-only (no general recursive walk, which would re-open
+/// the `MAX_KEYS` / `MAX_SCALARS` budget question this function exists to close) — every
+/// known caller's nested object (`hints`) is a flat map of short scalars by construction.
+/// See `docs/issues/2026-09-02-overflow-summary-promotes-the-count-and-elides-its-caveat.md`.
 pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
     /// Wide objects exist (`doc(get)` alone carries ~15); listing every key would
     /// crowd out the arrays and scalars below, which carry more per byte.
@@ -141,6 +151,26 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
     const MAX_SCALAR_LEN: usize = 60;
     // cap-class: RESULT_CAP format.shape_scalars — probed
     const MAX_SCALARS: usize = 8;
+
+    /// Render a flat object's own scalar fields as `k=v` pairs, bounded the same way the
+    /// top-level scalar pass is. Used both for the top level and for the one-level descent
+    /// into an object-valued key — never called a third time, which is what keeps the
+    /// descent narrow rather than a general recursive walk.
+    fn flat_scalars(
+        map: &serde_json::Map<String, Value>,
+        max_len: usize,
+        max_count: usize,
+    ) -> Vec<String> {
+        map.iter()
+            .filter_map(|(k, v)| match v {
+                Value::String(s) if s.len() <= max_len => Some(format!("{k}={s:?}")),
+                Value::Number(n) => Some(format!("{k}={n}")),
+                Value::Bool(b) => Some(format!("{k}={b}")),
+                _ => None,
+            })
+            .take(max_count)
+            .collect()
+    }
 
     match val {
         Value::Object(map) if !map.is_empty() => {
@@ -165,6 +195,20 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
                     Value::String(s) if s.len() <= MAX_SCALAR_LEN => Some(format!("{k}={s:?}")),
                     Value::Number(n) => Some(format!("{k}={n}")),
                     Value::Bool(b) => Some(format!("{k}={b}")),
+                    // A non-empty object gets ONE level of descent into its own scalars —
+                    // e.g. `hints={unindexed_files=1}` — instead of being reduced to its
+                    // bare key name. An object whose contents are themselves non-scalar
+                    // (nested further, or empty) still contributes nothing here; that is
+                    // the narrow-fix boundary, not a silent regression, since it is no
+                    // worse than the prior behavior for that shape.
+                    Value::Object(o) if !o.is_empty() => {
+                        let nested = flat_scalars(o, MAX_SCALAR_LEN, MAX_SCALARS);
+                        if nested.is_empty() {
+                            None
+                        } else {
+                            Some(format!("{k}: {{{}}}", nested.join(", ")))
+                        }
+                    }
                     _ => None,
                 })
                 .take(MAX_SCALARS)
@@ -403,6 +447,39 @@ mod tests {
         assert!(describe_payload_shape(&serde_json::json!("hi")).is_none());
         assert!(describe_payload_shape(&serde_json::json!(7)).is_none());
         assert!(describe_payload_shape(&serde_json::json!({})).is_none());
+    }
+
+    /// Regression test for
+    /// `docs/issues/2026-09-02-overflow-summary-promotes-the-count-and-elides-its-caveat.md`:
+    /// a mixed payload whose object-valued key (`hints`, analogous to the librarian's own
+    /// completeness/scope qualifiers) must surface its scalar contents, not just its bare
+    /// name in the `keys:` line — the array-valued key already worked (`arrays:` pass), the
+    /// scalar-valued key already worked; only the object-valued key was silently dropped.
+    #[test]
+    fn describe_payload_shape_surfaces_a_nested_object_alongside_scalars_and_arrays() {
+        let val = serde_json::json!({
+            "count": 48,
+            "hints": {"unindexed_files": 1, "reindex_hint": true},
+            "items": [1, 2, 3],
+        });
+        let shape = describe_payload_shape(&val).expect("an object has a shape");
+
+        // The scalar-valued key: unaffected by this fix, must still work.
+        assert!(shape.contains("count=48"), "scalar key regressed: {shape}");
+        // The array-valued key: unaffected by this fix (handled by the `arrays:` pass).
+        assert!(shape.contains("items[3]"), "array key regressed: {shape}");
+        // The object-valued key: THE fix. Before it, `hints` contributed only its bare
+        // name to `keys:` and nothing else — the magnitude (`count=48`) reached the reader
+        // while the qualifier that makes it interpretable (`unindexed_files`) did not.
+        assert!(
+            shape.contains("unindexed_files=1"),
+            "object-valued key's scalar contents must surface, not be reduced to a bare \
+             key name: {shape}"
+        );
+        assert!(
+            shape.contains("reindex_hint=true"),
+            "every flat scalar inside the nested object must surface, not just the first: {shape}"
+        );
     }
 
     #[test]

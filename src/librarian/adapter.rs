@@ -620,15 +620,28 @@ fn librarian_compact_summary(inner_name: &str, result: &Value) -> Option<String>
         lines.push(elided);
     }
 
+    // Tracks whether `$.overflow` has already been fully described by one of the two
+    // dedicated renderers below, so the generic fallback at the end does not restate it.
+    // `body_truncation_warning` and `overflow_hint` are mutually exclusive by construction
+    // (the latter declines exactly when `shown_lines` is present, which is the former's
+    // trigger), so at most one of them ever fires per result — but describe_payload_shape's
+    // one-level object descent (bug 4a00acf19728660f) now surfaces `overflow`'s own scalar
+    // fields too, and without this exclusion that duplicates whichever count the dedicated
+    // line above already announced. See
+    // `compact_summary_promotes_an_overflow_hint_from_any_librarian_tool`'s body-cap case.
+    let mut overflow_already_described = false;
+
     // Artifact-shaped messages stay gated on the tool, so another librarian action
     // carrying a similar-looking field is never described as an artifact body.
     if is_artifact {
         if let Some(warning) = body_truncation_warning(result) {
             lines.push(warning);
+            overflow_already_described = true;
         }
     }
     if let Some(hint) = overflow_hint(result) {
         lines.push(hint);
+        overflow_already_described = true;
     }
     if is_artifact {
         if let Some(matched) = matched_items_summary(result) {
@@ -645,7 +658,26 @@ fn librarian_compact_summary(inner_name: &str, result: &Value) -> Option<String>
         return None;
     }
 
-    if let Some(shape) = crate::tools::format::describe_payload_shape(result) {
+    // The generic shape describer runs over `result` unchanged UNLESS `overflow` was
+    // already announced above — in which case it runs over a shallow copy with that one
+    // key removed, so it still describes everything else (candidates_capped, a sibling
+    // `scope`, whatever a future action adds) without repeating the count a louder,
+    // more specific line already gave.
+    let trimmed;
+    let shape_source = if overflow_already_described {
+        match result.as_object() {
+            Some(map) if map.contains_key("overflow") => {
+                let mut m = map.clone();
+                m.remove("overflow");
+                trimmed = Value::Object(m);
+                &trimmed
+            }
+            _ => result,
+        }
+    } else {
+        result
+    };
+    if let Some(shape) = crate::tools::format::describe_payload_shape(shape_source) {
         lines.push(shape);
     }
     Some(lines.join("\n  "))
