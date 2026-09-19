@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/selector-narrower-than-its-population
 - librarian
@@ -121,6 +121,8 @@ librarian(action="tracker_design", archetype="failure_table")
 Then build a tracker from the first and call `update_entry` on any entry.
 
 ## Suggested fix
+
+**FIXED 2026-09-19** — `38c171786ab80e9088c7b4e3ce7aa7d8dc9182c6`, patch-id `7b38047f3d0489161cb215f7a005b8b75d48bc35`. Both halves shipped: the archetype keys on `id` with an `^AI-\d+$` pattern, declares `entry_collection: "issues"`, and its skeleton carries the `## AI-N — <title>` heading; and `every_archetype_without_an_entry_collection_has_no_ledger_shaped_array` closes the self-exemption, so an array-of-objects params shape must declare an entry_collection. Both reds observed in the order that proves it discriminates — hardened guard against the unfixed archetype first, then the heading guard against a partial fix.
 
 Smallest correct change: re-key `audit_issues`' `params_shape_example` and
 `params_schema_example` from `n` to `id`, add `"entry_collection": "issues"`, and give

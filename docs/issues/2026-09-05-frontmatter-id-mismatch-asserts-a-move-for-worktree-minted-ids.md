@@ -1,7 +1,7 @@
 ---
 id: e82deca98330f72c
 kind: bug
-status: open
+status: fixed
 title: 'BUG: frontmatter_id_mismatch still asserts a move for ids that were minted in another checkout'
 tags:
 - cluster/hint-composed-without-the-request
@@ -136,6 +136,8 @@ instead of a refusal banner, which is a surface nobody writes assertions about.
    under sha256. Not "no evidence of a move"; evidence of something else.
 
 ## Fix
+
+**FIXED 2026-09-19** — `8fe2f397c36b2baa656105f944a47bb40b9e62a6`, patch-id `6934e1a05fc40197ca7354704df0218ec5d1e350`. The detail now states the disjunction (a move, or a foreign-checkout mint) rather than asserting one cause; measured 8 of 8 live instances as foreign-checkout, zero as an actual move. Tested by SHAPE — the message must name both causes — not by pinning the sentence. The trial-hash discriminator remains deferred per this file's own Resume.
 
 Say what is known and stop. The mismatch is certain; the cause is not. Either:
 

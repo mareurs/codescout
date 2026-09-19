@@ -1,7 +1,7 @@
 ---
 id: '0135747b8b9664a3'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: doc(get) numbers headings in FILE lines and reads in BODY lines, so a heading''s own line reads back empty'
 owners:
 - marius
@@ -78,6 +78,8 @@ not an artefact of a stale binary.
 Not read.
 
 ## Fix
+
+**FIXED 2026-09-19** — `38c171786ab80e9088c7b4e3ce7aa7d8dc9182c6`, patch-id `7b38047f3d0489161cb215f7a005b8b75d48bc35`. Fix 3 (refusal) taken, not the reinterpretation: an out-of-range `start_line` now returns a `RecoverableError` naming `line_offset` and the corrected value, instead of a silently empty body. Re-framing to file-relative stays deferred per the 2026-08-31 ruling, which held it back as bigger than one bug-fix session should decide unilaterally.
 
 Not attempted. The cheapest remedy is to make the response self-describing rather than to
 change either number — both are defensible in isolation, and what is missing is the label.

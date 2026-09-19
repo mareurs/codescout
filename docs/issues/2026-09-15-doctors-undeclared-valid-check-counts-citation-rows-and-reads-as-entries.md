@@ -1,7 +1,7 @@
 ---
 id: '2155678e29cbd91a'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: doctor''s undeclared-Valid check counts citation rows, and its worklist reads as entries — 18 rows, 9 entries'
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
@@ -94,6 +94,8 @@ None beyond the greps above. Filed on notice rather than investigated, per `CLAU
 Tracking* — the count is wrong today whatever the mechanism turns out to be.
 
 ## Fix
+
+**FIXED 2026-09-19** — `8fe2f397c36b2baa656105f944a47bb40b9e62a6`, patch-id `6934e1a05fc40197ca7354704df0218ec5d1e350`. Per-artifact `seen_ids` set in `scan_cited_but_undeclared`, scoped inside the row loop so it cannot suppress a genuine violation elsewhere. Dedup by FIRST occurrence, matching `extract()`'s `seen_defs`, which binds citations to the earlier heading.
 
 Not designed. The reader-facing half is cheap and independent of the cause: **publish the distinct
 entry count beside the row count**, or give each row a key that makes the duplication visible

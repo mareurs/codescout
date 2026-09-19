@@ -1,7 +1,7 @@
 ---
 id: '4a00acf19728660f'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the overflow summary promotes a magnitude verbatim and reduces the qualifier that makes it interpretable to a bare key name'
 tags:
 - cluster/capped-result-presented-as-complete
@@ -253,6 +253,8 @@ summarised with `hints` elided; 1 row → full JSON inline with `hints` present.
    biggest.
 
 ## Fix
+
+**FIXED 2026-09-19** — `78c4ea7b2a9eb91da63b944d6db4ce968f4c892d`, patch-id `d9820d3901ec9039c27bc1dd03cf7c101b2612d6`. `describe_payload_shape` descends one level into an object-valued key instead of dropping it at `_ => None`. Arrays were never affected — a separate `arrays:` pass already surfaced them, confirmed at the bytes. The descent caused one regression, caught and fixed in the same commit: it duplicated the body-cap announcement, so `librarian_compact_summary` now strips `overflow` only when a dedicated renderer has already described it. Narrowed at the caller, not in the shared formatter, which also backs non-librarian call sites where nothing pre-handles `$.overflow`.
 
 Not yet implemented. The narrow fix follows from the root cause: in the scalar pass
 (`src/tools/format.rs:159-166`), descend one level into object-valued keys whose contents

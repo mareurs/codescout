@@ -1,7 +1,7 @@
 ---
 id: '980b98ef4dc66eac'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a malformed project.toml silently resolves the default embedding model instead of erroring'
 tags:
 - cluster/unclassified
@@ -54,6 +54,8 @@ up: propagate the error with `?` rather than `.ok()`, at whichever layer between
 own and cannot edge-resolve away," which is the reason NOT to fix it inline as part of Task 8.
 
 ## Fix
+
+**FIXED 2026-09-19** — `e635d4dab44a4b434a300ceab2b8402088d43a4d`, patch-id `89bf0a9bbd81be5a32efa790eb8dbfc912e5b9ca`. `resolve_embed_fields_with` propagates with `?` as a `RecoverableError` instead of `.ok()`-ing the parse failure into `None`. The missing-file path is unchanged and now pinned separately — its red was observed under mutation, since it cannot red on the production path.
 
 Not attempted. Scoped out of
 `docs/plans/2026-09-17-embedding-config-consolidation.md` Task 8, which this was found while

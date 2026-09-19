@@ -1,15 +1,13 @@
 ---
 id: c222737eedb69850
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: three config tests red on any machine whose environment configures codescout — the derive-the-list fix landed at one site, three siblings still hand-type it'
 owners:
 - marius
 tags:
 - cluster/selector-narrower-than-its-population
 topic: test isolation and the embedding env alias surface
-claimed_at: 2026-09-19
-claimed_by: 48d1f0c8-9f60-43bb-a15e-17ec7995813a
 ---
 
 ## Summary
@@ -134,6 +132,8 @@ adequate.
   hand-enumeration error one level up.
 
 ## Fix
+
+**FIXED 2026-09-19** — `e635d4dab44a4b434a300ceab2b8402088d43a4d`, patch-id `89bf0a9bbd81be5a32efa790eb8dbfc912e5b9ca`. All five env-touching tests in `tests/retrieval_unit.rs` now derive their isolation list from `embedding_env::all_names()` via one `with_isolated_retrieval_env` helper, which also pins `XDG_CONFIG_HOME`. Verified green in BOTH directions — ambient vars set and cleared. The guard this file asked for ships as `the_isolation_helper_clears_every_declared_embedding_name`, mutation-verified KILLED.
 
 Make each failing test neutralise the **whole** embedding env surface before setting its own vars —
 derive from `embedding_env::all_names()`, as `config_from_env_uses_defaults_when_unset` already

@@ -1,7 +1,7 @@
 ---
 id: '34be359cd8087698'
 kind: bug
-status: open
+status: fixed
 title: workspace(activate) writes libraries.json while is_write reports false, so the write lock never fires
 tags:
 - cluster/guard-narrower-than-its-name
@@ -87,6 +87,8 @@ comment pointing here rather than silently matching the annotation to `is_write`
    unguarded is a judgement the code does not record either way.
 
 ## Fix
+
+**FIXED 2026-09-19** — `2ccea49e279b9e4837cb9dba029e417798efd88e`, patch-id `686dc48821d206dc98ea935ddbe6d8538a51e353`. `Workspace::is_write` overrides the trait default and switches on the action, so `activate` takes the cross-process write lock while `status` and `list_projects` stay unlocked — `is_write` is evaluated per CALL, not per tool. Two doc comments that named `workspace` as an example of this gap were corrected in the same commit.
 Not attempted. Two candidate shapes, and the choice is not obvious:
 
 - **Override `is_write`** to return true for `action="activate"`. Correct and one line, but

@@ -95,6 +95,8 @@ So:
 
 ## Not fixed, deliberately
 
+**Attempted and REVERTED 2026-09-19** (`4b12032e`), recorded so the third proposal is cheaper than the second. The clear was gated on `rendezvous_active()`, converging it with `ActivateProject::call`'s adjacent branch — which reads as closing an asymmetry and is not. The two branches guard different EVENTS and only one is observable: that branch's is a `/clear`, which `Rendezvous::poll` genuinely sees (it "returns the new session id ONLY when it changed"), while a compaction leaves the session id identical, and the companion stamps only `hook_at`, never the source. Since the companion is always active here, the gating meant a GENUINE compaction never re-armed the ledger — an under-serve on every real compaction traded for this file's n=1 over-serve. The inverted test `post_compact_clears_even_when_the_rendezvous_is_active` now reds on re-proposal. This ruling stands: the design in § *The one viable design* is still the only viable one, and still not obviously worth a two-repo change at n=1.
+
 One datapoint. The cost per occurrence is measured (~49 KB) but the **rate** is not: the
 correct usage is driven by a hook that fires only on compaction and explicitly instructs
 the model to make the call, so a spurious call requires the model to invoke it without
@@ -104,4 +106,3 @@ it happens generally.
 A two-repo change on n=1 is not obviously worth it. What *is* worth doing independently
 is correcting the stale `Entry.hook_at` doc comment, since it is what makes the refuted
 design look correct.
-

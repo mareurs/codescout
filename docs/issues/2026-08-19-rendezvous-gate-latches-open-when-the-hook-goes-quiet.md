@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/gate-keyed-on-unobservable-event
 - guide-ledger
@@ -328,6 +328,8 @@ evidence most directly supports.
    **Evidence link:** § Independent verification.
 
 ## Fix
+
+**FIXED 2026-09-19** — `2ccea49e279b9e4837cb9dba029e417798efd88e`, patch-id `686dc48821d206dc98ea935ddbe6d8538a51e353`. Staleness now derives at READ time in `is_active()` from the cached mtime, leaving `poll()`'s assignment as a sticky "ever observed" flag. TTL is five times the companion's published `LIVENESS_THROTTLE_MS = 60_000`; the 60s is sourced from `lib.mjs`, the x5 is a disclosed judgment call — a single window would false-deactivate on any ordinary tool-free pause, the failure mode that refuted this file's earlier `hook_at`-age design. Tested as a three-point sandwich with injected mtimes, no sleeps.
 
 **Still no fix implemented** — but the shape has moved, and the reason is measured
 rather than argued. See § Evidence → *Measured 2026-08-26*.

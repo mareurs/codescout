@@ -1,13 +1,13 @@
 ---
-status: open
-opened: 2026-09-13
-closed:
-severity: low
-owner: marius
-related: []
+kind: bug
+status: fixed
 tags:
 - cluster/accepted-parameter-silently-dropped
-kind: bug
+closed: null
+opened: 2026-09-13
+owner: marius
+related: []
+severity: low
 ---
 
 # The ledger hook silently ignores an unrecognised flag
@@ -59,6 +59,8 @@ if source not in ("index", "worktree", "head"):
 checked by the same standard, which is the inconsistency rather than an oversight in principle.
 
 ## Suggested fix
+
+**FIXED 2026-09-19** — `562f24d069916182a680a15b3aa6eefa26c40cf0`, patch-id `3698108fc08c31f6fe496d862843866400736541`. A trailing `else` in `main()`'s argv chain exits naming the unrecognised flag. All eight caller surfaces were enumerated before adding the refusal — three peer sessions share this checkout and a new refusal that reds someone's commit would be worse than the bug. The regression test uses a plausible typo (`--fixture-ledgre`) rather than an obviously bogus token, because that is the bug's actual shape, and asserts stderr names the flag rather than merely exiting non-zero.
 
 One line, and it should be cheap to get right:
 
