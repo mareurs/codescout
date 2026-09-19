@@ -688,7 +688,7 @@ async fn a_pinned_read_gets_no_worktree_notice_even_though_the_tree_is_unchosen(
     );
 }
 
-/// docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md
+/// docs/issues/archive/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md
 ///
 /// **The DELIVERY half, which no other test in this file reaches.**
 ///
@@ -2515,7 +2515,7 @@ async fn correction_reaches_the_caller_on_the_json_path() {
 #[tokio::test]
 async fn correction_reaches_the_caller_on_the_compact_text_path() {
     // THE REGRESSION THAT ALREADY HAPPENED ONCE, to `workspace_notice`:
-    // docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md
+    // docs/issues/archive/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md
     // `format_compact` renders only the fields the tool knows about, so a key the
     // framework added after `call()` returned is dropped unless re-attached HERE.
     let ctx = bare_ctx().await;

@@ -1559,7 +1559,7 @@ pub trait Tool: Send + Sync {
                     // `tree`, `read_file`, `references`, `semantic_search`, … 18 of them,
                     // which is precisely the read surface it exists to caveat. It survived
                     // only on the pretty-JSON branch below.
-                    // docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md
+                    // docs/issues/archive/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md
                     //
                     // PREFIXED, matching `inject_notice`'s own choice for `run_command`
                     // ("so the warning sits in the channel that is actually read"): the

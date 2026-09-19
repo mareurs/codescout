@@ -211,7 +211,7 @@ Since that fix the advisory is attached ONCE after arm selection, so a fourth
 outcome cannot be added without carrying it.
 
 Path 2 already ate this exact bug once
-(`docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md`):
+(`docs/issues/archive/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md`):
 `format_compact` renders only the fields the tool knows about, so a
 framework-added key is dropped unless re-attached at the render site. A
 `corrections` key set on the value and nowhere else is silent on the two paths

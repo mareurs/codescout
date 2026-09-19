@@ -219,7 +219,7 @@ population this change touches.
 
 **All three are already solved once, for `workspace_notice`**, and the second row was a
 shipped bug:
-`docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md`
+`docs/issues/archive/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md`
 — the notice was injected into the `Value` and then dropped by every compact renderer, on
 "precisely the read surface it exists to caveat". `src/tools/symbol/edit_code.rs:184` is the
 same lesson at tool scope: *"a warning only present in the raw JSON is a silent fix."*

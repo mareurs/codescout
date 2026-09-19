@@ -10758,7 +10758,7 @@ the majority of read tools. No wrong answer was produced, and a defect I had dec
 was live for four hours.
 
 **Status:** promoted-to-bug-tracker —
-`docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md`
+`docs/issues/archive/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md`
 
 **Observed.** A post-rebuild `/mcp` reconnect put this session back in the exact state
 `7a3aee93` addresses: slot cleared, one linked worktree present. Two unpinned reads (`tree`,

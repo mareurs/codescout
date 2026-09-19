@@ -2248,7 +2248,7 @@ called `grep(pattern="^name =", file_path="Cargo.toml")` and got results with no
 `grep` is `OutputForm::Text`, so its response is `format_compact` output — that result is equally
 consistent with "no note exists" and "a note exists and the compact renderer drops it", which is
 the exact bug class this same design pass was built around
-(`docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md`).
+(`docs/issues/archive/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md`).
 The claim rests on the return types above, not on this call.
 
 **Filed late, and the delay is its own datapoint.** This entry was written in full at ~10:50 and

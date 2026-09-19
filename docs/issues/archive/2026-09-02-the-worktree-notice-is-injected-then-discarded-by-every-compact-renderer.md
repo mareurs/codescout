@@ -1,7 +1,7 @@
 ---
-id: b3c0fe6ee49d9b57
+id: 33d8b7ef88ee84d2
 kind: bug
-status: open
+status: archived
 title: 'BUG: the worktree read notice is injected into the response and then discarded by every tool with a compact renderer'
 tags:
 - cluster/declared-not-wired
@@ -140,8 +140,14 @@ route and would be duplicated. Not changed in this fix; recorded so the symmetry
 blind.
 ## Fix
 
-Not implemented. The decision is where the notice goes for a text-rendered tool, and it is a
-real one:
+**Implemented 2026-09-02, commit `0d6c07c3` (patch-id `8806b666c3249114f615b9f036392f904cb74fa6`).**
+Option (1) below was taken. Regression test:
+`src/tools/core/tests.rs::a_compact_rendered_read_still_carries_the_worktree_notice`, driving a
+tool that actually declares `OutputForm::Text` + `format_compact` (not `EchoTool`), paired with a
+Json-form control in the same context. Mutation-tested: reverting the re-attachment kills it
+(120 passed / 1 failed, `got: 3 matches in 2 files`), 120 others stay green. The commit also
+corrected the population claim below from 18 to the real ten `OutputForm::Text` tools. Original
+three-option analysis kept for the record:
 
 1. **Append to the rendered text in `call_content`**, after `format_compact` returns. One
    change, covers all 18, no per-tool work. Costs: the notice lands outside whatever structure
