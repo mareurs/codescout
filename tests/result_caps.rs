@@ -295,6 +295,56 @@ fn cap_constants_ignores_a_const_whose_name_is_not_cap_shaped() {
     );
 }
 
+/// An explicit `cap-class:` annotation is authoritative and must be honoured even when the
+/// const's own name is not cap-shaped — the defect in
+/// `docs/issues/2026-09-03-a-cap-class-annotation-on-a-non-cap-shaped-const-is-silently-
+/// ignored.md`. `LATEST_OBSERVATIONS` is the bug's own real instance
+/// (`src/librarian/preview/memory.rs:9`): a genuine result cap whose name contains none of
+/// `is_cap_shaped`'s tokens, so the old ordering (name-shape filter before annotation lookup)
+/// discarded the const before ever reading the annotation above it.
+#[test]
+fn cap_constants_honors_an_explicit_annotation_on_a_non_cap_shaped_const() {
+    let src = "\
+// cap-class: RESULT_CAP preview.latest_observations
+const LATEST_OBSERVATIONS: usize = 3;
+";
+    let got = cap_constants(src, "src/x.rs");
+    assert_eq!(
+        got.len(),
+        1,
+        "an explicit cap-class annotation must be honoured even when the const's name is \
+         not cap-shaped, not silently dropped: {got:?}"
+    );
+    assert_eq!(got[0].name, "LATEST_OBSERVATIONS");
+    assert_eq!(
+        got[0].annotation.as_deref(),
+        Some("RESULT_CAP preview.latest_observations")
+    );
+}
+
+/// A comment line that merely *mentions* `cap-class:` mid-sentence — while
+/// describing the mechanism, not declaring it — must not be read as a real
+/// annotation. Modeled on the actual regression this reorder surfaced:
+/// `src/tools/core/cap_probe.rs`'s `PROBE_ROWS` doc comment illustrates a
+/// `grep(pattern="cap-class: RESULT_CAP", ...)` example, and once
+/// `cap_constants` started computing `annotation_above` for every const
+/// (not only cap-shaped ones), that prose match made a non-cap-shaped,
+/// unannotated const look annotated.
+#[test]
+fn cap_constants_does_not_read_a_prose_mention_of_cap_class_as_an_annotation() {
+    let src = "\
+/// a shell `grep` — a `grep(pattern=\"cap-class: RESULT_CAP\", path=\"src\")`
+const PROBE_ROWS: usize = 1;
+";
+    let got = cap_constants(src, "src/x.rs");
+    assert!(
+        got.is_empty(),
+        "PROBE_ROWS is not cap-shaped and the comment above it only mentions \
+         `cap-class:` in prose rather than declaring it; this must not be \
+         picked up: {got:?}"
+    );
+}
+
 #[test]
 fn cap_constants_accepts_pub_and_visibility_qualified_forms() {
     let src = "\
@@ -753,8 +803,16 @@ fn cap_constants(src: &str, file: &str) -> Vec<CapDecl> {
             || !name
                 .chars()
                 .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
-            || !is_cap_shaped(name)
         {
+            continue;
+        }
+
+        // An explicit `cap-class:` annotation is authoritative: it must be picked up even
+        // when the const's own name is not cap-shaped (LATEST_OBSERVATIONS is the real
+        // instance — see `cap_constants_honors_an_explicit_annotation_on_a_non_cap_shaped_
+        // const`). The name-shape heuristic is only a fallback for the unannotated case.
+        let annotation = annotation_above(&lines, idx);
+        if annotation.is_none() && !is_cap_shaped(name) {
             continue;
         }
 
@@ -762,7 +820,7 @@ fn cap_constants(src: &str, file: &str) -> Vec<CapDecl> {
             name: name.to_string(),
             file: file.to_string(),
             line: idx + 1,
-            annotation: annotation_above(&lines, idx),
+            annotation,
         });
     }
     out
@@ -775,6 +833,20 @@ fn cap_constants(src: &str, file: &str) -> Vec<CapDecl> {
 /// A blank line ends the block: reading through one would let a stray
 /// annotation silently classify an unrelated later constant, which is a
 /// wrong classification rather than a missing one.
+///
+/// The match requires the comment line, after stripping its `//`/`///`/`//!`
+/// marker and leading whitespace, to *start with* `cap-class:` — not merely
+/// contain it. A `contains` match is exactly the self-matching-instrument
+/// hazard this file's own header warns about: prose that mentions
+/// `cap-class:` while describing the mechanism (e.g. a doc comment
+/// illustrating a `grep(pattern="cap-class: RESULT_CAP", ...)` example) is
+/// not an annotation, and after `cap_constants` started computing this for
+/// every const rather than only cap-shaped ones, that exact prose match in
+/// `src/tools/core/cap_probe.rs`'s `PROBE_ROWS` doc comment surfaced as a
+/// false positive — a real regression caught by re-running the full suite
+/// after the reorder fix in
+/// `docs/issues/2026-09-03-a-cap-class-annotation-on-a-non-cap-shaped-const-
+/// is-silently-ignored.md`.
 fn annotation_above(lines: &[&str], decl_idx: usize) -> Option<String> {
     let mut block: Vec<&str> = vec![];
     for i in (0..decl_idx).rev() {
@@ -812,7 +884,7 @@ fn annotation_above(lines: &[&str], decl_idx: usize) -> Option<String> {
         if in_fence {
             continue;
         }
-        if let Some((_, payload)) = body.split_once("cap-class:") {
+        if let Some(payload) = body.strip_prefix("cap-class:") {
             found = Some(payload.trim().to_string());
         }
     }

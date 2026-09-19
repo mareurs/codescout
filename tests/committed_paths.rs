@@ -150,6 +150,22 @@ fn offenders_in(root: &Path, tracked: &BTreeSet<String>) -> Vec<String> {
     found
 }
 
+/// The passing path's own denominator — named so a green run says what it actually
+/// checked, rather than a reader assuming "the whole `scripts/` directory".
+///
+/// Per `docs/issues/2026-09-13-home-path-scan-cannot-see-a-new-script-until-commit.md`
+/// § Fix (Option 2, prescribed over Option 1's withdrawn filesystem-scan widening):
+/// "Say the boundary in the passing direction... have the PASSING path name its own
+/// denominator." The exact wording is not pinned — the bug's acceptance is about the
+/// MESSAGE SHAPE (a count, plus the untracked-files-are-out-of-scope statement), not a
+/// specific sentence — but the count and the exclusion must both be present.
+fn scope_notice(scanned: usize) -> String {
+    format!(
+        "scanned {scanned} tracked script(s) under scripts/; untracked files are out of \
+         scope by design — stage yours (`git add`) before trusting this."
+    )
+}
+
 /// No script git TRACKS may hardcode a path under someone's home directory.
 ///
 /// "Tracked" rather than "committed", and the word is load-bearing in both
@@ -166,6 +182,10 @@ fn offenders_in(root: &Path, tracked: &BTreeSet<String>) -> Vec<String> {
 /// docs/issues/archive/2026-09-11-the-committed-scripts-gate-scans-the-filesystem-so-an-untracked-file-reds-it.md
 #[test]
 fn no_tracked_script_hardcodes_a_personal_home_path() {
+    let scanned = tracked_scripts().len();
+    let notice = scope_notice(scanned);
+    println!("{notice}");
+
     let found = offenders();
     assert!(
         found.is_empty(),
@@ -174,8 +194,7 @@ fn no_tracked_script_hardcodes_a_personal_home_path() {
          — or take it from an environment variable with a portable fallback. If the account \
          is genuinely universal (a CI runner image), add it to UNIVERSAL_ACCOUNTS with the \
          reason.\n\n\
-         Every path above is tracked by git (staged or committed). An untracked file is \
-         not scanned, so a scratch script in your working tree cannot be the cause.",
+         {notice}",
         found.join("\n  ")
     );
 }
@@ -196,6 +215,34 @@ fn the_home_path_scan_discriminates() {
     // account never rides in on a line that also mentions a universal one.
     assert!(UNIVERSAL_ACCOUNTS.contains(&"runner"));
     assert!(!UNIVERSAL_ACCOUNTS.contains(&"marius"));
+}
+
+/// The passing path must name its own denominator — a count of what was scanned, plus
+/// the untracked-files-are-out-of-scope boundary — rather than emitting nothing on
+/// success. Per CLAUDE.md § Observer Blindness position 3: "Say the boundary in the
+/// passing direction... have the PASSING path name its own denominator." Asserts SHAPE
+/// (a digit count is present; the exclusion is stated), not an exact sentence — the bug
+/// file's proposed wording is a suggestion, not a pinned string.
+#[test]
+fn scope_notice_names_a_count_and_the_untracked_boundary() {
+    let notice = scope_notice(7);
+
+    assert!(
+        notice.chars().any(|c| c.is_ascii_digit()),
+        "the notice must name how many scripts were scanned: {notice:?}"
+    );
+    assert!(
+        notice.contains('7'),
+        "the notice must name the actual count passed in, not a placeholder: {notice:?}"
+    );
+    assert!(
+        notice.to_lowercase().contains("untracked"),
+        "the notice must state that untracked files are out of scope: {notice:?}"
+    );
+    assert!(
+        notice.to_lowercase().contains("out of scope") || notice.to_lowercase().contains("stage"),
+        "the notice must state the boundary (out of scope) or the remedy (stage it): {notice:?}"
+    );
 }
 
 /// `scripts/` must actually be reachable from the test binary.

@@ -813,6 +813,34 @@ fn a_documented_tool_parameter_exists_on_that_tool() {
     );
 }
 
+/// Anchored-call false positives: [`CALL_OPEN`] matched `word(` in prose that is not a tool
+/// call at all — code quoted as a worked example, or an action name used as shorthand for
+/// `doc(action="…")`. **Not** `ALIAS_ALLOWLIST`: that constant is for a live tool cited under
+/// another name, and every entry here names no tool, live or dead. Keyed on the exact
+/// `(file, line, tool)` triple, never on the bare word, so a real dead-tool call that happens
+/// to share one of these words elsewhere is still caught — widening this to a bare-word
+/// denylist would silently blind the guard to that case.
+///
+/// Surfaced 2026-09-19 when `stale_tool_call_findings` stopped skipping every single-word
+/// (no-underscore) citation — see `docs/issues/2026-09-02-both-doc-citation-guards-skip-
+/// half-the-corpus-without-saying-so.md` § Fix: *"decide what to do with the unrecognised
+/// bucket… its size is unknown until measured."* Measured here: 4, all verified by hand.
+const ANCHOR_FALSE_POSITIVES: &[(&str, usize, &str)] = &[
+    // `for(i=3;i<=n;i++) if(a[i]~/^[A-Z]+$/) print a[i]` — an awk one-liner quoted verbatim
+    // as a worked example. `for` is awk syntax, not a codescout tool.
+    ("docs/TAXONOMY.md", 41, "for"),
+    // "a test that reaches a `#[cfg(feature = \"librarian\")]` item" — a Rust attribute
+    // quoted in prose, not a call.
+    ("CONTRIBUTING.md", 167, "cfg"),
+    // "`sorted(x, key=f)` counts" — Python's builtin, quoted as a worked example of a
+    // callback shape in a probe's own doc row.
+    ("docs/PROBES.md", 201, "sorted"),
+    // "`find(kind=\"bug\", status=\"open\")` — the triage query" — prose shorthand for
+    // `doc(action="find", …)`, using the ACTION name as if it were the tool name. No tool
+    // is named "find".
+    ("src/prompts/guides/tracker-conventions.md", 89, "find"),
+];
+
 /// Findings for [`a_documented_call_names_a_live_tool`], deduplicated by `(file, line, tool)` —
 /// one call site is one finding, however many named arguments it carries. Filed as
 /// `docs/issues/archive/2026-09-02-doc-tool-refs-counts-call-param-pairs-as-documents.md`:
@@ -831,10 +859,13 @@ fn stale_tool_call_findings(
         if c.bare {
             continue;
         }
-        if !c.tool.contains('_') {
+        if names.contains(&c.tool) || allowed.contains(c.tool.as_str()) {
             continue;
         }
-        if names.contains(&c.tool) || allowed.contains(c.tool.as_str()) {
+        if ANCHOR_FALSE_POSITIVES
+            .iter()
+            .any(|(file, line, tool)| *file == c.file && *line == c.line && *tool == c.tool)
+        {
             continue;
         }
         if !seen.insert((c.file.clone(), c.line, c.tool.clone())) {
@@ -855,17 +886,23 @@ fn stale_tool_call_findings(
 /// usually needs rewriting rather than patching.
 #[test]
 fn a_documented_call_names_a_live_tool() {
+    let cites = anchored_cites();
     let names = tool_names();
     let allowed: HashSet<&str> = ALIAS_ALLOWLIST.iter().copied().collect();
-    let bad = stale_tool_call_findings(&anchored_cites(), &names, &allowed);
+    let checked = cites.iter().filter(|c| !c.bare).count();
+    let bad = stale_tool_call_findings(&cites, &names, &allowed);
 
     assert!(
         bad.is_empty(),
-        "{} stale call(s) name a tool that does not exist.\n\n{}\n\n\
+        "{} stale call(s) name a tool that does not exist (checked {checked} of {} anchored \
+         citations; a bare dispatch-shorthand citation is excluded from this check by \
+         `stale_tool_call_findings` itself, which is a different exclusion from the one this \
+         count would otherwise hide).\n\n{}\n\n\
          If the name is a live alias, add it to ALIAS_ALLOWLIST with the declaration site — \
          but read that constant's comment first: the last candidate for it was a gap in this \
          file's own extractor, not a real alias.",
         bad.len(),
+        cites.len(),
         bad.join("\n\n")
     );
 }
@@ -899,6 +936,73 @@ fn a_stale_call_is_reported_once_regardless_of_argument_count() {
     assert!(
         bad[0].contains("artifact_event"),
         "the one finding must still name the offending tool: {bad:?}"
+    );
+}
+
+/// A retired tool name with no underscore (`artifact`, since renamed to `doc`) must be
+/// reported as stale, not silently skipped by a name-shape heuristic.
+///
+/// Filed as `docs/issues/2026-09-02-both-doc-citation-guards-skip-half-the-corpus-without-
+/// saying-so.md`: the old guard's `!c.tool.contains('_')` bailed out before checking the
+/// registry at all, so every single-word tool citation — live or dead — went unexamined.
+/// `artifact` is a real fixture, not a synthetic one: it is the tool this file's own `doc`
+/// replaced, so it is guaranteed retired rather than merely assumed to be.
+#[test]
+fn a_retired_single_word_tool_name_is_reported_not_skipped() {
+    let names = tool_names();
+    assert!(
+        !names.contains("artifact"),
+        "fixture assumption broken: \"artifact\" is registered as a live tool again — \
+         pick a different retired single-word name for this fixture"
+    );
+
+    let cite = Cite {
+        file: "docs/example.md".to_string(),
+        line: 42,
+        tool: "artifact".to_string(),
+        param: "action".to_string(),
+        bare: false,
+        text: "`artifact(action=\"get\")`".to_string(),
+    };
+    let allowed: HashSet<&str> = ALIAS_ALLOWLIST.iter().copied().collect();
+
+    let bad = stale_tool_call_findings(&[cite], &names, &allowed);
+
+    assert_eq!(
+        bad.len(),
+        1,
+        "a single-word tool name with no underscore must still be checked against the \
+         registry, not skipped outright: {bad:?}"
+    );
+    assert!(
+        bad[0].contains("artifact"),
+        "the finding must name the offending tool: {bad:?}"
+    );
+}
+
+/// `ANCHOR_FALSE_POSITIVES` is keyed on `(file, line, tool)`, not on the bare word — the same
+/// word at a different citation site must still be caught. Guards against the exclusion
+/// silently widening from "this exact prose example" to "any mention of `for`".
+#[test]
+fn the_anchor_false_positive_list_is_keyed_on_the_citation_site_not_the_word() {
+    let names = tool_names();
+    let allowed: HashSet<&str> = ALIAS_ALLOWLIST.iter().copied().collect();
+
+    let cite = Cite {
+        file: "docs/some-other-file.md".to_string(),
+        line: 999,
+        tool: "for".to_string(),
+        param: String::new(),
+        bare: false,
+        text: "`for(…)` pretending to be a tool at a different site".to_string(),
+    };
+    let bad = stale_tool_call_findings(&[cite], &names, &allowed);
+
+    assert_eq!(
+        bad.len(),
+        1,
+        "the same word at a citation site NOT in ANCHOR_FALSE_POSITIVES must still be \
+         reported: {bad:?}"
     );
 }
 
