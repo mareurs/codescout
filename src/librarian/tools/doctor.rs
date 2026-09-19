@@ -3356,9 +3356,16 @@ fn check_frontmatter_id_matches_catalog(id: &str, abs_path: &str) -> Option<Viol
     // The two sibling fixes each carry their own registration guard because each has a
     // reachable path that needs one; this one does not.
     //
-    // Only the twin id is excused. A worktree file declaring some OTHER id is ordinary
-    // post-move drift and still fires. And the row is not silently dropped either way:
-    // `scan_worktree_scoped` already reports it, with `collision_with` naming this very id.
+    // Only the twin id is excused. A worktree file declaring some OTHER id still fires —
+    // but that id is not necessarily post-move drift either: `id = sha256(abs_path)`, so
+    // an id minted while the file's path was inside a *different* worktree or a second
+    // clone is shaped identically to a genuinely stale post-move id, and this function has
+    // no evidence (no git history, no roster of removed worktree roots) to tell them apart.
+    // The message below states the disjunction rather than picking one — see
+    // docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md,
+    // measured 8 of 8 live instances as the foreign-checkout cause, zero as an actual move.
+    // And the row is not silently dropped either way: `scan_worktree_scoped` already reports
+    // it, with `collision_with` naming this very id.
     // docs/issues/archive/2026-08-19-repair-frontmatter-id-rewrites-files-in-registered-worktrees.md
     if worktree_twin_id(Path::new(abs_path)).as_deref() == Some(declared.as_str()) {
         return None;
@@ -3369,8 +3376,14 @@ fn check_frontmatter_id_matches_catalog(id: &str, abs_path: &str) -> Option<Viol
         Some(id.to_string()),
         abs_path,
         format!(
-            "frontmatter declares id '{declared}' but the catalog row is '{id}' — \
-             a move re-keys the row and this file kept the id it was moved away from"
+            "frontmatter declares id '{declared}' but the catalog row is '{id}' — this id was \
+             minted against a different absolute path, which happens two ways this check cannot \
+             tell apart from shape alone: the row was MOVED and this file kept the id it was \
+             moved away from (check `git log --follow --diff-filter=R -- <path>` to confirm), or \
+             the file was authored in ANOTHER CHECKOUT — a worktree or second clone, possibly \
+             since removed or merged — whose absolute path hashed to this id. \
+             `fix=repair_frontmatter_id` rewrites `id:` to the catalog's value either way; only \
+             the cause is uncertain, not the repair."
         ),
     ))
 }
@@ -4442,7 +4455,21 @@ fn scan_cited_but_undeclared(
             continue;
         };
         let sections = entry_sections(&text);
+        // One entry id can own more than one `EntrySection` *instance* when the file
+        // has duplicate headings (`## A-38` twice) — a distinct anomaly from a genuinely
+        // undeclared entry, and `scan_entry_defined_twice`'s finding, not this check's.
+        // Without a dedup, every instance pushed its own byte-identical
+        // Violation (same id, same shared `indegree` lookup keyed by (path, id) alone,
+        // so identical exposure), inflating `by_check` by the instance count rather than
+        // the entry count — reproduced live on A-38 (10 rows for one entry). `extract()`'s
+        // `seen_defs` binds every citation to the EARLIER heading in file order and
+        // discards the rest, so the first instance encountered here (sections are already
+        // in heading order) is the one citers actually resolve to; keep that one only.
+        let mut seen_ids = std::collections::HashSet::new();
         for s in &sections {
+            if !seen_ids.insert(s.id.as_str()) {
+                continue;
+            }
             // Keyed by (defining file, token): `F-1` is defined in every session log,
             // so a bare-token lookup would price this entry on other ledgers' traffic.
             let exposure = indegree
@@ -8954,6 +8981,34 @@ mod tests {
         let v = check_frontmatter_id_matches_catalog(&row_id, &f_str)
             .expect("being inside a worktree does not excuse an unrelated stale id");
         assert_eq!(v.check, "frontmatter_id_mismatch");
+    }
+
+    /// The remedy-text law (CLAUDE.md § Testing Discipline): a suite tests a guard's
+    /// PREDICATE and almost never its REMEDY TEXT. `check_frontmatter_id_matches_catalog`'s
+    /// `detail` used to assert ONE cause as fact — "a move re-keys the row" — which is false
+    /// for a worktree-minted id (bug e82deca98330f72c, measured 8 of 8 live instances as
+    /// foreign-checkout, zero as an actual move). This does not pin the sentence (reds on
+    /// every rewording) — it asserts the SHAPE: the message must still name BOTH candidate
+    /// causes, a move and a foreign checkout. That reds exactly on the deletion of either
+    /// branch and survives a rewording of both.
+    #[test]
+    fn frontmatter_id_mismatch_names_both_candidate_causes_not_only_a_move() {
+        let (_tmp, _main_root, worktree_root) = make_worktree_fixture();
+        std::fs::create_dir_all(worktree_root.join("docs")).unwrap();
+        let f = worktree_root.join("docs/plan.md");
+        std::fs::write(&f, "---\nid: dead111111111111\nkind: plan\n---\n\n# plan\n").unwrap();
+        let f_str = crate::util::fs::RepoPath::from_path(&f).into_string();
+        let row_id = crate::librarian::ids::artifact_id_from_abs(&f);
+
+        let v = check_frontmatter_id_matches_catalog(&row_id, &f_str)
+            .expect("a present-but-wrong id must still be flagged");
+        let lower = v.detail.to_lowercase();
+        assert!(
+            lower.contains("move") && lower.contains("checkout"),
+            "detail must name BOTH candidate causes (a move, and a foreign checkout/worktree), \
+             not assert only one: {}",
+            v.detail
+        );
     }
 
     /// The destructive half, end to end.
@@ -18694,6 +18749,38 @@ root = "work/elsewhere/ghost"
                 .unwrap()
                 .is_empty(),
             "one below the threshold must not fire"
+        );
+    }
+
+    #[test]
+    fn scan_cited_but_undeclared_dedupes_repeated_heading_instances_of_one_entry_id() {
+        // Reproduction of 2155678e29cbd91a: a file with two headings defining the SAME
+        // entry id (a duplicate-heading instance, not two distinct entries) must report
+        // ONE violation, not one per heading instance.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## A-38 — first\n\nno class declared\n\n## A-38 — duplicate heading\n\nno class declared either\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert(deg_key(&p, "A-38"), EXPOSURE_THRESHOLD);
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let violations = scan_cited_but_undeclared(&mut ds, &cat.conn, &deg).unwrap();
+        assert_eq!(
+            violations.len(),
+            1,
+            "two duplicate-heading instances of one entry id must report ONE violation, \
+                 not one per heading instance: {violations:?}"
         );
     }
 
