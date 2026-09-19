@@ -1177,10 +1177,75 @@ pub(super) fn apply_frontmatter_mutation(content: &str, param: &Value) -> Result
         }
     }
 }
-/// Normalized Levenshtein similarity in [0.0, 1.0] (1.0 = identical). Used only
-/// to LOCATE the closest line for a miss diagnostic — never to alter bytes.
+/// Normalized Levenshtein similarity in [0.0, 1.0] (1.0 = identical). Test-only:
+/// production code now compares an anchor against the best-matching SUBSTRING
+/// of a window (`best_substring_similarity`, `81f3a79b97b4b14e`) rather than
+/// the whole window, but `similarity_ranks_closeness` (tests.rs) still
+/// exercises this one directly as the general-purpose primitive it wraps
+/// (`strsim::normalized_levenshtein`).
+#[cfg(test)]
 pub(crate) fn similarity(a: &str, b: &str) -> f64 {
     strsim::normalized_levenshtein(a, b)
+}
+
+/// Levenshtein distance from `anchor` to the closest-matching SUBSTRING of
+/// `window` — free to start and stop anywhere in `window`, but every
+/// character of `anchor` must be accounted for ("fitting"/semi-global
+/// alignment, the standard approximate-substring-search DP).
+///
+/// Complexity is O(len(window) * len(anchor)): the SAME order as a single
+/// `strsim::normalized_levenshtein(window, anchor)` call, because both fill
+/// one edit-distance table of that size. This generalizes what the table
+/// measures (best substring vs. the whole string) without adding a
+/// dimension to the search — it does not become quadratic in window
+/// length the way trying every candidate substring length separately would.
+fn best_substring_edit_distance(window: &str, anchor: &str) -> usize {
+    let w: Vec<char> = window.chars().collect();
+    let a: Vec<char> = anchor.chars().collect();
+
+    // `prev`/`curr` hold one row of the DP table, indexed by position in `w`.
+    // Row 0 is all zeros — matching the empty anchor prefix against a
+    // substring ending anywhere in `window` costs nothing — which is what
+    // makes the match's START position free. A classic Levenshtein table
+    // would instead seed `prev[j] = j`, charging for skipping the window's
+    // own prefix; that charge is exactly `81f3a79b97b4b14e`'s root cause.
+    let mut prev: Vec<usize> = vec![0; w.len() + 1];
+    let mut curr: Vec<usize> = vec![0; w.len() + 1];
+
+    for (i, &ac) in a.iter().enumerate() {
+        curr[0] = i + 1; // consuming i+1 anchor chars against an empty window prefix.
+        for (j, &wc) in w.iter().enumerate() {
+            let sub_cost = usize::from(ac != wc);
+            curr[j + 1] = (prev[j] + sub_cost) // match/substitute
+                .min(prev[j + 1] + 1) // anchor char has no counterpart (delete from anchor)
+                .min(curr[j] + 1); // window char has no counterpart (insert into anchor)
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    // The last swap moved row `a.len()` into `prev`. The match is free to END
+    // anywhere in `window` too, so the answer is the minimum over that whole row.
+    prev.into_iter().min().unwrap_or(0)
+}
+
+/// Similarity of `anchor` against the best-matching substring of `window`, on
+/// the same `[0.0, 1.0]` scale as [`similarity`] (1.0 = `anchor` occurs in
+/// `window` verbatim) — normalized by `anchor`'s own length, never by
+/// `window`'s.
+///
+/// `81f3a79b97b4b14e`: scoring the anchor against the whole window (via
+/// `similarity`) makes a verbatim substring match score `|anchor| / |window|`
+/// — a value driven entirely by how much unrelated text surrounds the match,
+/// which self-suppresses below `SIM_THRESHOLD` for any anchor under half its
+/// containing line. The window's length is not part of the caller's
+/// question ("is my anchor in here, and what does it actually say"), so it
+/// must not gate the answer to it.
+fn best_substring_similarity(window: &str, anchor: &str) -> f64 {
+    let anchor_len = anchor.chars().count();
+    if anchor_len == 0 {
+        return 1.0;
+    }
+    let dist = best_substring_edit_distance(window, anchor);
+    1.0 - (dist as f64 / anchor_len as f64)
 }
 
 /// Strip whitespace + look-alike/invisible chars, leaving only "visible" glyphs.
@@ -1366,7 +1431,7 @@ pub(crate) fn diagnose_scoped_miss(
     let mut best_score = -1.0f64;
     for start in 0..=(lines.len() - n) {
         let window = lines[start..start + n].join("\n");
-        let s = similarity(&window, old_string);
+        let s = best_substring_similarity(&window, old_string);
         if s > best_score {
             best_score = s;
             best_idx = start;
@@ -1645,4 +1710,57 @@ pub(crate) async fn edit(input: Value, ctx: &ToolContext) -> Result<Value> {
     }
 
     Ok(json!("ok"))
+}
+
+#[cfg(test)]
+mod scoped_miss_substring_scoring_tests {
+    use super::diagnose_scoped_miss;
+
+    // 81f3a79b97b4b14e: a verbatim substring anchor inside a much longer line
+    // scored `|anchor| / |line|` under whole-line similarity, self-suppressing
+    // below SIM_THRESHOLD (0.5) for any anchor under half its line — reporting
+    // "no_similar_match" about text that is present, byte for byte. Uses
+    // uniform-char strings so the ratio is exact and the test doesn't depend
+    // on any particular prose.
+    #[test]
+    fn a_short_anchor_verbatim_inside_a_much_longer_line_is_found_not_reported_absent() {
+        let anchor = "x".repeat(60); // 60 chars
+        let line = format!("{anchor}{}", "y".repeat(400)); // 460 chars; anchor is its exact prefix.
+                                                           // Old whole-line ratio: 60/460 ≈ 0.130 — well under the 0.5 threshold,
+                                                           // so the pre-fix algorithm reports `no_similar_match` here.
+        let section = format!("## Section B\n{line}\n");
+
+        let e = diagnose_scoped_miss(&section, &anchor, "## Section B");
+        let tier = e.extra.get("scoped_miss_tier").and_then(|v| v.as_str());
+        assert_ne!(
+            tier,
+            Some("no_similar_match"),
+            "a verbatim substring of the section's only line must be FOUND, not reported \
+             as no similar match — message: {e}"
+        );
+        assert_eq!(
+            tier,
+            Some("visible_drift"),
+            "found but not identical to the whole line — want/have diff, not the \
+             whitespace-only tier — message: {e}"
+        );
+        let msg = e.to_string();
+        assert!(
+            msg.contains(&anchor),
+            "the want/have diff should show the anchor itself: {msg}"
+        );
+    }
+
+    // Control: unrelated content must still be declined — the fix must not
+    // make the search generically more permissive, only substring-aware.
+    #[test]
+    fn genuinely_unrelated_content_still_reports_no_similar_match() {
+        let section = "## Section B\nqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\n";
+        let old_string = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+        let e = diagnose_scoped_miss(section, old_string, "## Section B");
+        assert_eq!(
+            e.extra.get("scoped_miss_tier").and_then(|v| v.as_str()),
+            Some("no_similar_match")
+        );
+    }
 }

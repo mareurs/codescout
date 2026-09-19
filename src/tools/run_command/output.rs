@@ -100,6 +100,30 @@ pub(crate) fn rebuild_buffered_summary(raw: Value, output_id: &str) -> Value {
 ///
 /// See `docs/issues/archive/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md`.
 pub(crate) fn empty_test_selection_diagnostic(stdout: &str) -> Option<String> {
+    let (passed, ignored, filtered) = test_summary_counts(stdout)?;
+
+    if filtered == 0 || passed > 0 || ignored > 0 {
+        return None;
+    }
+
+    Some(format!(
+        "This run selected NO tests: `{filtered} filtered out` against `0 passed`, so the `ok` \
+         and the exit code report success over an EMPTY SET and would read identically if the \
+         code were broken. It is not evidence that anything was verified. Check that the filter \
+         names a test rather than a helper function or a module, or drop it and run the whole \
+         target, which cannot select empty."
+    ))
+}
+
+/// Sum libtest's own `test result:` summary line(s) across a whole `cargo test` invocation's
+/// stdout — `(passed, ignored, filtered)`. Shared by [`empty_test_selection_diagnostic`] (the
+/// full-miss case) and [`partial_test_selection_diagnostic`] (the partial-miss case): both need
+/// the same counts, and both must go silent under the same condition.
+///
+/// `None` when no `test result:` line was seen at all, OR when any target's summary was not
+/// `ok.` (a `FAILED` target bails the WHOLE function, not just that line) — a red is loud
+/// already, per both diagnostics' own doc comments.
+fn test_summary_counts(stdout: &str) -> Option<(usize, usize, usize)> {
     let (mut passed, mut ignored, mut filtered) = (0usize, 0usize, 0usize);
     let mut saw_summary = false;
 
@@ -126,16 +150,133 @@ pub(crate) fn empty_test_selection_diagnostic(stdout: &str) -> Option<String> {
         }
     }
 
-    if !saw_summary || filtered == 0 || passed > 0 || ignored > 0 {
+    saw_summary.then_some((passed, ignored, filtered))
+}
+
+/// Extract the free-standing (non-flag) name filters a `cargo test … -- …` invocation supplies
+/// to the test binary, plus the same invocation with its filters swapped for `--list` — or
+/// `None` when the command does not look like a `cargo test` run naming two or more filters.
+///
+/// **Heuristic, not a shell parser**: splits on ASCII whitespace, so a quoted filter containing
+/// a space would confuse it. Rust test names are `module::path::ident` and never contain spaces,
+/// which is the shape this bug and its reproduction are both about.
+///
+/// Gated at two-or-more filters deliberately: a single named filter's total miss is already
+/// `empty_test_selection_diagnostic`'s to report, and the ordinary one-name-per-run shape is by
+/// far the commonest `cargo test` invocation — this is what keeps the `--list` cost rare rather
+/// than paid on every filtered run.
+fn multi_filter_test_command(original_command: &str) -> Option<(Vec<String>, String)> {
+    if !original_command.contains("cargo test") {
+        return None;
+    }
+    let tokens: Vec<&str> = original_command.split_whitespace().collect();
+    let dash_idx = tokens.iter().rposition(|&t| t == "--")?;
+    let filters: Vec<String> = tokens[dash_idx + 1..]
+        .iter()
+        .filter(|t| !t.starts_with('-'))
+        .map(|s| s.to_string())
+        .collect();
+    if filters.len() < 2 {
+        return None;
+    }
+    let list_command = format!("{} --list", tokens[..=dash_idx].join(" "));
+    Some((filters, list_command))
+}
+
+/// Run the assembled `cargo test … -- --list` command and return its raw stdout, or `None` on
+/// any failure to introspect (spawn error, non-zero exit, timeout). Split out from
+/// [`partial_test_selection_diagnostic_with`] so tests exercise the diff logic against a canned
+/// listing instead of spawning a real `cargo test -- --list` — slow, environment-dependent, and
+/// no part of what this bug is about.
+async fn run_list_command(list_command: String, work_dir: std::path::PathBuf) -> Option<String> {
+    let mut cmd = tokio::process::Command::new("sh");
+    cmd.arg("-c")
+        .arg(&list_command)
+        .current_dir(&work_dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    let child = cmd.spawn().ok()?;
+    let out =
+        match tokio::time::timeout(std::time::Duration::from_secs(30), child.wait_with_output())
+            .await
+        {
+            Ok(Ok(o)) if o.status.success() => o,
+            _ => return None,
+        };
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Name any `cargo test` filter that matched NOTHING when other named filters in the same
+/// invocation matched something — the partial-miss half `empty_test_selection_diagnostic`
+/// cannot cover, because libtest's own summary has no per-filter breakdown (see that function's
+/// sibling doc comment and `docs/issues/2026-09-16-a-partial-test-filter-reports-success-over-a-silently-narrowed-selection.md`).
+///
+/// Pays for `cargo test … -- --list` (enumerate test names, no run) ONLY when
+/// [`multi_filter_test_command`] finds two-or-more named filters in `original_command` AND the
+/// run actually produced an `ok.` summary with `passed > 0 || ignored > 0` — i.e. never on the
+/// ordinary single-filter run, never on a full miss (already named elsewhere), never on a red.
+pub(crate) async fn partial_test_selection_diagnostic(
+    original_command: &str,
+    stdout: &str,
+    work_dir: &std::path::Path,
+) -> Option<String> {
+    partial_test_selection_diagnostic_with(original_command, stdout, work_dir, run_list_command)
+        .await
+}
+
+/// The body of [`partial_test_selection_diagnostic`], with the `--list` invocation as a
+/// parameter — split out exactly as `wip_author_diagnostic`/`wip_author_diagnostic_with` are, so
+/// a test can drive the diff logic with a fake listing rather than a real subprocess.
+async fn partial_test_selection_diagnostic_with<F, Fut>(
+    original_command: &str,
+    stdout: &str,
+    work_dir: &std::path::Path,
+    lister: F,
+) -> Option<String>
+where
+    F: FnOnce(String, std::path::PathBuf) -> Fut,
+    Fut: std::future::Future<Output = Option<String>>,
+{
+    let (passed, ignored, filtered) = test_summary_counts(stdout)?;
+    // A full miss is `empty_test_selection_diagnostic`'s to report — stay out of its way.
+    if filtered == 0 || (passed == 0 && ignored == 0) {
+        return None;
+    }
+
+    let (filters, list_command) = multi_filter_test_command(original_command)?;
+    let listing = lister(list_command, work_dir.to_path_buf()).await?;
+    let listed_names: Vec<&str> = listing
+        .lines()
+        .filter_map(|l| {
+            l.strip_suffix(": test")
+                .or_else(|| l.strip_suffix(": benchmark"))
+        })
+        .collect();
+    if listed_names.is_empty() {
+        return None;
+    }
+
+    let unmatched: Vec<&String> = filters
+        .iter()
+        .filter(|f| !listed_names.iter().any(|n| n.contains(f.as_str())))
+        .collect();
+    if unmatched.is_empty() {
         return None;
     }
 
     Some(format!(
-        "This run selected NO tests: `{filtered} filtered out` against `0 passed`, so the `ok` \
-         and the exit code report success over an EMPTY SET and would read identically if the \
-         code were broken. It is not evidence that anything was verified. Check that the filter \
-         names a test rather than a helper function or a module, or drop it and run the whole \
-         target, which cannot select empty."
+        "This run named {total} test filters but {bad_n} matched NOTHING in `cargo test … -- \
+         --list`: {bad}. The filters that DID resolve passed, and the exit code reports success \
+         over that narrowed set — it says nothing about the filter(s) that selected empty. \
+         Check for a rename, deletion or typo.",
+        total = filters.len(),
+        bad_n = unmatched.len(),
+        bad = unmatched
+            .iter()
+            .map(|s| format!("`{s}`"))
+            .collect::<Vec<_>>()
+            .join(", "),
     ))
 }
 
@@ -311,6 +452,13 @@ pub(crate) async fn handle_successful_output(
     // branch to reach it.
     let empty_selection = empty_test_selection_diagnostic(&raw_stdout);
 
+    // Same placement, computed after the total-miss case so it can stay out of that one's
+    // way. Unlike the two diagnostics above, this one can spawn a subprocess (`cargo test …
+    // -- --list`) — but only on the narrow gate documented on
+    // `partial_test_selection_diagnostic`, so an ordinary run pays nothing extra.
+    let partial_selection =
+        partial_test_selection_diagnostic(original_command, &raw_stdout, work_dir).await;
+
     // Same placement, same reason. The non-zero-exit gate lives inside the callee, not
     // here, so the one place that decides "is this a red" is the one place documenting
     // what it costs to be wrong about it. A green command spawns nothing at all.
@@ -413,6 +561,9 @@ pub(crate) async fn handle_successful_output(
             }
             if let Some(empty) = empty_selection {
                 result["empty_test_selection"] = json!(empty);
+            }
+            if let Some(partial) = partial_selection {
+                result["partial_test_selection"] = json!(partial);
             }
             return Ok(result);
         }
@@ -530,6 +681,9 @@ pub(crate) async fn handle_successful_output(
     if let Some(empty) = empty_selection {
         result["empty_test_selection"] = json!(empty);
     }
+    if let Some(partial) = partial_selection {
+        result["partial_test_selection"] = json!(partial);
+    }
 
     Ok(result)
 }
@@ -627,6 +781,9 @@ pub(crate) fn format_run_command(result: &Value) -> String {
     if let Some(empty) = result["empty_test_selection"].as_str() {
         s.push_str(&format!("\n⚠ {empty}"));
     }
+    if let Some(partial) = result["partial_test_selection"].as_str() {
+        s.push_str(&format!("\n⚠ {partial}"));
+    }
 
     // Last, and unconditional across output shapes for the same reason. This one is
     // about WHO holds the file rather than what went wrong, so it reads after the cause
@@ -640,4 +797,100 @@ pub(crate) fn format_run_command(result: &Value) -> String {
     }
 
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A realistic `cargo test --lib -- <filter1> <filter2>` summary: one filter resolved to
+    // one passing test, the rest of the workspace's tests were filtered out. Shape lifted from
+    // `docs/issues/2026-09-16-a-partial-test-filter-reports-success-over-a-silently-narrowed-selection.md`'s
+    // own reproduction.
+    const PARTIAL_MATCH_STDOUT: &str = "\nrunning 1 test\n\
+         test foo::bar::real_test ... ok\n\n\
+         test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5617 filtered out\n\n";
+
+    async fn fake_listing_with_one_real_name(
+        _list_command: String,
+        _work_dir: std::path::PathBuf,
+    ) -> Option<String> {
+        Some("foo::bar::real_test: test\n\n1 tests, 0 benchmarks\n".to_string())
+    }
+
+    async fn fake_listing_with_two_real_names(
+        _list_command: String,
+        _work_dir: std::path::PathBuf,
+    ) -> Option<String> {
+        Some(
+            "foo::bar::real_test: test\nfoo::bar::second_test: test\n\n\
+             2 tests, 0 benchmarks\n"
+                .to_string(),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_filter_naming_one_real_and_one_bogus_test_names_the_bogus_one() {
+        let out = partial_test_selection_diagnostic_with(
+            "cargo test --lib -- foo::bar::real_test zzz_no_such_test_anywhere_at_all",
+            PARTIAL_MATCH_STDOUT,
+            std::path::Path::new("."),
+            fake_listing_with_one_real_name,
+        )
+        .await;
+
+        let msg = out.expect("a name that matched nothing in --list must be named, not silent");
+        assert!(
+            msg.contains("zzz_no_such_test_anywhere_at_all"),
+            "message must name the bogus filter verbatim: {msg}"
+        );
+        assert!(
+            !msg.contains("real_test`"),
+            "the filter that DID resolve must not be reported as unmatched: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_filter_naming_only_real_tests_stays_silent() {
+        let out = partial_test_selection_diagnostic_with(
+            "cargo test --lib -- foo::bar::real_test foo::bar::second_test",
+            PARTIAL_MATCH_STDOUT,
+            std::path::Path::new("."),
+            fake_listing_with_two_real_names,
+        )
+        .await;
+
+        assert!(
+            out.is_none(),
+            "every named filter resolved in --list, so this must stay silent: {out:?}"
+        );
+    }
+
+    #[test]
+    fn multi_filter_test_command_extracts_filters_and_builds_the_list_form() {
+        let (filters, list_command) = multi_filter_test_command(
+            "cargo test --lib -- foo::bar::real_test zzz_no_such_test_anywhere_at_all",
+        )
+        .expect("two free-standing filters after `--` must be recognised");
+        assert_eq!(
+            filters,
+            vec![
+                "foo::bar::real_test".to_string(),
+                "zzz_no_such_test_anywhere_at_all".to_string()
+            ]
+        );
+        assert_eq!(list_command, "cargo test --lib -- --list");
+    }
+
+    #[test]
+    fn multi_filter_test_command_declines_a_single_filter() {
+        // The ordinary shape — one named test — is `empty_test_selection_diagnostic`'s to
+        // cover on a miss; this function must not pay the `--list` cost for it.
+        assert!(multi_filter_test_command("cargo test --lib -- foo::bar::real_test").is_none());
+    }
+
+    #[test]
+    fn multi_filter_test_command_declines_a_non_test_command() {
+        assert!(multi_filter_test_command("cargo build --workspace").is_none());
+    }
 }
