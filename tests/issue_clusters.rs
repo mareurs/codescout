@@ -33,6 +33,95 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+/// Every path's content, read from the git INDEX in one `git cat-file --batch` call.
+///
+/// One subprocess for the whole corpus rather than one per file — `tracked_all_bug_files`
+/// alone is 900+ paths, and a `git show :<path>` per entry measured ~2.3s over that
+/// population (2026-09-19) against effectively no measurable time for the batched form.
+/// Mirrors `scripts/pre-commit-ledger-counts.py`'s `_prime_index`, which made the same
+/// choice for the same reason.
+///
+/// **The stdin write happens on its own thread, and that is load-bearing, not tidiness.**
+/// A first version wrote the whole request to the child's stdin before reading any of its
+/// stdout — over 900 paths' worth of frontmatter that output exceeds the OS pipe buffer, so
+/// `git cat-file --batch` blocked writing to its (full) stdout while this process blocked
+/// writing to its (full) stdin: a deadlock, measured directly (2026-09-19 — the naive form
+/// hung past a 120s timeout on the live `docs/issues` corpus and had to be killed). Writing
+/// on a separate thread while the main thread drains stdout is the standard fix for exactly
+/// this shape of two-way pipe.
+///
+/// A path absent from the index is simply missing from the returned map — callers treat
+/// that the same way they treated `std::fs::read_to_string`'s `Err` before this existed.
+fn read_index_blobs(repo: &std::path::Path, paths: &[String]) -> BTreeMap<String, String> {
+    let mut blobs = BTreeMap::new();
+    if paths.is_empty() {
+        return blobs;
+    }
+    let mut stdin_body = String::new();
+    for p in paths {
+        stdin_body.push(':');
+        stdin_body.push_str(p);
+        stdin_body.push('\n');
+    }
+    let mut child = std::process::Command::new("git")
+        .args(["cat-file", "--batch"])
+        .current_dir(repo)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("git cat-file --batch failed to spawn — this gate needs a git checkout");
+    let mut stdin = child.stdin.take().expect("stdin was requested as piped");
+    let writer = std::thread::spawn(move || {
+        // A closed/broken pipe here (e.g. the child exited early) is reported by
+        // `wait_with_output`'s exit status below — ignore the write error itself rather than
+        // panicking on a thread whose failure the main thread cannot see.
+        let _ = stdin.write_all(stdin_body.as_bytes());
+    });
+    let out = child
+        .wait_with_output()
+        .expect("git cat-file --batch failed to run to completion");
+    writer
+        .join()
+        .expect("stdin-writer thread for git cat-file --batch panicked");
+    assert!(
+        out.status.success(),
+        "git cat-file --batch exited {:?}",
+        out.status.code()
+    );
+
+    let buf = out.stdout;
+    let mut i = 0usize;
+    for p in paths {
+        let Some(rel_nl) = buf[i..].iter().position(|&b| b == b'\n') else {
+            break;
+        };
+        let nl = i + rel_nl;
+        let header = String::from_utf8_lossy(&buf[i..nl]);
+        // A path absent from the index prints `:<path> missing` with no body.
+        if header.ends_with("missing") || header.ends_with("ambiguous") {
+            i = nl + 1;
+            continue;
+        }
+        let Some(size_str) = header.rsplit(' ').next() else {
+            break;
+        };
+        let Ok(size) = size_str.parse::<usize>() else {
+            break;
+        };
+        let body_start = nl + 1;
+        let body_end = body_start + size;
+        if body_end > buf.len() {
+            break;
+        }
+        blobs.insert(
+            p.clone(),
+            String::from_utf8_lossy(&buf[body_start..body_end]).into_owned(),
+        );
+        i = body_end + 1; // the newline git writes after the contents
+    }
+    blobs
+}
+
 const LEDGER: &str = "docs/trackers/issue-clusters.md";
 
 /// The per-class files. Since 2026-09-02 the ledger is an **Index file plus one file per
@@ -47,7 +136,19 @@ const LEDGER: &str = "docs/trackers/issue-clusters.md";
 /// See `docs/adrs/2026-09-02-isolate-what-is-cheap-own-what-is-shared.md`.
 const LEDGER_DIR: &str = "docs/trackers/issue-clusters";
 
-/// Index file + every class file, concatenated in a stable order.
+/// Index file + every class file, concatenated in a stable order — read from the git
+/// **index**, not the working tree.
+///
+/// **Why the index and not the worktree.** `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`
+/// reported the corpus side of this comparison reading the index for its file *list* while
+/// reading *content* — including the ledger, here — from the worktree, so a peer's in-flight
+/// edit to either side of the comparison could move it independently mid-run. The fix chosen
+/// here is to make **every** read in the comparison index-scoped: `tracked_all_bug_files`
+/// already lists from the index, `actual_counts` now reads content from it too (see there),
+/// and this function follows so the ledger side matches. Index-scoping also matches
+/// `scripts/pre-commit-ledger-counts.py`'s own default (*"This reads the INDEX and nothing
+/// else"*), so an interactive `cargo test` run and the pre-commit hook judge the same
+/// question: what would be committed right now, not what happens to be on disk mid-edit.
 ///
 /// **The parsers are unchanged by the split — only what they are pointed at moved.** That is
 /// deliberate: `the_ledger_parsers_agree_on_a_fixture` pins them against the Python mirror in
@@ -58,35 +159,60 @@ const LEDGER_DIR: &str = "docs/trackers/issue-clusters";
 /// `**Members:**`, `| IC-N |` rows and `## IC-N —` headings are all recognised at line start,
 /// so none can straddle the join between two files. A parser matching across lines would need
 /// a per-file loop instead.
-fn ledger_text() -> String {
-    let mut parts = vec![std::fs::read_to_string(repo_root().join(LEDGER))
-        .unwrap_or_else(|e| panic!("cannot read {LEDGER}: {e}"))];
-    let dir = repo_root().join(LEDGER_DIR);
-    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "md"))
+fn ledger_text_at(repo: &std::path::Path) -> String {
+    let dir_rel = format!("{LEDGER_DIR}/");
+    let out = Command::new("git")
+        .args(["ls-files", LEDGER, &dir_rel])
+        .current_dir(repo)
+        .output()
+        .expect("git ls-files failed to run — this gate needs a git checkout");
+    assert!(
+        out.status.success(),
+        "git ls-files exited {:?}: {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let mut files: Vec<String> = dedup_ls_files(&String::from_utf8_lossy(&out.stdout))
+        .into_iter()
+        .filter(|p| p.ends_with(".md"))
         .collect();
-    // Sorted so the concatenation is deterministic: unordered read_dir would make any
-    // failure message depend on filesystem iteration order.
+    // Sorted so the concatenation is deterministic: unordered `git ls-files` output would make
+    // any failure message depend on iteration order. LEDGER sorts first (it has no directory
+    // component ahead of "docs/trackers/issue-clusters/"'s own contents by construction below),
+    // so it is placed explicitly rather than relying on string ordering across two directories.
     files.sort();
+    let has_ledger = files.iter().any(|p| p == LEDGER);
+    assert!(
+        has_ledger,
+        "{LEDGER} is not in the git index — is it untracked or deleted?"
+    );
+    let class_files: Vec<&String> = files.iter().filter(|p| p.as_str() != LEDGER).collect();
     // LOAD-BEARING, and the reason it is an assert rather than a comment: if this directory
     // were empty or misnamed, every count below would parse the Index alone and report a
     // clean zero. `no_class_field_states_a_bare_n` is an ABSENCE assertion, so it is monotone
     // under exactly that failure — it would pass, forever, on a corpus it never read. This
     // asserts the population is non-empty, without which absence means nothing.
     assert!(
-        !files.is_empty(),
-        "no class files under {} — every absence assertion below would pass vacuously",
-        dir.display()
+        !class_files.is_empty(),
+        "no class files under {LEDGER_DIR} in the index — every absence assertion below would pass vacuously"
     );
-    for f in files {
-        parts.push(
-            std::fs::read_to_string(&f)
-                .unwrap_or_else(|e| panic!("cannot read {}: {e}", f.display())),
-        );
+
+    let mut all_paths: Vec<String> = vec![LEDGER.to_string()];
+    all_paths.extend(class_files.into_iter().cloned());
+    let blobs = read_index_blobs(repo, &all_paths);
+
+    let mut parts = Vec::with_capacity(all_paths.len());
+    for p in &all_paths {
+        let content = blobs.get(p).unwrap_or_else(|| {
+            panic!("{p} is listed by git ls-files but absent from the index blob read")
+        });
+        parts.push(content.clone());
     }
     parts.join("\n")
+}
+
+fn ledger_text() -> String {
+    ledger_text_at(&repo_root())
 }
 
 /// What is wrong with one bug file's class declaration, if anything.
@@ -402,17 +528,17 @@ fn the_scan_actually_reads_files() {
 // failure mode of the other.
 // ---------------------------------------------------------------------------
 
-/// Every tracked bug file — open corpus **and** archive.
+/// Every tracked bug file — open corpus **and** archive — as of the git **index**.
 ///
 /// Deliberately wider than [`tracked_open_bug_files`]; see the module header for why the two
 /// populations must stay separate.
 ///
 /// Paths arrive through [`dedup_ls_files`]: this is the population [`actual_counts`] counts, so a
 /// duplicated index entry here is a wrong number rather than a repeated line.
-fn tracked_all_bug_files() -> Vec<String> {
+fn tracked_all_bug_files_at(repo: &std::path::Path) -> Vec<String> {
     let out = Command::new("git")
         .args(["ls-files", "docs/issues"])
-        .current_dir(repo_root())
+        .current_dir(repo)
         .output()
         .expect("git ls-files failed to run — this gate needs a git checkout");
     assert!(
@@ -425,6 +551,10 @@ fn tracked_all_bug_files() -> Vec<String> {
         .into_iter()
         .filter(|p| p.ends_with(".md") && !p.ends_with("_TEMPLATE.md"))
         .collect()
+}
+
+fn tracked_all_bug_files() -> Vec<String> {
+    tracked_all_bug_files_at(&repo_root())
 }
 
 /// One file at three index stages is one file.
@@ -664,18 +794,32 @@ fn declared_counts(valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
     parse_index_counts(&text, valid)
 }
 
-/// The corpus side: how many bug files actually carry each slug.
+/// The corpus side: how many bug files actually carry each slug — read from the git
+/// **index**, not the working tree.
+///
+/// **Why the index.** This is the exact site
+/// `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`
+/// named: the file *list* below was already index-scoped (`tracked_all_bug_files`), but each
+/// file's *content* used to come from `std::fs::read_to_string` — the working tree — so a
+/// peer's in-flight write to a tagged file (mid-`artifact(action="move")`, or any write that
+/// briefly leaves the file absent or partially written) moved this count independently of
+/// what was actually committed. Reading every file's content from the index in one
+/// `git cat-file --batch` call ([`read_index_blobs`]) fixes both halves at once: population
+/// and content now come from the same world, and that world is the one a peer's uncommitted
+/// edit cannot touch.
 ///
 /// Seeded with every valid slug at 0, so a class with no members is compared against its row
 /// rather than dropping out of the comparison — `IC-12` is legitimately 0 and its row must still
 /// be checked.
-fn actual_counts(valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
+fn actual_counts_at(repo: &std::path::Path, valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
     let mut out: BTreeMap<String, usize> = valid.iter().map(|s| (s.clone(), 0)).collect();
-    for rel in tracked_all_bug_files() {
-        let Ok(content) = std::fs::read_to_string(repo_root().join(&rel)) else {
+    let paths = tracked_all_bug_files_at(repo);
+    let blobs = read_index_blobs(repo, &paths);
+    for rel in &paths {
+        let Some(content) = blobs.get(rel) else {
             continue;
         };
-        let Some(fm) = frontmatter(&content) else {
+        let Some(fm) = frontmatter(content) else {
             continue;
         };
         for tag in cluster_tags(fm) {
@@ -685,6 +829,182 @@ fn actual_counts(valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
         }
     }
     out
+}
+
+fn actual_counts(valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
+    actual_counts_at(&repo_root(), valid)
+}
+
+/// Build a throwaway git repo under `dir`, with `user.email`/`user.name` set so `git commit`
+/// does not need a global config. Every git call in this fixture is expected to succeed —
+/// this is test setup, not the thing under test, so a failure here panics loudly rather than
+/// being folded into the assertions below.
+fn init_fixture_repo(dir: &std::path::Path) {
+    for args in [
+        vec!["init", "-q"],
+        vec!["config", "user.email", "t@t"],
+        vec!["config", "user.name", "t"],
+    ] {
+        let out = Command::new("git")
+            .args(&args)
+            .current_dir(dir)
+            .output()
+            .unwrap_or_else(|e| panic!("git {args:?} failed to run: {e}"));
+        assert!(
+            out.status.success(),
+            "git {args:?} exited {:?}: {}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+fn git_commit_all(dir: &std::path::Path, message: &str) {
+    for args in [vec!["add", "-A"], vec!["commit", "-q", "-m", message]] {
+        let out = Command::new("git")
+            .args(&args)
+            .current_dir(dir)
+            .output()
+            .unwrap_or_else(|e| panic!("git {args:?} failed to run: {e}"));
+        assert!(
+            out.status.success(),
+            "git {args:?} exited {:?}: {}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+fn git_stage_all(dir: &std::path::Path) {
+    let out = Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(dir)
+        .output()
+        .expect("git add -A failed to run");
+    assert!(
+        out.status.success(),
+        "git add -A exited {:?}: {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// Positive control for `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`:
+/// [`actual_counts_at`] must report the INDEX value, not the working tree, when the two
+/// deliberately disagree.
+///
+/// Seeds a real git repo (a synthetic fixture, not this checkout — several sessions share
+/// this one, so a test that dirtied it would be exactly the hazard under test) with one bug
+/// file tagged `cluster/demo-slug`, commits it, then edits the WORKTREE copy to drop the tag
+/// without staging the edit. `git status` on this fixture would show the file modified; the
+/// index still holds the tagged version.
+///
+/// Three assertions, not one, because a single "reads 1" could pass by accident if the
+/// function secretly read the worktree and the edit below were a no-op:
+/// 1. Before any edit, both worlds agree — 1.
+/// 2. After the unstaged worktree edit strips the tag, `actual_counts_at` still reports 1 —
+///    it is reading the index, and a `std::fs::read_to_string` re-derivation of the same path
+///    confirms the worktree itself now disagrees (0), so this is a real divergence and not a
+///    stale assumption about what the edit does.
+/// 3. Staging (not committing) the strip brings the index's own count down to 0 — proving the
+///    function tracks the INDEX specifically (git's staging area), not last-commit HEAD.
+#[test]
+fn actual_counts_reads_the_index_not_the_worktree() {
+    let tmp = tempfile::tempdir().expect("failed to create a temp dir for the fixture repo");
+    let repo = tmp.path();
+    std::fs::create_dir_all(repo.join("docs/issues")).expect("mkdir docs/issues");
+    init_fixture_repo(repo);
+
+    let tagged =
+        "---\nid: demo\nkind: bug\nstatus: open\ntags:\n- cluster/demo-slug\n---\n\n# demo\n";
+    let untagged = "---\nid: demo\nkind: bug\nstatus: open\ntags: []\n---\n\n# demo\n";
+    let bug_path = repo.join("docs/issues/demo.md");
+    std::fs::write(&bug_path, tagged).expect("write fixture bug file");
+    git_commit_all(repo, "seed: one tagged bug file");
+
+    let valid: BTreeSet<String> = ["demo-slug".to_string()].into_iter().collect();
+
+    // 1. Freshly committed: both worlds agree.
+    assert_eq!(
+        actual_counts_at(repo, &valid).get("demo-slug").copied(),
+        Some(1),
+        "sanity: the freshly-committed fixture must start at 1"
+    );
+
+    // 2. Dirty the WORKTREE only — no `git add`.
+    std::fs::write(&bug_path, untagged).expect("strip the tag on disk, unstaged");
+    let worktree_now = std::fs::read_to_string(&bug_path).expect("re-read the worktree copy");
+    assert!(
+        !worktree_now.contains("cluster/demo-slug"),
+        "the fixture edit must actually remove the tag from the worktree copy, \
+         or this test proves nothing about a real divergence"
+    );
+    assert_eq!(
+        actual_counts_at(repo, &valid).get("demo-slug").copied(),
+        Some(1),
+        "actual_counts_at must still report the INDEX value (1) while the untracked worktree \
+         edit disagrees (0) — reporting 0 here means it regressed to reading the working tree"
+    );
+
+    // 3. Stage the strip (still uncommitted) — the INDEX itself now disagrees with HEAD.
+    git_stage_all(repo);
+    assert_eq!(
+        actual_counts_at(repo, &valid).get("demo-slug").copied(),
+        Some(0),
+        "once the strip is staged, actual_counts_at must follow the INDEX down to 0 — \
+         still reading 1 here would mean it is reading HEAD, not the index"
+    );
+}
+
+/// Companion control for [`actual_counts_reads_the_index_not_the_worktree`], over
+/// [`ledger_text_at`] instead of the bug-file corpus — the bug this guards named
+/// `declared_counts` (which is `parse_index_counts` over `ledger_text()`) as the other worktree
+/// read in the same comparison, and `ledger_text_at` is what both `declared_counts` and
+/// `bare_n_claims` now share.
+#[test]
+fn ledger_text_at_reads_the_index_not_the_worktree() {
+    let tmp = tempfile::tempdir().expect("failed to create a temp dir for the fixture repo");
+    let repo = tmp.path();
+    std::fs::create_dir_all(repo.join(LEDGER_DIR)).expect("mkdir issue-clusters dir");
+    init_fixture_repo(repo);
+
+    std::fs::write(repo.join(LEDGER), "# Issue clusters\n\ncommitted marker\n")
+        .expect("write fixture ledger");
+    std::fs::write(
+        repo.join(LEDGER_DIR).join("IC-1-demo.md"),
+        "## IC-1 — demo\n\n**Slug:** `cluster/demo-slug`\n",
+    )
+    .expect("write fixture class file");
+    git_commit_all(repo, "seed: ledger + one class file");
+
+    assert!(
+        ledger_text_at(repo).contains("committed marker"),
+        "sanity: the freshly-committed fixture ledger must be readable"
+    );
+
+    // Dirty the ledger on disk only — no `git add` — with a *different* marker.
+    std::fs::write(
+        repo.join(LEDGER),
+        "# Issue clusters\n\nUNSTAGED edit — must not be visible\n",
+    )
+    .expect("dirty the ledger on disk, unstaged");
+    let worktree_now =
+        std::fs::read_to_string(repo.join(LEDGER)).expect("re-read the worktree ledger copy");
+    assert!(
+        worktree_now.contains("UNSTAGED edit"),
+        "the fixture edit must actually reach the worktree copy, or this test proves nothing"
+    );
+
+    let seen = ledger_text_at(repo);
+    assert!(
+        seen.contains("committed marker"),
+        "ledger_text_at must still report the INDEX content (still carrying the committed \
+         marker) while the unstaged worktree edit disagrees"
+    );
+    assert!(
+        !seen.contains("UNSTAGED edit"),
+        "ledger_text_at must not see the unstaged worktree edit at all"
+    );
 }
 
 /// Every `n` in the ledger's Index table equals the class's real membership.
@@ -1471,12 +1791,18 @@ fn the_bare_n_claim_parser_discriminates() {
 /// derivation and this reddens until you change the other — a mechanism, not a resolution to
 /// keep them in sync.
 ///
-/// **Why `--source=worktree` and not the hook's own `index` mode.** The two answer different
-/// questions by design — the hook reads the INDEX, so it sees what a commit *ships*, which is
-/// exactly the state `every_index_count_matches_the_corpus` structurally cannot reach
-/// (`reconnaissance-patterns:R-155`). Comparing them against different substrates would make
-/// this test fail on any dirty tree, which is most of the time. Pointing both at the working
-/// tree isolates the thing actually at risk: the **parse logic**.
+/// **Why `--source=index` now, and not `--source=worktree`.** This test used to point both
+/// sides at the working tree, on the reasoning that comparing them against *different*
+/// substrates would fail on any dirty tree — true, but it stopped being the right substrate
+/// once the Rust side moved to the index (see
+/// `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`):
+/// `declared_counts`, `actual_counts` and `bare_n_claims` all read `ledger_text()`, which is
+/// index-scoped now. Pointing this comparison at `--source=worktree` would compare the
+/// worktree against the index and fail on any staged-but-uncommitted edit to the ledger or a
+/// bug file — reintroducing the exact transient-disagreement class the bug named, one layer
+/// up. `--source=index` keeps both sides of *this* test on the same world the Rust functions
+/// now use, which is what the substrate-matching requirement below actually asks for — it was
+/// never tied to a specific substrate, only to the two sides agreeing.
 ///
 /// Mutation that must kill this: change `parse_index_counts` to read `cells[i + 2]`, or drop
 /// the inline-`[a, b]` arm from `cluster_tags`, in EITHER language.
@@ -1485,7 +1811,7 @@ fn the_hook_script_agrees_on_the_cluster_parsers() {
     let out = Command::new("python3")
         .args([
             "scripts/pre-commit-ledger-counts.py",
-            "--source=worktree",
+            "--source=index",
             "--json",
         ])
         .current_dir(repo_root())
@@ -1521,7 +1847,7 @@ fn the_hook_script_agrees_on_the_cluster_parsers() {
             mine, theirs,
             "`{field}` disagrees between this gate and scripts/pre-commit-ledger-counts.py.\n\
              The two derivations have drifted — fix whichever is wrong, in BOTH languages.\n\
-             Reproduce: python3 scripts/pre-commit-ledger-counts.py --source=worktree --json"
+             Reproduce: python3 scripts/pre-commit-ledger-counts.py --source=index --json"
         );
     }
 }
@@ -2388,6 +2714,11 @@ const NOT_HOOK_OWED: &[(&str, &str)] = &[
          not a rule the hook enforces",
     ),
     (
+        "actual_counts_reads_the_index_not_the_worktree",
+        "positive control for the index-vs-worktree bug fix; proves a substrate property of \
+         actual_counts_at, not a rule the hook enforces on a commit",
+    ),
+    (
         "both_yaml_tag_styles_are_read",
         "parser coverage for `cluster_tags`; the invariant it supports is the one-tag rule, \
          which IS hook-owed",
@@ -2395,6 +2726,11 @@ const NOT_HOOK_OWED: &[(&str, &str)] = &[
     (
         "every_cluster_rule_is_hook_owed_or_exempt",
         "asserts about this file's own declarations; the hook has nothing to compare",
+    ),
+    (
+        "ledger_text_at_reads_the_index_not_the_worktree",
+        "positive control for the index-vs-worktree bug fix; proves a substrate property of \
+         ledger_text_at, not a rule the hook enforces on a commit",
     ),
     (
         "ls_files_index_stages_collapse_to_one_path_per_file",
