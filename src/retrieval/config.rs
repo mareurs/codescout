@@ -233,7 +233,7 @@ impl RetrievalConfig {
     /// function's doc comment and `merge_tests` below.
     pub fn from_env_and_project(root: Option<&std::path::Path>) -> Result<Self> {
         let (embedder_url, model, api_key, model_dim) =
-            resolve_embed_fields_with(EmbedEnv::from_real_env(), root);
+            resolve_embed_fields_with(EmbedEnv::from_real_env(), root)?;
         Ok(Self {
             qdrant_url: std::env::var("CODESCOUT_QDRANT_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:6334".into()),
@@ -612,10 +612,34 @@ fn merge_embed_config(
     (url, model, api_key, dim)
 }
 
+/// The four embed-related `RetrievalConfig` fields, in the order
+/// `(embedder_url, model, api_key, model_dim)` — the shape `merge_embed_config` returns
+/// and both wrappers below forward.
+///
+/// Named rather than written out because wrapping the tuple in `Result` (so a config
+/// load failure can refuse instead of defaulting) puts it over clippy's
+/// `type_complexity` threshold. The tuple itself did not grow.
+type ResolvedEmbedFields = (Option<String>, String, Option<String>, Option<usize>);
+
 /// Resolve the four embed-related `RetrievalConfig` fields for a project
 /// root, given an already-resolved `EmbedEnv`. Thin edge wrapper around
 /// `resolve_embed_fields_from` — the ONLY thing it adds is the real
 /// `ProjectConfig::load_or_default(root)` call.
+///
+/// **A load failure REFUSES; it does not fall back.** This used to be
+/// `root.and_then(|r| ProjectConfig::load_or_default(r).ok())`, and that `.ok()`
+/// turned a parse error into `None`, which fell through
+/// `merge_embed_config`'s `unwrap_or_else(default_embed_model)` to the built-in
+/// model — so a project whose config cannot be parsed was indistinguishable from
+/// one that never configured a model, and nothing named the substitution
+/// (`docs/issues/2026-09-18-a-malformed-project-toml-silently-resolves-the-default-embedding-model.md`,
+/// the same shape as the archived `f73130523241a666` one subsystem over).
+/// `Agent::with_project_at` already failed closed on the identical config; this is
+/// the other half catching up.
+///
+/// `root == None` (no project at all) and an **absent** project.toml both still
+/// resolve silently: `load_or_default` synthesises a default table for a missing
+/// file rather than erroring, so only a genuine load failure reaches the `?`.
 ///
 /// Deliberately NOT the seam most tests exercise: `load_or_default`
 /// itself applies its own `CODESCOUT_EMBED_MODEL`/`CODESCOUT_EMBED_URL`
@@ -632,10 +656,32 @@ fn merge_embed_config(
 fn resolve_embed_fields_with(
     env: EmbedEnv,
     root: Option<&std::path::Path>,
-) -> (Option<String>, String, Option<String>, Option<usize>) {
-    let project_config =
-        root.and_then(|r| crate::config::project::ProjectConfig::load_or_default(r).ok());
-    resolve_embed_fields_from(env, project_config)
+) -> Result<ResolvedEmbedFields> {
+    let project_config = match root {
+        Some(r) => Some(
+            crate::config::project::ProjectConfig::load_or_default(r).map_err(|e| {
+                // Input-driven: the user's own config file is malformed, and the
+                // caller can fix it or drop it. `RecoverableError` keeps this
+                // `isError: false`, so a sibling parallel tool call in the same turn
+                // is not aborted by someone else's typo (`get_guide("error-handling")`).
+                // The hint names two actions the reader can actually perform — a
+                // guard that says only what is wrong sends nobody anywhere.
+                crate::tools::RecoverableError::with_hint(
+                    format!(
+                        "the project config at {} could not be loaded: {e}",
+                        r.join(".codescout").join("project.toml").display()
+                    ),
+                    "Fix the file named in the error — a [project] table with a `name` \
+                     is required — or delete it to fall back to the built-in embedding \
+                     defaults. It is no longer defaulted silently: a config that cannot \
+                     be parsed would otherwise resolve to a model the project never \
+                     asked for.",
+                )
+            })?,
+        ),
+        None => None,
+    };
+    Ok(resolve_embed_fields_from(env, project_config))
 }
 
 /// Same composition as `resolve_embed_fields_with`, but takes an
@@ -651,7 +697,7 @@ fn resolve_embed_fields_with(
 fn resolve_embed_fields_from(
     env: EmbedEnv,
     project_config: Option<crate::config::project::ProjectConfig>,
-) -> (Option<String>, String, Option<String>, Option<usize>) {
+) -> ResolvedEmbedFields {
     let section = project_config.map(|c| c.embeddings);
     for field in dotenv_shadowed_fields(&env, section.as_ref()) {
         tracing::warn!(
@@ -1290,7 +1336,8 @@ mod merge_tests {
         // `EmbedEnv::default()` (never `from_real_env()`) as input: no
         // ambient variable can decide the verdict, because no real env is
         // read at all.
-        let (url, model, api_key, dim) = resolve_embed_fields_with(EmbedEnv::default(), None);
+        let (url, model, api_key, dim) = resolve_embed_fields_with(EmbedEnv::default(), None)
+            .expect("root == None loads no config, so it cannot fail");
         assert_eq!(model, default_embed_model());
         assert_eq!(url, None);
         assert_eq!(api_key, None);

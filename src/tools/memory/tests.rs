@@ -15,34 +15,50 @@ fn lsp() -> Arc<dyn crate::lsp::LspProvider> {
 /// docs/plans/2026-09-17-embedding-config-consolidation.md.
 #[test]
 fn resolved_chunk_budget_reflects_the_projects_configured_model() {
-    let small = tempdir().unwrap();
-    std::fs::create_dir_all(small.path().join(".codescout")).unwrap();
-    std::fs::write(
-        small.path().join(".codescout/project.toml"),
-        "[project]\nname = \"small\"\n\n[embeddings]\nmodel = \"local:AllMiniLML6V2Q\"\n",
-    )
-    .unwrap();
+    // `resolved_chunk_budget` resolves through
+    // `RetrievalConfig::from_env_and_project`, so ANY ambient embedding-model
+    // variable outranks both roots' project.toml, collapses the differential to a
+    // single model, and leaves `assert_ne!` below comparing a value to itself — a
+    // false red on every machine that configures codescout (which is every
+    // MCP-spawned shell here). The names are DERIVED from
+    // `embedding_env::all_names()` rather than re-typed: a hand-kept list stops
+    // covering the resolver the moment a name is added, which is exactly what the
+    // 2026-09-17 deprecated-alias chain did to `tests/retrieval_unit.rs`.
+    //
+    // Only the env layer needs neutralising, not the global config: a
+    // `~/.config/codescout/config.toml` is merged UNDER each project.toml, and both
+    // fixtures set `[embeddings].model` explicitly, so the overlay wins either way.
+    let unset: Vec<&'static str> = crate::config::embedding_env::all_names();
+    temp_env::with_vars_unset(unset, || {
+        let small = tempdir().unwrap();
+        std::fs::create_dir_all(small.path().join(".codescout")).unwrap();
+        std::fs::write(
+            small.path().join(".codescout/project.toml"),
+            "[project]\nname = \"small\"\n\n[embeddings]\nmodel = \"local:AllMiniLML6V2Q\"\n",
+        )
+        .unwrap();
 
-    let large = tempdir().unwrap();
-    std::fs::create_dir_all(large.path().join(".codescout")).unwrap();
-    std::fs::write(
-        large.path().join(".codescout/project.toml"),
-        "[project]\nname = \"large\"\n\n[embeddings]\nmodel = \"local:JinaEmbeddingsV2BaseCode\"\n",
-    )
-    .unwrap();
+        let large = tempdir().unwrap();
+        std::fs::create_dir_all(large.path().join(".codescout")).unwrap();
+        std::fs::write(
+            large.path().join(".codescout/project.toml"),
+            "[project]\nname = \"large\"\n\n[embeddings]\nmodel = \"local:JinaEmbeddingsV2BaseCode\"\n",
+        )
+        .unwrap();
 
-    let small_budget = super::resolved_chunk_budget(small.path()).unwrap();
-    let large_budget = super::resolved_chunk_budget(large.path()).unwrap();
+        let small_budget = super::resolved_chunk_budget(small.path()).unwrap();
+        let large_budget = super::resolved_chunk_budget(large.path()).unwrap();
 
-    assert_ne!(
-        small_budget, large_budget,
-        "two roots with different configured models must not yield the same budget"
-    );
-    assert_eq!(
-        large_budget,
-        crate::embed::chunk_size_for_model("local:JinaEmbeddingsV2BaseCode"),
-        "the large root's budget must be the one its OWN configured model implies"
-    );
+        assert_ne!(
+            small_budget, large_budget,
+            "two roots with different configured models must not yield the same budget"
+        );
+        assert_eq!(
+            large_budget,
+            crate::embed::chunk_size_for_model("local:JinaEmbeddingsV2BaseCode"),
+            "the large root's budget must be the one its OWN configured model implies"
+        );
+    });
 }
 
 /// Memory writes may return either `"ok"` (no best-effort side-effect
