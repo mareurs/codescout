@@ -1036,6 +1036,16 @@ def main() -> int:
                 sort_keys=True,
             ))
             return 0
+        else:
+            # No arm above matched. Without this, an unrecognized flag fell through the loop
+            # silently and execution proceeded into the real check suite as though no flag had
+            # been passed at all -- so a caller's typo (e.g. `--fixture-ledgre` for
+            # `--fixture-ledger`) got an exit code that depended on unrelated ambient ledger
+            # state instead of an error naming the mistake. Every real caller (this file's own
+            # tests, `tests/pre-commit-ledger-divergence.sh`, `scripts/pre-commit-run.sh`,
+            # `.pre-commit-config.yaml`) passes only flags recognized above, so this refuses
+            # strictly a superset of what silent-fallthrough used to admit.
+            raise SystemExit(f"unknown flag {arg!r}")
     if source not in ("index", "worktree", "head"):
         raise SystemExit(f"--source must be index|worktree|head, got {source!r}")
 

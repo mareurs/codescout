@@ -2429,6 +2429,11 @@ const NOT_HOOK_OWED: &[(&str, &str)] = &[
         "is the rule-parity comparison; asking the hook to enforce it is circular",
     ),
     (
+        "an_unrecognised_flag_is_refused_by_name_not_silently_ignored",
+        "a test OF the hook's own CLI argument parsing, not a ledger/content rule it enforces \
+         against a commit; there is no HOOK_RULES entry for \"refuse your own unknown flags\"",
+    ),
+    (
         "the_hook_script_agrees_on_both_yaml_tag_styles",
         "cross-language parser parity over stdin; a test OF the hook",
     ),
@@ -2650,5 +2655,40 @@ fn the_hook_enforces_every_rule_it_declares() {
          A rule enforced by only one side is the defect this pair exists to catch: the gate \
          reds for every session in the checkout while the commit path lets it through.\n\
          Reproduce: python3 scripts/pre-commit-ledger-counts.py --rules"
+    );
+}
+
+/// A caller-supplied flag that matches no arm in the elif chain must be refused, not silently
+/// ignored. Before the fix, `main()`'s argument loop has no trailing `else`: an unrecognized
+/// flag falls through with no error, and execution proceeds into the real check suite as though
+/// no flag had been passed at all -- so the exit code silently depends on unrelated ambient
+/// ledger state instead of naming the mistyped flag.
+///
+/// `--fixture-ledgre` is a plausible typo of the real `--fixture-ledger` (transposed letters),
+/// chosen because that shape is exactly the failure mode the bug names: a caller expecting a
+/// fixture's stdin-driven JSON response instead silently gets the real commit-time check, whose
+/// success or failure has nothing to do with the flag at all.
+///
+/// Mutation that must kill this: delete the trailing `else` arm (or its `raise SystemExit`),
+/// restoring the silent fallthrough.
+#[test]
+fn an_unrecognised_flag_is_refused_by_name_not_silently_ignored() {
+    let out = Command::new("python3")
+        .args(["scripts/pre-commit-ledger-counts.py", "--fixture-ledgre"])
+        .current_dir(repo_root())
+        .output()
+        .expect("python3 failed to run — the hook script needs it, so this gate does too");
+
+    assert!(
+        !out.status.success(),
+        "an unrecognised flag must not exit success -- it silently ran the real check suite \
+         instead of naming the mistake. stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("--fixture-ledgre"),
+        "the refusal must name the flag that was actually passed, not a generic message: {stderr}"
     );
 }
