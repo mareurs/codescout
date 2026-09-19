@@ -35,6 +35,31 @@ pub struct Entry {
     pub hook_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// The companion's own write cadence for this slot's `hook_at`, not invented here:
+/// `refreshLivenessStamp` in
+/// `../claude-plugins/codescout-companion/hooks/lib.mjs` rewrites `hook_at` on every
+/// codescout tool call (`PostToolUse`, `cs-liveness.mjs`), throttled to skip a
+/// rewrite less than this many ms after the last one
+/// (`LIVENESS_THROTTLE_MS = 60_000`, `lib.mjs:457`). That throttle is the only
+/// concrete number the companion publishes about how often it proves it is alive.
+/// Reused directly below rather than re-typed, so the derivation stays traceable
+/// in code and not only in prose.
+const HOOK_LIVENESS_THROTTLE_MS: u64 = 60_000;
+
+/// How long this slot's mtime may go unrefreshed before we stop believing a
+/// companion is present. Five throttle windows, not the throttle itself: one
+/// window (60s) is shorter than an ordinary tool-free gap (composing a reply,
+/// waiting on the user), so gating on it would flip `active` false on nearly every
+/// ordinary pause — the same false-deactivation that refuted the earlier
+/// `hook_at`-age sketch in
+/// docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md
+/// (healthy sessions measured 0.6h-25h stale under the OLD SessionStart-only
+/// stamp, before the liveness refresh existed). Five windows tolerates several
+/// consecutive tool-free turns while still resolving a genuinely dead hook in
+/// single-digit minutes rather than hours.
+const HOOK_STALE_AFTER: std::time::Duration =
+    std::time::Duration::from_millis(HOOK_LIVENESS_THROTTLE_MS * 5);
+
 #[derive(Debug, Clone)]
 pub struct Rendezvous {
     path: Option<PathBuf>,
@@ -119,8 +144,30 @@ impl Rendezvous {
     /// without supplying the real one. Public — and covered by this module's
     /// own tests — ahead of that consumer: `CodeScoutServer::poll_rendezvous`
     /// now copies it onto `GuideLedger::rendezvous_active` on every request.
+    ///
+    /// `self.active` alone is write-once and never reset by `poll()` — a
+    /// companion that stamped once and then crashed, or a `/mcp` process that
+    /// died, would otherwise read as active for the rest of the conversation
+    /// (docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md).
+    /// So liveness is re-derived here, on every read, from `last_mtime` — the
+    /// mtime `poll()` already cached the last time the slot's content changed —
+    /// against wall-clock now: stale past `HOOK_STALE_AFTER` and this reports
+    /// false even though the sticky flag is still set. `last_mtime == None`
+    /// (never yet polled, e.g. right after a reconnect inherited an active flag
+    /// from a predecessor slot) is treated as not-stale rather than
+    /// unconditionally stale, so inheritance still activates before the first
+    /// `poll()`. A future-relative-to-now mtime (this module's `stamp_as_hook`
+    /// test helper backdates to a fixed epoch that happens to be in the future
+    /// relative to "now" in code written years earlier) is likewise treated as
+    /// fresh rather than as an error.
     pub fn is_active(&self) -> bool {
         self.active
+            && self.last_mtime.is_none_or(|m| {
+                std::time::SystemTime::now()
+                    .duration_since(m)
+                    .is_ok_and(|age| age <= HOOK_STALE_AFTER)
+                    || std::time::SystemTime::now() < m
+            })
     }
 
     /// The session we currently believe we are serving, if any — the same value
@@ -873,6 +920,47 @@ mod tests {
             "before this fix a reconnect reported inactive for the rest of the \
              conversation, and every workspace(activate) then cleared the whole guide \
              ledger — ~59-67 KB of guides re-sent into a context already holding them"
+        );
+    }
+
+    #[test]
+    fn poll_closes_the_gate_once_the_hook_has_gone_quiet_past_its_ttl() {
+        // Point 1: inactive before any hook writes — the ordinary unstamped-publish
+        // state.
+        let dir = tempfile::tempdir().unwrap();
+        let mut r = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("sess-1"));
+        assert!(!r.is_active(), "unstamped at publish, as before");
+
+        // Point 2: the hook stamps this slot, freshly (mtime == now) — the gate
+        // opens.
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        stamp_as_hook_at(r.path().unwrap(), "sess-1", now_secs);
+        r.poll();
+        assert!(r.is_active(), "a fresh hook stamp opens the gate");
+
+        // Point 3: the hook goes quiet — no further writes — for longer than its
+        // own liveness cadence allows (`HOOK_STALE_AFTER`, derived from the
+        // companion's `LIVENESS_THROTTLE_MS`). Simulated by backdating the SAME
+        // file's mtime rather than sleeping real wall-clock time — this module's
+        // own established idiom for deterministic mtime control; see
+        // `stamp_as_hook_at`'s own comment. Before this fix `active` was
+        // write-once and never reset, so this poll (and every one after it) would
+        // keep reporting active forever, which is the bug in
+        // docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md
+        filetime::set_file_mtime(
+            r.path().unwrap(),
+            filetime::FileTime::from_unix_time(now_secs - HOOK_STALE_AFTER.as_secs() as i64 - 1, 0),
+        )
+        .unwrap();
+        r.poll();
+        assert!(
+            !r.is_active(),
+            "a hook silent for longer than its own liveness cadence must close the \
+             gate again, or a companion that crashed mid-conversation leaves it \
+             latched open for the rest of the conversation"
         );
     }
 }

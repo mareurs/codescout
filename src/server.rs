@@ -6824,10 +6824,8 @@ mod tests {
     /// **The converse is NOT asserted, and must not be.** `is_write` gates the
     /// cross-process write lock and nothing else, so it is not a reader-oracle:
     /// `run_command` has no override and reports `false` for every input including
-    /// `rm -rf src`, and `workspace` reports `false` while `action="activate"` writes
-    /// `.codescout/libraries.json` (`src/library/auto_register.rs:64-65`). Asserting
-    /// "`is_write == false` implies read-only" would encode those gaps as a rule and red
-    /// on the two tools that are annotated correctly.
+    /// `rm -rf src`. Asserting "`is_write == false` implies read-only" would encode that gap
+    /// as a rule and red on a tool that is annotated correctly.
     ///
     /// Annotations are hints, not guarantees — nothing enforces them at runtime. This gate
     /// is only about not shipping a hint that is actively wrong.

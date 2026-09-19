@@ -8,6 +8,30 @@ fn lsp() -> Arc<dyn crate::lsp::LspProvider> {
     crate::lsp::LspManager::new_arc()
 }
 
+#[test]
+fn workspace_is_write_depends_on_action() {
+    // `Workspace::call` dispatches "activate" to `ActivateProject`, which persists
+    // `.codescout/libraries.json` via `auto_register_deps` — a real write the
+    // cross-process write lock must cover. `status`/`list_projects` are pure reads
+    // and must NOT be forced through the lock, or every read serialises behind it.
+    assert!(
+        Workspace.is_write(&json!({ "action": "activate", "path": "/tmp/x" })),
+        "activate persists libraries.json and must take the write lock"
+    );
+    assert!(
+        !Workspace.is_write(&json!({ "action": "status" })),
+        "status is a pure read and must not be forced through the write lock"
+    );
+    assert!(
+        !Workspace.is_write(&json!({ "action": "list_projects" })),
+        "list_projects is a pure read and must not be forced through the write lock"
+    );
+    assert!(
+        !Workspace.is_write(&json!({})),
+        "no action at all must not be classified as a write"
+    );
+}
+
 #[tokio::test]
 async fn activate_and_get_config() {
     let dir = tempdir().unwrap();
@@ -1490,6 +1514,88 @@ async fn activate_project_unknown_id_with_no_slash_returns_error() {
         result.is_err() || result.as_ref().unwrap().get("error").is_some(),
         "expected error or error field, got: {:?}",
         result
+    );
+}
+
+/// Bug `a5054d135acacbe3`: `post_compact=true` unconditionally cleared
+/// `guide_hints_emitted`, with no check that a companion hook is even reachable —
+/// unlike the adjacent guarded branch in `ActivateProject::call` (six lines up in the
+/// same file), which skips its own blunt clear whenever `rendezvous_active()` is true.
+/// That asymmetry is the bug: converging the two means post_compact's clear is gated
+/// on the identical condition its sibling already uses, rather than firing on every
+/// call regardless of whether the signal can be trusted.
+#[tokio::test]
+async fn post_compact_skips_the_clear_when_rendezvous_is_active() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+
+    let mut led = crate::tools::guide_ledger::GuideLedger::default();
+    led.insert("librarian".to_string());
+    led.set_rendezvous_active(true);
+
+    let ctx = ToolContext {
+        agent: Agent::new(Some(dir.path().to_path_buf())).await.unwrap(),
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(led)),
+        workspace_override: None,
+    };
+
+    let result = ProjectStatus
+        .call(json!({"post_compact": true}), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["flushed"], json!(true), "expected flushed:true");
+    assert!(
+        ctx.guide_hints_emitted.lock().contains("librarian"),
+        "a verifiably live companion means conversation-identity changes are already \
+         visible via the rendezvous poll elsewhere, so a blunt clear here is redundant \
+         guesswork — it must not fire while the gate is open"
+    );
+}
+
+/// The other half of the sandwich above: with no rendezvous to trust (hookless client,
+/// or the companion has never reported in), the historical blunt clear must still run —
+/// this is `docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`'s
+/// own "degrade to today's behaviour on absence" design, and the case the ledger being
+/// gated must not silently break.
+#[tokio::test]
+async fn post_compact_still_clears_when_rendezvous_is_unverifiable() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+
+    let mut led = crate::tools::guide_ledger::GuideLedger::default();
+    led.insert("librarian".to_string());
+    led.set_rendezvous_active(false);
+
+    let ctx = ToolContext {
+        agent: Agent::new(Some(dir.path().to_path_buf())).await.unwrap(),
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(led)),
+        workspace_override: None,
+    };
+
+    let result = ProjectStatus
+        .call(json!({"post_compact": true}), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["flushed"], json!(true), "expected flushed:true");
+    assert!(
+        !ctx.guide_hints_emitted.lock().contains("librarian"),
+        "with no verifiable rendezvous, the blunt always-safe clear must still run — this \
+         is the fallback the bug file's design keeps deliberately, and without this half \
+         the assertion above would pass even if the gate were inverted"
     );
 }
 

@@ -17,15 +17,28 @@ impl Tool for Workspace {
         "workspace"
     }
 
+    /// `action="activate"` reaches `auto_register_deps`, which persists
+    /// `.codescout/libraries.json` (`src/library/auto_register.rs:64-65`) — a real
+    /// filesystem write that must take the cross-process write lock
+    /// (`src/server.rs:1048-1055`, `:534-539` consume this). `status` and
+    /// `list_projects` are pure reads and must stay unlocked, or every read
+    /// serialises behind the write lock alongside genuine writers.
+    ///
+    /// `is_write` is per-CALL, not per-tool (`Tool::is_write` takes `&Value`; see
+    /// `Library::is_write`, `Memory::is_write` for the same pattern), so switching on
+    /// `action` here locks exactly the mutating dispatch branch and none of the others.
+    /// Fixes `docs/issues/2026-09-03-workspace-activate-writes-libraries-json-outside-the-write-lock.md`.
+    fn is_write(&self, input: &Value) -> bool {
+        input.get("action").and_then(Value::as_str) == Some("activate")
+    }
+
     /// Mixed: `status`/`list_projects` read, `activate` writes — it calls
     /// `auto_register_deps`, which persists `.codescout/libraries.json`
     /// (`src/library/auto_register.rs:64-65`). Re-activating the same root re-registers
     /// nothing, so the write is additive and idempotent.
     ///
-    /// **This deliberately disagrees with `is_write`**, which returns the trait default
-    /// `false` for every `workspace` call. That is the narrower claim — `is_write` gates
-    /// the cross-process write lock, and the lock has never covered this path. Annotating
-    /// truthfully here does not change that; see
+    /// `is_write` agrees, per call: it returns `true` for `action="activate"` and `false` for
+    /// the read-only actions, so the activate path takes the cross-process write lock. See
     /// `docs/issues/2026-09-03-workspace-activate-writes-libraries-json-outside-the-write-lock.md`.
     fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
         crate::tools::annot::additive_closed()
@@ -382,7 +395,18 @@ impl Tool for ProjectStatus {
             // src/server.rs) — every other topic survives a restart.
             // Compaction clears everything. See
             // docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md.
-            ctx.guide_hints_emitted.lock().clear();
+            //
+            // Gated on the SAME condition `ActivateProject::call`'s guarded re-arm
+            // branch uses, converging an asymmetry between two adjacent branches:
+            // see docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md.
+            // A verifiably live companion means conversation-identity changes are
+            // already visible to us via the rendezvous poll elsewhere, so a blunt
+            // clear here is redundant guesswork about a call this server cannot
+            // itself confirm reflects a real compaction. With no rendezvous to
+            // trust, degrade to the historical always-safe behaviour.
+            if !ctx.guide_hints_emitted.lock().rendezvous_active() {
+                ctx.guide_hints_emitted.lock().clear();
+            }
             tracing::info!("PostCompact: flushed all LSP clients; they will restart lazily.");
             return Ok(json!({
                 "flushed": true,
