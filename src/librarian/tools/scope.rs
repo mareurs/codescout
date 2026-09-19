@@ -599,6 +599,190 @@ mod tests {
         );
     }
 
+    /// Assemble the `resolve_scope(` call needle character-wise so this
+    /// test's own source never contains the substring literally -- see the
+    /// doc comment on `every_resolve_scope_call_names_project_as_its_default`
+    /// for why that matters (the guard would otherwise find itself).
+    fn call_needle() -> String {
+        [
+            'r', 'e', 's', 'o', 'l', 'v', 'e', '_', 's', 'c', 'o', 'p', 'e', '(',
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    /// Assemble the `Scope::Project` needle character-wise for the same
+    /// reason as `call_needle`.
+    fn want_needle() -> String {
+        [
+            'S', 'c', 'o', 'p', 'e', ':', ':', 'P', 'r', 'o', 'j', 'e', 'c', 't',
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    /// Scan `content` for occurrences of `call` (expected to be
+    /// `resolve_scope(`), other than its own definition or a commented-out
+    /// mention, and report the 1-based line number of any whose default
+    /// argument does not name `want` within a **fixed 240-byte window**
+    /// after the call token.
+    ///
+    /// This is the ORIGINAL predicate from
+    /// `docs/issues/2026-09-09-a-fixed-byte-window-source-guard-reports-a-correct-call-site.md`
+    /// (bug `82b3c70313fb754b`), kept ONLY so the two direction tests below
+    /// can demonstrate the defect against a deterministic fixture instead of
+    /// mutating a production call site. It is deliberately not wired into
+    /// `every_resolve_scope_call_names_project_as_its_default` any more.
+    fn offending_resolve_scope_lines_by_byte_window(
+        content: &str,
+        call: &str,
+        want: &str,
+    ) -> (usize, Vec<u32>) {
+        let mut offenders = Vec::new();
+        let mut checked = 0usize;
+        for (idx, _) in content.match_indices(call) {
+            let line_start = content[..idx].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            let line_prefix = &content[line_start..idx];
+            if line_prefix.contains("fn ") || line_prefix.trim_start().starts_with("//") {
+                continue;
+            }
+            checked += 1;
+            let mut end = (idx + 240).min(content.len());
+            while !content.is_char_boundary(end) {
+                end -= 1;
+            }
+            if !content[idx..end].contains(want) {
+                let line_no = content[..idx].matches('\n').count() as u32 + 1;
+                offenders.push(line_no);
+            }
+        }
+        (checked, offenders)
+    }
+
+    /// Extract the trimmed source text of a call's **last** positional
+    /// argument, given `content` and the byte index of the call's opening
+    /// `(`. `//` and `/* */` comments and string-literal contents are
+    /// treated as opaque and never contribute to the returned text, so a
+    /// comment next to the real argument cannot be mistaken for it in
+    /// either direction. Returns `None` if the parens never balance (or a
+    /// stray `]`/`}` closes at the call's own depth) before the content
+    /// ends -- malformed input, which should not occur in a real `.rs` file.
+    fn last_call_arg(content: &str, open_paren: usize) -> Option<String> {
+        debug_assert_eq!(content.as_bytes().get(open_paren), Some(&b'('));
+        let mut depth: i32 = 0;
+        let mut current = String::new();
+        let mut args: Vec<String> = Vec::new();
+        let mut j = open_paren + 1;
+        while j < content.len() {
+            let rest = &content[j..];
+            if let Some(after) = rest.strip_prefix("//") {
+                return match after.find('\n') {
+                    Some(nl) => {
+                        j += 2 + nl;
+                        continue;
+                    }
+                    None => None, // line comment runs to EOF: unterminated call
+                };
+            }
+            if let Some(after) = rest.strip_prefix("/*") {
+                // Unterminated block comment => the call has no closing delimiter, so
+                // `?` propagates the same `None` the old `return None` arm did.
+                let end = after.find("*/")?;
+                j += 2 + end + 2;
+                continue;
+            }
+            let c = rest.chars().next()?;
+            let clen = c.len_utf8();
+            if c == '"' {
+                j += clen;
+                while j < content.len() {
+                    let c2 = content[j..].chars().next()?;
+                    let c2len = c2.len_utf8();
+                    j += c2len;
+                    if c2 == '\\' {
+                        if j < content.len() {
+                            j += content[j..]
+                                .chars()
+                                .next()
+                                .map(|c| c.len_utf8())
+                                .unwrap_or(0);
+                        }
+                        continue;
+                    }
+                    if c2 == '"' {
+                        break;
+                    }
+                }
+                continue;
+            }
+            match c {
+                '(' | '[' | '{' => {
+                    depth += 1;
+                    current.push(c);
+                    j += clen;
+                }
+                ')' | ']' | '}' => {
+                    if depth == 0 {
+                        if c != ')' {
+                            return None; // mismatched delimiter at the call's own depth
+                        }
+                        let last = current.trim();
+                        if !last.is_empty() {
+                            args.push(last.to_string());
+                        }
+                        return args.pop();
+                    }
+                    depth -= 1;
+                    current.push(c);
+                    j += clen;
+                }
+                ',' if depth == 0 => {
+                    args.push(current.trim().to_string());
+                    current.clear();
+                    j += clen;
+                }
+                _ => {
+                    current.push(c);
+                    j += clen;
+                }
+            }
+        }
+        None
+    }
+
+    /// Scan `content` for occurrences of `call` (expected to be
+    /// `resolve_scope(`), other than its own definition or a commented-out
+    /// mention, and report the 1-based line number of any whose **last
+    /// argument** -- parsed to the call's closing delimiter, comments and
+    /// string contents excluded -- is not `want`, bare (`Scope::Project`) or
+    /// path-qualified (`super::scope::Scope::Project`). Returns
+    /// `(checked, offenders)`; `checked` backs the guard's positive control.
+    fn offending_resolve_scope_lines(content: &str, call: &str, want: &str) -> (usize, Vec<u32>) {
+        let mut offenders = Vec::new();
+        let mut checked = 0usize;
+        for (idx, _) in content.match_indices(call) {
+            let line_start = content[..idx].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            let line_prefix = &content[line_start..idx];
+            if line_prefix.contains("fn ") || line_prefix.trim_start().starts_with("//") {
+                continue;
+            }
+            checked += 1;
+            let open_paren = idx + call.len() - 1;
+            let names_default = match last_call_arg(content, open_paren) {
+                Some(arg) => {
+                    arg == want
+                        || (arg.ends_with(want) && arg[..arg.len() - want.len()].ends_with("::"))
+                }
+                None => false,
+            };
+            if !names_default {
+                let line_no = content[..idx].matches('\n').count() as u32 + 1;
+                offenders.push(line_no);
+            }
+        }
+        (checked, offenders)
+    }
+
     /// Gate: every `resolve_scope` CALL in the tree names `Scope::Project` as its
     /// default.
     ///
@@ -616,18 +800,20 @@ mod tests {
     ///
     /// The needles are assembled character-wise so this test's own source does not
     /// match them.
+    ///
+    /// The predicate itself parses each call's argument list to its closing
+    /// delimiter and checks the **last argument** (`offending_resolve_scope_lines`
+    /// / `last_call_arg`), rather than asking whether `Scope::Project` merely
+    /// *appears* within a fixed byte window of the call token — see
+    /// `docs/issues/2026-09-09-a-fixed-byte-window-source-guard-reports-a-correct-call-site.md`
+    /// (bug `82b3c70313fb754b`). That bug's two failure directions are exercised
+    /// directly, without mutating a production call site, by
+    /// `a_correct_default_survives_a_long_comment_inside_the_argument_list` and
+    /// `a_wrong_default_is_reported_despite_a_mentioning_comment_nearby` below.
     #[test]
     fn every_resolve_scope_call_names_project_as_its_default() {
-        let call: String = [
-            'r', 'e', 's', 'o', 'l', 'v', 'e', '_', 's', 'c', 'o', 'p', 'e', '(',
-        ]
-        .into_iter()
-        .collect();
-        let want: String = [
-            'S', 'c', 'o', 'p', 'e', ':', ':', 'P', 'r', 'o', 'j', 'e', 'c', 't',
-        ]
-        .into_iter()
-        .collect();
+        let call = call_needle();
+        let want = want_needle();
         let root = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
         let mut offenders: Vec<String> = Vec::new();
         let mut checked = 0usize;
@@ -642,28 +828,17 @@ mod tests {
             let Ok(content) = std::fs::read_to_string(path) else {
                 continue;
             };
-            for (idx, _) in content.match_indices(call.as_str()) {
-                let line_start = content[..idx].rfind('\n').map(|i| i + 1).unwrap_or(0);
-                let line_prefix = &content[line_start..idx];
-                // Skip the definition itself, and any mention in a line comment.
-                if line_prefix.contains("fn ") || line_prefix.trim_start().starts_with("//") {
-                    continue;
-                }
-                checked += 1;
-                // Widen past rustfmt's wrapping; clamp to a char boundary because
-                // the surrounding source contains multi-byte punctuation.
-                let mut end = (idx + 240).min(content.len());
-                while !content.is_char_boundary(end) {
-                    end -= 1;
-                }
-                if !content[idx..end].contains(want.as_str()) {
-                    let line_no = content[..idx].matches('\n').count() + 1;
-                    let rel = path.strip_prefix(&root).unwrap_or(path);
-                    offenders.push(format!(
-                        "{}:{line_no}",
-                        rel.display().to_string().replace('\\', "/")
-                    ));
-                }
+            let (file_checked, file_offenders) =
+                offending_resolve_scope_lines(&content, &call, &want);
+            checked += file_checked;
+            if !file_offenders.is_empty() {
+                let rel = path.strip_prefix(&root).unwrap_or(path);
+                let rel_str = rel.display().to_string().replace('\\', "/");
+                offenders.extend(
+                    file_offenders
+                        .into_iter()
+                        .map(|line_no| format!("{rel_str}:{line_no}")),
+                );
             }
         }
         // Positive control: a scan that matched nothing must not read as a pass.
@@ -681,6 +856,121 @@ mod tests {
              librarian's documented default on every user-facing surface. A handler \
              that wants a different breadth should say so in its own doc comment and \
              this gate should be widened deliberately. Offenders: {offenders:?}"
+        );
+    }
+
+    /// Direction 1 of bug `82b3c70313fb754b`: a correct call whose default
+    /// argument is preceded by a multi-line explanatory comment inside the
+    /// argument list must not be reported. Under the old 240-byte-window
+    /// predicate this comment alone pushes `Scope::Project` past the window
+    /// (measured at offset 400 in the bug file); the argument-parsing
+    /// predicate does not care how long the comment is, because it excludes
+    /// comments before looking at the argument at all.
+    #[test]
+    fn a_correct_default_survives_a_long_comment_inside_the_argument_list() {
+        let call = call_needle();
+        let want = want_needle();
+        let content = format!(
+            "let (effective_scope, scope_fallback) = {call}\n    \
+             None,\n    \
+             current,\n    \
+             UmbrellaPolicy::Require,\n    \
+             // Explaining, at some length, exactly why this call opts into\n    \
+             // the project default rather than something wider -- the kind\n    \
+             // of comment a reviewer asks an author to leave at a call site,\n    \
+             // and exactly the shape that pushed a correct call past a fixed\n    \
+             // 240-byte window in the bug this test guards against.\n    \
+             {want},\n\
+             )?;\n"
+        );
+        let (checked, offenders) = offending_resolve_scope_lines(&content, &call, &want);
+        assert_eq!(checked, 1, "fixture must contain exactly one call site");
+        assert!(
+            offenders.is_empty(),
+            "a correct call must not be reported merely because a comment in its \
+             argument list is long: {offenders:?}"
+        );
+    }
+
+    /// Direction 2 of bug `82b3c70313fb754b` -- the expensive one: a call
+    /// site with the WRONG default and a comment merely *mentioning*
+    /// `Scope::Project` nearby must still be reported. This is the missing
+    /// negative case the bug file names under § Fix: "a fixture call site
+    /// with a wrong default plus a nearby mention, asserted to be reported."
+    #[test]
+    fn a_wrong_default_is_reported_despite_a_mentioning_comment_nearby() {
+        let call = call_needle();
+        let want = want_needle();
+        let content = format!(
+            "let (effective_scope, scope_fallback) = {call}\n    \
+             None,\n    \
+             current,\n    \
+             UmbrellaPolicy::Require,\n    \
+             // MUTATION PROBE -- unlike {want}, this surface wants the repo.\n    \
+             Scope::Repo,\n\
+             )?;\n"
+        );
+        let (checked, offenders) = offending_resolve_scope_lines(&content, &call, &want);
+        assert_eq!(checked, 1, "fixture must contain exactly one call site");
+        assert_eq!(
+            offenders.len(),
+            1,
+            "a wrong default must be reported even when a comment nearby mentions \
+             the right one: {offenders:?}"
+        );
+    }
+
+    /// Reproduces bug `82b3c70313fb754b` against the ORIGINAL byte-window
+    /// predicate (kept only as `offending_resolve_scope_lines_by_byte_window`,
+    /// not wired into the live guard), so the fix above has a red to point at
+    /// without ever mutating a production call site. Both fixtures are shared
+    /// with the two tests above; only the predicate under test differs.
+    #[test]
+    fn the_byte_window_predicate_is_wrong_in_both_directions() {
+        let call = call_needle();
+        let want = want_needle();
+
+        let correct_call_long_comment = format!(
+            "let (effective_scope, scope_fallback) = {call}\n    \
+             None,\n    \
+             current,\n    \
+             UmbrellaPolicy::Require,\n    \
+             // Explaining, at some length, exactly why this call opts into\n    \
+             // the project default rather than something wider -- the kind\n    \
+             // of comment a reviewer asks an author to leave at a call site,\n    \
+             // and exactly the shape that pushed a correct call past a fixed\n    \
+             // 240-byte window in the bug this test guards against.\n    \
+             {want},\n\
+             )?;\n"
+        );
+        let (_, byte_window_offenders) =
+            offending_resolve_scope_lines_by_byte_window(&correct_call_long_comment, &call, &want);
+        assert!(
+            !byte_window_offenders.is_empty(),
+            "direction 1: the byte-window predicate was expected to (wrongly) flag \
+             this correct call -- if it no longer does, the fixture stopped \
+             reproducing the bug and this test should be revisited, not deleted"
+        );
+
+        let wrong_default_mentioning_comment = format!(
+            "let (effective_scope, scope_fallback) = {call}\n    \
+             None,\n    \
+             current,\n    \
+             UmbrellaPolicy::Require,\n    \
+             // MUTATION PROBE -- unlike {want}, this surface wants the repo.\n    \
+             Scope::Repo,\n\
+             )?;\n"
+        );
+        let (_, byte_window_offenders_2) = offending_resolve_scope_lines_by_byte_window(
+            &wrong_default_mentioning_comment,
+            &call,
+            &want,
+        );
+        assert!(
+            byte_window_offenders_2.is_empty(),
+            "direction 2: the byte-window predicate was expected to (wrongly) admit \
+             this wrong default -- if it no longer does, the fixture stopped \
+             reproducing the bug and this test should be revisited, not deleted"
         );
     }
 
