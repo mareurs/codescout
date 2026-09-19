@@ -144,7 +144,19 @@ The first explanation — terse legacy slugs against full-sentence titles — wa
 
 So token overlap detects DISAGREEMENT and cannot tell which side is stale — and disagreement is the normal case, because a title is a prose refinement of a stem rather than a restatement of it. At 46 hits and no true positives the ratio is unusable. Note this file's own instance runs the OTHER way (stem correct, title stale), which a symmetric similarity score cannot express at all.
 
-The sharper form, not built: ask GIT rather than the text. A commit that edits `title:` without renaming the file, or renames without editing `title:`, is precise, rare, and is exactly what happened here. That is a history question; the text-similarity version is a proxy for it that the measurement above falsifies.
+**A second proxy was proposed — ask GIT rather than the text — and it is ALSO falsified. Both are recorded, because a file carrying one dead proxy and one plausible successor is what sends the next reader to build the successor.**
+
+The form: flag a commit that edits `title:` without renaming the file, or renames without editing `title:`. Two arms, both measured.
+
+*Arm 1, renames without a title edit.* **419** commits renamed a `docs/issues` file since 2026-04-01; of 60 sampled, **59 renamed without touching `title:` — 98%.** Not sloppiness: the dominant rename in this corpus is ARCHIVING via `doc(action="move")`, which legitimately keeps the title. The same unusable ratio as the token check, reached by a different route.
+
+*Arm 2, and it is decisive because it is this file.* `git log --follow --name-status` shows **A** at `8f1dfbd2`, then `M` at `d17453bc`, then `M` at `eab0c2e9`. No rename, ever. Title lines changed: 1 at creation, **2 at `d17453bc` — which is the REPAIR** — and 0 after. So across the entire defect window, `8f1dfbd2` to `d17453bc`, neither arm fires; the arm that does fire, fires on the fix. **The check detects the repair and is silent on the bug.**
+
+**WHY BOTH FAIL, and the reason is one level below either.** Both assume stem and title once AGREED in a recorded state and later drifted, so history or similarity can locate the divergence. Here the rename DID happen — `doc(action="move")` renamed the stem and left the title — but it happened between `doc(action="create")` and the first `git commit`. Git history begins at the first commit, so the divergence is PRE-HISTORIC: the only state git ever saw was the already-inconsistent one. In this workflow — create, revise, rename, commit — that window is where most authoring happens, which makes it exactly where divergences are introduced and exactly what no history-based check can reach.
+
+So similarity sees a disagreement it cannot direct, and history looks for an event it never recorded. **This class has no cheap check, and that is the finding.** The non-cheap form is SEMANTIC rather than lexical — do the stem and the title make the same CLAIM? — which a linter cannot judge and an agent can. That is a review prompt at archive time, not a gate.
+
+**What actually worked was not a detector at all, and it already exists.** `doc(action="find")` returns `title` and `abs_path` adjacent in one row; here they contradicted each other on their face. Nothing ran. The adjacency did the work, and it costs nothing.
 
 ## Tests added
 
