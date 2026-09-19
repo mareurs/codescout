@@ -1,7 +1,7 @@
 ---
 id: '81f3a79b97b4b14e'
 kind: bug
-status: open
+status: mitigated
 title: edit_markdown's closest-match diagnostic scores anchors against whole lines, so it goes silent exactly when the anchor is short
 tags:
 - cluster/truncated-window-ordered-by-the-wrong-key
@@ -145,6 +145,8 @@ In both cases the hint's advice (*"verify the heading, or re-read the current se
 
 ## Fix
 
+**MITIGATED 2026-09-19** — `f8cc41aaf4e8836174d0ccfe7371ac3cce9a6eee`, patch-id `519482a911f0ed2089d596d13e552cac0e6a61ce`. **This is option 2, the FALLBACK, not the preferred option 1**, and the distinction is recorded rather than blurred: option 1's containment check plus a new `scoped_miss_tier` needs `update.rs:531` and `markdown/tests.rs:3239-3365` and REMAINS OPEN. What shipped: `diagnose_scoped_miss` scores with `best_substring_similarity` — a fitting alignment with free start/end in the window, normalised by the ANCHOR's length — instead of scoring the anchor against the whole joined window. Complexity is unchanged in order, O(window x anchor), the same single DP table `normalized_levenshtein` already filled; the naive all-substrings scan would have added a search dimension. Red: a 60-char anchor verbatim inside a 460-char line came back `no_similar_match` (ratio 0.130 against a 0.5 threshold). A control asserting unrelated content still declines ships with it.
+
 Not yet fixed. Plan, in preference order:
 
 1. **Check containment before falling back to similarity.** Before the window scan in `diagnose_scoped_miss`, test whether `old_string.trim_end_matches('\n')` is a substring of any line. If so, the answer is not "nothing similar" but "found it, and here is the boundary you got wrong" — emit a `want`/`have` on that line with a tier of its own (e.g. `substring_present_boundary_differs`). This is the caller's actual predicate and it is O(section).
@@ -174,4 +176,3 @@ Read `diagnose_scoped_miss` (`src/tools/markdown/edit_markdown.rs:1100-1207`) an
 - `src/librarian/tools/update.rs:531` — the one consumer that routes on a tier value
 - `docs/adrs/2026-08-27-negative-results-name-their-scope.md` — the standing rule this violates: name the scope you examined when the zero is suspicious
 - `docs/trackers/issue-clusters.md` `IC-19` — the class. `IC-13` (`capped-result-presented-as-complete`) was considered and rejected: its widened clause deliberately excludes a marker the caller *can* see, and this message does name its own 0.5 cap.
-

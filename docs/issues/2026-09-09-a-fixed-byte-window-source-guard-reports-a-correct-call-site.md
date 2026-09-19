@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/gate-keyed-on-unobservable-event
 - testing-discipline
@@ -128,6 +128,8 @@ raises no lint.
    direction the guard was built to cover.
 
 ## Fix
+
+**FIXED 2026-09-19** — `56d8c160167edb92563b248dacdeb894648d4777`, patch-id `b4ab17f375596ea812fafe78524bd526338b0588`. The guard now parses the call's argument list (`last_call_arg`, depth-tracking, skipping comments and string contents) instead of scanning a fixed 240-byte window; the `checked >= 3` positive control is kept. The old predicate is RETAINED as `offending_resolve_scope_lines_by_byte_window`, used only by `the_byte_window_predicate_is_wrong_in_both_directions` — a falsified approach deleted is one someone re-derives. Both directions observed red first.
 
 Not yet fixed. Direction of the fix, and the reason it is not a window bump:
 raising 240 to 1000 buys direction 1 and makes direction 2 strictly worse, since

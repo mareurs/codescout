@@ -1,14 +1,14 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/authorship-unrecoverable-after-the-fact
+closed: null
 opened: 2026-09-06
-closed:
-severity: medium
 owner: marius
 related:
 - docs/issues/archive/2026-09-04-a-transported-catalog-carries-its-host-identity.md
+severity: medium
 ---
 
 # BUG: `audit_host_id_previous` is single-valued, so a catalog transported twice loses the chain back to its first identity
@@ -104,6 +104,8 @@ per-row host is not recoverable from the trail either — see the parent bug's �
    is the whole value of the key.
 
 ## Fix
+
+**FIXED 2026-09-19** — `56d8c160167edb92563b248dacdeb894648d4777`, patch-id `b4ab17f375596ea812fafe78524bd526338b0588`. `record_previous_host_id` appends newest-first and dedupes by moving an existing entry to the front; `\n` is a safe separator because `sanitize()` restricts host ids to `[a-z0-9-]`. `previous_host_id` stays single-valued (newest) because `references()` found its one caller, `doctor.rs:1120`, reads it as a scalar; the full chain is the new `previous_host_ids`. **HALF THIS BUG REMAINS OPEN:** the Fix also asks doctor to sum stranded rows across EVERY id in the chain, and `doctor.rs` still reads only the newest predecessor. Nothing regressed; that accounting is simply not yet widened.
 
 Not implemented. Make the value a list rather than a scalar — append on re-mint, dedupe, and
 have `doctor` sum stranded rows across every id in it rather than the one.

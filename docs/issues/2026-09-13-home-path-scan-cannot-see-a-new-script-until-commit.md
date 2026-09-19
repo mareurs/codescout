@@ -1,7 +1,7 @@
 ---
 id: '40a822bad321df16'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the home-path scan cannot see a new script until the commit that publishes it'
 tags:
 - cluster/selector-narrower-than-its-population
@@ -105,6 +105,8 @@ without either author noticing the file was answering itself.
    order `git add` → gate → commit catches it, and the natural order is `git add` → commit.
 
 ## Fix
+
+**FIXED 2026-09-19** — `89d2ca06563ca6b7b7b630ebcbde8545dc5ed7bf`, patch-id `0a9c21a3aa9f5e000e6911c438c3061eb38c0e38`. Option 2 taken, per this file's own withdrawal of Option 1: the scan is NOT widened, the passing path now names its denominator — "scanned N tracked script(s) under scripts/; untracked files are out of scope by design — stage yours (`git add`) before trusting this", currently 60, printed on pass and embedded in the failure message. Its test asserts SHAPE (a count, "untracked", the boundary), not the sentence.
 
 Not implemented. Options, cheapest first:
 

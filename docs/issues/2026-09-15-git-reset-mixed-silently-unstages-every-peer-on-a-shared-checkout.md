@@ -1,12 +1,13 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/shared-resource-carries-no-owner
+closed: null
 opened: 2026-09-15
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [cluster/shared-resource-carries-no-owner]
-kind: bug
+severity: medium
 ---
 
 # `git reset --mixed` silently unstages every peer on a shared checkout
@@ -85,6 +86,8 @@ population looking self-correcting. The session that ran the reset had already m
 the next task and would not have looked.
 
 ## Fix (proposed, not shipped)
+
+**FIXED 2026-09-19** — `40273a16e2e2c1d056c8b083ecf8205809f0fa9b`, patch-id `e110c5a8acfbe97497cf5f7447efc87e5c1a6388`. `scripts/git-safe-reset.sh` + `tests/git-safe-reset.sh`, modelled on `fmt-mine.sh` (the closer analogy than `rb.sh`: both guard a shared unowned git resource). FLAT refusal for `--mixed`/`--hard`, no `--force` and no ACK var — there is no state in which either is safe-with-acknowledgement, so an override would sell false assurance. The refusal names the staged COUNT, the filenames, provenance's answer on who wrote them, and the raw bypass. A zero-staged reset still refuses: a stale zero is not evidence, since the gap between check and reset is where a peer's `git add` lands. No TDD red was available (no prior implementation), so a MUTATION stood in — blanking the count-naming line gave 34/35, exactly that assertion.
 
 Unresolved, and deliberately filed before deciding, because the obvious remedies are both
 weak in the way this repo has paid for before:

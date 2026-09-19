@@ -1,13 +1,13 @@
 ---
-status: open
-opened: 2026-09-13
-closed:
-severity: medium
-owner: marius
-related: []
+kind: bug
+status: fixed
 tags:
 - cluster/authorship-unrecoverable-after-the-fact
-kind: bug
+closed: null
+opened: 2026-09-13
+owner: marius
+related: []
+severity: medium
 ---
 
 # `audit_log`'s `actor` records CONTACT and reads as AUTHORSHIP
@@ -102,6 +102,8 @@ instruments, and the more confident one is the wrong one.
   without it). Whether anything else in the trail narrows it, I did not check.
 
 ## Fix directions, neither started
+
+**FIXED 2026-09-19** — `e208bc258a79ceed561a7ba852ba691328448dfc`, patch-id `0bf2dc88fe776ad5dea07e90129b6e5767d06854`. Direction 1 (the note) taken over direction 2 (a derived `content_write` field) on this file's own stated criterion: a consumer search found ZERO programmatic readers of `actor`/`note` anywhere — only docs, the tool, and tests — so with nothing acting on it the note is honest and cheaper. It now names the payload-shape discriminator: `embedded_sha256`-only is reindex CONTACT; `file_sha256`/`slug`/`source` is a real content write. Existing rows untouched — they are an immutable record.
 
 1. **Cheapest, and matches the precedent already set today.** `file-provenance.py`
    had the same shape and was fixed by *surfacing the caveat in the output*

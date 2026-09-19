@@ -1,7 +1,7 @@
 ---
 id: '68481127b199baa0'
 kind: bug
-status: open
+status: fixed
 title: The cluster-count gate scopes its file list to the index but reads content from the working tree
 owners:
 - marius
@@ -130,6 +130,8 @@ for rel in tracked_all_bug_files() {          // index
 
 ## Fix
 
+**FIXED 2026-09-19** — `a27b3988df9cc836de25643ba1d16b5bb031b6c3`, patch-id `6218b737769127facb70abb482d4451fa35171d4`. Both sides now read the INDEX (not HEAD — this gate runs pre-commit, where the question is what is about to be committed), mirroring `pre-commit-ledger-counts.py --source=index`, which matters because that script is what this gate is compared against. `read_index_blobs` batches through `git cat-file --batch`, writing stdin on a separate thread while the main thread drains stdout — the single-threaded form deadlocks once the request list exceeds the pipe buffer. Both tests use fixtures where index and worktree deliberately DISAGREE; a fixture where they agree cannot fail.
+
 Not implemented. The obvious repair is to read content from the same world as the list —
 `git show :<path>` per entry, or one `git grep --cached` pass — which is what
 `scripts/pre-commit-ledger-counts.py` already does (*"This reads the INDEX and nothing else"*).
@@ -173,4 +175,3 @@ one tagged file and assert the gate reports the index count.
 - `scripts/pre-commit-ledger-counts.py` — the sibling that reads the index and says so.
 - `docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md` — the other
   half of this checkout's gate/shared-state friction.
-

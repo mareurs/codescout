@@ -1,7 +1,7 @@
 ---
 id: c2023c57ceff2672
 kind: bug
-status: open
+status: fixed
 title: 'A cap-class: RESULT_CAP annotation on a non-cap-shaped const is silently ignored, and the header points a reader at exactly that no-op'
 owners:
 - marius
@@ -52,6 +52,8 @@ Not yet re-run by this filing as a live mutation; the mechanism is read from `te
 
 ## Fix
 
+**FIXED 2026-09-19** — `89d2ca06563ca6b7b7b630ebcbde8545dc5ed7bf`, patch-id `0a9c21a3aa9f5e000e6911c438c3061eb38c0e38`. `cap_constants` computes `annotation_above()` BEFORE the name-shape filter, so an explicit declaration beats an inferred one. **The reorder exposed a second defect, fixed with it:** `annotation_above` matched `cap-class:` anywhere in a comment line, so `cap_probe.rs`'s `PROBE_ROWS` doc comment MENTIONING the token — while describing a grep hazard — was read as a real annotation. Tightened to require the token to OPEN the line. That is § Parsers Over a Namespace: no way to mention without citing.
+
 Not designed. The straightforward fix is to reorder the check: look for a `cap-class:` annotation first, and only fall back to the name-shape heuristic when no explicit annotation is present. This would make an explicit annotation always authoritative, closing the silent no-op.
 
 ## Tests added
@@ -74,4 +76,3 @@ A contributor wanting to annotate a non-cap-shaped constant should first check w
 - `src/librarian/preview/memory.rs:9` (`LATEST_OBSERVATIONS`) — the documented live instance
 - Surfaced during `result-cap-marker-gate` branch's whole-branch review (2026-09-03), session ledger `.superpowers/sdd/2026-09-02-result-cap-marker-gate/progress.md`, finding I4
 - `docs/trackers/issue-clusters/IC-3-declared-not-wired.md`
-

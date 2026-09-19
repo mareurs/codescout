@@ -1,7 +1,7 @@
 ---
 id: bee04240275ee7d9
 kind: bug
-status: open
+status: fixed
 title: 'BUG: both doc-citation guards silently skip 49% of the corpus, and neither reports a denominator'
 tags:
 - cluster/guard-narrower-than-its-name
@@ -104,6 +104,8 @@ and most-cited does not. So the guard's coverage over this programme's own blast
 
 ## Fix
 
+**FIXED 2026-09-19** — `89d2ca06563ca6b7b7b630ebcbde8545dc5ed7bf`, patch-id `0a9c21a3aa9f5e000e6911c438c3061eb38c0e38`. The `!c.tool.contains('_')` skip is gone; `ANCHOR_FALSE_POSITIVES` is keyed on `(file, line, tool)` triples rather than the bare word, so an exclusion cannot silently widen to every future occurrence — asserted by its own test. `a_documented_call_names_a_live_tool` now reports "checked N of M anchored citations". Removing the heuristic surfaced four real false positives in doc prose (an awk one-liner, a `#[cfg(...)]` attribute, Python's `sorted(x, key=f)`, a prose shorthand), excluded at the site; fencing them at source would let the list shrink and is a legitimate follow-up.
+
 Not chosen; the ordering matters more than the choice.
 
 - **Replace the heuristic with the registry.** The live tool list is available. A citation whose
@@ -143,4 +145,3 @@ allowlist. Do not remove the rule before measuring it.
 - `CLAUDE.md` § *Testing Discipline* — "A count of a defect population must arrive with its unit or
   not at all", and the population-vs-member law: a guard computed over a filtered population cannot
   speak for the members it filtered out.
-

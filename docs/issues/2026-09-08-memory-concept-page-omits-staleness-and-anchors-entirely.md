@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/unclassified
 closed: null
@@ -77,6 +77,8 @@ src/tools/memory/mod.rs long_docs    two memory systems, topics    -- actions, n
    the omission is an oversight.
 
 ## Fix
+
+**FIXED 2026-09-19** — `e208bc258a79ceed561a7ba852ba691328448dfc`, patch-id `0bf2dc88fe776ad5dea07e90129b6e5767d06854`. A short "Staleness and Anchors" section added to the concept page, naming the `<topic>.anchors.toml` sidecar, the three `workspace(action="status")` buckets, and the `refresh_anchors`-vs-`write` distinction, linking to the tool page for the procedure rather than restating it. Written from `src/memory/anchors.rs` (`check_all_memories`/`check_path_staleness`) rather than from this file's summary, and cross-checked against `docs/manual/src/tools/memory.md` — NO code-vs-doc drift found, reported because a clean check is a denominator.
 
 Not started. Smallest useful change is a short section on the concept page naming
 staleness and pointing at the tool page for the procedure — a pointer, not a second

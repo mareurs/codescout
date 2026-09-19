@@ -1,7 +1,7 @@
 ---
 id: '986e8146fc44d17d'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the worktree read notice prescribes two calls a peer-serve client is forbidden from making'
 tags:
 - cluster/hint-composed-without-the-request
@@ -15,7 +15,7 @@ related:
 - docs/issues/archive/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md
 - docs/issues/archive/2026-06-01-peer-workspace-arg-pin-escape.md
 severity: low
-unverified: 'Filed from a bytes-level read of two mechanisms, not from an end-to-end reproduction: peer-serve is an explicit `codescout peer serve` surface this session did not stand up, so the observable claim (a served read emits the notice) is INFERRED from the strip + call_content path rather than seen. What IS established at the bytes: `workspace` is absent from PEER_EXPOSED_TOOLS and named in the deny comment; handle_tool_call_inner removes the `workspace` argument before dispatch; the notice body names both calls. Anyone fixing this should reproduce first — CLAUDE.md''s rule that the plan is a hypothesis about the reproduction applies with full force here, because the fix option a reader finds most attractive (option 3) is the one that writes to the argument the strip exists to control.'
+verified: '2026-09-19 — the observable claim (a served read emits the notice) is now OBSERVED, not inferred. Reproduced end-to-end before implementing, per this file''s own instruction: linked worktree fabricated via a .git/worktrees/<name>/gitdir file, peer socket stood up, tool.call for `tree` sent; the notice fired verbatim, naming both calls peer dispatch denies. The fixture survives as `worktree_notice_on_a_served_read_never_prescribes_an_activate_or_pin_call` in src/peer/server.rs.'
 ---
 
 ## Summary
@@ -77,6 +77,14 @@ here rather than absorbed, because the tell for the whole class is CLAUDE.md's *
 observer who acts on what it emits"* — and here that observer was never checked.
 
 ## Fix
+
+**FIXED 2026-09-19** — `e208bc258a79ceed561a7ba852ba691328448dfc`, patch-id `0bf2dc88fe776ad5dea07e90129b6e5767d06854`.
+
+**The premise is now OBSERVED, not inferred** — the thing this file's `unverified:` field asked for, done before implementing. A linked worktree was fabricated via a `.git/worktrees/<name>/gitdir` file, a peer socket stood up, and a `tool.call` for `tree` sent: the notice fires on a served read, verbatim, including both unreachable calls.
+
+Option 1 shipped, not option 2: the DISCLOSURE is kept and only the PRESCRIPTION swapped, because a served agent needs to know which tree answered more than an interactive one does — no human is reading the envelope. Peer-serve now gets the banner plus "this connection is served against a fixed workspace and cannot be repinned from here"; every other caller is unchanged.
+
+The discriminator is set AT the seam this file names — `call_tool_by_name`, peer-serve's only production caller — as a `tokio::task_local!` scoped around the single future it drives, read by `worktree_read_notice`. **Not a `ToolContext` field, and the deviation is disclosed:** that struct is built by bare literal at ~20 sites with no `Default`, so a required field breaks all of them. Verified rather than assumed: no `tokio::spawn` breaks the task between scope and `call_content`, and `unwrap_or(false)` degrades to today's behaviour rather than to a new failure. Option 3 remains struck.
 
 Not implemented, but the blocking unknown is now **resolved**: a discriminator exists, and this
 file's first draft was wrong to say otherwise.

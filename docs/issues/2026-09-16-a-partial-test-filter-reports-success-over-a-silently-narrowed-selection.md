@@ -1,7 +1,7 @@
 ---
 id: '81d2cdcbbdfc03a6'
 kind: bug
-status: open
+status: fixed
 title: A partial test filter reports success over a silently narrowed selection
 tags:
 - run_command
@@ -109,6 +109,8 @@ nothing in libtest's output attributes it to either supplied filter.
    makes no difference.
 
 ## Fix
+
+**FIXED 2026-09-19** — `f8cc41aaf4e8836174d0ccfe7371ac3cce9a6eee`, patch-id `519482a911f0ed2089d596d13e552cac0e6a61ce`. `partial_test_selection_diagnostic` runs `cargo test -- --list`, diffs the supplied filter names against it, and NAMES any that matched nothing. `passed > 0` is untouched, per this file's own prohibition. The extra subprocess is gated to the shape the bug is about — command contains `cargo test`, a standalone `--` is present, and at least TWO non-flag tokens follow — so an ordinary single-filter or filter-less run never pays it. Split `..._with(lister)` for testability, mirroring `attribution.rs`'s existing pattern, so no test spawns a real cargo.
 
 Not implemented, and the cheap parser route is unavailable for the reason under
 *Root cause*.
