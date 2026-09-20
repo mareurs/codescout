@@ -150,6 +150,30 @@ if [ -e "$(git rev-parse --git-path CHERRY_PICK_HEAD)" ] ||
 fi
 
 log="$git_dir/session-stage-log"
+# STAND DOWN when there is no log to read — and what that line is FOR is narrower than it
+# looks. Documented 2026-09-20 because this was the only stand-down in this file carrying
+# no reason and no case, present since the guard's first commit (99d5acac).
+#
+# IT DOES NOT DECIDE THE VERDICT. Measured by deleting it from a copy and running an
+# identical fixture: still exit 0, because with no log there are no foreign owners and
+# `((${#theirs[@]})) || exit 0` below reaches the same answer. The fail-open here is
+# STRUCTURAL rather than a choice made at this line. What the line actually buys is one
+# thing: it stops the unguarded `awk` below from printing `awk: fatal: cannot open file`
+# at the caller. Deleting it is a cosmetic regression, not a policy change.
+#
+# That is why an earlier mutation of this line killed nothing. The natural reading of that
+# SURVIVED — "untested" — was wrong; it is inert for the verdict because a sibling path
+# covers its domain, which is CLAUDE.md's third reading.
+#
+# Whether the structural fail-open is RIGHT is unresolved and deliberately left so.
+# `install-hooks.sh`'s seeding comment states the principle "prefer the noisy wrong answer
+# when the quiet one is unobservable", which argues against it. Measured against that: 12 of
+# 13 `git_dir`s on this checkout carry a seeded log, and the one without is a linked
+# worktree whose index is private to it, so no peer's staged work exists there to capture.
+#
+# tests/hooks-discrimination.sh § 7b pins both halves separately — the silence as an
+# OVER-DETERMINED outcome that survives this line's deletion, and the absence of the awk
+# fatal as the one assertion that reds when it goes.
 [ -s "$log" ] || exit 0
 
 # Resolve a session id to a LIVE session, printing "<pid>|<name>" or nothing.

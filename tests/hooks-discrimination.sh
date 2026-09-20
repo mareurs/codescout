@@ -775,6 +775,70 @@ cd "$T" || exit 1
 git worktree remove --force "$WT" > /dev/null 2>&1
 rm -rf "$WT" "$T"
 
+# ----------------- 7b. the ABSENT-LOG stand-down, CHARACTERISED and not endorsed
+#
+# `pre-commit-foreign-index.sh`'s `[ -s "$log" ] || exit 0` stands the guard down whenever
+# the stage log is missing or empty. Unlike every other stand-down in that file it carried
+# no comment and no case: present since the guard's first commit (99d5acac, 2026-09-01),
+# and a mutation deleting the line outright killed nothing, so neither direction was
+# asserted by anything.
+#
+# THIS SECTION RECORDS WHAT THE BEHAVIOUR IS. IT DOES NOT RULE THAT IT IS RIGHT — and the
+# measurement below narrowed what "it" even refers to, so read the split before citing this.
+#
+# THE STAND-DOWN DOES NOT DECIDE THE VERDICT. Measured 2026-09-20 by deleting the line from
+# a copy and running an identical fixture: still exit 0, because with no log there are no
+# foreign owners and `((${#theirs[@]})) || exit 0` downstream reaches the same answer. The
+# fail-open is STRUCTURAL, not a choice made at that line — which dissolves the question
+# this section was opened to settle. What the line buys is one thing only: it stops an
+# unguarded `awk` from printing `awk: fatal: cannot open file` to the caller.
+#
+# That makes the earlier mutation result readable. Deleting the line killed nothing, and the
+# natural reading — "untested" — was wrong. It is CLAUDE.md's third reading of a SURVIVED
+# mutation: semantically inert for the verdict, because a sibling path already covers its
+# domain. The assertions below are split accordingly, one per reason.
+#
+# On whether the fail-open itself is right, unresolved and left that way: `install-hooks.sh`'s
+# seeding comment states this file's principle as "prefer the noisy wrong answer when the
+# quiet one is unobservable", and an absent-log exit 0 is the quiet one. Against that,
+# measured the same day, 12 of 13 `git_dir`s on this checkout carry a seeded log, and the
+# one without is a linked worktree whose INDEX IS PRIVATE TO IT, so no peer's staged work
+# exists there to capture. The exposure is a fresh clone or an un-hooked worktree, where
+# this hook is not installed and does not run at all.
+#
+# The CONTROL is what makes the silence assertion mean anything. Identical fixture, one
+# difference. Without it, `EXIT=0` is equally what "nothing foreign was staged" produces —
+# which is § 7's own false-green warning, and the reason this is a pair rather than a case.
+echo "== absent-log stand-down (characterisation)"
+
+new_repo
+echo base > a.txt
+git add a.txt > /dev/null 2>&1
+git commit -qm base
+echo mine > a.txt
+CLAUDE_CODE_SESSION_ID="$B" git add a.txt
+eq "absent-log fixture stages a FOREIGN path" "$(owner_at a.txt)" "$B"
+has "log PRESENT + foreign path -> refuse" "$(guard "$A")" "EXIT=1"
+# No git command between the removal and the guard, so `post-index-change` cannot fire and
+# recreate it — this is deterministic where § 2b's cases are not.
+rm -f "$(git rev-parse --git-dir)/session-stage-log"
+# OVER-DETERMINED, and labelled so nobody credits this green to the `[ -s "$log" ]` line:
+# with no log there are no foreign owners either, so the downstream
+# `((${#theirs[@]})) || exit 0` produces this same 0 on its own. Measured 2026-09-20 by
+# deleting the stand-down from a copy and re-running this fixture — still exit 0. So this
+# assertion pins the OUTCOME and not the line, which is the whole reason the next one exists.
+has "log ABSENT -> guard is silent" "$(guard "$A")" "EXIT=0"
+# THIS is what the stand-down actually buys, and it is the only assertion in this section
+# that reds when the line is deleted: without it the unguarded `awk` below it opens a file
+# that is not there and prints `awk: fatal: cannot open file ...` to the caller. Verified
+# both ways on a modified copy — present: clean; deleted: fatal on stderr, exit still 0.
+#
+# Same unguarded-awk shape as this suite's own `owner_of`, fixed in aa831668. The
+# difference is that `owner_of` was guarded at the read while this one is only MASKED by an
+# early exit, so the fatal is one deleted line away rather than absent.
+eq "log ABSENT -> no awk fatal reaches the caller" "$(guard "$A" | grep -c 'awk: fatal')" "0"
+rm -rf "$T"
+
 # ---------------------------------------------------------------------------
 # 8. THE ROUTE COLUMN — WHY `-` was recorded, not merely that it was.
 #
