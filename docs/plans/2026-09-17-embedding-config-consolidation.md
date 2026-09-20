@@ -487,13 +487,15 @@ emerges that doctor's scan/report shape genuinely fits.
 
 **Found and fixed as a byproduct, not itself Task 8's ask:** a stale doc
 comment on `RetrievalConfig.model` still described the pre-Task-5b two-layer
-env bug as current behaviour. **Found and filed, not fixed** — out of scope,
-recorded separately: `980b98ef4dc66eac`, a malformed `project.toml` (missing
-the required `[project]` table) makes `resolve_embed_fields_with`'s `.ok()`
-silently fall through to the built-in default model rather than erroring — the
-same defect *shape* the archived `f73130523241a666` fixed for the
-workspace-pin memory-read path, but a separate call site that fix did not
-touch.
+env bug as current behaviour. **Found and filed, not fixed by this task** —
+out of scope, recorded separately: `bcb1d662862dbfc9` (archived), a malformed `project.toml`
+(missing the required
+`[project]` table) makes `resolve_embed_fields_with`'s `.ok()` silently fall
+through to the built-in default model rather than erroring — the same defect
+*shape* the archived `f73130523241a666` fixed for the workspace-pin
+memory-read path, but a separate call site that fix did not touch. **Fixed
+independently of this plan** on 2026-09-19 in `e635d4dab44a4b` (bundled with
+the unrelated `c222737eedb69850`).
 
 SHA: `ce43813d` · patch-id: `436a510f1bd323592238eb1ffbeb36ddbf7290d7`. Gate green:
 FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0 (second attempt — first caught a real

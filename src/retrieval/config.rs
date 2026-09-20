@@ -632,7 +632,7 @@ type ResolvedEmbedFields = (Option<String>, String, Option<String>, Option<usize
 /// `merge_embed_config`'s `unwrap_or_else(default_embed_model)` to the built-in
 /// model — so a project whose config cannot be parsed was indistinguishable from
 /// one that never configured a model, and nothing named the substitution
-/// (`docs/issues/2026-09-18-a-malformed-project-toml-silently-resolves-the-default-embedding-model.md`,
+/// (`docs/issues/archive/2026-09-18-a-malformed-project-toml-silently-resolves-the-default-embedding-model.md`,
 /// the same shape as the archived `f73130523241a666` one subsystem over).
 /// `Agent::with_project_at` already failed closed on the identical config; this is
 /// the other half catching up.
@@ -672,10 +672,10 @@ fn resolve_embed_fields_with(
                         r.join(".codescout").join("project.toml").display()
                     ),
                     "Fix the file named in the error — a [project] table with a `name` \
-                     is required — or delete it to fall back to the built-in embedding \
-                     defaults. It is no longer defaulted silently: a config that cannot \
-                     be parsed would otherwise resolve to a model the project never \
-                     asked for.",
+                         is required — or delete it to fall back to the built-in embedding \
+                         defaults. It is no longer defaulted silently: a config that cannot \
+                         be parsed would otherwise resolve to a model the project never \
+                         asked for.",
                 )
             })?,
         ),

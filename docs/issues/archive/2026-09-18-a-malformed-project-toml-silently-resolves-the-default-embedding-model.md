@@ -1,5 +1,5 @@
 ---
-id: '980b98ef4dc66eac'
+id: bcb1d662862dbfc9
 kind: bug
 status: fixed
 title: 'BUG: a malformed project.toml silently resolves the default embedding model instead of erroring'
@@ -57,15 +57,18 @@ own and cannot edge-resolve away," which is the reason NOT to fix it inline as p
 
 **FIXED 2026-09-19** — `e635d4dab44a4b434a300ceab2b8402088d43a4d`, patch-id `89bf0a9bbd81be5a32efa790eb8dbfc912e5b9ca`. `resolve_embed_fields_with` propagates with `?` as a `RecoverableError` instead of `.ok()`-ing the parse failure into `None`. The missing-file path is unchanged and now pinned separately — its red was observed under mutation, since it cannot red on the production path.
 
-Not attempted. Scoped out of
-`docs/plans/2026-09-17-embedding-config-consolidation.md` Task 8, which this was found while
-working on — that task is about resolved-value-vs-source reporting for correctly-parsing
-configs, not about parse-failure handling, and conflating the two would have widened an
-already-landed change's scope after the fact.
+Landed separately from Task 8, as originally scoped — fixed alongside the unrelated `c222737eedb69850` (under-isolated env tests in the same file set), because the second bug was what made the first invisible on the fixing session's own machine.
 
 ## Tests added
 
-None — no fix landed.
+`tests/retrieval_unit.rs` gained a dedicated malformed-`project.toml` case alongside a
+broader fix: five env-touching tests in that file (three pre-existing, all of them
+under-isolated — `c222737eedb69850`) were unified onto one `with_isolated_retrieval_env`
+helper deriving its var list from `embedding_env::all_names()`, plus
+`the_isolation_helper_clears_every_declared_embedding_name` guarding that derivation itself
+(mutation-probed: deleting the loop gives KILLED). Verified in both directions — 15 ambient
+vars set (the world the bug lives in) and cleared (what CI sees) — 12 passed, 0 failed
+each way.
 
 ## Workarounds
 

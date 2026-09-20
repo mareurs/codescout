@@ -189,8 +189,8 @@ fn config_from_env_and_project_env_wins_over_project_toml() {
 /// A `project.toml` that cannot be loaded must REFUSE, not resolve the built-in default
 /// embedding model behind the caller's back.
 ///
-/// Regression for `980b98ef4dc66eac`
-/// (`docs/issues/2026-09-18-a-malformed-project-toml-silently-resolves-the-default-embedding-model.md`):
+/// Regression for `bcb1d662862dbfc9`
+/// (`docs/issues/archive/2026-09-18-a-malformed-project-toml-silently-resolves-the-default-embedding-model.md`):
 /// `resolve_embed_fields_with` discarded the load error with `.ok()`, so a project whose
 /// config fails to parse was indistinguishable from one that never configured a model —
 /// it got `local:AllMiniLML6V2Q` and no error. Same shape as the archived
@@ -219,7 +219,7 @@ fn a_malformed_project_toml_refuses_instead_of_defaulting_the_embedding_model() 
             // the better message anyway: the silent substitution IS the defect.
             Ok(cfg) => panic!(
                 "a project.toml that cannot be loaded must not resolve silently — \
-                 got model {:?}",
+                     got model {:?}",
                 cfg.model
             ),
             Err(e) => e,

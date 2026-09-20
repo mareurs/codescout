@@ -1054,8 +1054,9 @@ default model.
 `ProjectConfig::load_or_default` and `RetrievalConfig::from_env_and_project`
 directly) to separate "my test fixture is wrong" from "the function under test
 is wrong" — resolved in favour of the fixture, but only after checking, not by
-assuming. Filed the masking defect itself as `980b98ef4dc66eac` (open, scoped
-out of Task 8) rather than fixing it inline, since it's a separate, pre-existing
+assuming. Filed the masking defect itself as `bcb1d662862dbfc9` (archived; scoped out of
+Task 8, fixed independently 2026-09-19 in `e635d4dab44a4b`) rather than fixing
+it inline, since it's a separate, pre-existing
 call site from the sibling bug `f73130523241a666` already fixed for the
 workspace-pin memory-read path.
 
@@ -1068,7 +1069,7 @@ just read as "test passed" once corrected — nothing would have pointed at the
 `.ok()` swallow at all.
 
 **Rests on:** `src/tools/memory/tests.rs::resolved_chunk_budget_reflects_the_projects_configured_model`;
-bug `980b98ef4dc66eac`; the archived sibling `f73130523241a666`.
+bug `bcb1d662862dbfc9` (fixed); the archived sibling `f73130523241a666`.
 
 ## F-11 — temp_env's lock only protects its participants — an unguarded ambient-env reader raced two new tests and red the real gate
 
