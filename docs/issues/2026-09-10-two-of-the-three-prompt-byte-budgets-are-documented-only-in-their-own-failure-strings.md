@@ -1,7 +1,7 @@
 ---
 id: ea152af988811fa1
 kind: bug
-status: open
+status: fixed
 title: 'BUG: two of the three prompt-surface byte budgets are documented only in the failure strings of the tests that enforce them'
 owners:
 - marius
@@ -9,6 +9,7 @@ tags:
 - cluster/unclassified
 - prompts
 - docs
+claimed_by: 48d1f0c8-9f60-43bb-a15e-17ec7995813a
 ---
 
 ## Summary
@@ -111,6 +112,22 @@ an opinion about.
 it costs no budget. It is gated by `prompts::tests::reader_docs_contain_no_retired_call_forms` and
 by `audit_doc_refs`, so cited paths and tool names must resolve.
 
+**Correction, 2026-09-20 — "Not applied" was stale by nine days, and this section is where a reader checks.** The prescribed subsection shipped as `## Three byte budgets, and two of the margins are invisible until you exceed them` (`src/prompts/README.md:66`), immediately after `## The tool-surface budget` (`:52`) — the exact neighbour named above. It landed in `faf1dc99` (2026-09-10) and was corrected in place by `cd8917ca` (2026-09-11), which withdrew a "zero headroom" figure that was really 262 characters and a "every failing test prints its margin" claim false for two of the three. Both are ancestors of HEAD, verified with `git merge-base --is-ancestor`.
+
+**What was genuinely left undone was the test**, and only that. It is now `063b4722`.
+
+The generalisable half, because this campaign had just adopted the opposite rule: a `## Fix` section holds **two kinds of claim with one heading over them**. Its *prescription* — do this, not that; this neighbour, this tone — is a **decision**, and decisions do not decay. Its *status* — "Not applied", "Not implemented", "Not yet fixed" — is a **claim about the tree**, and decays exactly like any other. This campaign's round-2 lesson was "build the brief from the bug file's own `## Fix`, not from a triage sketch", and that lesson is right about the prescription and wrong about the status: here the frontmatter `status:` and the prose both said not-fixed, and the tree disagreed with both. **Read the section for its ruling; verify its state against the code.**
+
+## Fix provenance
+
+Three commits, because the prose and the gate landed separately and the prose was corrected once:
+
+- **SHA:** `faf1dc99` — the subsection itself (2026-09-10). **patch-id:** `6a37fdd355cf9dbc9dcd1b68dbefd9b516608d72`
+- **SHA:** `cd8917ca` — retracts two false claims inside it (2026-09-11). **patch-id:** `f2c3a685409c9a98378c1287813dd1dccf882529`
+- **SHA:** `063b4722` — the name-to-documentation gate (2026-09-20). **patch-id:** `fe452b01a8123a6c8e4239ac44eacaeaaafa5a36`
+
+SHAs are positional and do not survive a rebase of `experiments`; the patch-ids are content hashes of each diff and survive rebase and cherry-pick. All three derived through a file, never a pipe from `git show` — the command buffer is capped and a hash of a truncated prefix is a valid-looking WRONG digest.
+
 ## Tests added
 
 None — nothing is fixed. The honest note is that this class is hard to gate: a test asserting
@@ -119,6 +136,14 @@ reds on every rewording. The cheap shape, if one is wanted, is asserting that ea
 constant or budget-enforcing test name** appears somewhere under `src/prompts/README.md` — a
 name-to-documentation check rather than a prose pin, which reds exactly when a fourth budget is
 added and not documented.
+
+**Added 2026-09-20:** `prompts::tests::byte_budget_gates_are_named_in_the_prompts_readme` (`src/prompts/mod.rs`) — the name-to-documentation shape this section specified, asserting each known budget's constant or enforcing-test name appears somewhere in `src/prompts/README.md`. It survives a rewording and reds on the regression that actually happened.
+
+**Red corroborated two ways, the second without a build.** The implementing agent observed it in an isolated `git worktree` with the README swapped to its pre-`faf1dc99` bytes: FAILED, naming `MAX_DECLARED_SECTION_BYTES` and `a_p50_session_stays_under_the_committed_emission_byte_ceiling`. That was then re-derived here straight from git — token counts in `src/prompts/README.md` at `faf1dc99^` versus HEAD are **0 → 1**, **0 → 1**, and **1 → 2**. The third line is the **control**: `TOOL_SURFACE_CHAR_BUDGET` was documented both before and after, so it is never in the missing list, which is what shows the test discriminates *documented from undocumented* rather than merely *README changed*.
+
+**Its ceiling, recorded here so nobody credits it with the coverage this file asked for.** The section above asked for a check that "reds exactly when a fourth budget is added and not documented". This test does **not** do that: `BUDGET_GATES` is a hand-maintained list, so a fourth gate added without a matching entry is invisible to it. The test's own doc comment says so rather than implying completeness. The reason it cannot be derived today is concrete — two of the three bounds (`CEILING`, `TOOL_SURFACE_CHAR_BUDGET`) are constants **local to their test functions**, and one of them is named `CEILING`, carrying no marker a scan could recognise. There is no attribute or naming convention to enumerate.
+
+**And this repo has already measured what a hand-maintained list costs.** `src/config/embedding_env.rs`'s `all_names()` carries the prediction in its own doc comment — *"A list that must be kept in step by hand is the same shape as the eight scattered `env::var` calls this module exists to replace"* — and three tests in `tests/retrieval_unit.rs` went red on exactly that, fixed 2026-09-19 at `e635d4da` by deriving the population instead of retyping it. So the durable remedy here is the same move one layer up: give budget gates a **marker** (a registry, or a scannable attribute) so the population becomes derivable, and let this test enumerate rather than recite. That is a change to `src/server.rs` and `src/prompts/guide_index.rs`, outside this bug, and is left as the named follow-up rather than done as a drive-by — `src/server.rs` was concurrently held dirty by another session throughout this work.
 
 ## Workarounds
 
