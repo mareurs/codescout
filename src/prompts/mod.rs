@@ -2329,6 +2329,74 @@ mod tests {
         );
     }
 
+    /// Every byte-budget gate must be NAMED in `src/prompts/README.md` — the reader doc an
+    /// author of a guide or a prompt surface actually opens before editing one.
+    ///
+    /// **This is `docs/issues/2026-09-10-two-of-the-three-prompt-byte-budgets-are-documented-only-in-their-own-failure-strings.md`.**
+    /// Two of the three byte budgets that govern these surfaces —
+    /// `MAX_DECLARED_SECTION_BYTES` (`src/prompts/guide_index.rs`) and the `CEILING`
+    /// enforced by `a_p50_session_stays_under_the_committed_emission_byte_ceiling`
+    /// (`src/server.rs`) — used to live nowhere but the panic message of the test that
+    /// enforces them, so an author who reds one of them learns the bound only after
+    /// spending it. `TOOL_SURFACE_CHAR_BUDGET` was the one budget § *The tool-surface
+    /// budget* already documented; the fix added a sibling section naming the other two.
+    ///
+    /// **This gate is a name-to-documentation check, not a prose pin, and that distinction
+    /// is load-bearing.** Asserting that the README "mentions the p50 ceiling" in some
+    /// specific wording reds on every rewording of that prose — monotone under a rewrite
+    /// that changes nothing about whether the bound is documented. Asserting that each
+    /// known budget's constant or enforcing-test name appears *somewhere* in the file
+    /// survives a rewording and reds exactly on the regression this bug was about: a
+    /// budget gate whose name is not written down anywhere in the reader doc.
+    ///
+    /// **Its ceiling, named rather than hidden:** the list below is hand-maintained. A
+    /// fourth budget gate added to `src/server.rs` or `src/prompts/guide_index.rs`
+    /// without a matching entry here does not fail this test — there is no attribute or
+    /// naming convention this test can scan for to recognize "a byte-budget gate" in
+    /// general, so completeness rests on whoever adds the next one also adding it to
+    /// `BUDGET_GATES`. What this test DOES catch, and the reason it exists: a name added
+    /// here whose documentation is missing, which is exactly the shape of the original bug.
+    #[test]
+    fn byte_budget_gates_are_named_in_the_prompts_readme() {
+        // (constant or enforcing-test name, where it lives) — one entry per known
+        // byte-budget gate. Add a line here when you add a budget gate elsewhere.
+        const BUDGET_GATES: &[(&str, &str)] = &[
+            (
+                "MAX_DECLARED_SECTION_BYTES",
+                "src/prompts/guide_index.rs — declared_sections_are_within_the_size_cap",
+            ),
+            (
+                "a_p50_session_stays_under_the_committed_emission_byte_ceiling",
+                "src/server.rs — guide_hint_tests::a_p50_session_stays_under_the_committed_emission_byte_ceiling",
+            ),
+            (
+                "TOOL_SURFACE_CHAR_BUDGET",
+                "src/server.rs — tests::tool_surface_under_budget",
+            ),
+        ];
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let readme = std::fs::read_to_string(root.join("src/prompts/README.md"))
+            .expect("src/prompts/README.md must exist");
+
+        let missing: Vec<String> = BUDGET_GATES
+            .iter()
+            .filter(|(needle, _)| !readme.contains(needle))
+            .map(|(needle, location)| format!("  `{needle}` ({location})"))
+            .collect();
+
+        assert!(
+            missing.is_empty(),
+            "{} byte-budget gate name(s) not found anywhere in src/prompts/README.md:\n{}\n\n\
+             A budget whose name is not written down in the reader doc is published only to \
+             whoever trips its failure string — see \
+             docs/issues/2026-09-10-two-of-the-three-prompt-byte-budgets-are-documented-only-in-their-own-failure-strings.md. \
+             Add a subsection (or a row) naming the constant and the enforcing test.",
+            missing.len(),
+            missing.join("\n")
+        );
+    }
+
     /// The prescriptive ledger recipes must teach `append_entry`'s ONE-CALL form —
     /// `index_row` + `index_after_line` — and never the two-call form it replaced.
     ///
