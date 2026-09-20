@@ -50,6 +50,26 @@ from pathlib import Path
 DECL = "expects_augmentation:"
 
 
+def frontmatter_block(text: str) -> str:
+    """The YAML frontmatter block — between the file's opening `---` and the
+    next `---` — or "" if the file has none.
+
+    A declaration is a key inside THIS block, not any line starting with the
+    key's name. A doc's fenced YAML example showing
+    `expects_augmentation: x.yaml` starts at column 0 exactly like a real
+    frontmatter line does, so a check anchored only on "line start" cannot
+    tell a declaration from documentation *about* one — see
+    docs/issues/2026-09-10-probe-augmentation-restore-counts-prose-mentions-
+    as-declarations.md. Anchoring on the frontmatter block itself is the
+    stronger structural anchor: prose, tables and fenced examples in the
+    body are outside it regardless of what column they start in.
+    """
+    if not text.startswith("---"):
+        return ""
+    end = text.find("\n---", 3)
+    return text[3:end] if end != -1 else ""
+
+
 def find_declarers(repo: Path):
     """(artifact_rel, sidecar_rel) for every artifact naming a sidecar."""
     out = []
@@ -57,12 +77,13 @@ def find_declarers(repo: Path):
         if ".git" in p.parts or "/archive/" in p.as_posix():
             continue
         try:
-            head = p.read_text(errors="replace")[:4000]
+            text = p.read_text(errors="replace")
         except OSError:
             continue
-        if DECL not in head:
+        fm = frontmatter_block(text)
+        if DECL not in fm:
             continue
-        for line in head.splitlines():
+        for line in fm.splitlines():
             if line.startswith(DECL):
                 val = line[len(DECL):].strip().strip("'\"")
                 if val.endswith((".yaml", ".yml")):
