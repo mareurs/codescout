@@ -1694,6 +1694,76 @@ the *committing* session's staged paths and there is no earlier read to compare 
 way the guard's check and git's tree write are not atomic, so a guard can pass truthfully and the
 tree still be written from a different index. **No widening of scope reaches that**, which is the
 one actionable sentence in this instance.
+## Instance 18 — 2026-09-20, the review was TRUE when it ran and STALE when it was consumed
+
+Capturing session `571eb3d6-c879-43f6-b3f9-5a51e744e1af` (`codescout-5e`, `.claude-kat`).
+Captured session `3aa55c01-9663-44ca-82d2-48b6b8d76d66`. Commit `6f35bbe9`, *"docs(issues):
+four gaps in the evidence substrate the deep-agent design rests on"* — **10 files, 782
+insertions: their 8, plus `scripts/pre-commit-foreign-index.sh` (+24) and
+`tests/hooks-discrimination.sh` (+64), which are mine.**
+
+Not repaired, by agreement between both sessions within minutes. Bytes verified intact at
+HEAD (all three new assertions present, suite 150/0), so the damage is attribution only and
+permanent. § *Resume*'s standing rule held on first contact: the capturing session's reply
+was *"I have no interest in destroying working bytes to fix a name."*
+
+### The step was not skipped. It EXPIRED.
+
+Every prior instance in this file turns on a check that was absent, blind, or misread. This
+one is different and it is the reason the instance earns a heading:
+
+- **13:47** — captured session stages 2 files.
+- **13:48:26** — capturing session commits.
+- Before committing, the capturing session **ran `git diff --cached --name-only` and it
+  returned exactly its own 8 paths.** The review was correct at the instant it ran.
+
+The two foreign entries arrived in the index *between the review and the commit*. So the
+prescribed check produced a TRUE answer that was STALE by the time it was acted on, and
+nothing in its output carries an expiry. A reader cannot tell a fresh `--cached` listing
+from one invalidated a second later, because both are just a list of paths.
+
+This is what makes the pathspec form load-bearing rather than tidier spelling, and the
+distinction was not previously stated here: `git commit -- <paths>` does not depend on the
+index being unchanged since you looked. It re-scopes at commit time. The review narrows the
+window; only the pathspec closes it.
+
+### NEW TELL, and it reads backwards: a clean `git status` cannot discriminate
+
+Supplied by the capturing session unprompted, and it is the most reusable thing here.
+After committing, it ran `git status --short`, saw the two foreign files **gone from the
+listing**, and read that as *"they stayed out of my commit"* — reporting that to its
+operator.
+
+It meant the exact opposite. They were gone **because they had been committed**.
+
+A clean status is consistent with BOTH *excluded from my commit* and *included in my
+commit*, so it cannot discriminate between them — and the natural reading is the wrong one,
+because "absent from status" colloquially means "not involved". The instrument returns the
+same output for opposite outcomes, which is this corpus's recurring shape, here on a
+**post-hoc** check rather than a pre-flight one. Every other detector in this file runs
+before or during; this one runs after and confirms the wrong conclusion.
+
+The discriminator is `git show --stat <sha>` — read what the commit CONTAINS, never what the
+tree no longer shows. A file count that exceeds what your message describes is the signal;
+here it was 10 against a message describing 8.
+
+### The captured side's check worked, and was still one call too late
+
+Symmetry worth recording, because it bounds what the remedy buys. The captured session also
+ran `git diff --cached --name-only` before committing, and it **did** surface the anomaly —
+8 foreign paths it had never staged, correctly identified as `UNKNOWN` by
+`scripts/file-provenance.py`. It then chose the pathspec form for exactly the right reason.
+
+It was too late anyway: the capturing commit had already landed in the interval. So on
+2026-09-20 the prescribed sequence ran correctly **on both sides of the same capture** and
+prevented nothing. That is not an argument against the sequence — it is the measurement of
+its ceiling. Staging and committing are two operations, and the gap between them belongs to
+every session sharing the index.
+
+**Residue at HEAD, left deliberately:** `6f35bbe9`'s message describes 8 files and the
+commit holds 10. Anyone reading that commit for provenance gets a message and a content that
+disagree, with no marker saying so. Both sessions agreed that is cheaper than a rewrite.
+
 ## Resume
 
 **Discharged 2026-09-16.** Both halves are done, and the gap between them is worth one line
