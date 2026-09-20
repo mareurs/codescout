@@ -684,6 +684,30 @@ What is missing is curation and a trigger.
 The open question is activity detection — explicit call, inference from the tool sequence,
 or a hook (rejected: Claude-Code-only defeats the point). See CAP-10's *Open decisions*.
 
+### Auto-Generated Onboarding Docs & Videos
+
+**Idea, not yet scoped or proposed as a CAP.** codescout already builds an onboarding
+prompt and a per-repo `.codescout/system-prompt.md` for *agents*; there is no equivalent
+artifact for *people* — a new contributor or teammate still has to read `CLAUDE.md`,
+`docs/architecture/*`, and the memory topics by hand to build a mental model. The idea is
+to generate human-facing onboarding material (a written walkthrough, and potentially a
+short narrated video/screen-recording) automatically from the same sources codescout
+already indexes: the module map, key abstractions, recent architecture-relevant commits,
+and the existing memory topics (`architecture`, `conventions`, `gotchas`,
+`domain-glossary`). Regeneration would ideally be triggered the same way
+`onboarding(refresh_prompt=true)` is today, so the doc doesn't silently rot the way a
+hand-written onboarding doc does.
+
+Open questions before this becomes a real proposal: what "video" means in practice (a
+narrated slide-style walkthrough generated from text + TTS vs. an actual screen capture of
+a live session), where the output lives (checked into `docs/`, or generated on demand),
+and how staleness is detected/flagged given the existing provenance/freshness machinery
+(`docs/adrs/2026-08-27-negative-results-name-their-scope.md`,
+`refreshed_at_commit`/`commits_behind_head`). Candidate next step: write this up as a
+`CAP-N` entry in [`docs/trackers/capability-proposals.md`](trackers/capability-proposals.md)
+alongside CAP-10, since both are about surfacing codescout's existing knowledge at the
+right moment for an audience that isn't an LLM agent.
+
 ## Contributor Skills
 
 Three Claude Code skills living in `.claude/skills/` within this repo. Contributors who open codescout in Claude Code get them automatically — no build step required. The design doc this referenced (2026-02-26-contributor-skills-design.md) is not in the
