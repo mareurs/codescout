@@ -14,11 +14,25 @@
 //! `audit_doc_refs` cannot cover the third, and the reason is not the one that entry originally
 //! gave. Two hypotheses were refuted before the right one: fenced blocks are *not* skipped
 //! (`parser.rs` walks them and severity-caps to `code_block`), and the refs are not found-and-
-//! downgraded either. `RefKind` has five variants — `FilePath`, `FileLine`, `FileSymbol`,
-//! `ModulePath`, `Link` — and **all five are locations**. A tool parameter is not a location, so
-//! the instrument never sees it. This guard supplies the missing candidate kind as a test rather
-//! than as a sixth `RefKind`, because a test needs no wiring to be reachable and the registry has
-//! no enumerable form outside `server.rs`'s own private test module.
+//! downgraded either. **This paragraph used to rest on a third claim that has since decayed, and
+//! it is corrected rather than deleted because the conclusion survives on different grounds.** It
+//! read: *"`RefKind` has five variants — `FilePath`, `FileLine`, `FileSymbol`, `ModulePath`,
+//! `Link` — and all five are locations. A tool parameter is not a location, so the instrument
+//! never sees it."* `RefKind` now has **six**, and the sixth refutes the premise: `ArtifactId`
+//! resolves against the **catalog**, not the filesystem, and its own doc comment opens *"Unlike
+//! every sibling, this one does not resolve against the filesystem."* So a non-location kind is
+//! demonstrably expressible there, and "cannot" was only ever "does not".
+//!
+//! What still holds is the second reason, which is the load-bearing one: **a test needs no wiring
+//! to be reachable, and the tool registry has no enumerable form outside `server.rs`'s own private
+//! test module.** A `RefKind::ToolName` would need the registry lifted into a public surface for
+//! the resolver to consult, which is a larger change than the guard is worth. That is why this
+//! guard stays a test — a decision, not an impossibility.
+//!
+//! *(Corrected 2026-09-20. The stale claim was quoted back verbatim by an agent extending this
+//! file, which is how it surfaced: a header stating a count of a neighbour's variants is a claim
+//! about code, and decays exactly like the prose this very file exists to gate —
+//! `issue-clusters:IC-11` holding about its own guard.)*
 //!
 //! **Why this stops at the anchored call form, measured 2026-09-01.** A prose *mention* of
 //! a dead tool is not checkable here, and two guards for it were tried and rejected rather
