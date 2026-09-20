@@ -1,13 +1,14 @@
 ---
-status: open
-opened: 2026-09-09
-closed:
-severity: medium
-owner: marius
-related: []
+kind: bug
+status: fixed
 tags:
 - cluster/selector-narrower-than-its-population
-kind: bug
+claimed_by: 48d1f0c8-9f60-43bb-a15e-17ec7995813a
+closed: null
+opened: 2026-09-09
+owner: marius
+related: []
+severity: medium
 ---
 
 # BUG: install-hooks.sh --check reports all-ok for a checkout whose pre-push guard is silently skipped, because that branch's copy predates the hook
@@ -125,9 +126,32 @@ Not fixed. A fix must make the fail-open observable from something **not** co-ve
 
 The second is the one that addresses the class rather than this instance. Fail-open-vs-closed is a reasoned policy choice in the header, not an oversight, and is deliberately not relitigated here.
 
+**Implemented 2026-09-20 — the second option, as this section chose.** `--check` now scans the real `hooks_dir` listing and reports every executable file in it that this run did not account for, as a distinct `UNRECOGNIZED` state.
+
+**The inversion is real, not a second list.** `known_hooks` is accumulated inside `install_shim` itself (`scripts/install-hooks.sh:292`) plus the two branches that skip it — STALE `pre-commit` (`:201`) and off/skip `prepare-commit-msg` (`:464`, `:468`) — so it is built from what the run *actually did*, one name per call site, and grows the same way the rest of the script does. A hardcoded second list would have reproduced the defect one layer over, which is the trap this direction exists to avoid; the script says so at `:483`. `*.sample` files are excluded **by name, not by the executable bit** — `git init` ships them executable, so an `-x` test would flag all fourteen.
+
+**On the exit code, because it sits next to something this file fenced off.** An `UNRECOGNIZED` finding sets exit 1. That is **not** a re-litigation of *"fail closed on a missing guard"*, the option rejected above, and the distinction is in the subject: that option was about the **shim's** degrade-open behaviour when a guard it invokes is absent, which is untouched here. This is about a **newly detectable** condition — a hook that is installed and unaccounted-for — which had no exit-code semantics before because it had no detection. The shim's fail-open policy and its header's reasoning were not modified.
+
+## Fix provenance
+
+- **SHA:** `64fc17e3` — the inverted `--check` population scan plus its suite (2026-09-20). **patch-id:** `e56727527fc1a6f73f00a9d145f4a3a3fdc31e45`
+- **SHA:** `c41ef00d` — wires the suite into CI as its own job (2026-09-20). **patch-id:** `76d81b8015f751cc03359e92147c31bf852b6eb5`
+
+SHAs are positional and die when `experiments` is rebased; the patch-ids are content hashes of each diff and survive rebase and cherry-pick. Both derived through a file, never a pipe from `git show` — the command buffer is capped and a hash of a truncated prefix is a valid-looking WRONG digest.
+
 ## Tests added
 
 None. The regression test must assert that a tree with the guard removed produces an *observable* artifact, and there is currently no non-versioned surface for it to read — which is the bug. Named rather than left blank: the test is blocked on the fix's design, not overlooked. Note that `tests/pre-push-foreign-session-guard.sh` exercises path 2 on branches that have it, which is exactly the population where the defect is absent.
+
+**Added 2026-09-20:** `tests/install-hooks-check-population.sh` — **33 assertions, 0 failing**, re-run by this ledger rather than taken on report. Hermetic: every case builds throwaway repos (and one linked worktree) under `mktemp -d` and never touches this checkout's real `.git/hooks`, which matters because several sessions share it and a stray `install-hooks.sh` run would rewire hooks for all of them.
+
+**Red observed on the bug's own mechanism, not only on a synthetic case.** A linked worktree whose copy of `install-hooks.sh` had its `install_shim pre-push …` call site stripped — reproducing a branch that predates the hook — still reported clean and exited 0 pre-fix while a live `pre-push` hook sat in the shared common dir. The suite asserts both that and the plainer planted-hook case.
+
+**It asserts the REMEDY, not only the predicate**, which is the half a 54-assertion suite missed once before on the sibling pre-push guard (`CLAUDE.md` § *Testing Discipline*: *loudness is a property of a PATH*, including its remedy text). Three of the 33 check that the message names an inspection step, gives a concrete command, and names the actual next action; three more check the footer does not collapse `UNRECOGNIZED` into `NOT installed` — a hook that is, in fact, installed.
+
+**Control included:** a clean checkout reports no `UNRECOGNIZED` line at all, and all fourteen of git's own `*.sample` hooks are individually asserted absent from the report. Without that control the scan would pass by flagging everything.
+
+**And it is WIRED (`c41ef00d`), which is not a formality here.** The suite ran in no job when it landed. The defect this file records is a status tool reporting clean for a state it cannot see — and an unwired regression test is that same shape one level up: green, cited in a commit message, silent about every state nothing runs it in. It went into **its own job** rather than the `shell-tests` lane, following the ruling already written into `.github/workflows/ci.yml`: that lane is ~25% flaky, so a new red there is attributed to whoever pushed last.
 
 ## Workarounds
 
