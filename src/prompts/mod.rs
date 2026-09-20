@@ -2360,6 +2360,9 @@ mod tests {
     fn byte_budget_gates_are_named_in_the_prompts_readme() {
         // (constant or enforcing-test name, where it lives) — one entry per known
         // byte-budget gate. Add a line here when you add a budget gate elsewhere.
+        // cap-class: NOT_A_CAP — fixture data for a documentation-completeness
+        // check; it names other budgets' constants and locations, it does not
+        // itself bound anything a caller receives.
         const BUDGET_GATES: &[(&str, &str)] = &[
             (
                 "MAX_DECLARED_SECTION_BYTES",
