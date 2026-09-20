@@ -1,13 +1,14 @@
 ---
-id: 9a0157e63fe559b8
+id: ac32658ae8a041b5
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the served claim hint names the claim call concretely and the release call not at all'
 owners:
 - marius
 tags:
 - cluster/unclassified
 topic: artifact frontmatter deletion protocols
+closed: 2026-09-20
 ---
 
 ## Summary
@@ -118,8 +119,8 @@ fields behind. So the correct form exists and works; it is simply never printed.
 
 **Precedent for the narrower guard, which strengthens it beyond what this file first argued:** `extra` is NOT a contractually-anything-goes field today. It already refuses reserved keys, and `src/librarian/tools/update.rs:2162` asserts "a reserved key is refused whatever its value". So refusing the `{"__delete__": …}` shape is an ADDITION to an existing refusal set, not a new kind of validation imposed on a free field — which answers the obvious objection that round-trip-safety means `extra` must accept everything. (Supplied by a peer session; verified at the cited line.)
 
-Not fixed. The direction that matches the defect: **print the release call, not a sentence
-about it.** The hint already formats one concrete call; formatting its inverse costs the
+**Fixed at `ac754db6`.** The direction that matches the defect, and the one taken: **print the
+release call, not a sentence about it.** The hint already formats one concrete call; formatting its inverse costs the
 same and removes the invention step entirely:
 
 ```
@@ -171,9 +172,60 @@ It was also MEASURED before the design was read — "56 of 1208 fire" — and th
 
 **Four candidates, three falsified, and the survivor is not a check.** `doc(action="find")` rendered `title` and `abs_path` adjacent and they contradicted on their face — no detector, no derivation, no normalisation. It is the only one of the four that caught a real instance, and it already exists.
 
+
+## Fix provenance
+
+- **SHA:** `ac754db6` (`experiments`)
+- **patch-id:** `b096e902791c0145aff216c957ccc03bd0f96736`
+
+**The secondary guard was NOT taken, deliberately.** Refusing an `extra` value of shape
+`{"__delete__": …}` catches this one wrong guess and no other, while the reader is guessing
+because the surface asked them to. It is left as its own judgement rather than folded in
+silently under a fix whose claim is different.
+
 ## Tests added
 
-None.
+`the_claim_hint_prints_the_release_call_that_clears_every_field_the_claim_wrote`
+(`src/librarian/tools/find.rs`), placed beside the five existing cases — all of which
+assert about `call`, the claim, and none of which touches the inverse.
+
+Run **through the real call path** rather than against `claim_hint` directly, so it also
+proves the field survives into the serialized response.
+
+**Observed RED before the fix**, and the right one: only the new case failed, with all seven
+siblings green, on `release_call`'s absence.
+
+**Mutations — one per ASSERTION cluster rather than one per site, since several bounds sit
+at this one site. All three KILLED:**
+
+| mutation | which assertion catches it |
+|---|---|
+| `release_call` key renamed | the `.expect` — the field must be present |
+| release's `null` → `""` | the clearing assertions — an empty string reads as clearing and deletes nothing |
+| a third `claimed_*` added to the CLAIM call | the closed-population guard |
+
+**The third assertion is the one that keeps this honest past today.**
+`claim.matches("\"claimed_").count() == 2` reds if anyone adds a claim field without adding
+its clear. Without it the other three stay green while the lifecycle silently re-acquires
+exactly the half-ness this bug is about — CLAUDE.md's law that an assertion can be
+per-member-adequate when written and become an aggregate later, with no edit to it, to the
+code it guards, or to its fixture.
+
+**Two probe REFUSALS, recorded because both would have read as results:**
+
+1. The `null` mutation matched **twice** — the second occurrence being the test's own
+   assertion string. Applying it would have changed the production value *and* the assertion
+   checking it, in one edit: green suite, verdict `SURVIVED`, meaning *untested*. Re-run with
+   a literal unique to the production site.
+2. The closed-population mutation's *replacement contained its find string*, so the pattern
+   was still present afterwards. A mutation that never applied is indistinguishable from one
+   that survived, which is exactly why the probe refuses rather than reporting.
+
+**Gate: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0` — and `LEAN=0` is NOT evidence for this change.**
+This is librarian code, which `--no-default-features` compiles out, so the lean lane never
+ran a line of it. The new case appears **exactly once** in the gate log, in the default lane.
+Contrast `fc6f5bb7` (2026-09-18) in `src/tools/core`, whose case appears twice because that
+module is not feature-gated.
 
 ## Workarounds
 
@@ -183,8 +235,7 @@ of an error is not evidence the field is gone.
 
 ## Resume
 
-Open. Locus: `src/librarian/tools/find.rs`, the `claimable` hint's `note` and `call` fields.
-The change is to emit a second formatted call rather than to extend the prose.
+N/A — fixed at `ac754db6`.
 
 ## References
 

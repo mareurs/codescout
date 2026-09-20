@@ -207,7 +207,7 @@ fn claim_hint(items: &[Value], self_session: Option<&str>, today: &str) -> Optio
     // `null` is this server's only deletion value for an `extra` key. Printing the call
     // is what removes the invention step; saying "use null" in prose would not, because
     // the reader who needs it is composing a call, not reading a paragraph.
-    // docs/issues/2026-09-19-the-served-claim-hint-names-the-claim-call-and-never-the-release-call.md
+    // docs/issues/archive/2026-09-19-the-served-claim-hint-names-the-claim-call-and-never-the-release-call.md
     let release_call = "doc(action=\"update\", id=\"<id>\", patch={\"status\": \
                         \"investigating\", \"extra\": {\"claimed_by\": null, \
                         \"claimed_at\": null}})";
@@ -1492,7 +1492,7 @@ mod tests {
     /// Through the real call path rather than against `claim_hint` directly, so this
     /// also proves the field survives into the serialized response.
     ///
-    /// docs/issues/2026-09-19-the-served-claim-hint-names-the-claim-call-and-never-the-release-call.md
+    /// docs/issues/archive/2026-09-19-the-served-claim-hint-names-the-claim-call-and-never-the-release-call.md
     #[tokio::test]
     async fn the_claim_hint_prints_the_release_call_that_clears_every_field_the_claim_wrote() {
         let cat = Catalog::open_in_memory().unwrap();
