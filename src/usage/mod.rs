@@ -20,16 +20,42 @@ pub struct UsageRecorder {
     /// (`CLAUDE_CODE_SESSION_ID` first, which is per-process); taking it from
     /// there gives the value one resolution site instead of two that drifted.
     /// docs/issues/archive/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md
+    ///
+    /// **This field holds two different kinds of value and the column named after it
+    /// cannot say which.** The server passes `serving_session`, which is the companion's
+    /// composed `<session>/<agent>` principal token when one was stamped and a bare
+    /// session id otherwise — measured 2026-09-20, 1,873 of 68,988 rows in this
+    /// checkout's db carry the composed form. That is why `agent_id` below is its own
+    /// field rather than something a consumer recovers by splitting this one: doing so
+    /// needs a `/` sniff nothing documents, and a consumer grouping by this column
+    /// files a subagent apart from its own parent's session without noticing.
     cc_session_id: String,
+    /// The `agent_id` half of the principal, split from the companion's stamp by the
+    /// server and passed in already-resolved — one resolution site, for the reason the
+    /// field above records.
+    ///
+    /// `None` covers a parent (whose `PreToolUse` payload carries no `agent_id` at all)
+    /// and every client without the companion installed, and the two are not
+    /// distinguishable here. The ADR accepts that plugin dependency as a product
+    /// decision, so this degrades to the previous behaviour rather than erroring.
+    /// docs/adrs/2026-09-14-a-subagent-is-a-principal.md
+    agent_id: Option<String>,
 }
 
 impl UsageRecorder {
-    pub fn new(agent: Agent, debug: bool, session_id: String, cc_session_id: String) -> Self {
+    pub fn new(
+        agent: Agent,
+        debug: bool,
+        session_id: String,
+        cc_session_id: String,
+        agent_id: Option<String>,
+    ) -> Self {
         Self {
             agent,
             debug,
             session_id,
             cc_session_id,
+            agent_id,
         }
     }
 
@@ -50,12 +76,24 @@ impl UsageRecorder {
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = Result<Vec<Content>>>,
     {
+        // Captured HERE, beside the monotonic clock, because this is the only point
+        // that observes the call's start. `write_content` stamps `called_at` after
+        // `f().await` AND after its own `open_db`, so the start is not recoverable
+        // downstream as `called_at - latency_ms` — see the `started_at` migration.
+        let started_at = db::now_timestamp();
         let start = Instant::now();
         let result = f().await;
         let latency_ms = start.elapsed().as_millis() as i64;
         // Best-effort — never let recording fail the tool call
         let _ = self
-            .write_content(tool_name, latency_ms, input, workspace_override, &result)
+            .write_content(
+                tool_name,
+                &started_at,
+                latency_ms,
+                input,
+                workspace_override,
+                &result,
+            )
             .await;
         result
     }
@@ -63,6 +101,7 @@ impl UsageRecorder {
     async fn write_content(
         &self,
         tool_name: &str,
+        started_at: &str,
         latency_ms: i64,
         input: &Value,
         workspace_override: Option<&std::path::Path>,
@@ -142,6 +181,11 @@ impl UsageRecorder {
             overflow_tokens,
             err_family,
             Some(project_root_str.as_str()),
+            Some(started_at),
+            // Resolved once by the server from the companion's principal stamp, exactly
+            // as `cc_session_id` above and for the reason its doc names — a second
+            // resolution site is the defect that field already paid for.
+            self.agent_id.as_deref(),
         )?;
         Ok(())
     }
@@ -574,6 +618,7 @@ mod content_tests {
             false,
             "mcp-session".to_string(),
             "my-cc-session".to_string(),
+            None,
         );
 
         let _ = recorder
@@ -615,6 +660,7 @@ mod content_tests {
             true,
             "test-session".to_string(),
             "cc-test".to_string(),
+            None,
         );
         let input = json!({"query": "test_symbol", "path": "src/lib.rs"});
 
@@ -672,6 +718,7 @@ mod content_tests {
             false,
             "pin-session".to_string(),
             "cc-pin".to_string(),
+            None,
         );
         let input = json!({"query": "x"});
 
@@ -735,8 +782,13 @@ mod content_tests {
         let agent = crate::agent::Agent::new(Some(canon_main.clone()))
             .await
             .unwrap();
-        let recorder =
-            UsageRecorder::new(agent, false, "wt-session".to_string(), "cc-wt".to_string());
+        let recorder = UsageRecorder::new(
+            agent,
+            false,
+            "wt-session".to_string(),
+            "cc-wt".to_string(),
+            None,
+        );
         let input = json!({"query": "x"});
 
         let _ = recorder
@@ -785,6 +837,7 @@ mod content_tests {
             true,
             "test-session".to_string(),
             "cc-test".to_string(),
+            None,
         );
         let input = json!({"path": "/bad/path"});
 
@@ -841,6 +894,7 @@ mod content_tests {
             false,
             "test-session".to_string(),
             "cc-test".to_string(),
+            None,
         );
         let input = json!({});
 
@@ -893,6 +947,7 @@ mod content_tests {
             false,
             "test-session".to_string(),
             "cc-test".to_string(),
+            None,
         );
         let input = json!({"query": "test_symbol"});
 
@@ -929,6 +984,7 @@ mod content_tests {
             false,
             "test-session".to_string(),
             "cc-test".to_string(),
+            None,
         );
         let input = json!({"name_path": "LspManager/get_or_start", "path": "src/lsp/manager.rs"});
 

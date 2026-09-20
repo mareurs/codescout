@@ -15,7 +15,7 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         CREATE TABLE IF NOT EXISTS tool_calls (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             tool_name  TEXT NOT NULL,
-            called_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            called_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
             latency_ms INTEGER NOT NULL,
             outcome    TEXT NOT NULL,
             overflowed INTEGER NOT NULL DEFAULT 0,
@@ -113,6 +113,35 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         conn.execute_batch("ALTER TABLE tool_calls ADD COLUMN codescout_dirty INTEGER;")?;
     }
 
+    // Migration: the principal's second axis, and the call's START instant (v0.12).
+    //
+    // `agent_id` — the ADR `docs/adrs/2026-09-14-a-subagent-is-a-principal.md` decides
+    // that "a principal is `(session_id, agent_id)`", and this table recorded only the
+    // first axis. NULL here is deliberately AMBIGUOUS between two real states and must
+    // not be read as either alone: "recorded before this column existed", and "no agent
+    // id was asserted" — which for a stamped client means the session's own parent, and
+    // for an unstamped one means unknown. Disambiguate by `called_at` against the
+    // migration, not by the NULL.
+    //
+    // `started_at` — `called_at` is written at INSERT time, which is AFTER the tool
+    // body returned, so it is a completion instant under a name that states the start.
+    // It is NOT derivable as `called_at - latency_ms`: `latency_ms` times only
+    // `f().await`, while the INSERT additionally follows `with_project_at`, a
+    // `worktree_main_root` probe and a full `open_db` (three CREATE TABLEs, five
+    // migration probes, `backfill_legacy_rows`, and a 5s `busy_timeout` on contention).
+    // That overhead is unbounded and unmeasured, so the start is captured where it is
+    // actually known — in `UsageRecorder::record_content`, beside `Instant::now()` —
+    // and carried here. docs/issues/2026-09-20-called-at-records-completion-at-second-resolution.md
+    let has_agent_id: bool = conn
+        .prepare("SELECT agent_id FROM tool_calls LIMIT 0")
+        .is_ok();
+    if !has_agent_id {
+        conn.execute_batch(
+            "ALTER TABLE tool_calls ADD COLUMN agent_id TEXT;
+             ALTER TABLE tool_calls ADD COLUMN started_at TEXT;",
+        )?;
+    }
+
     backfill_legacy_rows(&conn, &project_root.to_string_lossy())?;
 
     Ok(conn)
@@ -165,6 +194,21 @@ impl<'a> From<&'a str> for BuildProvenance<'a> {
     }
 }
 
+/// The current UTC instant in the exact textual shape `write_record`'s
+/// `strftime('%Y-%m-%d %H:%M:%f','now')` produces.
+///
+/// The two must agree byte-for-byte: `started_at` and `called_at` land in the same
+/// row and are compared against each other and against `datetime()`-shaped window
+/// literals. `%.3f` is chrono's dotted three-digit fraction, which is what SQLite's
+/// `%f` emits — not `%3f`, which omits the dot, and not `%.f`, which would vary in
+/// width and break the fixed-prefix lexicographic ordering every predicate here
+/// relies on.
+pub fn now_timestamp() -> String {
+    chrono::Utc::now()
+        .format("%Y-%m-%d %H:%M:%S%.3f")
+        .to_string()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
     conn: &Connection,
@@ -183,13 +227,23 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
     overflow_tokens: Option<i64>,
     err_family: Option<&str>,
     project_root: Option<&str>,
+    started_at: Option<&str>,
+    agent_id: Option<&str>,
 ) -> Result<()> {
     // Taken by value so the sha and its dirty bit cannot be separated at the call site.
     // They were separable before BL-24, and the flag was the half that got dropped.
     let build = build.into();
     conn.execute(
-        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root)
-         VALUES (?1, datetime('now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+        // `called_at` is `strftime(…%f…)`, not `datetime()`: the latter is SECOND
+        // granular against a measured p50 latency of 20 ms, so a burst of calls
+        // collapsed to one timestamp with no intra-second discriminator and `rowid`
+        // could not break the tie correctly either (it is completion-ordered too).
+        // Mixed formats coexist safely in this column — every predicate over it is a
+        // lexicographic compare against a `datetime()`-shaped literal, and the shared
+        // prefix is fixed-width, so a `.SSS` suffix always sorts after the same second
+        // and before the next one.
+        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id)
+         VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
         params![
             tool_name,
             latency_ms,
@@ -207,6 +261,8 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
             overflow_tokens,
             err_family,
             project_root,
+            started_at,
+            agent_id,
         ],
     )?;
     // `pika_observations` is not codescout's table (a buddy-plugin skill creates it,
@@ -1115,6 +1171,208 @@ mod tests {
     }
 
     #[test]
+    fn called_at_carries_sub_second_precision() {
+        // The discriminator is the FORMAT the production INSERT writes, not a value
+        // read back from a row this test inserted. Under `datetime('now')` the string
+        // is `YYYY-MM-DD HH:MM:SS` with no fractional part, so this reds; under
+        // `strftime(…%f…)` it carries `.SSS`.
+        let (_dir, conn) = tmp();
+        write_record(
+            &conn, "symbols", 1, "success", false, None, "unknown", None, "s", None, None, None,
+            None, None, None, None, None, None,
+        )
+        .unwrap();
+        let ts: String = conn
+            .query_row("SELECT called_at FROM tool_calls", [], |r| r.get(0))
+            .unwrap();
+        let frac = ts.split('.').nth(1);
+        assert_eq!(
+            frac.map(str::len),
+            Some(3),
+            "called_at must carry three fractional-second digits, got {ts:?}. \
+             Second-granular timestamps tie constantly at the measured p50 of 20 ms, \
+             and `rowid` cannot break the tie correctly because it is completion-ordered too."
+        );
+    }
+
+    #[test]
+    fn two_calls_in_the_same_second_are_orderable() {
+        // The failure this guards is a TIE, so the assertion has to be inequality.
+        // A read-back of one row is monotone under the bug — it returns a plausible
+        // timestamp either way.
+        let (_dir, conn) = tmp();
+        fn row(conn: &Connection) {
+            write_record(
+                conn, "symbols", 1, "success", false, None, "unknown", None, "s", None, None, None,
+                None, None, None, None, None, None,
+            )
+            .unwrap();
+        }
+        row(&conn);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        row(&conn);
+
+        let stamps: Vec<String> = conn
+            .prepare("SELECT called_at FROM tool_calls ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        assert_eq!(stamps.len(), 2);
+        assert_ne!(
+            stamps[0], stamps[1],
+            "two calls 5 ms apart collapsed to one timestamp ({stamps:?}), so their \
+             relative order is unrecoverable"
+        );
+        // Lexicographic order must agree with insertion order — the property every
+        // window predicate and `recent_errors`' ORDER BY relies on.
+        assert!(stamps[0] < stamps[1], "sub-second stamps sort out of order");
+    }
+
+    #[test]
+    fn the_start_instant_survives_a_slow_call() {
+        // `started_at` exists because the start is NOT `called_at - latency_ms`: the
+        // INSERT trails the tool body by an unmeasured `open_db`. Here the start is
+        // supplied long before the write, which is the shape a slow `run_command`
+        // produces (p95 43 s), and the row must preserve the ordering.
+        let (_dir, conn) = tmp();
+        let started = "2020-01-01 00:00:00.000";
+        write_record(
+            &conn,
+            "run_command",
+            43_055,
+            "success",
+            false,
+            None,
+            "unknown",
+            None,
+            "s",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(started),
+            None,
+        )
+        .unwrap();
+        let (start, done): (Option<String>, String) = conn
+            .query_row("SELECT started_at, called_at FROM tool_calls", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(start.as_deref(), Some(started));
+        assert!(
+            start.unwrap() < done,
+            "the recorded start must precede the recorded completion"
+        );
+    }
+
+    #[test]
+    fn two_principals_in_one_session_are_distinguishable() {
+        // The filed defect is that a subagent's calls are indistinguishable from its
+        // parent's. One session id, two agent ids, and the pair must separate them —
+        // asserting only that `agent_id` round-trips would be monotone under a schema
+        // that stored it and a consumer that could not group by it.
+        let (_dir, conn) = tmp();
+        for agent in [Some("a-parent-child-1"), Some("a-parent-child-2"), None] {
+            write_record(
+                &conn,
+                "symbols",
+                1,
+                "success",
+                false,
+                None,
+                "unknown",
+                None,
+                "one-session",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                agent,
+            )
+            .unwrap();
+        }
+        let distinct: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT agent_id) FROM tool_calls WHERE session_id = 'one-session'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            distinct, 2,
+            "two stamped principals under one session must be separable"
+        );
+        let unstamped: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tool_calls WHERE agent_id IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            unstamped, 1,
+            "an unstamped call must record NULL, not a fabricated agent id"
+        );
+    }
+
+    #[test]
+    fn open_db_migrates_principal_and_start_columns() {
+        // A row written before the migration must survive it and read NULL — NULL here
+        // means "recorded before the column existed", which is honestly different from
+        // "no agent id was asserted". Same idiom as the traceability/friction migrations.
+        let dir = TempDir::new().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        conn.execute(
+            "INSERT INTO tool_calls (tool_name, latency_ms, outcome, session_id)
+             VALUES ('legacy', 10, 'success', 'old-session')",
+            [],
+        )
+        .unwrap();
+        let (agent, started): (Option<String>, Option<String>) = conn
+            .query_row("SELECT agent_id, started_at FROM tool_calls", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert!(agent.is_none(), "pre-migration agent_id must read NULL");
+        assert!(started.is_none(), "pre-migration started_at must read NULL");
+    }
+
+    #[test]
+    fn now_timestamp_matches_the_shape_sqlite_writes() {
+        // These two land in the same row and are compared against each other, so a
+        // format drift between them is a silent ordering bug rather than an error.
+        // Compares SHAPE, not value: the two clocks are read microseconds apart.
+        let (_dir, conn) = tmp();
+        let sqlite: String = conn
+            .query_row("SELECT strftime('%Y-%m-%d %H:%M:%f','now')", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let ours = now_timestamp();
+        let shape = |s: &str| {
+            s.chars()
+                .map(|c| if c.is_ascii_digit() { 'd' } else { c })
+                .collect::<String>()
+        };
+        assert_eq!(
+            shape(&ours),
+            shape(&sqlite),
+            "now_timestamp() must match SQLite's strftime shape exactly; \
+             ours={ours:?} sqlite={sqlite:?}"
+        );
+    }
+
+    #[test]
     fn write_record_roundtrip() {
         let (_dir, conn) = tmp();
         write_record(
@@ -1127,6 +1385,8 @@ mod tests {
             "unknown",
             None,
             "test-session",
+            None,
+            None,
             None,
             None,
             None,
@@ -1155,6 +1415,8 @@ mod tests {
             "unknown",
             None,
             "test-session",
+            None,
+            None,
             None,
             None,
             None,
@@ -1198,6 +1460,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
         )
         .unwrap();
         let overflowed: i64 = conn
@@ -1232,6 +1496,8 @@ mod tests {
             "unknown",
             None,
             "test-session",
+            None,
+            None,
             None,
             None,
             None,
@@ -1302,6 +1568,8 @@ mod tests {
             "unknown",
             None,
             "test-session",
+            None,
+            None,
             None,
             None,
             None,
@@ -1439,6 +1707,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
         )
         .unwrap();
         write_record(
@@ -1458,6 +1728,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
         )
         .unwrap();
         write_record(
@@ -1470,6 +1742,8 @@ mod tests {
             "unknown",
             None,
             "test-session",
+            None,
+            None,
             None,
             None,
             None,
@@ -1501,6 +1775,8 @@ mod tests {
                 "unknown",
                 None,
                 "test-session",
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -1780,6 +2056,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
         )
         .unwrap();
         let (cs, ps, sid, inp, out): (String, String, String, String, String) = conn
@@ -1801,7 +2079,7 @@ mod tests {
         let (_dir, conn) = tmp();
         write_record(
             &conn, "symbols", 42, "success", false, None, "abc1234", None, "sess-1", None, None,
-            None, None, None, None, None,
+            None, None, None, None, None, None, None,
         )
         .unwrap();
         let (ps, inp, out): (Option<String>, Option<String>, Option<String>) = conn
@@ -1836,6 +2114,8 @@ mod tests {
             Some(1045),
             None,
             Some("/repo"),
+            None,
+            None,
         )
         .unwrap();
         let (ft, tok, ef, pr): (Option<String>, Option<i64>, Option<String>, Option<String>) = conn
@@ -1872,6 +2152,8 @@ mod tests {
                 },
                 None,
                 "sess",
+                None,
+                None,
                 None,
                 None,
                 None,

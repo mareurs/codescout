@@ -26,8 +26,11 @@ WHAT THE PREDICATES LITERALLY COUNT (read before quoting a number):
                    docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-
                    re-keys-per-call.md). `--session-key cc` re-runs on the broken key so
                    the drift between them can be measured rather than assumed.
-  * ordering     = `id` (INTEGER PRIMARY KEY AUTOINCREMENT = insertion order). NOT
-                   `called_at`, which is second-granularity and ties constantly.
+  * ordering     = `id` (INTEGER PRIMARY KEY AUTOINCREMENT = insertion order). Note
+                   `called_at` carries `.SSS` since 2026-09-20 and no longer ties on
+                   every burst, but it is still the COMPLETION instant — `started_at`
+                   is the call's start. Neither `id` nor `called_at` orders by issue
+                   time; `started_at` does, and is NULL before that migration.
   * the corpus   = whatever survives the 30-day retention sweep in `write_record`. Any
                    count here is a floor on all-time, never a total.
 

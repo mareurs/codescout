@@ -1268,6 +1268,22 @@ impl CodeScoutServer {
         // measurement that corrected the stronger claim this comment used to make.
         let asserted_principal = crate::tools::session_key::principal_from_arguments(&mut input);
 
+        // The `agent_id` half, taken BEFORE `asserted_principal` is moved into the
+        // ledger adoption below. The companion composes the stamp as
+        // `<session_id>/<agent_id>` (principal-stamp.mjs), and session ids are UUIDs,
+        // so the first `/` is the only separator. Split rather than re-derived: the
+        // token is the one value that already distinguishes a subagent from its parent,
+        // and re-deriving the composition here is the drift
+        // `principal_from_arguments`' own doc comment declines to risk.
+        //
+        // This does NOT change what `serving_session` carries into `cc_session_id` —
+        // that conflation is real and separately filed; this only stops telemetry from
+        // being the place a reader has to un-pick it.
+        let asserted_agent = asserted_principal
+            .as_deref()
+            .and_then(|p| p.split_once('/'))
+            .map(|(_, agent)| agent.to_string());
+
         let workspace_override = Self::extract_workspace_override(&input);
 
         // Computed ONCE and threaded to both consumers below — the pinned-residency
@@ -1354,6 +1370,7 @@ impl CodeScoutServer {
             self.debug,
             self.session_id.clone(),
             serving_session.unwrap_or_else(|| self.cc_session_id.clone()),
+            asserted_agent,
         );
         let input_for_record = input.clone();
 
