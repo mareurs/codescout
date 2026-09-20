@@ -1,7 +1,7 @@
 ---
-id: ca77cfe338b3f789
+id: 90d32f37ef2d8fc8
 kind: bug
-status: open
+status: fixed
 title: 'BUG: usage.db records session_id but never agent_id, so every subagent''s calls are its parent''s'
 owners:
 - marius
@@ -12,7 +12,7 @@ tags:
 - principal
 - deep-agent
 topic: usage telemetry principal identity
-closed: ''
+closed: 2026-09-20
 opened: 2026-09-20
 severity: medium
 ---
@@ -148,21 +148,65 @@ That caveat is this bug stated from the consumer side.
 
 ## Fix
 
-Not implemented. The shape is forced by the precedent below: add a nullable `agent_id TEXT` column
-in the additive style every prior `open_db` migration used, thread `asserted_principal` into
-`UsageRecorder::new`, and pass it through `write_record`. NULL then honestly reads as "recorded
-before the column existed" or "parent, which asserts no agent id" — and those two are **not** the
-same thing, so the migration should say which it means rather than letting a reader guess.
+Fixed 2026-09-20.
 
-Note the ADR's policy alias: `agent_type == "fork"` resolves to the session parent. Telemetry
-should record what the principal resolved to, not re-derive the aliasing.
+- **SHA** `1dd363eb35bbca5bb064e22fb627f37c24f0217b`
+- **patch-id** `7a661035f24967cfc813cc4af9192fdd95c77887`
 
-This depends on the companion plugin, which the ADR explicitly accepts as a product decision — so
-a fix must degrade to today's behaviour when the stamp is absent, not error.
+A nullable `agent_id TEXT` column, added in the additive `open_db` style. The server splits
+the companion's `<session_id>/<agent_id>` stamp at the first `/` immediately after
+`principal_from_arguments` — before `asserted_principal` is moved into the ledger adoption —
+and threads the agent half into `UsageRecorder::new`. One resolution site, per the precedent
+in `cc_session_id`'s field doc. `None` degrades to the previous behaviour for every
+unstamped client rather than erroring, as the ADR's product decision requires.
+
+**One claim in this file was wrong, and the correction matters more than the fix.** This
+file stated: *"There is no column, and no value inside `input_json`, that separates them —
+so the merge cannot be undone after the fact by any query over this table."* The
+`input_json` half is right. The first half is **not**: the composed stamp already reaches
+the database, in `cc_session_id`.
+
+`serving_session` is `adopt_request_conversation(asserted_principal.or(...))`, which returns
+`asserted_principal` verbatim when one was stamped, and that value is passed into
+`UsageRecorder::new`'s `cc_session_id` slot at `src/server.rs:1353-1358`. Measured
+2026-09-20 against this checkout's db:
+
+```
+SELECT COUNT(*), SUM(cc_session_id LIKE '%/%') FROM tool_calls;
+-- 68988 | 1873
+```
+
+1,873 rows carry the composed `<session>/<agent>` form, including this session's own
+subagent calls. So the merge **was** undoable — by sniffing for a `/` that nothing
+documents.
+
+That makes the real defect a **conflation** rather than an absence: `cc_session_id` holds a
+bare CC session id on some rows and a composed principal token on others, under a name that
+states only the first. A consumer grouping by that column files a subagent apart from its
+own parent's session and reads a mixed population as one kind of thing — which is what the
+baseline's "64 distinct cc_session_id values" counted.
+
+The fix deliberately does **not** change what `serving_session` writes into
+`cc_session_id`: that value is also the ledger key, and re-pointing it is a behaviour change
+with its own blast radius. `agent_id` is added alongside so telemetry stops being the place
+a reader has to un-pick the conflation. The conflation itself is documented at the field and
+is a separate, still-open defect — an `IC-24` instance rather than this file's `IC-23`.
 
 ## Tests added
 
-None — not fixed.
+`two_principals_in_one_session_are_distinguishable` (`src/usage/db.rs`) — three rows under
+one `session_id`: two distinct `agent_id`s and one `None`. Asserts `COUNT(DISTINCT
+agent_id) == 2` for that session **and** that the unstamped row records NULL rather than a
+fabricated id. The assertion is on the grouping a consumer would actually perform; asserting
+only that `agent_id` round-trips would be monotone under a schema that stored the value and
+a consumer that could not group by it.
+
+`open_db_migrates_principal_and_start_columns` — a pre-migration row survives and reads
+NULL.
+
+**RED observed in an isolated worktree** via `scripts/mutation-probe.sh`, not by arming the
+shared tree. Replacing the `agent_id` parameter in `write_record`'s `params!` with a literal
+`None` killed it: `COUNT(DISTINCT agent_id)` returned `0` against an expected `2`.
 
 ## Workarounds
 

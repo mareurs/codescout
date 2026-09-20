@@ -1,7 +1,7 @@
 ---
-id: '730a13d704e88378'
+id: e75093da225ba1ce
 kind: bug
-status: open
+status: fixed
 title: 'BUG: called_at holds the completion instant at second resolution, so a session''s call sequence cannot be reconstructed'
 owners:
 - marius
@@ -11,7 +11,7 @@ tags:
 - telemetry
 - deep-agent
 topic: usage telemetry ordering and trajectory reconstruction
-closed: ''
+closed: 2026-09-20
 opened: 2026-09-20
 severity: medium
 ---
@@ -128,22 +128,57 @@ Baseline figures are from the frozen UTC window [2026-09-04, 2026-09-18) recorde
 
 ## Fix
 
-Not implemented. Two candidate directions, deliberately not chosen here:
+Fixed 2026-09-20.
 
-- Store sub-second time: `strftime('%Y-%m-%d %H:%M:%f','now')`. Fixes ties, not inversion.
-- Store the start instant: add a `started_at` column, or derive it as `called_at - latency_ms`.
-  Fixes inversion. Derivation is exact only if `called_at` is sub-second first, so the two
-  changes compose rather than substitute.
+- **SHA** `1dd363eb35bbca5bb064e22fb627f37c24f0217b`
+- **patch-id** `7a661035f24967cfc813cc4af9192fdd95c77887`
 
-Both are additive and nullable in the style every prior `open_db` migration used, so pre-existing
-rows stay readable — a NULL `started_at` honestly reads as "recorded before the column existed".
+Both halves landed, and they compose exactly as this file predicted.
 
-Any change here must keep the 30-day retention `DELETE` (`src/usage/db.rs:229-236`) and the
-window predicates in `query_stats` / `percentile` working against whatever format is written.
+**Resolution.** `called_at` is now written by `strftime('%Y-%m-%d %H:%M:%f','now')` in
+`write_record`'s INSERT, and the `CREATE TABLE` default matches. `called_at` was WIDENED
+rather than renamed: every predicate over it is a lexicographic compare against a
+`datetime()`-shaped literal and the shared prefix is fixed-width, so a `.SSS` row always
+sorts after the same second and before the next one. Old and new rows coexist in the
+column correctly. A rename would have broken five scripts and a frozen baseline for no
+ordering gain.
+
+**Frame.** A nullable `started_at` column now carries the call's start, captured in
+`UsageRecorder::record_content` beside `Instant::now()` and threaded down.
+
+**The derivation this file offered as an alternative does not work, and that is the one
+correction worth carrying forward.** `called_at - latency_ms` is exact only if the INSERT
+immediately follows the tool body. It does not: `latency_ms` times only `f().await`, while
+the INSERT additionally trails `with_project_at`, a `worktree_main_root` probe and a full
+`open_db` — three `CREATE TABLE`s, five migration probes, `backfill_legacy_rows`, and a 5 s
+`busy_timeout` under contention. That overhead is unbounded and unmeasured, so sub-second
+resolution does **not** make the derivation exact; it only makes it precisely wrong. The
+start had to be captured where it is observed.
+
+The 30-day retention `DELETE` and the `query_stats` / `percentile` window predicates were
+checked against the mixed-format column and are unaffected.
 
 ## Tests added
 
-None — not fixed.
+Three in `src/usage/db.rs`, plus a shared-format guard:
+
+- `called_at_carries_sub_second_precision` — asserts the production INSERT's output carries
+  three fractional digits. Reds on the format, not on a value this test supplied.
+- `two_calls_in_the_same_second_are_orderable` — two writes 5 ms apart must not collapse,
+  and must sort in insertion order. The guarded failure is a TIE, so the assertion is
+  inequality; a read-back of one row would be monotone under the bug.
+- `the_start_instant_survives_a_slow_call` — a start supplied long before the write (the
+  `run_command` p95 shape) must be preserved and must precede `called_at`.
+- `now_timestamp_matches_the_shape_sqlite_writes` — the Rust and SQLite clocks land in the
+  same row and are compared against each other, so a format drift between them would be a
+  silent ordering bug rather than an error. Compares shape, not value.
+- `open_db_migrates_principal_and_start_columns` — a pre-migration row survives and reads
+  NULL.
+
+**REDs observed in an isolated worktree** via `scripts/mutation-probe.sh`, not by arming the
+shared tree. Reverting the INSERT to `datetime('now')` killed the first two: both stamps
+came back `"2026-09-20 13:32:18"`, identical, with no fractional part — the filed defect
+reproduced exactly.
 
 ## Workarounds
 

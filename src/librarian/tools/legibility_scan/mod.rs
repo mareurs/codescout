@@ -658,6 +658,8 @@ mod tests {
             Some(3500),
             None,
             Some(&tmp.path().to_string_lossy()),
+            None,
+            None,
         )
         .unwrap();
         drop(conn);

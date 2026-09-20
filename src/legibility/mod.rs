@@ -539,6 +539,8 @@ mod tests {
                 Some(1000),
                 None,
                 Some("/repo"),
+                None,
+                None,
             )
             .unwrap();
         }
@@ -560,6 +562,8 @@ mod tests {
             None,
             Some("ambiguous_name_path"),
             Some("/repo"),
+            None,
+            None,
         )
         .unwrap();
         // a FOREIGN-project row for the same target — must be excluded (F-1)
@@ -580,6 +584,8 @@ mod tests {
             Some(9999),
             None,
             Some("/other-repo"),
+            None,
+            None,
         )
         .unwrap();
 
@@ -668,6 +674,8 @@ mod tests {
             Some(3500),
             None,
             Some(&dir.path().to_string_lossy()),
+            None,
+            None,
         )
         .unwrap();
 
