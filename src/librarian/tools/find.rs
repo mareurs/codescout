@@ -197,18 +197,35 @@ fn claim_hint(items: &[Value], self_session: Option<&str>, today: &str) -> Optio
          {{\"claimed_by\": \"{sid}\", \"claimed_at\": \"{today}\"}}}})"
     );
 
+    // The claim writes THREE fields; this used to print its inverse as a SENTENCE
+    // ("release with status `investigating`"), which names one of them and leaves the
+    // reader to invent the clear for the other two. `extra` writes what it is given, so
+    // a wrong invention lands as DATA and never as an error — measured 2026-09-19,
+    // eleven bug files released with `{"__delete__": true}` (another tool's sentinel),
+    // `updated: true` every time, found only by grepping `claimed_by` afterwards.
+    //
+    // `null` is this server's only deletion value for an `extra` key. Printing the call
+    // is what removes the invention step; saying "use null" in prose would not, because
+    // the reader who needs it is composing a call, not reading a paragraph.
+    // docs/issues/2026-09-19-the-served-claim-hint-names-the-claim-call-and-never-the-release-call.md
+    let release_call = "doc(action=\"update\", id=\"<id>\", patch={\"status\": \
+                        \"investigating\", \"extra\": {\"claimed_by\": null, \
+                        \"claimed_at\": null}})";
+
     let mut hint = serde_json::Map::new();
     hint.insert(
         "note".into(),
         json!(format!(
             "{} of these are held by nobody. If you are picking one up, claim it FIRST: a \
-             peer running this same query sees `open` and cannot tell it is yours. Release \
-             with status `investigating` when you stop.",
+             peer running this same query sees `open` and cannot tell it is yours. When you \
+             stop, release it with `release_call` below — it clears both fields the claim \
+             wrote, and `null` is the only value that deletes one.",
             unclaimed.len()
         )),
     );
     hint.insert("unclaimed".into(), json!(unclaimed));
     hint.insert("call".into(), json!(call));
+    hint.insert("release_call".into(), json!(release_call));
     // Null, never a fabricated value. `resolve_self` declines on Windows, on an
     // ambiguous pid, and when no registry row matches; each of those must read as
     // "unknown" here rather than as some other session's id.
@@ -1457,6 +1474,68 @@ mod tests {
                 .contains("\"status\": \"taken\""),
             "the hint must carry the literal claim call: {:#?}",
             hint["call"]
+        );
+    }
+
+    /// The RELEASE half of the claim lifecycle. The five tests around this one all
+    /// assert about `call` — the claim — and none of them touches the inverse, which
+    /// is the half with the silent failure mode.
+    ///
+    /// Measured 2026-09-19: a session released eleven bug files with
+    /// `extra={"claimed_by": {"__delete__": true}}` — another tool's deletion
+    /// sentinel, not this one's — received `updated: true` eleven times, and found it
+    /// only by grepping `claimed_by` afterwards. `extra` writes what it is given, so a
+    /// wrong guess lands as DATA and never as an error. The reader guessed because the
+    /// surface asked them to: it printed a complete claim call and a SENTENCE about
+    /// releasing.
+    ///
+    /// Through the real call path rather than against `claim_hint` directly, so this
+    /// also proves the field survives into the serialized response.
+    ///
+    /// docs/issues/2026-09-19-the-served-claim-hint-names-the-claim-call-and-never-the-release-call.md
+    #[tokio::test]
+    async fn the_claim_hint_prints_the_release_call_that_clears_every_field_the_claim_wrote() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut row = sample_row("a", "a bug nobody holds");
+        row.kind = "bug".into();
+        row.status = "open".into();
+        artifact::upsert(&cat, &row).unwrap();
+
+        let ctx = mk_ctx(cat);
+        let v = call(&ctx, json!({"kind": "bug"})).await.unwrap();
+        let hint = &v["hints"]["claimable"];
+
+        let release = hint["release_call"].as_str().expect(
+            "the hint must PRINT the release call, not describe it — a reader who has to \
+             invent the clear lands their wrong guess as data",
+        );
+
+        // `null` is this server's ONLY deletion value for an `extra` key. Asserting the
+        // literal is the point: a release call that named the fields without clearing
+        // them would read as complete and do nothing.
+        assert!(
+            release.contains("\"claimed_by\": null"),
+            "release must clear claimed_by with null: {release}"
+        );
+        assert!(
+            release.contains("\"claimed_at\": null"),
+            "release must clear claimed_at with null: {release}"
+        );
+        assert!(
+            release.contains("\"status\": \"investigating\""),
+            "release must also move the status off `taken`: {release}"
+        );
+
+        // CLOSED-POPULATION GUARD, and it is the part that keeps this test honest past
+        // today. The claim writes exactly two `claimed_*` fields now; if a third is ever
+        // added, this count reds and forces whoever added it to the release call as well.
+        // Without it the two assertions above stay green while the lifecycle re-acquires
+        // the very half-ness this bug is about.
+        let claim = hint["call"].as_str().unwrap();
+        assert_eq!(
+            claim.matches("\"claimed_").count(),
+            2,
+            "the claim writes a `claimed_*` field the release call above does not clear: {claim}"
         );
     }
 
