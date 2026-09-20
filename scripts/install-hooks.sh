@@ -78,6 +78,20 @@ fail=0
 # Tracked separately from `fail` because STALE and MISSING are not the same state and the
 # summary must not collapse them — see the footer at the end of this script.
 stale=0
+# Tracked separately again, for the same reason, and it is what makes `--check`'s
+# selector INVERTIBLE rather than merely accurate about the names it already knows.
+# Every hook name this run actually accounted for — via install_shim or via one of the
+# two branches below that skip it (STALE pre-commit, off prepare-commit-msg) — is
+# appended here. The scan near the end of this script then diffs $hooks_dir's real
+# contents against this list instead of against a second hand-maintained one, so a
+# branch whose copy of this file predates some future hook still catches that hook's
+# presence: the population is the directory, not the code. See
+# docs/issues/2026-09-09-install-hooks-check-reports-all-ok-for-a-skipped-pre-push-guard.md.
+known_hooks=""
+# A hook present in $hooks_dir that nothing above named. Kept apart from `stale` and
+# from plain `fail` so the footer can say what actually happened instead of reusing
+# "NOT installed" for a hook that is, in fact, installed and unexamined.
+unrecognized=0
 
 # ---------------------------------------------------------------- the hooksPath trap
 hooks_path="$(git config --get core.hooksPath 2>/dev/null)"
@@ -181,6 +195,10 @@ if [ -f "$hooks_dir/pre-commit" ] &&
         echo "        It is NOT inert - it RUNS, and runs the framework's stashing path." >&2
         fail=1
         stale=1
+        # Accounted for even though install_shim is skipped below — this branch already
+        # reported on "pre-commit" by name, so the population scan must not also call it
+        # unrecognised.
+        known_hooks="$known_hooks pre-commit"
         # Suppress install_shim's own refusal for this hook. Its message is right in
         # general and WRONG here: it reads "Someone ran 'pre-commit install'", which
         # accuses a reader of a migration state this script created. Two messages for one
@@ -266,6 +284,12 @@ install_shim() {
     hook_name="$1"
     target="$2"
     dest="$hooks_dir/$hook_name"
+
+    # Mark this name accounted for regardless of what follows — MISSING, REFUSING,
+    # STALE, FAILED and ok all reach here first. This is what lets the population scan
+    # near the end of the script tell "this script has code for it" apart from "this
+    # script has no idea", without a second list to keep in sync by hand.
+    known_hooks="$known_hooks $hook_name"
 
     if [ ! -x "$PROJECT_ROOT/$target" ]; then
         echo "MISSING $hook_name — $target is not executable" >&2
@@ -437,9 +461,60 @@ elif [ "$check_only" = "1" ]; then
         install_shim prepare-commit-msg scripts/prepare-commit-msg-session-id.sh
     else
         echo "off     prepare-commit-msg    opt-in; not installed"
+        known_hooks="$known_hooks prepare-commit-msg"
     fi
 else
     echo "skip    prepare-commit-msg    opt-in; pass --with-session-id"
+    known_hooks="$known_hooks prepare-commit-msg"
+fi
+
+# ------------------------------------------------------ the inverted --check population
+#
+# Everything above asks "is the hook THIS SCRIPT KNOWS ABOUT healthy" — a question this
+# copy of the file can only ask about names it has a call site for. That is exactly the
+# defect in
+# docs/issues/2026-09-09-install-hooks-check-reports-all-ok-for-a-skipped-pre-push-guard.md:
+# a branch whose install-hooks.sh predates some hook's addition iterates its OWN short
+# list, finds every entry on it healthy, and exits 0 — while $hooks_dir is the shared
+# COMMON dir (see the block above that resolves it), not per-branch, so a hook installed
+# from a newer branch's checkout is live there and unexamined.
+#
+# So invert the selector: the ground truth is the directory listing, not this script's
+# call sites. $known_hooks is not a second list to keep in sync by hand — it is built
+# above from what THIS run actually accounted for, one name per install_shim call plus
+# the two branches that skip it (STALE pre-commit, off/skip prepare-commit-msg), so it
+# grows the same way the rest of the script does.
+#
+# `*.sample` is excluded on NAME, not on the executable bit: `git init` ships those
+# EXECUTABLE (measured — 0755, not the template's own doing but every git version this
+# repo has tested), so filtering only on `-x` would flag one on every fresh clone. Git
+# itself never runs a `*.sample` file; only the exact hook name does.
+#
+# Only under --check: an install run does not need this, because install_shim already
+# writes or refuses every name this script recognises, and a name it does not recognise
+# is precisely the case this block reports rather than silently installs over.
+if [ "$check_only" = "1" ] && [ -d "$hooks_dir" ]; then
+    for _entry in "$hooks_dir"/*; do
+        [ -e "$_entry" ] || continue
+        _name="$(basename "$_entry")"
+        case "$_name" in
+            *.sample) continue ;;
+        esac
+        [ -f "$_entry" ] || continue
+        case " $known_hooks " in
+            *" $_name "*) continue ;;
+        esac
+        echo "UNRECOGNIZED $_name      present in $hooks_dir; this copy of install-hooks.sh" >&2
+        echo "        has no call site for it and cannot say whether it is current, stale," >&2
+        echo "        or safe to leave alone. hooks_dir is the shared common dir, so this" >&2
+        echo "        may be live from a different branch's install, not from this one." >&2
+        echo "        Inspect it before trusting or removing it:" >&2
+        echo "            cat \"$_entry\"" >&2
+        echo "        Then check out a branch whose copy of this script knows the hook and" >&2
+        echo "        re-run --check." >&2
+        fail=1
+        unrecognized=1
+    done
 fi
 
 echo
@@ -454,11 +529,21 @@ if [ "$fail" != "0" ]; then
     # Found 2026-09-06 by sessionId ba061586-6581-4656-b0c5-acad83474de5, on a run with two
     # stale hooks and zero missing ones, having first ruled out `off prepare-commit-msg` as
     # the cause by checking that the same line was present in a pre-change run that exited 0.
+    #
+    # UNRECOGNIZED gets its own branch for the same reason STALE did: "NOT installed" is
+    # actively wrong here, and in the reassuring direction — the hook exists and this
+    # branch simply cannot vouch for it, which is a different remedy than "run this
+    # script to install it".
     if [ "$stale" != "0" ]; then
         echo "One or more hooks are STALE: installed, RUNNING, and running an OLDER shape" >&2
         echo "than this script generates. A stale hook is NOT inert — that is why this line" >&2
         echo "does not say 'not installed'. Some hooks above may ALSO be missing; read the" >&2
         echo "per-hook lines rather than this one. Re-run without --check to regenerate." >&2
+    elif [ "$unrecognized" != "0" ]; then
+        echo "One or more hooks in the common hooks dir are UNRECOGNIZED by this copy of" >&2
+        echo "install-hooks.sh: installed, and this branch has no code to vouch for them." >&2
+        echo "Read the UNRECOGNIZED lines above, inspect each hook directly, and check out" >&2
+        echo "a branch whose copy of this script knows it before trusting a clean report." >&2
     else
         echo "One or more hooks are NOT installed. Nothing above is a substitute for the" >&2
         echo "positive check below." >&2
