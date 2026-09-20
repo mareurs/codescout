@@ -131,7 +131,7 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
     // migration probes, `backfill_legacy_rows`, and a 5s `busy_timeout` on contention).
     // That overhead is unbounded and unmeasured, so the start is captured where it is
     // actually known — in `UsageRecorder::record_content`, beside `Instant::now()` —
-    // and carried here. docs/issues/2026-09-20-called-at-records-completion-at-second-resolution.md
+    // and carried here. docs/issues/archive/2026-09-20-called-at-records-completion-at-second-resolution.md
     let has_agent_id: bool = conn
         .prepare("SELECT agent_id FROM tool_calls LIMIT 0")
         .is_ok();
