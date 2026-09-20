@@ -137,7 +137,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 
 **Sampling / capture mode:** enrichment / prospective. **NOT routine-first**: this session's first substantive episode ran before a context compaction and was never selected under this protocol, so the routine slot is declared `missed-capture` in this session's DCS receipt rather than backfilled here. Outcome genuinely unknown at capture — the five agents were still running when this was written.
 
-**Identity / key / times:** collector and coordinating principal = session `48d1f0c8-9f60-43bb-a15e-17ec7995813a`, profile `~/.claude-kat`, observed model Opus 5 (1M context). Five delegated subagent actors under that session: three Sonnet, two Opus (provider observed; no per-actor session ids are minted, so they are not independently attributable — see `ca77cfe338b3f789`, which is that gap filed as a bug). Capture key `s48d1f0c8-round3-fixer-dispatch`. Dispatch and capture 2026-09-20; finish unknown at capture.
+**Identity / key / times:** collector and coordinating principal = session `48d1f0c8-9f60-43bb-a15e-17ec7995813a`, profile `~/.claude-kat`, observed model Opus 5 (1M context). Five delegated subagent actors under that session: three Sonnet, two Opus (provider observed; no per-actor session ids are minted, so they are not independently attributable — see `90d32f37ef2d8fc8`, which is that gap filed as a bug). Capture key `s48d1f0c8-round3-fixer-dispatch`. Dispatch and capture 2026-09-20; finish unknown at capture.
 
 **Task / authority / substrate:** objective — fix five filed bugs drawn from the open ledger, one agent each. Authority as actually instructed: the user's standing *"continue autonomously; when in doubt, check trackers and/or measure first"*, under CLAUDE.md's constraints (no push absent an explicit ask; never `git add -A`; `experiments` only). Workspace `/home/marius/work/claude/codescout`, base revision `170eac15`, tree carrying one modified file owned by another session (`.codescout/audit/ripper-65e654-202609.jsonl`, untouched). Target paths declared disjoint per agent: `scripts/probe_augmentation_restore.py`; `scripts/install-hooks.sh` + `tests/hooks-discrimination.sh`; `src/librarian/tools/audit_doc_refs/**`; `src/prompts/README.md` + `src/prompts/mod.rs`; `src/librarian/tools/doctor.rs`.
 
@@ -156,6 +156,8 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 **Rests on / grouping:** one grouped incident spanning this session and its five dispatched agents. The five bug files are the canonical records and are not reproduced here: `9a1998aaf4b09801`, `044e3c141cf80359`, `db80a4adc712c971`, `ea152af988811fa1`, `8713b680435c878a`.
 
 **Overhead:** capture ~8 minutes, actual. Distinguished from the scouting above, which the task required regardless and is not collection overhead.
+
+**Correction — 2026-09-20T14:00Z (citation only, no observed fact changed):** the bug cited in *Identity / key / times* was fixed and archived the same day, and `id = sha256(abs_path)` re-keyed it on the move, so the id recorded at capture no longer resolves. The citation now names the post-archive id. The dead id is deliberately not restated here — an artifact id cannot be mentioned without being cited, and `git log` holds the prior value. Nothing about the pre-action packet's observed content is altered by this.
 
 ## Template for new entries
 

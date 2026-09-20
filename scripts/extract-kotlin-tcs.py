@@ -32,7 +32,7 @@ def parse_ts(s: str) -> datetime:
     # written before it are bare seconds and both live in this column. Accept
     # either: the caller's `except ValueError: continue` would otherwise skip
     # every NEW row in silence, which reads as "no recent data" rather than as
-    # an error. docs/issues/2026-09-20-called-at-records-completion-at-second-resolution.md
+    # an error. docs/issues/archive/2026-09-20-called-at-records-completion-at-second-resolution.md
     for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
         try:
             return datetime.strptime(s, fmt)

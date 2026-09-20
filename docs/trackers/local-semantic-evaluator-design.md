@@ -73,12 +73,12 @@ All four filed 2026-09-20, all `open` at the time of writing.
 
 | bug | id | what it blocks |
 |---|---|---|
-| `called_at` holds the completion instant at second resolution | `730a13d704e88378` | a session's calls cannot be ordered — `run_command`'s p95 is 43,055 ms, long enough that a call which started first is recorded last |
-| `usage.db` records `session_id` but never `agent_id` | `ca77cfe338b3f789` | a subagent is indistinguishable from its parent, so per-principal analysis silently merges them |
+| `called_at` holds the completion instant at second resolution | `e75093da225ba1ce` | a session's calls cannot be ordered — `run_command`'s p95 is 43,055 ms, long enough that a call which started first is recorded last |
+| `usage.db` records `session_id` but never `agent_id` | `90d32f37ef2d8fc8` | a subagent is indistinguishable from its parent, so per-principal analysis silently merges them |
 | `run_command` never overrides `is_write` | `1fc9a6192a3f31b3` | the highest-volume tool records every shell command as a read |
 | the observation window yields zero prospective samples | `0ca7439866e8f2b6` | the collection policy itself |
 
-The first two are the ones rung 0 actually needs, and both are small. For the principal: the agent id is resolved by `principal_from_arguments` (`src/server.rs:1269`), consumed at `adopt_request_conversation` (`:1334`), then discarded before `UsageRecorder::new` (`:1352`) — the value is in scope and dropped twice rather than absent. Those line numbers were read at HEAD `170eac15` and a fix was in flight as this was written, so treat the bug file as authoritative for them. The third is deliberately **not** bundled with the other two: changing `is_write` alters what the server's write guard engages on, which is a behaviour change with blast radius rather than an instrumentation fix.
+The first two are the ones rung 0 actually needs, and both are small. For the principal: the agent id is resolved by `principal_from_arguments` (`src/server.rs:1269`), consumed at `adopt_request_conversation` (`:1334`), then discarded before `UsageRecorder::new` (`:1352`) — the value is in scope and dropped twice rather than absent. Those line numbers were read at HEAD `170eac15`; both bugs were fixed the same day in `1dd363eb` and `ae1554f1` and are now archived, which re-keyed their ids (`id = sha256(abs_path)`) — the two cited above are the post-archive ones. Treat the archived bug files as authoritative, and note the principal file's own root-cause statement was found too strong once the fix was attempted: the composed `<session>/<agent>` stamp already reached the database in the `cc_session_id` slot, so the defect was a conflation rather than an absence. The third is deliberately **not** bundled with the other two: changing `is_write` alters what the server's write guard engages on, which is a behaviour change with blast radius rather than an instrumentation fix.
 
 ### What is deliberately not proposed
 
