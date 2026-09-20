@@ -122,9 +122,12 @@ The generalisable half, because this campaign had just adopted the opposite rule
 
 Three commits, because the prose and the gate landed separately and the prose was corrected once:
 
-- **SHA:** `faf1dc99` — the subsection itself (2026-09-10). **patch-id:** `6a37fdd355cf9dbc9dcd1b68dbefd9b516608d72`
-- **SHA:** `cd8917ca` — retracts two false claims inside it (2026-09-11). **patch-id:** `f2c3a685409c9a98378c1287813dd1dccf882529`
-- **SHA:** `063b4722` — the name-to-documentation gate (2026-09-20). **patch-id:** `fe452b01a8123a6c8e4239ac44eacaeaaafa5a36`
+- **SHA:** `faf1dc99` — the subsection itself (2026-09-10).
+- **patch-id:** `6a37fdd355cf9dbc9dcd1b68dbefd9b516608d72`
+- **SHA:** `cd8917ca` — retracts two false claims inside it (2026-09-11).
+- **patch-id:** `f2c3a685409c9a98378c1287813dd1dccf882529`
+- **SHA:** `063b4722` — the name-to-documentation gate (2026-09-20).
+- **patch-id:** `fe452b01a8123a6c8e4239ac44eacaeaaafa5a36`
 
 SHAs are positional and do not survive a rebase of `experiments`; the patch-ids are content hashes of each diff and survive rebase and cherry-pick. All three derived through a file, never a pipe from `git show` — the command buffer is capped and a hash of a truncated prefix is a valid-looking WRONG digest.
 

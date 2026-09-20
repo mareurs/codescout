@@ -134,8 +134,10 @@ The second is the one that addresses the class rather than this instance. Fail-o
 
 ## Fix provenance
 
-- **SHA:** `64fc17e3` — the inverted `--check` population scan plus its suite (2026-09-20). **patch-id:** `e56727527fc1a6f73f00a9d145f4a3a3fdc31e45`
-- **SHA:** `c41ef00d` — wires the suite into CI as its own job (2026-09-20). **patch-id:** `76d81b8015f751cc03359e92147c31bf852b6eb5`
+- **SHA:** `64fc17e3` — the inverted `--check` population scan plus its suite (2026-09-20).
+- **patch-id:** `e56727527fc1a6f73f00a9d145f4a3a3fdc31e45`
+- **SHA:** `c41ef00d` — wires the suite into CI as its own job (2026-09-20).
+- **patch-id:** `76d81b8015f751cc03359e92147c31bf852b6eb5`
 
 SHAs are positional and die when `experiments` is rebased; the patch-ids are content hashes of each diff and survive rebase and cherry-pick. Both derived through a file, never a pipe from `git show` — the command buffer is capped and a hash of a truncated prefix is a valid-looking WRONG digest.
 

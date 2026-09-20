@@ -124,7 +124,8 @@ This is the same trap `present_tense_surfaces()`' doc comment records from 2026-
 
 ## Fix provenance
 
-- **SHA:** `737a29fe` — the YAML branch of the dead-tool gate, plus its `docs/PROBES.md` instrument row (2026-09-20). **patch-id:** `79c64ff0427f983feb6898e438a23910adc5768f`
+- **SHA:** `737a29fe` — the YAML branch of the dead-tool gate, plus its `docs/PROBES.md` instrument row (2026-09-20).
+- **patch-id:** `79c64ff0427f983feb6898e438a23910adc5768f`
 
 SHA is positional and dies when `experiments` is rebased; the patch-id is a content hash of the diff and survives rebase and cherry-pick. Derived through a file, never a pipe from `git show`.
 
