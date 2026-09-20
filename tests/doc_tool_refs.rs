@@ -1419,3 +1419,597 @@ fn a_documented_json_payload_names_real_parameters() {
         bad.join("\n\n")
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The YAML surface: `docs/augmentations/*.yaml` `prompt:` fields.
+//
+// Everything below is `cfg(feature = "librarian")` because it reads the sidecar through the
+// production reader, which is librarian-gated. The markdown guards above stay ungated, so the
+// lean lane keeps them; what the lean lane loses is THIS half, and it loses it silently. Read
+// the default lane (`cargo test --workspace`) before trusting a change here — the same caveat
+// `CLAUDE.md` § *Development Commands* already states for librarian code generally.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Every committed augmentation sidecar.
+///
+/// **Why a YAML file is a present-tense surface.** A sidecar's `prompt:` is not documentation
+/// *about* an augmentation — it IS the augmentation's standing instruction, delivered into a
+/// model's context verbatim on two paths. Confirmed at runtime 2026-09-20 against artifact
+/// `f2ecdd76a6189efb`: `doc(action="gather", id=…)` returns it under a top-level `prompt` key
+/// (`src/librarian/tools/refresh.rs`), and `librarian(action="context")` renders it as
+/// `> Standing instruction: …` (`src/librarian/tools/context.rs`). Both were observed returning
+/// the sidecar's own bytes, and `librarian(action="doctor")` reported `sidecar_shape_drift: 0`
+/// project-wide, so the committed YAML *is* the live prompt rather than a copy of it. That was
+/// the single premise
+/// `docs/issues/2026-09-02-augmentation-prompts-prescribe-dead-tools-and-no-gate-reads-yaml.md`
+/// flagged as read-from-the-code-but-not-observed, and the reason its § Resume says to confirm
+/// it before designing anything.
+///
+/// Kept OUT of [`present_tense_surfaces`] deliberately. That walk yields `.md` paths whose lines
+/// are file lines, and every consumer of it prints `file:line`. A prompt's line numbering
+/// belongs to the YAML scalar, not to the file — see [`prompt_cites_from`].
+#[cfg(feature = "librarian")]
+fn augmentation_sidecars() -> Vec<PathBuf> {
+    let dir = repo_root().join("docs/augmentations");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "yaml"))
+        .collect();
+    out.sort();
+    out
+}
+
+/// The marker token this scanner answers to. Deliberately NOT `audit-doc-refs:ignore`.
+#[cfg(feature = "librarian")]
+const PROMPT_IGNORE_TOKEN: &str = "doc-tool-refs:ignore";
+
+/// What a `<!-- doc-tool-refs:ignore … -->` marker on a prompt line suppresses.
+///
+/// **This scanner owes an escape** (`CLAUDE.md` § *Parsers Over a Namespace*, `IC-6`). An
+/// augmentation prompt is prose, and prose has a legitimate reason to write a dead tool name as
+/// a call: a "this used to be X" note, or a worked example of the form a rename replaced. With
+/// no escape the only remedies are deleting correct history — which is `IC-6` again — or an
+/// allowlist entry, which silences that site for every FUTURE defect as well.
+///
+/// Grammar borrowed from `audit_doc_refs`' `<!-- audit-doc-refs:ignore `tok` -->`
+/// (`src/librarian/tools/audit_doc_refs/parser.rs`), including both of its rules: only the
+/// LEADING run of backticked tokens is the target list, so the prose justifying the marker is
+/// not read as more targets; and a scoped marker naming nothing degrades to the coarse form
+/// rather than sitting silently inert.
+///
+/// **The TOKEN differs on purpose.** Reusing `audit-doc-refs:ignore` would mean a marker placed
+/// for a stale-*path* reason silently also suppresses a dead-*tool* finding — precisely the
+/// "a suppression that silently widens" failure `parse_ignore_marker`'s own comment warns about.
+/// Same vocabulary, own name.
+///
+/// **Limitation, stated here rather than discovered later.** Suppression is per LINE, and 6 of
+/// the 24 sidecars write `prompt:` as a single-quoted flow scalar — one line holding the whole
+/// prompt. A bare marker there suppresses that entire prompt. On a flow scalar use the scoped
+/// form; the bare form is only safe inside a `|` / `|-` literal block.
+#[cfg(feature = "librarian")]
+enum PromptIgnore {
+    None,
+    All,
+    Only(Vec<String>),
+}
+
+#[cfg(feature = "librarian")]
+impl PromptIgnore {
+    fn blocks(&self, tool: &str) -> bool {
+        match self {
+            PromptIgnore::None => false,
+            PromptIgnore::All => true,
+            PromptIgnore::Only(targets) => targets.iter().any(|t| t == tool),
+        }
+    }
+}
+
+/// Read one prompt line's marker, if it carries one.
+#[cfg(feature = "librarian")]
+fn prompt_ignore(line: &str) -> PromptIgnore {
+    let Some(at) = line.find("<!--") else {
+        return PromptIgnore::None;
+    };
+    let Some(mut rest) = line[at + 4..]
+        .trim_start()
+        .strip_prefix(PROMPT_IGNORE_TOKEN)
+    else {
+        return PromptIgnore::None;
+    };
+    let mut targets: Vec<String> = Vec::new();
+    loop {
+        rest = rest.trim_start();
+        let Some(body) = rest.strip_prefix('`') else {
+            break;
+        };
+        let Some(end) = body.find('`') else { break };
+        if end == 0 {
+            break;
+        }
+        targets.push(body[..end].to_string());
+        rest = &body[end + 1..];
+    }
+    if targets.is_empty() {
+        PromptIgnore::All
+    } else {
+        PromptIgnore::Only(targets)
+    }
+}
+
+/// One sidecar set's worth of prompt citations, plus what the reader could NOT read.
+///
+/// The counters are not bookkeeping — same argument as [`PayloadScan`], and sharper here: the
+/// bug that motivated this whole surface IS a scan whose scope quietly excluded a population
+/// while reporting green. A reader that declines a file satisfies every `is_empty()` assertion
+/// downstream of it, so the refused set has to be as visible as the read one.
+#[cfg(feature = "librarian")]
+#[derive(Default)]
+struct PromptScan {
+    cites: Vec<Cite>,
+    /// Sidecars whose `prompt:` was parsed and walked. The denominator.
+    scanned: usize,
+    /// Sidecars the YAML reader refused, each with its error. Asserted empty below.
+    refused: Vec<String>,
+    /// Call sites an ignore marker suppressed. Surfaced so a marker that silently widened to
+    /// cover the corpus shows up as a number rather than as a clean report.
+    suppressed: usize,
+}
+
+/// Read each sidecar's `prompt:` through the PRODUCTION reader and bill its tool calls.
+///
+/// **The YAML is parsed, never pattern-matched.**
+/// `codescout::librarian::augmentation_sidecar::read` is the same function `reindex` restores an
+/// augmentation with, so this gate and the runtime agree on what `prompt:` *is* by construction
+/// rather than by two readers happening to match. A hand-rolled `^prompt:` block-scalar reader
+/// was written first and rejected on measurement: **6 of the 24 sidecars write `prompt:` as a
+/// single-quoted flow scalar** (`artifact-augmentation-followups`, `claim-decay`,
+/// `code-dupes-backlog`, `retrieval-benchmark`, `system-retrospective-improvements`,
+/// `test-escape-hardening`), and all 6 contain `doc(action=…)` calls — so that reader would have
+/// silently declined a quarter of the population and reported green. That is this bug's own
+/// shape, one level up.
+///
+/// **The heredoc tell** (`CLAUDE.md` § *Parsers Over a Namespace*): this parser's heredoc is the
+/// block scalar body, where a line reading as a YAML key (`params:`, `render_template:`) is
+/// DATA. Only a real YAML parser is guaranteed to treat it that way — the second reason the
+/// production reader is used rather than a regex over `^prompt:`.
+///
+/// **Line numbers are scalar-relative, and the ADDRESS says so.** A YAML scalar's line 1 is not
+/// the file's line 1, and neither the parser nor the sidecar struct carries spans. So a `Cite`
+/// from this surface sets `file = "<path>#prompt"`: `docs/augmentations/x.yaml#prompt:12` cannot
+/// be misread as a file line the way `docs/augmentations/x.yaml:12` would be. On a flow scalar
+/// every citation is line 1 by construction; the finding quotes the offending text, which is
+/// what you grep for. Documented rather than faked, per `IC-6` — a plausible-looking wrong line
+/// number costs a reader more than an honest scalar-relative one.
+///
+/// **Grain is inherited from [`anchored_cites`] on purpose:** one `Cite` per named argument or
+/// billable bare identifier, so a ZERO-argument call is not billed. Load-bearing, not an
+/// oversight — `docs-trackers-tool-usage-patterns.yaml`'s prompt quotes
+/// `build_system_prompt_draft()`, a Rust function, and billing zero-arg calls would report it as
+/// a dead tool. The cost is a real blind spot: `some_dead_tool()` written with no arguments
+/// goes unseen here, exactly as it does on the markdown surfaces.
+#[cfg(feature = "librarian")]
+fn prompt_cites_from(paths: &[PathBuf], root: &std::path::Path) -> PromptScan {
+    let actions = tool_actions();
+    let mut scan = PromptScan::default();
+    for path in paths {
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(path.as_path())
+            .display()
+            .to_string();
+        let sidecar = match codescout::librarian::augmentation_sidecar::read(path) {
+            Ok(s) => s,
+            Err(e) => {
+                scan.refused.push(format!("{rel}: {e}"));
+                continue;
+            }
+        };
+        scan.scanned += 1;
+        let addr = format!("{rel}#prompt");
+        for (i, line) in sidecar.prompt.lines().enumerate() {
+            let ignore = prompt_ignore(line);
+            for call in calls_on_line(line) {
+                if ignore.blocks(&call.tool) {
+                    scan.suppressed += 1;
+                    continue;
+                }
+                let named = call.params.iter().cloned().map(|p| (p, false));
+                let bare = billable_bare(&call, &actions)
+                    .into_iter()
+                    .map(|b| (b, true));
+                for (param, is_bare) in named.chain(bare) {
+                    scan.cites.push(Cite {
+                        file: addr.clone(),
+                        line: i + 1,
+                        tool: call.tool.clone(),
+                        param,
+                        bare: is_bare,
+                        text: line.trim().chars().take(110).collect(),
+                    });
+                }
+            }
+        }
+    }
+    scan
+}
+
+/// **The gate.** An augmentation `prompt:` naming a tool that does not exist.
+///
+/// This is the acceptance condition of
+/// `docs/issues/2026-09-02-augmentation-prompts-prescribe-dead-tools-and-no-gate-reads-yaml.md`:
+/// *"a `docs/augmentations/*.yaml` prompt naming a dead tool must fail a gate. Today it fails
+/// nothing."* It shares [`stale_tool_call_findings`], [`tool_names`] and [`calls_on_line`] with
+/// the markdown surfaces rather than re-deriving any of them, so there is one notion of "a live
+/// tool" in this file and not two.
+///
+/// **It is green on landing, and that is a measurement rather than a design goal.** The bug
+/// recorded 20 offending prompts (6 × `artifact_augment(…)`, 14 × `artifact(action=…)`) on
+/// branch `tool-collapse` at `5da2537d`, and its § Environment warns the count differs per
+/// checkout. Re-measured on `experiments` 2026-09-20: **zero**. Every tool call across all 24
+/// sidecars names `doc` or `librarian`, both live — the collapse programme's own sweep reached
+/// them. The prompts were NOT repaired by this commit (the bug forbids that until Task 13), and
+/// no path was allowlisted to reach this number; it is simply what the corpus now holds. The
+/// half that was never done is the one done here: nothing was watching.
+///
+/// Because the real corpus can no longer produce the RED, the wiring is proved by
+/// [`a_dead_tool_call_in_a_sidecar_prompt_is_reported`] against a seeded fixture read through
+/// this same reader — and separately by a mutation on the production path, not on a fixture.
+#[cfg(feature = "librarian")]
+#[test]
+fn an_augmentation_prompt_names_only_live_tools() {
+    let root = repo_root();
+    let scan = prompt_cites_from(&augmentation_sidecars(), &root);
+    let names = tool_names();
+    let allowed: HashSet<&str> = ALIAS_ALLOWLIST.iter().copied().collect();
+    let bad = stale_tool_call_findings(&scan.cites, &names, &allowed);
+
+    assert!(
+        scan.refused.is_empty(),
+        "{} sidecar(s) could not be read, so their prompts went UNSCANNED and the assertion \
+         below is silent about them:\n{}",
+        scan.refused.len(),
+        scan.refused.join("\n")
+    );
+
+    assert!(
+        bad.is_empty(),
+        "{} augmentation prompt(s) call a tool that does not exist (scanned {} sidecars, {} \
+         citations, {} call site(s) suppressed by an ignore marker).\n\n{}\n\n\
+         An augmentation `prompt:` is EXECUTABLE PROSE: `doc(action=\"gather\")` returns it to \
+         the model and `librarian(action=\"context\")` renders it as a standing instruction, so \
+         a dead call here is delivered and acted on. Repair the prompt with \
+         `doc(action=\"augment\", id=…, merge=true, augment={{prompt: \"…\"}})` and re-export \
+         the sidecar — editing the YAML alone leaves the live catalog row stale, and \
+         `librarian(action=\"doctor\")`'s `sidecar_shape_drift` is what would then red.\n\n\
+         If the name is dead ON PURPOSE — a historical note, or a worked example of the form a \
+         rename replaced — the escape is a marker on that line, scoped to the name:\n    \
+         <!-- {} `old_tool_name` -->\n  \
+         The bare form (no backticked names) suppresses every call on the line; on a \
+         single-quoted flow scalar that is the WHOLE prompt, so prefer the scoped form there. \
+         An address reads `<file>#prompt:<line>` — the line is the line of the YAML SCALAR, not \
+         of the file; grep the quoted text.",
+        bad.len(),
+        scan.scanned,
+        scan.cites.len(),
+        scan.suppressed,
+        bad.join("\n\n"),
+        PROMPT_IGNORE_TOKEN
+    );
+}
+
+/// The wiring proof: a seeded sidecar carrying a dead tool call must be REPORTED.
+///
+/// Written because the real corpus is green, and a green assertion over a clean corpus is
+/// indistinguishable from a scan that reads nothing — `CLAUDE.md` § *Testing Discipline*, first
+/// law. It goes through [`prompt_cites_from`] and [`stale_tool_call_findings`], i.e. the code
+/// that ships, not a re-implementation of them.
+///
+/// `artifact_augment` is a real fixture, not a synthetic one: it is the tool this bug found 6
+/// prompts still calling, deleted by Task 5 of the tool-surface-collapse plan.
+#[cfg(feature = "librarian")]
+#[test]
+fn a_dead_tool_call_in_a_sidecar_prompt_is_reported() {
+    let names = tool_names();
+    assert!(
+        !names.contains("artifact_augment"),
+        "fixture assumption broken: `artifact_augment` is a registered tool again — pick \
+         another retired name"
+    );
+
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("seeded.yaml"),
+        "schema_version: 1\nprompt: |-\n  Maintain the table.\n  Add a row with \
+         `artifact_augment(id=\"x\", params={a: 1})`.\n",
+    )
+    .unwrap();
+
+    let scan = prompt_cites_from(&[tmp.path().join("seeded.yaml")], tmp.path());
+    assert!(scan.refused.is_empty(), "refused: {:?}", scan.refused);
+    assert_eq!(scan.scanned, 1);
+
+    let allowed: HashSet<&str> = ALIAS_ALLOWLIST.iter().copied().collect();
+    let bad = stale_tool_call_findings(&scan.cites, &names, &allowed);
+
+    assert_eq!(
+        bad.len(),
+        1,
+        "a dead tool call inside a sidecar `prompt:` must produce exactly one finding: {bad:?}"
+    );
+    assert!(
+        bad[0].contains("artifact_augment") && bad[0].contains("seeded.yaml#prompt:2"),
+        "the finding must name the tool AND address it scalar-relative: {bad:?}"
+    );
+
+    // Opposite direction at the SAME site: the reader is not simply reporting everything it
+    // reads. Without this, a `prompt_cites_from` that billed every identifier would pass above.
+    std::fs::write(
+        tmp.path().join("live.yaml"),
+        "schema_version: 1\nprompt: |-\n  Add a row with `doc(action=\"append_entry\")`.\n",
+    )
+    .unwrap();
+    let live = prompt_cites_from(&[tmp.path().join("live.yaml")], tmp.path());
+    assert!(
+        !live.cites.is_empty(),
+        "the live-tool prompt must still be CITED — a scan that reads nothing also reports \
+         nothing stale"
+    );
+    assert!(
+        stale_tool_call_findings(&live.cites, &names, &allowed).is_empty(),
+        "`doc` is live; billing it as stale would make the gate useless"
+    );
+}
+
+/// A single-quoted flow scalar is read, not refused.
+///
+/// 6 of the 24 committed sidecars are written this way, and every one of them contains
+/// `doc(action=…)` calls. The first draft of this scanner was a hand-rolled `^prompt:` block
+/// reader that would have declined all 6 — silently, reporting green over 18 of 24. This pins
+/// the property that rejection bought, so a future "simplification" back to a line-based reader
+/// reds here instead of quietly narrowing the population.
+///
+/// Both YAML escapes of the flow form are in the fixture: `''` for a literal apostrophe, and
+/// `\n` written as a real newline inside the quotes.
+#[cfg(feature = "librarian")]
+#[test]
+fn a_flow_scalar_prompt_is_read_not_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("flow.yaml"),
+        "schema_version: 1\nprompt: 'Don''t hand-build it. Append with \
+         `artifact_augment(id=\"x\")` instead.'\n",
+    )
+    .unwrap();
+
+    let scan = prompt_cites_from(&[tmp.path().join("flow.yaml")], tmp.path());
+    assert!(scan.refused.is_empty(), "refused: {:?}", scan.refused);
+    assert_eq!(
+        scan.scanned, 1,
+        "a flow scalar must be SCANNED, not skipped"
+    );
+
+    let names = tool_names();
+    let allowed: HashSet<&str> = ALIAS_ALLOWLIST.iter().copied().collect();
+    let bad = stale_tool_call_findings(&scan.cites, &names, &allowed);
+    assert_eq!(
+        bad.len(),
+        1,
+        "the dead call inside a flow scalar must be found: {bad:?}"
+    );
+
+    // And the real corpus still contains the form this fixture models. If every sidecar is
+    // rewritten to a literal block one day, this reads as a stale claim rather than a guard —
+    // so it is asserted rather than asserted-in-a-comment.
+    let root = repo_root();
+    let flow_in_corpus = augmentation_sidecars().iter().any(|p| {
+        std::fs::read_to_string(p)
+            .map(|t| t.lines().any(|l| l.starts_with("prompt: '")))
+            .unwrap_or(false)
+    });
+    assert!(
+        flow_in_corpus,
+        "no committed sidecar under {} still writes `prompt:` as a flow scalar — this test's \
+         premise has expired; re-read it before deleting it",
+        root.join("docs/augmentations").display()
+    );
+}
+
+/// A sidecar the YAML reader cannot parse is REFUSED, not silently skipped.
+///
+/// The one branch of [`prompt_cites_from`] no real sidecar exercises — `doctor` reports
+/// `sidecar_unparseable: 0` today — and therefore the one most likely to be decoration. It is
+/// also the exact shape of the bug this whole surface answers: a scan whose population quietly
+/// shrank while it went on reporting green. `scanned` must not count it, `refused` must name it,
+/// and [`an_augmentation_prompt_names_only_live_tools`] asserts `refused` empty BEFORE it
+/// asserts anything about findings, so an unreadable sidecar reds rather than narrowing the gate.
+///
+/// The fixture is malformed the way a real one would be — an unclosed flow scalar, which is what
+/// a hand-edit of a quoted `prompt:` produces — not by writing bytes that are not YAML at all.
+#[cfg(feature = "librarian")]
+#[test]
+fn an_unreadable_sidecar_is_refused_loudly_not_skipped_silently() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bad = tmp.path().join("broken.yaml");
+    std::fs::write(&bad, "schema_version: 1\nprompt: 'unterminated\n").unwrap();
+    let good = tmp.path().join("fine.yaml");
+    std::fs::write(
+        &good,
+        "schema_version: 1\nprompt: |-\n  Call `doc(action=\"get\")`.\n",
+    )
+    .unwrap();
+
+    let scan = prompt_cites_from(&[bad, good], tmp.path());
+
+    assert_eq!(
+        scan.refused.len(),
+        1,
+        "the unparseable sidecar must be RECORDED as refused, not dropped: {:?}",
+        scan.refused
+    );
+    assert!(
+        scan.refused[0].starts_with("broken.yaml"),
+        "the refusal must name the file that could not be read: {:?}",
+        scan.refused
+    );
+    assert_eq!(
+        scan.scanned, 1,
+        "a refused sidecar must not be counted as scanned — `scanned` is the denominator the \
+         non-vacuity floor is read against"
+    );
+    // Opposite direction: the readable sibling is still read. A reader that gave up on the
+    // whole set after one bad file would satisfy every assertion above.
+    assert!(
+        !scan.cites.is_empty(),
+        "one unreadable sidecar must not stop the walk; `fine.yaml` should still be cited"
+    );
+}
+
+/// `<!-- doc-tool-refs:ignore … -->` is the escape, and it is the one this parser owes.
+///
+/// Paired with its opposite direction throughout: every suppression assertion here is monotone
+/// under the scan going dead, so each is worthless without the un-suppressed contrast beside it.
+#[cfg(feature = "librarian")]
+#[test]
+fn the_prompt_ignore_marker_is_the_documented_escape() {
+    let names = tool_names();
+    let allowed: HashSet<&str> = ALIAS_ALLOWLIST.iter().copied().collect();
+    let tmp = tempfile::tempdir().unwrap();
+
+    let write = |name: &str, body: &str| {
+        let p = tmp.path().join(name);
+        std::fs::write(&p, format!("schema_version: 1\nprompt: |-\n  {body}\n")).unwrap();
+        p
+    };
+    let findings = |p: std::path::PathBuf| {
+        let scan = prompt_cites_from(&[p], tmp.path());
+        assert!(scan.refused.is_empty(), "refused: {:?}", scan.refused);
+        (
+            stale_tool_call_findings(&scan.cites, &names, &allowed).len(),
+            scan.suppressed,
+        )
+    };
+
+    // The contrast: the same sentence, with and without the marker.
+    let (bare_bad, bare_sup) = findings(write(
+        "unescaped.yaml",
+        "Use `artifact_augment(id=\"x\")` here.",
+    ));
+    assert_eq!(
+        (bare_bad, bare_sup),
+        (1, 0),
+        "without a marker the dead call is a finding — that contrast is the whole test"
+    );
+
+    let (scoped_bad, scoped_sup) = findings(write(
+        "scoped.yaml",
+        "Formerly `artifact_augment(id=\"x\")`. <!-- doc-tool-refs:ignore `artifact_augment` -->",
+    ));
+    assert_eq!(
+        (scoped_bad, scoped_sup),
+        (0, 1),
+        "a scoped marker naming the tool suppresses it, and SAYS it suppressed one"
+    );
+
+    // Scoped means scoped: a marker naming one tool does not cover a different dead name on the
+    // same line. Without this, `Only` could be implemented as `All` and every test above passes.
+    let (other_bad, _) = findings(write(
+        "scoped-other.yaml",
+        "`artifact_augment(id=\"x\")` and `artifact_event(id=\"y\")`. \
+         <!-- doc-tool-refs:ignore `artifact_augment` -->",
+    ));
+    assert_eq!(
+        other_bad, 1,
+        "a marker naming `artifact_augment` must NOT suppress `artifact_event` on the same line"
+    );
+
+    // A marker for the OTHER scanner must not suppress this one. Reusing that token would make
+    // a stale-path suppression silently cover a dead-tool call.
+    let (foreign_bad, _) = findings(write(
+        "foreign.yaml",
+        "`artifact_augment(id=\"x\")` <!-- audit-doc-refs:ignore `artifact_augment` -->",
+    ));
+    assert_eq!(
+        foreign_bad, 1,
+        "`audit-doc-refs:ignore` is a different instrument's marker and must not suppress here"
+    );
+
+    // Degrade-to-coarse, mirroring `parse_ignore_marker`: a scoped marker naming nothing is a
+    // typo, not an instruction to suppress nothing.
+    let (empty_bad, empty_sup) = findings(write(
+        "empty-target.yaml",
+        "`artifact_augment(id=\"x\")` <!-- doc-tool-refs:ignore -->",
+    ));
+    assert_eq!(
+        (empty_bad, empty_sup),
+        (0, 1),
+        "a marker naming no target degrades to the coarse form rather than sitting inert"
+    );
+}
+
+/// Non-vacuity for the YAML half.
+///
+/// [`an_augmentation_prompt_names_only_live_tools`] asserts `is_empty()` over a corpus that is
+/// currently clean — the single most monotone-under-removal configuration there is. An empty
+/// `docs/augmentations/`, a reader that refuses everything, or a `prompt:` field that stopped
+/// parsing all produce exactly the silence it asserts. This pins the population from below.
+///
+/// The floors are deliberately far under today's readings (24 sidecars, 24 scanned, 146
+/// citations, derived 2026-09-20 by running this test's own floor against an impossible value
+/// and reading the number out of its panic) — they exist to catch a collapse, not to ratchet a
+/// number that grows with the corpus.
+#[cfg(feature = "librarian")]
+#[test]
+fn the_sidecar_prompt_scan_is_not_reading_an_empty_corpus() {
+    let root = repo_root();
+    let sidecars = augmentation_sidecars();
+    assert!(
+        sidecars.len() >= 15,
+        "only {} sidecar(s) under docs/augmentations — the gate would pass vacuously",
+        sidecars.len()
+    );
+
+    let scan = prompt_cites_from(&sidecars, &root);
+    assert!(
+        scan.refused.is_empty(),
+        "{} sidecar(s) refused: {:?}",
+        scan.refused.len(),
+        scan.refused
+    );
+    assert_eq!(
+        scan.scanned,
+        sidecars.len(),
+        "every sidecar found on disk must be scanned; {} of {} were",
+        scan.scanned,
+        sidecars.len()
+    );
+    assert!(
+        scan.cites.len() > 50,
+        "only {} citations across {} sidecar prompts — the extractor or the reader is broken",
+        scan.cites.len(),
+        scan.scanned
+    );
+
+    // A citation that must resolve: `doc(action=…)` is what these prompts overwhelmingly call,
+    // and `action` is its required discriminator. If this stops resolving, the scan is running
+    // and reading the wrong thing.
+    assert!(
+        scan.cites
+            .iter()
+            .any(|c| c.tool == "doc" && c.param == "action"),
+        "no `doc(action=` citation resolved from any sidecar prompt"
+    );
+
+    // And the markers are not quietly eating the corpus. Zero is the expected reading today;
+    // a number that grows is a suppression widening, which is the failure this counter exists
+    // to make visible rather than the thing it forbids.
+    assert_eq!(
+        scan.suppressed, 0,
+        "{} call site(s) suppressed by an ignore marker — expected 0 today. If a marker was \
+         added deliberately, raise this with the reason; if not, a marker has widened.",
+        scan.suppressed
+    );
+}
