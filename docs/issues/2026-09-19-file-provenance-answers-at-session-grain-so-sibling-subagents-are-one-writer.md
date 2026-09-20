@@ -73,6 +73,20 @@ returns a true sentence at a granularity coarser than the question. That is why 
   a corrupted byte** — the guard's protective branch is unreachable for this class of writer, so
   the next consumer of provenance that is not idempotent inherits an unguarded path.
 
+### Instance 2 — 2026-09-20, same session, a different round and a different agent
+
+A five-agent round in session `48d1f0c8-9f60-43bb-a15e-17ec7995813a`. One agent (owning `tests/doc_tool_refs.rs`) ran `./scripts/fmt-mine.sh` once, as `CLAUDE.md` mandates for gate step 1. It reported *"formatted 2 file(s) written by this session"*. The second file was **`src/librarian/tools/doctor.rs`**, owned by a sibling agent that was **mid-task, not merely dirty** — confirmed by this ledger at the time: `git status --short` showed ` M src/librarian/tools/doctor.rs` while that agent was still running. `scripts/file-provenance.py src/librarian/tools/doctor.rs` returned `MINE — written by THIS session (48d1f0c8)`. No refusal, because there was nothing to refuse.
+
+**Three things this adds to instance 1.**
+
+1. **It was derived independently.** The reporting agent had read nothing about this bug. It reproduced the mechanism from its own observation — shared `sessionId` across sibling subagents, per-sessionId discrimination, therefore no refusal — and concluded *"worth a bug file"*. **It was already filed.** A correct rediscovery by a party with full access to the tree is evidence about the instrument's *invisibility*, which is a stronger claim than its behaviour: the mechanism is re-derivable and the existing record is not reachable from the point of use.
+
+2. **The containment held a second time, and for the same reason.** § *Workarounds* credits disjoint file-set assignment for the first sweep being harmless. `doctor.rs` was not in the formatting agent's commit — verified with `git show --stat`, 2 files, neither of them `doctor.rs`. So the dispatcher-side mitigation is now two-for-two, and it is the only thing standing between this defect and a real collision.
+
+3. **A harm vector § *Evidence* does not cover.** That section says *"harm observed: none — rustfmt is idempotent and semantics-neutral"*, and that remains true **of the bytes**. It is not true of the *edit session* running over them: re-indentation invalidates an in-flight agent's `edit_file` `old_string` anchors, so the victim's next edit fails to match text it correctly read minutes earlier — and the natural reading of that failure is *"I mis-transcribed"*, not *"my file was reformatted under me"*. The cost is a wrong self-diagnosis in a party with no way to see the cause, which is this file's own class arriving one layer further in. Mitigated here only because the coordinator happened to be holding the formatting agent's report and could warn the victim directly — not a mechanism, and not repeatable.
+
+**Do not read instance 2 as an independent confirmation of instance 1.** Same session, same campaign, same dispatcher; the two share every structural cause, so this is one mechanism observed twice, not two mechanisms agreeing. What it does establish is **recurrence under the documented workflow**: both instances happened to agents following `CLAUDE.md` correctly, and gate step 1 is what invokes the sweep.
+
 ## Hypotheses tried
 
 - *"fmt-mine.sh's attribution logic is wrong."* FALSIFIED — it is correct at its own granularity;
