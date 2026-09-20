@@ -107,6 +107,35 @@ jobs:
           git config --global init.defaultBranch master
       - run: bash tests/pre-push-foreign-session-guard.sh
 
+  # ITS OWN JOB, for the same reason as the one above: `shell-tests` is the known-flaky
+  # lane and this suite's assertions are meant to read as verdicts. Kept out of
+  # `push-guard-tests` too — that job's name would then describe half of what it runs.
+  #
+  # WHY IT IS WIRED AT ALL, and the symmetry is the argument. The defect it guards
+  # (docs/issues/2026-09-09-install-hooks-check-reports-all-ok-for-a-skipped-pre-push-
+  # guard.md) is a STATUS TOOL REPORTING CLEAN FOR A STATE IT CANNOT SEE: `--check`
+  # iterated its own hardcoded `install_shim` list, so a live hook in the shared common
+  # dir that this branch's copy has no call site for was invisible, and the report said
+  # ok. An unwired regression test is that same shape one level up — green, cited in a
+  # commit message, and silent about every state it is never run in. Leaving it unwired
+  # would reproduce the bug in the guard against it.
+  #
+  # Self-contained: every case builds throwaway repos (and one linked worktree) under
+  # `mktemp -d`. It never reads or writes this checkout's real `.git/hooks`, which
+  # matters because several sessions share it and a stray `install-hooks.sh` run would
+  # rewire hooks for all of them. Needs git only.
+  install-hooks-check-tests:
+    name: install-hooks.sh --check population
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Identify a committer (the suite builds throwaway git repos and a worktree)
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name  CI
+          git config --global init.defaultBranch master
+      - run: bash tests/install-hooks-check-population.sh
+
   # ITS OWN JOB, for the same reason as the one above rather than a new one: `shell-tests`
   # is the known-flaky lane, and a suite whose assertions are meant to read as verdicts
   # cannot live where reds get attributed to whoever pushed last. Kept out of
