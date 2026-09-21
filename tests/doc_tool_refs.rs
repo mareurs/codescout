@@ -847,8 +847,10 @@ const ANCHOR_FALSE_POSITIVES: &[(&str, usize, &str)] = &[
     // quoted in prose, not a call.
     ("CONTRIBUTING.md", 167, "cfg"),
     // "`sorted(x, key=f)` counts" — Python's builtin, quoted as a worked example of a
-    // callback shape in a probe's own doc row.
-    ("docs/PROBES.md", 201, "sorted"),
+    // callback shape in a probe's own doc row. Line-keyed, so ANY row inserted above it in
+    // PROBES.md moves the mention and reds this guard for every session until the number
+    // here is bumped: 201 -> 202 when `ffeada30` added the probe-predicate-candidates row.
+    ("docs/PROBES.md", 202, "sorted"),
     // "`find(kind=\"bug\", status=\"open\")` — the triage query" — prose shorthand for
     // `doc(action="find", …)`, using the ACTION name as if it were the tool name. No tool
     // is named "find".
