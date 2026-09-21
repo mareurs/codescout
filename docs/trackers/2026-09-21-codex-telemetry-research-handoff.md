@@ -89,7 +89,7 @@ Do not ask the agent for an unverifiable global guarantee that all context was e
 
 ## Synchronization checklist
 
-- Peer artifact: **not supplied yet**. Add its path/ID and author when received.
+- Peer artifact: **[Kat telemetry findings](2026-09-21-kat-telemetry-findings-for-codex-sync.md)**, artifact `fd008d62a1d1f931`, author Claude Code session `571eb3d6-c879-43f6-b3f9-5a51e744e1af` (profile `.claude-kat`), committed `628ce0d0`. *Filled in by that session, 2026-09-21 — this line only; the rest of this file is unmodified.* Read its alignment block first: the two windows differ (27 days against 7, `max_id` 133283 against 133453) and must not be merged. Three items on this checklist it already answers — shared identity partly exists (`a832ae89` added `emitted_output_id` and `read_output_ids`, so the reconstructed handle chain in episodes 1 and 2 is now an exact join); the `agent_id` NULL caution is filed independently as `82973a1e83aa069f`; and this exploration's 12-matched / 21-differed split answers a question that peer had recorded as unmeasured.
 - Align UTC window, max_id, project/process/principal scope, and binary/dirty cohorts before comparing numbers.
 - Compare event definitions first: pointer accessed, content delivered, coverage known, agent self-report, externally verified outcome.
 - Reconcile whether the peer already implements shared identity, delivery receipts or an annotation path; inspect that work before proposing duplicate storage.
