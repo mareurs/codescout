@@ -18,7 +18,7 @@ topic: deep-agent-telemetry
 **Valid:** dated 2026-09-21
 
 **Author:** Codex, session 01a0be18-827e-7a72-b5c9-1bcbebeedac2.
-**State:** exploration saved; awaiting comparison with the parallel agent's independent report.
+**State:** peer report received and first Codex reconciliation recorded on 2026-09-21; runtime rollout and instrument alignment remain open.
 **User request:** preserve this session's exploration/research for synchronization, with codex in the tracker name. The user will pass the pointer to the peer. No peer contact or implementation is implied.
 
 ## Start here
@@ -95,6 +95,24 @@ Do not ask the agent for an unverifiable global guarantee that all context was e
 - Reconcile whether the peer already implements shared identity, delivery receipts or an annotation path; inspect that work before proposing duplicate storage.
 - Decide the smallest extension to existing audit/context surfaces, including positive and unknown vocabulary and retention of supporting evidence.
 - Record agreements, disagreements and unresolved questions with supporting sources. Implementation scope remains a separate decision.
+
+## Codex reconciliation after the peer handoff
+
+**Valid:** dated 2026-09-21
+
+**Status:** first comparison complete; rollout and measurement alignment remain open.
+**Rests on:** peer artifact fd008d62a1d1f931; commits a17c5e66 and a832ae89; current BufferLinkage and extract_read_output_ids definitions; read-only PRAGMA table_info(tool_calls) on this project's usage database.
+
+The peer's addition above is preserved as authored. This section qualifies its sentence that the historical episodes are now an exact join.
+
+- **Committed implementation:** a832ae89 is contained in the current experiments branch. BufferLinkage carries emitted and reads; extract_read_output_ids scans serialized arguments. This is useful infrastructure for relating an emitted handle to later mentions of that handle. Its own contract explicitly says mentioned, not resolved. It neither proves delivered content nor supplies the missing Claude tool-use-ID join.
+- **Observed runtime substrate:** at this reconciliation, PRAGMA table_info(tool_calls) on the same project's usage database returned neither emitted_output_id nor read_output_ids. The query completed successfully. Thus the feature is present in source, but deployment/migration to this inspected database has not been demonstrated. Do not replace historical reconstruction with a claim of native linkage. Check the live writer, migration, and fresh-row population before using the new columns; do not rebuild or restart another session merely to reconcile documents.
+- **History remains history:** even a future successful migration needs an explicit backfill or re-extraction to populate old rows. No such historical population was demonstrated here. The original episode report remains accurate about its reconstruction method.
+- **Independent agreement:** the agent_id NULL ambiguity is already filed as artifact 82973a1e83aa069f; reuse that issue. Delivery versus use and self-report versus observation remain separate dimensions. The peer's suggestion to attach annotation to a concrete consumer is a useful design criterion, not an implemented mechanism verified here.
+- **Read split boundary:** 12 equal / 21 different serialized responses answers the equality question only for the Codex frozen seven-day cohort and predicate. It neither answers the peer's older cohort numerically nor proves content changes or waste. The edited-file episode is separate evidence of an intervening source change.
+- **Window correction:** the Kat interval starts earlier but ends at 2026-09-20 17:26:26; Codex ends at 2026-09-21 05:23:49. The windows overlap; the Kat interval does not contain the entire Codex interval. Keep their denominators separate.
+
+Still to reconcile: identical grouping/detector implementations on one frozen window; deployment coverage of the new columns; actual trace correlation; and the annotation consumer/schema. The saved weekly JSON records the grouping as process-session plus project, not just an unconstrained session-only sequence. No new prevalence or performance claim follows from this exchange.
 
 ## Saved state
 
