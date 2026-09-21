@@ -116,6 +116,14 @@ twice, and 72 pairs at ten or more.
 **Reframe rather than discard: the predicate is "identical arguments repeated",
 not "same path repeated".**
 
+**Narrowed 2026-09-21 (`a8f384cc0052d7b9`).** Identical *arguments* are not
+identical *results*, and the sentence above read as though they were. `q2`
+skips every row whose tool is not `read_file`, so an intervening
+`edit_file`/`edit_code` on the same path is invisible **by construction**, and a
+re-read after an edit — correct behaviour — is counted here as a repeat. The 326
+is a **candidate population**, not a redundancy verdict; a verdict needs
+source-state evidence this probe does not collect.
+
 ## Q3 — suspicious zeros: survives weakened, and is partly already built
 
 | | n | |
@@ -162,16 +170,29 @@ What a session does on its **next** call after an overflow (n = 4,502):
 | session ended | 26 | 0.6% |
 | re-ran identical arguments | 6 | 0.1% |
 
-**The buffer is queried after roughly one overflow in three.** Progressive
-disclosure exists so that elided content stays retrievable; on ~3,059 of 4,502
-occasions the caller moved on without retrieving it.
+**The next call carries buffer-reference syntax after roughly one overflow in
+three.** The table above is a next-call classification and nothing more — read
+it exactly as its header is written.
 
-**This measurement cannot say whether that is good or bad, and that is the
-result.** Two readings fit the same number exactly: the compact summary was
-sufficient and disclosure did its job, or the caller silently lost information
-and proceeded anyway. Nothing in `usage.db` records whether the summary
-sufficed, so the instrument cannot discriminate — a gap in the recorder, not an
-ambiguity in the data.
+**Narrowed 2026-09-21 (`a8f384cc0052d7b9`).** The table's labels were correct;
+the sentence that used to follow them was not. It said the caller "moved on
+without retrieving it" on ~3,059 occasions, promoting a next-call
+classification into an eventual-retrieval rate the instrument does not measure.
+Two linkage defects, running in **opposite** directions: `classify_next`
+(`scripts/probe-predicate-candidates.py:301-316`) sees only the next call, so
+retrieval two or more calls later is invisible (**undercount**); and it matches
+any handle-shaped string in that call rather than the handle *this* overflow
+emitted, so reading an unrelated buffer counts (**overcount**). Neither
+magnitude is measured — the counterexamples that established them are
+synthetic. The eventual-retrieval rate is therefore **unknown**, and 32.1%
+bounds it in neither direction.
+
+**Even with the linkage repaired, this measurement cannot say whether the
+elided content was needed, and that is the result.** Two readings fit: the
+compact summary was sufficient and disclosure did its job, or the caller
+silently lost information and proceeded anyway. Nothing in `usage.db` records
+whether the summary sufficed, so the instrument cannot discriminate — a gap in
+the recorder, not an ambiguity in the data.
 
 Ordering ambiguity: **4,801 of 68,808 adjacent pairs (6.98%) share a
 `called_at` second**, so about one classification in fourteen rests on
@@ -209,9 +230,13 @@ this basis.
 
 ## What this implies for the predicate set
 
-**Ship one, reframed.** *Identical-argument repeat* — 326 occurrences, 4.4% of
-path-naming reads, unambiguously redundant by construction. Cheap to evaluate,
-no interpretation needed, and its firing is never the designed interaction.
+**Ship one, reframed and narrowed.** *Identical-argument repeat* — 326
+occurrences, 4.4% of path-naming reads. Cheap to evaluate, and its firing is
+never the paging interaction Q2 ruled out. **But it is a candidate population,
+not a redundancy verdict** (narrowed 2026-09-21, `a8f384cc0052d7b9`): `q2` sees
+only `read_file` rows, so a re-read after an intervening edit is correct
+behaviour counted as a repeat. A verdict needs source-state evidence the probe
+does not collect.
 
 **Ship one, scoped down and honest about overlap.** *Zero-match grep* at 8.50%,
 with the explicit note that 56% of its population already receives a scope
@@ -223,12 +248,15 @@ sequence data. Leave it undefined rather than inventing a definition the
 evidence does not carry.
 
 **Consider a fourth, which the data proposed rather than confirmed.**
-*An overflow whose buffer is never queried before the session moves on* —
-~68% of 4,502 overflows. It is the largest measurable population here and it
-sits directly on the token lever. But it cannot be acted on until the recorder
-can distinguish "the summary sufficed" from "the caller gave up", and today it
-cannot. **That is a request for instrumentation, not a predicate ready to
-build** — and naming it as a predicate without that distinction would be
+*An overflow whose next call carries no buffer-reference syntax* — ~68% of
+4,502 overflows. It is the largest measurable population here and it sits
+directly on the token lever. **Two things block acting on it, not one**
+(narrowed 2026-09-21, `a8f384cc0052d7b9`). The linkage is broken in both
+directions, so that population is *not* the set of unretrieved overflows; and
+even once handles are matched over a declared observation horizon, the recorder
+still cannot distinguish "the summary sufficed" from "the caller gave up".
+**That is a request for instrumentation, not a predicate ready to
+build** — and naming it as a predicate without those distinctions would be
 exactly the mistake Q2 nearly made.
 
 **Finally, rung 1a's own denominator rule is vindicated by Q3.** The naive

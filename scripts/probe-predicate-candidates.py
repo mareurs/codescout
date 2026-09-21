@@ -226,7 +226,13 @@ def q2(rows):
     single 'repeat rate' would silently pick one:
       * any_repeat      — the path was seen before in this session, at all
       * narrowed_repeat — ...and this call narrows (paging: the DESIGNED path)
-      * identical_args  — ...and the arguments are byte-identical (redundant)
+      * identical_args  — ...and the arguments are byte-identical
+
+    identical_args is a CANDIDATE population, not a redundancy verdict: this
+    loop skips every non-read_file row, so an intervening edit_file/edit_code on
+    the same path is invisible and a correct re-read of CHANGED content lands
+    here too. Argument equality is not result equality.
+    docs/issues/2026-09-20-predicate-probe-overstates-retrieval-and-redundancy.md
     """
     seen: dict[tuple, int] = defaultdict(int)
     seen_args: dict[tuple, int] = defaultdict(int)
@@ -299,6 +305,18 @@ def q3(rows):
 
 
 def classify_next(prev, nxt):
+    """Classify the ONE call recorded after `prev`. Not a retrieval test.
+
+    Two limits, running in OPPOSITE directions, so the result bounds an
+    eventual-retrieval rate in neither:
+      * horizon — only seq[i+1] is examined, so a buffer read two or more calls
+        later is invisible (retrieval UNDERcounted);
+      * linkage — 'queried_the_buffer' fires on any REF_PREFIXES string in the
+        next input; the handle `prev` actually emitted is never compared, so
+        reading an UNRELATED buffer counts (retrieval OVERcounted).
+    Any retrieval claim needs handle matching over a declared horizon.
+    docs/issues/2026-09-20-predicate-probe-overstates-retrieval-and-redundancy.md
+    """
     if nxt is None:
         return "session_ended"
     ni = jload(nxt["input_json"])

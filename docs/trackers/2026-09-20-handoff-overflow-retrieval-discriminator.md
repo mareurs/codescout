@@ -2,7 +2,7 @@
 id: ff49e054ef02e6c3
 kind: tracker
 status: draft
-title: Handoff — what does an unretrieved overflow mean?
+title: Handoff — how do we tell whether an elided result was needed?
 tags:
 - handoff
 - temporary
@@ -12,7 +12,7 @@ tags:
 topic: deep-agent-observation
 ---
 
-# Handoff — what does an unretrieved overflow mean?
+# Handoff — how do we tell whether an elided result was needed?
 
 **Status: awaiting pickup, 20 September 2026.** Temporary. Delete this file once the
 question below is answered and the answer is folded into
@@ -22,26 +22,52 @@ Nothing here authorizes implementation.
 ## The question, in one sentence
 
 Progressive disclosure elides a large result and returns a summary plus an `@ref` handle.
-**The handle is queried after only 32.1% of overflows.** Does that mean the summary
-sufficed, or that information was silently lost?
+When the elided content is not picked up, does that mean the summary sufficed, or that
+information was silently lost?
 
 The two readings have opposite remedies — one says raise the inline budget or improve the
-summary, the other says the mechanism is working and should be left alone — and the
-measurement cannot separate them.
+summary, the other says the mechanism is working and should be left alone.
+
+**A second question now sits in front of that one** (added 2026-09-21): the instrument
+cannot currently tell you which overflows went unretrieved at all. Read the next section
+before quoting any figure from this file.
 
 ## What is measured, and what is not
 
 **Measured** (`docs/research/2026-09-20-predicate-candidates-for-the-observer-phase.md`,
 `555135b94c321741`; probe `scripts/probe-predicate-candidates.py`): over 69,444 rows,
 2026-08-24 15:21:13 → 2026-09-20 17:26:26 UTC, frozen at `max_id=133283`, 636 sessions,
-12 project roots, all codescout — the `@ref` buffer is queried after **32.1%** of
-overflows, leaving roughly **3,059 of 4,502** results elided and never retrieved.
+12 project roots, all codescout — **the call immediately following an overflow contains
+buffer-reference syntax in 32.1% of cases (1,443 of 4,502)**.
 
-**Not measured, and this is the whole point:** whether the elided bytes were needed. The
-*rate* is recoverable from `usage.db` because a later call's `input_json` carries the
-handle. The *interpretation* is not, because nothing records what the caller wanted.
+Read that sentence literally. It is a **next-call classification**, and the research
+artifact's Q4 table always labelled it as one. The promotion of it into a retrieval rate
+happened in prose downstream — including in the first version of this file.
 
-So this is **not a predicate candidate**. It is a request for a discriminator.
+**Two linkage defects sit between that figure and any claim about retrieval, and they run
+in opposite directions.** Filed as
+`docs/issues/2026-09-20-predicate-probe-overstates-retrieval-and-redundancy.md`
+(`a8f384cc0052d7b9`), root causes verified at the bytes 2026-09-21:
+
+- `classify_next` (`scripts/probe-predicate-candidates.py:301-316`) receives only the next
+  call. A buffer read two or more calls later is invisible — retrieval **undercounted**.
+- It returns `queried_the_buffer` when any handle-shaped string appears in that call's
+  input, never comparing it against the handle the overflow emitted. Reading an
+  *unrelated* buffer counts — retrieval **overcounted**.
+
+Neither error's magnitude is known. The counterexamples that established them are
+synthetic, not a re-measurement of the corpus. So **the eventual-retrieval rate is
+unmeasured**, and 32.1% is neither an upper nor a lower bound on it. It is a correct
+measurement of a narrower thing.
+
+**Separately not measured:** whether the elided bytes were needed. That question survives
+the linkage repair intact — matching handles would tell you *whether* a buffer was read,
+never *whether its contents mattered*. Nothing in `usage.db` records what the caller
+wanted.
+
+So this is **not a predicate candidate**. It is a request for a discriminator, and the
+linkage repair is now the first half of that work rather than a precondition someone else
+already met.
 
 ## The actual design problem
 
@@ -76,6 +102,12 @@ for progressive disclosure and closes a question that would otherwise keep being
 
 ## Constraints whoever picks this up must know
 
+- **The retrieval figure's linkage is broken in both directions, and repairing it is part
+  of this work.** `classify_next` looks exactly one call ahead, and matches any
+  handle-shaped string rather than the handle the overflow emitted. Any eventual-retrieval
+  claim needs handle matching over a **declared observation horizon** — choose that horizon
+  deliberately and state it, because "the next call" is itself a horizon and it is the one
+  that produced the overclaim. Filed as `a8f384cc0052d7b9`.
 - **`usage.db` is a rolling 30 days that prunes on write.** `write_record` runs
   `DELETE FROM tool_calls WHERE called_at < datetime('now','-30 days')` on every insert.
   Re-running the probe later describes a different population with no warning. Freeze any
@@ -108,8 +140,10 @@ predicate evaluation inside the existing `UsageRecorder`, which is already a per
 durable, failure-isolated observer.
 
 Measurement killed two of the three predicates originally proposed for rung 1a. What
-survives is small: byte-identical repeat reads (4.4% of path-bearing reads) and zero-match
-`grep` minus the 56% that already carry a scope warning. This question is what the data
+survives is small, and narrower than it first read: repeat reads with byte-identical
+arguments (4.4% of path-bearing reads) — a **candidate**, not a redundancy verdict, since
+the probe never checks for an intervening edit and argument equality does not imply
+content equality — and zero-match `grep` minus the 56% that already carry a scope warning. This question is what the data
 offered instead, and it is worth more than either.
 
 One rule rung 1a must ship with, which applies here too: **record the evaluation, not the
