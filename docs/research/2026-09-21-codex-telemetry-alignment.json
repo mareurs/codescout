@@ -1,0 +1,340 @@
+{
+  "window": [
+    "2026-09-14 05:23:49",
+    "2026-09-21 05:23:49"
+  ],
+  "max_id": 133453,
+  "n": 9748,
+  "peer_q2": {
+    "read_file_calls_naming_a_path": 917,
+    "first_visits": 495,
+    "any_repeat": 422,
+    "any_repeat_pct": 46.02,
+    "repeat_that_is_narrowing": 379,
+    "repeat_that_is_narrowing_pct": 89.81,
+    "repeat_with_identical_args": 33,
+    "repeat_with_identical_args_pct": 3.6,
+    "distinct_session_path_pairs": 495,
+    "visits_per_pair_distribution_capped_at_10": {
+      "1": 290,
+      "2": 108,
+      "3": 52,
+      "4": 13,
+      "5": 16,
+      "6": 7,
+      "7": 4,
+      "9": 1,
+      "10": 4
+    }
+  },
+  "peer_q3": {
+    "grep_calls": 953,
+    "grep_with_output": 943,
+    "zero_match": 64,
+    "zero_match_pct_of_with_output": 6.79,
+    "zero_match_pattern_pathish": 14,
+    "zero_match_pathish_pct": 21.88,
+    "nonzero_match_pattern_pathish": 142,
+    "nonzero_pathish_base_rate_pct": 16.15,
+    "control_naive_substring_count": 121,
+    "control_naive_overcounts_by": 57,
+    "control_fired": true
+  },
+  "project_scoped": {
+    "reads": 917,
+    "repeated": 33,
+    "same": 12,
+    "different": 21
+  },
+  "instrument_sha256": "50cccf0a047d3e553f1097bf8081f77cb76daaf08a508aa44d651275179c41b5",
+  "repeat_pairs_equal_across_groupings": true,
+  "repeat_pairs": [
+    {
+      "previous": 132579,
+      "current": 132630,
+      "same_response": false
+    },
+    {
+      "previous": 132554,
+      "current": 132656,
+      "same_response": false
+    },
+    {
+      "previous": 132656,
+      "current": 132661,
+      "same_response": false
+    },
+    {
+      "previous": 132697,
+      "current": 132765,
+      "same_response": true
+    },
+    {
+      "previous": 128895,
+      "current": 129706,
+      "same_response": false
+    },
+    {
+      "previous": 131009,
+      "current": 131387,
+      "same_response": true
+    },
+    {
+      "previous": 131033,
+      "current": 131388,
+      "same_response": true
+    },
+    {
+      "previous": 131029,
+      "current": 131390,
+      "same_response": false
+    },
+    {
+      "previous": 131017,
+      "current": 131391,
+      "same_response": false
+    },
+    {
+      "previous": 131095,
+      "current": 131396,
+      "same_response": true
+    },
+    {
+      "previous": 131112,
+      "current": 131398,
+      "same_response": true
+    },
+    {
+      "previous": 131100,
+      "current": 131486,
+      "same_response": true
+    },
+    {
+      "previous": 131390,
+      "current": 131615,
+      "same_response": false
+    },
+    {
+      "previous": 131391,
+      "current": 131797,
+      "same_response": false
+    },
+    {
+      "previous": 131410,
+      "current": 131801,
+      "same_response": false
+    },
+    {
+      "previous": 131405,
+      "current": 131804,
+      "same_response": false
+    },
+    {
+      "previous": 131261,
+      "current": 131952,
+      "same_response": false
+    },
+    {
+      "previous": 131011,
+      "current": 131953,
+      "same_response": false
+    },
+    {
+      "previous": 131025,
+      "current": 131955,
+      "same_response": false
+    },
+    {
+      "previous": 131081,
+      "current": 131956,
+      "same_response": true
+    },
+    {
+      "previous": 131158,
+      "current": 131957,
+      "same_response": true
+    },
+    {
+      "previous": 131958,
+      "current": 132182,
+      "same_response": true
+    },
+    {
+      "previous": 132182,
+      "current": 132186,
+      "same_response": false
+    },
+    {
+      "previous": 131230,
+      "current": 132736,
+      "same_response": false
+    },
+    {
+      "previous": 131010,
+      "current": 132738,
+      "same_response": true
+    },
+    {
+      "previous": 131141,
+      "current": 132739,
+      "same_response": true
+    },
+    {
+      "previous": 131281,
+      "current": 132813,
+      "same_response": false
+    },
+    {
+      "previous": 132739,
+      "current": 132819,
+      "same_response": false
+    },
+    {
+      "previous": 132736,
+      "current": 132823,
+      "same_response": false
+    },
+    {
+      "previous": 131042,
+      "current": 132827,
+      "same_response": false
+    },
+    {
+      "previous": 131698,
+      "current": 132844,
+      "same_response": false
+    },
+    {
+      "previous": 131704,
+      "current": 132851,
+      "same_response": true
+    },
+    {
+      "previous": 132856,
+      "current": 133010,
+      "same_response": false
+    }
+  ],
+  "zero_row_ids": [
+    128040,
+    128077,
+    125468,
+    127552,
+    127756,
+    126992,
+    126216,
+    131909,
+    132728,
+    132518,
+    132528,
+    127872,
+    128181,
+    125085,
+    125126,
+    127640,
+    129837,
+    129881,
+    124670,
+    129175,
+    129313,
+    131078,
+    131177,
+    131206,
+    131249,
+    131278,
+    131284,
+    131299,
+    131308,
+    131318,
+    131319,
+    131326,
+    131344,
+    131445,
+    131582,
+    131717,
+    131722,
+    131723,
+    131724,
+    131725,
+    131729,
+    131821,
+    131823,
+    131837,
+    131991,
+    132032,
+    132033,
+    132150,
+    132314,
+    132325,
+    132346,
+    132351,
+    132887,
+    130866,
+    133191,
+    131908,
+    124168,
+    124188,
+    128339,
+    124611,
+    125762,
+    128785,
+    128053,
+    124447
+  ],
+  "scope_warning_row_ids": [
+    128077,
+    125468,
+    127552,
+    127756,
+    126992,
+    126216,
+    131909,
+    132518,
+    132528,
+    127872,
+    128181,
+    125085,
+    125126,
+    129837,
+    129881,
+    129175,
+    129313,
+    131078,
+    131177,
+    131206,
+    131249,
+    131278,
+    131445,
+    131582,
+    131717,
+    131722,
+    131723,
+    131724,
+    131725,
+    131729,
+    131821,
+    131823,
+    131991,
+    132032,
+    132033,
+    132150,
+    132346,
+    132351,
+    132887,
+    130866,
+    133191,
+    131908,
+    124168,
+    124188,
+    124611,
+    128785,
+    124447
+  ],
+  "zero_controls": {
+    "0 matches": true,
+    "10 matches": false,
+    "20 matches": false,
+    "100 matches": false
+  },
+  "scope_warning_predicate": "first text block contains exact newline-newline warning: this zero describes what was searched, not the pattern."
+}

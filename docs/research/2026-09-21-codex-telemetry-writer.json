@@ -1,0 +1,12 @@
+[
+  {
+    "pid": 3016183,
+    "exe": "/home/marius/work/claude/codescout/target/release/codescout (deleted)",
+    "version": {
+      "version": "0.15.0",
+      "git_sha": "b53a3ffc",
+      "git_sha_full": "b53a3ffc17a6471db3b2143961ffae88288b770a",
+      "git_dirty": false
+    }
+  }
+]

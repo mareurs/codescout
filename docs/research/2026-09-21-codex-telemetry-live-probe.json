@@ -1,0 +1,502 @@
+[
+  {
+    "pid": 1709919,
+    "observed_utc": "2026-09-21T08:49:09.894337+00:00",
+    "binary_sha256": "c203fba3d10f8ecb9c3c1f2371ec83ad1f7de8b8d2019d85548e9ca60baf0709",
+    "debug": false,
+    "root": "/tmp/codex-telemetry-probe-vkns7j88",
+    "A": "@cmd_c327a2bf",
+    "B": "@cmd_c327a303",
+    "columns": [
+      "id",
+      "tool_name",
+      "called_at",
+      "latency_ms",
+      "outcome",
+      "overflowed",
+      "error_msg",
+      "codescout_sha",
+      "project_sha",
+      "session_id",
+      "input_json",
+      "output_json",
+      "cc_session_id",
+      "friction_target",
+      "overflow_tokens",
+      "err_family",
+      "project_root",
+      "codescout_dirty",
+      "agent_id",
+      "started_at",
+      "emitted_output_id",
+      "read_output_ids"
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "tool_name": "legacy_probe_seed",
+        "outcome": "success",
+        "emitted_output_id": null,
+        "read_output_ids": null,
+        "codescout_sha": null,
+        "codescout_dirty": null,
+        "session_id": null,
+        "input_payload_present": false,
+        "output_payload_present": false
+      },
+      {
+        "id": 2,
+        "tool_name": "run_command",
+        "outcome": "success",
+        "emitted_output_id": "@cmd_c327a2bf",
+        "read_output_ids": null,
+        "codescout_sha": "a832ae89",
+        "codescout_dirty": 1,
+        "session_id": "663050e3-ed40-4a19-95c9-e0068eb24674",
+        "input_payload_present": false,
+        "output_payload_present": false
+      },
+      {
+        "id": 3,
+        "tool_name": "run_command",
+        "outcome": "success",
+        "emitted_output_id": "@cmd_c327a303",
+        "read_output_ids": null,
+        "codescout_sha": "a832ae89",
+        "codescout_dirty": 1,
+        "session_id": "663050e3-ed40-4a19-95c9-e0068eb24674",
+        "input_payload_present": false,
+        "output_payload_present": false
+      },
+      {
+        "id": 4,
+        "tool_name": "read_file",
+        "outcome": "success",
+        "emitted_output_id": null,
+        "read_output_ids": null,
+        "codescout_sha": "a832ae89",
+        "codescout_dirty": 1,
+        "session_id": "663050e3-ed40-4a19-95c9-e0068eb24674",
+        "input_payload_present": false,
+        "output_payload_present": false
+      },
+      {
+        "id": 5,
+        "tool_name": "read_file",
+        "outcome": "success",
+        "emitted_output_id": null,
+        "read_output_ids": "[\"@cmd_c327a303\"]",
+        "codescout_sha": "a832ae89",
+        "codescout_dirty": 1,
+        "session_id": "663050e3-ed40-4a19-95c9-e0068eb24674",
+        "input_payload_present": false,
+        "output_payload_present": false
+      },
+      {
+        "id": 6,
+        "tool_name": "grep",
+        "outcome": "success",
+        "emitted_output_id": null,
+        "read_output_ids": "[\"@cmd_c327a2bf\"]",
+        "codescout_sha": "a832ae89",
+        "codescout_dirty": 1,
+        "session_id": "663050e3-ed40-4a19-95c9-e0068eb24674",
+        "input_payload_present": false,
+        "output_payload_present": false
+      },
+      {
+        "id": 7,
+        "tool_name": "read_file",
+        "outcome": "success",
+        "emitted_output_id": null,
+        "read_output_ids": "[\"@cmd_c327a2bf\"]",
+        "codescout_sha": "a832ae89",
+        "codescout_dirty": 1,
+        "session_id": "663050e3-ed40-4a19-95c9-e0068eb24674",
+        "input_payload_present": false,
+        "output_payload_present": false
+      },
+      {
+        "id": 8,
+        "tool_name": "read_file",
+        "outcome": "success",
+        "emitted_output_id": null,
+        "read_output_ids": "[\"@cmd_c327a2bf\"]",
+        "codescout_sha": "a832ae89",
+        "codescout_dirty": 1,
+        "session_id": "663050e3-ed40-4a19-95c9-e0068eb24674",
+        "input_payload_present": false,
+        "output_payload_present": false
+      }
+    ],
+    "calls": [
+      {
+        "label": "produce_A",
+        "name": "run_command",
+        "input": {
+          "command": "python3 -c \"print('\\n'.join('A%04d '%i+'x'*120 for i in range(400)))\""
+        },
+        "result": {
+          "emitted_output_id": "@cmd_c327a2bf",
+          "raw_envelope_omitted": true
+        }
+      },
+      {
+        "label": "produce_B",
+        "name": "run_command",
+        "input": {
+          "command": "python3 -c \"print('\\n'.join('B%04d '%i+'y'*120 for i in range(400)))\""
+        },
+        "result": {
+          "emitted_output_id": "@cmd_c327a303",
+          "raw_envelope_omitted": true
+        }
+      },
+      {
+        "label": "intermediate",
+        "name": "read_file",
+        "input": {
+          "path": "small.txt"
+        },
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "1 line\n\nsmall control\n"
+            },
+            {
+              "type": "text",
+              "text": "\n[codescout] paths are relative to /tmp/codex-telemetry-probe-vkns7j88"
+            },
+            {
+              "type": "text",
+              "text": "\n## Project Status (details)\n- **Memories:** None yet \u2014 run `onboarding` to create project memories\n- **Semantic index:** Not built \u2014 run `index(action='build')` to enable `semantic_search`\n"
+            }
+          ],
+          "isError": false
+        }
+      },
+      {
+        "label": "other_buffer",
+        "name": "read_file",
+        "input": {
+          "path": "@cmd_c327a303",
+          "start_line": 1,
+          "end_line": 3
+        },
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "400 lines\n\nB0000 yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\nB0001 yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\nB0002 yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+            }
+          ],
+          "isError": false
+        }
+      },
+      {
+        "label": "mention_only",
+        "name": "grep",
+        "input": {
+          "path": "small.txt",
+          "pattern": "@cmd_c327a2bf"
+        },
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "0 matches"
+            }
+          ],
+          "isError": false
+        }
+      },
+      {
+        "label": "partial_A",
+        "name": "read_file",
+        "input": {
+          "path": "@cmd_c327a2bf",
+          "start_line": 1,
+          "end_line": 3
+        },
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "400 lines\n\nA0000 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nA0001 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nA0002 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+          ],
+          "isError": false
+        }
+      },
+      {
+        "label": "correct_A",
+        "name": "read_file",
+        "input": {
+          "path": "@cmd_c327a2bf",
+          "start_line": 398,
+          "end_line": 400
+        },
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "400 lines\n\nA0397 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nA0398 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nA0399 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+          ],
+          "isError": false
+        }
+      }
+    ]
+  },
+  {
+    "pid": 1711141,
+    "observed_utc": "2026-09-21T08:49:20.161936+00:00",
+    "binary_sha256": "c203fba3d10f8ecb9c3c1f2371ec83ad1f7de8b8d2019d85548e9ca60baf0709",
+    "debug": true,
+    "root": "/tmp/codex-telemetry-probe-_qco5g3p",
+    "A": "@cmd_c327cad3",
+    "B": "@cmd_c327cb1d",
+    "columns": [
+      "id",
+      "tool_name",
+      "called_at",
+      "latency_ms",
+      "outcome",
+      "overflowed",
+      "error_msg",
+      "codescout_sha",
+      "project_sha",
+      "session_id",
+      "input_json",
+      "output_json",
+      "cc_session_id",
+      "friction_target",
+      "overflow_tokens",
+      "err_family",
+      "project_root",
+      "codescout_dirty",
+      "agent_id",
+      "started_at",
+      "emitted_output_id",
+      "read_output_ids"
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "tool_name": "legacy_probe_seed",
+        "outcome": "success",
+        "emitted_output_id": null,
+        "read_output_ids": null,
+        "codescout_sha": null,
+        "codescout_dirty": null,
+        "session_id": null,
+        "input_payload_present": false,
+        "output_payload_present": false
+      },
+      {
+        "id": 2,
+        "tool_name": "run_command",
+        "outcome": "success",
+        "emitted_output_id": "@cmd_c327cad3",
+        "read_output_ids": null,
+        "codescout_sha": "a832ae89",
+        "codescout_dirty": 1,
+        "session_id": "d5f0b883-4c8a-4d00-8631-79e10d423170",
+        "input_payload_present": true,
+        "output_payload_present": true
+      },
+      {
+        "id": 3,
+        "tool_name": "run_command",
+        "outcome": "success",
+        "emitted_output_id": "@cmd_c327cb1d",
+        "read_output_ids": null,
+        "codescout_sha": "a832ae89",
+        "codescout_dirty": 1,
+        "session_id": "d5f0b883-4c8a-4d00-8631-79e10d423170",
+        "input_payload_present": true,
+        "output_payload_present": true
+      },
+      {
+        "id": 4,
+        "tool_name": "read_file",
+        "outcome": "success",
+        "emitted_output_id": null,
+        "read_output_ids": null,
+        "codescout_sha": "a832ae89",
+        "codescout_dirty": 1,
+        "session_id": "d5f0b883-4c8a-4d00-8631-79e10d423170",
+        "input_payload_present": true,
+        "output_payload_present": true
+      },
+      {
+        "id": 5,
+        "tool_name": "read_file",
+        "outcome": "success",
+        "emitted_output_id": null,
+        "read_output_ids": "[\"@cmd_c327cb1d\"]",
+        "codescout_sha": "a832ae89",
+        "codescout_dirty": 1,
+        "session_id": "d5f0b883-4c8a-4d00-8631-79e10d423170",
+        "input_payload_present": true,
+        "output_payload_present": true
+      },
+      {
+        "id": 6,
+        "tool_name": "grep",
+        "outcome": "success",
+        "emitted_output_id": null,
+        "read_output_ids": "[\"@cmd_c327cad3\"]",
+        "codescout_sha": "a832ae89",
+        "codescout_dirty": 1,
+        "session_id": "d5f0b883-4c8a-4d00-8631-79e10d423170",
+        "input_payload_present": true,
+        "output_payload_present": true
+      },
+      {
+        "id": 7,
+        "tool_name": "read_file",
+        "outcome": "success",
+        "emitted_output_id": null,
+        "read_output_ids": "[\"@cmd_c327cad3\"]",
+        "codescout_sha": "a832ae89",
+        "codescout_dirty": 1,
+        "session_id": "d5f0b883-4c8a-4d00-8631-79e10d423170",
+        "input_payload_present": true,
+        "output_payload_present": true
+      },
+      {
+        "id": 8,
+        "tool_name": "read_file",
+        "outcome": "success",
+        "emitted_output_id": null,
+        "read_output_ids": "[\"@cmd_c327cad3\"]",
+        "codescout_sha": "a832ae89",
+        "codescout_dirty": 1,
+        "session_id": "d5f0b883-4c8a-4d00-8631-79e10d423170",
+        "input_payload_present": true,
+        "output_payload_present": true
+      }
+    ],
+    "calls": [
+      {
+        "label": "produce_A",
+        "name": "run_command",
+        "input": {
+          "command": "python3 -c \"print('\\n'.join('A%04d '%i+'x'*120 for i in range(400)))\""
+        },
+        "result": {
+          "emitted_output_id": "@cmd_c327cad3",
+          "raw_envelope_omitted": true
+        }
+      },
+      {
+        "label": "produce_B",
+        "name": "run_command",
+        "input": {
+          "command": "python3 -c \"print('\\n'.join('B%04d '%i+'y'*120 for i in range(400)))\""
+        },
+        "result": {
+          "emitted_output_id": "@cmd_c327cb1d",
+          "raw_envelope_omitted": true
+        }
+      },
+      {
+        "label": "intermediate",
+        "name": "read_file",
+        "input": {
+          "path": "small.txt"
+        },
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "1 line\n\nsmall control\n"
+            },
+            {
+              "type": "text",
+              "text": "\n[codescout] paths are relative to /tmp/codex-telemetry-probe-_qco5g3p"
+            },
+            {
+              "type": "text",
+              "text": "\n## Project Status (details)\n- **Memories:** None yet \u2014 run `onboarding` to create project memories\n- **Semantic index:** Not built \u2014 run `index(action='build')` to enable `semantic_search`\n"
+            }
+          ],
+          "isError": false
+        }
+      },
+      {
+        "label": "other_buffer",
+        "name": "read_file",
+        "input": {
+          "path": "@cmd_c327cb1d",
+          "start_line": 1,
+          "end_line": 3
+        },
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "400 lines\n\nB0000 yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\nB0001 yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\nB0002 yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+            }
+          ],
+          "isError": false
+        }
+      },
+      {
+        "label": "mention_only",
+        "name": "grep",
+        "input": {
+          "path": "small.txt",
+          "pattern": "@cmd_c327cad3"
+        },
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "0 matches"
+            }
+          ],
+          "isError": false
+        }
+      },
+      {
+        "label": "partial_A",
+        "name": "read_file",
+        "input": {
+          "path": "@cmd_c327cad3",
+          "start_line": 1,
+          "end_line": 3
+        },
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "400 lines\n\nA0000 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nA0001 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nA0002 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+          ],
+          "isError": false
+        }
+      },
+      {
+        "label": "correct_A",
+        "name": "read_file",
+        "input": {
+          "path": "@cmd_c327cad3",
+          "start_line": 398,
+          "end_line": 400
+        },
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "400 lines\n\nA0397 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nA0398 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nA0399 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+          ],
+          "isError": false
+        }
+      }
+    ]
+  }
+]

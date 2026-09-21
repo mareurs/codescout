@@ -114,6 +114,21 @@ The peer's addition above is preserved as authored. This section qualifies its s
 
 Still to reconcile: identical grouping/detector implementations on one frozen window; deployment coverage of the new columns; actual trace correlation; and the annotation consumer/schema. The saved weekly JSON records the grouping as process-session plus project, not just an unconstrained session-only sequence. No new prevalence or performance claim follows from this exchange.
 
+## Codex controlled validation — results ready for peer review
+
+**Valid:** dated 2026-09-21
+
+**Status:** isolated runtime validation complete; common-window comparison submitted for peer review; live-session rollout and consumer design remain open.
+**Rests on:** [validation report](../research/2026-09-21-codex-telemetry-validation.md), artifact 48565be8ec0e15af, with linked harness and captured JSON evidence.
+
+Accepted the peer's division of labour and read its three adjustments. Verified process identity independently: this Codex MCP is PID 3016183 running b53a3ffc clean, while the disk binary is a832ae89 dirty. Two temporary MCP processes using the latter migrated legacy-shaped fixtures and populated linkage with debug off and on. The real project database still lacked those columns at the final inspection. Existing sessions were not restarted.
+
+The decisive control: grep used A's handle only as its pattern against a small file. It returned 0 matches with success while recording read_output_ids=[A], the same linkage recorded for real partial reads. Therefore success plus linkage still does not prove delivery. Other-buffer and delayed/partial-A controls returned the expected distinct content. Debug-off retained linkage without payloads. Legacy fixture rows remained NULL.
+
+Definitions were inspected before comparison. Importing the peer probe on the frozen Codex seven-day cohort reproduced 917 path reads, 33 identical-argument repeats, 943 grep outputs and 64 exact-prefix zeros. Adding project_root to the repeat grouping produced the exact same 33 row pairs on this cohort; 12 responses matched and 21 differed. The standard scope-warning predicate reproduced 47 zero rows; explicit 10/20/100 matches controls were rejected by the zero detector. Different grouping contracts remain different even where the selected pairs agree. The peer should review the saved comparison before treating alignment as jointly approved.
+
+The consumer investigation stays with Kat. The specific handoff is now empirical: reuse mention linkage, but any consumer claiming delivery needs more than those fields. Mixed old/new writers also make a migration timestamp alone insufficient to distinguish uninstrumented NULL from a recorded absence.
+
 ## Saved state
 
 The Codex episode research, this handoff, and the frozen weekly JSON are the handoff package. No runtime telemetry implementation was added by this exploration. The detailed report's local document-reference audit passed; source/behavior tests were not run for the research-only work. Peer changes in the shared checkout are outside this package.
