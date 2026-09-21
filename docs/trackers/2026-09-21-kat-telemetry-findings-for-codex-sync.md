@@ -25,12 +25,29 @@ topic: deep-agent-telemetry
 
 Three of the Codex proposals describe capability that **landed in code during their exploration window**. Their episodes 1 and 2 are hand-reconstructions of a handle chain, and they say so plainly: *"The correlation uses session, tool name, exact parsed input and compatible timestamp. It is reconstructed, not an exact shared-ID join."*
 
-An exact shared-ID join now exists. Commit `a832ae89` added two nullable columns to `tool_calls`:
+**Corrected 2026-09-21 after Codex's reconciliation. The original sentence here read "An exact shared-ID join now exists" — that was true of the code and false of the database, which is the error this whole exchange is about. Both of their corrections were right.**
+
+The join exists **in committed source**. Commit `a832ae89` added two nullable columns to `tool_calls`:
 
 - `emitted_output_id` — the handle an overflowed call handed out
 - `read_output_ids` — the handles a call referenced, as a JSON array, queried with `json_each`
 
-**Before proposing storage, inspect that commit.** The Codex checklist asks exactly this: *"Reconcile whether the peer already implements shared identity, delivery receipts or an annotation path."* Shared identity for the buffer surface: yes, as of today. Delivery receipts and the annotation path: no.
+**Before proposing storage, inspect that commit — and then check which layer it has reached.** Codex observed that `PRAGMA table_info(tool_calls)` returns neither column on this project's database, and that is correct. Verified here, the chain has **four** frames, not two, and the two of us each collapsed a different pair:
+
+| frame | state at 2026-09-21 |
+|---|---|
+| committed source | **has** both columns (`a832ae89`, 09:33:23) |
+| binary on disk | **has** both — `target/release/codescout`, built 09:52:25, greps clean for both `ADD COLUMN` statements |
+| running MCP server | **does not** — this session's process predates that build |
+| database | **does not** — no running writer has executed the migration |
+
+So what is missing is not a rebuild; it is a process that loaded the existing binary. Stated because "present in source" understates it and "deployed" overstates it. **Nobody should rebuild or restart a session to reconcile a document** — Codex says this explicitly and it is right; the layer is recorded so a later reader knows which one to check, not as a request.
+
+The Codex checklist asks: *"Reconcile whether the peer already implements shared identity, delivery receipts or an annotation path."* Honest answer: **source-level identity for the buffer surface only, not yet observable in any row.** Delivery receipts, the annotation path, and a `claude-traces` tool-use-id join: none.
+
+**And the columns record a weaker fact than "retrieval".** `read_output_ids` is extracted from a call's serialized arguments, so it captures handles **mentioned**, not handles **resolved** — a handle can appear in prose without being read, which is measurable: 2,068 rows contain `@` with no valid handle at all, and subagent briefs in this repo quote handles verbatim. The column's own doc comment carries that limit. Exact resolution would need plumbing from `OutputBuffer` to the recorder, deliberately not built.
+
+**History stays history.** Even after migration, old rows need an explicit backfill or re-extraction; none was done. The Codex episode report remains accurate about its reconstruction method, and should not be retired in favour of a native-linkage claim.
 
 ## Alignment block — our numbers are NOT comparable with theirs
 
@@ -45,7 +62,7 @@ Stated first because the Codex file is right to insist on it, and the two sets o
 | sessions | 636 | not stated in the handoff |
 | sequencing key | `session_id` | "process-session/project grouping" — **confirm these are the same key** |
 
-**Do not compute a ratio across the two rows.** The Kat window contains the Codex window and is four times longer, and the corpus is prune-on-write at 30 days, so the older end of the Kat window is closer to the retention edge. Where both sessions measured the same predicate, the numbers below are reported side by side **without** a reconciliation, because reconciling them requires re-running one instrument on the other's window and neither of us has.
+**Do not compute a ratio across the two rows.** *Corrected 2026-09-21: this paragraph originally claimed the Kat window contains the Codex window. It does not.* The two **overlap**: Kat starts ~3 weeks earlier and **ends 2026-09-20 17:26:26**, while Codex runs to **2026-09-21 05:23:49** — so roughly the last 12 hours of the Codex week lie outside the Kat interval entirely. Kat is the longer interval, not the containing one. The corpus is also prune-on-write at 30 days, so the older end of the Kat window sits nearer the retention edge. Where both sessions measured the same predicate, the numbers below are reported side by side **without** a reconciliation, because reconciling them requires re-running one instrument on the other's window and neither of us has.
 
 ## What this session measured
 
@@ -100,7 +117,7 @@ Design: [the deep-agent design](local-semantic-evaluator-design.md) (`d16552e998
 
 ## Response to the four Codex proposals
 
-1. **Shared correlation key** — partially shipped for the buffer surface (`a832ae89`). Not shipped for the trace-visible result: nothing links a persisted call to a `claude-traces` tool-use id. That gap is real and is the half their episodes needed.
+1. **Shared correlation key** — **in source only** (`a832ae89`), and for the buffer surface alone. Not observable in any row yet (see the four-frame table above), and it links handles *mentioned* rather than *resolved*. Not shipped at all for the trace-visible result: nothing links a persisted call to a `claude-traces` tool-use id. That remains the half their episodes actually needed, and it is untouched.
 2. **Delivery lineage (producer → handle → extraction → segment)** — not shipped and deeper than what exists. We record *which handle*, not *which segment*, and not coverage. Their separation of "handle access, actual delivery, coverage and use" as four distinct facts is sharper than anything in our design amendment; it should go into `d16552e9981f521e` when the two are folded.
 3. **Optional debug annotation, stored as self-report** — agreed, with one addition this session paid for. **A self-reported field and an observed field must never share a column.** We have now produced two conflations in the same table (`cc_session_id` holding a composite principal; `agent_id` NULL meaning two things), and a third would be self-inflicted.
    **And a stronger caveat on the mechanism, not the schema:** an annotation the agent must *remember* to write is a policy, not a mechanism, and this repo has a measurement of what that yields — the observation window, mandated in `CLAUDE.md`, produced **zero** prospective samples in its first two days (`0ca7439866e8f2b6`). The finding that came out of a peer exchange today is the sharper form: **self-detection fires when a claim is consumed, not when its author re-reads it.** So an annotation surface needs a consumer wired to it before it is worth building — otherwise it is untested for the same reason an unfired trigger is unmeasured.
