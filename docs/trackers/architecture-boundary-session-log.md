@@ -256,14 +256,14 @@ It never reads `entry_high_water_*`. Measured in a scratch ledger after four `DR
 
 **Observed:** To upgrade ADR `d66562ed420391a8`'s three remembered incidents into a population, I designed a census on a retroactive fingerprint: `entry_high_water_<PREFIX>` in frontmatter never decreases, so `high_water − live_count` should name entries that were allocated and are gone.
 
-The mark has **one production writer.** `references(upsert_int_line)` returns 8 sites: 7 tests and `augmentation.rs:1507`, inside `allocate_entry_id` — the **prose** branch, entered only when `entry_collection` is absent (`append_entry.rs:183`). The params allocator (`augmentation.rs:770-772`) writes neither the mark nor a reservation.
+The mark has **one production writer.** `references(upsert_int_line)` returns 8 sites: the definition, **6 test calls**, and one production caller — `augmentation.rs:1507`, inside `allocate_entry_id`, the **prose** branch, entered only when `entry_collection` is absent (`append_entry.rs:183`). The params allocator (`augmentation.rs:770-771`) writes neither the mark nor a reservation.
 
-So the census can only see the half the ADR calls safe:
+So the census can only see the half the ADR calls safe. **The classification below is corrected from this entry's first revision, and the correction is the more useful half — see the counting-rule note at the end.**
 
 | population | pairs | measurable |
 |---|---|---|
-| prose-backed (no `entry_collection`) | 53 | yes |
-| params-backed | 15 | **8 carry no mark at all; 3 more carry one BELOW their live count** |
+| prose-backed (no `entry_collection`) | ~55 | mostly — but **not all**: at least two prose namespaces carry no mark either (`provenance-probe-session-log` W, `response-envelope-session-log` W) |
+| params-backed | ~14 | **most carry no mark at all, and several carry one BELOW their live count** |
 
 **The proof that it is blind rather than merely weak.** The ADR's incident 1 — the T-N ledger going from 19 entries to 1 on 2026-08-16 — computes as `32 − 34 ≤ 0`. A *negative* gap. The single incident that motivated the design is invisible to the instrument built to validate it, and it reports clean.
 
@@ -278,6 +278,16 @@ So the census can only see the half the ADR calls safe:
 **Consequence for the decision, and it is the useful part.** The remedy creates the missing instrument. An `index_row` is what puts a params id into the allocator's `body_max`, which is the only surviving record for that home — so making `index_row` mandatory is both the durability fix *and* the thing that would make a future census possible at all. § *Observer Blindness* position 3, best shape: the correct path ends in a state where the check exists.
 
 **Status:** open — ADR amended to state the census is unobtainable in principle; the structural argument, verified at the bytes, is now the stronger leg.
+
+**Correction, 2026-09-21, and it is this entry's second lesson.** Turning the census into an indexed probe (`scripts/probe-ledger-entry-loss.py`, `PROBES.md`) produced a **third** count of the same population, and the three do not agree: the original harness yields **64 pairs / 48 artifacts** (`entry_prefix` ∪ high-water), this entry's first revision published **68 / 54**, and the probe returns **69 / 54** — the probe adds five params ledgers that declare no `entry_prefix` (`C`, `BL`, `PV`, `TMR`, `WIN`). Each is the right answer to a different question about what counts as a ledger.
+
+That is `CLAUDE.md` § *Testing Discipline* holding about this very entry: *"one population yielded four defensible numbers inside an hour, each the right answer to a different question — and near enough to each other that no reader would have queried any of them."* 64, 68, 69. **Nobody would have queried any of them, and I published one as the population.**
+
+Two classification claims fell with it. *"8 unmeasurable, all params-backed"* is false of every enumeration — at least two of the unmeasurable namespaces are **prose**. And *"3 carry a mark below their live count"* is **4**, the fourth being prose: `issue-clusters` holds `entry_high_water_IC: 23` (`:16`) against `| IC-24 |` (`:377`), an index-table row that the allocator's `body_claimed_indices` counts and `link_scan`'s `def_re` does not. So the clean params-versus-prose split this entry drew is an artifact of one counting rule, not a property of the population.
+
+**The remedy is the probe, not a corrected number.** Figures are deliberately given as approximations above; run `python3 scripts/probe-ledger-entry-loss.py` and read the classification, which states its own counting rule and refuses to let an all-zero result read as "nothing was lost".
+
+And one premise of that work was wrong: the original census harness did **not** die in a scratchpad. It survived, was re-run at `96e4498d` beside the new probe, and is what made the three-way disagreement visible instead of a silent divergence.
 
 ## Entries
 
