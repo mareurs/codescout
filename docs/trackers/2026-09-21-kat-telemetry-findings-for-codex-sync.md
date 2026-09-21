@@ -199,6 +199,22 @@ And yet — verified at `src/usage/db.rs:323-339` — codescout's 30-day retenti
 
 **Standing limit on every consumer named above:** open bug `dd576a520be29aba` — the recorder selects MCP calls only, so anything keyed on `usage.db` is blind to native `Bash`, `Read` and `Edit` with no marker distinguishing absence from non-use.
 
+### Codex verification of `46c3aa57` — five corrections, all accepted
+
+Peer review of the section above, 2026-09-21. Three were over-statements of mine, accepted directly; two were checkable and were checked here. **The headline answer is narrowed as a result** — recorded in place rather than quietly softened, because the narrowing is the finding.
+
+**1. "Byte-identical scan output" — withdrawn, and the replacement is narrower.** Verified at `src/librarian/tools/legibility_scan/mod.rs:303`: on close, `row.after` is **re-measured** via `measure_target`. So a repair and a detector removal need not produce identical rows. What is monotone is the **close predicate** alone (`:300`, `status == "open" && !current_keys.contains(key)`), which reads the same for both causes. Whether the resulting ROW discriminates depends on `after` — and for the 19 `name_collision`-only rows it demonstrably does not, because `after` there is a *body* measure on a *non-body* defect, which is exactly why the Verdicts prose calls those deltas "not meaningful". The derived claim survives on its own evidence; the broader one was unearned.
+
+**2. "Nothing reads `pika_observations`" — false as written**, and self-contradicted two paragraphs later in this same section, which described codescout's retention read. Precise form: **no renderer** consumes it (Phase 3 deferred, never shipped). The retention sweep reads membership; per Codex, the skill also reads `MAX(tool_call_id)` as an audit watermark — their reading, not re-verified here. The claim that survives is about the absence of a *rendering* consumer, not about the absence of reads.
+
+**3. Separate tables do not prevent all conflation.** Accepted as a narrowing of this session's insight, which over-reached in saying the conflation "has no site to occur at". Distinct tables remove the **storage** site; they do not remove the **interpretation** site. A join at read time can still merge a self-report with an observation, so verdict semantics and provenance must be carried explicitly wherever the rows live.
+
+**4. "The write path fired once, ever" — withdrawn as unsupported by retained data.** `usage.db` prunes on a rolling 30-day horizon, so no lifetime count can be read off it. What was observed, at one census of 96 databases that this session did **not** re-verify: one held 55 rows all dated 2026-05-17; codescout's own held 0 against ~70,000 retained calls. That is an observation with a window, not a lifetime.
+
+**5. T-N does not host a general sufficiency signal — and the mismatch is harder than Codex stated.** Verified: the ledger's `params_schema` constrains `verdict` to `enum ["legitimate", "debatable", "wrong-tool", null]`. Because that schema validates on **every merge**, a `sufficient` verdict is not merely off-vocabulary — it is **refused at write time**. `null` exists, so *unknown* has a representation; *sufficient* has none. And the existence of the `prompt-engineering` harness does not show the annotation → intervention → evaluation circuit is wired for a **new** signal; it shows it is wired for prompt-surface edits.
+
+**Revised answer, jointly held.** T-N is the consumer for observations already adjudicated as tool-choice or prompt-surface problems. **The general context-sufficiency consumer is NOT established, and remains this half's open question.** What survives `46c3aa57` unchanged is the selection criterion, which is the durable part and was never dependent on the candidate: **a consumer's verification must be an independent instrument, not the absence of the signal.** Both rejected candidates now have a named reason — `legibility_scan` keys on `friction_target` and cannot hold a keyless annotation; T-N's schema refuses the vocabulary — and those are constraints on whatever is built next, not merely eliminations.
+
 ## Handling
 
 Temporary. When reconciliation completes, fold the agreements into [the deep-agent design](local-semantic-evaluator-design.md) and delete both this file and the Codex handoff. Neither file authorizes implementation; the observation window's deferral still stands until 2026-10-02.
