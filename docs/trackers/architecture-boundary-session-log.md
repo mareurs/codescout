@@ -11,8 +11,8 @@ topic: architecture-boundary-measurement
 entry_prefix:
 - F
 - W
-entry_high_water_F: 4
-entry_high_water_W: 3
+entry_high_water_F: 5
+entry_high_water_W: 4
 ---
 
 # Architecture Boundary Measurement — Session Log
@@ -205,6 +205,50 @@ divergence ran, on a predicate that cannot know, in the one case the two write o
 were deliberately made to differ.
 
 **Status:** fixed-verified.
+
+## F-5 — Two allocators behind one tool — the ADR cited the prose branch for a params row
+
+**Valid:** dated 2026-09-21
+
+**Observed:** ADR `d66562ed420391a8` argued its central cheapness claim — that a derived row's id survives a catalog loss — from `append_entry.rs:294-324`, a three-input allocator whose durable input is a committed frontmatter high-water mark. The range is real and the description of it is accurate. It is also in the **wrong branch**: `:183` opens the prose-ledger path and `:294-324` sits inside it.
+
+A params row takes a different allocator, `augmentation.rs:770-772`:
+
+```rust
+let params_next = next_index(&existing_ids, id_prefix);
+let next = params_next.max(body_max.map_or(0, |m| m + 1));
+```
+
+It never reads `entry_high_water_*`. Measured in a scratch ledger after four `DRV` allocations: `entry_high_water_ADJ: 3`, and **no `DRV` key at all**.
+
+**How it survived reading, which is the portable part.** The tool documentation describes `append_entry` as one behaviour with an optional `entry_collection`, and the sentence that persuaded me — *"computed from the live max across both existing params entries and ids the markdown body already claims"* — is true of **both** allocators. A document that describes two implementations as one cannot tell you which serves your species of call, and nothing in the reading experience marks the gap. Reading harder would not have closed it; only calling both paths did.
+
+**The correction strengthened the design rather than retracting it.** `body_max` reads ids the **committed body** claims, so a derived row's id is durable *iff* `index_row` was written. The parameter the first revision called a convenience is the durability mechanism, and the allocator already warns on the state it guards (`body_max + 1 > params_next` reports params missing rows the body documents).
+
+**Cost if unexamined:** a migration across the 15 params-backed trackers, founded on a durability property their allocator does not have. The failure mode is not loud — after a catalog loss the id is reissued and every citation of it silently re-points at a different row. Caught by the probe (`60b627a2`), not by review, and not by the two readings that preceded it.
+
+**Status:** fixed-verified — ADR amended in `e365a6b3`.
+
+## W-4 — Pre-specifying four independently-failing properties kept two holds from masking the failure
+
+**Valid:** dated 2026-09-21
+
+**Observed:** The citation probe was briefed as four properties that can each fail alone — allocation, prose-entry creation, resolution, edge grain — plus four named controls, rather than as one question. The verdicts split inside a single property:
+
+| property | verdict |
+|---|---|
+| P1 dual-home allocation | HOLDS |
+| P2 prose adjudication entry | HOLDS |
+| P3-A write-time `cites` **from** a prose ledger | **FAILS — refused by name** |
+| P3-A'' write-time `cites` between two params rows | HOLDS |
+
+**Counterfactual, with the evidence rather than the assertion.** A brief asking *"verify the citation path works"* would have reported that it works — because a citation path genuinely does (`P3-A''`), and P1 and P2 hold. The path that is unavailable is the one the design needs, and that asymmetry is exactly what a single verdict elides. The ADR would then have shipped resting on a write-time join that `append_entry.rs:194-201` refuses by name, with the refusal's own hint naming the alternative.
+
+**The control that earned its place.** C3 asked whether an edge to `DRV-1` reaches `DRV-1` and not `DRV-2`. Without it, a mechanism resolving to *"some entry in that artifact"* passes both P3 and P4 while being useless for adjudication, since the whole point is to name which derived row a judgment is about. It held on the write path — and the same probe found the scanner path reports only `src_id`/`dst_id` with no entry at all, so the two paths differ precisely where C3 looks. A probe without it would have graded them the same.
+
+**What this did NOT establish**, recorded because this ledger's own closing note asks for it: no scanner-derived edge was ever materialized. `link_scan` ran report-only by design, because `write=true` prunes project-wide and this is a shared checkout — so the surviving mechanism's *write* half is inferred from its report, not observed. And C4 bought the **precondition** for surviving a catalog loss, never the property; that needs an isolated catalog, which the probe deliberately did not create.
+
+**Status:** validated.
 
 ## Entries
 
