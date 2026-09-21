@@ -141,6 +141,18 @@ impl UsageRecorder {
             .and_then(|m| db::normalize_err_family(tool_name, m));
         let project_root_str = project_root.to_string_lossy().to_string();
 
+        // Buffer linkage. Both are extracted unconditionally, NOT behind `self.debug`
+        // like `input_json`/`output_json` below — that is the whole reason they are
+        // columns rather than something a query derives. With debug off, neither the
+        // emitted handle nor the referenced ones survive anywhere else, and the join
+        // loses both of its sides.
+        let emitted_output_id = if overflowed {
+            extract_emitted_output_id(result)
+        } else {
+            None
+        };
+        let read_output_ids = extract_read_output_ids(input);
+
         let input_json = if self.debug {
             serde_json::to_string(input).ok()
         } else {
@@ -186,6 +198,10 @@ impl UsageRecorder {
             // as `cc_session_id` above and for the reason its doc names — a second
             // resolution site is the defect that field already paid for.
             self.agent_id.as_deref(),
+            db::BufferLinkage {
+                emitted: emitted_output_id.as_deref(),
+                reads: read_output_ids.as_deref(),
+            },
         )?;
         Ok(())
     }
@@ -298,6 +314,97 @@ fn extract_friction_target(input: &Value) -> Option<String> {
         }
     }
     None
+}
+
+/// The `@ref` handle an overflowed call handed out, from its own response envelope.
+///
+/// Free to extract: `extract_overflow_tokens` above already deserializes exactly this
+/// JSON object to read `buffered_bytes`, and discarded the sibling `output_id` — its own
+/// fixture is `{"output_id":"@tool_x","buffered_bytes":10000}`.
+///
+/// This is the half that is **not** recoverable at query time. `output_json` is
+/// debug-gated (see `write_content`), so on a recorder running with debug off there is no
+/// other record of which handle a call emitted, and the join has nothing to anchor on.
+fn extract_emitted_output_id(result: &Result<Vec<Content>>) -> Option<String> {
+    let blocks = result.as_ref().ok()?;
+    let text = blocks
+        .first()
+        .and_then(|c| c.as_text())
+        .map(|t| t.text.as_str())?;
+    let v: Value = serde_json::from_str(text).ok()?;
+    let id = v.get("output_id").and_then(Value::as_str)?;
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+/// Buffer handles a call **named in its arguments**, deduplicated, as a JSON array.
+///
+/// **This records what a call MENTIONED, never what the buffer resolver RESOLVED**, and
+/// the gap is not a rounding error. Measured 2026-09-21 over this project's own
+/// `usage.db`: 2,068 rows contain an `@` with no valid handle at all, and a handle can be
+/// quoted in prose that is never served — a subagent brief naming `@tool_x` verbatim
+/// records a reference the server never resolved. Closing that would need plumbing from
+/// `OutputBuffer` to this recorder, which is deliberately not built.
+///
+/// So a join over this column answers *"was this handle named later?"* and **not** *"was
+/// this result retrieved?"*. Promoting the first into the second is precisely the defect
+/// these columns exist to make measurable rather than to repeat —
+/// `docs/issues/2026-09-20-predicate-probe-overstates-retrieval-and-redundancy.md`.
+///
+/// A JSON array rather than a scalar because multi-handle calls are real: over 5,355
+/// handle-bearing calls the distribution of distinct handles per call was
+/// `{1: 5285, 2: 55, 3: 11, 4: 2, 5: 1, 9: 1}` (2026-09-21), so keeping only the first
+/// would drop 1.31% of calls — and would drop them by biasing retrieval *downward*, the
+/// same direction as the defect being fixed. Query with `json_each`.
+fn extract_read_output_ids(input: &Value) -> Option<String> {
+    let blob = serde_json::to_string(input).ok()?;
+    let handles = scan_buffer_handles(&blob);
+    if handles.is_empty() {
+        return None;
+    }
+    serde_json::to_string(&handles).ok()
+}
+
+/// Every distinct buffer handle in `hay`, in first-seen order.
+///
+/// Hand-rolled rather than a `regex`: this runs on the recording path of **every** tool
+/// call, and the scan is a prefix test plus an alphanumeric run.
+///
+/// The `.err` suffix normalizes away for free, and that is load-bearing rather than
+/// incidental — per `get_guide("progressive-disclosure")`, `.err` selects the *stderr
+/// stream of the same entry*, so `@cmd_abc.err` and `@cmd_abc` MUST join as one handle.
+/// Consuming only `[A-Za-z0-9]` after the prefix stops at the `.`, which yields exactly
+/// that. `scan_normalizes_the_err_suffix` pins it, because a future change to the
+/// accepted charset would silently split the two apart.
+fn scan_buffer_handles(hay: &str) -> Vec<String> {
+    const REF_PREFIXES: [&str; 5] = ["@cmd_", "@tool_", "@file_", "@ack_", "@bg_"];
+    let bytes = hay.as_bytes();
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'@' {
+            i += 1;
+            continue;
+        }
+        // `bytes[i]` is ASCII `@`, so `i` is a char boundary and this slice is safe.
+        let rest = &hay[i..];
+        let Some(prefix) = REF_PREFIXES.iter().find(|p| rest.starts_with(**p)) else {
+            i += 1;
+            continue;
+        };
+        let body_start = i + prefix.len();
+        let mut end = body_start;
+        while end < bytes.len() && bytes[end].is_ascii_alphanumeric() {
+            end += 1;
+        }
+        if end > body_start {
+            let handle = &hay[i..end];
+            if !out.iter().any(|h| h == handle) {
+                out.push(handle.to_string());
+            }
+        }
+        i = end.max(i + 1);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -591,6 +698,93 @@ mod content_tests {
             extract_friction_target(&json!({"command": "ls", "cwd": "src/"})),
             None,
             "cwd is where the call ran, not what it addressed"
+        );
+    }
+
+    #[test]
+    fn extract_emitted_output_id_reads_the_envelopes_handle() {
+        let env = Ok(vec![Content::text(
+            r#"{"output_id":"@tool_x","buffered_bytes":10000}"#.to_string(),
+        )]);
+        assert_eq!(
+            extract_emitted_output_id(&env),
+            Some("@tool_x".to_string()),
+            "the handle sits beside buffered_bytes in the envelope extract_overflow_tokens \
+             already parses"
+        );
+        let no_id = Ok(vec![Content::text(
+            r#"{"buffered_bytes":10000}"#.to_string(),
+        )]);
+        assert_eq!(extract_emitted_output_id(&no_id), None);
+        let err: Result<Vec<Content>> = Err(anyhow::anyhow!("boom"));
+        assert_eq!(extract_emitted_output_id(&err), None);
+    }
+
+    #[test]
+    fn extract_read_output_ids_collects_every_distinct_handle() {
+        use serde_json::json;
+        assert_eq!(
+            extract_read_output_ids(&json!({"path": "@tool_abc123"})),
+            Some(r#"["@tool_abc123"]"#.to_string())
+        );
+        assert_eq!(
+            extract_read_output_ids(&json!({"path": "src/lib.rs"})),
+            None,
+            "a call naming no handle records NULL, not an empty array"
+        );
+        // Multi-handle is 1.31% of handle-bearing calls (measured 2026-09-21 over 5,355):
+        // small, but dropping it would bias retrieval DOWNWARD — the same direction as the
+        // defect these columns fix.
+        let multi = extract_read_output_ids(
+            &json!({"command": "diff @cmd_aaa111 @cmd_bbb222", "cwd": "@file_ccc333"}),
+        )
+        .unwrap();
+        let parsed: Vec<String> = serde_json::from_str(&multi).unwrap();
+        assert_eq!(parsed, vec!["@cmd_aaa111", "@cmd_bbb222", "@file_ccc333"]);
+    }
+
+    /// `.err` selects the stderr stream of the SAME buffer entry, so it must normalize to
+    /// the same handle or a stderr read would never join to the result that produced it.
+    ///
+    /// This falls out of consuming only `[A-Za-z0-9]` after the prefix — which means a
+    /// future widening of that charset (to accept `.`, say) would silently split the two
+    /// apart with no other test noticing. That is what this test is for.
+    #[test]
+    fn scan_normalizes_the_err_suffix() {
+        assert_eq!(
+            scan_buffer_handles("grep ERROR @cmd_abc123.err"),
+            vec!["@cmd_abc123".to_string()]
+        );
+        assert_eq!(
+            scan_buffer_handles("@cmd_abc123 and @cmd_abc123.err"),
+            vec!["@cmd_abc123".to_string()],
+            "the bare handle and its .err form are one buffer and must dedup to one entry"
+        );
+    }
+
+    /// The column's stated ceiling, pinned so nobody re-promotes *named* into *retrieved*.
+    ///
+    /// Extraction reads the call's ARGUMENTS, not the buffer resolver, so a handle quoted
+    /// in prose is recorded exactly like one that was served. Subagent briefs in this repo
+    /// quote handles verbatim, and 2,068 rows carry an `@` with no valid handle at all
+    /// (measured 2026-09-21). The behaviour is correct for what the field claims; this test
+    /// exists so the claim cannot quietly widen.
+    #[test]
+    fn a_handle_merely_quoted_in_prose_is_still_recorded_as_named() {
+        use serde_json::json;
+        let quoted = extract_read_output_ids(&json!({
+            "body": "Tell the fork to read @tool_abc123 — it is NOT reading it here."
+        }));
+        assert_eq!(
+            quoted,
+            Some(r#"["@tool_abc123"]"#.to_string()),
+            "this column records what a call NAMED; it does not and cannot claim the \
+             buffer was resolved"
+        );
+        // A bare `@` with no valid prefix is not a handle, and must not become one.
+        assert_eq!(
+            extract_read_output_ids(&json!({"body": "email me@example.com or @nope_abc"})),
+            None
         );
     }
 
@@ -1008,5 +1202,66 @@ mod content_tests {
         assert_eq!(ft.as_deref(), Some("LspManager/get_or_start"));
         assert_eq!(tok, Some(2500), "10000 bytes / 4");
         assert!(pr.is_some(), "project_root always set");
+    }
+
+    /// The wiring from extractor to column, end to end — and the reason these are
+    /// columns at all.
+    ///
+    /// `debug` is **false** here, so `input_json` and `output_json` are both NULL. If
+    /// the linkage were derived at query time from those blobs instead of recorded,
+    /// this row would carry no linkage whatever and the join would have nothing to
+    /// stand on. That is the whole argument against the precedent in
+    /// `extract_friction_target_ignores_shell_commands` ("already recoverable at query
+    /// time, so storing a derived form buys nothing") — true of `command`, false here,
+    /// because that reasoning assumed a debug-gated field would be present.
+    #[tokio::test]
+    async fn record_content_records_buffer_linkage_with_debug_off() {
+        use serde_json::json;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let recorder = UsageRecorder::new(
+            agent.clone(),
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+            None,
+        );
+
+        // A call that BOTH names an existing handle and overflows into a new one, so a
+        // swap of the two fields cannot pass by writing the same value to both.
+        let input = json!({"path": "@cmd_prior1"});
+        let _ = recorder
+            .record_content("read_file", &input, None, || async {
+                Ok(vec![Content::text(
+                    r#"{"output_id":"@tool_fresh2","buffered_bytes":10000}"#.to_string(),
+                )])
+            })
+            .await;
+
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        let (inp, emitted, reads): (Option<String>, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT input_json, emitted_output_id, read_output_ids FROM tool_calls",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert!(
+            inp.is_none(),
+            "debug is off — this is the configuration the columns exist for"
+        );
+        assert_eq!(
+            emitted.as_deref(),
+            Some("@tool_fresh2"),
+            "the handle this call handed out"
+        );
+        assert_eq!(
+            reads.as_deref(),
+            Some(r#"["@cmd_prior1"]"#),
+            "the handle this call named — a DIFFERENT value, so a field swap reds here"
+        );
     }
 }

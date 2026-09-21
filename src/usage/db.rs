@@ -142,6 +142,27 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         )?;
     }
 
+    // Migration: buffer-handle linkage, so "was an elided result retrieved?" is a join
+    // rather than a guess about the immediately-following call. Additive + nullable, so
+    // every pre-existing row and the unchanged SELECTs stay correct.
+    //
+    // NOTE the NULL ambiguity, stated rather than repeated silently: on `read_output_ids`
+    // NULL means BOTH "recorded before this column existed" AND "this call named no
+    // handle", and the two are separable only by whether the row predates the migration.
+    // That is the same defect filed for `agent_id` in
+    // docs/issues/2026-09-20-agent-id-null-conflates-pre-migration-with-main-session.md;
+    // it is accepted here rather than fixed, because a sentinel for "named none" would
+    // write a row for ~92% of all calls to record an absence.
+    let has_buffer_linkage: bool = conn
+        .prepare("SELECT emitted_output_id FROM tool_calls LIMIT 0")
+        .is_ok();
+    if !has_buffer_linkage {
+        conn.execute_batch(
+            "ALTER TABLE tool_calls ADD COLUMN emitted_output_id TEXT;
+             ALTER TABLE tool_calls ADD COLUMN read_output_ids TEXT;",
+        )?;
+    }
+
     backfill_legacy_rows(&conn, &project_root.to_string_lossy())?;
 
     Ok(conn)
@@ -194,6 +215,29 @@ impl<'a> From<&'a str> for BuildProvenance<'a> {
     }
 }
 
+/// The buffer handles a call emitted and referenced, travelling as one value.
+///
+/// A `@ref` handle is how a buffered (overflowed) result is retrieved later. Linking the
+/// call that HANDED OUT a handle to the calls that later NAMED it is what turns "was an
+/// elided result retrieved?" into a join. Before these columns the only available answer
+/// was a heuristic over the immediately-following call, which both missed retrieval at a
+/// distance and counted reads of unrelated buffers —
+/// `docs/issues/2026-09-20-predicate-probe-overstates-retrieval-and-redundancy.md`.
+///
+/// Bundled for the same reason as [`BuildProvenance`] above: `write_record` already takes
+/// eighteen positional parameters, ten of them `Option<&str>`. Two more adjacent optional
+/// strings would be silently transposable across twenty-five call sites, and a
+/// transposition type-checks. Named fields make that unrepresentable rather than unlikely.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct BufferLinkage<'a> {
+    /// The handle this call handed out, read from its own overflow envelope.
+    pub emitted: Option<&'a str>,
+    /// JSON array of the handles this call named in its arguments, normalized and
+    /// deduplicated. See `usage::extract_read_output_ids` for the gap between *named*
+    /// and *resolved* — it is load-bearing and this field does not close it.
+    pub reads: Option<&'a str>,
+}
+
 /// The current UTC instant in the exact textual shape `write_record`'s
 /// `strftime('%Y-%m-%d %H:%M:%f','now')` produces.
 ///
@@ -229,6 +273,7 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
     project_root: Option<&str>,
     started_at: Option<&str>,
     agent_id: Option<&str>,
+    linkage: BufferLinkage<'_>,
 ) -> Result<()> {
     // Taken by value so the sha and its dirty bit cannot be separated at the call site.
     // They were separable before BL-24, and the flag was the half that got dropped.
@@ -242,8 +287,8 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
         // lexicographic compare against a `datetime()`-shaped literal, and the shared
         // prefix is fixed-width, so a `.SSS` suffix always sorts after the same second
         // and before the next one.
-        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id)
-         VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id, emitted_output_id, read_output_ids)
+             VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
         params![
             tool_name,
             latency_ms,
@@ -263,6 +308,8 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
             project_root,
             started_at,
             agent_id,
+            linkage.emitted,
+            linkage.reads,
         ],
     )?;
     // `pika_observations` is not codescout's table (a buddy-plugin skill creates it,
@@ -1178,8 +1225,25 @@ mod tests {
         // `strftime(…%f…)` it carries `.SSS`.
         let (_dir, conn) = tmp();
         write_record(
-            &conn, "symbols", 1, "success", false, None, "unknown", None, "s", None, None, None,
-            None, None, None, None, None, None,
+            &conn,
+            "symbols",
+            1,
+            "success",
+            false,
+            None,
+            "unknown",
+            None,
+            "s",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Default::default(),
         )
         .unwrap();
         let ts: String = conn
@@ -1203,8 +1267,25 @@ mod tests {
         let (_dir, conn) = tmp();
         fn row(conn: &Connection) {
             write_record(
-                conn, "symbols", 1, "success", false, None, "unknown", None, "s", None, None, None,
-                None, None, None, None, None, None,
+                conn,
+                "symbols",
+                1,
+                "success",
+                false,
+                None,
+                "unknown",
+                None,
+                "s",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Default::default(),
             )
             .unwrap();
         }
@@ -1257,6 +1338,7 @@ mod tests {
             None,
             Some(started),
             None,
+            Default::default(),
         )
         .unwrap();
         let (start, done): (Option<String>, String) = conn
@@ -1298,6 +1380,7 @@ mod tests {
                 None,
                 None,
                 agent,
+                Default::default(),
             )
             .unwrap();
         }
@@ -1394,6 +1477,7 @@ mod tests {
             None,
             None,
             None,
+            Default::default(),
         )
         .unwrap();
         let count: i64 = conn
@@ -1424,6 +1508,7 @@ mod tests {
             None,
             None,
             None,
+            Default::default(),
         )
         .unwrap();
         let (name, latency, outcome, overflowed, msg): (String, i64, String, i64, Option<String>) =
@@ -1462,6 +1547,7 @@ mod tests {
             None,
             None,
             None,
+            Default::default(),
         )
         .unwrap();
         let overflowed: i64 = conn
@@ -1505,6 +1591,7 @@ mod tests {
             None,
             None,
             None,
+            Default::default(),
         )
         .unwrap();
         let after: i64 = conn
@@ -1577,6 +1664,7 @@ mod tests {
             None,
             None,
             None,
+            Default::default(),
         )
         .unwrap();
 
@@ -1709,6 +1797,7 @@ mod tests {
             None,
             None,
             None,
+            Default::default(),
         )
         .unwrap();
         write_record(
@@ -1730,6 +1819,7 @@ mod tests {
             None,
             None,
             None,
+            Default::default(),
         )
         .unwrap();
         write_record(
@@ -1751,6 +1841,7 @@ mod tests {
             None,
             None,
             None,
+            Default::default(),
         )
         .unwrap();
 
@@ -1784,6 +1875,7 @@ mod tests {
                 None,
                 None,
                 None,
+                Default::default(),
             )
             .unwrap();
         }
@@ -2058,6 +2150,7 @@ mod tests {
             None,
             None,
             None,
+            Default::default(),
         )
         .unwrap();
         let (cs, ps, sid, inp, out): (String, String, String, String, String) = conn
@@ -2078,8 +2171,25 @@ mod tests {
     fn write_record_traceability_fields_nullable() {
         let (_dir, conn) = tmp();
         write_record(
-            &conn, "symbols", 42, "success", false, None, "abc1234", None, "sess-1", None, None,
-            None, None, None, None, None, None, None,
+            &conn,
+            "symbols",
+            42,
+            "success",
+            false,
+            None,
+            "abc1234",
+            None,
+            "sess-1",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Default::default(),
         )
         .unwrap();
         let (ps, inp, out): (Option<String>, Option<String>, Option<String>) = conn
@@ -2116,6 +2226,7 @@ mod tests {
             Some("/repo"),
             None,
             None,
+            Default::default(),
         )
         .unwrap();
         let (ft, tok, ef, pr): (Option<String>, Option<i64>, Option<String>, Option<String>) = conn
@@ -2161,6 +2272,7 @@ mod tests {
                 None,
                 None,
                 None,
+                Default::default(),
             )
             .unwrap();
             let (sha, got): (String, Option<i64>) = conn
@@ -2178,6 +2290,198 @@ mod tests {
                  and not in the row is the whole defect"
             );
         }
+    }
+
+    /// The join the whole change exists for: a handle emitted, then read SEVERAL calls
+    /// later, in the same session.
+    ///
+    /// This is the case the previous instrument structurally could not see. `classify_next`
+    /// in `scripts/probe-predicate-candidates.py` inspects only `seq[i + 1]`, so a
+    /// retrieval at a distance was recorded as `switched_tool` — reproduced 2026-09-21
+    /// with an overflowing read, a `grep`, then a read of the buffer, which reported
+    /// `{"switched_tool": 1}` and zero retrievals.
+    #[test]
+    fn a_handle_read_several_calls_later_still_joins_to_its_origin() {
+        let (_dir, conn) = tmp();
+        let emit = |c: &Connection, id: &str| {
+            write_record(
+                c,
+                "read_file",
+                10,
+                "success",
+                true,
+                None,
+                "unknown",
+                None,
+                "sess-1",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                BufferLinkage {
+                    emitted: Some(id),
+                    reads: None,
+                },
+            )
+            .unwrap();
+        };
+        let call = |c: &Connection, tool: &str, reads: Option<&str>| {
+            write_record(
+                c,
+                tool,
+                10,
+                "success",
+                false,
+                None,
+                "unknown",
+                None,
+                "sess-1",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                BufferLinkage {
+                    emitted: None,
+                    reads,
+                },
+            )
+            .unwrap();
+        };
+
+        emit(&conn, "@tool_aaa111");
+        call(&conn, "grep", None); // the intervening call that defeated next-call logic
+        call(&conn, "read_file", Some(r#"["@tool_aaa111"]"#));
+
+        let retrieved: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tool_calls e
+                 WHERE e.emitted_output_id IS NOT NULL
+                   AND EXISTS (
+                       SELECT 1 FROM tool_calls r, json_each(r.read_output_ids)
+                       WHERE r.session_id = e.session_id
+                         AND r.id > e.id
+                         AND json_each.value = e.emitted_output_id
+                   )",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            retrieved, 1,
+            "a handle read two calls after it was emitted must join to its origin; \
+             the distance is exactly what the next-call heuristic could not see"
+        );
+    }
+
+    /// The other direction of the same defect: reading an UNRELATED buffer must not count.
+    ///
+    /// `classify_next` returned `queried_the_buffer` for any next-call input containing a
+    /// `@`-prefixed token, never comparing it against the handle the previous call actually
+    /// emitted — so an unrelated read scored as a retrieval. A test that only asserted the
+    /// positive case above would be satisfied by an implementation that joins everything.
+    #[test]
+    fn reading_an_unrelated_handle_does_not_join() {
+        let (_dir, conn) = tmp();
+        write_record(
+            &conn,
+            "read_file",
+            10,
+            "success",
+            true,
+            None,
+            "unknown",
+            None,
+            "sess-1",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            BufferLinkage {
+                emitted: Some("@tool_aaa111"),
+                reads: None,
+            },
+        )
+        .unwrap();
+        write_record(
+            &conn,
+            "read_file",
+            10,
+            "success",
+            false,
+            None,
+            "unknown",
+            None,
+            "sess-1",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            BufferLinkage {
+                emitted: None,
+                reads: Some(r#"["@cmd_zzz999"]"#),
+            },
+        )
+        .unwrap();
+
+        let retrieved: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tool_calls e
+                 WHERE e.emitted_output_id IS NOT NULL
+                   AND EXISTS (
+                       SELECT 1 FROM tool_calls r, json_each(r.read_output_ids)
+                       WHERE r.session_id = e.session_id
+                         AND r.id > e.id
+                         AND json_each.value = e.emitted_output_id
+                   )",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            retrieved, 0,
+            "a read of a DIFFERENT buffer must not count as retrieving this one"
+        );
+    }
+
+    /// A row written before the migration reads NULL on both columns rather than failing.
+    #[test]
+    fn buffer_linkage_columns_are_nullable_for_pre_migration_rows() {
+        let dir = TempDir::new().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        conn.execute(
+            "INSERT INTO tool_calls (tool_name, latency_ms, outcome) VALUES ('symbols', 10, 'success')",
+            [],
+        )
+        .unwrap();
+        let (emitted, reads): (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT emitted_output_id, read_output_ids FROM tool_calls",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert!(emitted.is_none());
+        assert!(reads.is_none());
     }
 
     /// The hole the `From<&str>` fixture convenience re-opens, closed where it matters.

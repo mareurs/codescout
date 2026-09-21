@@ -660,6 +660,7 @@ mod tests {
             Some(&tmp.path().to_string_lossy()),
             None,
             None,
+            Default::default(),
         )
         .unwrap();
         drop(conn);

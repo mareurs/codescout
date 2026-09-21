@@ -541,6 +541,7 @@ mod tests {
                 Some("/repo"),
                 None,
                 None,
+                Default::default(),
             )
             .unwrap();
         }
@@ -564,6 +565,7 @@ mod tests {
             Some("/repo"),
             None,
             None,
+            Default::default(),
         )
         .unwrap();
         // a FOREIGN-project row for the same target — must be excluded (F-1)
@@ -586,6 +588,7 @@ mod tests {
             Some("/other-repo"),
             None,
             None,
+            Default::default(),
         )
         .unwrap();
 
@@ -676,6 +679,7 @@ mod tests {
             Some(&dir.path().to_string_lossy()),
             None,
             None,
+            Default::default(),
         )
         .unwrap();
 
