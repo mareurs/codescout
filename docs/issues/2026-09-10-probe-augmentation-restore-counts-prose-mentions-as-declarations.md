@@ -5,7 +5,6 @@ status: fixed
 title: 'BUG: probe_augmentation_restore counted a fenced yaml example as a declaration, anchoring on a 4000-byte prefix instead of the frontmatter block'
 tags:
 - cluster/addressing-without-an-escape-hatch
-claimed_by: 48d1f0c8-9f60-43bb-a15e-17ec7995813a
 opened: 2026-09-10
 owner: marius
 related:

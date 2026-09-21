@@ -8,7 +8,6 @@ tags:
 - librarian
 - doctor
 topic: bug-ledger integrity checks
-claimed_by: 48d1f0c8-9f60-43bb-a15e-17ec7995813a
 ---
 
 # BUG: the fix-anchor check reads a patch-id a record MENTIONS as one it CLAIMS

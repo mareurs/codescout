@@ -5,7 +5,6 @@ status: fixed
 title: 'BUG: 20 augmentation prompts prescribe dead tool calls, and no gate scans YAML'
 tags:
 - cluster/doc-contradicted-by-code
-claimed_by: 48d1f0c8-9f60-43bb-a15e-17ec7995813a
 ---
 
 ## Summary
