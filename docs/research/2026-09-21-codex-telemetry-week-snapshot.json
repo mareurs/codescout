@@ -1,0 +1,374 @@
+{
+  "window_utc_inclusive_start_exclusive_end": [
+    "2026-09-14 05:23:49",
+    "2026-09-21 05:23:49"
+  ],
+  "max_id": 133453,
+  "scope": "MCP calls in this usage.db; completion-time window; no native host calls or task outcomes",
+  "sql_control": {
+    "n": 9748,
+    "overflow": 805,
+    "timed": 67,
+    "payloads": 8750
+  },
+  "total": {
+    "n": 9748,
+    "overflow": 805,
+    "non_success": 509,
+    "both_payloads": 8750,
+    "started_at": 67,
+    "agent_id_set": 54
+  },
+  "daily": {
+    "2026-09-14": {
+      "n": 2408,
+      "overflow": 162,
+      "non_success": 151,
+      "both_payloads": 2408,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    "2026-09-15": {
+      "n": 1029,
+      "overflow": 102,
+      "non_success": 64,
+      "both_payloads": 1029,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    "2026-09-16": {
+      "n": 1537,
+      "overflow": 106,
+      "non_success": 83,
+      "both_payloads": 1494,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    "2026-09-17": {
+      "n": 1242,
+      "overflow": 96,
+      "non_success": 66,
+      "both_payloads": 1242,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    "2026-09-18": {
+      "n": 1071,
+      "overflow": 173,
+      "non_success": 42,
+      "both_payloads": 206,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    "2026-09-19": {
+      "n": 1456,
+      "overflow": 85,
+      "non_success": 60,
+      "both_payloads": 1456,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    "2026-09-20": {
+      "n": 968,
+      "overflow": 78,
+      "non_success": 42,
+      "both_payloads": 891,
+      "started_at": 43,
+      "agent_id_set": 35
+    },
+    "2026-09-21": {
+      "n": 37,
+      "overflow": 3,
+      "non_success": 1,
+      "both_payloads": 24,
+      "started_at": 24,
+      "agent_id_set": 19
+    }
+  },
+  "build_cohorts": [
+    {
+      "sha": "78b65f4e",
+      "dirty": 0,
+      "n": 1768,
+      "overflow": 110,
+      "non_success": 68,
+      "both_payloads": 1768,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "07d6f525",
+      "dirty": 1,
+      "n": 890,
+      "overflow": 159,
+      "non_success": 29,
+      "both_payloads": 25,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "42a1baba",
+      "dirty": 1,
+      "n": 801,
+      "overflow": 43,
+      "non_success": 48,
+      "both_payloads": 782,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "8273331d",
+      "dirty": 1,
+      "n": 762,
+      "overflow": 78,
+      "non_success": 33,
+      "both_payloads": 762,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "36eec498",
+      "dirty": 1,
+      "n": 653,
+      "overflow": 39,
+      "non_success": 37,
+      "both_payloads": 653,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "b095bcae",
+      "dirty": 1,
+      "n": 586,
+      "overflow": 65,
+      "non_success": 36,
+      "both_payloads": 586,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "8fbaa7ae",
+      "dirty": 1,
+      "n": 539,
+      "overflow": 43,
+      "non_success": 28,
+      "both_payloads": 539,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "afcf8c14",
+      "dirty": 1,
+      "n": 535,
+      "overflow": 38,
+      "non_success": 31,
+      "both_payloads": 511,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "b53a3ffc",
+      "dirty": 0,
+      "n": 529,
+      "overflow": 45,
+      "non_success": 32,
+      "both_payloads": 439,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "5a682c9d",
+      "dirty": 1,
+      "n": 487,
+      "overflow": 33,
+      "non_success": 28,
+      "both_payloads": 487,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "c9561e1b",
+      "dirty": 1,
+      "n": 465,
+      "overflow": 31,
+      "non_success": 34,
+      "both_payloads": 465,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "29058404",
+      "dirty": 1,
+      "n": 223,
+      "overflow": 17,
+      "non_success": 14,
+      "both_payloads": 223,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "5cbfa7a3",
+      "dirty": 1,
+      "n": 174,
+      "overflow": 12,
+      "non_success": 10,
+      "both_payloads": 174,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "0b944c29",
+      "dirty": 1,
+      "n": 171,
+      "overflow": 16,
+      "non_success": 7,
+      "both_payloads": 171,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "3d9cd206",
+      "dirty": 1,
+      "n": 161,
+      "overflow": 8,
+      "non_success": 12,
+      "both_payloads": 161,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "1186cf2c",
+      "dirty": 1,
+      "n": 160,
+      "overflow": 11,
+      "non_success": 12,
+      "both_payloads": 160,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "3b7fa796",
+      "dirty": 1,
+      "n": 150,
+      "overflow": 17,
+      "non_success": 9,
+      "both_payloads": 150,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "30bc208b",
+      "dirty": 1,
+      "n": 122,
+      "overflow": 14,
+      "non_success": 7,
+      "both_payloads": 122,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "66cce698",
+      "dirty": 1,
+      "n": 115,
+      "overflow": 9,
+      "non_success": 8,
+      "both_payloads": 115,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "638fdc1f",
+      "dirty": 1,
+      "n": 114,
+      "overflow": 3,
+      "non_success": 4,
+      "both_payloads": 114,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "efa57e72",
+      "dirty": 1,
+      "n": 84,
+      "overflow": 5,
+      "non_success": 12,
+      "both_payloads": 84,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "7bc2cc89",
+      "dirty": 1,
+      "n": 69,
+      "overflow": 1,
+      "non_success": 1,
+      "both_payloads": 69,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "04734cdc",
+      "dirty": 1,
+      "n": 67,
+      "overflow": 5,
+      "non_success": 0,
+      "both_payloads": 67,
+      "started_at": 67,
+      "agent_id_set": 54
+    },
+    {
+      "sha": "a2fe747e",
+      "dirty": 1,
+      "n": 55,
+      "overflow": 3,
+      "non_success": 2,
+      "both_payloads": 55,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "d4ab86e2",
+      "dirty": 1,
+      "n": 36,
+      "overflow": 0,
+      "non_success": 4,
+      "both_payloads": 36,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "989fa34c",
+      "dirty": 1,
+      "n": 26,
+      "overflow": 0,
+      "non_success": 2,
+      "both_payloads": 26,
+      "started_at": 0,
+      "agent_id_set": 0
+    },
+    {
+      "sha": "60c4edce",
+      "dirty": 1,
+      "n": 6,
+      "overflow": 0,
+      "non_success": 1,
+      "both_payloads": 6,
+      "started_at": 0,
+      "agent_id_set": 0
+    }
+  ],
+  "grep": {
+    "with_output": 943,
+    "exact_first_block_zero": 64,
+    "zero_with_scope_warning": 47,
+    "naive_substring_zero": 121
+  },
+  "repeat_reads": {
+    "path_reads": 917,
+    "repeated_normalized_arguments": 33,
+    "same_serialized_response": 12,
+    "different_serialized_response": 21,
+    "missing_response": 0,
+    "scope": "same process session and project; compares previous identical request; no agent attribution or source-state verdict"
+  }
+}
