@@ -11,7 +11,7 @@ topic: architecture-boundary-measurement
 entry_prefix:
 - F
 - W
-entry_high_water_F: 5
+entry_high_water_F: 6
 entry_high_water_W: 4
 ---
 
@@ -249,6 +249,35 @@ It never reads `entry_high_water_*`. Measured in a scratch ledger after four `DR
 **What this did NOT establish**, recorded because this ledger's own closing note asks for it: no scanner-derived edge was ever materialized. `link_scan` ran report-only by design, because `write=true` prunes project-wide and this is a shared checkout — so the surviving mechanism's *write* half is inferred from its report, not observed. And C4 bought the **precondition** for surviving a catalog loss, never the property; that needs an isolated catalog, which the probe deliberately did not create.
 
 **Status:** validated.
+
+## F-6 — The census I built to validate the ADR cannot see the population the ADR is about
+
+**Valid:** dated 2026-09-21
+
+**Observed:** To upgrade ADR `d66562ed420391a8`'s three remembered incidents into a population, I designed a census on a retroactive fingerprint: `entry_high_water_<PREFIX>` in frontmatter never decreases, so `high_water − live_count` should name entries that were allocated and are gone.
+
+The mark has **one production writer.** `references(upsert_int_line)` returns 8 sites: 7 tests and `augmentation.rs:1507`, inside `allocate_entry_id` — the **prose** branch, entered only when `entry_collection` is absent (`append_entry.rs:183`). The params allocator (`augmentation.rs:770-772`) writes neither the mark nor a reservation.
+
+So the census can only see the half the ADR calls safe:
+
+| population | pairs | measurable |
+|---|---|---|
+| prose-backed (no `entry_collection`) | 53 | yes |
+| params-backed | 15 | **8 carry no mark at all; 3 more carry one BELOW their live count** |
+
+**The proof that it is blind rather than merely weak.** The ADR's incident 1 — the T-N ledger going from 19 entries to 1 on 2026-08-16 — computes as `32 − 34 ≤ 0`. A *negative* gap. The single incident that motivated the design is invisible to the instrument built to validate it, and it reports clean.
+
+**What makes this an entry rather than a mistake.** `F-5`, written and committed two turns earlier in this same session, states the mechanism exactly: two allocators, the durable mark on the prose path only, a params row with no committed surface unless `index_row` is passed. I recorded that finding, then chose an instrument whose sole input is that mark, and did not notice it could only see one side. The finding predicted the blindness; knowing it prevented nothing. That is `CLAUDE.md` § *Observer Blindness* in its literal form — "every one was committed by an author actively writing about that class" — and it is the reason the section says to build a mechanism rather than resolve to check harder.
+
+**What the census did establish**, because it is not a null result. C3, the falsifying direction, was run and came back: across 53 prose-backed pairs, **zero** entries were written and then lost. Three ids are allocated and absent with no archive companion, and all three are self-documented non-entries — R-148/R-149 a cross-host allocation collision whose content was re-filed as R-177/R-178, GG-10 burned by a reverted write (already a filed, archived bug), and F-1/W-1/W-2 reservations consumed by index rows written before their sections, which this very ledger family's `statement-validity-session-log:F-3` is titled after. So the ADR's directional claim survives its falsification attempt.
+
+**But the asymmetry it reads as evidence is partly an artifact of observability.** *"Prose has lost nothing"* is checkable and now checked. *"Params has lost things"* is knowable only from incident memory. The convenience sample cannot be upgraded to a population — not for want of effort, but because the mechanism writes no record on that path.
+
+**Cost if unexamined:** a census reporting 68 of 68 pairs clean would have read as validation of the ADR, while being computed over a population from which every falsifying member is structurally absent. That is the scope law from `CLAUDE.md` § *Testing Discipline* — an assertion over a population that cannot verify a claim about a member — with the population chosen by the instrument rather than by me.
+
+**Consequence for the decision, and it is the useful part.** The remedy creates the missing instrument. An `index_row` is what puts a params id into the allocator's `body_max`, which is the only surviving record for that home — so making `index_row` mandatory is both the durability fix *and* the thing that would make a future census possible at all. § *Observer Blindness* position 3, best shape: the correct path ends in a state where the check exists.
+
+**Status:** open — ADR amended to state the census is unobtainable in principle; the structural argument, verified at the bytes, is now the stronger leg.
 
 ## Entries
 
