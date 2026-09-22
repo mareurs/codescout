@@ -102,4 +102,18 @@ A null on arm 1a does not falsify H1 — 1a and 1b are different interventions, 
 
 ## Amendments
 
-_None. Append here with date and reason; do not edit the sections above._
+**2026-09-22 — a numeric prediction for RTD-10, added before any scoring.**
+
+The original registration predicted RTD-10 *"fails — needs a gate before the claim"*, which is qualitative and therefore scoreable only by argument. A numeric form is registered here instead:
+
+> **RTD-10 draws YES on ≥ 3 of the 12 RTD-10 controls in `docs/evals/rule-tell-controls.md` (`cfa0d5bc1bdeacab`), and does not survive.** The two near-miss controls, `CTL10-11` and `CTL10-13`, are where the prompt could still discriminate; a YES on either is the stronger evidence against it.
+
+**This is an addition, not a restatement, and the provenance matters.** The `≥ 1 in 4` figure originated in a spoken audit of the five prompts, was never written into this document, and was then mis-cited to it when the control corpus was briefed. The corpus build was instructed to look the claim up rather than take it on trust, did so, found no such threshold, and declined to adopt it — which is the only reason this is an amendment rather than a number the corpus was quietly built around.
+
+It remains a **pre**-registration because **no prompt has been run against any control**. A threshold chosen after seeing fires would be a fit, not a prediction; this one is recorded while the outcome is still unknown.
+
+**2026-09-22 — a measurement hazard the corpus build surfaced, registered as a caveat on RTD-9.**
+
+RTD-9 was the hardest prompt to find wild negatives for: of its ten controls, **four are near-misses** rather than full-shape, a higher proportion than any other section. The reason is structural and worth registering before it is mistaken for a result — this corpus's own *"a count must arrive with its unit"* law means prose written under it **already carries a window, date or denominator**, so the all-time claims that survive uncorrected are mostly ordinals (*"the first…"*) or design properties, both of which RTD-9's prompt excludes by name.
+
+**A well-followed rule depletes the population of plausible controls for its own tell.** So precision for such a rule is measured on a thinner and less adversarial base, and a clean RTD-9 result is weaker evidence than the same result for a rule the corpus violates often. Report RTD-9's full-shape and near-miss fires **separately**; a pooled rate over the ten would hide exactly this.
