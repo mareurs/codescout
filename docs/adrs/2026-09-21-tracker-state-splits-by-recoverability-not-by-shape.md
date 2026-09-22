@@ -35,7 +35,7 @@ But the decision it produced sorted state by **churn**, and the property that ma
 | cost if lost | one scan run | irreplaceable |
 | durability today | gitignored, wholesale-replaceable | **identical** |
 
-Three measured incidents, one mechanism:
+Three measured incidents. They **read** as one mechanism because a single boundary fixes all three — but that is a claim about the remedy, not the cause. Incidents 1 and 3 are **durability**; incident 2 is **joinability**, where nothing was lost at all. § *Revisit-when* carries what that split costs Operating Principle 4, and the two halves ship on different schedules because of it.
 
 1. **T-N, 2026-08-16.** One `doc(action="augment", merge=true, params={observations:[…]})` took the ledger from 19 entries to 1. Those were `verdict` judgments — adjudications in the disposable store.
 2. **legibility-backlog, 2026-06-13.** Retiring the `name_collision` detector (ADR `2026-06-13-drop-name-collision-defect`, `919dbe5c`) auto-closed 19 rows. The Verdicts prose records that 7 of them "closed because the **detector was removed, not because the code was refactored**". Nothing in the collection separates those 7 from the 12 genuine relocations — same `status`, same `defects`, same `closed_at` — and `render_template.j2` files all of them under one heading. The adjudication had no structured home, so it went to prose, where no reader can join it. **Every automated reader of those params sees 19 clean closes.**
@@ -113,7 +113,7 @@ The tool's write-mode hint (`mod.rs:999`) meanwhile returns *"Re-run any time �
 
 ## Confidence
 
-**Medium-high on the boundary**, unchanged. It rests on three measured incidents sharing one mechanism, plus the split between 15 params-backed and 16 prose-backed trackers in which only the former have lost data. The 2026-09-21 probe did not test the boundary and does not bear on it.
+**Medium-high on the boundary.** It rests on three measured incidents — **two of durability and one of joinability**, not three of one mechanism (§ *Context*) — plus a params-versus-prose asymmetry in which only params-backed ledgers are known to have lost entries. Neither leg is a figure to quote from this page: the population has three defensible counts under three counting rules, so run `python3 scripts/probe-ledger-entry-loss.py` and read its classification. The 2026-09-21 probe of the citation path did not test the boundary and does not bear on it.
 
 **Medium on the mechanism — the same rating as the first revision, for the opposite reason.** It was medium because the path had only been read; it is now exercised, and the exercise falsified three claims. Measured: allocation, refusal behaviour, neighbour discrimination, entry-grain edges on the write path, and the absence of a params high-water mark. **Not established:** no scanner-derived edge was ever materialized — `link_scan` ran report-only by design, because `write=true` prunes project-wide on a shared checkout — so the surviving mechanism's *write* half is inferred from its report rather than observed. And control C4 established the **precondition** for surviving a catalog loss, never the property; that needs an isolated catalog, which the probe deliberately did not create.
 

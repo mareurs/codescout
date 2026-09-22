@@ -102,9 +102,8 @@ published anyway, and that a second reader caught. A mechanism that misses them 
 buying anything a re-read does not already buy. **A miss on any of the four blocks, whatever
 the aggregate.**
 
-Secondary gate, RTD-15: its positive is **uncorrected at HEAD** (see § *Two defects found
-while building this set*), so it is a live fixture rather than a historical one, and it can be
-scored against the working tree.
+Secondary gate, RTD-15: its positive was **uncorrected at HEAD** when this set was mined (see § *Two defects found
+while building this set*), and was repaired afterwards. Score it against the blobs its `source` names, as for every other case.
 
 ## Case format
 
@@ -528,8 +527,13 @@ The adjudication had no structured home, so it went to prose, where no reader ca
   found while building this set*.
 - **caught_by:** `self-reread` — no peer and no probe is named; the commit calls it *"a
   miscount that survived two writes and a peer review"*.
-- **text_detectable:** `yes` — secondary hard gate, and the only case scoreable against the
-  live working tree rather than a historical blob.
+- **text_detectable:** `yes` — secondary hard gate. **Score it against the two blobs named
+  above, which is what every other case does.** Until the ADR was repaired this positive was
+  also live in the working tree, and this line claimed that as the fixture's basis; it was
+  never the basis, since `source` already cited historical blobs. The repair swept three
+  stale sites, not the two this case found — § *Confidence* restated **both** the
+  one-mechanism claim and a params/prose split that had itself been corrected twice, which
+  strengthens rather than weakens what this case is evidence for.
 
 ### Case RTD-16 — a population figure with the wrong denominator
 
@@ -759,10 +763,18 @@ stands unqualified in two places while the correction sits between them:
 - `:116` — *"It rests on three measured incidents sharing one mechanism"*, written at
   `e365a6b3`, 30 minutes before the correction and never revisited
 
-That is a live intra-document contradiction in an Accepted ADR, and it is the best available
-fixture for the classifier's flagship tell: it can be scored against the working tree rather
-than a blob. It is left in place deliberately; repairing it would destroy the fixture, and
-whoever repairs it should re-point this section first.
+That was a live intra-document contradiction in an Accepted ADR, and it is the best available
+fixture for the classifier's flagship tell. **It has since been repaired**, and the repair is
+itself evidence: the sweep found **three** stale sites, not the two listed above — `:116` in
+§ *Confidence* restated the one-mechanism claim **and** a params/prose split that had already
+been corrected twice elsewhere in the same document. Score RTD-15 against the blobs its
+`source` names; that was always the basis, and this section's earlier claim that repairing
+the ADR would destroy the fixture was wrong — a working-tree instance was a convenience, not
+the label.
+
+The mechanism is worth naming because no corpus law does: **each amendment was locally
+correct and applied by appending.** Nothing swept the restatements, so a document accreted
+both readings, with the uncorrected one first — where a reader meets it.
 
 **2. The briefing's `C-N` case labels would have collided with two existing namespaces.** A
 heading of the form `### C-1 — <title>` is exactly what `link_scan`'s `def_re` recognises as an
