@@ -13,7 +13,7 @@ closed: 2026-09-16
 opened: 2026-09-16
 owner: marius
 related: []
-severity: med
+severity: medium
 ---
 
 # `CODESCOUT_INDEX_ACK="-"` clears a refusal the ack was never meant to reach

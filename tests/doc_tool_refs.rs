@@ -849,8 +849,14 @@ const ANCHOR_FALSE_POSITIVES: &[(&str, usize, &str)] = &[
     // "`sorted(x, key=f)` counts" — Python's builtin, quoted as a worked example of a
     // callback shape in a probe's own doc row. Line-keyed, so ANY row inserted above it in
     // PROBES.md moves the mention and reds this guard for every session until the number
-    // here is bumped: 201 -> 202 when `ffeada30` added the probe-predicate-candidates row.
-    ("docs/PROBES.md", 202, "sorted"),
+    // here is bumped: 201 -> 202 when `ffeada30` added the probe-predicate-candidates row,
+    // then 202 -> 203 when `50986419` (2026-09-21) added the ledger-entry-loss row.
+    // TWICE NOW, and the second time the red sat at HEAD redding the gate for every session
+    // in this checkout — so read this recurrence as the cost estimate it is, not as a chore.
+    // The durable repair is an ignore marker the mention can carry itself, filed as
+    // docs/issues/2026-09-21-docs-commit-stales-a-line-keyed-exemption.md; until that ships,
+    // any PROBES.md row inserted above line 203 re-arms this.
+    ("docs/PROBES.md", 203, "sorted"),
     // "`find(kind=\"bug\", status=\"open\")` — the triage query" — prose shorthand for
     // `doc(action="find", …)`, using the ACTION name as if it were the tool name. No tool
     // is named "find".

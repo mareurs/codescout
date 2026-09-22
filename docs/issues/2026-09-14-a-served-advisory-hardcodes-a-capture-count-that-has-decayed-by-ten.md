@@ -109,6 +109,38 @@ present.
 Not implemented — the file is in `claude-plugins`, a different repo, and this session has made
 no edit there.
 
+## Update 2026-09-22 — two further sites, in codescout itself, now fixed
+
+**This record named two sites, both in `claude-plugins`. There are four.** The same sentence is
+served by codescout's own `scripts/pre-commit-unreviewed-content.sh`, in the same two-site shape
+this file documents for the hook — served text plus a header twin:
+
+- `:123` — `echo "same file since you last looked. Four such captures are recorded in"`
+- `:12` — `# That is not hypothetical. It has happened four times in this repo, documented in`
+
+Both are now fixed with **this record's own prescribed remedy** — the value deleted, the citation
+kept (`It has happened repeatedly in this repo`; `Such captures are recorded in`). `bash -n` clean;
+no test pinned either string, checked before editing.
+
+**Two counts in that file are legitimate and were deliberately left alone.** `FOUR SEPARATE calls`
+at `:126` enumerates the steps that follow it, and `instance 4` at `:14` cites one durable record
+rather than a population. A substitution keyed on the word would have corrupted both — the hazard
+`CLAUDE.md` § *Parsers Over a Namespace* describes, met in the act of fixing a different one.
+
+**The count has decayed further since this was filed.** Re-derived 2026-09-22 against
+`docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md`: **17 `## Instance`
+headings, the highest numbered `Instance 18`** (2026-09-20). The title's "fourteen" is itself now
+stale. Those two figures differ and are reported separately rather than reconciled into one
+headline, per § *Testing Discipline* — count the LIST, never the corpus.
+
+**Status stays `open`.** The two sites at `claude-plugins:codescout-companion/hooks/pre-edit-dirty-check.mjs:119`
+and `:8-12` are untouched — a different repo, which this session did not edit, and which has its own
+live session. What this closes is the in-repo half. What it adds is the finding that the class had
+**twice the sites the record knew about**, which is § *Testing Discipline*'s "mutate once per
+guarded SITE, not once per feature" paying out in the direction that costs: a remedy applied at the
+two known sites would have left this advisory serving the stale number indefinitely, with the bug
+file reporting the class closed.
+
 ## Tests added
 
 None. A regression test would have to assert the absence of a digit in an advisory string,

@@ -11,7 +11,7 @@ tags:
 topic: librarian document editing
 closed: null
 opened: 2026-09-16
-severity: med
+severity: medium
 ---
 
 # BUG: one ledger entry is two headings 16,000 lines apart, so a heading-addressed edit amends half of it and reports success

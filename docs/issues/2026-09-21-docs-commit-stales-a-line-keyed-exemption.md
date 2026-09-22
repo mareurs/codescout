@@ -86,6 +86,42 @@ That rescues the asymmetry rather than losing it. Instance 1 went uncaught for h
 
 Instance 6 is the demonstration: a summary line contradicting its own body, written by a party who had stated the correct version two paragraphs earlier. Knowing was never the missing ingredient.
 
+## Recurrence 2026-09-22 — the second falsification, observed red at HEAD
+
+**This fired again, and this time it was sitting red at `HEAD` for every session in the
+checkout.** Found by running `./scripts/gate.sh` on unrelated work; the lean lane failed
+`tests/doc_tool_refs.rs` with two findings, neither in the diff being gated.
+
+| what | detail |
+|---|---|
+| exemption | `tests/doc_tool_refs.rs` — `("docs/PROBES.md", 202, "sorted")` |
+| mention actually at | `docs/PROBES.md:203` |
+| displaced by | `50986419` (2026-09-21), which inserted the ledger-entry-loss probe row above it |
+| prior occurrence | `201 -> 202`, by `ffeada30` — already recorded in the exemption's own comment |
+
+The comment above that tuple **predicted this in writing** — *"ANY row inserted above it in
+PROBES.md moves the mention and reds this guard for every session until the number here is
+bumped"* — and the prediction did not prevent the second instance, because nothing executes a
+comment. That is `CLAUDE.md` § *Observer Blindness*: knowing the class is not a mechanism.
+
+**A second, independent finding came with it, and it is NOT this bug.** `docs/PROBES.md:189`
+wrote `references(upsert_int_line)` — a symbol passed as a *value*, which the scanner bills as a
+parameter name. That one has a real escape and took it: `references(symbol=upsert_int_line)`,
+naming the slot, which is what the guard's own failure text recommends. Worth separating because
+the two arrived in one test run and only one of them is a missing-ignore-marker instance.
+
+**Both repaired 2026-09-22** — the exemption bumped `202 -> 203` with the recurrence recorded
+on the tuple, and the `:189` citation given its parameter name. **Status stays `open`:** the
+line-keyed exemption is re-armed, not removed. Any row inserted above `PROBES.md:203` falsifies
+it a third time, which is precisely what this record exists to stop and what the § *Fix* ignore
+marker would close.
+
+**Cost datum for whoever prices that fix:** the red reads as a regression in whatever the
+reader just committed — it names `docs/PROBES.md`, a file the reader has usually not touched —
+and the discriminating check (is `PROBES.md` dirty? if clean, worktree == HEAD, so the red is
+pre-existing) is not one the failure output suggests. `git stash` is the reflex here and is
+**wrong on this checkout**: a peer's uncommitted work would go with it.
+
 ## Environment
 
 Shared codescout checkout, branch `experiments`. Observed at HEAD `a832ae89` during a gate run; cause at `ffeada30`; instance fixed at `70e6c1ad`.

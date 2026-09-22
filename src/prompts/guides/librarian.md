@@ -310,10 +310,11 @@ librarian(action="context", anchor_id="<id>", max_tokens=N)  ← link-graph neig
 ### doctor repairs — what each `fix=` mode does
 <!-- serves: librarian.doctor -->
 
-Every mode WRITES, is scoped (`root=` or the active project), and is a **dry run
-until `confirm=true`** — so reading this after your first call has cost you
-nothing, which is why it lives here rather than in the tool schema. The report
-these repair is project-scoped by default too; a foreign finding
+Every mode WRITES and is a **dry run until `confirm=true`** — so reading this
+after your first call has cost you nothing, which is why it lives here rather
+than in the tool schema. Every mode but `mint_slugs` is scoped (`root=` or the
+active project); that one is corpus-wide by design and its row says why. The
+report these repair is project-scoped by default too; a foreign finding
 surfaces only when a local artifact cites it (umbrella siblings only).
 
 | `fix=` | what it does |
@@ -322,7 +323,7 @@ surfaces only when a local artifact cites it (umbrella siblings only).
 | `reseat_worktree` | Reseats no-collision worktree-scoped catalog rows to their main-repo path. Takes the same `scope` as the report, via one shared `DoctorScope`. Collisions are **reported, not reseated** — resolve those with `doc(action="graft")`. A dry run lists candidates under `would_reseat`; `confirm=true` applies them and lists them under `reseated`. |
 | `rehome` | Migrates a moved repo's rows from `old_root` to `new_root`, preserving ids and history. |
 | `repair_frontmatter_id` | Rewrites every `frontmatter_id_mismatch` file's `id:` to its catalog row's id, for every artifact under one root. A file with **no** frontmatter id is left alone rather than stamped — stamping one would newly subject it to the librarian guard. |
-| `mint_slugs` | Backfills `artifact.slug` where NULL. |
+| `mint_slugs` | Backfills `artifact.slug` where NULL. **Corpus-wide — the one mode `scope` and `root` do not narrow**, deliberately (see its arm in `src/librarian/tools/doctor.rs`): it writes only machine-local catalog rows, never files, so one deterministic pass keeps slug assignment a function of the corpus rather than of whichever repo swept first. Expect its dry run to name OTHER repos' artifacts — that is the mode working, not a scope leak — and note a slug is immutable once minted. |
 | `export_augmentations` | Exports each augmentation's **shape** (never its `params`) to a committed sidecar and stamps `expects_augmentation:` to name it, so another machine's `reindex` re-attaches it. It can only export rows THIS catalog holds — run it on the machine that still has them. |
 
 Which params each mode needs is on `root` / `old_root` / `new_root` in the schema,

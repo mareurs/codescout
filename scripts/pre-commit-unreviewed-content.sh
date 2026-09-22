@@ -9,7 +9,7 @@
 # session wrote to the same file between your edit and your commit — silently, under
 # your commit message.
 #
-# That is not hypothetical. It has happened four times in this repo, documented in
+# That is not hypothetical. It has happened repeatedly in this repo, documented in
 # docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md. In
 # instance 4 the capturing session was actively guarding against the mechanism, used
 # path-scoped committing (the remedy that file recommended), and captured a peer's
@@ -120,7 +120,7 @@ done < <(GIT_INDEX_FILE="$idx" git diff-index --cached --name-only HEAD)
     echo
     echo "\`git commit -- <paths>\` commits the WORKING TREE at those paths, not the index."
     echo "On this shared checkout that includes anything a concurrent session wrote to the"
-    echo "same file since you last looked. Four such captures are recorded in"
+    echo "same file since you last looked. Such captures are recorded in"
     echo "docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md."
     echo
     echo "Do this instead — FOUR SEPARATE calls. Not one batched command:"
