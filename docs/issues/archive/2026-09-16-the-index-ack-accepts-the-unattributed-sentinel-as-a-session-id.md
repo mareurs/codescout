@@ -1,5 +1,5 @@
 ---
-id: ea962a09e72e6863
+id: 1866d62a897b2304
 kind: bug
 status: fixed
 title: CODESCOUT_INDEX_ACK accepts `-`, the unattributed sentinel, as if it were a session id
