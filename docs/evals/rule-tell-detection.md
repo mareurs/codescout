@@ -105,6 +105,340 @@ the aggregate.**
 Secondary gate, RTD-15: its positive was **uncorrected at HEAD** when this set was mined (see § *Two defects found
 while building this set*), and was repaired afterwards. Score it against the blobs its `source` names, as for every other case.
 
+## Tells — the bool prompts
+
+**Tree and instant:** written at `63e69d872c4ea545f99d6481a4a234782a56d5e4`, branch
+`experiments`, 2026-09-22T04:49:00Z. **No classifier has been run against any prompt below —
+n=0, as for the rest of this file.** The `fires_on` / `silent_on` readings are the same
+inspection-based prediction the § *What this bounds* preamble already discounts, applied one
+level further in: a claim about what a model *would* answer, made by reading.
+
+A prompt for each case in the `peer × yes` cell that § *Hard-gate cases* pins — RTD-3, RTD-8,
+RTD-9, RTD-10 — and one more, marked separately, for a tell the rule corpus does not name.
+
+**Every prompt asks about the SHAPE of a claim, never its truth.** A classifier reading a turn's
+output cannot know whether a count is right, whether the cause named is the real one, or whether
+a universal negative holds — each needs the world. It *can* see whether a count arrived with a
+derivation, whether a causal step carries a hedge, whether a negative states the scope it was
+checked over. That reframing is what makes these answerable from the output text alone, and it is
+also the origin of every false positive listed below: a correct claim written in the unhedged form
+is, in text, indistinguishable from an unsupported one.
+
+**No prompt names a subject from these cases.** The negatives are the same claims correctly
+hedged — same subject, same figures, same citations — so a prompt keyed on subject matter would
+fire on both halves of every pair and demonstrate nothing. Each subsection states the textual
+feature that separates its pair.
+
+**Each prompt is narrower than the rule it serves.** A rule says what makes a claim unsupported; a
+prompt says what one recognisable shape of unsupported claim looks like in text. The second is
+strictly smaller, and the gap is named per subsection rather than apologised for once.
+
+**Headings here do not open with `RTD-`, for the reason § *Two defects found while building this
+set* gives:** a heading that opens with the prefix is what `link_scan`'s `def_re` reads as an
+entry-token definition, and this file mints no ids.
+
+### Bool prompt for RTD-3 — a cause welded to an absence
+
+- **rule served:** `CLAUDE.md` § *Testing Discipline* — *"A test cannot detect a change its
+  assertion is MONOTONE under. Absence assertions (`is_empty()`, `!exists()`) are monotone under
+  **removal** — a dead mechanism produces exactly the silence they assert."*
+- **narrower than the rule:** the law is about a predicate in code and about the *direction* it is
+  blind to. The prompt sees prose only, and only one member of the family — a zero reported in
+  text with a cause bolted on. It cannot see a monotone assertion, and it cannot tell whether the
+  cause named is the only one that fits.
+- **prompt:**
+
+```
+Read the text below. Answer YES or NO, and nothing else.
+
+Does the text (a) report a zero, an absence, a non-occurrence, or a "none found" as an
+observed result, AND (b) state a cause for it -- a "because", "due to", "the reason is",
+"this happened since" -- with no clause anywhere in the text allowing that some other
+cause could produce the same result?
+
+A hedge on the observation ("approximately", "at one census") does not count. The hedge
+must be on the causal step: calling the cause a hypothesis, naming a rival explanation,
+or saying the observation does not by itself establish it.
+
+Wording that pre-empts doubt about the causal step while asserting it -- "this is not a
+prediction", "not speculation", "plainly" -- counts toward YES, not as a hedge.
+
+Answer NO if the text reports the zero and names no cause, or names a cause and also
+marks it as one candidate among others.
+```
+
+- **fires_on:** the case's positive —
+
+```
+**And an annotation nobody consumes will not be written.** This is not a prediction: the observation window mandated in `CLAUDE.md` produced **zero** prospective samples in its first two days (`0ca7439866e8f2b6`) because it asked sessions to notice rather than wiring capture to something that happens anyway.
+```
+
+  Two clauses trip it. `because it asked sessions to notice rather than wiring capture to
+  something that happens anyway` attaches a cause to `**zero** prospective samples`. And `This is
+  not a prediction:` is read by the prompt's third paragraph as evidence *for* YES rather than as
+  a hedge — a sentence asserting the causal step is not conjecture is not a hedge on it.
+
+- **silent_on:** the case's negative —
+
+```
+**And an annotation nobody consumes will not be written — a hypothesis, which is what the evidence supports.** The observation window mandated in `CLAUDE.md` produced **zero** prospective samples in its first two days (`0ca7439866e8f2b6`). That measures **absence of capture in the observed interval**, and does not by itself establish that absence of a consumer caused it.
+```
+
+  The classifier must notice that both hedges land on the *causal step*, not on the observation:
+  the conclusion is labelled `a hypothesis, which is what the evidence supports`, and the closing
+  clause states the measurement `does not by itself establish that absence of a consumer caused
+  it`. Everything else is carried over unchanged — same subject, same `zero`, same artifact id —
+  so a prompt that fired on both would have keyed on the topic.
+
+- **false-positive risk:** a causal reading of a zero that is *correctly* supported, where the
+  support is a control rather than a hedge. `CLAUDE.md` § *Development Commands* carries one: the
+  lean lane runs zero librarian tests because `--no-default-features` switches the librarian off,
+  and the control that makes the zero a measurement is a sibling count returning 101 in both
+  lanes. Cause asserted, no hedge on the causal step, prompt answers YES. It separates hedged from
+  unhedged, never supported from unsupported — that distinction needs the world.
+
+### Bool prompt for RTD-8 — an unrestricted universal negative
+
+- **rule served:** `CLAUDE.md` § *Observer Blindness* — *"Never close an authorship question by
+  elimination — identify positively. Elimination is sound only over a population **proven complete
+  by an instrument that spans the whole namespace**, and two agreeing instruments are not that
+  when they share a scope."* The fit is partial and stated as such: the case's own `rule` field
+  records that **no** corpus law names its tell, and the elimination law is about the inference,
+  not about the sentence shape.
+- **narrower than the rule:** the law covers elimination reasoning of any shape, including where
+  the conclusion is positive (*"therefore it was X"*). The prompt sees only the syntactic
+  universal negative, and only when the text either states no scope or states a smaller one.
+- **prompt:**
+
+```
+Read the text below. Answer YES or NO, and nothing else.
+
+Does the text assert, in its own voice, an unrestricted universal negative about some
+named thing -- "nothing reads it", "no caller", "there are no users of X", "never
+happens", "zero references anywhere" -- where the evidence offered alongside it, if any,
+covers a narrower scope than the claim (one file, one module, one search, one time span)?
+
+Answer YES when the negative carries no restricting qualifier of kind, place, or time,
+and the text either does not say what it examined to reach it, or says it examined
+something smaller than the claim covers.
+
+Answer NO when the negative is scoped ("no consumer of kind K", "none in this module",
+"none since <date>"); when the text names a search that spans everything the claim
+covers; or when the absolute phrasing appears only inside quotation marks as a claim the
+text is correcting, narrowing, or calling false.
+```
+
+- **fires_on:** the case's positive —
+
+```
+It is not codescout's table (`src/usage/db.rs:315-322`: a buddy-plugin skill creates it, zero references in this crate); the skill writes it only on an explicit user utterance; **nothing reads it** — Phase 3, which would render entries from it, was deferred and never shipped.
+```
+
+  The tripping clause is `**nothing reads it**` — unrestricted, in the text's own voice — while
+  the evidence beside it, `zero references in this crate`, is scoped to one crate. The prompt's
+  second paragraph is aimed exactly at that mismatch, and it is visible without leaving the
+  sentence.
+
+- **silent_on:** the case's negative —
+
+```
+**2. "Nothing reads `pika_observations`" — false as written**, and self-contradicted two paragraphs later in this same section, which described codescout's retention read. Precise form: **no renderer** consumes it (Phase 3 deferred, never shipped).
+```
+
+  Two features the classifier must catch, and both are NO conditions in the prompt's last
+  paragraph: the absolute survives only inside quotation marks, immediately labelled `false as
+  written`; and the claim the text now makes is scoped to a kind — `**no renderer** consumes it`.
+  The subject, the entity and the deferred-Phase-3 justification are identical across the pair.
+
+- **false-positive risk:** a correct unrestricted negative whose supporting search genuinely
+  spanned the namespace but is not described in the same passage — *"Nothing constructs this type
+  directly; the only path is the builder."* A whole-workspace `references` call may well have been
+  run; the sentence does not say so, and the prompt answers YES. It keys on whether the text
+  *states* a scope, never on whether one was searched — which is the only version of the question
+  a classifier can answer.
+
+### Bool prompt for RTD-9 — an all-time count off a windowed source
+
+- **rule served:** `CLAUDE.md` § *Testing Discipline* — *"A count of a defect population must
+  arrive with its unit or not at all."* The case names the same law and says the missing unit is
+  the retention window.
+- **narrower than the rule:** the law demands a unit for *every* population count, and on a shared
+  checkout an instant and a tree as well. The prompt asks about one unit only — time coverage —
+  and only when the count is quantified over all of it. A bare defect count with no unit at all
+  slips past this prompt entirely; it is RTD-4's and RTD-16's shape, not this one's.
+- **prompt:**
+
+```
+Read the text below. Answer YES or NO, and nothing else.
+
+Does the text state how many times something has happened over ALL time -- "once, ever",
+"has never", "has only ever", "for the first time", "in its entire history" -- where the
+evidence is a reading of stored records, a census, a log, or a database, and the text
+does not state the span of time those records cover?
+
+Answer YES when an all-time count or frequency is given and no coverage window appears
+anywhere in the text: no date range, no "as of", no retention horizon, no "in the
+observed interval".
+
+Answer NO when the text states the span its source covers; when it frames the figure as
+an observation over a window rather than a lifetime; or when the all-time wording appears
+only as a quoted claim the text is withdrawing. A claim about a design property ("this
+branch can never run") is not a count of occurrences -- answer NO.
+```
+
+- **fires_on:** the case's positive —
+
+```
+Live state: the table exists in 3 of 96 `usage.db` files on this machine; codescout holds **0** rows against ~70,000 calls; the one populated copy is 55 rows written on 2026-05-17 in a retired checkout. The write path has fired once, ever.
+```
+
+  The tripping clause is the last sentence: `The write path has fired once, ever.` — a lifetime
+  frequency, offered on the strength of the file census in the sentences before it, with no span
+  stated for what those files retain. A single date (`2026-05-17`) is a point, not a coverage
+  window, and the prompt asks for the latter.
+
+- **silent_on:** the case's negative —
+
+```
+**4. "The write path fired once, ever" — withdrawn as unsupported by retained data.** `usage.db` prunes on a rolling 30-day horizon, so no lifetime count can be read off it. What was observed, at one census of 96 databases that this session did **not** re-verify: one held 55 rows all dated 2026-05-17; codescout's own held 0 against ~70,000 retained calls. That is an observation with a window, not a lifetime.
+```
+
+  The classifier must notice that the span is now stated twice — the source's horizon (`prunes on
+  a rolling 30-day horizon`) and the figure's own frame (`an observation with a window, not a
+  lifetime`) — and that the all-time wording survives only in quotation marks under `withdrawn`.
+  The figures themselves (55 rows, 2026-05-17, 96 databases, ~70,000) are carried over unchanged,
+  so the window-naming is the whole of the difference.
+
+- **false-positive risk:** a sound lifetime claim over a source that has no horizon — *"This
+  assertion has never fired in CI."* CI history is append-only and complete, the claim holds, the
+  sentence states no span, and the prompt answers YES. Its blind spot is that it cannot tell a
+  pruned source from a complete one, which is precisely the external fact the design forbids it
+  from having.
+
+### Bool prompt for RTD-10 — an impossibility with no sites enumerated
+
+- **rule served:** `CLAUDE.md` § *Parsers Over a Namespace* — *"'It cannot happen' is a claim
+  about today's corpus and decays with it"*, and the instruction beside it to *"answer two
+  questions in the code rather than in your head"*.
+- **narrower than the rule:** the law is about *decay* — an impossibility true today and false
+  once the corpus grows. The prompt cannot see time at all. It asks only whether the sentence
+  shows its survey, so it fires on an impossibility that is permanently true and stays silent on a
+  decaying one that happens to list three sites.
+- **prompt:**
+
+```
+Read the text below. Answer YES or NO, and nothing else.
+
+Does the text claim that some failure, confusion, error, or collision CANNOT occur -- "is
+impossible", "cannot happen", "has no site to occur at", "is prevented", "there is no way
+for this to arise" -- supported only by a general or structural reason (a separation, a
+type, a design property, two distinct owners), with no list of the specific places,
+paths, or cases that were checked?
+
+Answer YES when the impossibility is stated flatly and nothing in the text enumerates
+what was surveyed.
+
+Answer NO when the text names the places it examined; when the impossibility is scoped to
+one named site or kind rather than asserted of everything ("removes the storage site",
+"cannot happen on the write path"); or when the absolute wording appears only as a claim
+the text is narrowing or withdrawing.
+```
+
+- **fires_on:** the case's positive, which is one sentence entire —
+
+```
+**Data owner and schema owner are different parties, so the conflation has no site to occur at.**
+```
+
+  `has no site to occur at` is the flat impossibility; `different parties` is the structural
+  reason standing in for a survey. Nothing is enumerated, and the prompt's first paragraph names
+  both halves of that shape.
+
+- **silent_on:** the case's negative —
+
+```
+**3. Separate tables do not prevent all conflation.** Accepted as a narrowing of this session's insight, which over-reached in saying the conflation "has no site to occur at". Distinct tables remove the **storage** site; they do not remove the **interpretation** site. A join at read time can still merge a self-report with an observation, so verdict semantics and provenance must be carried explicitly wherever the rows live.
+```
+
+  The classifier must notice that the absolute appears only as a quoted over-reach, and that what
+  replaces it is scoped in both directions — `remove the **storage** site; they do not remove the
+  **interpretation** site` — with a surviving path named (`A join at read time can still merge`).
+  The structural reason is *unchanged* between the two spans; only the scoping moved.
+
+- **false-positive risk:** a sound type-level impossibility. *"The index cannot be out of bounds:
+  the value is a non-zero integer type and the array is sized from it."* Structural reason, no
+  enumeration, correct — YES. Any claim whose *correct* support is the structural reason is a
+  false positive by construction, and this prompt cannot separate those from claims where the
+  structural reason underdetermines the conclusion.
+
+### Unwritten — intra-document contradiction
+
+**This prompt serves no `CLAUDE.md` rule.** § *Case format* already records the gap: RTD-8, RTD-9
+and RTD-15 have no law in the corpus that names their tell. The nearest surface is
+`src/prompts/guides/project-activation-bootstrap.md` § *Phase 2* — *"A comment, doc, or README the
+code contradicts is itself a finding (doc-vs-code drift)"* — which covers doc against code and not
+doc against itself. It is kept in this section, separately marked, because it is the one prompt
+here whose subject matter the written rules do not reach.
+
+- **prompt:**
+
+```
+Read the ENTIRE text below -- every section of it, first line to last, not only
+neighbouring paragraphs. Answer YES or NO, and nothing else.
+
+Do any two passages of this text state things that cannot both be true? Look for one
+passage making an absolute claim -- "all", "none", "every", "one and the same",
+"nothing", "always", "identical" -- and another passage anywhere else describing a case,
+a count, or a behaviour that the first excludes.
+
+The two passages may be far apart and in different sections. Distance is not evidence
+against a contradiction; compare claims about the same subject wherever they appear.
+
+Answer YES only when both passages speak in the text's own voice as claims it is
+currently making.
+
+Answer NO when a later passage explicitly corrects, retracts, or narrows the earlier one;
+when one of the two is a quotation of a claim the text attributes to someone else; or
+when the two are about different subjects.
+```
+
+- **fires_on:** three positives, each against a falsifier the same output carries.
+  - **RTD-8** — `**nothing reads it**` against, ~200 words later in the same commit's text,
+    *"when that table exists the DELETE carries `AND id NOT IN (SELECT tool_call_id FROM
+    pika_observations)`. A referenced row survives the prune."* The second passage describes a
+    read of the thing the first says nothing reads.
+  - **RTD-9** — `The write path has fired once, ever.` against the same output's account of the
+    rolling prune: a lifetime count off a source the text elsewhere says discards its older rows.
+    **This is the weakest of the three and worth saying so** — it needs a semantic step (a pruned
+    source cannot support a lifetime count), not a syntactic one. The dedicated RTD-9 prompt above
+    fires on the sentence alone and does not need it.
+  - **RTD-15** — `Three measured incidents, one mechanism:` against incident 2's own description
+    three lines below, `**Every automated reader of those params sees 19 clean closes.**` —
+    nothing lost, where incidents 1 and 3 describe entries deleted and state reverted.
+- **silent_on:** RTD-8's and RTD-15's negatives are both explicit corrections — *"false as
+  written, and self-contradicted two paragraphs later in this same section"*, and *"The three
+  incidents in § *Context* are not one mechanism"*. The classifier must recognise the correcting
+  move and answer NO. A prompt that fires on a document **because** it carries its own retraction
+  penalises the repair, and § *Distribution* already names the setting where that bites: seven
+  positives coexist with their negatives in the file today.
+- **scope — the whole document, not a window, and RTD-15's repair is the measurement.** This case
+  listed two stale sites; the sweep at `63e69d87` found three. At `78f7662c` the contradicting
+  passages sat at `:38` in § *Context* and `:116` in § *Confidence* of the same ADR — 78 lines
+  apart, with six `##` headings between them — with the correction itself at `:112`, in a third
+  section (§ *Revisit-when*). The third stale site was inside that same `:116` sentence: a
+  params-versus-prose split already corrected twice elsewhere in the document. **A classifier fed
+  a sliding window of adjacent paragraphs fires on none of the three.** The mechanism `63e69d87`'s
+  message names is why the distance is the normal case rather than the unlucky one: each amendment
+  was locally correct and applied by appending, so nothing swept the restatements, and the
+  uncorrected reading stayed first — where a reader meets it.
+- **false-positive risk:** a rule stated absolutely and elaborated later with a legitimate
+  exception. `CLAUDE.md` § *Git Workflow* is a live instance: *"`master` is protected — all
+  experimental work on `experiments`"*, and further down, *"each with exactly one bypass actor"*.
+  Both are true; the second elaborates rather than corrects; a reader hunting absolute-versus-
+  instance calls it a contradiction. This is the broadest of the prompts here and will be the
+  loudest, because a document containing both a rule and its exceptions is the ordinary shape of
+  documentation, not a defect.
+
 ## Case format
 
 ```
