@@ -227,7 +227,7 @@ Read-only by default. These are the probes you already have without leaving the 
 | Skill | Measures | Note |
 |---|---|---|
 | `analyze-usage` | Nine canonical SQL queries over `usage.db`: tool popularity, error breakdown, overflow, latency buckets, slow commands, per-session summary, LSP starts and failures | **No error-taxonomy query keyed on `err_family`** — a gap worth knowing when you are asked to "measure frictions"; use `friction-probe.py` for that axis |
-| `claude-traces` | Session cost, message timeline, tool sequences (`cc.py`, JSONL) and token/profile/per-call detail (`lf.py`, Langfuse) | `cc.py` reads **only `~/.claude`** — it ignores `CLAUDE_CONFIG_DIR`, so it is blind to `~/.claude-sdd` and `~/.claude-kat` (filed: `llm-proxy:docs/issues/2026-07-10-ccpy-config-dir-hardcoded-and-path-encoding.md`). Pass explicit directories |
+| `claude-traces` | Session cost, message timeline, tool sequences (`cc.py`, JSONL) and token/profile/per-call detail (`lf.py`, Langfuse) | `cc.py` **honours `CLAUDE_CONFIG_DIR`** (`:23`) — the earlier caveat here, that it read only `~/.claude`, described a defect that has since been fixed and was still being cited as live on 2026-09-22. Residual limit: **one config dir per invocation**, so on a multi-profile machine enumerate the profiles and invoke per profile; a single run silently covers one of them. Two byte-identical copies exist (codescout and `llm-proxy`); which is canonical is unresolved |
 
 ## Cross-repo
 
