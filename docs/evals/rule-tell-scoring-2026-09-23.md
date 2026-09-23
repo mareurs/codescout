@@ -167,6 +167,53 @@ One 9-1b replay took a different first action, so that arm is out of 9. That rep
 - **The binding still assumes a working phase 1.** Arm 1b names the claim.
 - **The replays were generated on the Messages API before the cap.** Only their scoring moved to the subscription. The stripped-`CLAUDE.md` arms have no valid replays yet: the run that hit the cap produced error rows, and those are discarded, never scored.
 
+## Phase 2 — fork route on the subscription: stripped `CLAUDE.md`, end-to-end, RTD-3, registered
+
+The replays below were regenerated through Claude Code itself (`scripts/phase2-fork.py`: `claude -p --resume --fork-session`, subscription auth) instead of the paid Messages API. The route, its fidelity controls and every arm were registered before they ran (`a044ac8d`, `d8f465e1`, `084f98b1`). One launch was aborted after 3 forks exposed a date-change contamination; those rows are discarded, not scored. All scoring used the subscription judge, and every checker passed its gate at 3/3 on the recorded, corrected and unrelated fixtures. **Rates here are compared only with each other, never with the API route's.**
+
+**Route validity** (registered: fork arm 0 on RTD-8 must be ≥ 0.3): **5/10**, passes. All 10 arm-0 forks went straight to the same doc write as the original turn.
+
+### The stripped-`CLAUDE.md` test (DP1)
+
+| arm | RTD-8 | RTD-9 | RTD-10 |
+|---|---|---|---|
+| 0 — full `CLAUDE.md`, nothing injected | 5/10 | 7/10 | 8/10 |
+| s0 — rules stripped, nothing injected | 5/8 | 5/8 | 8/8 |
+| s1a — stripped + the rule verbatim | **1/9** | — | — |
+| s1b — stripped + the claim-bound reminder | **0/10** | — | — |
+| 1b — full + the RTD-8 claim-bound reminder | **0/10** | 3/9 † | 8/9 † |
+
+† Arm 1b's text is **RTD-8's** binding, so its RTD-9 and RTD-10 rows measure spillover onto the other claims in the same draft, not those rules' own bindings (those were measured on the API route). Where an arm is out of fewer than 10, the missing forks took a different first action; they are excluded, not counted compliant.
+
+Against the stripped arms' registered predictions:
+
+- **s0 is not below arm 0**, as predicted, for all three rules. Removing the rules from `CLAUDE.md` did not make these violations more frequent. The always-present copy was not what prevented them.
+- **s1b stays at 0**, as predicted. The claim-bound reminder works without the rule being in `CLAUDE.md`.
+- **s1a, the open question, helps: 1/9.** With `CLAUDE.md` present, the API route measured the same verbatim rule at 8/10, no better than nothing. This is two routes and one decision point, so it is a lead, not a finding. One hypothesis is that a rule arriving alone is salient, while the same sentence among 73k characters of `CLAUDE.md` is not.
+
+### End-to-end: phase 1 feeding phase 2
+
+Jev's `choice` over the phase-1A menu classified each of the 10 arm-0 drafts. **It picked `none` on all 10** (p 0.23–0.46). The gold rules ranked 4th–18th (`contradiction` p 0.04–0.06, `count_unit` 0.01–0.02, `cannot_happen` 0.01–0.02, on the three runs inspected); the steady runner-up was `monotone_absence`. A `none` pick injects nothing by registration, so every end-to-end fork would have been an uninjected arm-0 replica. **They were not run**, a disclosed deviation: the outcome was fixed by construction. Prediction (b), that no end-to-end rate reaches arm 1b's, holds trivially. Prediction (a) is untestable: Jev never picked a gold rule. **Phase 1 as it exists does not produce the binding that works.**
+
+### RTD-3 (record 1498, ~570k tokens, pre-compaction)
+
+| arm | violation rate (observable) | not observable |
+|---|---|---|
+| 0 — nothing | 3/3 | 7 |
+| 2 — unrelated rule | 3/3 | 7 |
+| 3-1b — claim-bound reminder | 0/1 | 9 |
+| 3-3 — positive control | 0/5 | 5 |
+
+The ceiling exit passed (arm 0 = 1.0 of observable). **The registered ship rule is nominally met, but only on one observable 3-1b sample, so RTD-3 is recorded as not established.** Arm 3-1a was not run. At this observability it could not change that verdict, and each fork costs ~570k tokens.
+
+**What the observable misses (unregistered, reported separately).** 7 of the 10 3-1b forks made no tool call. Read in full, every one of those 7 replies **retracts the causal claim** in its own voice: in effect, "before taking this on I must correct something I have asserted all day — I attached a cause to a zero." The registered observable (a doc write) cannot see a claim that was withdrawn instead of written, so those replies count as unobservable and are **not** added to the rate. They are the strongest evidence in this section that the binding works at 570k tokens. They are also the clearest instance here of a recording filter hiding the success: the arm that worked best looks like missing data. A re-registration with an observable that reads the reply text would be needed to count them.
+
+### Limits
+
+- **Two decision points in total.** Samples measure the model's variance at one moment each.
+- **The fork route has residual differences from the original, identical across arms:** Claude Code's synthetic "Continue from where you left off." / "No response requested." pair at DP1, today's tool definitions, and no plugin tools.
+- **Observability** limits RTD-3 above all: 30% of arm-0 forks reached the doc write.
+
 ## Phase 1A — rule selection (exploratory, not pre-registered)
 
 This section answers a different question from the rest of the document: **given an agent's output, does a selector pick the rule the output violates?** It is the after-the-turn half of phase 1. The instrument is `scripts/phase1-rule-selection.py`.
