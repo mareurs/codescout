@@ -195,6 +195,60 @@ OBSERVED at, not a fix. It is named here because `doctor`'s
 `terminal_status_without_fix_anchor` found it and said the quiet part: a record
 with a loose hash in its prose does not merely lack an anchor, it **reads as
 anchored**, so a reader scanning for provenance finds one and stops looking.
+### Merged is not in effect — measured 2026-09-23, and it blocks archiving
+
+**This record is archive-eligible on its anchor and must NOT be archived yet.** The anchor
+verifies completely: `claude-plugins:9169527` resolves, sits on `main`, and its patch-id
+`f909298548df5b1631c84a2ac281d1cca4468e3d` still matches the diff (derived through a file, per
+the warning this file's own anchor carries). Every criterion an archiver would check says go.
+
+The fix is nonetheless **not reaching a single session on this machine.** All three profiles
+install codescout-companion from a *version-keyed cache*, so editing the plugin repo changes
+nothing any running session reads. Probed by the retired string the fix removed — the
+unobservable authorship claim `that this session did not write`:
+
+| profile | cached `pre-edit-dirty-check.mjs` |
+|---|---|
+| `~/.claude` | **STALE** — retired string present |
+| `~/.claude-sdd` | **STALE** — retired string present |
+| `~/.claude-kat` | **STALE** — retired string present |
+
+Three of three. So the hook is still emitting the authorship claim this record is about, in
+every session including the one that measured it, while the record reads `mitigated` and its
+provenance reads clean.
+
+**Why this is worth a section rather than a line.** The archiving checklist is built from the
+anchor — SHA resolves, patch-id matches, lands on the default branch — and for an in-repo fix
+those three ARE delivery, because the tree under test is the tree that ships. For a
+companion-plugin fix they are not: delivery needs `plugin.json` bumped and a reinstall per
+profile, and **nothing in the anchor can express that**. An archiver following the documented
+procedure correctly closes this record while the defect fires continuously. That is
+`CLAUDE.md` § *Observer Blindness* — the party best placed to check is holding an instrument
+that cannot see the failure.
+
+**Discharge condition, so the next reader has a test rather than a judgement:** re-run the
+probe above. Archive when it reports the retired string absent from all three caches, not when
+the commit merges. Until then `mitigated` is the right status and the mitigation is
+theoretical.
+
+*(Probe belongs to memory `reconnaissance`, § "A companion-plugin fix is inert until the
+version bumps" — which measured the identical three-of-three result on a different hook on
+2026-08-14. Second instance, same mechanism, different fix.)*
+
+**The class is already filed and this is an instance of it, not a new finding:**
+`docs/issues/archive/2026-08-17-plugin-content-edit-without-a-version-bump-never-reaches-any-profile.md`
+(`mitigated`). Worth stating plainly because that record is ARCHIVED, so the standing triage
+queries — which hide archived rows by default — do not surface it to anyone deciding whether a
+cross-repo anchor is sufficient. Its mitigation evidently does not reach the archiving
+checklist, which is the same shape as the defect it describes: a repair that exists and is not
+delivered to the surface that needs it.
+
+**Two of the three bugs closed on a `claude-plugins:` anchor may be in this state as well** —
+`2026-09-03-il4-deny-hook-will-deadlock-markdown-reads-after-the-fold.md` and
+`2026-09-16-worktree-guard-reads-a-quoted-regex-alternation-as-a-bare-git-verb.md`, both
+`fixed` and archived. NOT checked here, and named rather than swept: each needs its own retired
+string probed against the three caches, and a wrong guess about either would be a claim that a
+closed bug is open.
 ## Tests added
 
 Two suites cover this hook, in different trees, and the first search found only one —

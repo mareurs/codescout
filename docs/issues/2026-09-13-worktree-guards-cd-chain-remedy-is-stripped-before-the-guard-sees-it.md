@@ -39,6 +39,35 @@ Three calls from a `Bash` tool whose CC PWD is `/home/marius/work/claude/codesco
 Call 3 is the documented form **verbatim** — no env-var prefix, no `;`, no
 redirection. It is refused.
 
+### Recurrence 2026-09-22 — same strip, different verb
+
+Reproduced on `git commit`, which widens the observed surface: all three calls in the table
+above are `git push`, so the verb was a shared feature of every prior instance and could not be
+ruled out as part of the mechanism. It is not.
+
+Typed: `cd /home/marius/work/claude/codescout && git commit -F - <<'MSG' … MSG`
+Echoed back: `Offender: git commit -F - <<Q` — the `cd … &&` absent again, exactly as the
+`Command:` analysis above predicts. `git -C /home/marius/work/claude/codescout commit -F -`
+then succeeded on the first attempt (`ce9aa15f`).
+
+Two details worth adding to the cost section rather than the mechanism:
+
+- **The worktree count in the refusal has grown to 15**, from the 2 this record was written
+  against — 13 of them `mutation-<uuid>` trees from `scripts/mutation-probe.sh`. The guard's
+  single-worktree carve-out is therefore further from applying than ever here, so this refusal
+  is now effectively unconditional on this checkout rather than incidental.
+- **The refusal is still the cheapest place to learn the repo's worktree inventory**, which is
+  how this session noticed HEAD had moved three commits under it mid-task. That is an accident
+  of the error text, not a feature, but it is the reason the refusal cost ~nothing this time.
+
+**The discriminating test in § *What is NOT established* remains UNRUN, and deliberately.** It
+asks for a guarded verb with `cd <other-worktree> &&`, and on inspection every guarded verb
+available for it is unsafe to fire speculatively from this session: `push` contacts the remote,
+and `commit` / `reset` / `rebase` / `merge` would act on a worktree whose index this session does
+not own — on a checkout that currently has four other live sessions. The test is right and still
+wants running; it wants running by someone who can first establish that the target worktree's
+index is empty. Recording the reason so the next reader does not read the gap as an oversight.
+
 ## The evidence is in the guard's own output
 
 The refusal echoes what it received. For call 3:
