@@ -38,16 +38,27 @@ Arms are compared within this route only.
 from __future__ import annotations
 
 import argparse
+import datetime
 import importlib.util
 import json
 import os
 import pathlib
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+
+# Every live fork process and scratch file, so an interrupted run cleans up after itself.
+# A killed driver otherwise leaves orphaned `claude` forks writing into the SHARED
+# projects directory -- observed 2026-09-23, six files removed by hand, by content.
+_LIVE_PROCS: set = set()
+_LIVE_FILES: set = set()
+_LOCK = threading.Lock()
+_OWN: tuple | None = None   # (projdir, cut record uuid, run start time) -- see _cleanup_and_exit
 
 HERE = pathlib.Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location("replay", HERE / "phase2-replay.py")
@@ -69,6 +80,33 @@ DENY_HOOK = {"PreToolUse": [{"matcher": "*", "hooks": [{
     "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\","
                "\"permissionDecision\":\"deny\",\"permissionDecisionReason\":"
                "\"replay: tool execution disabled\"}}'"}]}]}
+
+
+def _cleanup_and_exit(signum, _frame):
+    """Kill every live fork's process group and delete its scratch files, then exit.
+
+    A fork's OWN transcript is named by an id the fork mints, so it cannot be tracked
+    in advance. It is found by content instead: a .jsonl created after this run began
+    that contains the cut record's uuid can only be one of ours -- a peer's transcript
+    never holds it. That is the check used by hand on 2026-09-23.
+    """
+    with _LOCK:
+        for p in list(_LIVE_PROCS):
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        for f in list(_LIVE_FILES):
+            pathlib.Path(f).unlink(missing_ok=True)
+        if _OWN:
+            projdir, marker, t0 = _OWN
+            for f in projdir.glob("*.jsonl"):
+                try:
+                    if f.stat().st_mtime >= t0 and marker in f.read_text():
+                        f.unlink()
+                except OSError:
+                    pass
+    os._exit(128 + signum)
 
 
 def strip_rendered(r: dict) -> None:
@@ -121,7 +159,10 @@ class Shadow:
 
 def seed(src: list[dict], cut: int, arm_text: str | None, stripped: bool, sid: str) -> list[dict]:
     rows = []
-    for r in src[:cut + 1]:
+    last_date = max((i for i, r in enumerate(src[:cut + 1])
+                     if (r.get("attachment") or {}).get("type") == "date"), default=None)
+    today = datetime.date.today().isoformat()
+    for i, r in enumerate(src[:cut + 1]):
         if r.get("type") == "queue-operation":
             continue
         if (r.get("attachment") or {}).get("type") == "queued_command":
@@ -132,6 +173,15 @@ def seed(src: list[dict], cut: int, arm_text: str | None, stripped: bool, sid: s
         r.pop("toolUseResult", None)
         if stripped and (r.get("attachment") or {}).get("type") == "instructions":
             strip_rendered(r)
+        if i == last_date:
+            # A resume on a later day emits "The date has changed" -- an elapsed-time
+            # signal the original never had; forks answered it by auditing the tree.
+            # So the date the resume compares against is set to the fork's own day,
+            # in `rendered` too, since that is the text the model reads.
+            old = r["attachment"]["date"]
+            r["attachment"]["date"] = today
+            for c in r.get("rendered") or []:
+                c["content"] = c["content"].replace(old, today)
         for k in ("sessionId", "session_id"):
             if k in r:
                 r[k] = sid
@@ -175,6 +225,8 @@ def fork(src, cut, prompt, projdir, shadow: Shadow, mcp, arm, run, timeout, keep
     label = ("s" if shadow.stripped else "") + arm
     sid = str(uuid.uuid4())
     seed_path = projdir / f"{sid}.jsonl"
+    with _LOCK:
+        _LIVE_FILES.add(str(seed_path))
     with open(seed_path, "w") as fh:
         for r in seed(src, cut, ARMS.get(arm), shadow.stripped, sid):
             fh.write(json.dumps(r) + "\n")
@@ -186,9 +238,17 @@ def fork(src, cut, prompt, projdir, shadow: Shadow, mcp, arm, run, timeout, keep
                        "--max-turns", "1", "--output-format", "stream-json", "--verbose"])
     fork_sid = None
     try:
-        p = subprocess.run(cmd, cwd=REPO, env=env, capture_output=True, text=True,
-                           timeout=timeout, stdin=subprocess.DEVNULL)
-        events = [json.loads(l) for l in p.stdout.splitlines() if l.startswith("{")]
+        proc = subprocess.Popen(cmd, cwd=REPO, env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True,
+                                stdin=subprocess.DEVNULL, start_new_session=True)
+        with _LOCK:
+            _LIVE_PROCS.add(proc)
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        finally:
+            with _LOCK:
+                _LIVE_PROCS.discard(proc)
+        events = [json.loads(l) for l in out.splitlines() if l.startswith("{")]
         init = next((e for e in events if e.get("subtype") == "init"), {})
         fork_sid = init.get("session_id")
         if init.get("apiKeySource") not in (None, "none"):
@@ -196,15 +256,18 @@ def fork(src, cut, prompt, projdir, shadow: Shadow, mcp, arm, run, timeout, keep
         body, tools, mid = first_turn(events)
         if mid is None:
             return {"arm": label, "run": run,
-                    "error": f"no assistant turn (exit {p.returncode}): {p.stderr.strip()[-200:]}"}
+                    "error": f"no assistant turn (exit {proc.returncode}): {err.strip()[-200:]}"}
         return {"arm": label, "run": run, "route": "fork", "model": init.get("model"),
                 "tools": tools, "text": body}
     except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
         return {"arm": label, "run": run, "error": f"timeout after {timeout}s"}
     finally:
         # Delete ONLY this fork's two files, named by id: other sessions write new
         # transcripts into the same directory.
         seed_path.unlink(missing_ok=True)
+        with _LOCK:
+            _LIVE_FILES.discard(str(seed_path))
         if fork_sid and fork_sid != sid:
             f = projdir / f"{fork_sid}.jsonl"
             if keep and f.exists():
@@ -226,6 +289,8 @@ def main() -> int:
     ap.add_argument("--keep", help="move each fork's transcript here, for inspection")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
+    signal.signal(signal.SIGTERM, _cleanup_and_exit)
+    signal.signal(signal.SIGINT, _cleanup_and_exit)
 
     src = [json.loads(l) for l in open(args.transcript)][:args.cut + 2]
     nxt = src[args.cut + 1]
@@ -234,6 +299,9 @@ def main() -> int:
         sys.exit(f"record {args.cut + 1} is not a rendered attachment; no faithful prompt")
     prompt = "\n".join(c["content"] for c in rendered)
     projdir = pathlib.Path(args.transcript).parent
+    global _OWN
+    import time
+    _OWN = (projdir, src[args.cut]["uuid"], time.time())
     cfg = json.load(open(PROFILE / ".claude.json"))["mcpServers"]
     mcp = json.dumps({"mcpServers": {k: cfg[k] for k in ("codescout", "researcher") if k in cfg}})
     base = pathlib.Path(args.workdir)
