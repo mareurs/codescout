@@ -36,9 +36,11 @@ hiding the risky region.
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import os
 import pathlib
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -184,6 +186,9 @@ def build_panel(max_spread: float, judges: str) -> PanelJudge:
 def banner(judges: str) -> str:
     if judges == "panel":
         return f"cross-family panel: {CLAUDE_MODEL} (authority) + {GEMINI_MODEL}"
+    if judges == "jev":
+        return (f"TypeSafe Jev ({JEV_MODEL}) `noul` — returns calibrated P(true), no "
+                f"reasoning; a fire is P >= 0.5, fixed before the run.")
     return (f"SINGLE JUDGE {CLAUDE_MODEL} — NOT the panel the pre-registration "
             f"names.\n  No divergence signal exists in this run: every `spread` is "
             f"0.0 by construction,\n  and no row can be withheld. Verdicts are "
@@ -223,46 +228,186 @@ def run(panel, tasks, pool: int) -> list[dict]:
     with ThreadPoolExecutor(max_workers=pool) as ex:
         futs = [ex.submit(score_one, panel, m, r, t) for m, r, t in tasks]
         return [f.result() for f in futs]
+NATIVE_YN = re.compile(r"^\W*(YES|NO)\b", re.I)
+
+
+def native_one(provider, meta: dict, prompt: str, text: str, retries: int = 4) -> dict:
+    """Ask the prompt in the form it was WRITTEN for: prompt, then the text, then a
+    bare YES/NO. No rubric wrapper, no 0-1 scale, no threshold.
+
+    WHY THIS IS THE DEFAULT. The rubric form embeds the prompt as the `criterion`
+    of prompt_tdd's RUBRIC_PROMPT -- a 0-1 "quality" scale with the text placed
+    ABOVE a prompt that says "the text below", and YES := score >= 0.5. Measured
+    2026-09-23 over 285 tasks: the two forms agreed on 241, and all 44
+    disagreements ran ONE way, rubric YES -> native NO (73 YES vs 29). 22 of the
+    rubric YESes were intermediate scores crossing the 0.5 line -- including
+    CTL10-13, where the judge wrote "pushes toward NO" and then scored 0.7.
+    A wrapper that only ever adds YESes is a bias, not noise.
+    """
+    last = None
+    for attempt in range(retries):
+        try:
+            raw, _ = provider.complete(f"{prompt}\n\n<text>\n{text}\n</text>")
+            m = NATIVE_YN.match(raw.strip())
+            if not m:
+                raise ValueError(f"unparseable native answer: {raw.strip()[:80]!r}")
+            v = m.group(1).upper()
+            return {**meta, "verdict": v, "score": 1.0 if v == "YES" else 0.0,
+                    "spread": 0.0, "diverged": False, "raw": raw.strip()[:200]}
+        except Exception as e:  # noqa: BLE001 — surfaced as an errored row, never a verdict
+            last = f"{type(e).__name__}: {e}"
+            time.sleep(2 * (2 ** attempt))
+    return {**meta, "error": last}
+REASONED_SUFFIX = """
+
+Before answering, go through each condition in the question one at a time and
+say whether the text meets it. Then give your answer on a final line as
+ANSWER: YES or ANSWER: NO."""
+
+REASONED_ANSWER = re.compile(r"^\s*ANSWER:\s*(YES|NO)\b", re.I | re.M)
+
+
+def reasoned_one(provider, meta: dict, prompt: str, text: str, retries: int = 4) -> dict:
+    """The prompt as written, then the text, then room to reason before a final
+    `ANSWER:` line. The DEFAULT form, and the only one that passed the mutation gate.
+
+    WHY. Measured 2026-09-23, mutation gate at n=10: the BARE native form answered
+    NO to its own clear-YES fixture 10/10 on RTD-8 and RTD-3 (3/10 on RTD-9), and on
+    RTD-8 gave a wrong reason for it. The same prompts, allowed to walk their
+    conditions first, answered YES with sound reasoning. The prompts' own "Answer YES
+    or NO, and nothing else" is the right contract for a trained classifier that
+    returns a probability, and the wrong one for an LLM judge: it demands the format
+    before the reasoning (prompt-hamsa Heuristic 5).
+
+    The LAST `ANSWER:` line is the verdict, so a condition-by-condition walk that
+    says "YES, it meets (a)" can never be read as the answer. A missing answer line
+    or an empty reasoning body is refused as an errored row.
+    """
+    last = None
+    for attempt in range(retries):
+        try:
+            raw, _ = provider.complete(f"{prompt}\n\n<text>\n{text}\n</text>{REASONED_SUFFIX}")
+            answers = REASONED_ANSWER.findall(raw)
+            if not answers:
+                raise ValueError(f"no ANSWER: line in reasoned reply: {raw.strip()[-120:]!r}")
+            body = REASONED_ANSWER.split(raw)[0].strip()
+            if not body:
+                raise ValueError("reasoned reply carried an answer and no reasoning")
+            v = answers[-1].upper()
+            return {**meta, "verdict": v, "score": 1.0 if v == "YES" else 0.0,
+                    "spread": 0.0, "diverged": False, "reasoning": body[-600:]}
+        except Exception as e:  # noqa: BLE001 — surfaced as an errored row, never a verdict
+            last = f"{type(e).__name__}: {e}"
+            time.sleep(2 * (2 ** attempt))
+    return {**meta, "error": last}
+JEV_URL = "https://api.typesafe.ai/v1/systemone"
+JEV_MODEL = "jev-latest"
+# The one sentence describing an output Jev does not produce. Whitespace-tolerant
+# because the contradiction prompt wraps it across a line break.
+JEV_STRIP = re.compile(r"\s*Answer\s+YES\s+or\s+NO,\s+and\s+nothing\s+else\.")
+
+
+def jev_instructions(prompt: str) -> str:
+    """The prompt verbatim minus the answer-format sentence -- REFUSING if that
+    sentence is not there exactly once, since a strip that silently did nothing is
+    indistinguishable from one that worked (the pre-registration's own rule)."""
+    stripped, n = JEV_STRIP.subn("", prompt)
+    if n != 1:
+        raise ValueError(f"expected the answer-format sentence exactly once, found {n}")
+    return stripped.strip()
+
+
+def jev_one(_provider, meta: dict, prompt: str, text: str, retries: int = 4) -> dict:
+    """One `noul` question per request: the passage is the state, the prompt is the
+    instructions, no criteria. P(true) >= 0.5 is a fire -- fixed in the
+    pre-registration, not tuned on the corpus. The key is read from the
+    environment and never logged."""
+    import urllib.error
+    import urllib.request
+    key = os.environ.get("JEV_API_KEY")
+    if not key:
+        return {**meta, "error": "JEV_API_KEY not set"}
+    try:
+        instructions = jev_instructions(prompt)
+    except ValueError as e:
+        return {**meta, "error": str(e)}
+    body = json.dumps({"model": JEV_MODEL, "state": text,
+                       "questions": {"q": {"type": "noul", "instructions": instructions}}}).encode()
+    last = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(JEV_URL, data=body, headers={
+                "Content-Type": "application/json", "Authorization": f"Bearer {key}"})
+            with urllib.request.urlopen(req, timeout=60) as r:
+                data = json.load(r)
+            p = float(data["answers"]["q"]["noul"])
+            if not 0.0 <= p <= 1.0:
+                raise ValueError(f"noul {p!r} outside [0,1]")
+            return {**meta, "verdict": "YES" if p >= 0.5 else "NO", "score": p, "p": p,
+                    "spread": 0.0, "diverged": False, "jev_model": data.get("model")}
+        except urllib.error.HTTPError as e:
+            last = f"HTTP {e.code}: {e.read().decode()[:160].replace(key, '<KEY>')}"
+        except Exception as e:  # noqa: BLE001 — surfaced as an errored row, never a verdict
+            last = f"{type(e).__name__}: {str(e)[:160].replace(key, '<KEY>')}"
+        time.sleep(2 * (2 ** attempt))
+    return {**meta, "error": last}
+
+
+def score_tasks(args, specs: list[tuple[dict, str, str]]) -> list[dict]:
+    """One dispatcher for both modes, so mutation and score cannot run different forms.
+
+    `specs` carries each prompt RAW; the rubric form adapts it here and only here.
+    Every row is stamped with its form, judge and run index so the analyser can
+    refuse a conclusion the configuration cannot support.
+    """
+    expanded = [({**meta, "form": args.form, "judges": args.judges, "run": i}, prompt, text)
+                for i in range(args.runs) for meta, prompt, text in specs]
+    if args.form in ("native", "reasoned", "jev"):
+        provider = None
+        if args.form != "jev":
+            provider = TextOnlyAnthropic(CLAUDE_MODEL)
+            provider._get_client()
+        fn = {"native": native_one, "reasoned": reasoned_one, "jev": jev_one}[args.form]
+        with ThreadPoolExecutor(max_workers=args.pool) as ex:
+            futs = [ex.submit(fn, provider, m, p, t) for m, p, t in expanded]
+            return [f.result() for f in futs]
+    panel = build_panel(args.max_spread, args.judges)
+    panel.judges[0].provider._get_client()
+    return run(panel, [(m, adapt(p), t) for m, p, t in expanded], args.pool)
 
 
 def mutation(args) -> int:
-    panel = build_panel(args.max_spread, args.judges)
-    panel.judges[0].provider._get_client()
-    tasks = []
-    for pid, (yes, no, near) in MUTATION_CASES.items():
-        for kind, text in (("clear_yes", yes), ("clear_no", no), ("near_miss", near)):
-            tasks.append(({"prompt_id": pid, "kind": kind}, adapt(PROMPTS[pid]), text))
-
-    rows = run(panel, tasks, args.pool)
+    specs = [({"prompt_id": pid, "kind": kind}, PROMPTS[pid], text)
+             for pid, (yes, no, near) in MUTATION_CASES.items()
+             for kind, text in (("clear_yes", yes), ("clear_no", no), ("near_miss", near))]
+    rows = score_tasks(args, specs)
     errors = [r for r in rows if "error" in r]
     ok = [r for r in rows if "error" not in r]
 
-    print(f"=== MUTATION CHECK — {banner(args.judges)} ===")
+    print(f"=== MUTATION CHECK — form={args.form} runs={args.runs} — {banner(args.judges)} ===")
     print(f"rows={len(rows)} ok={len(ok)} errors={len(errors)}\n")
     for e in errors:
         print(f"  ERROR {e['prompt_id']}/{e['kind']}: {e['error']}")
 
+    # Mean score per (prompt, kind) over runs: the fire RATE in native form.
+    acc: dict[tuple[str, str], list[float]] = collections.defaultdict(list)
+    for r in ok:
+        acc[(r["prompt_id"], r["kind"])].append(r["score"])
     print(f"{'prompt':<14} {'clear_yes':>10} {'near_miss':>10} {'clear_no':>10}   split?")
     splits = 0
     for pid in MUTATION_CASES:
-        g = {r["kind"]: r for r in ok if r["prompt_id"] == pid}
-        if len(g) != 3:
-            print(f"{pid:<14} INCOMPLETE ({len(g)}/3 scored)")
+        cells = {k: acc.get((pid, k)) for k in ("clear_yes", "near_miss", "clear_no")}
+        if not all(cells.values()):
+            print(f"{pid:<14} INCOMPLETE")
             continue
-        y, n, m = g["clear_yes"]["score"], g["clear_no"]["score"], g["near_miss"]["score"]
+        y, m, n = (sum(v) / len(v) for v in (cells["clear_yes"], cells["near_miss"], cells["clear_no"]))
         split = y >= 0.7 and n <= 0.3
         splits += split
         print(f"{pid:<14} {y:>10.2f} {m:>10.2f} {n:>10.2f}   {'PASS' if split else 'FAIL'}")
 
     print(f"\npoles split on {splits}/{len(MUTATION_CASES)} prompts")
     print("near-miss scores are NOT graded here — they are reported so the "
-          "near-gate\nregion is visible before the corpus run. A near_miss pinned at a "
-          "pole means\nthe judge is not discriminating in the region the gate operates in.")
-    spreads = sorted(r["spread"] for r in ok)
-    if spreads:
-        over = sum(1 for s in spreads if s > args.max_spread)
-        print(f"\nspread: max={spreads[-1]:.3f}  over gate {args.max_spread}: "
-              f"{over}/{len(spreads)}")
+          "near-gate\nregion is visible before the corpus run.")
     if errors:
         print("\n⚠ ERRORS PRESENT — do not read the table above as a clean result.")
         return 2
@@ -271,17 +416,13 @@ def mutation(args) -> int:
 
 def score(args) -> int:
     rows_in = [json.loads(l) for l in open(args.tasks)]
-    print(f"=== JUDGE — {banner(args.judges)}")
-    panel = build_panel(args.max_spread, args.judges)
-    panel.judges[0].provider._get_client()
-    tasks = [
-        ({"judges": args.judges, "task_id": r["task_id"], "prompt_id": r["prompt_id"],
-          "passage_id": r["passage_id"], "parts": r.get("parts", 1)},
-         adapt(r["prompt"]), r["text"])
-        for r in rows_in
-    ]
+    print(f"=== JUDGE — form={args.form} runs={args.runs} — {banner(args.judges)}")
+    specs = [({"task_id": r["task_id"], "prompt_id": r["prompt_id"],
+               "passage_id": r["passage_id"], "parts": r.get("parts", 1)},
+              r["prompt"], r["text"])
+             for r in rows_in]
     t0 = time.monotonic()
-    rows = run(panel, tasks, args.pool)
+    rows = score_tasks(args, specs)
     with open(args.out, "w") as fh:
         for r in rows:
             fh.write(json.dumps(r) + "\n")
@@ -306,15 +447,32 @@ def load_prompts(path: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["mutation", "score"], required=True)
+    ap.add_argument("--form", choices=["reasoned", "native", "rubric", "jev"], default="reasoned",
+                    help="reasoned (default) = the prompt as written, then reason per "
+                         "condition, then a final ANSWER line -- the only form that "
+                         "passed the mutation gate; native = bare YES/NO, measurably "
+                         "biased to NO; rubric = prompt_tdd's 0-1 RUBRIC_PROMPT, "
+                         "measurably biased to YES. The last two are kept only to "
+                         "reproduce those findings")
+    ap.add_argument("--runs", type=int, default=1,
+                    help="samples per task; the judge varies between calls, so a "
+                         "single sample is a verdict and >=10 is a rate")
     ap.add_argument("--tasks", default="blind-tasks.jsonl")
     ap.add_argument("--out", default="scored.jsonl")
-    ap.add_argument("--judges", choices=["panel", "claude"], required=True,
+    ap.add_argument("--judges", choices=["panel", "claude", "jev"], required=True,
                     help="panel = cross-family, needs a live GEMINI_API_KEY; "
                          "claude = single judge, provisional and labelled so in "
                          "the output and in every emitted row")
     ap.add_argument("--max-spread", type=float, default=0.25)
     ap.add_argument("--pool", type=int, default=6)
     args = ap.parse_args()
+    if (args.form == "jev") != (args.judges == "jev"):
+        sys.exit("--form jev and --judges jev go together: the judge IS the form.")
+    if args.form != "rubric" and args.judges == "panel":
+        sys.exit(f"--form {args.form} is single-judge by construction: PanelJudge scores "
+                 "rubrics, not YES/NO answers. Use --judges claude, or --form rubric.")
+    if args.runs < 1:
+        sys.exit("--runs must be >= 1")
     load_prompts(args.tasks)
     missing = set(MUTATION_CASES) - set(PROMPTS)
     if args.mode == "mutation" and missing:

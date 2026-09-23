@@ -2,7 +2,7 @@
 id: '06bcdbaf7583c526'
 kind: eval
 status: active
-title: Rule-tell scoring — first run, 2026-09-23 (provisional, single judge)
+title: Rule-tell scoring — 2026-09-23 (single judge; one result retracted and replaced)
 tags:
 - eval
 - rule-tells
@@ -15,77 +15,139 @@ topic: rule-tell-detection
 
 **Valid:** dated 2026-09-23
 
-This records the first scoring run of the five rule-tell detector prompts against the control corpus. The design is in `docs/evals/rule-injection-timing-preregistration.md` (`11f039dc91b862ec`) and the corpus is `docs/evals/rule-tell-controls.md` (`cfa0d5bc1bdeacab`).
+This records the scoring of the five rule-tell detector prompts against the control corpus. The design is in `docs/evals/rule-injection-timing-preregistration.md` (`11f039dc91b862ec`), the corpus is `docs/evals/rule-tell-controls.md` (`cfa0d5bc1bdeacab`), and the scope is **single-judge** (`claude-haiku-4-5`): the Gemini leg was unavailable, so no cross-family divergence could be measured.
 
-**Read the scope first:** the run is **single-family and provisional.** The pre-registration names a cross-family panel. The Gemini leg was unavailable (its key returns `API_KEY_INVALID`), so every verdict below comes from one judge, no divergence could be detected, and no row could be withheld.
+## Retraction — read first
 
-## How to reproduce
+The first version of this document, committed in `9108d49b`, said the prompts **"fail on precision"**. That was wrong, and it came from three defects in the harness and analyser, not from the prompts:
 
-The pipeline has three stages, and each is a script in this repo:
+1. **The prompts were wrapped in a 0–1 quality rubric** (`prompt-engineering:RUBRIC_PROMPT`), which biased verdicts toward YES. Over 285 tasks, all 44 disagreements between that form and the bare question ran in one direction, and 22 of the YES verdicts were scores like 0.7 crossing a 0.5 threshold. In one case the judge wrote *"pushes toward NO"* and still scored 0.7.
+2. **The analyser counted a full-shape control's YES as a false positive.** The corpus defines a full-shape control as a passage that carries every feature the prompt's YES branch names, so a YES there is what the prompt's wording requires. Only near-miss fires are precision defects.
+3. **Passages scored against another prompt were treated as known negatives.** They carry no label for that prompt, so a YES there is not known to be wrong.
 
-```
-scripts/blind-rule-tell-tasks.py     corpus -> 285 blind tasks (5 prompts x 57 passages)
-scripts/score-rule-tell-prompts.py   --mode mutation (gate), then --mode score
-scripts/analyse-rule-tell-run.py     scored rows + corpus labels -> the tables below
-```
+A later correction was also premature. Asking the bare question (*"Answer YES or NO, and nothing else"*, no wrapper) looked clean, with 0/8 near-miss fires, but that form **failed the mutation gate**: it answered NO to its own clear-YES fixtures (10/10 on RTD-8 and RTD-3). A prompt that says NO to everything passes a precision test trivially. It was presented as a finding before the gate had been re-run on it.
 
-The judge is `claude-haiku-4-5-20251001` through `prompt-engineering:PanelJudge`. The scorer uses `--judges claude`, which stamps `judges: claude` on every row so the analyser can refuse panel-only conclusions. The scorer forces the **text** judge path, for the reason in § *The first run was void*.
+## The harness that passed
 
-The scored rows live in the session scratchpad and are not committed: they carry passage text and judge reasoning, and they would be re-derived on any re-run anyway. The in-repo analyser reproduced the recorded output byte for byte before any number here was written.
+Three forms were tested against fifteen fixtures with known answers (a clear YES, a clear NO, and a near-miss per prompt):
 
-## The mutation gate passed before any corpus row was spent
-
-The gate is fifteen hand-written rows (per prompt: a clear YES, a clear NO, and a realistic near-miss), following `prompt-engineering:skill-eval-playbook` `L-13`. The poles split on **5 of 5** prompts.
-
-The near-miss column is not graded by the gate. One cell still earned its place: RTD-8 scored **1.00** on *"Nothing in the scheduler reads `retry_budget`. A workspace-wide grep returns only its definition."* That text meets both of RTD-8's own NO conditions, since the negative is scoped and the search spans the claim.
-
-## The first run was void
-
-The first 285-row pass used the Anthropic structured-output path and produced no usable verdicts:
-
-- 72% of rows had empty reasoning.
-- 52 rows had scores no judge would give, such as `1e-121`, ten rows at `1e-16`, and one at `1.0018`, which is outside the declared range.
-- The correlation had no exceptions. All 80 rows with reasoning had sane scores, and every degenerate score was on a row without reasoning.
-
-The cause is in `prompt-engineering`, not here, and it is harness-wide. `Verdict.reasoning` has a default, so the generated schema does not require it, and the model leaves it out: 29 of 32 of the harness's own stock rubrics came back without reasoning. Filed as `prompt-engineering:docs/issues/2026-09-23-structured-judge-verdict-omits-reasoning-and-scores-unbounded.md` (`prompt-engineering:98c5431`).
-
-Two positives that "failed" in the void run passed once it was re-scored. The first run's gate verdict was an artifact of the judge path, not a property of the prompts.
-
-## Results — text path, 285/285 scored, 0 errored, every row with reasoning
-
-### Positive gate: 4 of 5
-
-| positive | prompt | verdict |
+| form | how the prompt is asked | mutation gate |
 |---|---|---|
-| `CTL10-8` | RTD-10 | YES 1.00 |
-| `CTL3-6` | RTD-3 | YES 0.75 |
-| `CTL8-6` | RTD-8 | YES 1.00 |
-| `CTL9-4` | RTD-9 | YES 1.00 |
-| `CTLX-5` | contradiction | **NO 0.00** |
+| rubric | wrapped in a 0–1 quality rubric, YES if the score is 0.5 or more | passed the poles at n = 1, but is **biased toward YES** (see above) |
+| native | the prompt as written, bare YES/NO | **failed**: NO to its own clear YES, 10/10 on two prompts |
+| **reasoned** | the prompt as written, then reason through each condition, then a final `ANSWER:` line | **passed 5/5 at n = 10**, every pole exactly 1.00 / 0.00 |
 
-`CTLX-5`'s NO is correct for what the judge was shown. The corpus stores the passage as two fragments, and the blinding extractor joins them with `[…]`, which drops the material the contradiction depends on. The judge's own reasoning says so: *"The excerpt provided is too brief and fragmented to evaluate against the criterion."* So the **contradiction prompt is unscoreable on this corpus as extracted**. The other four prompts cleared their gates.
+The prompts' own instruction, *"Answer YES or NO, and nothing else"*, is the right contract for a trained classifier and the wrong one for an LLM judge: it demands the verdict before any reasoning. Given room to reason, the same judge answered correctly.
 
-### Precision — a YES on a control is a false positive
+The instruments are `scripts/score-rule-tell-prompts.py` (`--form reasoned` is the default) and `scripts/analyse-rule-tell-run.py`. The scorer refuses unparseable rows and rows with no reasoning, and stamps the form, judge and run on every row. The analyser refuses to run the calibration section when there is only one judge, and reports each label by the corpus's own definition.
 
-| prompt | controls | YES | full-shape | near-miss |
-|---|---|---|---|---|
-| RTD-10 | 12 | **9** | 8/10 | 1/2 |
-| RTD-3 | 10 | 6 | 6/10 | — |
-| RTD-9 | 10 | 6 | 5/6 | 1/4 |
-| RTD-8 | 10 | 3 | 3/8 | 0/2 |
-| contradiction | 10 | 4 | not interpretable | |
+**The first scoring pass was void for a separate reason.** The harness judge's structured-output path returned verdicts with no reasoning at all: 72% of rows, including scores such as `1e-121`. Filed as `prompt-engineering:docs/issues/2026-09-23-structured-judge-verdict-omits-reasoning-and-scores-unbounded.md` (`prompt-engineering:98c5431`); it affects every eval in that repo. Every run recorded here uses the text path.
 
-### Cross-talk — how often a prompt fires on passages outside its own shape
+## Results — reasoned form, n = 10, 2,850 of 2,850 rows, 0 errored
 
-RTD-8 15/46 (33%) · RTD-10 14/44 (32%) · RTD-3 9/46 (20%) · RTD-9 2/46 (4%) · contradiction 1/46 (2%).
+The fire rate is the share of the ten runs that answered YES.
+
+### Positive gate: 3 of 4 scoreable
+
+| positive | prompt | fire rate |
+|---|---|---|
+| `CTL10-8` | RTD-10 | 1.00 |
+| `CTL8-6` | RTD-8 | 0.90 |
+| `CTL3-6` | RTD-3 | 0.80 |
+| `CTL9-4` | RTD-9 | **0.00** |
+| `CTLX-5` | contradiction | not scoreable |
+
+`CTL9-4` fails because of **ambiguous wording in RTD-9**, not because of the harness. In every run the judge reasons that because a date appears (*"55 rows written on 2026-05-17"*), the text "states the span" its records cover, and so answers NO. That date is when the rows were written, not the period the records cover. RTD-9's YES branch lists *"no date range, no 'as of'"*, which invites reading any date as a coverage window. The fix is a wording change: distinguish a date that appears in the text from the span the source covers.
+
+`CTLX-5` is unscoreable because the blinding extractor joins its two fragments across a gap that removes the material the contradiction depends on. The judge's reasoning says as much: *"too brief and fragmented to evaluate."*
+
+### Diagonal controls
+
+| prompt | near-miss (**precision**: a fire is a defect) | full-shape (a fire is what the wording requires) |
+|---|---|---|
+| RTD-10 | 0.10 mean, 0/2 tasks fire | 0.83, 9/10 |
+| RTD-9 | 0.25 mean, 1/4 | 0.60, 4/6 |
+| RTD-8 | 0.20 mean, 0/2 | 0.46, 4/8 |
+| RTD-3 | no near-miss controls | 0.39, 5/10 |
+
+Only **1 of the 8 near-miss controls** fires at 0.5 or above. A full-shape control that does *not* fire means either the prompt skipped its own YES branch or the label is wrong, and this column cannot tell which. Several full-shape passages meet one of the prompt's NO conditions on a close reading, so the labels themselves need review by someone other than their author.
+
+### Off-diagonal passages (unlabelled for the prompt)
+
+RTD-8 fires on 0.33 of them, RTD-10 on 0.30, RTD-3 on 0.22, contradiction on 0.08, and RTD-9 on 0.07. These are **fire rates, not false-positive rates**: the passages carry no label for these prompts.
 
 ## Against the registered predictions
 
-- **RTD-10: confirmed on the numeric threshold, and not on the strongest reading.** The registration predicted a YES on at least 3 of the 12 controls, and the observed count is 9. The two near-misses that were meant to discriminate split: `CTL10-13` drew YES (0.70) and `CTL10-11` drew NO. So the registered strongest reading, a YES on both, did not happen.
-- **RTD-9: reported split, as registered.** It fired on 5 of 6 full-shape controls and on 1 of 4 near-misses. A pooled 6/10 would have hidden that the prompt is weakest exactly on the controls built to look like its tell.
+- **RTD-10: the registered threshold is met (9 of 12 controls fire), but the prompt survives on its own exclusions.** Its two discriminating near-misses fire at 0.00 (`CTL10-11`) and 0.20 (`CTL10-13`), so the "does not survive" reading is **not** supported. It fires on full-shape claims as its wording requires, and holds on the claims its NO branch excludes.
+- **RTD-9, reported split as registered:** full-shape 0.60 (4/6), near-miss 0.25 (1/4). Separately, its positive fails on the wording defect above.
 
 ## What this does not establish
 
-- **Nothing is cross-family.** The calibration section of the analyser refused to run, because every spread is 0.0 when there is one judge, and a clean-valley verdict would then be an artifact of the setup. The panel's own calibration also predates the structured path and was measured on the text path (see the `prompt-engineering` bug file).
-- **The cells are small.** Each prompt has 10–12 controls, and the near-miss sub-cells hold 2–4.
-- **The contradiction prompt has no result.** Measuring it needs whole documents, or passages that keep the material between their fragments. That is a corpus decision and has not been made.
+- **Nothing here is cross-family.** One judge, no divergence signal.
+- **Small cells:** 10–12 controls per prompt, 2–4 near-misses.
+- **The contradiction prompt has no result.** Measuring it needs whole documents, or passages that keep the material between their fragments.
+- **This measures the detector-prompt approach, not rule selection.** Whether a selector picks the right rule to inject is phase 1 proper, and is measured separately.
+
+## Jev `noul` arm — the registered prediction was falsified
+
+The pre-registration's 2026-09-23 amendment predicted that Jev would **pass the mutation gate on at least 4 of the 5 prompts**, and that if it failed on more than one, the corpus would not be scored with it.
+
+| prompt | clear YES | near-miss | clear NO | gate (YES ≥ 0.7, NO ≤ 0.3) |
+|---|---|---|---|---|
+| RTD-8 | 0.89 | 0.68 | 0.34 | FAIL |
+| RTD-9 | 0.95 | 0.55 | 0.04 | PASS |
+| RTD-3 | 0.93 | 0.93 | 0.12 | PASS |
+| RTD-10 | 0.94 | 0.26 | 0.17 | PASS |
+| contradiction | 0.65 | 0.10 | 0.21 | FAIL |
+
+These are mean P(true) over 3 runs. **It passed 3 of 5, so the prediction is falsified, and the corpus was not scored with this arm.**
+
+At the registered **fire cut-off of 0.5**, every clear pole would still be classified correctly. The registration names the same gate as every other form, though, so the looser test was not substituted after the results were seen. The margins also matter in their own right: a confident NO at 0.34, and a near-miss at 0.68 on RTD-8, which would fire, where reasoned Haiku gave 0.00 over 10 runs.
+
+## Phase 1A — rule selection (exploratory, not pre-registered)
+
+This section answers a different question from the rest of the document: **given an agent's output, does a selector pick the rule the output violates?** It is the after-the-turn half of phase 1. The instrument is `scripts/phase1-rule-selection.py`.
+
+**The arm was not pre-registered.** The pre-registration covers Jev's `noul` arm; this `choice` arm was designed and run in the same session, with no prediction recorded beforehand. Read the numbers as exploratory.
+
+**Data.** The 21 cases in `docs/evals/rule-tell-detection.md`. Each is a same-claim pair: the text as published, which violated the case's rule, and the same claim after correction, which violates none.
+
+**Menu.** 23 options:
+
+- the 12 laws the cases cite, worded as close to each law's quoted text as possible;
+- the unwritten contradiction tell, which the eval set records as a gap in the rule corpus;
+- 9 distractors, real `CLAUDE.md` laws that no case violates;
+- `none`.
+
+The mapping from each case to its correct option is a judgment call and is shipped in the script as `GOLD`.
+
+### Gate first
+
+Six fixtures with known answers, written for the gate and drawn from no case: two clean texts, and four unmistakable violations spanning cited laws and distractors.
+
+| selector | gate |
+|---|---|
+| Jev (`choice`, `jev-latest`) | **6/6**, 3/3 on every fixture |
+| reasoned Haiku | **4/6**: it flags both clean texts (for example `run_tool` on *"The helper returns the sum of its two integer arguments"*) |
+
+Haiku's misses are defensible under a strictly literal reading of that rule, since almost any engineering sentence can be read as breaking one of 23 rules. The consequence for the product is the same either way: a selector that always finds a violation injects on every turn.
+
+### Results
+
+| | Jev, 3 runs | reasoned Haiku, 5 runs |
+|---|---|---|
+| text-detectable positives: top-1 | **12/51 (24%)** | 12/85 (14%) |
+| top-3 | **27/51 (53%)** | 30/85 (35%) |
+| corrected text: picks `none` | **30/63 (48%)** | 1/105 (1%) |
+
+Chance on this menu is 1/23 (4%).
+
+**Jev is not deterministic.** Its full distribution differed on all 42 states across three runs, and its top pick was stable on 33 of 42. Average over runs; never read one call as the answer.
+
+**Its pairs show both the strength and the defect.**
+
+- Clean discriminations from violation to fix: RTD-10 `cannot_happen` 0.76 → `none` 0.84, RTD-15 `contradiction` 0.68 → `none`, RTD-13 `run_tool` → `none`.
+- Topic-matching rather than violation-matching: RTD-8 picks `contradiction` on **both** sides, and more confidently on the correction (0.87), whose text contains the word *"self-contradicted"*.
+- The mean probability it gives `none` is 0.27 on corrected text and 0.24 on violating text, so as a separator between violation and fix, `none` is weak.
+
+**Reading.** On this set, Jev passes the gate where the reasoning LLM does not, and beats it on every measure. Its top-1 accuracy (24%) is too low to inject on directly; its top-3 (53%) suggests it could serve as a candidate filter in front of a slower check. The set is small, 21 pairs, and this is one run of an unregistered arm. The before-the-turn half of phase 1, predicting the rule from the context leading up to the wrong step, is not measured here.

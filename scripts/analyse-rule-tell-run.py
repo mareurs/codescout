@@ -82,11 +82,17 @@ def main() -> int:
     errors = [r for r in rows if "error" in r]
     ok = [r for r in rows if "error" not in r]
 
-    print(f"=== RUN — {len(ok)}/{len(rows)} scored, {len(errors)} errored")
+    forms = sorted({r.get("form", "rubric") for r in ok})
+    runs = sorted({r.get("run", 0) for r in ok})
+    print(f"=== RUN — {len(ok)}/{len(rows)} rows scored, {len(errors)} errored; "
+          f"form={forms}, runs per task={len(runs)}")
     cfgs = sorted({r.get("judges", "unknown") for r in ok})
     print(f"    judge configuration: {cfgs}"
           + ("   ⚠ PROVISIONAL — single family, no divergence signal"
              if cfgs != ["panel"] else ""))
+    if "rubric" in forms or "native" in forms:
+        print("    ⚠ form includes rubric/native — both FAILED the mutation gate "
+              "(rubric biased YES, native biased NO). Only `reasoned` passed.")
     if errors:
         print("⚠ ERRORS PRESENT. Every rate below is over a PARTIAL batch; an "
               "errored\n  row and a NO are indistinguishable downstream. Read this "
@@ -105,106 +111,110 @@ def main() -> int:
     # indistinguishable from the one a real cross-family run with perfect
     # agreement produces. The distribution is monotone under the very thing the
     # section exists to detect, so the section refuses rather than softens.
-    judge_cfg = {r.get("judges", "unknown") for r in ok}
     spreads = [r["spread"] for r in ok]
     g = args.max_spread
-    print(f"\n=== 1. JUDGE CALIBRATION ON THIS CORPUS (n={len(spreads)}) ===")
-    if judge_cfg != {"panel"}:
-        print(f"  REFUSED — this run was scored by {sorted(judge_cfg)}, not the "
-              f"cross-family panel.\n  Every spread is 0.0 because there is only one "
-              f"judge, so a clean-valley verdict here\n  would be an artifact of the "
-              f"configuration, not a measurement of the corpus.\n  Re-run with "
-              f"--judges panel (needs a live GEMINI_API_KEY) to calibrate the gate.")
+    print(f"\n=== 1. JUDGE CALIBRATION ON THIS CORPUS ===")
+    if cfgs != ["panel"]:
+        print(f"  REFUSED — scored by {cfgs}, not the cross-family panel. Every spread "
+              f"is 0.0 with one judge,\n  so a clean-valley verdict here would be an "
+              f"artifact of the configuration.")
     else:
         zone = [s for s in spreads if 0.20 < s <= 0.30]
         s = sorted(spreads)
         p = lambda q: s[min(int(q * (len(s) - 1)), len(s) - 1)]  # noqa: E731
         print(f"  mean={sum(s)/len(s):.3f}  p50={p(.5):.3f}  p90={p(.9):.3f}  "
               f"p95={p(.95):.3f}  max={s[-1]:.3f}")
-        print(f"  over gate {g}: {sum(1 for x in s if x > g)}/{len(s)} "
-              f"({100*sum(1 for x in s if x > g)/len(s):.1f}%) — these are WITHHELD")
+        print(f"  over gate {g}: {sum(1 for x in s if x > g)}/{len(s)} — these are WITHHELD")
         hist(s, g)
         print(f"\n  ANTIMODE: rows in (0.20, 0.30] = {len(zone)} -> "
-              f"{'CLEAN VALLEY — gate transfers' if not zone else 'gate sits ON data, NOT a clean valley for this corpus'}")
+              f"{'CLEAN VALLEY — gate transfers' if not zone else 'gate sits ON data'}")
 
-    withheld = {r["task_id"] for r in ok if r["diverged"]}
-    graded = [r for r in ok if not r["diverged"]]
+    # Per-task FIRE RATE over runs. Withheld rows (panel divergence) are counted
+    # out, never as a NO.
+    by_task: dict[tuple[str, str], list[int]] = collections.defaultdict(list)
+    withheld = 0
+    for r in ok:
+        if r.get("diverged"):
+            withheld += 1
+            continue
+        by_task[(r["prompt_id"], r["passage_id"])].append(r["verdict"] == "YES")
+    rate = {k: sum(v) / len(v) for k, v in by_task.items() if v}
+
+    def cell(prompt: str, pids: list[str]) -> str:
+        rs = [rate[(prompt, p)] for p in pids if (prompt, p) in rate]
+        if not rs:
+            return "—"
+        maj = sum(1 for x in rs if x >= 0.5)
+        return f"{sum(rs)/len(rs):.2f} ({maj}/{len(rs)} tasks fire)"
 
     # ---- 2. POSITIVE GATE --------------------------------------------------
     positives = {p for p, d in labels.items() if d["is_positive"]}
-    print(f"\n=== 2. POSITIVE GATE — {len(positives)} seeded positives must fire ===")
+    print(f"\n=== 2. POSITIVE GATE — {len(positives)} seeded positives must fire "
+          f"(fire rate >= 0.5) ===")
     gate_ok = True
     for pid in sorted(positives):
         own = labels[pid]["for_prompt"]
-        hit = [r for r in ok if r["passage_id"] == pid and r["prompt_id"] == own]
-        if not hit:
+        x = rate.get((own, pid))
+        if x is None:
             print(f"  {pid:<10} {own:<14} NOT SCORED")
             gate_ok = False
             continue
-        r = hit[0]
-        flag = "WITHHELD" if r["diverged"] else r["verdict"]
-        bad = r["diverged"] or r["verdict"] != "YES"
+        bad = x < 0.5
         gate_ok &= not bad
-        legs = f"claude={r['claude']:.2f}"
-        if r.get("gemini") is not None:
-            legs += f" gemini={r['gemini']:.2f}"
-        print(f"  {pid:<10} {own:<14} {flag:<9} score={r['score']:.2f} "
-              f"({legs}) {'  <-- FAIL' if bad else ''}")
-    print(f"\n  GATE: {'PASS' if gate_ok else 'FAIL — control results below are UNINTERPRETABLE'}")
+        print(f"  {pid:<10} {own:<14} fire rate {x:.2f}{'   <-- FAIL' if bad else ''}")
+    print(f"\n  GATE: {'PASS' if gate_ok else 'FAIL — a prompt that misses its own positive is not measuring precision'}")
 
-    # ---- 3. PRECISION ------------------------------------------------------
-    print(f"\n=== 3. PRECISION — diagonal controls (a YES is a false positive) ===")
-    print(f"{'prompt':<14} {'controls':>9} {'YES':>5} {'rate':>7}   full-shape    near-miss   withheld")
+    # ---- 3. DIAGONAL, BY WHAT EACH LABEL MEANS -----------------------------
+    # The corpus defines the two control kinds (rule-tell-controls.md § What a
+    # control is here). Reading both as negatives was the defect in the first
+    # analysis of this run: a FULL-SHAPE control carries every YES feature, so a
+    # fire is what the prompt's wording REQUIRES; only a NEAR-MISS fire is a
+    # failure to honour the prompt's own exclusions.
+    print(f"\n=== 3. DIAGONAL CONTROLS — mean fire rate, and tasks firing at >= 0.5 ===")
+    print("  near-miss  : a stated NO condition is met -> a fire is a PRECISION DEFECT")
+    print("  full-shape : every YES feature present   -> a fire is what the wording requires;")
+    print("               a non-fire means the prompt skipped its own YES branch, OR the")
+    print("               label is wrong — this column cannot tell which")
+    print(f"\n{'prompt':<14} {'near-miss (precision)':<28} {'full-shape':<28}")
     for sec, prompt in DIAGONAL.items():
         ctrls = [p for p, d in labels.items()
                  if p.startswith(sec + "-") and not d["is_positive"]]
-        sub = [r for r in graded if r["prompt_id"] == prompt and r["passage_id"] in ctrls]
-        wh = sum(1 for r in ok if r["prompt_id"] == prompt
-                 and r["passage_id"] in ctrls and r["diverged"])
-        yes = [r for r in sub if r["verdict"] == "YES"]
-        fs = [r for r in sub if labels[r["passage_id"]]["shape"] == "full-shape"]
-        nm = [r for r in sub if labels[r["passage_id"]]["shape"] == "near-miss"]
-        fy = sum(1 for r in fs if r["verdict"] == "YES")
-        ny = sum(1 for r in nm if r["verdict"] == "YES")
-        rate = f"{len(yes)}/{len(sub)}" if sub else "—"
-        print(f"{prompt:<14} {len(ctrls):>9} {len(yes):>5} {rate:>7}   "
-              f"{fy}/{len(fs):<10} {ny}/{len(nm):<10} {wh}")
+        nm = [p for p in ctrls if labels[p]["shape"] == "near-miss"]
+        fs = [p for p in ctrls if labels[p]["shape"] == "full-shape"]
+        unk = [p for p in ctrls if labels[p]["shape"] == "UNKNOWN"]
+        tail = f"   ({len(unk)} controls carry no shape label)" if unk else ""
+        print(f"{prompt:<14} {cell(prompt, nm):<28} {cell(prompt, fs):<28}{tail}")
 
-    # ---- 4. CROSS-TALK -----------------------------------------------------
-    print(f"\n=== 4. CROSS-TALK — off-diagonal YES (a prompt firing outside its shape) ===")
+    # ---- 4. OFF-DIAGONAL ---------------------------------------------------
+    # Another prompt's passages carry NO label for this prompt, so a fire there is
+    # not known to be wrong. Reported as a rate, never as a false-positive rate.
+    print(f"\n=== 4. OFF-DIAGONAL — UNLABELLED for this prompt; a fire rate, "
+          f"NOT a false-positive rate ===")
     for sec, prompt in DIAGONAL.items():
-        off = [r for r in graded if r["prompt_id"] == prompt
-               and not r["passage_id"].startswith(sec + "-")]
-        yes = sum(1 for r in off if r["verdict"] == "YES")
-        print(f"  {prompt:<14} {yes:>3}/{len(off):<4} "
-              f"({100*yes/len(off) if off else 0:.0f}%)")
+        off = sorted({p for (pr, p) in rate if pr == prompt and not p.startswith(sec + "-")})
+        print(f"  {prompt:<14} {cell(prompt, off)}")
 
     # ---- 5. REGISTERED PREDICTIONS ----------------------------------------
     print(f"\n=== 5. REGISTERED PREDICTIONS ===")
     c10 = [p for p, d in labels.items() if p.startswith("CTL10-") and not d["is_positive"]]
-    s10 = [r for r in graded if r["prompt_id"] == "RTD-10" and r["passage_id"] in c10]
-    y10 = [r for r in s10 if r["verdict"] == "YES"]
+    fire10 = [p for p in c10 if rate.get(("RTD-10", p), 0) >= 0.5]
     print(f"  RTD-10 — registered: YES on >= 3 of the 12 controls, 'does not survive'.")
-    print(f"           observed: {len(y10)}/{len(s10)} scored controls "
-          f"({len(c10)} labelled)")
+    print(f"           observed: {len(fire10)}/{len(c10)} controls fire at >= 0.5 "
+          f"-> {'MET' if len(fire10) >= 3 else 'NOT MET'}")
     for nm in ("CTL10-11", "CTL10-13"):
-        h = [r for r in ok if r["passage_id"] == nm and r["prompt_id"] == "RTD-10"]
-        if h:
-            r = h[0]
+        if ("RTD-10", nm) in rate:
             print(f"           {nm} (near-miss, the discriminating cell): "
-                  f"{'WITHHELD' if r['diverged'] else r['verdict']} score={r['score']:.2f}")
+                  f"fire rate {rate[('RTD-10', nm)]:.2f}")
     c9 = [p for p, d in labels.items() if p.startswith("CTL9-") and not d["is_positive"]]
-    s9 = [r for r in graded if r["prompt_id"] == "RTD-9" and r["passage_id"] in c9]
-    fs9 = [r for r in s9 if labels[r["passage_id"]]["shape"] == "full-shape"]
-    nm9 = [r for r in s9 if labels[r["passage_id"]]["shape"] == "near-miss"]
-    print(f"  RTD-9  — registered: report full-shape and near-miss SEPARATELY; "
-          f"a pooled rate hides\n           that a well-followed rule depletes its own control population.")
-    print(f"           full-shape {sum(1 for r in fs9 if r['verdict']=='YES')}/{len(fs9)}"
-          f"   near-miss {sum(1 for r in nm9 if r['verdict']=='YES')}/{len(nm9)}")
+    print(f"  RTD-9  — registered: report full-shape and near-miss SEPARATELY.")
+    print(f"           full-shape {cell('RTD-9', [p for p in c9 if labels[p]['shape']=='full-shape'])}"
+          f"   near-miss {cell('RTD-9', [p for p in c9 if labels[p]['shape']=='near-miss'])}")
+    print("  contradiction — NOT SCOREABLE as extracted: its passages are joined across")
+    print("           a gap that removes the material the contradiction depends on.")
 
     if withheld:
-        print(f"\n  {len(withheld)} task(s) withheld on panel divergence — counted "
-              f"out of every rate above, never as a NO.")
+        print(f"\n  {withheld} row(s) withheld on panel divergence — counted out of "
+              f"every rate above, never as a NO.")
     return 0
 
 
