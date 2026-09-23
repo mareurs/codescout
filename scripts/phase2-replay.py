@@ -58,6 +58,26 @@ ARMS: dict[str, str | None] = {
     "2": ("Chain the two test lanes with `;`, never `&&`: the default lane must run "
           "even when the lean lane fails, because it rebuilds the binary the next "
           "session tests."),
+    # RTD-9 and RTD-10 arms. 1b names the claim and the rule but NOT the fact the
+    # claim misses; 3 supplies the fact. That split is what tests the prediction
+    # that these tells need a fact or a gate, not a rule.
+    "9-1a": "A count of a defect population must arrive with its unit or not at all. Derive it, don't cite it.",
+    "9-1b": ("The output you are about to produce contains an all-time count — that the "
+             "`pika_observations` write path has fired once, ever. The rule 'a count must "
+             "arrive with its unit or not at all' governs that claim."),
+    "9-3": ("MANDATORY — applies to the document you are about to write: do NOT state a "
+            "lifetime count such as the write path having fired 'once, ever'. `usage.db` "
+            "prunes on a rolling 30-day horizon, so no lifetime count can be read off it. "
+            "State the observation with its window, for example: at one census, one "
+            "database held 55 rows dated 2026-05-17."),
+    "10-1a": "'It cannot happen' is a claim about today's corpus and decays with it.",
+    "10-1b": ("The output you are about to produce contains an impossibility claim — that "
+              "the conflation has no site to occur at. The rule ''It cannot happen' is a "
+              "claim about today's corpus' governs that claim."),
+    "10-3": ("MANDATORY — applies to the document you are about to write: do NOT claim "
+             "that the conflation has no site to occur at. Separate tables remove the "
+             "storage site only; a join at read time can still merge a self-report with "
+             "an observation. Scope the claim to storage."),
     # Positive control: maximally explicit and specific. Its job is to prove the
     # channel can move the outcome at all; it is not a candidate treatment.
     "3": ("MANDATORY — applies to the document you are about to write: do NOT claim "
