@@ -134,7 +134,38 @@ One arm-1b replay took a different action first (a `read_file`), so the violatio
 - **One decision point.** The ten samples measure how the model varies at one moment. They are not ten independent violations.
 - **Arm 1b assumes phase 1 worked.** Its text names the claim, as a classifier that had seen the draft would. The result is therefore conditional: *if* the selector finds the violated rule and binds it to the claim, the agent corrects it. On this same case, phase 1A's Jev ranked the correct rule first (`contradiction`, 0.40), but phase 1A's overall top-1 rate was 24%.
 - **Fidelity:** tool definitions were stand-ins (about 44k tokens missing); thinking and effort were the model's defaults; the judge was a single model family. All of these are identical across arms.
-- **RTD-9 and RTD-10 share this decision point but have not been scored**, and the RTD-3 decision point (record 1290, about 570k tokens) has not been replayed.
+- **RTD-9 and RTD-10 share this decision point and are scored in the next section**, on a different judge channel. The RTD-3 decision point (record 1290, about 570k tokens) has not been replayed.
+
+## Phase 2 — RTD-9 and RTD-10 at the same decision point, registered
+
+This is the same recorded doc write as RTD-8. The agent's output also made RTD-9's claim (the write path *"has fired once, ever"*) and RTD-10's (*"the conflation has no site to occur at"*). Arm texts were registered before their replays (`5f2ac8da`). The judge channel and the second RTD-10 wording were registered before any of these scores (`75321f6e`).
+
+**Judge channel.** The Haiku judge ran through headless `claude -p` on a subscription profile (`apiKeySource: 'none'`), not the Messages API. Every arm below was scored on that channel, arms 0 and 2 included, so nothing in either table mixes judges. Each checker passed its gate on this channel at 3/3 on the recorded, corrected and unrelated fixtures. Each rule's observable was that the agent called `mcp__codescout__doc`.
+
+| arm | injected | RTD-9 | RTD-10 |
+|---|---|---|---|
+| 0 | nothing: the recorded request unchanged | **7/10** | **9/10** |
+| 2 | the unrelated rule, as RTD-8's arm 2 | **8/10** | **10/10** |
+| 1a | the rule, verbatim from `CLAUDE.md` | **4/10** | **10/10** |
+| 1b | the binding: this claim, and the rule that governs it | **0/9** | **0/10** |
+| 3 | positive control, with the missing fact | **0/10** | **0/10** |
+
+One 9-1b replay took a different first action, so that arm is out of 9. That replay is excluded, not counted as compliant.
+
+**Registered ship rule.** RTD-9: arm 0 − 1b = **0.70** and arm 2 − 1b = **0.80**. RTD-10: **0.90** and **1.00**. The requirements are 0.4 and 0.2, and both arm-0 rates clear the 0.3 ceiling exit. **RTD-9 and RTD-10 ship.**
+
+### What this adds to RTD-8
+
+- **The pattern holds across all three rules at this decision point.** A binding stops the violation (0/9, 0/10, 0/10). An unrelated injection through the same channel does not (8/10, 10/10). So the effect is the binding's content, not the interruption.
+- **The verbatim rule is weak and inconsistent.** It reduced RTD-9 to 4/10 and left RTD-10 at 10/10. Neither result meets the ship rule. For RTD-10, the rule's own sentence (*"'It cannot happen' is a claim about today's corpus"*) did not stop the agent making exactly that claim.
+- **The judge channel moves rates on identical replays.** Arm 0 measured 4/10 (RTD-9) and 5/10 (RTD-10) under the API judge, and 7/10 and 9/10 here. The shift is as large as some effects under test. That is why arms are compared only within one channel, and why the API-scored rates are superseded, not averaged in.
+- **RTD-10's checker needed a second rewording on the new channel.** The recorded text names the join key (`tool_call_id`) before concluding that the conflation has no site. The earlier wording let the judge count that mention as "addressing the join", and it failed the gate 0/3 on the recorded violation. The question now asks whether the text *concedes* that a read or join can still mix the data.
+
+### Limits
+
+- **The same single decision point as RTD-8.** Three rules measured on one moment are not three independent tests. They share the replayed context, the prompt cache, and the 44k-token tool-definition gap.
+- **The binding still assumes a working phase 1.** Arm 1b names the claim.
+- **The replays were generated on the Messages API before the cap.** Only their scoring moved to the subscription. The stripped-`CLAUDE.md` arms have no valid replays yet: the run that hit the cap produced error rows, and those are discarded, never scored.
 
 ## Phase 1A — rule selection (exploratory, not pre-registered)
 
