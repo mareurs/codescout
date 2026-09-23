@@ -1,6 +1,6 @@
 """Regression coverage for scripts/probe_augmentation_restore.py's declared-sidecar count.
 
-docs/issues/2026-09-10-probe-augmentation-restore-counts-prose-mentions-as-declarations.md:
+docs/issues/archive/2026-09-10-probe-augmentation-restore-counts-prose-mentions-as-declarations.md:
 `find_declarers` used to anchor on "line starts with `expects_augmentation:`" — which a
 documentation example inside a fenced YAML code block also satisfies, since fence content
 starts at column 0 exactly like a real frontmatter line. That counted a *mention* of the

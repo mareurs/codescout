@@ -1,5 +1,5 @@
 ---
-id: '9a1998aaf4b09801'
+id: 41c3978d6372edf9
 kind: bug
 status: fixed
 title: 'BUG: probe_augmentation_restore counted a fenced yaml example as a declaration, anchoring on a 4000-byte prefix instead of the frontmatter block'
