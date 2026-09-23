@@ -525,15 +525,22 @@ appear in `/analyze-usage`, `docs/trackers/tool-usage-patterns.md`, or the
 unbounded-pipe block (piping `cargo test` to `grep` masked a non-zero exit here,
 reporting success on a failing run) or its dangerous-command `@ack_*` gate.
 
-**Which shell path this project should use is UNDER ACTIVE EVALUATION — do not
-"settle" it in either direction as a drive-by.** Eval data showed Opus performing
-better with native `Bash` than with `run_command`, which is why
-`shell_command_mode` was set to `"disabled"` on 2026-08-27; it was returned to
-`"warn"` (i.e. `run_command` ON) the same day, deliberately, while further evals
-run. So the current setting is a **hold, not a verdict**, and the trade-offs above
-are inputs to that evaluation rather than defects to fix. If you find
-`shell_command_mode` set to something surprising, assume it is an eval arm and
-ask before changing it.
+**CONCLUDED 2026-09-20 — native `Bash`, `Write` and `Edit` are DENIED.** They were
+added to `permissions.deny` in `settings.json` for all three profiles (`~/.claude`,
+`~/.claude-sdd`, `~/.claude-kat`), implemented in `claude-plugins`. That deny is
+harness-level and unconditional: it sits upstream of, and independent from,
+codescout-companion's `pre-tool-guard.mjs`, whose advisory-then-stand-down
+behaviour no longer decides anything here. Verdict and its location:
+`docs/trackers/shell-gating-session-log.md` § *Promotion status*; `CLAUDE.md`
+§ *Companion Plugin* now states the same in place of its "in flight" paragraph.
+
+**One datum from the evaluation is kept, because without it the verdict invites
+re-litigation:** eval data had shown Opus performing *better* with native `Bash`
+than with `run_command`, and `shell_command_mode` was set to `"disabled"` on
+2026-08-27 on that basis, then returned to `"warn"` the same day. The decision
+went the other way regardless. That datum is not grounds to reopen it, and the
+trade-offs above are now consequences to work within rather than inputs to a
+pending call.
 
 The `~/.cargo/config.toml` `[env]` pin stays useful either way: it is inert when
 work goes through `run_command` and load-bearing when it goes through `Bash`, so

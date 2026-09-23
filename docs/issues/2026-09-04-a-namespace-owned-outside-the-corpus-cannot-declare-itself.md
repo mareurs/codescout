@@ -126,6 +126,43 @@ My `grep -rhoE '\bTC-[0-9]+\b'` is not fence-aware, so the 26 cited ids may over
 case if the resolver skips fenced blocks. The direction of the finding is unaffected: `TC-21`–`TC-25`
 are outside any code fence, so **at least 5** would dangle.
 
+### Second instance 2026-09-23 — `AE-N`, and the two are siblings in one directory
+
+**This record measured `TC-N` and reads as n=1. It is n=2, and the second instance sits beside
+the first on disk.** `AE-1`…`AE-12` are defined in `scripts/tc-suites/artifact-entries.json` —
+the same directory as `legacy-natural.json`, which owns `TC-01`…`TC-20`. Both are executable
+benchmark suites; neither is a ledger.
+
+| prefix | authority | ids | cited in prose | `entry_prefix` declared |
+|---|---|---|---:|---|
+| `TC` | `scripts/tc-suites/legacy-natural.json` | 20 | (per this record) | no |
+| `AE` | `scripts/tc-suites/artifact-entries.json` | 12 | 26 across 6 files | no |
+
+Verified 2026-09-23 by reading the suite JSON, not by inferring from the citations: the ids are
+`"id": "AE-1"` fields in a `cases` array, alongside `query`, `expect_entry` and `expect_path`.
+`expect_entry` is itself a real ledger token (`W-81`, `OB-1`, `SD-11`), so a single case row
+carries one token from each namespace — which is the clearest available statement that the two
+are different kinds of thing wearing one grammar.
+
+**What this changes about the fix, and it is not just the count.** The three directions in
+§ *Fix* were priced against one prefix. At n=2 with both authorities in **one directory**,
+direction 1 (an `external_prefix:` declaration) stops being a per-prefix accommodation and
+becomes a rule with an enumerable population: *every suite under `scripts/tc-suites/`*. Direction
+3 — accept it as permanent known-noise — correspondingly weakens, because the noise is now a
+class that grows by one row every time someone adds a suite, and the next reader re-derives all
+of this from scratch exactly as this session did.
+
+**The naive remedy stays forbidden, and the reason transfers unchanged.** Defining
+`## AE-1 — …` headings would hand allocation of a benchmark's case ids to the librarian and turn
+26 silent citations into dangling ones, which is this record's own measured result for `TC`.
+Nothing about `AE` weakens that; it is the same shape with different bytes.
+
+*(Surfaced while triaging `cited_prefix_with_no_definer` for cleanup. Worth noting how it
+presented: as an ordinary doctor finding reading "either define the headings or declare the
+prefix", with nothing marking it as an instance of a filed class whose first line is that both
+prescribed remedies make it worse. The finding text cannot say so — that is the defect, one
+layer up.)*
+
 ## Hypotheses tried
 
 1. **Hypothesis:** `TC-N` is an abandoned namespace whose definers were deleted.
