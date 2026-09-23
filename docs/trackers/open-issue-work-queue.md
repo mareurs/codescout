@@ -96,7 +96,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-49 | 2 | `workspace(post_compact)` flushes LSP without prewarming — next nav call pays cold start and can blow the 60s timeout, while its hint promises no disruption | **done-archived** 2026-09-13 — bug is `mitigated` + archived. Prior detail retained: **partial** — hint + manual fixed; diagnosis corrected in 3 places. Its prescribed fix (a) was a NO-OP for its own Rust repro (`PREWARM_LANGUAGES` is JVM-only), and a mux keyed by workspace keeps the server warm across sessions, so the cold window is far narrower than filed. The actually-false sentence is cross-repo (`session-start.mjs:339`) and still emitting — stays open for that. Hint fix `ff90ce41`, patch-id `9da21228d4392923`; **observed live** in the running release binary on 2026-08-30 when `workspace(post_compact=true)` returned the new text after a compaction — first sighting in the wild, so this row reports it rather than inferring it from source | `d7072ed21959aca1` |
 | BL-50 | 2 | `expects_augmentation` is a boolean, so a fresh clone knows an augmentation is missing but nothing records what it was | done | `11dec5e144ba0482` |
 | BL-51 | 2 | a rendezvous slot that misses its SessionStart stamp can never be stamped again — Phase C inactive for that server's life | **dropped** — both claims refuted by their own author 90 min after filing; self-heals at next SessionStart; severity `informational`; code is JS in `claude-plugins`, not this repo | `d91e96485308ee2f` |
-| BL-52 | 2 | the rendezvous gate latches open, so a hook going quiet mid-process leaves `/clear` invisible again | **blocked** — sketched fix refuted (`hook_at` ages 0.6–25h, so no window discriminates); viable fix is cross-repo + a design decision; next step is measurement, not code | `54a70b49f6f26681` |
+| BL-52 | 2 | the rendezvous gate latches open, so a hook going quiet mid-process leaves `/clear` invisible again | **blocked** — sketched fix refuted (`hook_at` ages 0.6–25h, so no window discriminates); viable fix is cross-repo + a design decision; next step is measurement, not code | `52a9448b312dbbf6` |
 | BL-53 | 3 | guide topics are atomic nodes in an unmodelled graph — also `GG-7`, sequenced there; do not fix from here | open (cross-ref) | `7579b32b1cd2362f` |
 | BL-54 | 2 | workspace `read_only` flips mid-session with no `activate` — also `WP-5`; may share a `with_project_at` root cause with BL-46 | done-archived | `6a3bb4d968d1d514` |
 | BL-55 | 3 | three unrelated tests failed together on the wine lane under load — the reference case for "flaky by wall clock" vs "defect load exposes" (`F-78`) | open | `05b157e0c38b765a` |
@@ -472,7 +472,7 @@ all.
 
 **Valid:** dated 2026-08-29
 
-`docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`. A companion
+`docs/issues/archive/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`. A companion
 hook that goes quiet mid-process leaves `/clear` invisible again. See BL-51 — treat as one piece
 of work.
 

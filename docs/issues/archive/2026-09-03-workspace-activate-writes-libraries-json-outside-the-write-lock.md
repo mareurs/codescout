@@ -1,5 +1,5 @@
 ---
-id: '34be359cd8087698'
+id: fb43040082d227b8
 kind: bug
 status: fixed
 title: workspace(activate) writes libraries.json while is_write reports false, so the write lock never fires

@@ -61,7 +61,7 @@ fixed without either fix reaching the other:
   `docs/issues/archive/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`
 
 A third, on the *id* field, is
-`docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`.
+`docs/issues/archive/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`.
 
 So the class has at least three members across two directions and two fields, every one
 found by a human noticing an oddity rather than by any check. A one-off sweep would answer
@@ -189,7 +189,7 @@ this session was not working in.
 - Mirror direction, archived:
   `docs/issues/archive/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`
 - Same pair, id rather than status:
-  `docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`
+  `docs/issues/archive/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`
 - Tagged `cluster/unclassified` deliberately. The parent named a candidate class — *"a
   write path updates one half of the file/catalog pair and reports success"* — and this
   file is **not** a fourth instance of it: it is the absence of the instrument that would

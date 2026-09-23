@@ -166,7 +166,7 @@ The `**Members:**` field for `cluster/<slug>` is in `docs/trackers/issue-cluster
 - `docs/trackers/issue-clusters.md` § *One slug, two spellings* — the sibling note, and the
   spelling zero this one is not.
 - `docs/trackers/issue-clusters/IC-22-hint-composed-without-the-request.md` — the class.
-- `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` — the other
+- `docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` — the other
   half of this gate's friction; index-vs-worktree, not routing.
 
 ## Attribution

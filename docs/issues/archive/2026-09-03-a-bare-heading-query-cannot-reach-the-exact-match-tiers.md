@@ -282,7 +282,7 @@ invisible for the whole session that found it.
   the tier-ordering cost it left behind.
 - `docs/issues/archive/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md`
   — added `occurrence`, which does not reach this case.
-- `docs/issues/2026-09-02-closest-match-search-scores-anchors-against-whole-lines.md` — the
+- `docs/issues/archive/2026-09-02-closest-match-search-scores-anchors-against-whole-lines.md` — the
   sibling `IC-19` member in the same subsystem: a match score computed against the wrong unit.
 - **Also satisfies `IC-6` (`addressing-without-an-escape-hatch`)** on its *two-spellings*
   half: `Index` and `## Index` are two spellings of one heading and only one reaches the

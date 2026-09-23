@@ -194,7 +194,7 @@ the `workspace` argument before dispatch. That strip is the fix for
 `docs/issues/archive/2026-06-01-peer-workspace-arg-pin-escape.md` and must stay. No
 discriminator exists at this seam — `home_root` cannot separate peer-serve from the ordinary
 startup fallback, which is the case the notice must fire on. Filed as
-`docs/issues/2026-09-02-the-worktree-notice-prescribes-two-calls-a-served-peer-cannot-make.md`.
+`docs/issues/archive/2026-09-02-the-worktree-notice-prescribes-two-calls-a-served-peer-cannot-make.md`.
 
 ## Fix provenance
 

@@ -1,5 +1,5 @@
 ---
-id: '68481127b199baa0'
+id: 0560f6257bddee29
 kind: bug
 status: fixed
 title: The cluster-count gate scopes its file list to the index but reads content from the working tree

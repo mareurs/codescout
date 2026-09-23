@@ -769,7 +769,7 @@ test cleanly. The right name is an **unpaid cost**, not a blind spot, and filing
 prescribe building something that already exists.
 
 **SCOPE THAT DECLASSIFICATION CAREFULLY — it covers the prior-art gap and nothing else.**
-`docs/issues/2026-09-13-home-path-scan-cannot-see-a-new-script-until-commit.md` carries **two**
+`docs/issues/archive/2026-09-13-home-path-scan-cannot-see-a-new-script-until-commit.md` carries **two**
 findings, and only one of them is this. The gate's population boundary being published solely in the
 enforcement layer **is** structural and stays OB-shaped: an author writing a new script has no
 reason to open `tests/committed_paths.rs`, and no amount of care manufactures that reason. The

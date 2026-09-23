@@ -1,5 +1,5 @@
 ---
-id: '986e8146fc44d17d'
+id: 184258b6a22ecfb5
 kind: bug
 status: fixed
 title: 'BUG: the worktree read notice prescribes two calls a peer-serve client is forbidden from making'

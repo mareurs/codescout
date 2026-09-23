@@ -159,7 +159,7 @@ The gate, over **tracked** `src/**/*.rs` only:
 
 **Tracked, not the worktree.** `tests/issue_clusters.rs` established this and states why:
 gating on untracked files lets one session red another's build, since an untracked file is
-a peer's in-flight work. `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`
+a peer's in-flight work. `docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`
 is open because a sibling gate got this wrong.
 
 ### Two instruments, different scopes
@@ -350,9 +350,9 @@ it would re-create the complaint in a new file.
 - `src/tools/output_buffer.rs` — the already-landed entry-level marker; the pattern for
   "on the object the caller re-reads, not on the response."
 - `src/server.rs:6430` `call_tool_checked` — the driver, and the `RecoverableError` trap.
-- `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` —
+- `docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` —
   open; the mistake the tracked-files rule avoids.
-- `docs/issues/2026-09-02-overflow-summary-promotes-the-count-and-elides-its-caveat.md` —
+- `docs/issues/archive/2026-09-02-overflow-summary-promotes-the-count-and-elides-its-caveat.md` —
   the one member open in both its file and its code.
 - `docs/issues/archive/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md` (fixed at
   `488192e8`, file stale) and

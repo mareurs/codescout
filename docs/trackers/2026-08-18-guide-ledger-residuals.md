@@ -222,7 +222,7 @@ event. Task 4's startup re-arm is ungated so the reconnect itself is covered, bu
 `activate` inside that window blunt-clears instead of re-arming surgically. It degrades
 toward re-sending, so the governing invariant holds. This is the exact complement of the
 latch-open hazard filed at
-`docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`: that
+`docs/issues/archive/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`: that
 one is the gate never closing, this one is the gate not opening.
 
 **Method note that cost three wrong readings before it was fixed.** "My" server was twice

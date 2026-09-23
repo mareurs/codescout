@@ -207,4 +207,4 @@ after the repair, and the peer independently confirmed their commit's shape
 
 **But `--mixed` is the wrong flag for that repair on a shared checkout, and the reason
 is its own bug:**
-`docs/issues/2026-09-15-git-reset-mixed-silently-unstages-every-peer-on-a-shared-checkout.md`.
+`docs/issues/archive/2026-09-15-git-reset-mixed-silently-unstages-every-peer-on-a-shared-checkout.md`.

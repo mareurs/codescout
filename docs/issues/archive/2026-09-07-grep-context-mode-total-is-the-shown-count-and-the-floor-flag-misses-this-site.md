@@ -178,7 +178,7 @@ For any count, drop `context_lines` — or use `mode="files"`, which walks to co
   rather than sitting two lines below it, because the header is what a reader anchors on."*
 - `docs/trackers/issue-clusters/IC-20-floor-published-under-the-name-of-a-total.md` — the class
   considered and rejected, and the row whose *Mechanism status* this bug corrects.
-- `docs/issues/2026-09-02-overflow-summary-promotes-the-count-and-elides-its-caveat.md` — open,
+- `docs/issues/archive/2026-09-02-overflow-summary-promotes-the-count-and-elides-its-caveat.md` — open,
   and **distinct**: that one is `describe_payload_shape` reducing object-valued keys to bare
   names. Here the hint text arrived in full; what is missing is a field that was never computed.
 - Found by sessionId `ba061586-6581-4656-b0c5-acad83474de5`, who published the `39` into a commit

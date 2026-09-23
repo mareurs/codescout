@@ -1,5 +1,5 @@
 ---
-id: '81f3a79b97b4b14e'
+id: 7f6b9d873db9ce10
 kind: bug
 status: mitigated
 title: edit_markdown's closest-match diagnostic scores anchors against whole lines, so it goes silent exactly when the anchor is short

@@ -173,7 +173,7 @@ rather than a classifier.
   — same mechanism on the librarian surface; tagged `cluster/guard-narrower-than-its-name`.
   Its *The test cannot fail on an omission* section is the reason this bug could sit unfiled: the
   suite asserts that listed actions ARE writes and nothing asserts the list is complete.
-- `docs/issues/2026-09-03-workspace-activate-writes-libraries-json-outside-the-write-lock.md` —
+- `docs/issues/archive/2026-09-03-workspace-activate-writes-libraries-json-outside-the-write-lock.md` —
   same mechanism on `workspace`.
 - `docs/issues/archive/2026-06-01-librarian-adapter-stale-is-write.md` — same mechanism,
   stale tool names.

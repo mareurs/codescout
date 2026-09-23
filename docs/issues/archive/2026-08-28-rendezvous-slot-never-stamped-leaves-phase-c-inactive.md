@@ -13,7 +13,7 @@ closed: 2026-08-30
 opened: 2026-08-28
 owner: marius
 related:
-- docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md
+- docs/issues/archive/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md
 severity: informational
 unverified: 'REFUTED 2026-08-28, both by measurement: (a) candidate 1 - a /mcp reconnect DOES inherit the predecessor stamp (new pid''s hook_at predated its own start by 3 minutes); (b) the file''s own headline claim that a missed stamp is permanent - the one measured instance was stamped by a later SessionStart-class event. Invariant 1 governs the REFRESH hook only; it says nothing about the other writer, and I over-generalised from it. Still unexplained and still true: that server served calls for ~8 hours with a null slot. No fix is implemented and none is currently warranted - the failure direction is forgiving and the exposure self-heals.'
 ---
@@ -34,7 +34,7 @@ if (!e.hook_at) continue;            // invariant 1 — never open the gate
 companion is present.
 
 This is the **opposite polarity** to
-`docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`, which
+`docs/issues/archive/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`, which
 worries about the gate being held open. Found while measuring that one.
 
 The direction is safe: gate-closed means the blunt `clear()` path, which is the forgiving
@@ -250,6 +250,6 @@ the failure direction is the forgiving one.
 
 ## References
 
-- `docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md` — the
+- `docs/issues/archive/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md` — the
   sibling bug; its 2026-08-28 measurement subsection is where this was found.
 - `claude-plugins:80ed23f` — the liveness refresh, and invariant 1.

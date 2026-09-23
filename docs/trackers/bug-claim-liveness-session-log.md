@@ -447,7 +447,7 @@ Run per population, it rejected three of four:
   records". `docs/architecture/companion-plugin.md` separately documents the file as *"now
   marked `zombie` and carrying the full correction"*.
 - **`frontmatter_id_mismatch` on `docs/issues/2026-09-09-build-check-renders-three-of-n-compile-errors-with-no-count.md`.**
-  `docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`
+  `docs/issues/archive/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`
   (status `open`) names that exact id pair as a known false positive: worktree-minted, not
   move-orphaned.
 
@@ -493,7 +493,7 @@ at three *different* distances from the reader, which is the point:
    `docs/issues/2026-09-09-build-check-renders-three-of-n-compile-errors-with-no-count.md`
    states *"a move re-keys the row and this file kept the id it was moved away from."* No move
    happened — the id was **worktree-minted**, and
-   `docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`
+   `docs/issues/archive/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`
    (status `open`) already records this exact id pair as the known false positive. The check
    ships a `fix=repair_frontmatter_id`, so the prescribed action is one call away and would
    overwrite the standing evidence for that open bug.
@@ -518,7 +518,7 @@ layer out: the check's **predicate** is right in all three cases, and what misle
 
 **Rests on:** `src/librarian/tools/doctor.rs` (the three checks and
 `an_open_status_bug_under_archive_is_silent`);
-`docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`.
+`docs/issues/archive/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`.
 
 ## F-4 — I shipped the defect class I had filed an hour earlier, into the doc comment of its own fix's test
 

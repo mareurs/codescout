@@ -13460,7 +13460,7 @@ surface and the semantic query is the strong one**.
 
 **Recurred within 24 hours, in the mild form, which is why this is invariant rather than dated.**
 On 2026-09-10 I flagged `frontmatter_id_mismatch` as asserting an unmeasured cause and recorded it
-as a new observation; it was already filed as `e82deca98330f72c` (2026-09-05). Caught before it
+as a new observation; it was already filed as `e4cccc7c8d339988` (2026-09-05). Caught before it
 became a second file only because the peer who owned that area said so. Same shape: the finding
 arrived by measurement, so it did not present as a rediscovery.
 

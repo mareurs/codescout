@@ -1,5 +1,5 @@
 ---
-id: '4a00acf19728660f'
+id: fa1c5777998404d1
 kind: bug
 status: fixed
 title: 'BUG: the overflow summary promotes a magnitude verbatim and reduces the qualifier that makes it interpretable to a bare key name'

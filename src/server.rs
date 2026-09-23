@@ -1063,7 +1063,7 @@ impl CodeScoutServer {
         .map_err(|e| {
             McpError::invalid_params(format!("failed to build tool request: {e}"), None)
         })?;
-        // Bug 986e8146fc44d17d: scope `PEER_SERVE_DISPATCH` around this call's
+        // Bug 184258b6a22ecfb5: scope `PEER_SERVE_DISPATCH` around this call's
         // future (not a field on `req` or `ToolContext`) so `worktree_read_notice`
         // can tell a peer-serve dispatch apart from an ordinary session without a
         // new required field rippling into every other `ToolContext` construction

@@ -124,7 +124,7 @@ has run the probe) plus `check-codescout-integration`. None is transient.
 
 ## Hypotheses tried
 
-1. **Hypothesis:** this is the already-filed `986e8146fc44d17d` (*the worktree notice
+1. **Hypothesis:** this is the already-filed `184258b6a22ecfb5` (*the worktree notice
    prescribes two calls a served peer cannot make*). **Test:** read that file.
    **Verdict:** rejected. That one is `worktree_read_notice` on the **read** path, and its
    defect is that a **peer-serve** client is structurally forbidden from either prescribed
@@ -213,5 +213,5 @@ N/A — fixed at `fc6f5bb7`.
 - `src/tools/core/guards.rs:21-71` — the guard and its hint
 - `src/util/path_security.rs:540-574` — `list_git_worktrees`, unsorted
 - `scripts/mutation-probe.sh` — deliberate per-session worktree retention
-- `docs/issues/2026-09-02-the-worktree-notice-prescribes-two-calls-a-served-peer-cannot-make.md`
+- `docs/issues/archive/2026-09-02-the-worktree-notice-prescribes-two-calls-a-served-peer-cannot-make.md`
   — sibling member of the same class, read path

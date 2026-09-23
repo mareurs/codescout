@@ -1057,7 +1057,7 @@ mod tests {
     }
 
     /// Hardens the guard above against the exact gap
-    /// docs/issues/2026-09-17-the-archetype-guard-is-keyed-on-the-field-whose-absence-is-the-defect.md
+    /// docs/issues/archive/2026-09-17-the-archetype-guard-is-keyed-on-the-field-whose-absence-is-the-defect.md
     /// describes: the heading-presence guard is keyed on `entry_collection` being
     /// declared, which makes ITS ABSENCE — the actual defect in `audit_issues` — invisible
     /// to it, since `continue` on a missing `entry_collection` skips the archetype

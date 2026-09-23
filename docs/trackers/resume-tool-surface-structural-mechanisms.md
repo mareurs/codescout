@@ -213,7 +213,7 @@ sufficient.** *"Is the first call harmless?"* clears prose to move; *"does the c
 the section?"* decides whether it lands anywhere at all. **SM-2 and SM-3 must check both** —
 and the second is not visible from the marker, only from `relevant_guide_topic`.
 
-**Filed en route:** `docs/issues/2026-09-03-workspace-activate-writes-libraries-json-outside-the-write-lock.md`.
+**Filed en route:** `docs/issues/archive/2026-09-03-workspace-activate-writes-libraries-json-outside-the-write-lock.md`.
 Classifying every tool forced a per-tool *"does this modify its environment?"* and found
 `is_write` answering `false` where the disk says otherwise.
 

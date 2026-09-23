@@ -126,7 +126,7 @@ tokio::task_local! {
     /// the one call site that already means "this is peer-serve" — without
     /// widening a struct every tool and its tests construct directly.
     ///
-    /// See docs/issues/2026-09-02-the-worktree-notice-prescribes-two-calls-a-served-peer-cannot-make.md.
+    /// See docs/issues/archive/2026-09-02-the-worktree-notice-prescribes-two-calls-a-served-peer-cannot-make.md.
     pub(crate) static PEER_SERVE_DISPATCH: bool;
 }
 
@@ -207,7 +207,7 @@ async fn worktree_read_notice(ctx: &ToolContext, root: Option<&std::path::Path>)
     }
     let list: Vec<String> = worktrees.iter().map(|p| p.display().to_string()).collect();
 
-    // Bug 986e8146fc44d17d: the two remedies below (`workspace(action='activate', ...)`
+    // Bug 184258b6a22ecfb5: the two remedies below (`workspace(action='activate', ...)`
     // and a per-call `workspace=` pin) are both unavailable to a peer-serve client —
     // `workspace` is refused by `PEER_EXPOSED_TOOLS` and a supplied `workspace=` is
     // stripped before dispatch — so prescribing them there is advice the recipient is

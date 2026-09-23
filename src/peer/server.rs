@@ -595,12 +595,12 @@ mod tests {
         handle.abort();
     }
 
-    // Reproduction for bug 986e8146fc44d17d: does `worktree_read_notice`
+    // Reproduction for bug 184258b6a22ecfb5: does `worktree_read_notice`
     // actually fire on a served read when the peer-serve root has linked
     // git worktrees? The bug file demands this check before any fix —
     // "the specific thing to check is whether a served read emits at
     // all, since the whole file rests on that inference."
-    // Bug 986e8146fc44d17d: `worktree_read_notice`'s remedy tells the
+    // Bug 184258b6a22ecfb5: `worktree_read_notice`'s remedy tells the
     // caller to run `workspace(action='activate', ...)` or pass
     // `workspace="<abs path>"` — both denied-by-construction over the
     // peer protocol (`PEER_EXPOSED_TOOLS` excludes `workspace`, and

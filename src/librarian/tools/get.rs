@@ -1489,7 +1489,7 @@ mod tests {
         assert_eq!(v["frontmatter_lines"], json!(0));
     }
 
-    /// Regression for docs/issues/2026-09-15-doc-get-numbers-headings-in-file-lines-and-reads-in-body-lines.md.
+    /// Regression for docs/issues/archive/2026-09-15-doc-get-numbers-headings-in-file-lines-and-reads-in-body-lines.md.
     /// `preview.headings[].line` is file-relative (the sibling fix above) but
     /// `start_line`/`end_line` stay body-relative (deliberately, per F-128) — nothing stopped a
     /// caller composing this tool's OWN response with itself from feeding a heading's file-relative

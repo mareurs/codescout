@@ -225,4 +225,4 @@ after the branch merged and the main checkout was reindexed (`added: 2`). Nothin
   selector".
 - Class precedents against the older `tests/doc_tool_refs.rs`:
   `docs/issues/2026-09-02-docs-architecture-is-in-neither-the-gates-inclusion-list-nor-its-exclusion-rationale.md`,
-  `docs/issues/2026-09-02-both-doc-citation-guards-skip-half-the-corpus-without-saying-so.md`.
+  `docs/issues/archive/2026-09-02-both-doc-citation-guards-skip-half-the-corpus-without-saying-so.md`.

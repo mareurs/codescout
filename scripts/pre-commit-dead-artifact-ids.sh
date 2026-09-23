@@ -21,7 +21,7 @@
 # The other checks in this hook read `git show :<path>` — the INDEX — because a pathspec
 # or partial commit makes the worktree and the staged bytes disagree, and reading the
 # worktree instead is already a filed defect here
-# (docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md).
+# (docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md).
 #
 # This one CANNOT do that, and the reason is the same absolute-path property above:
 # materializing staged bytes to a temp path changes every file's own id, so the

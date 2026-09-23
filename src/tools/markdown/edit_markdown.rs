@@ -1179,7 +1179,7 @@ pub(super) fn apply_frontmatter_mutation(content: &str, param: &Value) -> Result
 }
 /// Normalized Levenshtein similarity in [0.0, 1.0] (1.0 = identical). Test-only:
 /// production code now compares an anchor against the best-matching SUBSTRING
-/// of a window (`best_substring_similarity`, `81f3a79b97b4b14e`) rather than
+/// of a window (`best_substring_similarity`, `7f6b9d873db9ce10`) rather than
 /// the whole window, but `similarity_ranks_closeness` (tests.rs) still
 /// exercises this one directly as the general-purpose primitive it wraps
 /// (`strsim::normalized_levenshtein`).
@@ -1208,7 +1208,7 @@ fn best_substring_edit_distance(window: &str, anchor: &str) -> usize {
     // substring ending anywhere in `window` costs nothing — which is what
     // makes the match's START position free. A classic Levenshtein table
     // would instead seed `prev[j] = j`, charging for skipping the window's
-    // own prefix; that charge is exactly `81f3a79b97b4b14e`'s root cause.
+    // own prefix; that charge is exactly `7f6b9d873db9ce10`'s root cause.
     let mut prev: Vec<usize> = vec![0; w.len() + 1];
     let mut curr: Vec<usize> = vec![0; w.len() + 1];
 
@@ -1232,7 +1232,7 @@ fn best_substring_edit_distance(window: &str, anchor: &str) -> usize {
 /// `window` verbatim) — normalized by `anchor`'s own length, never by
 /// `window`'s.
 ///
-/// `81f3a79b97b4b14e`: scoring the anchor against the whole window (via
+/// `7f6b9d873db9ce10`: scoring the anchor against the whole window (via
 /// `similarity`) makes a verbatim substring match score `|anchor| / |window|`
 /// — a value driven entirely by how much unrelated text surrounds the match,
 /// which self-suppresses below `SIM_THRESHOLD` for any anchor under half its
@@ -1716,7 +1716,7 @@ pub(crate) async fn edit(input: Value, ctx: &ToolContext) -> Result<Value> {
 mod scoped_miss_substring_scoring_tests {
     use super::diagnose_scoped_miss;
 
-    // 81f3a79b97b4b14e: a verbatim substring anchor inside a much longer line
+    // 7f6b9d873db9ce10: a verbatim substring anchor inside a much longer line
     // scored `|anchor| / |line|` under whole-line similarity, self-suppressing
     // below SIM_THRESHOLD (0.5) for any anchor under half its line — reporting
     // "no_similar_match" about text that is present, byte for byte. Uses

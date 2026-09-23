@@ -1,5 +1,5 @@
 ---
-id: '40a822bad321df16'
+id: cc5587507e689d3b
 kind: bug
 status: fixed
 title: 'BUG: the home-path scan cannot see a new script until the commit that publishes it'

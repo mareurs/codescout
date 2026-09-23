@@ -214,7 +214,7 @@ correction is worth more than the datapoint.** `e5691fad` and `9e022ef0` agreed 
 build artifacts but not source, and from `OB-23`'s stand-down shape. Neither of us opened
 `build_check.rs`. A mechanism exists, ships, is reached, and has a **scope gap**; "absent" and
 "narrower than its name" prescribe opposite work, and we were one file-read from the second.
-That is `81d2cdcbbdfc03a6`'s class arriving here too — a shipped remedy implying a scope it does
+That is `2ad6e7696be45aa9`'s class arriving here too — a shipped remedy implying a scope it does
 not have, where the false coverage is the half that stops the next person looking.
 
 **THE MODULE ADMITS FOUR CEILINGS AND PRESENTS CHECK-VERSUS-TEST AS MET — which is the whole

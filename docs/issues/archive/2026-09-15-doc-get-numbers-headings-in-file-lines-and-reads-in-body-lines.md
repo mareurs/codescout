@@ -1,5 +1,5 @@
 ---
-id: '0135747b8b9664a3'
+id: d50c6ac20a86c924
 kind: bug
 status: fixed
 title: 'BUG: doc(get) numbers headings in FILE lines and reads in BODY lines, so a heading''s own line reads back empty'

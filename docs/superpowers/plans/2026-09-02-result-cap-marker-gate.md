@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **Scan tracked files only** — `git ls-files src`, never a filesystem walk. An untracked file is a peer's in-flight work and gating on it lets one session red another's build. Precedent and the measured incident: `tests/issue_clusters.rs:1275-1281`; the open bug for getting it wrong is `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`.
+- **Scan tracked files only** — `git ls-files src`, never a filesystem walk. An untracked file is a peer's in-flight work and gating on it lets one session red another's build. Precedent and the measured incident: `tests/issue_clusters.rs:1275-1281`; the open bug for getting it wrong is `docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`.
 - **The gate is a source-TEXT check, never a compiled-in registry.** `librarian` is a **default** feature (`Cargo.toml`), so caps inside `#[cfg(feature = "librarian")]` exist in source while their probe rows compile out under `--no-default-features`. A gate consulting compiled symbols reds on the lean lane and passes on the default one — a failure reached by *following* `CLAUDE.md`'s gate order.
 - **Scan `src/` only, never `tests/`.** `tests/result_caps.rs` contains `cap-class:` example strings as fixtures. Scanning `tests/` would count a teaching example as a real declaration — the documentation-example-as-real-token trap in `CLAUDE.md` § *Parsers Over a Namespace*.
 - **Every filter the gate runs is an extracted pure function the meta-tests call directly.** No meta-test may assert about its own re-implementation (`CLAUDE.md` § *Testing Discipline*).

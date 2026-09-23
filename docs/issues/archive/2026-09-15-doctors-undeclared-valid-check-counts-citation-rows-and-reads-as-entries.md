@@ -1,5 +1,5 @@
 ---
-id: '2155678e29cbd91a'
+id: 7a37ff8972b8bb38
 kind: bug
 status: fixed
 title: 'BUG: doctor''s undeclared-Valid check counts citation rows, and its worklist reads as entries — 18 rows, 9 entries'

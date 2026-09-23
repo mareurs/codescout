@@ -15,7 +15,7 @@ closed: 2026-08-19
 opened: 2026-08-19
 owner: marius
 severity: medium
-unverified: fix itself is fully verified live (inheritance + surgical activate, 2026-08-19); the standing caveat is that it WIDENS the open latch bug 54a70b49f6f26681 by voiding its /mcp workaround — trade recorded under Known cost
+unverified: fix itself is fully verified live (inheritance + surgical activate, 2026-08-19); the standing caveat is that it WIDENS the open latch bug 52a9448b312dbbf6 by voiding its /mcp workaround — trade recorded under Known cost
 ---
 
 # BUG: a `/mcp` reconnect makes the rendezvous inactive forever, and the next `activate` wipes the guide ledger
@@ -209,8 +209,8 @@ this fix inherits nothing, so the blunt default is preserved byte for byte.
 **Added 2026-08-19, after the fix shipped, on finding a filed bug that should have been read
 first.**
 
-`docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`
-(`54a70b49f6f26681`, filed `e76b513e`) records that `Rendezvous::active` is **monotone** —
+`docs/issues/archive/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`
+(`52a9448b312dbbf6`, filed `e76b513e`) records that `Rendezvous::active` is **monotone** —
 written true once and never false. Its stated workaround was:
 
 > *"`/mcp` reconnect. Respawning the server resets `Rendezvous::active` to false, after which

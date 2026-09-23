@@ -171,7 +171,7 @@ issued *before* the session's latch was set.
 per-call confirmation; its absence on one call is an unconfirmed write, and the guard cannot see
 that because it stopped looking at the first `activate`.
 
-Same structural shape as open bug `54a70b49f6f26681` (*the rendezvous gate latches open*): a
+Same structural shape as open bug `52a9448b312dbbf6` (*the rendezvous gate latches open*): a
 session-global boolean standing in for a per-event check.
 ## Measured 2026-08-27 — the obvious fix is refuted, and the pressure points the other way
 

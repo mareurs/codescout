@@ -751,7 +751,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `Scope::Project` within 240 bytes of `resolve_scope(`, and three lines of
     // comment between the two pushes it to 400 — reporting this correct call site
     // as an offender. Measured 2026-09-09; see
-    // docs/issues/2026-09-09-a-fixed-byte-window-source-guard-reports-a-correct-call-site.md
+    // docs/issues/archive/2026-09-09-a-fixed-byte-window-source-guard-reports-a-correct-call-site.md
     let (effective_scope, scope_fallback) = super::scope::resolve_scope(
         args.scope,
         ctx.current_project.as_deref(),
@@ -3362,7 +3362,7 @@ fn check_frontmatter_id_matches_catalog(id: &str, abs_path: &str) -> Option<Viol
     // clone is shaped identically to a genuinely stale post-move id, and this function has
     // no evidence (no git history, no roster of removed worktree roots) to tell them apart.
     // The message below states the disjunction rather than picking one — see
-    // docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md,
+    // docs/issues/archive/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md,
     // measured 8 of 8 live instances as the foreign-checkout cause, zero as an actual move.
     // And the row is not silently dropped either way: `scan_worktree_scoped` already reports
     // it, with `collision_with` naming this very id.
@@ -8928,7 +8928,7 @@ mod tests {
     /// The remedy-text law (CLAUDE.md § Testing Discipline): a suite tests a guard's
     /// PREDICATE and almost never its REMEDY TEXT. `check_frontmatter_id_matches_catalog`'s
     /// `detail` used to assert ONE cause as fact — "a move re-keys the row" — which is false
-    /// for a worktree-minted id (bug e82deca98330f72c, measured 8 of 8 live instances as
+    /// for a worktree-minted id (bug e4cccc7c8d339988, measured 8 of 8 live instances as
     /// foreign-checkout, zero as an actual move). This does not pin the sentence (reds on
     /// every rewording) — it asserts the SHAPE: the message must still name BOTH candidate
     /// causes, a move and a foreign checkout. That reds exactly on the deletion of either
@@ -18786,7 +18786,7 @@ root = "work/elsewhere/ghost"
 
     #[test]
     fn scan_cited_but_undeclared_dedupes_repeated_heading_instances_of_one_entry_id() {
-        // Reproduction of 2155678e29cbd91a: a file with two headings defining the SAME
+        // Reproduction of 7a37ff8972b8bb38: a file with two headings defining the SAME
         // entry id (a duplicate-heading instance, not two distinct entries) must report
         // ONE violation, not one per heading instance.
         let tmp = tempfile::tempdir().unwrap();

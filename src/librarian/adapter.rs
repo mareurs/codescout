@@ -625,7 +625,7 @@ fn librarian_compact_summary(inner_name: &str, result: &Value) -> Option<String>
     // `body_truncation_warning` and `overflow_hint` are mutually exclusive by construction
     // (the latter declines exactly when `shown_lines` is present, which is the former's
     // trigger), so at most one of them ever fires per result — but describe_payload_shape's
-    // one-level object descent (bug 4a00acf19728660f) now surfaces `overflow`'s own scalar
+    // one-level object descent (bug fa1c5777998404d1) now surfaces `overflow`'s own scalar
     // fields too, and without this exclusion that duplicates whichever count the dedicated
     // line above already announced. See
     // `compact_summary_promotes_an_overflow_hint_from_any_librarian_tool`'s body-cap case.

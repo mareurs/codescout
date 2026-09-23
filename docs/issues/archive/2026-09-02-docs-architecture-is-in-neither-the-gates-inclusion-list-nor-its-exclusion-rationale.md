@@ -63,7 +63,7 @@ axes, and they are **not** re-files of each other:
 
 | bug | what narrows | fix |
 |---|---|---|
-| `bee04240275ee7d9` | a *citation filter* inside a scanned file (`!c.tool.contains('_')`) | change the filter |
+| `e6ea7afb0a815564` | a *citation filter* inside a scanned file (`!c.tool.contains('_')`) | change the filter |
 | `6ed22167cef9d224` | *file type* — every scanner is markdown-scoped, prose moved into YAML | add a YAML reader |
 | this one | *directory enumeration* — a markdown dir in no list | add the directory |
 
@@ -165,6 +165,6 @@ the exclusion rationale — this bug is one instance and the enumeration was nev
 
 - Found during the Opus task review of `f7b7ff33` (Task 6 of the tool-surface-collapse plan),
   2026-09-02, as review finding I3.
-- Siblings in the same class, different mechanisms: `bee04240275ee7d9`, `6ed22167cef9d224`.
+- Siblings in the same class, different mechanisms: `e6ea7afb0a815564`, `6ed22167cef9d224`.
 - `docs/adrs/2026-08-27-negative-results-name-their-scope.md` — a gate that is silent about a
   directory it never walked is a negative result that does not name its scope.

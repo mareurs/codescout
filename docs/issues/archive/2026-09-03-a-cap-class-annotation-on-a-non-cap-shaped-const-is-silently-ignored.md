@@ -1,5 +1,5 @@
 ---
-id: c2023c57ceff2672
+id: 3de420b499d51387
 kind: bug
 status: fixed
 title: 'A cap-class: RESULT_CAP annotation on a non-cap-shaped const is silently ignored, and the header points a reader at exactly that no-op'

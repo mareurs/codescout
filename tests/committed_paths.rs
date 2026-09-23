@@ -153,7 +153,7 @@ fn offenders_in(root: &Path, tracked: &BTreeSet<String>) -> Vec<String> {
 /// The passing path's own denominator — named so a green run says what it actually
 /// checked, rather than a reader assuming "the whole `scripts/` directory".
 ///
-/// Per `docs/issues/2026-09-13-home-path-scan-cannot-see-a-new-script-until-commit.md`
+/// Per `docs/issues/archive/2026-09-13-home-path-scan-cannot-see-a-new-script-until-commit.md`
 /// § Fix (Option 2, prescribed over Option 1's withdrawn filesystem-scan widening):
 /// "Say the boundary in the passing direction... have the PASSING path name its own
 /// denominator." The exact wording is not pinned — the bug's acceptance is about the

@@ -37,7 +37,7 @@ entry_prefix:
 >   figures are marked **upper bounds** — read that caveat before quoting them.
 >
 > **What is open elsewhere** (each carries its own `## Resume`, so nothing is owed here):
-> the rendezvous latch bug `54a70b49f6f26681`, which this session's `4800c297` **widened**
+> the rendezvous latch bug `52a9448b312dbbf6`, which this session's `4800c297` **widened**
 > by voiding its `/mcp` workaround; `run_command` rewriting pipes inside heredocs
 > (`0de2778e6adac220`); `grep`'s silent zero on an absolute glob (`a23bdded8539b234`).
 > `librarian(action="doctor")` now reports 8 `terminal_status_with_caveat` findings — that
@@ -65,7 +65,7 @@ entry_prefix:
 > (`0de2778e6adac220`, fix `4ea33d15`) and `grep`'s absolute-glob silent zero
 > (`a23bdded8539b234`, fix `c38bfd91`). The commit-message backtick substitution is fixed
 > and archived too (`5606ab6e35618aea`, fix `26de395c`). Only the **rendezvous latch bug**
-> (`54a70b49f6f26681`) is still open of those named. Every id written above this line was
+> (`52a9448b312dbbf6`) is still open of those named. Every id written above this line was
 > re-keyed by its archive move and no longer resolves.
 >
 > Corrections stack here rather than replacing the text above because this block sits in

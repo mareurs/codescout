@@ -1,5 +1,5 @@
 ---
-id: c222737eedb69850
+id: 6655bc86c65fe8c5
 kind: bug
 status: fixed
 title: 'BUG: three config tests red on any machine whose environment configures codescout — the derive-the-list fix landed at one site, three siblings still hand-type it'

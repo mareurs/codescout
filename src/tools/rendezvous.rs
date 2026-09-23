@@ -52,7 +52,7 @@ const HOOK_LIVENESS_THROTTLE_MS: u64 = 60_000;
 /// waiting on the user), so gating on it would flip `active` false on nearly every
 /// ordinary pause — the same false-deactivation that refuted the earlier
 /// `hook_at`-age sketch in
-/// docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md
+/// docs/issues/archive/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md
 /// (healthy sessions measured 0.6h-25h stale under the OLD SessionStart-only
 /// stamp, before the liveness refresh existed). Five windows tolerates several
 /// consecutive tool-free turns while still resolving a genuinely dead hook in
@@ -148,7 +148,7 @@ impl Rendezvous {
     /// `self.active` alone is write-once and never reset by `poll()` — a
     /// companion that stamped once and then crashed, or a `/mcp` process that
     /// died, would otherwise read as active for the rest of the conversation
-    /// (docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md).
+    /// (docs/issues/archive/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md).
     /// So liveness is re-derived here, on every read, from `last_mtime` — the
     /// mtime `poll()` already cached the last time the slot's content changed —
     /// against wall-clock now: stale past `HOOK_STALE_AFTER` and this reports
@@ -285,7 +285,7 @@ pub(crate) fn parent_pid() -> u32 {
 /// SessionStart was its only writer until 2026-08-31; that has been false since the
 /// companion gained a throttled liveness refresher
 /// (`codescout-companion:hooks/lib.mjs`, `LIVENESS_THROTTLE_MS = 60_000`), added for
-/// `docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`.
+/// `docs/issues/archive/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`.
 /// That refresher deliberately never stamps an unstamped slot, so it cannot open the
 /// gate — which keeps the *presence* test here correct while making the *age*
 /// meaningless. Measured 2026-08-31: a live slot reported `hook_at` 0 minutes old
@@ -949,7 +949,7 @@ mod tests {
         // `stamp_as_hook_at`'s own comment. Before this fix `active` was
         // write-once and never reset, so this poll (and every one after it) would
         // keep reporting active forever, which is the bug in
-        // docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md
+        // docs/issues/archive/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md
         filetime::set_file_mtime(
             r.path().unwrap(),
             filetime::FileTime::from_unix_time(now_secs - HOOK_STALE_AFTER.as_secs() as i64 - 1, 0),

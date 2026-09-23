@@ -408,7 +408,7 @@ mod tests {
         assert!(out.get("hint").is_none());
     }
 
-    // Bug 84ad63fe45ab6e2e: `actor` records WHO TOUCHED a row (a reindex
+    // Bug 4c4dd1952a02b163: `actor` records WHO TOUCHED a row (a reindex
     // counts), not who wrote it — and reads as authorship. Nothing
     // previously said so; only `verb`'s per-connection-sticky caveat was
     // documented, and `verb` is not the discriminator (it doesn't vary

@@ -3,7 +3,7 @@
 #
 # WHAT THIS GUARDS, AND WHY THE MESSAGE ASSERTIONS ARE NOT DECORATION
 #
-# docs/issues/2026-09-15-git-reset-mixed-silently-unstages-every-peer-on-a-shared-checkout.md:
+# docs/issues/archive/2026-09-15-git-reset-mixed-silently-unstages-every-peer-on-a-shared-checkout.md:
 # `git reset --mixed` (git's own default) rewrites `.git/index` -- ONE file per
 # checkout, not per session -- discarding whatever ANY OTHER session had staged,
 # with no error and nothing for the victim to attribute it to. A suite that only

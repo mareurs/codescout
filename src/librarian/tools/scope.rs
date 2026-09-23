@@ -628,8 +628,8 @@ mod tests {
     /// after the call token.
     ///
     /// This is the ORIGINAL predicate from
-    /// `docs/issues/2026-09-09-a-fixed-byte-window-source-guard-reports-a-correct-call-site.md`
-    /// (bug `82b3c70313fb754b`), kept ONLY so the two direction tests below
+    /// `docs/issues/archive/2026-09-09-a-fixed-byte-window-source-guard-reports-a-correct-call-site.md`
+    /// (bug `ef3fccd7be0bf25d`), kept ONLY so the two direction tests below
     /// can demonstrate the defect against a deterministic fixture instead of
     /// mutating a production call site. It is deliberately not wired into
     /// `every_resolve_scope_call_names_project_as_its_default` any more.
@@ -805,8 +805,8 @@ mod tests {
     /// delimiter and checks the **last argument** (`offending_resolve_scope_lines`
     /// / `last_call_arg`), rather than asking whether `Scope::Project` merely
     /// *appears* within a fixed byte window of the call token — see
-    /// `docs/issues/2026-09-09-a-fixed-byte-window-source-guard-reports-a-correct-call-site.md`
-    /// (bug `82b3c70313fb754b`). That bug's two failure directions are exercised
+    /// `docs/issues/archive/2026-09-09-a-fixed-byte-window-source-guard-reports-a-correct-call-site.md`
+    /// (bug `ef3fccd7be0bf25d`). That bug's two failure directions are exercised
     /// directly, without mutating a production call site, by
     /// `a_correct_default_survives_a_long_comment_inside_the_argument_list` and
     /// `a_wrong_default_is_reported_despite_a_mentioning_comment_nearby` below.
@@ -859,7 +859,7 @@ mod tests {
         );
     }
 
-    /// Direction 1 of bug `82b3c70313fb754b`: a correct call whose default
+    /// Direction 1 of bug `ef3fccd7be0bf25d`: a correct call whose default
     /// argument is preceded by a multi-line explanatory comment inside the
     /// argument list must not be reported. Under the old 240-byte-window
     /// predicate this comment alone pushes `Scope::Project` past the window
@@ -892,7 +892,7 @@ mod tests {
         );
     }
 
-    /// Direction 2 of bug `82b3c70313fb754b` -- the expensive one: a call
+    /// Direction 2 of bug `ef3fccd7be0bf25d` -- the expensive one: a call
     /// site with the WRONG default and a comment merely *mentioning*
     /// `Scope::Project` nearby must still be reported. This is the missing
     /// negative case the bug file names under § Fix: "a fixture call site
@@ -920,7 +920,7 @@ mod tests {
         );
     }
 
-    /// Reproduces bug `82b3c70313fb754b` against the ORIGINAL byte-window
+    /// Reproduces bug `ef3fccd7be0bf25d` against the ORIGINAL byte-window
     /// predicate (kept only as `offending_resolve_scope_lines_by_byte_window`,
     /// not wired into the live guard), so the fix above has a red to point at
     /// without ever mutating a production call site. Both fixtures are shared

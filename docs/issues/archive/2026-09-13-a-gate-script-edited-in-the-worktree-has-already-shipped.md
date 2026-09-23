@@ -188,7 +188,7 @@ Nothing in flight. The remedy text (candidate 3) shipped with the rule; candidat
 ## References
 
 - `scripts/pre-commit-run.sh:157` — the pathspec that decides which commits run the checker.
-- `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` — the
+- `docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` — the
   **closest prior art, and a different bug.** There the two worlds are *population vs content*
   inside one gate: `tracked_all_bug_files()` lists the index while `actual_counts()` reads the
   worktree, so a peer's half-written file moves the count. Here they are *code vs data* across the

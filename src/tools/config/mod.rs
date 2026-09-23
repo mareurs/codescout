@@ -27,7 +27,7 @@ impl Tool for Workspace {
     /// `is_write` is per-CALL, not per-tool (`Tool::is_write` takes `&Value`; see
     /// `Library::is_write`, `Memory::is_write` for the same pattern), so switching on
     /// `action` here locks exactly the mutating dispatch branch and none of the others.
-    /// Fixes `docs/issues/2026-09-03-workspace-activate-writes-libraries-json-outside-the-write-lock.md`.
+    /// Fixes `docs/issues/archive/2026-09-03-workspace-activate-writes-libraries-json-outside-the-write-lock.md`.
     fn is_write(&self, input: &Value) -> bool {
         input.get("action").and_then(Value::as_str) == Some("activate")
     }
@@ -39,7 +39,7 @@ impl Tool for Workspace {
     ///
     /// `is_write` agrees, per call: it returns `true` for `action="activate"` and `false` for
     /// the read-only actions, so the activate path takes the cross-process write lock. See
-    /// `docs/issues/2026-09-03-workspace-activate-writes-libraries-json-outside-the-write-lock.md`.
+    /// `docs/issues/archive/2026-09-03-workspace-activate-writes-libraries-json-outside-the-write-lock.md`.
     fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
         crate::tools::annot::additive_closed()
     }

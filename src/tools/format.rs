@@ -139,7 +139,7 @@ pub(crate) fn insert_below_header(body: String, extra: &str) -> String {
 /// deliberately ONE level and scalars-only (no general recursive walk, which would re-open
 /// the `MAX_KEYS` / `MAX_SCALARS` budget question this function exists to close) — every
 /// known caller's nested object (`hints`) is a flat map of short scalars by construction.
-/// See `docs/issues/2026-09-02-overflow-summary-promotes-the-count-and-elides-its-caveat.md`.
+/// See `docs/issues/archive/2026-09-02-overflow-summary-promotes-the-count-and-elides-its-caveat.md`.
 pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
     /// Wide objects exist (`doc(get)` alone carries ~15); listing every key would
     /// crowd out the arrays and scalars below, which carry more per byte.
@@ -450,7 +450,7 @@ mod tests {
     }
 
     /// Regression test for
-    /// `docs/issues/2026-09-02-overflow-summary-promotes-the-count-and-elides-its-caveat.md`:
+    /// `docs/issues/archive/2026-09-02-overflow-summary-promotes-the-count-and-elides-its-caveat.md`:
     /// a mixed payload whose object-valued key (`hints`, analogous to the librarian's own
     /// completeness/scope qualifiers) must surface its scalar contents, not just its bare
     /// name in the `keys:` line — the array-valued key already worked (`arrays:` pass), the

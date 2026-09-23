@@ -145,7 +145,7 @@ has never had an instrument.** This file deliberately does not guess the number.
 
 - Mirror-direction sibling, archived: `docs/issues/archive/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`.
 - Same file/catalog pair, **id** rather than **status**:
-  `docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`.
+  `docs/issues/archive/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`.
 - **Candidate class, not yet a cluster** — *"a write path updates one half of the file/catalog pair
   and reports success"*. Three instances now span two directions and two fields (status via `link`,
   status via `edit_markdown`, id via move/worktree). Tagged `cluster/unclassified` deliberately

@@ -1349,8 +1349,8 @@ citation this repo already relies on, despite never having been its own commit.
 
 **A second-order cost this instance also produced:** the archive move that followed (of the bug
 this fix closed) re-minted the file's catalog id, breaking two INBOUND prose citations in unrelated
-files that named the pre-archive path as a worked example for `docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`
-(id `e82deca98330f72c`). Those citations depend on the OLD path for a `sha256(path) = id` computation
+files that named the pre-archive path as a worked example for `docs/issues/archive/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`
+(id `e4cccc7c8d339988`). Those citations depend on the OLD path for a `sha256(path) = id` computation
 they quote, so the path could not simply be swapped to the new one without invalidating the math —
 fixed by appending a forward-note there instead of editing the historical values. Ordinary archival
 churn, but a reminder that a capture-and-archive sequence can compound: one event breaks provenance

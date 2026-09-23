@@ -174,7 +174,7 @@ async fn activate_nonexistent_path_errors() {
     assert!(result.is_err());
 }
 
-/// Shape B from `docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`
+/// Shape B from `docs/issues/archive/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`
 /// — the mechanism that file called "a hypothesis wearing a conclusion's clothes",
 /// isolated from `/clear`, from the companion plugin, and from any second session.
 ///

@@ -5,7 +5,7 @@ closed:
 severity: medium
 owner: marius
 related:
-  - docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md
+  - docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md
   - docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md
 tags:
   - cluster/hint-composed-without-the-request
@@ -87,7 +87,7 @@ Two defects on one surface, `tests/issue_clusters.rs`'s panic message.
 the worktree is unreadable, so it is counted by neither path; its untracked copy at the new location
 is not tracked, so it is counted by neither path either. The file falls out of the corpus entirely
 for the duration of the move. The gate's own corpus derivation has this property — that is
-`docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`, already
+`docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`, already
 filed — and the **remediation instruction hands the reader the same instrument**, so a faithful
 re-derivation cannot distinguish "the ledger drifted" from "a peer is mid-move".
 
@@ -316,7 +316,7 @@ paired cell bump described in § *Root cause* defect 2.
 
 ## References
 
-- `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` — the
+- `docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` — the
   corpus-derivation half; same mechanism, different artifact, different fix.
 - `docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md` — the live blocked
   pair measured in § *Evidence*.

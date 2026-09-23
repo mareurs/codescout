@@ -2088,7 +2088,7 @@ outside the report in all three cases. Reject reasons, verbatim, as Phase 4 requ
 |---|---|
 | `terminal_status_with_caveat` × 112 | Report-only by design. `scan_terminal_status_with_caveat`'s own header: *"Reports only; there is no `fix=`. Discharging a caveat means establishing the thing it says was never established, which is work, not repair."* Archived files are included deliberately. |
 | zombie-at-archive (`13382b706c9c77b0`) | Not in the report at all — filtered on purpose by `an_open_status_bug_under_archive_is_silent` (`src/librarian/tools/doctor.rs:9846`), whose doc comment names that exact path as its motivating case. I proposed a `doc(action="move")` because the **absence** of a check read as a coverage gap. |
-| `frontmatter_id_mismatch` × 1 | Detail asserts *"a move re-keys the row and this file kept the id it was moved away from"* — false here; the id was worktree-minted. `docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md` (status `open`) already records this exact id pair as the known false positive. |
+| `frontmatter_id_mismatch` × 1 | Detail asserts *"a move re-keys the row and this file kept the id it was moved away from"* — false here; the id was worktree-minted. `docs/issues/archive/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md` (status `open`) already records this exact id pair as the known false positive. |
 
 **Why "read the report more carefully" is the wrong instrument.** Each reject is invisible from
 a different surface: a source-function header, a test's doc comment, and a filed bug. Only the

@@ -57,13 +57,13 @@ own and cannot edge-resolve away," which is the reason NOT to fix it inline as p
 
 **FIXED 2026-09-19** — `e635d4dab44a4b434a300ceab2b8402088d43a4d`, patch-id `89bf0a9bbd81be5a32efa790eb8dbfc912e5b9ca`. `resolve_embed_fields_with` propagates with `?` as a `RecoverableError` instead of `.ok()`-ing the parse failure into `None`. The missing-file path is unchanged and now pinned separately — its red was observed under mutation, since it cannot red on the production path.
 
-Landed separately from Task 8, as originally scoped — fixed alongside the unrelated `c222737eedb69850` (under-isolated env tests in the same file set), because the second bug was what made the first invisible on the fixing session's own machine.
+Landed separately from Task 8, as originally scoped — fixed alongside the unrelated `6655bc86c65fe8c5` (under-isolated env tests in the same file set), because the second bug was what made the first invisible on the fixing session's own machine.
 
 ## Tests added
 
 `tests/retrieval_unit.rs` gained a dedicated malformed-`project.toml` case alongside a
 broader fix: five env-touching tests in that file (three pre-existing, all of them
-under-isolated — `c222737eedb69850`) were unified onto one `with_isolated_retrieval_env`
+under-isolated — `6655bc86c65fe8c5`) were unified onto one `with_isolated_retrieval_env`
 helper deriving its var list from `embedding_env::all_names()`, plus
 `the_isolation_helper_clears_every_declared_embedding_name` guarding that derivation itself
 (mutation-probed: deleting the loop gives KILLED). Verified in both directions — 15 ambient

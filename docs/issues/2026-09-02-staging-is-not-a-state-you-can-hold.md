@@ -343,7 +343,7 @@ docs and gates recommend. Three concrete items:
    and it belongs in the shared guidance rather than in one session's briefs.
 3. **Consider whether the gate can read the worktree instead of the index** for an interactive run,
    so that verification does not *require* staging first. That is the same index-vs-worktree axis as
-   `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` and should
+   `docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` and should
    be decided with it, not separately — note the two want opposite things, which is the real
    question rather than an oversight.
 
@@ -390,7 +390,7 @@ identifies content and never ownership — usable only if you remember what your
 ## Resume
 
 Decide item 3 against
-`docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` — they pull in
+`docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` — they pull in
 opposite directions and the resolution is one decision, not two. Then add the atomic shape to
 `CLAUDE.md` § *Git Workflow* and to the `ledger-counts` failure text.
 

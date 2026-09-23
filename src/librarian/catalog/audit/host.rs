@@ -308,7 +308,7 @@ fn resolve_host_id_for(conn: &Connection, candidate: &str) -> Result<String> {
 /// transported more than once has a longer chain; see [`previous_host_ids`] for the full
 /// list. This function is kept, rather than folded into the plural one, because `doctor`'s
 /// existing `audit_health.host_previous` field is single-valued and this is its unchanged
-/// reader — bug `be6a7e3707b4b62a`'s fix widened the *storage* from a scalar to a list
+/// reader — bug `e78d53668e05c955`'s fix widened the *storage* from a scalar to a list
 /// without touching that single-value consumer, since the newest link is still the
 /// correct answer to "what did this id just replace".
 ///
@@ -326,7 +326,7 @@ pub(crate) fn previous_host_id(conn: &Connection) -> Result<Option<String>> {
 /// one-element list with no migration needed, because a host id is [`sanitize`]d to
 /// `[a-z0-9-]` and can never itself contain a newline.
 ///
-/// No cap: bug `be6a7e3707b4b62a`'s own reasoning is that the population is bounded by how
+/// No cap: bug `e78d53668e05c955`'s own reasoning is that the population is bounded by how
 /// many machines have ever held this catalog, which is small, and a silently-dropped oldest
 /// entry would reproduce the same bug one layer down. Deduped instead — an id already
 /// present is moved to the front rather than duplicated, so a catalog that ping-pongs
@@ -345,7 +345,7 @@ pub(crate) fn previous_host_ids(conn: &Connection) -> Result<Vec<String>> {
 
 /// Record `id` as the newest entry in the previous-host chain — append, not overwrite.
 ///
-/// This is the fix for `be6a7e3707b4b62a`: a plain `set_meta` here is exactly the bug,
+/// This is the fix for `e78d53668e05c955`: a plain `set_meta` here is exactly the bug,
 /// because it discards every id already in the chain. Dedupes by removing any existing
 /// occurrence of `id` before prepending it, so the invariant "each id appears at most once,
 /// newest first" holds after every call.
@@ -529,7 +529,7 @@ mod tests {
     /// The test the bug file's own `## Resume` section calls for: two re-mints in
     /// sequence, asserting the first predecessor survives the second. Every test above
     /// seeds exactly one foreign id, which is why six passing tests and a live production
-    /// verification all missed `be6a7e3707b4b62a` — the defect is unrepresentable in a
+    /// verification all missed `e78d53668e05c955` — the defect is unrepresentable in a
     /// single-hop fixture.
     #[test]
     fn a_second_transport_keeps_the_first_predecessor_in_the_chain() {
@@ -559,7 +559,7 @@ mod tests {
             vec![archlinux_id.clone(), first_foreign.clone()],
             "the chain must retain BOTH predecessors, newest first — a scalar \
              overwrite drops `first_foreign` the moment `archlinux_id` is recorded, \
-             which is the bug at be6a7e3707b4b62a"
+             which is the bug at e78d53668e05c955"
         );
     }
 

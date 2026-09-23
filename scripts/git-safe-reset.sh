@@ -3,7 +3,7 @@
 # --mixed/--hard on a checkout other sessions share.
 #
 # WHY THIS EXISTS
-# docs/issues/2026-09-15-git-reset-mixed-silently-unstages-every-peer-on-a-shared-checkout.md
+# docs/issues/archive/2026-09-15-git-reset-mixed-silently-unstages-every-peer-on-a-shared-checkout.md
 #
 #   `.git/index` is ONE file per checkout, not per session. `git reset --mixed`
 #   (git's own default when no mode flag is given) rewrites that index to match

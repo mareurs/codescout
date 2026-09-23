@@ -139,7 +139,7 @@ const LEDGER_DIR: &str = "docs/trackers/issue-clusters";
 /// Index file + every class file, concatenated in a stable order — read from the git
 /// **index**, not the working tree.
 ///
-/// **Why the index and not the worktree.** `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`
+/// **Why the index and not the worktree.** `docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`
 /// reported the corpus side of this comparison reading the index for its file *list* while
 /// reading *content* — including the ledger, here — from the worktree, so a peer's in-flight
 /// edit to either side of the comparison could move it independently mid-run. The fix chosen
@@ -798,7 +798,7 @@ fn declared_counts(valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
 /// **index**, not the working tree.
 ///
 /// **Why the index.** This is the exact site
-/// `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`
+/// `docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`
 /// named: the file *list* below was already index-scoped (`tracked_all_bug_files`), but each
 /// file's *content* used to come from `std::fs::read_to_string` — the working tree — so a
 /// peer's in-flight write to a tagged file (mid-`artifact(action="move")`, or any write that
@@ -889,7 +889,7 @@ fn git_stage_all(dir: &std::path::Path) {
     );
 }
 
-/// Positive control for `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`:
+/// Positive control for `docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`:
 /// [`actual_counts_at`] must report the INDEX value, not the working tree, when the two
 /// deliberately disagree.
 ///
@@ -1795,7 +1795,7 @@ fn the_bare_n_claim_parser_discriminates() {
 /// sides at the working tree, on the reasoning that comparing them against *different*
 /// substrates would fail on any dirty tree — true, but it stopped being the right substrate
 /// once the Rust side moved to the index (see
-/// `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`):
+/// `docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md`):
 /// `declared_counts`, `actual_counts` and `bare_n_claims` all read `ledger_text()`, which is
 /// index-scoped now. Pointing this comparison at `--source=worktree` would compare the
 /// worktree against the index and fail on any staged-but-uncommitted edit to the ledger or a

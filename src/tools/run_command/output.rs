@@ -210,7 +210,7 @@ async fn run_list_command(list_command: String, work_dir: std::path::PathBuf) ->
 /// Name any `cargo test` filter that matched NOTHING when other named filters in the same
 /// invocation matched something — the partial-miss half `empty_test_selection_diagnostic`
 /// cannot cover, because libtest's own summary has no per-filter breakdown (see that function's
-/// sibling doc comment and `docs/issues/2026-09-16-a-partial-test-filter-reports-success-over-a-silently-narrowed-selection.md`).
+/// sibling doc comment and `docs/issues/archive/2026-09-16-a-partial-test-filter-reports-success-over-a-silently-narrowed-selection.md`).
 ///
 /// Pays for `cargo test … -- --list` (enumerate test names, no run) ONLY when
 /// [`multi_filter_test_command`] finds two-or-more named filters in `original_command` AND the
@@ -805,7 +805,7 @@ mod tests {
 
     // A realistic `cargo test --lib -- <filter1> <filter2>` summary: one filter resolved to
     // one passing test, the rest of the workspace's tests were filtered out. Shape lifted from
-    // `docs/issues/2026-09-16-a-partial-test-filter-reports-success-over-a-silently-narrowed-selection.md`'s
+    // `docs/issues/archive/2026-09-16-a-partial-test-filter-reports-success-over-a-silently-narrowed-selection.md`'s
     // own reproduction.
     const PARTIAL_MATCH_STDOUT: &str = "\nrunning 1 test\n\
          test foo::bar::real_test ... ok\n\n\
