@@ -35,9 +35,13 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.environ.get("PROMPT_ENGINEERING_ROOT",
-                                  "/home/marius/work/claude/prompt-engineering") + "/src")
-from prompt_tdd.judge import AnthropicProvider  # noqa: E402
+sys.path.insert(0, os.environ.get(
+    "PROMPT_ENGINEERING_ROOT",
+    # sibling checkout of this repo, derived rather than hardcoded (tests/committed_paths.rs)
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "prompt-engineering"))
+    + "/src")
+import json as _json  # noqa: E402
+import subprocess  # noqa: E402
 
 TAIL = ("\n\nGo through the text and quote any sentence that bears on this. Then give "
         "your answer on a final line as ANSWER: YES or ANSWER: NO.")
@@ -88,8 +92,50 @@ claim the text narrows or withdraws.""",
     },
 }
 
-ANS = re.compile(r"^\s*ANSWER:\s*(YES|NO)\b", re.I | re.M)
-_p = AnthropicProvider("claude-haiku-4-5-20251001")
+# `[\s*_#>]*` admits markdown decoration: through `claude -p` Haiku writes `**ANSWER: NO**`,
+# which the API path never did -- a strict anchor read every such reply as unparseable.
+ANS = re.compile(r"^[\s*_#>]*ANSWER:[\s*_]*(YES|NO)\b", re.I | re.M)
+class SubscriptionJudge:
+    """Haiku through headless `claude -p` on a subscription profile -- never the paid API.
+
+    prompt_tdd's ClaudeCliProvider is NOT used as-is: its appended system line demands
+    "ONLY the requested JSON object", which contradicts the reasoned ANSWER: form this
+    checker's gate was passed under. So the system prompt is REPLACED (no Claude Code
+    default leaks in), tools are off, and the API key is stripped from the child env so
+    a missing login fails loudly instead of silently billing the Messages API.
+    """
+
+    SYSTEM = "You are a careful text classifier. Answer in plain text."
+
+    def __init__(self, model: str, config_dir: str, timeout: int = 300) -> None:
+        self.model, self.timeout = model, timeout
+        self.config_dir = os.path.expanduser(config_dir)
+        if not os.path.exists(os.path.join(self.config_dir, ".credentials.json")):
+            sys.exit(f"no subscription credentials in {self.config_dir}")
+
+    def complete(self, prompt: str) -> tuple[str, float]:
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
+        env["CLAUDE_CONFIG_DIR"] = self.config_dir
+        p = subprocess.run(
+            ["claude", "-p", prompt, "--model", self.model, "--tools", "",
+             "--system-prompt", self.SYSTEM, "--strict-mcp-config",
+             "--no-session-persistence", "--output-format", "json"],
+            capture_output=True, text=True, timeout=self.timeout,
+            stdin=subprocess.DEVNULL, env=env, cwd="/tmp")
+        if p.returncode != 0:
+            raise RuntimeError(f"claude -p exit {p.returncode}: {p.stderr.strip()[:200]}")
+        out = _json.loads(p.stdout)
+        # This CLI emits a LIST of events; the verdict is the last `type=result` one.
+        if isinstance(out, list):
+            out = next((e for e in reversed(out) if e.get("type") == "result"), {})
+        if out.get("is_error") or "result" not in out:
+            raise RuntimeError(f"claude -p session error: {str(out.get('result'))[:200]}")
+        return str(out.get("result", "")), 0.0
+
+
+_p = SubscriptionJudge("claude-haiku-4-5-20251001",
+                       os.environ.get("JUDGE_CONFIG_DIR", "~/.claude-kat"))
 
 
 def judge(question: str, text: str, retries: int = 3) -> str:

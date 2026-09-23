@@ -29,8 +29,9 @@ PERMITS an intermediate score: forcing a binary rails every row at 0/1 and the
 spread reads 0.000, which is exactly the rails-only null L-1 warns is a green bar
 hiding the risky region.
 
-    set -a; . /home/marius/work/claude/prompt-engineering/.env; set +a
-    /home/marius/work/claude/prompt-engineering/.venv/bin/python \
+    PE="${PROMPT_ENGINEERING_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)/prompt-engineering}"
+    set -a; . "$PE/.env"; set +a
+    "$PE/.venv/bin/python" \
         scripts/score-rule-tell-prompts.py --mode mutation
 """
 from __future__ import annotations
@@ -45,7 +46,9 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-PE = os.environ.get("PROMPT_ENGINEERING_ROOT", "/home/marius/work/claude/prompt-engineering")
+# Sibling checkout of this repo, derived rather than hardcoded (tests/committed_paths.rs).
+PE = os.environ.get("PROMPT_ENGINEERING_ROOT", os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "prompt-engineering"))
 if not pathlib.Path(PE, "src", "prompt_tdd", "judge.py").is_file():
     sys.exit(f"prompt_tdd not found under {PE}/src — set PROMPT_ENGINEERING_ROOT")
 sys.path.insert(0, str(pathlib.Path(PE, "src")))

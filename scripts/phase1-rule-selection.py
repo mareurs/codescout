@@ -164,8 +164,11 @@ TOP_RE = re.compile(r"^\s*TOP3:\s*(.+)$", re.M)
 
 
 def haiku_select(text: str, _client=[]) -> dict:  # noqa: B006 — cached client
-    sys.path.insert(0, os.environ.get("PROMPT_ENGINEERING_ROOT",
-                                      "/home/marius/work/claude/prompt-engineering") + "/src")
+    sys.path.insert(0, os.environ.get(
+        "PROMPT_ENGINEERING_ROOT",
+        # sibling checkout of this repo, derived rather than hardcoded (tests/committed_paths.rs)
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "prompt-engineering"))
+        + "/src")
     from prompt_tdd.judge import AnthropicProvider
     if not _client:
         _client.append(AnthropicProvider("claude-haiku-4-5-20251001"))
