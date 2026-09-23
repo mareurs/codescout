@@ -78,6 +78,21 @@ ARMS: dict[str, str | None] = {
              "that the conflation has no site to occur at. Separate tables remove the "
              "storage site only; a join at read time can still merge a self-report with "
              "an observation. Scope the claim to storage."),
+    # RTD-3 (decision point: transcript record 1494 -> doc write 1498). Same split as
+    # RTD-9/10: 1b binds the rule to the claim without the missing fact; 3 supplies it.
+    # Arm 2 reuses the shared unrelated rule, "2".
+    "3-1a": ("A test cannot detect a change its assertion is MONOTONE under. Absence "
+             "assertions (`is_empty()`, `!exists()`) are monotone under removal — a dead "
+             "mechanism produces exactly the silence they assert."),
+    "3-1b": ("The output you are about to produce attaches a cause to a zero — that the "
+             "observation window produced zero samples *because* it asked sessions to "
+             "notice, stated as 'not a prediction'. The rule 'absence assertions are "
+             "monotone under removal' governs that claim."),
+    "3-3": ("MANDATORY — applies to the document you are about to write: do NOT attach a "
+            "cause to the zero-sample reading, and do NOT call it 'not a prediction'. Zero "
+            "samples in two days are consistent with several causes: no eligible session, "
+            "capture not wired, or a window that had barely started. State it as absence "
+            "of capture in the observed interval, and mark any cause as a hypothesis."),
     # Positive control: maximally explicit and specific. Its job is to prove the
     # channel can move the outcome at all; it is not a candidate treatment.
     "3": ("MANDATORY — applies to the document you are about to write: do NOT claim "

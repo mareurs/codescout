@@ -221,14 +221,19 @@ def first_turn(events: list[dict]) -> tuple[str, list[str], str | None]:
     return "\n".join(parts), tools, mid
 
 
-def fork(src, cut, prompt, projdir, shadow: Shadow, mcp, arm, run, timeout, keep) -> dict:
+def fork(src, cut, prompt, projdir, shadow: Shadow, mcp, arm, text, in_prompt, run, timeout, keep) -> dict:
     label = ("s" if shadow.stripped else "") + arm
     sid = str(uuid.uuid4())
     seed_path = projdir / f"{sid}.jsonl"
     with _LOCK:
         _LIVE_FILES.add(str(seed_path))
+    # The injection goes EITHER into the seed as a hook_additional_context attachment
+    # after the cut record, OR -- when the turn opens with a user message, as RTD-3's
+    # does -- after that message, rendered exactly as an attachment renders.
+    if text is not None and in_prompt:
+        prompt = f"{prompt}\n<system-reminder>\n{text}\n</system-reminder>"
     with open(seed_path, "w") as fh:
-        for r in seed(src, cut, ARMS.get(arm), shadow.stripped, sid):
+        for r in seed(src, cut, None if in_prompt else text, shadow.stripped, sid):
             fh.write(json.dumps(r) + "\n")
     env = {k: v for k, v in os.environ.items()
            if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
@@ -258,7 +263,7 @@ def fork(src, cut, prompt, projdir, shadow: Shadow, mcp, arm, run, timeout, keep
             return {"arm": label, "run": run,
                     "error": f"no assistant turn (exit {proc.returncode}): {err.strip()[-200:]}"}
         return {"arm": label, "run": run, "route": "fork", "model": init.get("model"),
-                "tools": tools, "text": body}
+                "injected": text, "tools": tools, "text": body}
     except subprocess.TimeoutExpired:
         os.killpg(proc.pid, signal.SIGKILL)
         return {"arm": label, "run": run, "error": f"timeout after {timeout}s"}
@@ -280,8 +285,17 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--transcript", required=True)
     ap.add_argument("--cut", type=int, required=True,
-                    help="index of the LAST record kept: the tool_result the turn answered")
-    ap.add_argument("--arms", required=True, help="comma-separated; prefix s for stripped (s0, s1b)")
+                    help="index of the LAST record kept before the turn's input")
+    ap.add_argument("--prompt-records",
+                    help="comma-separated record indexes whose text forms the prompt, in order "
+                         "(a user message and/or rendered attachments); default: cut+1")
+    ap.add_argument("--inject-in-prompt", action="store_true",
+                    help="append the arm text to the prompt as a <system-reminder>, instead of "
+                         "seeding it as an attachment -- for a turn that opens with a user message")
+    ap.add_argument("--arms", default="", help="comma-separated; prefix s for stripped (s0, s1b)")
+    ap.add_argument("--dynamic",
+                    help="JSONL of {run, text} -- one injection per run, arm label from --dynamic-label")
+    ap.add_argument("--dynamic-label", default="e2e")
     ap.add_argument("--runs", type=int, default=10)
     ap.add_argument("--pool", type=int, default=2)
     ap.add_argument("--timeout", type=int, default=900)
@@ -292,33 +306,50 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _cleanup_and_exit)
     signal.signal(signal.SIGINT, _cleanup_and_exit)
 
-    src = [json.loads(l) for l in open(args.transcript)][:args.cut + 2]
-    nxt = src[args.cut + 1]
-    rendered = nxt.get("rendered") or []
-    if nxt.get("type") != "attachment" or not rendered:
-        sys.exit(f"record {args.cut + 1} is not a rendered attachment; no faithful prompt")
-    prompt = "\n".join(c["content"] for c in rendered)
+    idx = ([int(x) for x in args.prompt_records.split(",")] if args.prompt_records
+           else [args.cut + 1])
+    src = [json.loads(l) for l in open(args.transcript)][:max(idx) + 1]
+    parts = []
+    for i in idx:
+        r = src[i]
+        c = (r.get("message") or {}).get("content")
+        if r.get("type") == "user" and isinstance(c, str):
+            parts.append(c)
+        elif r.get("type") == "attachment" and r.get("rendered"):
+            parts += [x["content"] for x in r["rendered"]]
+        else:
+            sys.exit(f"record {i} is neither a user text message nor a rendered attachment")
+    prompt = "\n".join(parts)
     projdir = pathlib.Path(args.transcript).parent
     global _OWN
     import time
-    _OWN = (projdir, src[args.cut]["uuid"], time.time())
+    _OWN = (projdir, next(r for r in reversed(src[:args.cut + 1]) if r.get("uuid"))["uuid"],
+            time.time())
     cfg = json.load(open(PROFILE / ".claude.json"))["mcpServers"]
     mcp = json.dumps({"mcpServers": {k: cfg[k] for k in ("codescout", "researcher") if k in cfg}})
     base = pathlib.Path(args.workdir)
     shadows: dict[str, Shadow] = {}
 
-    jobs = []
-    for a in args.arms.split(","):
+    def shadow(v: str) -> Shadow:
+        return shadows.setdefault(v, Shadow(base, v, src[:args.cut + 1]))
+
+    jobs = []   # (label, text, shadow, run)
+    for a in filter(None, args.arms.split(",")):
         stripped, arm = (True, a[1:]) if a.startswith("s") else (False, a)
         if arm != "0" and arm not in ARMS:
             sys.exit(f"arm {arm!r} is not registered in phase2-replay.ARMS")
-        v = "stripped" if stripped else "full"
-        shadows.setdefault(v, Shadow(base, v, src[:args.cut + 1]))
-        jobs += [(arm, shadows[v], r) for r in range(args.runs)]
-    print(f"fork route: {len(jobs)} forks, model {MODEL}, cut after record {args.cut}")
+        sh = shadow("stripped" if stripped else "full")
+        jobs += [(arm, ARMS.get(arm), sh, r) for r in range(args.runs)]
+    if args.dynamic:
+        for l in open(args.dynamic):
+            d = json.loads(l)
+            jobs.append((args.dynamic_label, d.get("text"), shadow("full"), d["run"]))
+    print(f"fork route: {len(jobs)} forks, model {MODEL}, cut after record {args.cut}, "
+          f"prompt from records {idx}, injection {'in prompt' if args.inject_in_prompt else 'as attachment'}")
     with ThreadPoolExecutor(max_workers=args.pool) as ex, open(args.out, "a") as out:
-        futs = [ex.submit(fork, src, args.cut, prompt, projdir, s, mcp, a, r, args.timeout, args.keep)
-                for a, s, r in jobs]
+        futs = [ex.submit(fork, src, args.cut, prompt, projdir, sh, mcp, lab, txt,
+                          args.inject_in_prompt, r, args.timeout, args.keep)
+                for lab, txt, sh, r in jobs]
         for f in futs:
             row = f.result()
             out.write(json.dumps(row) + "\n")

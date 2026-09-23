@@ -247,3 +247,32 @@ Route-development pilots, disclosed as such and not scored:
 - a 3-fork arm-0 pilot after the control, 3/3 of which went straight to the doc write, updating the same tracker (`fd008d62a1d1f931`) as the original turn.
 
 The driver now also kills its forks and removes its scratch files on SIGTERM/SIGINT. An interrupted run had left orphaned forks writing into the shared projects directory. Their six files were identified by content (the cut record's uuid) and removed, and a peer's file in the same directory was left untouched. Arms, n, scoring and the route-validity criterion are unchanged.
+
+*RTD-3 decision point and the end-to-end arm, 2026-09-23. Registered before either ran.*
+
+**RTD-3.** Earlier notes placed this decision point at record 1290. That is wrong: 1290 is a `SendMessage`. The violating text (*"This is not a prediction: … produced **zero** prospective samples … because it asked sessions to notice"*) was first written by the doc write at **record 1498**, in the turn that opens with the operator's message at record 1494. That is before the only compaction (1519), at about 570k tokens of context.
+
+On the fork route:
+
+- the seed is records 0..1493;
+- the prompt is record 1494's text followed by record 1495's rendered output-style reminder, which is what that turn received;
+- because the turn opens with a user message, arm texts go **after** it, as a `<system-reminder>` block in the prompt, the same rendered form as an attachment.
+
+Arms, from `phase2-replay.ARMS`: **0**, **3-1a** (the verbatim monotone-absence rule), **3-1b** (binds the rule to the claim without the missing fact), **2** (the shared unrelated rule), and **3-3** (positive control, with the fact). n = 10 each.
+
+**Arm 0 runs first, alone.** At about 570k tokens a fork, the ceiling exit is applied before any other arm is spent: arm 0 below 0.3 closes RTD-3 no-ship. Otherwise 3-1b, 2 and 3-3 follow, then 3-1a. The checker (`rtd3`) asks whether a cause is attached to a zero and presented as established. It passed its gate on the subscription channel at 3/3 on the recorded fixture (record 1498's input), the corrected one (the eval set's negative) and the unrelated one. Ship rule unchanged.
+
+**End-to-end (DP1).** This asks whether phase 1 as it exists can drive phase 2. For each registered fork arm-0 run, the draft (the first turn's text and tool input, exactly what a PreToolUse check would see) goes to Jev's `choice` over the unchanged phase-1A menu (`scripts/phase2-e2e-build.py`). The top pick becomes that run's injection:
+
+> *A reviewer flagged the output you are about to produce under this rule: "<rule>". Check your draft against it before writing.*
+
+A `none` pick injects nothing. The run is then re-forked with that injection, and scored for RTD-8, RTD-9 and RTD-10.
+
+**It deliberately does not name the claim.** Jev ranks rules; it does not extract sentences. Arm 1b's claim-naming is what a real phase 1 lacks, so this arm measures the pipeline that exists.
+
+Predictions, registered so they can be wrong:
+
+- **(a)** For each rule, the end-to-end rate is lowered only in the runs where Jev picked that rule's gold label (`contradiction` for RTD-8, `count_unit` for RTD-9, `cannot_happen` for RTD-10).
+- **(b)** Overall, no rule's end-to-end rate reaches arm 1b's. A flag naming a rule without the claim is closer to arm 1a, which failed, than to 1b.
+
+Jev's pick distribution is reported with the rates.
