@@ -1036,6 +1036,8 @@ def main() -> int:
                 sort_keys=True,
             ))
             return 0
+        else:
+            raise SystemExit(f"unknown flag {arg!r}")
     if source not in ("index", "worktree", "head"):
         raise SystemExit(f"--source must be index|worktree|head, got {source!r}")
 

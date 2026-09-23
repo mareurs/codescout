@@ -2429,6 +2429,10 @@ const NOT_HOOK_OWED: &[(&str, &str)] = &[
         "is the rule-parity comparison; asking the hook to enforce it is circular",
     ),
     (
+        "the_hook_rejects_unknown_flags",
+        "checks the hook CLI's error handling; an unknown flag is not a ledger invariant",
+    ),
+    (
         "the_hook_script_agrees_on_both_yaml_tag_styles",
         "cross-language parser parity over stdin; a test OF the hook",
     ),
@@ -2650,5 +2654,28 @@ fn the_hook_enforces_every_rule_it_declares() {
          A rule enforced by only one side is the defect this pair exists to catch: the gate \
          reds for every session in the checkout while the commit path lets it through.\n\
          Reproduce: python3 scripts/pre-commit-ledger-counts.py --rules"
+    );
+}
+
+/// Unknown command-line flags must fail instead of being silently ignored.
+#[test]
+fn the_hook_rejects_unknown_flags() {
+    let out = Command::new("python3")
+        .args([
+            "scripts/pre-commit-ledger-counts.py",
+            "--flag-that-does-not-exist",
+        ])
+        .current_dir(repo_root())
+        .output()
+        .expect("python3 failed to run — the hook script needs it, so this gate does too");
+
+    assert!(
+        !out.status.success(),
+        "unknown flags must make the script fail"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("unknown flag '--flag-that-does-not-exist'"),
+        "the failure must identify the unknown flag; got: {stderr}"
     );
 }
