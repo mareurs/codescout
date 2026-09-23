@@ -155,6 +155,19 @@ list, with a comment saying why. Committed in `26b60af8`
 (patch-id `39641840397a72f257450e7d36b72e197a1c67bf`) -- that is a workaround at
 one call site, not a fix to the guard.
 
+## Fix provenance
+
+- **SHA:** `26b60af8` (`experiments`)
+- **patch-id:** `39641840397a72f257450e7d36b72e197a1c67bf`
+
+Formalised 2026-09-23 from a pair this record already stated in § *Fix* prose. `doctor`'s
+`terminal_status_without_fix_anchor` cannot parse a hash in running text, so the record read as
+anchored while nothing resolved it -- which is the failure mode that check exists to name. The
+pair was not guessed: the SHA resolves and is an ancestor of `experiments`, and its patch-id
+recomputed from the diff equals the one this file already carried. The SHA is positional and
+dies on the next rebase of `experiments`; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick, which is why both are recorded rather than either.
+
 ## Tests added
 
 None for the guard itself -- adding one is the fix, not a step toward it, and it

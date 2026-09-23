@@ -105,6 +105,19 @@ Do **not** "fix" this by deduplicating rows in the report before the cause is kn
 rows turn out to carry a real distinction the payload does not currently serialise, collapsing them
 destroys the evidence rather than the defect.
 
+## Fix provenance
+
+- **SHA:** `8fe2f397c36b2baa656105f944a47bb40b9e62a6` (`experiments`)
+- **patch-id:** `6934e1a05fc40197ca7354704df0218ec5d1e350`
+
+Formalised 2026-09-23 from a pair this record already stated in § *Fix* prose. `doctor`'s
+`terminal_status_without_fix_anchor` cannot parse a hash in running text, so the record read as
+anchored while nothing resolved it -- which is the failure mode that check exists to name. The
+pair was not guessed: the SHA resolves and is an ancestor of `experiments`, and its patch-id
+recomputed from the diff equals the one this file already carried. The SHA is positional and
+dies on the next rebase of `experiments`; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick, which is why both are recorded rather than either.
+
 ## Resume
 
 Start with the emit site for `entry_cited_from_outside_but_undeclared` in

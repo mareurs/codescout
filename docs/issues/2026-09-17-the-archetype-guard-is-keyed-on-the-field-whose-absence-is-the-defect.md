@@ -136,6 +136,19 @@ declares an `entry_collection` and keys those objects on `id` would have caught 
 one, and will catch the next archetype added without them. As written, the guard's
 coverage shrinks silently every time an archetype omits the field.
 
+## Fix provenance
+
+- **SHA:** `38c171786ab80e9088c7b4e3ce7aa7d8dc9182c6` (`experiments`)
+- **patch-id:** `7b38047f3d0489161cb215f7a005b8b75d48bc35`
+
+Formalised 2026-09-23 from a pair this record already stated in § *Fix* prose. `doctor`'s
+`terminal_status_without_fix_anchor` cannot parse a hash in running text, so the record read as
+anchored while nothing resolved it -- which is the failure mode that check exists to name. The
+pair was not guessed: the SHA resolves and is an ancestor of `experiments`, and its patch-id
+recomputed from the diff equals the one this file already carried. The SHA is positional and
+dies on the next rebase of `experiments`; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick, which is why both are recorded rather than either.
+
 ## Notes
 
 Found while building a tracker in another repo, not while working on codescout —

@@ -123,6 +123,19 @@ Two things to decide rather than assume:
 not help any row already written, and the parent bug establishes that machine attribution of
 existing rows is unrecoverable regardless.
 
+## Fix provenance
+
+- **SHA:** `56d8c160167edb92563b248dacdeb894648d4777` (`experiments`)
+- **patch-id:** `b4ab17f375596ea812fafe78524bd526338b0588`
+
+Formalised 2026-09-23 from a pair this record already stated in § *Fix* prose. `doctor`'s
+`terminal_status_without_fix_anchor` cannot parse a hash in running text, so the record read as
+anchored while nothing resolved it -- which is the failure mode that check exists to name. The
+pair was not guessed: the SHA resolves and is an ancestor of `experiments`, and its patch-id
+recomputed from the diff equals the one this file already carried. The SHA is positional and
+dies on the next rebase of `experiments`; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick, which is why both are recorded rather than either.
+
 ## Tests added
 
 None — filed at notice, and the fix is not written.

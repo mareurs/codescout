@@ -104,6 +104,19 @@ reset-and-repair sequence that defaults to `--soft` and says why, in the same wa
 
 **Not started.** Filed on notice, per CLAUDE.md § *Bug Tracking*.
 
+## Fix provenance
+
+- **SHA:** `40273a16e2e2c1d056c8b083ecf8205809f0fa9b` (`experiments`)
+- **patch-id:** `e110c5a8acfbe97497cf5f7447efc87e5c1a6388`
+
+Formalised 2026-09-23 from a pair this record already stated in § *Fix* prose. `doctor`'s
+`terminal_status_without_fix_anchor` cannot parse a hash in running text, so the record read as
+anchored while nothing resolved it -- which is the failure mode that check exists to name. The
+pair was not guessed: the SHA resolves and is an ancestor of `experiments`, and its patch-id
+recomputed from the diff equals the one this file already carried. The SHA is positional and
+dies on the next rebase of `experiments`; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick, which is why both are recorded rather than either.
+
 ## Repro
 
 1. `git add <file-a>` in session A.

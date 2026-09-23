@@ -89,6 +89,19 @@ bypasses the anchor update entirely, and the tool schema misdescribes
 `refresh_anchors`. Fixing the page without fixing those documents a procedure the UI
 does not follow.
 
+## Fix provenance
+
+- **SHA:** `e208bc258a79ceed561a7ba852ba691328448dfc` (`experiments`)
+- **patch-id:** `0bf2dc88fe776ad5dea07e90129b6e5767d06854`
+
+Formalised 2026-09-23 from a pair this record already stated in § *Fix* prose. `doctor`'s
+`terminal_status_without_fix_anchor` cannot parse a hash in running text, so the record read as
+anchored while nothing resolved it -- which is the failure mode that check exists to name. The
+pair was not guessed: the SHA resolves and is an ancestor of `experiments`, and its patch-id
+recomputed from the diff equals the one this file already carried. The SHA is positional and
+dies on the next rebase of `experiments`; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick, which is why both are recorded rather than either.
+
 ## Cluster — why `unclassified` rather than a forced fit
 
 `IC-11` (`doc-contradicted-by-code`) is the obvious reach and is wrong: nothing here is

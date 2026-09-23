@@ -74,6 +74,19 @@ not be passing a flag this script currently ignores — if one is, the fix turns
 a refused commit for everyone, which is a worse failure than the one being fixed. Grep the
 invokers first; that check is the actual work here, not the `else`.
 
+## Fix provenance
+
+- **SHA:** `562f24d069916182a680a15b3aa6eefa26c40cf0` (`experiments`)
+- **patch-id:** `3698108fc08c31f6fe496d862843866400736541`
+
+Formalised 2026-09-23 from a pair this record already stated in § *Fix* prose. `doctor`'s
+`terminal_status_without_fix_anchor` cannot parse a hash in running text, so the record read as
+anchored while nothing resolved it -- which is the failure mode that check exists to name. The
+pair was not guessed: the SHA resolves and is an ancestor of `experiments`, and its patch-id
+recomputed from the diff equals the one this file already carried. The SHA is positional and
+dies on the next rebase of `experiments`; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick, which is why both are recorded rather than either.
+
 ## Workarounds
 
 None needed — the failure is confined to authoring new fixture-driven tests, and shows up as a

@@ -155,6 +155,19 @@ Not yet fixed. Plan, in preference order:
 
 Remedy (1) is the one this bug's cluster argues for: the fix is the **selection**, not the marker.
 
+## Fix provenance
+
+- **SHA:** `f8cc41aaf4e8836174d0ccfe7371ac3cce9a6eee` (`experiments`)
+- **patch-id:** `519482a911f0ed2089d596d13e552cac0e6a61ce`
+
+Formalised 2026-09-23 from a pair this record already stated in § *Fix* prose. `doctor`'s
+`terminal_status_without_fix_anchor` cannot parse a hash in running text, so the record read as
+anchored while nothing resolved it -- which is the failure mode that check exists to name. The
+pair was not guessed: the SHA resolves and is an ancestor of `experiments`, and its patch-id
+recomputed from the diff equals the one this file already carried. The SHA is positional and
+dies on the next rebase of `experiments`; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick, which is why both are recorded rather than either.
+
 ## Tests added
 
 None — not fixed. A regression test wants both reproductions as a pair: the short-line case asserting `visible_drift` and the long-line case asserting the new tier. Asserting only the long-line case would pass against a build that had simply lowered the threshold, which is remedy (2) and not (1).

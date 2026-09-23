@@ -147,6 +147,19 @@ Not proposed: changing `gate.sh` to clear the vars. That would hide the defect f
 leaving every other runner — a direct `cargo test`, an IDE, a peer's shell — exposed, and it would
 make the tests permanently dependent on a wrapper to be correct.
 
+## Fix provenance
+
+- **SHA:** `e635d4dab44a4b434a300ceab2b8402088d43a4d` (`experiments`)
+- **patch-id:** `89bf0a9bbd81be5a32efa790eb8dbfc912e5b9ca`
+
+Formalised 2026-09-23 from a pair this record already stated in § *Fix* prose. `doctor`'s
+`terminal_status_without_fix_anchor` cannot parse a hash in running text, so the record read as
+anchored while nothing resolved it -- which is the failure mode that check exists to name. The
+pair was not guessed: the SHA resolves and is an ancestor of `experiments`, and its patch-id
+recomputed from the diff equals the one this file already carried. The SHA is positional and
+dies on the next rebase of `experiments`; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick, which is why both are recorded rather than either.
+
 ## Tests added
 
 Pending. The regression assertion worth having is not another config case but a **guard**: that no

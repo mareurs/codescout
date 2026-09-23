@@ -272,6 +272,19 @@ not the discriminator.
 **Do not scope the fix to `unindexed_files`.** Two of the three instances carry that key and
 the third does not; fixing the field rather than the rule would leave the scope case
 (`hidden_archived`) silently broken and look green.
+## Fix provenance
+
+- **SHA:** `78c4ea7b2a9eb91da63b944d6db4ce968f4c892d` (`experiments`)
+- **patch-id:** `d9820d3901ec9039c27bc1dd03cf7c101b2612d6`
+
+Formalised 2026-09-23 from a pair this record already stated in § *Fix* prose. `doctor`'s
+`terminal_status_without_fix_anchor` cannot parse a hash in running text, so the record read as
+anchored while nothing resolved it -- which is the failure mode that check exists to name. The
+pair was not guessed: the SHA resolves and is an ancestor of `experiments`, and its patch-id
+recomputed from the diff equals the one this file already carried. The SHA is positional and
+dies on the next rebase of `experiments`; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick, which is why both are recorded rather than either.
+
 ## Tests added
 
 None yet. The regression test this bug needs does not exist at any layer: see § *Evidence*

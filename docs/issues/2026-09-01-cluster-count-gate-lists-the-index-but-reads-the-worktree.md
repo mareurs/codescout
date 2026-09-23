@@ -148,6 +148,19 @@ Two things to decide rather than assume:
   *what would be committed*, which is the question a pre-commit gate asks and not necessarily the
   one an interactive run asks.
 
+## Fix provenance
+
+- **SHA:** `a27b3988df9cc836de25643ba1d16b5bb031b6c3` (`experiments`)
+- **patch-id:** `6218b737769127facb70abb482d4451fa35171d4`
+
+Formalised 2026-09-23 from a pair this record already stated in § *Fix* prose. `doctor`'s
+`terminal_status_without_fix_anchor` cannot parse a hash in running text, so the record read as
+anchored while nothing resolved it -- which is the failure mode that check exists to name. The
+pair was not guessed: the SHA resolves and is an ancestor of `experiments`, and its patch-id
+recomputed from the diff equals the one this file already carried. The SHA is positional and
+dies on the next rebase of `experiments`; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick, which is why both are recorded rather than either.
+
 ## Tests added
 
 None — this is a report. A regression test is awkward by construction: it would have to write a

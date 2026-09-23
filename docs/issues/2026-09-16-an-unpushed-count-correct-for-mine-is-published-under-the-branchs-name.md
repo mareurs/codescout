@@ -144,6 +144,19 @@ missing implementation.
 session writes "all mine". § *Observer Blindness* position 3 asks for a check that runs when
 nobody is worried, and this record does not have one.
 
+## Fix provenance
+
+- **SHA:** `f9d77076` (`experiments`)
+- **patch-id:** `01eaa5523753cb7b30354343e638e1662b7f5191`
+
+Formalised 2026-09-23 from a pair this record already stated in § *Fix* prose. `doctor`'s
+`terminal_status_without_fix_anchor` cannot parse a hash in running text, so the record read as
+anchored while nothing resolved it -- which is the failure mode that check exists to name. The
+pair was not guessed: the SHA resolves and is an ancestor of `experiments`, and its patch-id
+recomputed from the diff equals the one this file already carried. The SHA is positional and
+dies on the next rebase of `experiments`; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick, which is why both are recorded rather than either.
+
 ## Tests added
 
 None. The defect is in a sentence a session writes, not in code — there is no production path

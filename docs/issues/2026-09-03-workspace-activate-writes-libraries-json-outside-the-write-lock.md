@@ -102,6 +102,19 @@ This is the same class as `docs/issues/archive/2026-09-02-is-write-omits-five-mu
 is not automatically right here, because the librarian actions are user-initiated writes
 and this one is a side effect of a routine navigation call.
 
+## Fix provenance
+
+- **SHA:** `2ccea49e279b9e4837cb9dba029e417798efd88e` (`experiments`)
+- **patch-id:** `686dc48821d206dc98ea935ddbe6d8538a51e353`
+
+Formalised 2026-09-23 from a pair this record already stated in § *Fix* prose. `doctor`'s
+`terminal_status_without_fix_anchor` cannot parse a hash in running text, so the record read as
+anchored while nothing resolved it -- which is the failure mode that check exists to name. The
+pair was not guessed: the SHA resolves and is an ancestor of `experiments`, and its patch-id
+recomputed from the diff equals the one this file already carried. The SHA is positional and
+dies on the next rebase of `experiments`; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick, which is why both are recorded rather than either.
+
 ## Tests added
 None — filed, not fixed. `server::tests::annotations_agree_with_is_write` deliberately does
 **not** assert the converse direction (`is_write == false` implies read-only), precisely so
