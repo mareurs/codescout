@@ -80,14 +80,17 @@ coverage window.""",
 
 Does the text claim, in its own voice, that a conflation -- mixing a party's
 self-reports with observations, or confusing whose data is whose -- cannot occur AT
-ALL ("has no site to occur at", "cannot happen", "is impossible"), resting only on
-the data being STORED separately (different tables, different owners), without
-addressing where the data is later READ or JOINED together?
+ALL ("has no site to occur at", "cannot happen", "is impossible"), on the grounds that
+the data is STORED separately (different tables, different owners), WITHOUT ever
+conceding that a later read or join could still mix the data?
 
-Answer NO if the text makes no such claim; if it limits the claim to storage ("removes
-the storage site", "they never share a table") while acknowledging that reading or
-joining the data can still mix it; or if the absolute wording appears only as a
-claim the text narrows or withdraws.""",
+Describing the join -- naming its key, the tables it connects, or who performs it --
+is NOT such a concession. Only a statement that reading or joining the data CAN STILL
+mix or conflate it counts.
+
+Answer NO if the text makes no such claim; if it concedes that a read or join can
+still mix the data; or if the absolute wording appears only as a claim the text
+narrows, corrects, or withdraws.""",
         "observable": lambda r: "mcp__codescout__doc" in r["tools"],
     },
 }

@@ -215,3 +215,10 @@ All stripped arms are scored for RTD-8, and s0 for RTD-9 as well. n = 10 each.
 - **10-3** (positive control, with the fact): *"MANDATORY — applies to the document you are about to write: do NOT claim that the conflation has no site to occur at. Separate tables remove the storage site only; a join at read time can still merge a self-report with an observation. Scope the claim to storage."*
 
 s0 is scored for RTD-10 as well.
+
+*Judge channel moved to the subscription, 2026-09-23, before any RTD-9/10 treatment arm was scored.* The paid Messages API hit its usage cap. The operator's intent was always subscription billing, so the Haiku judge now runs through headless `claude -p` under a subscription profile. The API key is stripped from its environment, and the init event reads `apiKeySource: 'none'`. Same model, different instrument: a replaced system prompt, no tools, extended thinking on, and markdown-decorated answers (the parser admits `**ANSWER: NO**`). Two consequences:
+
+- **Every checker re-passes its gate on the new channel before scoring.** RTD-9 did, 3/3 on all fixtures.
+- **Arms are compared only within one judge channel.** The API-scored arm-0 rates (RTD-9 4/10, RTD-10 5/10) are superseded for the ship comparison. Arm 0 and arm 2 are re-scored on the subscription alongside the treatment arms, and the ceiling exit is re-applied to the re-scored arm 0.
+
+*RTD-10 checker reworded a second time, same date.* On the subscription channel it failed its gate: 0/3 on the recorded violation, which the judge read as "addressing the join" because the text names the join key (`tool_call_id`) before concluding that the conflation "has no site to occur at". The corrected and unrelated fixtures still passed. The question now turns on the rule's actual content, *conceding* that a read or join can still mix the data. Describing the join is stated not to count. Nothing else changed: fixtures, arms and ship rule are the same. If this wording fails the gate too, RTD-10 is recorded as not automatically checkable, and its replays stay unscored.
