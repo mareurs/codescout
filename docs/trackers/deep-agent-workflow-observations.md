@@ -153,7 +153,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 
 **Delegation candidate:** the bounded repeatable step here is **not** the fix — it is the triage gate in front of it: *read a filed bug's `## Fix` section and classify whether it prescribes a patch, a decision, or an out-of-repo change.* Five of ten candidates classified "not a patch" on their own text, and each classification is checkable against the file that produced it. Missing input for automating it: **no machine-readable marker distinguishes a prescriptive `## Fix` from a deliberative one** — today the difference is carried entirely in prose. Proposal only; no autonomous run was measured, and this episode establishes nothing about whether a lightweight worker could reproduce the classification.
 
-**Rests on / grouping:** one grouped incident spanning this session and its five dispatched agents. The five bug files are the canonical records and are not reproduced here: `41c3978d6372edf9`, `044e3c141cf80359`, `db80a4adc712c971`, `ea152af988811fa1`, `8713b680435c878a`.
+**Rests on / grouping:** one grouped incident spanning this session and its five dispatched agents. The five bug files are the canonical records and are not reproduced here: `41c3978d6372edf9`, `28b4927cf6253635`, `6ed22167cef9d224`, `43d63e9f2e6c7cc0`, `de46d402441e1e2b`.
 
 **Overhead:** capture ~8 minutes, actual. Distinguished from the scouting above, which the task required regardless and is not collection overhead.
 

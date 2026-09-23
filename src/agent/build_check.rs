@@ -13,7 +13,7 @@
 //! Measured 2026-09-08: an uncommitted `src/agent/write_guard.rs` reddened peers' gates
 //! for ~7 minutes; the author found out from a peer message, minutes later, after two
 //! sessions had paid. Full record:
-//! `docs/issues/2026-09-08-the-author-of-a-tree-reddening-write-is-the-one-party-never-told.md`
+//! `docs/issues/archive/2026-09-08-the-author-of-a-tree-reddening-write-is-the-one-party-never-told.md`
 //!
 //! WHY IT IS NOT `SessionRegistry`-SHAPED
 //! -------------------------------------
@@ -75,7 +75,7 @@
 //!   build lock, which is the blocking this module exists to avoid. So the bound is
 //!   published rather than closed — and published at BOTH surfaces, because a reader who
 //!   never opens this file still sees the notice
-//!   (`docs/issues/2026-09-08-the-author-of-a-tree-reddening-write-is-the-one-party-never-told.md`).
+//!   (`docs/issues/archive/2026-09-08-the-author-of-a-tree-reddening-write-is-the-one-party-never-told.md`).
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

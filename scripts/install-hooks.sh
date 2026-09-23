@@ -86,7 +86,7 @@ stale=0
 # contents against this list instead of against a second hand-maintained one, so a
 # branch whose copy of this file predates some future hook still catches that hook's
 # presence: the population is the directory, not the code. See
-# docs/issues/2026-09-09-install-hooks-check-reports-all-ok-for-a-skipped-pre-push-guard.md.
+# docs/issues/archive/2026-09-09-install-hooks-check-reports-all-ok-for-a-skipped-pre-push-guard.md.
 known_hooks=""
 # A hook present in $hooks_dir that nothing above named. Kept apart from `stale` and
 # from plain `fail` so the footer can say what actually happened instead of reusing
@@ -473,7 +473,7 @@ fi
 # Everything above asks "is the hook THIS SCRIPT KNOWS ABOUT healthy" — a question this
 # copy of the file can only ask about names it has a call site for. That is exactly the
 # defect in
-# docs/issues/2026-09-09-install-hooks-check-reports-all-ok-for-a-skipped-pre-push-guard.md:
+# docs/issues/archive/2026-09-09-install-hooks-check-reports-all-ok-for-a-skipped-pre-push-guard.md:
 # a branch whose install-hooks.sh predates some hook's addition iterates its OWN short
 # list, finds every entry on it healthy, and exits 0 — while $hooks_dir is the shared
 # COMMON dir (see the block above that resolves it), not per-branch, so a hook installed

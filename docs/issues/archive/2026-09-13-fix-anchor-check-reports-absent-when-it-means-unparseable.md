@@ -173,7 +173,7 @@ If the SHA stops resolving, recover the commit by patch-id.
 ## References
 
 - Inverse defect, same day, same mechanism:
-  `docs/issues/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md`
+  `docs/issues/archive/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md`
 - CLAUDE.md § *Testing Discipline* — a suite tests a guard's PREDICATE and never its REMEDY TEXT;
   arrival at the right addressee buys nothing if the instruction is unanswerable as written. Here
   the remedy text names the thing the reader has already done.

@@ -184,6 +184,6 @@ the denylist entry in the same change.
 - Found during the Task 7 pre-dispatch scout, 2026-09-02.
 - `DEPRECATED_TOOL_NAMES` backfill was separately flagged as M3 by the Opus review of `f7b7ff33`.
 - Siblings in the same class, different mechanisms: `bee04240275ee7d9` (citation filter),
-  `db80a4adc712c971` (file type), `3f0e7733ae77c707` (directory enumeration),
+  `6ed22167cef9d224` (file type), `3f0e7733ae77c707` (directory enumeration),
   `ef3e685d69e34321` (label parsing). This one is **markup**.
 - `CLAUDE.md` § *Testing Discipline* — "Loudness is a property of a PATH, not of a failure."

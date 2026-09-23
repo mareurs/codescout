@@ -6,7 +6,7 @@
 #
 # WHY THIS EXISTS
 # ---------------
-# docs/issues/2026-09-09-install-hooks-check-reports-all-ok-for-a-skipped-pre-push-guard.md:
+# docs/issues/archive/2026-09-09-install-hooks-check-reports-all-ok-for-a-skipped-pre-push-guard.md:
 # `--check`'s selector was its own hardcoded list of `install_shim` call sites. A branch
 # whose copy of this file predates some hook's addition to that list iterates its OWN
 # short list, finds every entry on it healthy, and exits 0 -- while the hooks directory

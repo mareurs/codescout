@@ -1,5 +1,5 @@
 ---
-id: ea152af988811fa1
+id: 43d63e9f2e6c7cc0
 kind: bug
 status: fixed
 title: 'BUG: two of the three prompt-surface byte budgets are documented only in the failure strings of the tests that enforce them'

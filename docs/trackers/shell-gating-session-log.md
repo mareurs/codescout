@@ -442,7 +442,7 @@ and was filed from this entry, then fixed and archived
 (`docs/issues/archive/2026-09-16-worktree-guard-reads-a-quoted-regex-alternation-as-a-bare-git-verb.md`,
 `15c6773f542cc9f0`, `cluster/addressing-without-an-escape-hatch`; the fix anchor lives in that
 record's `## Fix provenance`, not here — a patch-id in running prose is read as a CLAIM by
-`doctor`'s fix-anchor check, which is `8713b680435c878a`). The `cd` strip is already filed
+`doctor`'s fix-anchor check, which is `de46d402441e1e2b`). The `cd` strip is already filed
 and open (`docs/issues/2026-09-13-worktree-guards-cd-chain-remedy-is-stripped-before-the-guard-sees-it.md`,
 `cluster/gate-keyed-on-unobservable-event`).
 

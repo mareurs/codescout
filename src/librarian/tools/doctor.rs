@@ -6715,7 +6715,7 @@ fn scan_terminal_status_without_fix_anchor(
 /// section. `CLAUDE.md` § *Parsers Over a Namespace*: a scheme that interprets every token in
 /// its namespace owes an escape for *mention*. Prose is now that escape, and it is the
 /// UNMARKED form, so an author citing a neighbour needs to know nothing to get it right.
-/// docs/issues/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md
+/// docs/issues/archive/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md
 ///
 /// **This is a RECALL trade, so here is what it cost, with its unit, instant and tree.**
 /// Measured 2026-09-20T13:24Z at tree `2ef766f455a336df4d9fa904aada11a99a5aa0d5`, over the
@@ -10319,7 +10319,7 @@ mod tests {
     /// *mention*. `docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
     /// was reported as fixed-but-mislabelled on every clause while being correctly open, and the
     /// only available silence was an `unverified:` asserting something untrue.
-    /// docs/issues/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md
+    /// docs/issues/archive/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md
     ///
     /// **The first four seeds are ABSENCE assertions, monotone under removal of the check** —
     /// delete the whole scan and they still pass, because a dead check produces exactly the

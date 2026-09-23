@@ -1,5 +1,5 @@
 ---
-id: '8713b680435c878a'
+id: de46d402441e1e2b
 kind: bug
 status: fixed
 title: 'BUG: the fix-anchor check reads a patch-id a record MENTIONS as one it CLAIMS'

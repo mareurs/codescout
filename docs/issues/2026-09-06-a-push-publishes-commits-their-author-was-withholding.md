@@ -555,7 +555,7 @@ was damaged or lost; every one of the eight commits was gate-green and archived.
 entirely to the *decision*: an operator who had not authorised a push now has one, and the author
 who had been withholding learned of it by re-deriving the count during an unrelated
 reconnaissance — not from any notification, which is the same blind spot
-`docs/issues/2026-09-08-the-author-of-a-tree-reddening-write-is-the-one-party-never-told.md`
+`docs/issues/archive/2026-09-08-the-author-of-a-tree-reddening-write-is-the-one-party-never-told.md`
 names for a different write.
 
 ### Instance 2026-09-13 (third) — the mechanism WORKED, published as a denominator

@@ -64,7 +64,7 @@ axes, and they are **not** re-files of each other:
 | bug | what narrows | fix |
 |---|---|---|
 | `bee04240275ee7d9` | a *citation filter* inside a scanned file (`!c.tool.contains('_')`) | change the filter |
-| `db80a4adc712c971` | *file type* — every scanner is markdown-scoped, prose moved into YAML | add a YAML reader |
+| `6ed22167cef9d224` | *file type* — every scanner is markdown-scoped, prose moved into YAML | add a YAML reader |
 | this one | *directory enumeration* — a markdown dir in no list | add the directory |
 
 Same class, three mechanisms, three independent fixes. Filed separately for that reason.
@@ -91,7 +91,7 @@ declaring the directory covered.
    **Verdict:** rejected — it names four other paths and not this one.
    **Evidence:** § Root cause.
 
-2. **Hypothesis:** this is a re-file of `db80a4adc712c971`.
+2. **Hypothesis:** this is a re-file of `6ed22167cef9d224`.
    **Test:** compared root causes — that bug's mechanism is "every scanner is markdown-scoped".
    **Verdict:** rejected. These files *are* markdown; the gap is directory enumeration, and the fixes
    do not overlap.
@@ -165,6 +165,6 @@ the exclusion rationale — this bug is one instance and the enumeration was nev
 
 - Found during the Opus task review of `f7b7ff33` (Task 6 of the tool-surface-collapse plan),
   2026-09-02, as review finding I3.
-- Siblings in the same class, different mechanisms: `bee04240275ee7d9`, `db80a4adc712c971`.
+- Siblings in the same class, different mechanisms: `bee04240275ee7d9`, `6ed22167cef9d224`.
 - `docs/adrs/2026-08-27-negative-results-name-their-scope.md` — a gate that is silent about a
   directory it never walked is a negative result that does not name its scope.

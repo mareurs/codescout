@@ -1463,7 +1463,7 @@ fn a_documented_json_payload_names_real_parameters() {
 /// the sidecar's own bytes, and `librarian(action="doctor")` reported `sidecar_shape_drift: 0`
 /// project-wide, so the committed YAML *is* the live prompt rather than a copy of it. That was
 /// the single premise
-/// `docs/issues/2026-09-02-augmentation-prompts-prescribe-dead-tools-and-no-gate-reads-yaml.md`
+/// `docs/issues/archive/2026-09-02-augmentation-prompts-prescribe-dead-tools-and-no-gate-reads-yaml.md`
 /// flagged as read-from-the-code-but-not-observed, and the reason its § Resume says to confirm
 /// it before designing anything.
 ///
@@ -1662,7 +1662,7 @@ fn prompt_cites_from(paths: &[PathBuf], root: &std::path::Path) -> PromptScan {
 /// **The gate.** An augmentation `prompt:` naming a tool that does not exist.
 ///
 /// This is the acceptance condition of
-/// `docs/issues/2026-09-02-augmentation-prompts-prescribe-dead-tools-and-no-gate-reads-yaml.md`:
+/// `docs/issues/archive/2026-09-02-augmentation-prompts-prescribe-dead-tools-and-no-gate-reads-yaml.md`:
 /// *"a `docs/augmentations/*.yaml` prompt naming a dead tool must fail a gate. Today it fails
 /// nothing."* It shares [`stale_tool_call_findings`], [`tool_names`] and [`calls_on_line`] with
 /// the markdown surfaces rather than re-deriving any of them, so there is one notion of "a live

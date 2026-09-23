@@ -1970,7 +1970,7 @@ Walk through `src/services/auth.rs`, then see [the sample](src/foo.py).
         }
 
         // The label is the SUBJECT here, not a tag on the value — the token is a real bug.
-        // Verbatim from docs/issues/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md
+        // Verbatim from docs/issues/archive/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md
         let kept = "The patch-id belongs to `d5af3d3ceff1d08c`, a different bug.";
         let cands = parse_refs(kept, Path::new("docs/trackers/t.md"), PathSyntax::NoModules).0;
         assert!(

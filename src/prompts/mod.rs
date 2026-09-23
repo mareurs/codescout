@@ -2332,7 +2332,7 @@ mod tests {
     /// Every byte-budget gate must be NAMED in `src/prompts/README.md` — the reader doc an
     /// author of a guide or a prompt surface actually opens before editing one.
     ///
-    /// **This is `docs/issues/2026-09-10-two-of-the-three-prompt-byte-budgets-are-documented-only-in-their-own-failure-strings.md`.**
+    /// **This is `docs/issues/archive/2026-09-10-two-of-the-three-prompt-byte-budgets-are-documented-only-in-their-own-failure-strings.md`.**
     /// Two of the three byte budgets that govern these surfaces —
     /// `MAX_DECLARED_SECTION_BYTES` (`src/prompts/guide_index.rs`) and the `CEILING`
     /// enforced by `a_p50_session_stays_under_the_committed_emission_byte_ceiling`
@@ -2393,7 +2393,7 @@ mod tests {
             "{} byte-budget gate name(s) not found anywhere in src/prompts/README.md:\n{}\n\n\
              A budget whose name is not written down in the reader doc is published only to \
              whoever trips its failure string — see \
-             docs/issues/2026-09-10-two-of-the-three-prompt-byte-budgets-are-documented-only-in-their-own-failure-strings.md. \
+             docs/issues/archive/2026-09-10-two-of-the-three-prompt-byte-budgets-are-documented-only-in-their-own-failure-strings.md. \
              Add a subsection (or a row) naming the constant and the enforcing test.",
             missing.len(),
             missing.join("\n")

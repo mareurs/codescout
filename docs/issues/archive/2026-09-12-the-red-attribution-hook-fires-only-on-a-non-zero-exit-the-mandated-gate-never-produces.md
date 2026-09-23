@@ -401,7 +401,7 @@ Harmless — the `-->` still trips the filter — but escape them if you want a 
 - `scripts/attribute-red.py` — `DIAGNOSTIC_PATH`, `named_paths`, `dirty_paths`
 - `CLAUDE.md` § *Development Commands* (the `;`-chained gate) and § *Reaching a Peer
   Session* (the hook and its one named ceiling)
-- `docs/issues/2026-09-08-the-author-of-a-tree-reddening-write-is-the-one-party-never-told.md`
+- `docs/issues/archive/2026-09-08-the-author-of-a-tree-reddening-write-is-the-one-party-never-told.md`
   — the problem the hook exists to solve
 - Measured with sessionId `b80a27d4` (codescout-87), who supplied the independent
   controlled pair and both repro gotchas.

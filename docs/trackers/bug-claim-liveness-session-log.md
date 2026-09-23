@@ -598,7 +598,7 @@ state that makes *"which architectural problem do these bugs share?"* stop being
 Without (2) a peer's in-flight Rust gets rewritten — itself a filed defect here. Without (3)'s
 attribution a red suite reads as evidence against one's own change, and the next hour goes into
 debugging a working diff — which is
-`docs/issues/2026-09-08-the-author-of-a-tree-reddening-write-is-the-one-party-never-told.md`.
+`docs/issues/archive/2026-09-08-the-author-of-a-tree-reddening-write-is-the-one-party-never-told.md`.
 
 **The generalisable claim, and the reason it is one entry rather than three notes.** On a
 checkout this shared, **the modal cause of a red is not in the diff of the session that meets

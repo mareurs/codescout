@@ -94,7 +94,7 @@ Direction 2 is likelier right on the same reasoning `496dd63e` used: a change th
 **Do not fix by tightening `structured_fix_pointers` itself.** It has two consumers since
 `496dd63e`, its `Option` is honest, and narrowing the parser to serve one caller's question would
 break the inverse property those two checks now hold — which is the property
-`8713b680435c878a` was closed to establish.
+`de46d402441e1e2b` was closed to establish.
 
 ## Tests added
 
@@ -115,6 +115,6 @@ should be built before it exists.
 
 ## References
 
-- `docs/issues/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md` (`8713b680435c878a`) — the sibling check, fixed at `496dd63e`, which made this parser shared. That file also records a **second** gap found in the same run and likewise not introduced by it: `terminal_status_without_fix_anchor` has no test covering the fence escape, so a regression in the fence skip would break it silently.
+- `docs/issues/archive/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md` (`de46d402441e1e2b`) — the sibling check, fixed at `496dd63e`, which made this parser shared. That file also records a **second** gap found in the same run and likewise not introduced by it: `terminal_status_without_fix_anchor` has no test covering the fence escape, so a regression in the fence skip would break it silently.
 - `CLAUDE.md` § *Bug Tracking* — the SHA-dies / patch-id-survives rule this check is named for.
 - **Prior-instance count deliberately not stated.** Derive it: `doc(action="find", kind="bug", include_archived=true, filter={"tags": {"contains": "cluster/guard-narrower-than-its-name"}})`.
