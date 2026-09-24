@@ -468,3 +468,29 @@ A first build of the **mined correction pairs**, with no model call and nothing 
 **What that makes the comparison.** Two labelling passes by the same model family, under the same instruction and specs. **It measures consistency, not independence.** The admission rule required an *independent* labeller, and **it cannot be applied as registered**: a κ between Claude and Claude is not evidence the labels are right. The model-vs-context experiment shows why this matters here. Claude and Codex found almost disjoint defect sets, so agreement within one family can hide a shared blind spot.
 
 **So the agent labels stay NOT admitted.** The comparison below is reported as a consistency figure. Admission waits for an independent labeller, which would be a new registration: the operator, or a different model family under the same instruction and blind sample.
+
+## Amendment — the independent labeller is Codex on the real reviews' model, 2026-09-24 (registered before it ran)
+
+**Operator decision:** the independent check on the agent labels is Codex, on the model and effort that produced today's two Codex reviews, `gpt-6-astra` at `medium`, as recorded in their session (`4f4eb0c3`). A different model family is the point: the model-vs-context experiment found Claude and GPT reviewers catch nearly disjoint defects.
+
+**Channel:**
+
+- `codex exec` (codex-cli 0.154.0) on the ChatGPT subscription (`auth_mode chatgpt`, no API key present), with every API-key variable stripped from the child environment.
+- A fresh `CODEX_HOME` holding only the credentials link and a `config.toml` pinning `model = "gpt-6-astra"` and `model_reasoning_effort = "medium"`. No `AGENTS.md`, no MCP servers, no plugins.
+- **Run outside the repository**, in a directory holding only `label-instruction.md`, `menu.json` and the 40 sample rows (`operator-sample.jsonl`, no labels in it). The repo holds both Claude label sets, so a labeller working there could read them.
+- One run. Output: one JSON line per row in the instruction's shape.
+
+**Blindness:** Codex sees exactly what the Claude labellers saw, the same fields and the same instruction, and no label from either Claude pass.
+
+**Scoring:**
+
+- Codex against the **agent labels**, which are the ones up for admission: collapsed-label raw agreement and Cohen's κ, exact-rule agreement where both call a violation, and every disagreement.
+- The same against the main-session labels, reported alongside.
+
+**Admission rule, the registered one applied to this labeller:**
+
+- **κ ≥ 0.6** between Codex and the agent labels on the collapsed label: the agent labels are admitted for T and for mined training rows.
+- **κ < 0.6:** they are not. Disagreements are reported, and there is no relabelling to reach the bar.
+- A run that errors, or returns fewer than 40 valid rows, is reported and not scored.
+
+**Prediction:** κ ≥ 0.6, but below the 0.86 Claude–Claude figure, with most disagreements on rows where one side calls a violation and the other `not-a-violation`.
