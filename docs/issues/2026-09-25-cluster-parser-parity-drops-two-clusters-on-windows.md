@@ -27,7 +27,7 @@ assertion `left == right` failed: `actual` disagrees between this gate and scrip
 Reproduce: python3 scripts/pre-commit-ledger-counts.py --source=index --json
 ```
 
-`left` holds `"guard-narrower-than-its-name": 59` and `"repro-env-diverges-from-gate-env": 27`, and `right` has neither key. The other 23 keys are identical, including `unclassified: 51`. Which of `left`/`right` is the Rust side and which the script was not read from the test.
+`left` holds `"guard-narrower-than-its-name": 59` and `"repro-env-diverges-from-gate-env": 27`, and `right` has neither key. The other 23 keys are identical, including `unclassified: 51`. **`left` is Rust and `right` is the Python script**, read from `tests/issue_clusters.rs:1846`: `assert_eq!(mine, theirs, …)`, where `mine` is `actual_counts(&valid)` and `theirs` is the script's `--json` output. So **the Python side drops the two clusters**. The reading was supplied by session `938e2953-de0e-4241-a543-9b761a70326a` and checked against the file.
 
 ## Reproduction
 
@@ -41,8 +41,10 @@ Native `windows-latest` CI lanes. It is not in the wine lane's results, because 
 
 ## Root cause
 
-Unknown. The shape is two clusters missing whole, not miscounted, which points at a whole class file or section that one parser does not read on Windows. Not verified.
+Unknown. The shape is two clusters missing whole, not miscounted, which points at a whole class file or section that one parser does not read on Windows.
+
+**Candidate, not verified:** in `scripts/pre-commit-ledger-counts.py`, `_git()` (`:113`) and `read()`'s per-file fallbacks (`git show HEAD:path` at `:262`, `git show :path` at `:267`) call `subprocess.run(…, capture_output=True, text=True)` with no `encoding=`. On Windows that decodes with the locale codepage (cp1252), not UTF-8. The worktree `open()` at `:270` passes `encoding="utf-8"` explicitly. The absence of `encoding=` at those three lines is confirmed. Whether either fallback is reached for these two slugs, and whether their files hold bytes that cp1252 decodes differently, is **not** known. Candidate raised by session `938e2953`.
 
 ## Resume
 
-Unowned. Start by reading which side is `left` in `tests/issue_clusters.rs:1846`, then check what is Windows-specific about how that side reads the files for `IC-14` and `IC-5`.
+Unowned. Test the candidate in Root cause first. Run `python3 scripts/pre-commit-ledger-counts.py --source=index --json` with `PYTHONUTF8=0` and a cp1252 locale (or on Windows), and see whether passing `encoding="utf-8"` at `:113`/`:262`/`:267` restores the two slugs.
