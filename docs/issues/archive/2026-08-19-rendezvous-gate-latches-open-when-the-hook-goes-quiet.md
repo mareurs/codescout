@@ -12,7 +12,7 @@ opened: 2026-08-19
 owner: marius
 related: []
 severity: low
-unverified: 'MECHANISM confirmed (src/tools/config/mod.rs:267-283, gated branch observed executing live 2026-08-27). The stamp is now LIVE-VERIFIED (2026-08-28: this session''s slot moved 04:54:32Z -> 04:56:19Z after an MCP call; note the hook matcher is mcp__.* so native Bash calls never stamp). FREQUENCY now has a first number - 0 of 5 stamped slots showed the latch-open-while-quiet state, joined against usage.db call activity - but that is one ~20-minute snapshot, not a long-run rate. Re-run the join before closing. No codescout-side fix is implemented, deliberately.'
+unverified: 'RESOLVED 2026-09-19 by 2ccea49e (staleness derives at read time, so a quiet hook expires the gate); the frequency join asked for here measured a mechanism that no longer exists. Was — MECHANISM confirmed (src/tools/config/mod.rs:267-283, gated branch observed executing live 2026-08-27). The stamp is now LIVE-VERIFIED (2026-08-28: this session''s slot moved 04:54:32Z -> 04:56:19Z after an MCP call; note the hook matcher is mcp__.* so native Bash calls never stamp). FREQUENCY now has a first number - 0 of 5 stamped slots showed the latch-open-while-quiet state, joined against usage.db call activity - but that is one ~20-minute snapshot, not a long-run rate. Re-run the join before closing. No codescout-side fix is implemented, deliberately.'
 ---
 
 # BUG: the rendezvous gate latches open, so a companion hook that goes quiet mid-process leaves `/clear` invisible again

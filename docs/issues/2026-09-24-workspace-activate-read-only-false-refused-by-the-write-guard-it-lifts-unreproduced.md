@@ -29,6 +29,17 @@ The refusal points the reader at a call that the same guard refuses. A reader wh
 
 A background research subagent was running on the same MCP server between steps 3 and 5, and may have activated the project itself. That is unverified.
 
+
+### Reproduced 2026-09-24, deterministically (session `09093108-1425-4f6d-9695-a9e3bb98ea0d`)
+
+On a server rebuilt at `c07f71ee`+, with no subagent or peer sharing it, in three calls:
+
+1. `workspace(action="activate", path="/home/marius/work/claude/codescout/crates/codescout-embed", read_only=true)` → `status: ok`, `read_only: true` (a workspace member, activated by absolute path).
+2. `workspace(action="activate", path="/home/marius/work/claude/codescout", read_only=false)` → **refused**: *"File writes are disabled: the active project is …/crates/codescout-embed and it was activated read-only. … To lift the block here instead, call workspace(action='activate', path='…/crates/codescout-embed', read_only: false)"*.
+3. The same call as step 2 plus `workspace="/home/marius/work/claude/codescout"` → `status: ok`, `read_only: false`, home restored.
+
+So the lead above holds and is not intermittent: the activate call is gated by the CURRENT activation's read-only state, so a read-only activation guards the only call that leaves it, including a call to a DIFFERENT root. The step-5 success in the original sequence fits the peer-reactivation reading it offered. The per-call pin is the working escape (step 3) and the refusal names it first, so a reader following the text in order recovers; the second remedy it names is the one that cannot work.
+
 ## Environment
 
 codescout server pid 3289089, `git_sha 396f04c4` (dirty), profile `~/.claude-kat`, CLI Claude Code, 2026-09-24.

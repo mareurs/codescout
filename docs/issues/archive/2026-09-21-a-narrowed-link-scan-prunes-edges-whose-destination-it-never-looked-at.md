@@ -12,7 +12,7 @@ opened: 2026-09-21
 owner: marius
 related: []
 severity: high
-unverified: 'The live reproduction has not been re-run against a rebuilt binary: after `cargo rb` + `/mcp`, `librarian(action="link_scan", scope="project", write=false, limit=10)` should report edges_stale at or near the pairs with both ends in the window, not 53. The predicate and its call-site wiring are pinned by tests; the live number is not observed.'
+unverified: 'CLEARED 2026-09-24 on the rebuilt binary — `link_scan(limit=10, write=false)` reports `edges_stale = 0`, was 53; the false-dangling half is filed as 82b69559ddb18983. Was — The live reproduction has not been re-run against a rebuilt binary: after `cargo rb` + `/mcp`, `librarian(action="link_scan", scope="project", write=false, limit=10)` should report edges_stale at or near the pairs with both ends in the window, not 53. The predicate and its call-site wiring are pinned by tests; the live number is not observed.'
 ---
 
 > **Do not run `librarian(action="link_scan", write=true)` with a narrowed scan on this

@@ -13,7 +13,7 @@ opened: 2026-08-31
 owner: marius
 related: []
 severity: low
-unverified: The code fix is covered by six tests and a five-mutation matrix, but the live shape of memory(action="refresh_anchors")'s new dropped_machine_local report has not been observed against a rebuilt server — this session's is git_sha 179ba3d7, pre-fix. The data repair IS verified live (workspace status re-reads the sidecar per call). Discharge by rebuilding, reconnecting, and calling refresh_anchors on a topic whose sidecar still carries a gitignored anchor; note that after this commit no such sidecar exists in-repo, so the trigger has to be manufactured or found in a sibling repo.
+unverified: CLEARED 2026-09-24 — live on the rebuilt binary with a manufactured sidecar — `refresh_anchors` reported `dropped_machine_local = [.buddy/.current_session_id]` and kept the tracked CLAUDE.md anchor; probe topic deleted. Was — The code fix is covered by six tests and a five-mutation matrix, but the live shape of memory(action="refresh_anchors")'s new dropped_machine_local report has not been observed against a rebuilt server — this session's is git_sha 179ba3d7, pre-fix. The data repair IS verified live (workspace status re-reads the sidecar per call). Discharge by rebuilding, reconnecting, and calling refresh_anchors on a topic whose sidecar still carries a gitignored anchor; note that after this commit no such sidecar exists in-repo, so the trigger has to be manufactured or found in a sibling repo.
 ---
 
 # BUG: memory anchors include gitignored runtime artifacts, so five memories are stale by construction

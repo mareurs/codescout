@@ -10,7 +10,7 @@ opened: 2026-09-24
 owner: marius
 related: []
 severity: medium
-unverified: Not exercised through the served binary, which predates c8d4e0d6 — the live ledger was repaired by hand instead. Discharge on the next real rekey_prefix after `cargo rb` + /mcp by reading the ledger's frontmatter afterwards.
+unverified: CLEARED 2026-09-24 on the rebuilt binary — a `rekey_prefix` preview of the live DCX ledger reports `frontmatter_lines_rewritten = 2`. Was — Not exercised through the served binary, which predates c8d4e0d6 — the live ledger was repaired by hand instead. Discharge on the next real rekey_prefix after `cargo rb` + /mcp by reading the ledger's frontmatter afterwards.
 ---
 
 ## Summary

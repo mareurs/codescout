@@ -9,7 +9,7 @@ closed: null
 opened: 2026-09-02
 owner: marius
 severity: medium
-unverified: no fix and no test — the defect is in a prescription in CLAUDE.md, which is heavily contended on this checkout, and no test is obviously available since the observation depends on a session's registry name changing under it. Root cause is established; the remedy is a one-clause doc amendment nobody has made.
+unverified: CLEARED 2026-09-24 — the one-clause CLAUDE.md amendment landed at ab231cbf; the no-test half is a standing limit. Was — no fix and no test — the defect is in a prescription in CLAUDE.md, which is heavily contended on this checkout, and no test is obviously available since the observation depends on a session's registry name changing under it. Root cause is established; the remedy is a one-clause doc amendment nobody has made.
 ---
 
 # BUG: a session's self-reported name is not verifiable from inside the session, and the positive-identification procedure does not distinguish that

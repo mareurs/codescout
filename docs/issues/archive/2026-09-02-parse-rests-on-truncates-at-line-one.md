@@ -15,7 +15,7 @@ opened: 2026-09-02
 owner: marius
 related: []
 severity: medium
-unverified: the 47%->59% resolvability projection in Evidence was not re-derived post-fix; only capture correctness (~70% of declarations) was measured
+unverified: RESOLVED 2026-09-24 by re-derivation — 152 of 273 declarations (56%) carry at least one resolvable target post-fix; not a check of the 59% projection, since the corpus grew by 65 declarations and the classifier was re-implemented. Was — the 47%->59% resolvability projection in Evidence was not re-derived post-fix; only capture correctness (~70% of declarations) was measured
 ---
 
 # BUG: `parse_rests_on` returns line 1 only, silently truncating 70% of declarations mid-value

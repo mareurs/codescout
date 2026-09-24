@@ -16,7 +16,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
 severity: medium
-unverified: Not live-verified against a running MCP server — the served binary predates the fix. The by-id sibling route WAS live-verified the same day on a real 12-sub-project workspace; this route was verified only by its (now un-ignored) test.
+unverified: CLEARED 2026-09-24 — live on the rebuilt binary — activating crates/codescout-embed by absolute path returned its 5 on-disk memory topics and a workspace array (the focus-switch), and created no stray memory directory. Was — Not live-verified against a running MCP server — the served binary predates the fix. The by-id sibling route WAS live-verified the same day on a real 12-sub-project workspace; this route was verified only by its (now un-ignored) test.
 ---
 
 ## Summary

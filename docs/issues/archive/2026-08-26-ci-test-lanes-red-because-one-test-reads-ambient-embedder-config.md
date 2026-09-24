@@ -14,7 +14,7 @@ closed: 2026-08-26
 opened: 2026-08-26
 owner: marius
 severity: high
-unverified: CI has NOT been re-run — origin/experiments is 62 commits behind local, so no lane has seen this fix. What is established is that the reproduction goes red→green and the whole lib suite passes with the variable unset (4330/0), which is the environment CI runs in for this test. Separately, the 2026-08-24 local-embed lane failed on two OTHER tests (artifact_advertises_the_append_entry_section_writer, every_guide_topic_is_triggered_or_declared_pull_only) that were never assessed against HEAD; both pass locally today, but that is not the same as a green lane.
+unverified: CLEARED 2026-09-24 — CI run 35179964638 at baaafe0a, which contains the fix d81064f7, is green on every lane including both local-embed lanes; of the two other tests named here one still existed there and passed, the other no longer exists. Was — CI has NOT been re-run — origin/experiments is 62 commits behind local, so no lane has seen this fix. What is established is that the reproduction goes red→green and the whole lib suite passes with the variable unset (4330/0), which is the environment CI runs in for this test. Separately, the 2026-08-24 local-embed lane failed on two OTHER tests (artifact_advertises_the_append_entry_section_writer, every_guide_topic_is_triggered_or_declared_pull_only) that were never assessed against HEAD; both pass locally today, but that is not the same as a green lane.
 ---
 
 ## Summary

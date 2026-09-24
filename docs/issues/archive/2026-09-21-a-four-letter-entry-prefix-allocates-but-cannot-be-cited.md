@@ -11,7 +11,7 @@ opened: 2026-09-21
 owner: marius
 related: []
 severity: medium
-unverified: 'The refusal half is not live: the served binary predates c8d4e0d6, so create/update/rekey_prefix/append_entry still accept a four-letter prefix until `cargo rb` + /mcp. Discharge by calling append_entry with id_prefix="DCTX" on any params ledger after the rebuild and reading the refusal (nothing is allocated). The rename half IS verified live: link_scan(write=false) at c8d4e0d6 reports an edges_missing row 0ca7439866e8f2b6 -> 0cc578bbc332d699 that this file recorded as absent.'
+unverified: 'CLEARED 2026-09-24 on the rebuilt binary — `append_entry(id_prefix=DCTX)` refused naming the bound; nothing allocated. Was — The refusal half is not live: the served binary predates c8d4e0d6, so create/update/rekey_prefix/append_entry still accept a four-letter prefix until `cargo rb` + /mcp. Discharge by calling append_entry with id_prefix="DCTX" on any params ledger after the rebuild and reading the refusal (nothing is allocated). The rename half IS verified live: link_scan(write=false) at c8d4e0d6 reports an edges_missing row 0ca7439866e8f2b6 -> 0cc578bbc332d699 that this file recorded as absent.'
 ---
 
 ## Summary

@@ -12,7 +12,7 @@ opened: 2026-08-31
 owner: marius
 related: []
 severity: low
-unverified: whether CI's windows-gnu-cross-under-wine job actually needs ppid==0 (the reason the split was presumably introduced) was not re-verified against CI itself — no CI access from this session. See Resume.
+unverified: CLEARED 2026-09-24 — the split was not required — CI run 35179964638 ran the cfg(windows) branch asserting ppid != 0 under wine on the windows-gnu lane, and it passed. Was — whether CI's windows-gnu-cross-under-wine job actually needs ppid==0 (the reason the split was presumably introduced) was not re-verified against CI itself — no CI access from this session. See Resume.
 ---
 
 # BUG: `tools::rendezvous::tests::publish_records_a_zero_parent_pid_on_windows_by_design` asserted `ppid == 0` as "Windows by design", contradicting the real `ToolHelp32Snapshot`-based implementation and an earlier fix's own regression test

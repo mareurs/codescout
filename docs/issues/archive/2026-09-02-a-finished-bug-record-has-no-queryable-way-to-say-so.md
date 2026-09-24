@@ -10,7 +10,7 @@ related:
 - docs/issues/archive/2026-09-02-index-description-omits-the-verify-action.md
 - docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md
 severity: medium
-unverified: the 36cb17ed section-scoping fix was verified against the live corpus by a transcription of its two functions, not by the rebuilt MCP binary — re-run librarian(action="doctor") after a rebuild to confirm the real check also reports 1 rather than 5
+unverified: WITHDRAWN 2026-09-24 — the 36cb17ed section scoping this asks to verify was superseded by the bullet grammar (2026-09-13); the live check reports 0. Was — the 36cb17ed section-scoping fix was verified against the live corpus by a transcription of its two functions, not by the rebuilt MCP binary — re-run librarian(action="doctor") after a rebuild to confirm the real check also reports 1 rather than 5
 ---
 
 # BUG: a finished bug record has no queryable way to say so, and the terminal-status selector returns a correct zero

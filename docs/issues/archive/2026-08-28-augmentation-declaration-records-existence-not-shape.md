@@ -11,7 +11,7 @@ tags:
 - cross-machine
 - claude-md-drift
 closed: 2026-08-30
-unverified: 'MECHANISM shipped and tested; LOCAL export done; ONE item this machine cannot close. `librarian(doctor)` reports augmentation_declared_but_absent: 13 -- trackers that DECLARE an augmentation and have none here. Their only copy is another machine''s gitignored, unbacked catalog, so `export_augmentations` run HERE cannot recover them; it must be run THERE. Also open, non-blocking: `artifact_augment` does not write through on shape change (the export is idempotent, so this costs a re-run rather than correctness). Matches open-issue-work-queue:BL-50, which carries the same disposition.'
+unverified: 'CLEARED 2026-09-24 — doctor reports `augmentation_declared_but_absent = 0` on this machine. Was — MECHANISM shipped and tested; LOCAL export done; ONE item this machine cannot close. `librarian(doctor)` reports augmentation_declared_but_absent: 13 -- trackers that DECLARE an augmentation and have none here. Their only copy is another machine''s gitignored, unbacked catalog, so `export_augmentations` run HERE cannot recover them; it must be run THERE. Also open, non-blocking: `artifact_augment` does not write through on shape change (the export is idempotent, so this costs a re-run rather than correctness). Matches open-issue-work-queue:BL-50, which carries the same disposition.'
 ---
 
 # BUG: `expects_augmentation` records existence, not shape

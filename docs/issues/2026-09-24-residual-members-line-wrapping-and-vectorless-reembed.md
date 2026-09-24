@@ -19,6 +19,11 @@ Remaining work split out of `docs/issues/archive/2026-09-04-the-chunker-budget-i
 
 **The work:** Implement a wrapping form for the **Members:** line (26 KB single line), and reindex to re-embed the 7 vectorless artifacts.
 
+
+**Half discharged 2026-09-24:** the re-embed is done — `reindex(reembed=true)` on the rebuilt
+binary reported 34346 embedded and 0 vectorless. What remains is the wrapping form for the
+`**Members:**` line.
+
 ## Parent caveat, verbatim
 
 `docs/issues/archive/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md` (status `fixed`):

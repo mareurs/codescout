@@ -12,7 +12,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-08-20-friction-target-omits-command-and-file-path.md
 severity: low
-unverified: 'The backfill''s end-to-end re-classification of historical rows has NOT been observed on a live DB — only the fingerprint change is unit-tested. Re-run scripts/friction-probe.py --null-detail after the next cargo rb + /mcp reconnect to confirm the count drops from 73 toward 4. Also: 4 one-off messages remain unclassified BY DESIGN, not by omission.'
+unverified: 'CLEARED 2026-09-24 — `friction-probe.py --null-detail` on the live usage.db classifies all 71 `worktree_activate_required` errors in its 30-day window, none left unclassified; the 73-toward-4 total is not comparable, the window having rolled and 79 other messages being unclassified today. Was — The backfill''s end-to-end re-classification of historical rows has NOT been observed on a live DB — only the fingerprint change is unit-tested. Re-run scripts/friction-probe.py --null-detail after the next cargo rb + /mcp reconnect to confirm the count drops from 73 toward 4. Also: 4 one-off messages remain unclassified BY DESIGN, not by omission.'
 ---
 
 # BUG: the largest unclassified error message — the worktree/activate write block — has no err_family, and unclassified is where friction concentrates

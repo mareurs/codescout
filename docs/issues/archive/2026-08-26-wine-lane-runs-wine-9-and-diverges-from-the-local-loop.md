@@ -13,7 +13,7 @@ opened: 2026-08-26
 owner: marius
 related: []
 severity: medium
-unverified: 'Mitigated, not fixed: TWO tests (the heredoc write and the yes|head overflow) are skipped on the wine lane rather than the version gap being closed. Both hang identically under wine 9.0 and pass under 11.16, so they share a cause and a remedy. The durable fix — pin the lane to a WineHQ build matching the local loop — is designed and argued below but NOT implemented or measured; the honest expectation is that changing wine versions moves the failure set in BOTH directions. Skip list is now 8 entries, each classified, down from 32.'
+unverified: 'CLEARED 2026-09-24 — the durable fix shipped (58d85263, c06ecc28 — wine pinned to winehq-devel matching the local loop), and CI run 35179964638 ran both named tests on the wine lane, passing. Was — Mitigated, not fixed: TWO tests (the heredoc write and the yes|head overflow) are skipped on the wine lane rather than the version gap being closed. Both hang identically under wine 9.0 and pass under 11.16, so they share a cause and a remedy. The durable fix — pin the lane to a WineHQ build matching the local loop — is designed and argued below but NOT implemented or measured; the honest expectation is that changing wine versions moves the failure set in BOTH directions. Skip list is now 8 entries, each classified, down from 32.'
 ---
 
 # BUG: the windows-gnu lane runs wine 9.0 while the local loop runs wine 11.16, and the two disagree

@@ -6,7 +6,7 @@ title: 'BUG: doc(action=link, rel=supersedes) moves the status in the catalog an
 tags:
 - cluster/unclassified
 closed: 2026-09-07
-unverified: The write-through is fixed and regression-tested; the pre-existing corpus is NOT. No `frontmatter_status_mismatch` check exists, so artifacts that diverged before `05da2db7` are unmeasured and unrepaired.
+unverified: CLEARED 2026-09-24 — the `frontmatter_status_mismatch` check now exists and reports 0 on the rebuilt binary. Was — The write-through is fixed and regression-tested; the pre-existing corpus is NOT. No `frontmatter_status_mismatch` check exists, so artifacts that diverged before `05da2db7` are unmeasured and unrepaired.
 ---
 
 ## Summary

@@ -20,7 +20,7 @@ related:
 - docs/issues/archive/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md
 - docs/issues/archive/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md
 severity: high
-unverified: Every artifact vector currently stored is still query-prefixed. The code no longer produces them, but the existing rows are only corrected by a full `reindex(reembed=true)`, which has not been run.
+unverified: CLEARED 2026-09-24 — `reindex(reembed=true)` ran on the rebuilt binary — 34346 embedded, 0 vectorless, 0 embed errors. Was — Every artifact vector currently stored is still query-prefixed. The code no longer produces them, but the existing rows are only corrected by a full `reindex(reembed=true)`, which has not been run.
 ---
 
 ## Summary
