@@ -71,6 +71,7 @@ Both reviewers get the **same clean channel**: no user-level instructions (no `~
 - **The optional WARM arm (a true fork of the authoring session) is dropped:** it cannot be matched for Codex, and a cross-profile resume of a 1M-token session is not a clean channel.
 
 ## Results — appended 2026-09-24, after every run and score
+> **Correction, 2026-09-24, from the operator, verified: the Codex cells did not run the real reviews' model.** The registration says `gpt-5.6-sol` at `high` is "the configuration the real reviews ran with". It is only the default in `~/.codex/config.toml`. The Codex session that wrote both real reviews, `~/.codex/sessions/2026/09/20/rollout-2026-09-20T12-14-32-01a0be18-….jsonl`, records **`gpt-6-astra` at `medium`**: 94 model fields and 84 effort fields, with no other value. So the Codex cells measure a **different GPT model and effort** from the reviewer whose catches motivated this experiment. The Claude cells, the context comparison and the per-model split of what gets found stand as measured. What the Codex cells cannot show is how the real reviewer compares, or whether its findings came from its model. A matched `gpt-6-astra`/`medium` arm would need a new registration.
 
 **Runs:** 24 of 24 completed with exit 0. Every run reported its pinned model (`claude-opus-5-5`, `gpt-5.6-sol`), left its checkout clean, and ran 4–14 minutes. **Checker gate: 22/22**, and every fixture's 3 votes were unanimous. Over the 132 scored (review, defect) pairs, 131 of the vote triples were unanimous.
 
