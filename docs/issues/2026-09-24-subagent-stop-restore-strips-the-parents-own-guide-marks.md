@@ -1,11 +1,11 @@
 ---
 id: c186c45e2ed2a038
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the companion''s SubagentStop restore strips the parent''s OWN guide marks from its on-disk ledger — under per-principal ledgers the next /mcp re-delivers them'
 tags:
 - cluster/gate-keyed-on-unobservable-event
-closed: null
+closed: 2026-09-24
 opened: 2026-09-24
 owner: marius
 related:
@@ -90,9 +90,30 @@ Not implemented — cross-repo (`claude-plugins`) and a design choice, so left f
 - **(a) Skip the restore when the subagent was stamped.** Positive evidence is observable: `<session>_<agentId>.json` exists ⇔ the server served this subagent under its own principal, so none of its marks reached the parent file. This replaces the lifetime-window proxy with an observation — the IC-2 remedy — and keeps the bracket as the fallback for an unstamped subagent (hook failure, server not named `codescout`).
 - **(b) Retire the bracket outright**, accepting the unstamped fallback's loss.
 
+**Implemented 2026-09-24 as candidate (a), refined** — session-wide rather than per-agent. `lib.mjs` `sessionHasPrincipalLedgers(ledgerPath, sessionId)` is true when any `<sanitized session>_*.json` exists beside the parent's ledger (the server's `sanitize` and the hook's `sanitizeSessionId` both map `[^A-Za-z0-9_-]` to `_`, verified against `src/tools/guide_ledger.rs`); `agent-guide-restore.mjs` then skips only the ledger rewrite, keeping the snapshot/tombstone bookkeeping. Keying on the agent's OWN file, as first written above, would have missed a subagent that never calls codescout — it gets no file, and the restore would strip the parent's marks for exactly that subagent.
+
+- **SHA** — `claude-plugins:cf5ea29cf8f7371c9c74af262a37d5fbe8c14e77` (branch `main`, not pushed at time of writing).
+- **patch-id** — `8ee2e1081663975c179922093446f13d0fbe9088`.
+
 ## Tests added
 
-None — this record opens the defect. A fix wants a companion-side test in the style of `hooks/agent-guide-snapshot.test.sh`: seed a parent ledger, run the snapshot hook, add a parent key, create `<session>_<agentId>.json`, run the restore hook, assert the parent key **survives**; plus the converse (no per-agent file → key removed, today's behaviour).
+- `codescout-companion/hooks/agent-guide-snapshot.test.sh` **Case 8a** (the agent's own per-agent ledger exists) and **8b** (only a sibling's exists; this agent made no call) — both **observed RED** on the unchanged hook (the parent's `progressive-disclosure` / `workspace-state` stripped), then GREEN. Case 1 remains the control: with no per-agent ledger the subtraction still runs.
+- **Mutations, on a scratch copy of the plugin** (hooks run live from the working tree, so never in place): helper always-`false` → killed by exactly 8a/8b; always-`true` → killed by Case 1 and six other subtraction cases.
+- `tests/run-all.sh` green.
+
+### Live verification, 2026-09-24
+
+With the working-tree hook live, a probe subagent ran `sleep 25`; the parent fetched a never-held topic during its lifetime. A first attempt was discarded as non-discriminating: the async dispatch returned before `SubagentStart`, so the first mark (`untrusted-content`, 10:41:06.055Z) landed IN the snapshot (10:41:06.997Z). The second mark was clean:
+
+| time (UTC) | event |
+|---|---|
+| 10:41:06.997 | `SubagentStart` snapshot — keys exclude `error-handling` |
+| 10:41:10.755 | probe's `sleep 25` starts (`usage.db`) |
+| **10:41:30.591** | parent marks `error-handling` |
+| 10:41:35.773 | probe's call ends → `SubagentStop` restore; snapshot cleaned up |
+| after | **`error-handling` still in the parent's ledger**; ledger mtime = the mark's own write |
+
+The pre-fix hook would have removed it (not in the snapshot; no sibling vouches). This also confirms directly that hooks run from the `claude-plugins` working tree: the cached 1.20.13 copy does not contain the fix.
 
 ## Workarounds
 
@@ -100,7 +121,7 @@ None needed for correctness; the cost is one re-delivered guide body per strippe
 
 ## Resume
 
-Decide (a) vs (b). For (a): in `agent-guide-restore.mjs`, before computing `keep`, return early when `join(dirname(ledgerPath), sanitizeSessionId(\`${sessionId}/${agentId}\`) + '.json')` exists — confirm first that `sanitizeSessionId` and `guide_ledger.rs`'s `sanitize` map `/` identically (both appear to map it to `_`; the live file `774ba049-…_a3ba615808d91a57d.json` is consistent with that). Then the test above.
+Archive via `doc(action="move")`, re-pointing in the same pass: the two `claude-plugins` citations of this path (`hooks/agent-guide-restore.mjs`, `hooks/agent-guide-snapshot.test.sh`), `docs/issues/archive/2026-09-24-guide-rearm-request-is-consumed-by-whichever-principal-calls-next.md` § References, and `deep-agent-workflow-observations:DWF-6` / `DCS-4`'s citation of this id (the move mints a new one). Deferred to one pass with `a5054d135acacbe3`'s archive, after that bug's live check.
 
 ## References
 

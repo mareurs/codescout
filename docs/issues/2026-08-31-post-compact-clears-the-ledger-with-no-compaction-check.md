@@ -1,7 +1,7 @@
 ---
 id: a5054d135acacbe3
 kind: bug
-status: open
+status: fixed
 title: workspace(post_compact=true) clears the whole guide ledger without checking that a compaction happened — ~49 KB re-delivered on one mistaken call, and the flag name is what misleads
 tags:
 - cluster/gate-keyed-on-unobservable-event
@@ -10,6 +10,8 @@ tags:
 - workspace
 - affordance
 - doc-vs-code
+closed: 2026-09-24
+unverified: 'codescout half not verified live: the serving binary predates ba3a787e. Verified by RED-first tests, four isolated mutations, and gate GATE_EXIT=0; the companion half is live. Live check spelled out in Resume.'
 ---
 
 ## Symptom
@@ -106,3 +108,28 @@ it happens generally.
 A two-repo change on n=1 is not obviously worth it. What *is* worth doing independently
 is correcting the stale `Entry.hook_at` doc comment, since it is what makes the refuted
 design look correct.
+
+**Superseded 2026-09-24 — the viable design above was implemented** (see *Fix*). The ruling in this section still stands for what it ruled on: gating on `rendezvous_active()` remains wrong, and `post_compact_clears_even_when_the_rendezvous_is_active` still pins it.
+
+
+## Fix
+
+The design in § *The one viable design*, plus one piece it missed. **The measured case — a mistaken call after a plain `/mcp` reconnect — starts a NEW server with a fresh slot, and no `SessionStart` fires on `/mcp`**, so a source stamped only by SessionStart never reaches it. The new server must inherit it, which `inherited_stamp` now does.
+
+- **Companion** (`claude-plugins:cf5ea29c`, patch-id `8ee2e1081663975c179922093446f13d0fbe9088`): `session-start.mjs` writes `hook_source` + `hook_source_at`, and treats the source as part of "already current" — the old skip (`e.session === sessionId && e.hook_at`) swallowed exactly the compaction stamp, since a compaction keeps the session id. The liveness refresher rewrites the whole object, so it preserves both fields.
+- **codescout** (`ba3a787ef5486a4825349d313b3fb64455dff1d1` on `experiments`, patch-id `538f3a2a525265310386d375197898931d7033db`): `Entry` gains both fields (serde-defaulted); `inherited_stamp` carries the LATEST session start's source across `/mcp`, ordered by `hook_source_at` — never by `hook_at`, which the liveness refresher keeps moving; `poll` tracks it; `call_tool_inner` copies it onto the live ledger AFTER principal adoption; `post_compact` skips the clear only on a positive non-`compact` source and says so (`ledger: "kept"` + `ledger_note`). Absent or `compact` → the blunt clear, exactly as before.
+
+**Residual, accepted:** a compaction long ago followed by a later mistaken call still clears — the last session start really was a compaction. Closing it would need "this compaction was already honoured" state persisted across restarts.
+
+## Tests added
+
+- `tools::config::tests::post_compact_keeps_the_ledger_when_the_last_session_start_was_not_a_compaction` — observed RED on the behavioural assertion (ledger wiped), then GREEN; `…clears_when_the_last_session_start_was_a_compaction` is its sandwich half.
+- `tools::rendezvous::tests::publish_inherits_the_session_start_source_from_a_predecessor_slot`, `…publish_inherits_the_newest_session_start_source` (carries a `hook_at` trap: the older session start's slot has the newest liveness stamp), `…poll_reports_the_session_start_source_the_hook_wrote` — all RED first.
+- `server::guide_hint_tests::post_compact_after_a_plain_session_start_keeps_the_ledger_end_to_end` — the wiring through `call_tool_inner`; RED before the copy existed.
+- Companion `session-start.test.sh`: source recorded; compaction re-stamps on an unchanged session; RFC3339 `hook_source_at` — all RED first.
+- Mutations (`scripts/mutation-probe.sh`, isolated), each KILLED by exactly its intended test: gate keeps on `compact`; inheritance ordered by `hook_at`; `poll` drops the source; `publish` drops the inherited source.
+- Gate `GATE_EXIT=0`; `claude-plugins` `tests/run-all.sh` green.
+
+## Resume
+
+Live check after `cargo rb` + `/mcp` (no compaction): the companion half is already live, and the stamp it wrote at this conversation's last SessionStart is inherited by the new server. Call `workspace(post_compact=true)` → expect `"ledger": "kept"` and the parent's ledger file byte-unchanged. Then archive with `c186c45e2ed2a038` in one pass (see its Resume for the citations to re-point).
