@@ -471,9 +471,20 @@ pub const DEFAULT_AUDIT_CODE_GLOBS: &[&str] = &[
 /// excluding the subtree wholesale would drop live coverage in order to
 /// document a silence that never covered this file. `globset` has no negation,
 /// so a broad pattern plus a carve-out is not expressible.
+///
+/// `docs/evals/data/*/runs/**` holds captured model output: each review transcript
+/// is the text a reviewer wrote, kept byte-identical because an LLM judge re-scores
+/// it. Its links point into the worktree the run used, which is deleted afterwards,
+/// so every one is `missing` by construction. 242 high findings in 14 of the 24
+/// transcripts under `2026-09-24-review-model-vs-context/runs/`, measured
+/// 2026-09-24, redded CI. Fencing or rewriting them would change the judge's input.
+/// The eval's README and write-up sit outside `runs/` and stay scanned. `*` crosses
+/// `/` under `Glob::new`'s defaults, so a `runs/` at any depth below `data/` is
+/// excluded; that directory was the only one when this was added.
 pub const DEFAULT_AUDIT_EXCLUDES: &[&str] = &[
     "docs/agents/**",
     "docs/lessons/**",
+    "docs/evals/data/*/runs/**",
     "src/prompts/guides/**",
     "src/prompts/source.md",
     "src/prompts/memory-templates.md",
@@ -2104,6 +2115,34 @@ mod tests {
                 n_scanned, 1,
                 "default scan should exclude docs/agents/** — only docs/other/guide.md should be scanned"
             );
+    }
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn default_scan_excludes_raw_eval_run_transcripts() {
+        // A captured model review under docs/evals/data/<eval>/runs/ is data, not
+        // documentation: its links point into the worktree it ran in, deleted after the
+        // run. The fixture's README sits in the SAME eval dir, so a glob that swallowed
+        // the whole data dir (dropping README coverage) fails this test just as a
+        // missing exclude does. Its body is inert: n_files_scanned is the assertion.
+        let tmp = TempDir::new().unwrap();
+        let eval = tmp.path().join("docs/evals/data/2026-01-01-x");
+        std::fs::create_dir_all(eval.join("runs")).unwrap();
+        std::fs::write(
+            eval.join("runs/a.review.md"),
+            "[`f.rs:1`](/gone/worktree/f.rs:1)\n",
+        )
+        .unwrap();
+        std::fs::write(eval.join("README.md"), "# Eval\n").unwrap();
+
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let result = call(&ctx, serde_json::json!({"emit_tracker": false}))
+            .await
+            .unwrap();
+        assert_eq!(
+            result["n_files_scanned"].as_u64().unwrap(),
+            1,
+            "default scan should skip docs/evals/data/*/runs/** and still scan the eval's README.md"
+        );
     }
 
     #[test]
