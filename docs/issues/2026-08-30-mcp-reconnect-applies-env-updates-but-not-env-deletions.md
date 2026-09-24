@@ -16,7 +16,7 @@ claimed_by: e4fbc7ef-27b7-4707-8469-ccdffa8e4e92
 opened: 2026-08-30
 owner: marius
 severity: high
-unverified: 'Mechanism (merge-over-replace) is INFERRED from behaviour, not read from source — Claude Code is not in this repo. It has since made a correct falsifiable prediction (see § The mechanism made a prediction), which is evidence and not proof. Still untested: whether a full Claude Code restart clears a deleted key.'
+unverified: 'Narrowed 2026-09-24 on Claude Code 2.1.282: on the .claude.json mcpServers.env layer a mixed edit applied BOTH halves on /mcp, with an in-phase control, so merge-over-replace is not the harness''s general behaviour. Still untested: whether the settings.json § env asymmetry observed 2026-08-30 on an older build reproduces at 2.1.282, and whether a full restart clears a deleted key. The mechanism was never read from source — Claude Code is not in this repo.'
 ---
 
 # BUG: `/mcp` reconnect applies a CHANGED env var from `settings.json` but not a REMOVED one
@@ -171,6 +171,32 @@ the intended retrieval config is not this bug's question.
 Still owed: the operator-run experiment (delete a key → `/mcp` → read `/proc/<server>/environ`, once per
 layer), or an upstream report — the mechanism is not in this repo. Checked by sessionId
 `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`.
+
+## Measured 2026-09-24 — the `.claude.json` layer applies a deletion (Claude Code 2.1.282)
+
+The operator-run experiment the section above asked for, on the layer that section found is the
+live one for `~/.claude-sdd`: `~/.claude-sdd/.claude.json` → `mcpServers.codescout.env`. Probe keys
+were chosen so nothing reads them (`ZZ_MCP_ENV_*`); the file was edited by atomic replace and
+re-read before each reconnect; one `claude` process (pid 2834158) throughout, so every reading is a
+`/mcp` reconnect and never a restart.
+
+| phase | edit to the file | new server (pid, start UTC) | `PROBE` | `CONTROL` | reads as |
+|---|---|---|---|---|---|
+| 1 | add `ZZ_MCP_ENV_PROBE=phase1` | 3543619, 19:55:11 | `phase1` | — | the layer IS re-read on `/mcp` — the control that makes phase 2 mean anything |
+| (no-op) | none; a "continue" arrived without `/mcp` | still 3543619 | `phase1` | absent | **no reconnect** — separated from "deletion not applied" only by the unchanged pid |
+| 2 | ONE write: delete `PROBE`, add `ZZ_MCP_ENV_CONTROL=phase2` | 2826596, 20:56:55 | **absent** | `phase2` | **both halves of a mixed edit applied** |
+
+Phase 2 is the original bug's own shape — one edit, one deletion plus one update, one reconnect —
+with the update as its in-phase control. On this layer and this build the deletion **lands**. The file
+was restored after: env map back to 16 keys and equal to the pre-experiment backup's, no `ZZ_` key
+left. Run by sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92` with the operator typing `/mcp`.
+
+**What this does and does not settle.** It falsifies *merge-over-replace as the harness's general
+behaviour*: whatever built the 2026-08-30 spawn env, it is not what builds the `.claude.json` layer's
+today. It does NOT show the 08-30 observation was wrong, and does not re-test it: that was the
+`~/.claude/settings.json` § `env` layer, on an older build. Two readings remain and this data cannot
+separate them — the asymmetry is specific to the `settings.json` layer, or it was fixed between that
+build and 2.1.282. The discriminating run is the same two phases against `settings.json` § `env`.
 
 ## Workarounds
 
