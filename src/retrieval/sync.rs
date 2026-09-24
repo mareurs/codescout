@@ -2787,6 +2787,7 @@ mod tests {
                 git_dirty: false,
                 pid: 4242,
                 exe_deleted: Some(true),
+                build_id: None, // inert: the stale-binary guard reads only exe_deleted
             }),
         )
         .await
@@ -3366,6 +3367,7 @@ mod tests {
                 git_dirty: false,
                 pid: 4242,
                 exe_deleted: Some(true),
+                build_id: None, // inert: the stale-binary guard reads only exe_deleted
             }),
             ..SyncOpts::default()
         };

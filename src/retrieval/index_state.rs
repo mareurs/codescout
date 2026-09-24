@@ -111,12 +111,12 @@ pub struct IndexState {
 /// Identity of the process that wrote an [`IndexState`], and of the code it was
 /// running.
 ///
-/// Two of the three fields are portable and carry most of the diagnostic value on
+/// `git_sha` and `git_dirty` are portable and carry most of the diagnostic value on
 /// their own: a sidecar stamped with a `git_sha` different from the reading
 /// binary's own `env!("CODESCOUT_GIT_SHA")` proves a different build wrote it, on
-/// every platform, with no `/proc` walk. `exe_deleted` is the Linux-only bonus,
-/// not a gate -- which is why this ships without an answer for the non-Linux
-/// `/proc/self/exe` question that had been treated as blocking.
+/// every platform, with no `/proc` walk. `exe_deleted` and `build_id` are the
+/// Linux-only bonus, not gates -- which is why this ships without an answer for the
+/// non-Linux `/proc/self/exe` question that had been treated as blocking.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WriterProvenance {
     /// `git rev-parse --short HEAD` at build time, baked in by `build.rs` as
@@ -134,6 +134,17 @@ pub struct WriterProvenance {
     /// "could not tell" and must never be read as "not deleted" -- the same
     /// distinction `indexed_with_model` draws between absence and mismatch.
     pub exe_deleted: Option<bool>,
+    /// SHA-256 of the writing process's own executable BYTES: the one identity here
+    /// that varies with uncommitted content, which `git_sha` by construction cannot.
+    /// Two builds from one dirty commit share a `git_sha` and differ here.
+    ///
+    /// Derived from the running artifact, not baked by `build.rs`, whose rerun
+    /// triggers do not cover the working tree -- a baked value would be only
+    /// incidentally fresh. `None` off Linux, when the read fails, and in every
+    /// sidecar written before this field existed; `None` means "not recorded" and
+    /// must never be compared as a value.
+    /// docs/issues/2026-09-11-the-written_by-check-compares-shas-only-so-two-dirty-builds-at-one-commit-are-equal.md
+    pub build_id: Option<String>,
 }
 
 /// Snapshot this process's identity for [`WriterProvenance`].
@@ -143,6 +154,7 @@ pub fn current_writer() -> WriterProvenance {
         git_dirty: env!("CODESCOUT_GIT_DIRTY") == "1",
         pid: std::process::id(),
         exe_deleted: exe_is_deleted(),
+        build_id: exe_build_id(),
     }
 }
 
@@ -181,6 +193,39 @@ fn exe_is_deleted() -> Option<bool> {
 
 #[cfg(not(target_os = "linux"))]
 fn exe_is_deleted() -> Option<bool> {
+    None
+}
+
+/// SHA-256 of the executable bytes behind `exe`, for [`WriterProvenance::build_id`].
+///
+/// Pass a `/proc/<pid>/exe` path itself, NEVER the string it reads as: for an
+/// unlinked binary `readlink` returns `"<path> (deleted)"`, a path that does not
+/// exist, while opening the `/proc` entry reaches the inode the process is still
+/// running. Measured 2026-09-11 on two different probe binaries (47,416 bytes read
+/// through `/proc/<pid>/exe`, 0 through its readlink string). That is why this does
+/// not go through `std::env::current_exe()`: it would record `None` in exactly the
+/// zombie-server case `exe_deleted` exists for.
+#[cfg(target_os = "linux")]
+fn build_id_of(exe: &std::path::Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(exe).ok()?;
+    Some(hex::encode(Sha256::digest(&bytes)))
+}
+
+/// This process's [`WriterProvenance::build_id`], computed once and cached.
+///
+/// Lazy and cached: computed on first use rather than at startup, then paid once per
+/// process by every `current_writer()` caller. It reads the whole executable
+/// (~62 MiB for `cargo rb`; 46 ms through `sha256sum`, measured 2026-09-24).
+#[cfg(target_os = "linux")]
+fn exe_build_id() -> Option<String> {
+    static ID: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    ID.get_or_init(|| build_id_of(std::path::Path::new("/proc/self/exe")))
+        .clone()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn exe_build_id() -> Option<String> {
     None
 }
 
@@ -465,6 +510,87 @@ mod tests {
             w.pid,
             std::process::id(),
             "and THIS process's pid, so a reader can ask whether the writer still lives"
+        );
+        // Expected value through an INDEPENDENT route — the test binary's path, which
+        // is live here — not through `/proc/self/exe`, which is what the code reads. A
+        // `build_id: None` constructor, or one hashing something else, reds here.
+        #[cfg(target_os = "linux")]
+        {
+            use sha2::{Digest, Sha256};
+            let me = std::env::current_exe().expect("the test binary has a path");
+            let bytes = fs::read(&me).unwrap_or_else(|e| {
+                panic!("cannot read the running test binary at {me:?} (a peer rebuild unlinking it?): {e}")
+            });
+            assert_eq!(
+                w.build_id.as_deref(),
+                Some(hex::encode(Sha256::digest(&bytes)).as_str()),
+                "the stamp must carry THIS binary's content hash — the one identity that \
+                 differs between two builds of one dirty commit"
+            );
+        }
+    }
+
+    /// Back-compat parse for `build_id`, same family as the test below: a sidecar
+    /// whose `written_by` predates the field must parse, with the field absent read as
+    /// "not recorded" — which `written_by_report` then treats as "fall back to the
+    /// sha", never as a value to compare.
+    #[test]
+    fn a_written_by_recorded_before_build_id_existed_still_parses() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".codescout")).unwrap();
+        fs::write(
+            state_path(root),
+            r#"{"last_indexed_commit":"abc","last_indexed_at":"2026-01-01T00:00:00Z",
+                "schema_version":4,
+                "written_by":{"git_sha":"deadbee","git_dirty":true,"pid":7,"exe_deleted":false}}"#,
+        )
+        .unwrap();
+
+        let w = read_index_state(root)
+            .expect("a pre-field sidecar must still parse")
+            .written_by
+            .expect("the recorded writer must survive the added field");
+        assert_eq!(w.build_id, None, "absent means not recorded");
+        assert_eq!(w.git_sha, "deadbee", "and what WAS recorded survives");
+    }
+
+    /// The route, pinned on the case it exists for: a process whose executable has been
+    /// UNLINKED. The `/proc/<pid>/exe` entry still opens the inode; the string it
+    /// reads as does not exist. Both halves asserted, because the second is what makes
+    /// the first mean something — a helper that resolved the link first would pass on a
+    /// live binary and record `None` for every zombie server.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn build_id_reads_the_inode_of_a_deleted_binary() {
+        use sha2::{Digest, Sha256};
+        let tmp = tempfile::tempdir().unwrap();
+        let copy = tmp.path().join("sleepy");
+        fs::copy("/usr/bin/sleep", &copy).expect("/usr/bin/sleep is the probe binary");
+        let original = fs::read(&copy).unwrap();
+        let mut child = std::process::Command::new(&copy)
+            .arg("30")
+            .spawn()
+            .expect("spawn the copied probe");
+        // `spawn` returns only after exec succeeded, so the image is mapped: unlinking
+        // now leaves a running process with no file behind it.
+        fs::remove_file(&copy).unwrap();
+        let proc_exe = std::path::PathBuf::from(format!("/proc/{}/exe", child.id()));
+
+        let via_proc = build_id_of(&proc_exe);
+        let via_readlink = fs::read_link(&proc_exe).ok().and_then(|p| build_id_of(&p));
+        child.kill().ok();
+        child.wait().ok();
+
+        assert_eq!(
+            via_proc.as_deref(),
+            Some(hex::encode(Sha256::digest(&original)).as_str()),
+            "the /proc entry must reach the deleted binary's bytes"
+        );
+        assert_eq!(
+            via_readlink, None,
+            "and the readlink string must NOT — it names '<path> (deleted)', which is \
+             why build_id_of is never handed a resolved path"
         );
     }
 

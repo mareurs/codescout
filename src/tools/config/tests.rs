@@ -360,6 +360,20 @@ async fn project_status_declares_the_binary_that_answered() {
         "the key must be present even where the answer is None — absence of the \
          KEY would read as 'not deleted' rather than 'could not tell': {result:#}"
     );
+    assert_eq!(
+        server["build_id"],
+        json!(want.build_id),
+        "the build id a reader compares against the sidecar's must come from the \
+         same constructor: {result:#}"
+    );
+    // Without this the equality above passes with both sides `None` — which is the
+    // state before the field was populated at all.
+    #[cfg(target_os = "linux")]
+    assert!(
+        server["build_id"].is_string(),
+        "on Linux the serving binary can hash its own bytes, so `null` here means \
+         the identity was never computed: {result:#}"
+    );
 }
 
 #[tokio::test]

@@ -543,26 +543,36 @@ impl Tool for IndexProject {
 /// consequently sat in the tree with zero assertions anywhere on it. Same shape,
 /// and the same reason, as `retrieval::sync::guard_stale_binary`.
 ///
-/// `reading_sha` / `reading_dirty` are parameters rather than `env!` reads at this
-/// level so a test can drive BOTH sides. With the reader's identity baked in, a
-/// fixture could only ever supply a writer sha that differs from this build's, so
-/// the silent branch would be inexpressible — and an assertion that cannot express
+/// `reading_sha` / `reading_dirty` / `reading_build_id` are parameters rather than
+/// reads at this level so a test can drive BOTH sides. With the reader's identity
+/// baked in, a fixture could only ever supply a writer that differs from this build,
+/// so the silent branch would be inexpressible — and an assertion that cannot express
 /// the silence is not evidence about it.
 ///
-/// **The predicate is still sha-only, and still wrong.** Two builds from one commit
-/// with different uncommitted content compare equal here and this returns `None`:
-/// `docs/issues/2026-09-11-the-written_by-check-compares-shas-only-so-two-dirty-builds-at-one-commit-are-equal.md`,
-/// which is NOT fixed by this function. The dirty flags it reports are for a reader
-/// to diagnose with and must not be branched on — `build.rs` computes that flag
-/// from a `git status` with no pathspec (so a markdown edit sets it) and declares
-/// rerun triggers that do not cover the working tree (so it is only incidentally
-/// fresh). Widening the predicate with it was tried and refuted; see the bug.
+/// **Sameness is decided by `build_id` when both sides recorded one** — a hash of the
+/// executable's bytes, the one identity that differs between two builds of one dirty
+/// commit — and by `git_sha` otherwise, which is what it was before the field existed:
+/// `docs/issues/2026-09-11-the-written_by-check-compares-shas-only-so-two-dirty-builds-at-one-commit-are-equal.md`.
+/// The dirty flags it reports are for a reader to diagnose with and must not be
+/// branched on — `build.rs` computes that flag from a `git status` with no pathspec
+/// (so a markdown edit sets it) and declares rerun triggers that do not cover the
+/// working tree (so it is only incidentally fresh). Widening the predicate with it was
+/// tried and refuted; see the bug.
 pub(crate) fn written_by_report(
     w: &crate::retrieval::index_state::WriterProvenance,
     reading_sha: &str,
     reading_dirty: bool,
+    reading_build_id: Option<&str>,
 ) -> Option<Value> {
-    if w.git_sha == reading_sha {
+    let same_build = match (w.build_id.as_deref(), reading_build_id) {
+        // Content-derived on both sides: the only comparison that separates two
+        // builds of one dirty commit.
+        (Some(writer), Some(reader)) => writer == reader,
+        // Either side unrecorded — a pre-field sidecar, or no `/proc/self/exe` —
+        // falls back to the sha. `None` is never compared as a value.
+        _ => w.git_sha == reading_sha,
+    };
+    if same_build {
         return None;
     }
     Some(json!({
@@ -570,6 +580,7 @@ pub(crate) fn written_by_report(
         "git_dirty": w.git_dirty,
         "pid": w.pid,
         "exe_deleted": w.exe_deleted,
+        "build_id": w.build_id,
         "reading_binary_sha": reading_sha,
         // The writer's record carries `git_dirty` and the reader's half of the same
         // object did not, so a caller comparing the two sides was handed a
@@ -577,6 +588,7 @@ pub(crate) fn written_by_report(
         // difference. Independent of the predicate above, and worth having whatever
         // happens to it.
         "reading_binary_dirty": reading_dirty,
+        "reading_build_id": reading_build_id,
     }))
 }
 
@@ -819,11 +831,12 @@ impl Tool for IndexStatus {
                     // never "written by the current build".
                     // docs/issues/archive/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md
                     if let Some(w) = st.written_by.as_ref() {
-                        if let Some(report) = written_by_report(
-                            w,
-                            env!("CODESCOUT_GIT_SHA"),
-                            env!("CODESCOUT_GIT_DIRTY") == "1",
-                        ) {
+                        // The reader's side from the SAME constructor the writer used, so
+                        // the two halves of the comparison cannot drift apart.
+                        let me = crate::retrieval::index_state::current_writer();
+                        if let Some(report) =
+                            written_by_report(w, &me.git_sha, me.git_dirty, me.build_id.as_deref())
+                        {
                             result["written_by"] = report;
                         }
                     }
@@ -1573,25 +1586,31 @@ mod written_by_report_tests {
     use super::written_by_report;
     use crate::retrieval::index_state::WriterProvenance;
 
-    fn writer(sha: &str, dirty: bool) -> WriterProvenance {
+    fn writer(sha: &str, dirty: bool, build_id: Option<&str>) -> WriterProvenance {
         WriterProvenance {
             git_sha: sha.to_string(),
             git_dirty: dirty,
             pid: 4242,
             exe_deleted: Some(true),
+            build_id: build_id.map(str::to_string),
         }
     }
 
     /// The two sides of every pair are DELIBERATELY OPPOSITE — writer `dirty:false`
-    /// against reader `dirty:true`, writer `deadbeef` against reader `cafe1234`. If
-    /// they matched, reporting the writer's flag under the reader's key (or the
-    /// reverse) would pass, and that transposition is the likeliest way this block
-    /// breaks: the two values sit adjacent in one `json!` literal and differ only by
-    /// which variable they read.
+    /// against reader `dirty:true`, writer `deadbeef` against reader `cafe1234`, writer
+    /// build `aaaa` against reader `bbbb`. If they matched, reporting the writer's value
+    /// under the reader's key (or the reverse) would pass, and that transposition is the
+    /// likeliest way this block breaks: each pair sits adjacent in one `json!` literal
+    /// and differs only by which variable it reads.
     #[test]
     fn a_writer_from_another_build_reports_each_sides_own_flags() {
-        let r = written_by_report(&writer("deadbeef", false), "cafe1234", true)
-            .expect("differing shas must report");
+        let r = written_by_report(
+            &writer("deadbeef", false, Some("aaaa")),
+            "cafe1234",
+            true,
+            Some("bbbb"),
+        )
+        .expect("differing builds must report");
 
         assert_eq!(r["git_sha"], "deadbeef", "the WRITER's sha");
         assert_eq!(r["reading_binary_sha"], "cafe1234", "the READER's sha");
@@ -1601,33 +1620,76 @@ mod written_by_report_tests {
             "the READER's dirty flag — the half that was missing entirely, leaving a \
              caller to compare a dirty-aware value against a dirty-blind one"
         );
+        assert_eq!(r["build_id"], "aaaa", "the WRITER's build id");
+        assert_eq!(r["reading_build_id"], "bbbb", "the READER's build id");
         assert_eq!(r["pid"], 4242);
         assert_eq!(r["exe_deleted"], true);
     }
 
-    /// Pins the REFUTED REPAIR, not the open defect — the distinction is the whole
-    /// point of this test existing.
-    ///
-    /// Widening the predicate to treat `dirty` on either side as "cannot establish
-    /// sameness" warns on every ordinary run of this checkout, including a build
-    /// reading its own sidecar, so it was rejected. This asserts the function does
-    /// not quietly acquire that behaviour.
-    ///
-    /// It does NOT assert the current predicate is correct. Two builds from one
-    /// commit with different uncommitted content still land here and are still
-    /// reported as the same build — the open bug. Closing it means giving this
-    /// function a content-derived build identity to compare, which changes its
-    /// INPUTS; this test is expected to be rewritten by that change, not defended
-    /// against it.
+    /// THE BUG (bfdfeebd): two builds from one commit with different uncommitted
+    /// content share a `git_sha`, and the sha-only predicate called them the same
+    /// build. Both sides clean-flagged on purpose: the dirty bit is not what decides
+    /// this, the bytes are — a markdown edit sets `git_dirty` without changing a byte
+    /// of the binary, and `build.rs` only incidentally refreshes it.
     #[test]
-    fn equal_shas_stay_silent_even_when_the_two_sides_disagree_about_dirty() {
+    fn equal_shas_with_different_build_ids_report() {
+        let r = written_by_report(
+            &writer("deadbeef", false, Some("aaaa")),
+            "deadbeef",
+            false,
+            Some("bbbb"),
+        )
+        .expect("same commit, different bytes: a different build wrote this sidecar");
+        assert_eq!(r["build_id"], "aaaa");
+        assert_eq!(r["reading_build_id"], "bbbb");
+    }
+
+    /// The refuted repair stays refuted: a build reading its OWN sidecar is silent
+    /// however either side's dirty flag reads. Widening on `dirty` warned on every
+    /// ordinary run of this checkout. The discriminator is now the build id, so the
+    /// fixture pins equal ids with deliberately disagreeing dirty flags.
+    #[test]
+    fn equal_build_ids_stay_silent_even_when_the_two_sides_disagree_about_dirty() {
         assert!(
-            written_by_report(&writer("deadbeef", true), "deadbeef", false).is_none(),
-            "dirty must not widen the predicate — that repair over-fires and was rejected"
+            written_by_report(
+                &writer("deadbeef", true, Some("aaaa")),
+                "deadbeef",
+                false,
+                Some("aaaa")
+            )
+            .is_none(),
+            "same bytes is the same build — dirty must not widen the predicate"
         );
         assert!(
-            written_by_report(&writer("deadbeef", false), "deadbeef", true).is_none(),
+            written_by_report(
+                &writer("deadbeef", false, Some("aaaa")),
+                "deadbeef",
+                true,
+                Some("aaaa")
+            )
+            .is_none(),
             "and not in the other direction either"
         );
+    }
+
+    /// Where EITHER side has no build id — a sidecar written before the field existed,
+    /// or a platform with no `/proc/self/exe` — the comparison falls back to the sha,
+    /// exactly as before the field. Both halves are needed: equal shas stay silent (no
+    /// new noise on an old sidecar), and differing shas still report (the fallback is a
+    /// comparison, not a mute). `None` is never compared as a value.
+    #[test]
+    fn a_missing_build_id_on_either_side_falls_back_to_the_sha() {
+        for (w_id, r_id) in [(None, Some("bbbb")), (Some("aaaa"), None), (None, None)] {
+            assert!(
+                written_by_report(&writer("deadbeef", false, w_id), "deadbeef", false, r_id)
+                    .is_none(),
+                "equal shas, build id missing on a side ({w_id:?}, {r_id:?}): silent, as before"
+            );
+            assert!(
+                written_by_report(&writer("deadbeef", false, w_id), "cafe1234", false, r_id)
+                    .is_some(),
+                "differing shas, build id missing on a side ({w_id:?}, {r_id:?}): still reports"
+            );
+        }
     }
 }

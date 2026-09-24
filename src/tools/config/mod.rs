@@ -489,7 +489,7 @@ impl Tool for ProjectStatus {
         // things are right, and "which build answered me?" is a question worth
         // being able to ask on a healthy day.
         //
-        // Same four facts `write_index_state_with_dirty` stamps into the
+        // Same facts `write_index_state_with_dirty` stamps into the
         // sidecar, from the same constructor, so what ANSWERED and what WROTE
         // are directly comparable without a /proc walk on either side.
         // docs/issues/archive/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md
@@ -500,6 +500,7 @@ impl Tool for ProjectStatus {
                 "git_dirty": w.git_dirty,
                 "pid": w.pid,
                 "exe_deleted": w.exe_deleted,
+                "build_id": w.build_id,
             });
         }
 
