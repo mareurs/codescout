@@ -1182,7 +1182,7 @@ impl CodeScoutServer {
     /// rich history on disk from an earlier process, and `rekey`'s "start
     /// empty" contract — correct for a conversation that provably has no
     /// file yet, such as a fresh `/clear` — silently discarded it.
-    /// docs/issues/2026-09-24-rekey-never-consults-the-on-disk-ledger-of-the-principal-it-targets.md
+    /// docs/issues/archive/2026-09-24-rekey-never-consults-the-on-disk-ledger-of-the-principal-it-targets.md
     ///
     /// An **anonymous** ledger (no identity at construction) is never parked —
     /// there is no key to file it under — so a process with no resolvable session
@@ -10744,7 +10744,7 @@ mod guide_hint_tests {
     /// the same process — must be restored from its on-disk ledger file,
     /// not treated as never-served.
     ///
-    /// `docs/issues/2026-09-24-rekey-never-consults-the-on-disk-ledger-of-the-principal-it-targets.md`.
+    /// `docs/issues/archive/2026-09-24-rekey-never-consults-the-on-disk-ledger-of-the-principal-it-targets.md`.
     /// `parked_ledgers` is in-memory only and empty at construction, so a
     /// fresh process has nothing parked for ANY principal that isn't the
     /// base session — even one with a rich, previously-persisted history.

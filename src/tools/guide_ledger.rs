@@ -312,7 +312,7 @@ impl GuideLedger {
     /// pass, which stays the responsibility of the process constructing the
     /// base ledger rather than every later re-adoption.
     ///
-    /// docs/issues/2026-09-24-rekey-never-consults-the-on-disk-ledger-of-the-principal-it-targets.md
+    /// docs/issues/archive/2026-09-24-rekey-never-consults-the-on-disk-ledger-of-the-principal-it-targets.md
     pub fn adopt(&mut self, session: &str) {
         let repointed = self
             .path

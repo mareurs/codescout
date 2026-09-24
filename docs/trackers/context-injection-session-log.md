@@ -1462,6 +1462,8 @@ True of the `guide_ledger.rs` / `server.rs` / `guide_rearm.rs` shape at `HEAD` o
 
 **Fix idea / Pointer:** File `docs/issues/` bug entries for mechanism 2 (`poll_guide_rearm` principal-scoping race) and mechanism 3 (`parked_ledgers` / `rekey()` not consulting on-disk history) — pending user decision on how to proceed, same conversation.
 
+**Resolved same session.** Mechanism 2 was retracted before filing — re-reading `docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md` directly showed it is Decision #8, already litigated and accepted ("Acceptable, matches 'degrade to re-sending, never to suppressing.'"), not a new defect; filing it would have been exactly the rediscovery this tracker exists to prevent. Mechanism 3 was filed as `bebe1b228d668b40` (`docs/issues/archive/2026-09-24-rekey-never-consults-the-on-disk-ledger-of-the-principal-it-targets.md`), fixed and verified same session — including live, end to end, through the real principal-stamp hook and a real `/mcp` restart (evidence in the bug file's *Tests added*): `GuideLedger::adopt()` added as `rekey`'s disk-consulting twin, wired into `adopt_request_conversation`'s case-3 branch only. A second, latent defect surfaced by the new regression test in the same investigation — `adopt_request_conversation`'s parent-call fallback used the frozen construction-time `base_ledger_key` rather than `poll_rendezvous`'s current resolution — was fixed in the same commit. SHA `971ed73f4d9f1ded140926de7d8b7889eb1dc161`, patch-id `5dba2cc5ae2d34af2d23f58778ecd6f520bd79f4`, branch `experiments`.
+
 ## Template for new entries
 
 <!-- New F-N / W-N entries land above this line. This heading is the anchor:
