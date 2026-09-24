@@ -132,4 +132,11 @@ The design in § *The one viable design*, plus one piece it missed. **The measur
 
 ## Resume
 
-Live check after `cargo rb` + `/mcp` (no compaction): the companion half is already live, and the stamp it wrote at this conversation's last SessionStart is inherited by the new server. Call `workspace(post_compact=true)` → expect `"ledger": "kept"` and the parent's ledger file byte-unchanged. Then archive with `c186c45e2ed2a038` in one pass (see its Resume for the citations to re-point).
+Live check after `cargo rb` — and it needs a `SessionStart` that ran the NEW hook (`cf5ea29c`). **The fixing session cannot supply one:** its only SessionStart was a compaction that predated the hook change, so its slot carries no `hook_source` (verified 2026-09-24: PID 2968670's slot has no such field), and a check there correctly degrades to `"ledger": "cleared"` — which would read as a failed fix. Recipe:
+
+1. Start a session, or `claude --resume` one (SessionStart `source=startup`/`resume` stamps `hook_source`). Confirm with `cat ~/.local/state/codescout/servers/<pid>.json` → `hook_source` present.
+2. `/mcp` (no compaction) — the new server inherits the source.
+3. `workspace(post_compact=true)` → expect `"ledger": "kept"` and the ledger file unchanged apart from the reconnect's bootstrap re-arm.
+4. Clearing half: `/compact`, then the call → `"ledger": "cleared"`.
+
+Then archive with `c186c45e2ed2a038` in one pass (see its Resume for the citations to re-point).
