@@ -12,10 +12,10 @@
 # the machine (104G measured beside a 17G slot): a slot over CODESCOUT_SLOT_CEILING_MB is
 # emptied under its own lock. And a burst of concurrent runs leaves high-numbered slots
 # behind forever, so free slots numbered CODESCOUT_GATE_POOL_KEEP or higher are removed
-# under THEIR locks by whichever run comes next (bug b085022bc2f05c36). Case K covers
+# under THEIR locks by whichever run comes next (bug 503fa887ab0ec144). Case K covers
 # scripts/with-slot.sh, the leased way to run one ad-hoc command, which exists because a
 # session reused a path the gate printed and grew a tree outside the lease (bug
-# 294ba0ae7ed8c7b1).
+# 097aa5ca2222a91d).
 #
 # The real gate.sh is driven here, not a copy of its logic: `cargo` is a stub on PATH that
 # records the CARGO_TARGET_DIR each lane saw, `./scripts/fmt-mine.sh` is a stub in a fake
@@ -99,7 +99,7 @@ run_gate a sid-a
 eq "first run leases slot-0" "$(first_seen a)" "$POOL/slot-0"
 eq "the stub was reached once per cargo lane" "$(wc -l < "$WORK/seen-a" | tr -d ' ')" "3"
 eq "all three cargo lanes share ONE target dir" "$(sort -u "$WORK/seen-a" | wc -l | tr -d ' ')" "1"
-# The remedy for bug 294ba0ae7ed8c7b1 has to sit where the path appears, or the path
+# The remedy for bug 097aa5ca2222a91d has to sit where the path appears, or the path
 # stays the invitation.
 eq "the printed path names the leased way to reuse it" "$(grep -c 'scripts/with-slot.sh' "$WORK/out-a")" "1"
 

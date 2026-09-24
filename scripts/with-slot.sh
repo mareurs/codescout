@@ -7,7 +7,7 @@
 # session knows about is the one gate.sh printed. So sessions typed
 # `CARGO_TARGET_DIR=<that path> cargo test …` by hand. After the pool replaced per-session
 # trees, one session kept doing it and grew a 4.5G tree the pool cannot reclaim, because
-# no lock proves it idle (bug 294ba0ae7ed8c7b1). With today's gate the printed path is a
+# no lock proves it idle (bug 097aa5ca2222a91d). With today's gate the printed path is a
 # SLOT, and the same habit writes into a tree another session may be leasing. That is
 # the concurrent-writer window the lease exists to close (scripts/gate.sh's header).
 #

@@ -62,7 +62,7 @@ Why each part, one line each. Every measurement, date and superseded form →
   **For a targeted `cargo test`, use `scripts/with-slot.sh cargo test …`, never the path the gate
   printed.** That path is leased for one run, and reusing it by hand writes into a tree another
   session may hold
-  ([`docs/issues/2026-09-24-a-target-path-the-gate-printed-is-reused-by-hand-outside-the-lease.md`](docs/issues/2026-09-24-a-target-path-the-gate-printed-is-reused-by-hand-outside-the-lease.md)).
+  ([`docs/issues/archive/2026-09-24-a-target-path-the-gate-printed-is-reused-by-hand-outside-the-lease.md`](docs/issues/archive/2026-09-24-a-target-path-the-gate-printed-is-reused-by-hand-outside-the-lease.md)).
   The script prints its slot's size and the pool's total on every run, rather than this file
   quoting a number that would decay.
 - **Chain the two test lanes with `;`, never `&&`.** The guarantee above is conditional on the

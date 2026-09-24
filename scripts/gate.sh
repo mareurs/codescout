@@ -26,14 +26,14 @@
 # keying on the session id left 323G in 17 trees on 2026-09-24 (bug 1da62c896d649aa6).
 # The lease lives in scripts/slot-pool.sh, which also bounds the pool on every lease:
 # a slot past CODESCOUT_SLOT_CEILING_MB is emptied, and free slots numbered
-# CODESCOUT_GATE_POOL_KEEP or higher are removed (bug b085022bc2f05c36). Why the lock is
+# CODESCOUT_GATE_POOL_KEEP or higher are removed (bug 503fa887ab0ec144). Why the lock is
 # held without `flock -o`, and why only the lock may authorize a removal, is written
 # there. This script prints the slot's size and the pool's total when it finishes.
 #
 # THE PATH IT PRINTS IS LEASED FOR THIS RUN ONLY. Reusing it by hand for a targeted
 # `cargo test` writes into a slot another run may hold; scripts/with-slot.sh is the leased
 # way to do that, and the line below says so where the path appears (bug
-# 294ba0ae7ed8c7b1).
+# 097aa5ca2222a91d).
 #
 # NOT MANDATORY, and that is a real limitation rather than modesty: a session that types
 # the four commands directly still shares `target/`, so this is a mechanism for whoever

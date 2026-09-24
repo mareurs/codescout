@@ -1,5 +1,5 @@
 ---
-id: b085022bc2f05c36
+id: 503fa887ab0ec144
 kind: bug
 status: fixed
 title: 'BUG: the gate''s slot pool bounds how many trees exist, not how big each grows — a slot trends toward the shared tree''s 104G'
@@ -13,7 +13,7 @@ related:
 - docs/issues/archive/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md
 - docs/issues/archive/2026-09-24-mutation-probe-worktrees-are-never-reclaimed.md
 severity: med
-unverified: CI has not yet run tests/gate-slot.sh cases G-K or tests/mutation-probe.sh cases 27-29. They run in the gate-slot-tests and mutation-probe-tests jobs on the next push of 9d755a16.
+unverified: 'CLEARED 2026-09-25. Was: CI had not run tests/gate-slot.sh cases G-K or tests/mutation-probe.sh cases 27-29. Both jobs (gate-slot-tests, mutation-probe-tests) ran green in CI run 36058985076 on 87001799.'
 ---
 
 # BUG: the gate's slot pool bounds how many trees exist, not how big each grows — a slot trends toward the shared tree's 104G

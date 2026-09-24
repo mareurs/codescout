@@ -510,7 +510,7 @@ verification outcome above, which stands as written.
 | Observed interval (UTC) | 2026-09-24, about 14:00 to 20:25, approximate. It spans one compaction. The stretch before it is known to this receipt only through the compaction summary |
 | Workspace | `/home/marius/work/claude/codescout`, branch `experiments`, shared checkout. Peers ebf651ec, 571eb3d6, 774ba049 and system-cf interacted |
 | Coverage | `partial`. The post-compaction interval was observed directly; the pre-compaction interval was not |
-| DWF routine / enrichment | routine-first **DWF-8** (gate cache disk, per-session target dirs), recorded with its outcome. The later investigation (the pool's size bound, and the hand-reused path) was **not** captured as an enrichment. Its canonical records are bug files `b085022bc2f05c36` and `294ba0ae7ed8c7b1`, fixed in `9d755a16` |
+| DWF routine / enrichment | routine-first **DWF-8** (gate cache disk, per-session target dirs), recorded with its outcome. The later investigation (the pool's size bound, and the hand-reused path) was **not** captured as an enrichment. Its canonical records are bug files `503fa887ab0ec144` and `097aa5ca2222a91d`, fixed in `9d755a16` |
 | DCX routine / enrichment | `unknown`. The compaction summary names no DCX selection, and this collector cannot verify one either way |
 | Native / delegated / unobserved gaps | No subagents were dispatched after compaction. All shell work went through `run_command`, so it appears in usage.db. The 26-mutation run was a background script, visible only as its log |
 | Collection overhead | This receipt: 1 append call, plus 2 reads of the ledger's recipe sections. Not measured in time |

@@ -1,5 +1,5 @@
 ---
-id: '294ba0ae7ed8c7b1'
+id: '097aa5ca2222a91d'
 kind: bug
 status: fixed
 title: 'BUG: a target path the gate printed is reused by hand for targeted cargo runs, outside the lease — a per-session tree came back after the fix'
@@ -11,9 +11,9 @@ closed: 2026-09-24
 opened: 2026-09-24
 related:
 - docs/issues/archive/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md
-- docs/issues/2026-09-24-the-gate-pool-bounds-how-many-trees-not-how-big-each-grows.md
+- docs/issues/archive/2026-09-24-the-gate-pool-bounds-how-many-trees-not-how-big-each-grows.md
 severity: med
-unverified: CI has not yet run tests/gate-slot.sh case K or the with-slot.sh hint assertions in cases A and E. They run in the gate-slot-tests job on the next push of 9d755a16.
+unverified: 'CLEARED 2026-09-25. Was: CI had not run tests/gate-slot.sh case K or the with-slot.sh hint assertions in cases A and E. The gate-slot-tests job ran green in CI run 36058985076 on 87001799.'
 ---
 
 # BUG: a target path the gate printed is reused by hand for targeted cargo runs, outside the lease — a per-session tree came back after the fix

@@ -450,7 +450,7 @@ OUT=$(cd "$R" && TMPDIR="$WORK/tmp26" CLAUDE_CODE_SESSION_ID=sid-g "$PROBE" \
 eq "26 the run armed" "$(tree_of "$OUT" | grep -c .)" "1"
 eq "26 TMPDIR is empty after the run" "$(ls -A "$WORK/tmp26" | wc -l | tr -d ' ')" "0"
 
-# --- 27-29. THE POOL STAYS SMALL — bug b085022bc2f05c36 --------------------------------
+# --- 27-29. THE POOL STAYS SMALL — bug 503fa887ab0ec144 --------------------------------
 # A leased tree is never keyed on a session, so it is also never torn down: a burst of
 # concurrent runs leaves high-numbered trees behind, and cargo never shrinks a target/.
 # Both bounds live in scripts/slot-pool.sh, shared with scripts/gate.sh, whose suite

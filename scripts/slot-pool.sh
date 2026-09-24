@@ -10,7 +10,7 @@
 # and never correctness (bug-fix-session-log:F-173).
 #
 # A pool of long-lived trees needs two more bounds, and `slot_tend` applies both on every
-# lease (bug b085022bc2f05c36). Cargo never garbage-collects a target dir, so one slot
+# lease (bug 503fa887ab0ec144). Cargo never garbage-collects a target dir, so one slot
 # grows toward the longest-lived tree on the machine: 104G measured beside a 17G slot on
 # 2026-09-24. A slot over CODESCOUT_SLOT_CEILING_MB is therefore emptied, and that one
 # run builds cold. And the high-water mark never fell, so free slots numbered KEEP or
@@ -19,7 +19,7 @@
 # THE LOCK IS THE ONLY PROOF A TREE IS IDLE, which is why the pruning lives here and not
 # in a cron job or a warning. `flock -n` succeeding is the one observation that no leased
 # run is inside a slot, so every removal happens under that lock. A tree with no lock
-# file (a session that typed its own CARGO_TARGET_DIR, bug 294ba0ae7ed8c7b1) cannot be
+# file (a session that typed its own CARGO_TARGET_DIR, bug 097aa5ca2222a91d) cannot be
 # proven idle, and nothing here touches it.
 #
 # LOCK FILES ARE NEVER UNLINKED. A run that opened `slot-N.lock` just before the unlink

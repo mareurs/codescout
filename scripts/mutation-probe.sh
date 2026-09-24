@@ -191,7 +191,7 @@ if [ "$pre" != "1" ]; then
 fi
 
 if [ "$MODE" = "isolated" ]; then
-    # Bound the pool before paying for anything (bug b085022bc2f05c36): empty this tree's
+    # Bound the pool before paying for anything (bug 503fa887ab0ec144): empty this tree's
     # target/ if it outgrew CODESCOUT_SLOT_CEILING_MB, and remove free trees numbered
     # CODESCOUT_PROBE_POOL_KEEP or higher. Removal goes through git so the registration
     # under .git/worktrees goes too; a bare `rm -rf` would leave it listed.
