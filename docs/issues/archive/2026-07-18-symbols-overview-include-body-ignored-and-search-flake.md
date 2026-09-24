@@ -545,7 +545,17 @@ reader would learn to skip the warning that matters.
 
 The second site is not optional once the first exists. A persistent `null` became an `Err`, and the old `continue` would have swallowed exactly that into the same silent zero.
 
-**TRACKED: four other callers still swallow a `document_symbols` `Err`.** They are `list_overview.rs:265` (`if let Ok`), `resolve_range_via_document_symbols` (`.ok()?`), `audit_doc_refs/resolver.rs:556` (`.ok()`), and `list_overview`'s concurrent path. All four now get the `null` retry, which removes the measured cause for them too. A failure that outlasts the budget is still silent there. Not changed here: each needs its own decision about what a partial overview or an unresolved doc ref should say.
+**RESOLVED 2026-09-24 (`ad23c2f0`, patch-id `5559b5b9adc30bdd6f095866253a329d5d998237`). Was: "four other callers still swallow a `document_symbols` `Err`".** That count came from a grep and overstated the problem. Reading each site found five, and they split as follows:
+
+| site | behaviour on `Err` | outcome |
+|---|---|---|
+| glob overview, `list_overview` | `if let Ok` dropped the file from `files`, with no entry and no mark | **fixed**: tree-sitter symbols, marked `lsp: warming` |
+| single-file overview, `list_overview` | **a regression from `e26da0b2`**. A persistent `null` used to reach the BUG-054 tree-sitter fallback; as an `Err`, `?` failed the call after up to 5 s | **fixed**: falls back to tree-sitter with `lsp_warming` when a grammar exists, and still propagates when none does |
+| directory overview, `list_overview` | `.unwrap_or_default()` then tree-sitter on empty | unchanged: unmarked but not false |
+| `resolve_range_via_document_symbols` | `None`, so the caller refuses with the original range-validation error | unchanged: still a refusal (the message is imprecise) |
+| `audit_doc_refs/resolver.rs` | `Verdict::Unknown` plus `note_degraded(NoAnswerWithinBudget)` | unchanged: already claims nothing |
+
+The two fixes are guarded by `tools::symbol::tests::glob_overview_keeps_a_file_whose_symbol_lookup_failed` and `..._single_file_overview_falls_back_to_tree_sitter_when_the_symbol_lookup_fails`, both observed RED first. Mutations: 3/3 KILLED.
 
 ## Tests added (2026-07-28)
 

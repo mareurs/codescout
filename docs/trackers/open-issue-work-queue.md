@@ -768,7 +768,7 @@ exposes" — applies here too.
 
 **Status:** done-archived — 2026-09-24. **Valid:** dated 2026-09-24
 
-`docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md` (`bf02ad346f61bf00`), `status: fixed`. Bug A was fixed in `b2344aab`. Bug B recurred six times on the path-scoped branch on 2026-09-24, from the same rust-analyzer `null` as BL-61. It was fixed in the same commit, `e26da0b2`: the path branch now records files it could not read, and a zero carries a `completeness_warning` naming them. **TRACKED in the bug file:** four other `document_symbols` callers still swallow an `Err`. They get the `null` retry, but a failure that outlasts the budget stays silent there.
+`docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md` (`bf02ad346f61bf00`), `status: fixed`. Bug A was fixed in `b2344aab`. Bug B recurred six times on the path-scoped branch on 2026-09-24, from the same rust-analyzer `null` as BL-61. It was fixed in the same commit, `e26da0b2`: the path branch now records files it could not read, and a zero carries a `completeness_warning` naming them. The follow-up on other `document_symbols` callers is also done (`ad23c2f0`): of five sites, the glob and single-file overviews were fixed, the single-file one being a regression from `e26da0b2`, and three were found already honest.
 ### BL-65 — the CLI's `doctor` exposes no `--fix`, so all six repairs are MCP-only
 
 **Status:** **done** 2026-09-09 — `953c98f3`, patch-id
