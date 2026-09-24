@@ -107,6 +107,23 @@ jobs:
           git config --global init.defaultBranch master
       - run: bash tests/pre-push-foreign-session-guard.sh
 
+  # ITS OWN JOB, for the reason `push-guard-tests` gives above: `shell-tests` is the known-flaky
+  # lane, and this suite's value is that R1-R3 are readable as the reproduction of
+  # docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md
+  # and F1-F9 as the contract of scripts/commit-mine.sh -- a red here must read as a verdict.
+  # Throwaway repos under mktemp -d; needs git and python3.
+  commit-mine-tests:
+    name: commit-mine (the empty intersection, and the route out of it)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Identify a committer (the suite builds throwaway git repos)
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name  CI
+          git config --global init.defaultBranch master
+      - run: bash tests/commit-mine.sh
+
   # ITS OWN JOB, for the same reason as the one above: `shell-tests` is the known-flaky
   # lane and this suite's assertions are meant to read as verdicts. Kept out of
   # `push-guard-tests` too — that job's name would then describe half of what it runs.

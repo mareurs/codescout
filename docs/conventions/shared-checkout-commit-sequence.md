@@ -257,6 +257,15 @@ That is a defect, filed separately at
 the mechanism re-derived from the hooks' source. This page cannot solve it; a sequence
 teaches the choreography and does not remove the need for one.
 
+**Since 2026-09-24 a tool does: `scripts/commit-mine.sh -m "..."`.** It asks the foreign-index guard
+which staged paths are yours (`--classify`, the guard's own loop rather than a copy of it), builds a
+private index from HEAD plus only those entries, and commits from it — so every hook judges exactly
+your set, and a coupled pair you staged lands together even while a peer's unstaged hunk sits in the
+same working-tree file. The bare-commit refusal names it at the moment of need. **What it cannot
+split:** one index entry holding two authors' hunks, i.e. a peer re-staged the file over yours.
+Ownership is recorded per `(blob, path)`, so that entry is theirs and is left out, and the refusal
+that follows is correct. The reproduction and the contract are `tests/commit-mine.sh` (R1–R3, F1–F9).
+
 ## Why not guide injection
 
 The first draft of this proposed a `shared-checkout-commits` guide topic injected on the

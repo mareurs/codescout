@@ -89,8 +89,28 @@
 
 set -uo pipefail
 
+# `--classify` is a SECOND ENTRY POINT, for `scripts/commit-mine.sh` and nothing else: print
+# which staged paths THIS guard attributes to the caller and which to whom, then exit 0 without
+# judging. It exists so the helper asks the guard instead of re-implementing the lookup --
+# the same law as the two copy-pasted `--raw` pipelines below, where a fix to one site left
+# the other wrong (docs/issues/archive/2026-09-08-the-stage-log-records-a-renames-source-path-and-drops-its-destination.md).
+# Output, one line per staged path:   mine\t<your id>\t<path>   |   theirs\t<owner>\t<path>
+# Three NON-EMPTY fields, always: a tab in IFS is whitespace to `read`, so an empty middle
+# field would collapse and the path would be read as the owner.
+#
+# EVERY stand-down below that exits 0 in the default mode exits NON-ZERO here, and that
+# asymmetry is the point. The guard fails OPEN because refusing a routine commit teaches
+# `--no-verify`; the helper must fail CLOSED, because an empty classification it read as
+# "nothing foreign" would let it claim every staged path as the caller's. 2 = no session id,
+# 3 = cannot classify (sequencer stop, or no stage log). tests/commit-mine.sh F5/F8/F9.
+classify=0
+[ "${1:-}" = "--classify" ] && classify=1
+
 me="${CLAUDE_CODE_SESSION_ID:-}"
-[ -n "$me" ] || exit 0
+if [ -z "$me" ]; then
+    ((classify)) && { echo "classify: no CLAUDE_CODE_SESSION_ID, so no owner to classify for" >&2; exit 2; }
+    exit 0
+fi
 
 # A PATHSPEC commit gets a temporary index named `next-index-<pid>.lock`. This block used
 # to `exit 0` here, on the stated premise that such a commit "IGNORES the shared index
@@ -146,6 +166,7 @@ git_dir="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
 # one that fails if this is ever widened to an unconditional exit.
 if [ -e "$(git rev-parse --git-path CHERRY_PICK_HEAD)" ] ||
    [ -e "$(git rev-parse --git-path MERGE_HEAD)" ]; then
+    ((classify)) && { echo "classify: a cherry-pick or merge is in progress; a commit now would conclude it" >&2; exit 3; }
     exit 0
 fi
 
@@ -199,6 +220,7 @@ log="$git_dir/session-stage-log"
 # could not read. The EXIT=0 assertion sits ABOVE the notice assertion on purpose, so a
 # notice that ever starts refusing reds as a verdict change rather than as a text change.
 if [ ! -s "$log" ]; then
+    ((classify)) && { printf 'classify: no session-stage-log at %s, so no path can be attributed to anyone\n' "$git_dir" >&2; exit 3; }
     printf 'pre-commit: foreign-index guard did NOT run — no session-stage-log at %s\n' "$git_dir" >&2
     printf '  So this exit 0 means "could not check", not "nothing foreign is staged".\n' >&2
     printf '  Read it yourself before committing:  git diff --cached --name-only\n' >&2
@@ -236,6 +258,9 @@ foreign_owners=()
 # unrecorded paths there are, so the branch that produced them has to be collected
 # separately or it is lost with the duplicates.
 unrecorded_routes=()
+# path -> owner, for `--classify` only: the refusal below needs owners deduplicated, the
+# helper needs them per path.
+declare -A owner_of=()
 
 while IFS=$'\t' read -r blob path; do
     [ -n "$path" ] || continue
@@ -244,6 +269,7 @@ while IFS=$'\t' read -r blob path; do
     IFS=$'\t' read -r owner route <<< "$prior"
     if [ -n "$owner" ] && [ "$owner" != "$me" ]; then
         theirs+=("$path")
+        owner_of["$path"]="$owner"
         case " ${foreign_owners[*]-} " in
             *" $owner "*) ;;
             *) foreign_owners+=("$owner") ;;
@@ -272,6 +298,15 @@ done < <(git diff --cached --raw --no-renames 2>/dev/null |
 # failed with the recorder already fixed. Keep BOTH call sites in step; a mutation of either
 # alone leaves the other's assertion green.
 # docs/issues/archive/2026-09-08-the-stage-log-records-a-renames-source-path-and-drops-its-destination.md
+
+# The classification is complete here and nothing below changes it -- the joint and
+# all-contested arms decide whether to REFUSE, not whose a path is -- so this is the one
+# point where printing it cannot disagree with the verdict a real commit would get.
+if ((classify)); then
+    for p in "${mine[@]-}"; do [ -n "$p" ] && printf 'mine\t%s\t%s\n' "$me" "$p"; done
+    for p in "${theirs[@]-}"; do [ -n "$p" ] && printf 'theirs\t%s\t%s\n' "${owner_of[$p]}" "$p"; done
+    exit 0
+fi
 
 ((${#theirs[@]})) || exit 0
 
@@ -482,6 +517,13 @@ fi
         else
             echo "    git commit -- <your paths>   # <- none of the staged paths look like yours"
         fi
+        echo
+        echo "If THAT is refused too -- a file you staged also carries a peer's UNSTAGED edit,"
+        echo "and a pathspec commit takes the whole working-tree file -- commit exactly what"
+        echo "you staged instead. It builds a private index from HEAD plus only the staged"
+        echo "paths this guard attributes to you, so every hook sees your paths and no others:"
+        echo
+        echo "    scripts/commit-mine.sh -m \"...\""
         echo
         echo "Leave theirs staged; it is not yours to unstage either. \`git reset\` here"
         echo "would take their work out of the index seconds before they commit it."
