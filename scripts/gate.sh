@@ -22,14 +22,18 @@
 # gate lanes are isolated; the release loop stays shared and keeps working.
 #
 # THE POOL, and why a lease rather than a directory per session. The race above lasts one
-# RUN, so a slot is held for one run and reused by the next, whichever session starts it.
-# The pool therefore grows with peak concurrent gate runs, not with sessions ever started:
+# RUN, so a slot is held for one run and reused by the next, whichever session starts it:
 # keying on the session id left 323G in 17 trees on 2026-09-24 (bug 1da62c896d649aa6).
-# The lock sits on an fd every child inherits, deliberately WITHOUT `flock -o`: with `-o`,
-# SIGKILLing this script frees the slot while its cargo is still writing into it, which
-# reopens the race; without it, a daemon started mid-run (sccache, measured) pins one slot,
-# which costs disk and never correctness (bug-fix-session-log:F-173). This script prints
-# the slot's size and the pool's total when it finishes.
+# The lease lives in scripts/slot-pool.sh, which also bounds the pool on every lease:
+# a slot past CODESCOUT_SLOT_CEILING_MB is emptied, and free slots numbered
+# CODESCOUT_GATE_POOL_KEEP or higher are removed (bug b085022bc2f05c36). Why the lock is
+# held without `flock -o`, and why only the lock may authorize a removal, is written
+# there. This script prints the slot's size and the pool's total when it finishes.
+#
+# THE PATH IT PRINTS IS LEASED FOR THIS RUN ONLY. Reusing it by hand for a targeted
+# `cargo test` writes into a slot another run may hold; scripts/with-slot.sh is the leased
+# way to do that, and the line below says so where the path appears (bug
+# 294ba0ae7ed8c7b1).
 #
 # NOT MANDATORY, and that is a real limitation rather than modesty: a session that types
 # the four commands directly still shares `target/`, so this is a mechanism for whoever
@@ -58,26 +62,16 @@ EOF
     exit 2
 fi
 
-# Outside the repo on purpose: nothing here needs gitignoring, a peer's `git clean`
-# cannot reach it, and no tool that walks the worktree will scan it.
-POOL="${CODESCOUT_GATE_POOL:-$HOME/.cache/codescout-gate}"
+# The pool is outside the repo on purpose: nothing there needs gitignoring, a peer's
+# `git clean` cannot reach it, and no tool that walks the worktree will scan it.
+. "$(dirname "${BASH_SOURCE[0]}")/slot-pool.sh" || exit 2
 if [ -z "${CARGO_TARGET_DIR:-}" ]; then
-    mkdir -p "$POOL" || exit 2
-    SLOT=0
-    while :; do
-        exec {SLOT_FD}>"$POOL/slot-$SLOT.lock" || exit 2
-        flock -n "$SLOT_FD"; rc=$?
-        [ "$rc" -eq 0 ] && break
-        exec {SLOT_FD}>&-
-        # Exit 1 means held; anything else (flock missing, say) would loop forever.
-        [ "$rc" -eq 1 ] || { echo "gate.sh: flock failed with exit $rc" >&2; exit 2; }
-        SLOT=$((SLOT + 1))
-    done
-    export CARGO_TARGET_DIR="$POOL/slot-$SLOT"
+    lease_gate_target gate.sh || exit 2
 fi
 mkdir -p "$CARGO_TARGET_DIR" || exit 2
 
 echo "gate.sh: CARGO_TARGET_DIR=$CARGO_TARGET_DIR"
+[ -n "${SLOT_FD:-}" ] && echo "gate.sh: leased for THIS run only. For a targeted run, lease your own: scripts/with-slot.sh cargo test --lib -- <filter>"
 echo
 
 # The two ONNX weight tests in `crates/codescout-embed/src/local.rs`
@@ -121,7 +115,7 @@ DEFAULT=$?
 
 echo
 echo "gate.sh: tree size $(du -sh "$CARGO_TARGET_DIR" 2>/dev/null | cut -f1) at $CARGO_TARGET_DIR"
-[ -n "${SLOT_FD:-}" ] && echo "gate.sh: pool total $(du -sh "$POOL" 2>/dev/null | cut -f1) at $POOL"
+[ -n "${SLOT_FD:-}" ] && echo "gate.sh: pool total $(du -sh "$GATE_POOL" 2>/dev/null | cut -f1) at $GATE_POOL"
 echo "GATE EXITS -> FMT=$FMT CLIPPY=$CLIPPY LEAN=$LEAN DEFAULT=$DEFAULT"
 
 # FMT is the one ambiguous code, and the ambiguity is routine rather than rare on a shared

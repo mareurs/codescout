@@ -153,22 +153,12 @@ else
     # Leased per RUN from a pool, not keyed on the session: a session-keyed tree was never
     # removed (72G across 18 on 2026-09-24,
     # docs/issues/archive/2026-09-24-mutation-probe-worktrees-are-never-reclaimed.md) and gave two
-    # concurrent runs from one session the same tree. Same lease as scripts/gate.sh: the
-    # lock sits on an fd the test command inherits, deliberately without `flock -o`, so a
-    # SIGKILLed probe whose command still runs keeps its tree (bug-fix-session-log:F-173).
+    # concurrent runs from one session the same tree. The lease is scripts/gate.sh's, shared
+    # through scripts/slot-pool.sh, which says why it is held without `flock -o`.
+    . "$(dirname "${BASH_SOURCE[0]}")/slot-pool.sh" || exit 2
     POOL="${ROOT}.worktrees"
-    mkdir -p "$POOL" || exit 2
-    SLOT=0
-    while :; do
-        exec {SLOT_FD}>"$POOL/mutation-slot-$SLOT.lock" || exit 2
-        flock -n "$SLOT_FD"; lock_rc=$?
-        [ "$lock_rc" -eq 0 ] && break
-        exec {SLOT_FD}>&-
-        # Exit 1 means held; anything else (flock missing, say) would loop forever.
-        [ "$lock_rc" -eq 1 ] || { echo "mutation-probe: flock failed with exit $lock_rc" >&2; exit 2; }
-        SLOT=$((SLOT + 1))
-    done
-    TREE="$POOL/mutation-slot-$SLOT"; MODE="isolated"
+    slot_lease "$POOL" mutation-slot- mutation-probe || exit 2
+    TREE="$SLOT_DIR"; MODE="isolated"
 fi
 TARGET="$TREE/$FILE"
 BACKUP=$(mktemp)
@@ -201,6 +191,16 @@ if [ "$pre" != "1" ]; then
 fi
 
 if [ "$MODE" = "isolated" ]; then
+    # Bound the pool before paying for anything (bug b085022bc2f05c36): empty this tree's
+    # target/ if it outgrew CODESCOUT_SLOT_CEILING_MB, and remove free trees numbered
+    # CODESCOUT_PROBE_POOL_KEEP or higher. Removal goes through git so the registration
+    # under .git/worktrees goes too; a bare `rm -rf` would leave it listed.
+    probe_remove_tree() {
+        git -C "$ROOT" worktree remove --force "$1" >&2 || echo "mutation-probe: could not remove $1" >&2
+    }
+    slot_tend mutation-probe "$POOL" mutation-slot- CODESCOUT_PROBE_POOL_KEEP 2 \
+        "$TREE/target" probe_remove_tree || exit 2
+
     if [ ! -d "$TREE" ]; then
         echo "mutation-probe: creating isolated worktree (one-off, ~87 s + 2.8 G on this repo)" >&2
         git -C "$ROOT" worktree add --detach "$TREE" HEAD >&2 || exit 2

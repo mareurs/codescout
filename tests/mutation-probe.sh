@@ -450,6 +450,53 @@ OUT=$(cd "$R" && TMPDIR="$WORK/tmp26" CLAUDE_CODE_SESSION_ID=sid-g "$PROBE" \
 eq "26 the run armed" "$(tree_of "$OUT" | grep -c .)" "1"
 eq "26 TMPDIR is empty after the run" "$(ls -A "$WORK/tmp26" | wc -l | tr -d ' ')" "0"
 
+# --- 27-29. THE POOL STAYS SMALL — bug b085022bc2f05c36 --------------------------------
+# A leased tree is never keyed on a session, so it is also never torn down: a burst of
+# concurrent runs leaves high-numbered trees behind, and cargo never shrinks a target/.
+# Both bounds live in scripts/slot-pool.sh, shared with scripts/gate.sh, whose suite
+# tests/gate-slot.sh covers the lock and KEEP logic. These cases cover the probe's own
+# wiring: its KEEP variable, its target/ path, and a removal that unregisters the worktree.
+
+# 27. A free tree numbered KEEP or higher is removed, git registration included.
+R=$(newrepo)
+run "$R" sid-h --file src/lib.rs --find 'guard();' --replace '' -- true
+git -C "$R" worktree add -q --detach "$R.worktrees/mutation-slot-1" HEAD 2>/dev/null
+: > "$R.worktrees/mutation-slot-1.lock"
+OUT=$(cd "$R" && CODESCOUT_PROBE_POOL_KEEP=2 CLAUDE_CODE_SESSION_ID=sid-h "$PROBE" \
+    --file src/lib.rs --find 'guard();' --replace '' -- true 2>&1)
+eq "27 a free tree below KEEP is kept" "$(probe_trees "$R")" "2"
+OUT=$(cd "$R" && CODESCOUT_PROBE_POOL_KEEP=1 CLAUDE_CODE_SESSION_ID=sid-h "$PROBE" \
+    --file src/lib.rs --find 'guard();' --replace '' -- true 2>&1)
+# `git worktree list` still names a deleted-but-registered tree, so a bare `rm -rf` reds this.
+eq "27 a free tree at KEEP is reclaimed, registration and all" "$(probe_trees "$R")" "1"
+eq "27 and its directory is gone" "$([ -e "$R.worktrees/mutation-slot-1" ] && echo kept || echo gone)" "gone"
+
+# 28. A tree whose target/ outgrew the ceiling has target/ emptied; under it, it is kept.
+# The fixture repo must ignore target/, or the probe's `git clean` empties it regardless
+# and the "kept" half could never pass.
+R=$(newrepo); printf 'target/\n' > "$R/.gitignore"
+git -C "$R" add .gitignore; git -C "$R" commit -qm ignore-target
+run "$R" sid-i --file src/lib.rs --find 'guard();' --replace '' -- true
+STALE="$R.worktrees/mutation-slot-0/target/stale"
+mkdir -p "$(dirname "$STALE")"; head -c 2097152 /dev/zero > "$STALE"
+OUT=$(cd "$R" && CODESCOUT_SLOT_CEILING_MB=64 CLAUDE_CODE_SESSION_ID=sid-i "$PROBE" \
+    --file src/lib.rs --find 'guard();' --replace '' -- true 2>&1)
+eq "28 a target/ under the ceiling is kept" "$([ -e "$STALE" ] && echo kept || echo gone)" "kept"
+OUT=$(cd "$R" && CODESCOUT_SLOT_CEILING_MB=1 CLAUDE_CODE_SESSION_ID=sid-i "$PROBE" \
+    --file src/lib.rs --find 'guard();' --replace '' -- true 2>&1)
+eq "28 a target/ over the ceiling is emptied" "$([ -e "$STALE" ] && echo kept || echo gone)" "gone"
+eq "28 and the tree itself survives" "$(probe_trees "$R")" "1"
+# A ceiling aimed at the tree instead of its target/ passes both lines above: the stale
+# file goes, and git still lists the deleted tree. Only the checkout shows the difference.
+eq "28 and its checkout is intact" "$([ -f "$R.worktrees/mutation-slot-0/src/lib.rs" ] && echo intact || echo gone)" "intact"
+
+# 29. A KEEP that is not a whole number stops the probe before any worktree exists.
+R=$(newrepo)
+OUT=$(cd "$R" && CODESCOUT_PROBE_POOL_KEEP=two CLAUDE_CODE_SESSION_ID=sid-j timeout 20 "$PROBE" \
+    --file src/lib.rs --find 'guard();' --replace '' -- true 2>&1); RC=$?
+eq "29 a bad KEEP exits 2" "$RC" "2"
+eq "29 no probe worktree was created" "$(probe_trees "$R")" "0"
+
 echo
 echo "mutation-probe: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
