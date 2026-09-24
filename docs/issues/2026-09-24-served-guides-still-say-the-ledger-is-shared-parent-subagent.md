@@ -1,11 +1,11 @@
 ---
 id: '8bb2ec02b621c3f7'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: four served surfaces still say the guide ledger is shared parent↔subagent — false since the principal ADR whenever the companion stamps subagent calls'
 tags:
 - cluster/doc-contradicted-by-code
-closed: null
+closed: 2026-09-24
 opened: 2026-09-24
 owner: marius
 related:
@@ -61,6 +61,11 @@ N/A — doc-vs-code drift, read directly.
 
 Reword each site to condition the shared-ledger claim on the absence of the companion's per-subagent stamp. `get_guide`'s repeat note keeps every property `repeat_fetch_keeps_body_and_flags_static` pins ("already delivered"; "if it is not already in your context, read it"; never "You already fetched"), since without the stamp a subagent's first fetch still lands on that branch.
 
+**Implemented**: each of the four sites now states the shared-ledger claim conditionally (true only without the companion's per-subagent stamp) and keeps its advice; the two `guide.rs` code comments repeating the premise updated to match. `repeat_fetch_keeps_body_and_flags_static` passes against the new note; gate `GATE_EXIT=0`, which includes `a_p50_session_stays_under_the_committed_emission_byte_ceiling` for the longer bodies.
+
+- **SHA** — `a126bf482597e5f691dab5c4edaaeda63d83a997` (branch `experiments`).
+- **patch-id** — `01e28ebfd6aeb2d9f488e404055d7c4655fcff4d`.
+
 ## Tests added
 
 N/A for the prose — asserting on wording reds on every rewording (CLAUDE.md § *Testing Discipline*). The one behavioural property at stake, that the repeat note stays neutral about who received the guide, is already pinned by `repeat_fetch_keeps_body_and_flags_static` (`src/tools/guide.rs`), which passes against the new wording.
@@ -71,7 +76,7 @@ None needed; the advice itself was right.
 
 ## Resume
 
-Record fix SHA + patch-id; archive.
+Archive via `doc(action="move")`, re-pointing `deep-agent-workflow-observations:DWF-6`'s citation of this file's id in the same commit (the move mints a new id). Deferred only because that ledger file currently carries two peer sessions' uncommitted entries.
 
 ## References
 

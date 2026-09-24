@@ -1,16 +1,17 @@
 ---
 id: '084cfc7d1eb60c45'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: poll_guide_rearm consumes a subagent''s re-arm request on ANY principal''s call — the parent''s next call after a dispatch or resume re-arms the parent''s entire ledger'
 tags:
 - cluster/gate-keyed-on-unobservable-event
-closed: null
+closed: 2026-09-24
 opened: 2026-09-24
 owner: marius
 related:
 - docs/issues/2026-09-24-subagent-stop-restore-strips-the-parents-own-guide-marks.md
 severity: high
+unverified: 'not verified live: the serving MCP binary at fix time predates a126bf48. Verified by the regression test (observed RED then GREEN), three isolated mutations each KILLED by the intended test, and gate GATE_EXIT=0. Live check spelled out in Resume.'
 ---
 
 # BUG: `poll_guide_rearm` consumes a subagent's re-arm request on ANY principal's call — the parent's next call after a subagent dispatch or resume re-arms the parent's entire ledger
@@ -81,6 +82,11 @@ Accepted cost, stated rather than left to be found: an **unstamped** subagent (s
 
 Residual, not fixed here: a **resumed** stamped subagent still consumes its own request and has the parent's key set re-armed on *its* ledger — redundant for a subagent whose transcript already holds those guides, but bounded to that subagent.
 
+**Implemented** as planned: `GuideRearmInbox::poll(agent_id)` (`src/tools/guide_rearm.rs`) opens exactly `<pid>-<request_hash(agent_id)>.json`; `request_hash` mirrors the companion's `shortHash`; `poll_guide_rearm(agent)` (`src/server.rs`) returns immediately for a parent call and is fed `asserted_agent`, which `call_tool_inner` already split out of the principal.
+
+- **SHA** — `a126bf482597e5f691dab5c4edaaeda63d83a997` (branch `experiments`).
+- **patch-id** — `01e28ebfd6aeb2d9f488e404055d7c4655fcff4d`.
+
 ## Tests added
 
 - **`a_parent_call_does_not_consume_a_subagents_guide_rearm_request`** (`src/server.rs`, `guide_hint_tests`) — the regression. A parent holding the opener + `librarian` receives no re-delivery while a request addressed to agent `a3ba615808d91a57d` is pending, keeps `librarian`, and leaves the request in place; the named subagent's own stamped call then consumes it. **Watched RED on the unchanged code** at exactly `"a request addressed to a subagent must not re-arm the parent"` — the parent really was re-armed — then GREEN.
@@ -103,7 +109,7 @@ None.
 
 ## Resume
 
-TDD in `src/server.rs` `guide_hint_tests`: a parent call with a subagent's request pending must not re-deliver the parent's topics and must leave the request in place; the subagent's own stamped call then consumes it. Pin the hash with the live vector above.
+Verify live, then archive. `cargo rb` + `/mcp` so the serving binary contains `a126bf48`; dispatch or resume a subagent that makes no codescout call; before any codescout call, confirm with a non-codescout tool that its request sits in `~/.local/state/codescout/guide_rearm/`; make one parent call; confirm the request is **still there** and the parent's ledger file still holds its topics. Then archive via `doc(action="move")` — and re-point `deep-agent-workflow-observations:DWF-6`'s citation of this file's id in the same commit, since the move mints a new one.
 
 ## References
 

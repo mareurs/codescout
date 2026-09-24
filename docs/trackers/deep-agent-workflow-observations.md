@@ -15,7 +15,7 @@ entry_prefix:
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
 entry_high_water_DWF: 6
-entry_high_water_DCS: 3
+entry_high_water_DCS: 4
 ---
 
 # Deep-agent workflow observations and session coverage
@@ -92,6 +92,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DWF-5 | 2026-09-24 | workflow | enrichment | 09093108:prefix-uniqueness |
 | DCS-3 | 2026-09-24 | coverage | session-receipt | 09093108/whole-session |
 | DWF-6 | 2026-09-24 | workflow | routine-first | 774ba049/guide-rearm-debug |
+| DCS-4 | 2026-09-24 | coverage | session-receipt | 774ba049/post-compaction |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -234,6 +235,22 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 - **Outcome / basis:** good / partial — fixes verified by observed RED→GREEN and a live check; the companion-side restore fix (`c186c45e2ed2a038`) is awaiting an operator decision.
 - **Delegation candidate:** "live-verify a guide-ledger fix across a restart" is a bounded workflow: dispatch probe → read per-principal ledger file → operator `/mcp` → resume probe → compare stamps. Missing input for a worker: the `/mcp` step needs the operator. Proposal only.
 - **Rests on / grouping / overhead:** bug files named above; one incident group with `571eb3d6`. Capture overhead ~5 min, estimated.
+
+## DCS-4 — Session 774ba049 — guide-ledger debug, fixes and live verification, post-compaction interval
+
+**Valid:** dated 2026-09-24
+
+| Field | Record |
+|---|---|
+| Session / principal / collector | session `774ba049-d97c-443a-b31d-f662a9cb6a1e`; coordinating host agent, collector = same; post-compaction model claude-opus-5-5, pre-compaction model not recorded here |
+| Observed interval (UTC) | post-compaction only: ~07:35 (serving PID 1405510 start) to ~09:15, 2026-09-24, approximate. The pre-compaction part of the session is not covered |
+| Workspace | `/home/marius/work/claude/codescout`, branch `experiments`, shared checkout with concurrent peers (two peers' uncommitted entries sat in this ledger during the interval) |
+| Coverage | `partial` — interval above only; captured retrospectively |
+| DCX routine / enrichment | none recorded. Routine sample: `missed-capture` — context choices were made (what to brief a probe subagent with; which topic to test, chosen to avoid a hook confound) without a pre-action snapshot |
+| DWF routine / enrichment | DWF-6 (routine-first, retrospective). No enrichment entry |
+| Native / delegated / unobserved gaps | one delegated probe subagent (principal `…/a3ba615808d91a57d`, Sonnet) — its codescout calls are in `usage.db` under its `agent_id`; native `Glob`/`Read` calls used deliberately (they do not poll codescout's re-arm inbox) are absent from `usage.db`; `scripts/mutation-probe.sh` runs happened in isolated worktrees |
+| Unresolved pending entries | none in this ledger. Open outside it: `084cfc7d1eb60c45` awaits a live check after rebuild; `c186c45e2ed2a038` and `a5054d135acacbe3` await operator decisions |
+| Collection overhead | ~10 min across DWF-6 and this receipt, including separating two peers' unstaged hunks from this session's; estimated, not measured |
 
 ## Template for new entries
 
