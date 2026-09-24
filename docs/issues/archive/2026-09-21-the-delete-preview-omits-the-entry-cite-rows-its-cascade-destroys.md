@@ -9,7 +9,7 @@ closed: 2026-09-24
 opened: 2026-09-21
 owner: marius
 related:
-- docs/issues/2026-09-21-the-delete-preview-calls-an-untracked-file-git-restorable.md
+- docs/issues/archive/2026-09-21-the-delete-preview-calls-an-untracked-file-git-restorable.md
 severity: high
 ---
 
@@ -225,7 +225,7 @@ enumeration, so the fix lands once per site rather than once per verb
 - `docs/issues/archive/2026-09-17-graft-cascade-deletes-the-source-ledgers-outgoing-entry-citations.md`
   — the sibling: there the cascade itself was the defect, here the **preview** is. Same
   table, same irreversibility argument, different call site.
-- `docs/issues/2026-09-21-the-delete-preview-calls-an-untracked-file-git-restorable.md` — the
+- `docs/issues/archive/2026-09-21-the-delete-preview-calls-an-untracked-file-git-restorable.md` — the
   other defect in this same preview, filed separately (see below).
 
 ## Cluster

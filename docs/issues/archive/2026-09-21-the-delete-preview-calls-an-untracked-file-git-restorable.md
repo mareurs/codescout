@@ -1,10 +1,11 @@
 ---
-id: b79a744df055da55
+id: 4a154d7effff259b
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the delete dry run tells you an untracked file is git-restorable'
 tags:
 - cluster/hint-composed-without-the-request
+closed: 2026-09-24
 opened: 2026-09-21
 owner: marius
 related:
@@ -137,34 +138,27 @@ conditions; the string was never conditional. This is not prose that decayed
 
 ## Fix
 
-Not fixed. Three shapes, in increasing cost:
-
-1. **Withdraw the claim.** Replace the clause with what the code actually knows: *"the
-   catalog rows below are catalog-only and are not restorable; check the file's own git
-   state before authorising."* Costs nothing, is true of every input, and per
-   `CLAUDE.md` § *Parsers Over a Namespace* a documented limitation costs a reader far less
-   than a confident wrong assertion.
-2. **Ask git.** One `git ls-files --error-unmatch <abs_path>` (or a libgit2 index lookup)
-   in the dry-run branch, and emit `"file_tracked": true|false` beside a `recoverable`
-   sentence that branches on it. The repo's own `scripts/file-provenance.py` already
-   establishes that shelling to git from this codebase is acceptable.
-3. **Distinguish the three states** — untracked, tracked-and-clean, tracked-and-dirty — since
-   the middle one is the only one for which the current sentence is true.
-
-Whichever is chosen, `src/librarian/tools/delete.rs:373`'s doc-comment must change with it,
-or the test module keeps asserting the old belief in prose.
+**FIXED 2026-09-24 at `5a9c51ad`, shape 3.** New `file_git_state`
+(`src/librarian/tools/delete.rs`) runs one `git status --porcelain --ignored` and reports
+`committed_clean`, `committed_with_uncommitted_edits`, `not_committed` (untracked, ignored, or
+staged but never committed) or `unknown` (no repository or no git — stated, never guessed) as
+`file_git_state`, and the file half of `recoverable` is built from it. Shape 3 rather than 2
+because the middle state is exactly where "restorable" misleads — git restores the last commit and
+the uncommitted edit is gone — and it costs the same single call. Synchronous, since the dry run
+holds the catalog's `parking_lot` guard. The test doc comment that repeated the old claim as fact
+is corrected.
 
 ## Tests added
 
-None — status is `open`. A regression test here is a **shape** test, not a prose pin: assert
-that the dry run on an **untracked** fixture does not emit a `recoverable` value containing
-*"git-tracked"*, and that a tracked fixture does (or that the response carries a
-`file_tracked` field at all). Per `CLAUDE.md` § *Testing Discipline*, that buys the regression
-that actually happened — the unconditional claim — without redding on every rewording; it
-cannot tell you the new text is *correct*. The existing test at
-`src/librarian/tools/delete.rs:376` asserts only `cascades.augmentation`, and its 2026-09-03
-fixture is created inside a `tempfile::tempdir()` that is not a git repo at all, so the
-fixture cannot distinguish tracked from untracked even in principle — annotate or replace it.
+`file_git_state_separates_untracked_committed_and_dirty` (real temp repositories: untracked,
+staged, clean, dirty, and outside any repository; red first) and
+`delete_preview_does_not_call_a_never_committed_file_restorable` (the reported case, asserted on
+the wire field and on the sentence). Mutation via `scripts/mutation-probe.sh`, 5/5 KILLED.
+
+## Fix provenance
+
+- **SHA:** `5a9c51ad` (`experiments`)
+- **patch-id:** `dd8b8b67e6354196cb66cefce6f4a94bfa0dcc9f`
 
 ## Workarounds
 
@@ -181,12 +175,7 @@ before deleting.
 
 ## Resume
 
-Decide between fix shapes 1 and 2 above. If 2: the dry-run branch at
-`src/librarian/tools/delete.rs:89` already holds `abs_path` and the catalog `row`, so the git
-query needs no new plumbing — but the branch runs inside an explicit block holding a
-`parking_lot::MutexGuard` (see the comment at :39-47), so keep the call synchronous or move it
-above the lock. Then update `src/librarian/tools/delete.rs:373` and re-home the test fixture
-into a real git repo, or annotate it as unable to discriminate.
+N/A — fixed at `5a9c51ad`.
 
 ## References
 

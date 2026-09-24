@@ -63,7 +63,7 @@ pub fn diff(
     // Measured: `link_scan(limit=10)` reported 53 edges stale against 2 for the full scan.
     // Failing this way leaves a genuinely dead edge to an unscanned destination in place until
     // a scan wide enough to see both ends — an extra edge rather than a lost one.
-    // docs/issues/2026-09-21-a-narrowed-link-scan-prunes-edges-whose-destination-it-never-looked-at.md
+    // docs/issues/archive/2026-09-21-a-narrowed-link-scan-prunes-edges-whose-destination-it-never-looked-at.md
     for pair in &existing {
         if !desired.contains(pair)
             && prunable_src.contains(pair.0.as_str())
@@ -145,7 +145,7 @@ mod tests {
     /// never LOOKED AT, not because its citation went away. Measured 2026-09-24:
     /// `link_scan(limit=10)` reported 53 such edges stale against 2 for the full scan, and
     /// `write=true` would have deleted them.
-    /// docs/issues/2026-09-21-a-narrowed-link-scan-prunes-edges-whose-destination-it-never-looked-at.md
+    /// docs/issues/archive/2026-09-21-a-narrowed-link-scan-prunes-edges-whose-destination-it-never-looked-at.md
     ///
     /// Load-bearing: `a→x` has BOTH ends scanned and must still be pruned — without it this is
     /// monotone under "prune nothing", which would pass by disabling the prune entirely.

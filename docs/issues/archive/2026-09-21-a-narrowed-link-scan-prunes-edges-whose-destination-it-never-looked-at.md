@@ -1,17 +1,18 @@
 ---
-id: '57b9f8169f835599'
+id: 2d8806456e6e1ba3
 kind: bug
-status: open
+status: fixed
 title: a narrowed link_scan marks correct cites edges stale — the prune is bounded by a citation's source while resolution is bounded by both ends
 owners:
 - marius
 tags:
 - cluster/selector-narrower-than-its-population
-closed: null
+closed: 2026-09-24
 opened: 2026-09-21
 owner: marius
 related: []
 severity: high
+unverified: 'The live reproduction has not been re-run against a rebuilt binary: after `cargo rb` + `/mcp`, `librarian(action="link_scan", scope="project", write=false, limit=10)` should report edges_stale at or near the pairs with both ends in the window, not 53. The predicate and its call-site wiring are pinned by tests; the live number is not observed.'
 ---
 
 > **Do not run `librarian(action="link_scan", write=true)` with a narrowed scan on this
@@ -269,46 +270,32 @@ this. A green suite here is silence about the case, not coverage of it.
 
 ## Fix
 
-**Not fixed — filing only, by instruction. Nothing in the tree was changed.**
+**FIXED 2026-09-24 at `ea151a39`, by the narrow-the-prune repair this section preferred.**
+`diff::diff` now takes the resolver corpus's ids and prunes only a pair whose DESTINATION is
+resolvable, mirroring the source bound (`src/librarian/tools/link_scan/diff.rs`). Its failure mode
+is the safe one: a genuinely dead edge to an unscanned destination survives until a scan wide
+enough to see both ends. The write-mode hint at `src/librarian/tools/link_scan/mod.rs` no longer
+claims idempotence.
 
-The asymmetry is the bug, so the repair is to make one bound match the other. Two shapes,
-and they are not equivalent:
+Not taken: widening the resolution corpus to the whole catalog (it would make `limit` stop
+bounding the work), and refusing a prune outright when `scan_truncated=true` (a reasonable
+further tightening, not needed once the prune cannot reach an unscanned destination).
 
-- **Narrow the prune to pairs whose BOTH ends were scanned** — add a `prunable_dst` (or reuse
-  the corpus id set) and require `prunable_src.contains(pair.0) && scanned.contains(pair.1)`
-  at `src/librarian/tools/link_scan/diff.rs:58`. Cheap, local, and safe in the direction that
-  matters; its cost is that a genuinely dead edge to an unscanned destination survives until
-  a scan wide enough to see both ends. Preferred, because the failure it leaves behind is an
-  extra edge rather than a lost one.
-- **Widen the resolution corpus to the whole catalog while leaving the prune source-bounded**
-  — build `DefinitionIndex`/`Corpus` from all artifacts rather than from `rows`
-  (`src/librarian/tools/link_scan/mod.rs:398-431`). Removes the false-dangling *reporting*
-  defect too, but makes `limit` no longer bound the work, which is what `limit` is for.
-
-Independently of either, and cheaper than both: **the hint at
-`src/librarian/tools/link_scan/mod.rs:999` must stop claiming idempotence**, and a prune
-whose scan was truncated (`scan_truncated=true`) should arguably be refused outright rather
-than performed silently — a caller who passed `limit` did not ask to delete anything.
-
-Record the fix SHA **and** `git show <sha> | git patch-id --stable` here when it lands.
+Re-measured before the fix, 2026-09-24, `write=false`: `limit=10` -> `edges_stale: 53`; full
+scan -> `2`. The post-fix live reading is owed after a rebuild — see `unverified:`.
 
 ## Tests added
 
-None — this record files the defect and changes no code. What a regression test has to
-assert, named here so the next session does not have to re-derive it:
+`diff::tests::an_edge_to_an_unscanned_destination_is_never_pruned` (red first; a both-ends-scanned
+pair keeps it from passing under "prune nothing") and
+`an_unsupported_edge_between_two_scanned_artifacts_is_reported_stale` in
+`src/librarian/tools/link_scan/mod.rs`, a call-level wiring pin — nothing in the module asserted
+that anything is ever pruned. Mutation via `scripts/mutation-probe.sh`, 2/2 KILLED.
 
-- **Unit, at `src/librarian/tools/link_scan/diff.rs`:** a pair whose source is in
-  `prunable_src` and whose destination is in neither `desired` nor the scanned set must
-  **not** appear in `stale`. This is the case both existing tests are monotone under — they
-  vary only the source axis — so it must be a new case, and its red must be observed before
-  the fix, not inferred from the fix.
-- **Integration, at `src/librarian/tools/link_scan/mod.rs`:** seed a corpus where A cites B,
-  run `write=true` unbounded, then run `write=true` with `limit` small enough to scan A and
-  not B, and assert the A→B edge survives. Equivalently: assert `edges_pruned == 0` for any
-  run with `scan_truncated == true`.
-- **Shape, on the hint:** assert the `write=true` hint does not claim idempotence
-  unconditionally. Pinning the sentence reds on every rewording; asserting that the word
-  `idempotent` is either absent or qualified reds on exactly the regression that matters.
+## Fix provenance
+
+- **SHA:** `ea151a39` (`experiments`)
+- **patch-id:** `cadee09dc3e8d041e721b9e8574886c0f9211adc`
 
 ## Workarounds
 
@@ -323,26 +310,7 @@ assert, named here so the next session does not have to re-derive it:
 
 ## Resume
 
-Decide between the two repairs in § *Fix* — the narrow-the-prune form is the smaller change
-and fails in the safer direction. Then, in order: add the failing unit case at
-`src/librarian/tools/link_scan/diff.rs` and observe its red before touching the predicate at
-`src/librarian/tools/link_scan/diff.rs:58`; fix the predicate; fix the hint at
-`src/librarian/tools/link_scan/mod.rs:999`; re-run
-`librarian(action="link_scan", scope="project", write=false, limit=10)` and confirm
-`edges_stale` drops to 0 while the full-`limit` run still reports its own two.
-
-Open questions deliberately left open rather than guessed:
-
-- Whether `scan_truncated=true` should refuse the prune entirely, or only narrow it. A
-  refusal is louder and cannot be mis-read; a narrowing is silent and keeps the tool usable
-  under a cap.
-- Whether `links` should gain an `origin` column to match `entry_cite`. That is a schema
-  migration and a separate decision from this bug; it protects hand-written rows, which is a
-  different population from the one measured here.
-- The false `cross_repo` classification of `bug-fix-session-log:F-171` and the silenced
-  `A-38` are *reporting* consequences of the same narrow corpus. Both are fixed by the
-  widen-the-corpus repair and by neither the narrow-the-prune repair nor the hint fix — if the
-  narrow repair is chosen, they stay, and are worth their own record.
+N/A for the mechanism — fixed at `ea151a39`. The live re-measurement after a rebuild is in `unverified:`.
 
 ## References
 

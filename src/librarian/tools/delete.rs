@@ -211,7 +211,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 /// *"the file is git-tracked and restorable"* — composed from the gate's design rationale
 /// rather than from the file's state. For a scratch artifact that was never committed, which is
 /// the modal caller of `delete`, it was false, and the force-delete that followed destroyed the
-/// only copy. docs/issues/2026-09-21-the-delete-preview-calls-an-untracked-file-git-restorable.md
+/// only copy. docs/issues/archive/2026-09-21-the-delete-preview-calls-an-untracked-file-git-restorable.md
 ///
 /// Synchronous on purpose: the dry run calls this while holding the catalog's
 /// `parking_lot::MutexGuard` (see `call`), which must not cross an `.await`.
@@ -613,7 +613,7 @@ mod tests {
     /// git-tracked and restorable" — was an unconditional literal, true only of the middle one.
     /// Load-bearing: `dirty` is committed AND modified, the state where "restorable" is half
     /// true — git restores the last commit and the uncommitted edit is gone.
-    /// docs/issues/2026-09-21-the-delete-preview-calls-an-untracked-file-git-restorable.md
+    /// docs/issues/archive/2026-09-21-the-delete-preview-calls-an-untracked-file-git-restorable.md
     #[test]
     fn file_git_state_separates_untracked_committed_and_dirty() {
         for (state, want) in [
