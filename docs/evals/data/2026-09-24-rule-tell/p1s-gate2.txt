@@ -1,0 +1,19 @@
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 22 rules x 8 texts x 3 runs, subscription judge ===
+  clean-1        expect none            hit 3/3   fired [[], [], []]   PASS
+  clean-2        expect none            hit 0/3   fired [['d_history', 'member_vs_population', 'question_asked'], ['member_vs_population'], ['member_vs_population']]   FAIL
+  semicolon      expect d_semicolon     hit 3/3   fired [['d_semicolon', 'question_asked'], ['d_semicolon', 'question_asked'], ['d_semicolon', 'question_asked']]   PASS
+  sessionid      expect d_sessionid     hit 3/3   fired [['d_sessionid'], ['d_sessionid'], ['d_sessionid']]   PASS
+  cannot         expect cannot_happen   hit 0/3   fired [['closed_population'], ['closed_population', 'monotone_absence', 'question_asked'], ['closed_population', 'question_asked']]   FAIL
+  contradiction  expect contradiction   hit 3/3   fired [['closed_population', 'contradiction', 'd_history'], ['closed_population', 'contradiction', 'd_history', 'scope_instant'], ['closed_population', 'contradiction', 'd_history']]   PASS
+  clean-3        expect none            hit 0/3   fired [['closed_population', 'count_unit', 'd_history', 'question_asked', 'scope_instant'], ['act_on_artifact', 'count_unit', 'd_history', 'member_vs_population', 'monotone_absence', 'question_asked', 'scope_instant'], ['count_unit', 'member_vs_population', 'monotone_absence', 'question_asked', 'scope_instant']]   FAIL
+  clean-4        expect none            hit 0/3   fired [['d_history'], ['act_on_artifact', 'd_history'], ['d_history', 'scope_instant']]   FAIL
+
+gate: 4/8   errored rows: 0
+exit=1

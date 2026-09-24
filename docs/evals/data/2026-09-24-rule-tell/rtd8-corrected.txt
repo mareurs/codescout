@@ -1,0 +1,1 @@
+**2. "Nothing reads `pika_observations`" — false as written**, and self-contradicted two paragraphs later in this same section, which described codescout's retention read. Precise form: **no renderer** consumes it (Phase 3 deferred, never shipped).

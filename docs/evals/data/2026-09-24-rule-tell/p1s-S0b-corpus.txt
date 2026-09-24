@@ -1,0 +1,56 @@
+judge: claude-sonnet-5 via claude -p, config /tmp/claude-1000/-home-marius-work-claude-codescout/571eb3d6-c879-43f6-b3f9-5a51e744e1af/scratchpad/judge-config-main
+RTD-1 positive [] errored=0
+RTD-1 negative [] errored=0
+RTD-2 positive [] errored=0
+RTD-2 negative [] errored=0
+RTD-3 positive ['monotone_absence', 'closed_population'] errored=0
+RTD-3 negative [] errored=0
+RTD-4 positive [] errored=0
+RTD-4 negative [] errored=0
+RTD-5 positive [] errored=0
+RTD-5 negative [] errored=0
+RTD-6 positive [] errored=0
+RTD-6 negative [] errored=0
+RTD-7 positive [] errored=0
+RTD-7 negative [] errored=0
+RTD-8 positive ['contradiction'] errored=0
+RTD-8 negative [] errored=0
+RTD-9 positive [] errored=0
+RTD-9 negative [] errored=0
+RTD-10 positive ['cannot_happen'] errored=0
+RTD-10 negative [] errored=0
+RTD-11 positive [] errored=0
+RTD-11 negative [] errored=0
+RTD-12 positive [] errored=0
+RTD-12 negative [] errored=0
+RTD-13 positive [] errored=0
+RTD-13 negative [] errored=0
+RTD-14 positive [] errored=0
+RTD-14 negative [] errored=0
+RTD-15 positive [] errored=0
+RTD-15 negative [] errored=0
+RTD-16 positive [] errored=0
+RTD-16 negative [] errored=0
+RTD-17 positive [] errored=0
+RTD-17 negative ['d_history'] errored=0
+RTD-18 positive [] errored=0
+RTD-18 negative [] errored=0
+RTD-19 positive [] errored=0
+RTD-19 negative [] errored=0
+RTD-20 positive ['selector_narrow'] errored=0
+RTD-20 negative ['selector_narrow'] errored=0
+RTD-21 positive ['count_unit'] errored=0
+RTD-21 negative [] errored=0
+
+=== SCORE A — 42 texts, 924 rows, 0 errored, 0 incomplete ===
+bucket     pos: gold fired  only gold  fires/text    neg: any fire  fires/text   excluded
+yes                    3/8        2/8        0.62              2/8        0.25   0
+partial                0/9        0/9        0.00              0/9        0.00   0
+no                     0/4        0/4        0.25              0/4        0.00   0
+
+claim localisation (positives where the gold rule fired): quote absent from the
+corrected text, i.e. inside what the fix changed -- diagnostic, see comment
+  yes       3/3
+  partial   0/0
+  no        0/0
+exit=0

@@ -1,0 +1,24 @@
+Loading weights:   0%|          | 0/426 [00:00<?, ?it/s]Loading weights:  10%|▉         | 41/426 [00:00<00:00, 391.02it/s]Loading weights:  28%|██▊       | 120/426 [00:00<00:00, 620.93it/s]Loading weights:  47%|████▋     | 201/426 [00:00<00:00, 698.16it/s]Loading weights:  65%|██████▌   | 278/426 [00:00<00:00, 724.32it/s]Loading weights:  84%|████████▍ | 358/426 [00:00<00:00, 749.39it/s]Loading weights: 100%|██████████| 426/426 [00:00<00:00, 711.48it/s]
+[transformers] `causal_conv1d_fn` is falling back to its reference PyTorch implementation because `causal_conv1d` is not installed. This is correct but much slower; install `causal_conv1d` for the optimized kernel.
+judge: alibiserikbay/JevK5 local, noul threshold 0.5
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 22 rules x 10 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 0/1   fired [['cannot_happen']]   FAIL
+  clean-2        expect none            hit 0/1   fired [['cannot_happen', 'question_asked']]   FAIL
+  semicolon      expect d_semicolon     hit 1/1   fired [['cannot_happen', 'd_semicolon', 'question_asked', 'selector_narrow']]   PASS
+  sessionid      expect d_sessionid     hit 1/1   fired [['d_sessionid', 'd_visibility', 'lines_read', 'open_artifact', 'run_tool']]   PASS
+  cannot         expect cannot_happen   hit 1/1   fired [['cannot_happen']]   PASS
+  contradiction  expect contradiction   hit 0/1   fired [['cannot_happen', 'closed_population', 'count_unit', 'member_vs_population', 'scope_instant', 'selector_narrow']]   FAIL
+  clean-3        expect none            hit 0/1   fired [['cannot_happen', 'question_asked', 'run_tool']]   FAIL
+  clean-4        expect none            hit 0/1   fired [['cannot_happen', 'open_artifact']]   FAIL
+  clean-5        expect none            hit 0/1   fired [['cannot_happen', 'run_tool']]   FAIL
+  member         expect member_vs_population hit 1/1   fired [['cannot_happen', 'closed_population', 'member_vs_population', 'monotone_absence', 'question_asked', 'run_tool']]   PASS
+
+gate: 4/10   errored rows: 0
+exit=1

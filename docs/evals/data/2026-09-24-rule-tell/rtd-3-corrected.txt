@@ -1,0 +1,1 @@
+**And an annotation nobody consumes will not be written — a hypothesis, which is what the evidence supports.** The observation window mandated in `CLAUDE.md` produced **zero** prospective samples in its first two days (`0ca7439866e8f2b6`). That measures **absence of capture in the observed interval**, and does not by itself establish that absence of a consumer caused it.

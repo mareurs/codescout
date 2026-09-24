@@ -1,0 +1,7 @@
+=== CHECKER GATE for rtd8 (3 runs each) ===
+  recorded   want YES  got ['NO', 'NO', 'NO']  FAIL
+  corrected  want NO  got ['NO', 'NO', 'NO']  PASS
+  unrelated  want NO  got ['NO', 'NO', 'NO']  PASS
+
+GATE FAILED — replays NOT scored.
+exit=1

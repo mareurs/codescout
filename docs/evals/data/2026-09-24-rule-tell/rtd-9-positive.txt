@@ -1,0 +1,1 @@
+Live state: the table exists in 3 of 96 `usage.db` files on this machine; codescout holds **0** rows against ~70,000 calls; the one populated copy is 55 rows written on 2026-05-17 in a retired checkout. The write path has fired once, ever.

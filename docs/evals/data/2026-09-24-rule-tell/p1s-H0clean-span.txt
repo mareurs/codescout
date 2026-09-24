@@ -1,0 +1,12 @@
+judge: claude-haiku-4-5-20251001 via claude -p, config /tmp/claude-1000/-home-marius-work-claude-codescout/571eb3d6-c879-43f6-b3f9-5a51e744e1af/scratchpad/judge-config
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 3 texts x 3 runs, expected rule only ===
+  span-cannot      cannot_happen  ['on-target', 'NO', 'NO']   FAIL
+  span-sessionid   d_sessionid    ['on-target', 'on-target', 'on-target']   PASS
+  span-semicolon   d_semicolon    ['on-target', 'on-target', 'on-target']   PASS
+
+span gate: 2/3   errored runs: 0
+exit=1

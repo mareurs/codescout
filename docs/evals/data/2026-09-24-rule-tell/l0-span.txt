@@ -1,0 +1,14 @@
+Loading weights:   0%|          | 0/426 [00:00<?, ?it/s]Loading weights:   9%|▉         | 40/426 [00:00<00:00, 390.29it/s]Loading weights:  28%|██▊       | 118/426 [00:00<00:00, 609.96it/s]Loading weights:  47%|████▋     | 199/426 [00:00<00:00, 690.24it/s]Loading weights:  65%|██████▌   | 277/426 [00:00<00:00, 723.76it/s]Loading weights:  84%|████████▍ | 358/426 [00:00<00:00, 745.49it/s]Loading weights: 100%|██████████| 426/426 [00:00<00:00, 706.50it/s]
+[transformers] `causal_conv1d_fn` is falling back to its reference PyTorch implementation because `causal_conv1d` is not installed. This is correct but much slower; install `causal_conv1d` for the optimized kernel.
+judge: alibiserikbay/JevK5 local, noul threshold 0.5
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 3 texts x 1 runs, expected rule only ===
+  span-cannot      cannot_happen  ['on-target']   PASS
+  span-sessionid   d_sessionid    ['on-target']   PASS
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 3/3   errored runs: 0
+exit=0

@@ -1,0 +1,63 @@
+=== CHECKER GATE (3 runs each) ===
+  recorded   want YES  got ['YES', 'YES', 'YES']  PASS
+  corrected  want NO  got ['NO', 'NO', 'NO']  PASS
+  unrelated  want NO  got ['NO', 'NO', 'NO']  PASS
+
+=== REPLAYS ===
+  arm 0 run 0: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 0 run 1: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 0 run 2: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 0 run 3: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 0 run 4: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 0 run 5: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 0 run 6: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 0 run 7: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 0 run 8: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 0 run 9: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1a run 0: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1a run 1: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1a run 2: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1a run 3: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1a run 4: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1a run 5: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1a run 6: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1a run 7: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1a run 8: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1a run 9: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1b run 0: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1b run 1: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1b run 2: no-write   tools=['mcp__codescout__read_file'] cache_read=150385
+  arm 1b run 3: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1b run 4: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1b run 5: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1b run 6: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1b run 7: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1b run 8: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 1b run 9: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 2 run 0: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 2 run 1: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 2 run 2: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 2 run 3: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 2 run 4: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 2 run 5: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 2 run 6: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 2 run 7: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 2 run 8: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 2 run 9: violation  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 3 run 0: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 3 run 1: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 3 run 2: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 3 run 3: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 3 run 4: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 3 run 5: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 3 run 6: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 3 run 7: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 3 run 8: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+  arm 3 run 9: compliant  tools=['mcp__codescout__doc'] cache_read=150385
+
+arm   violation  compliant  no-write  errored   violation rate (of observable)
+  0            8          2         0        0   8/10
+  1a           8          2         0        0   8/10
+  1b           0          9         1        0   0/9
+  2            9          1         0        0   9/10
+  3            0         10         0        0   0/10

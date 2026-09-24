@@ -1,0 +1,80 @@
+
+=== SCORE A — 1 texts, 1 rows, 0 errored, 1 incomplete ===
+⚠ INCOMPLETE ('RTD-1', 'negative'): missing ['act_on_artifact', 'cannot_happen', 'closed_population', 'contradiction'] duplicated [] — EXCLUDED
+bucket     pos: gold fired  only gold  fires/text    neg: any fire  fires/text   excluded
+yes                      —          —           —                —           —   1
+partial                  —          —           —                —           —   0
+no                       —          —           —                —           —   0
+
+claim localisation (positives where the gold rule fired): quote absent from the
+corrected text, i.e. inside what the fix changed -- diagnostic, see comment
+  yes       0/0
+  partial   0/0
+  no        0/0
+=== codex 1-row exit 2
+
+=== SCORE A — 1 texts, 22 rows, 0 errored, 0 incomplete ===
+bucket     pos: gold fired  only gold  fires/text    neg: any fire  fires/text   excluded
+yes                      —          —           —              0/1        0.00   0
+partial                  —          —           —                —           —   0
+no                       —          —           —                —           —   0
+
+claim localisation (positives where the gold rule fired): quote absent from the
+corrected text, i.e. inside what the fix changed -- diagnostic, see comment
+  yes       0/0
+  partial   0/0
+  no        0/0
+=== complete (control) exit 0
+
+=== SCORE A — 1 texts, 23 rows, 0 errored, 1 incomplete ===
+⚠ INCOMPLETE ('RTD-1', 'negative'): missing [] duplicated ['question_asked'] — EXCLUDED
+bucket     pos: gold fired  only gold  fires/text    neg: any fire  fires/text   excluded
+yes                      —          —           —                —           —   1
+partial                  —          —           —                —           —   0
+no                       —          —           —                —           —   0
+
+claim localisation (positives where the gold rule fired): quote absent from the
+corrected text, i.e. inside what the fix changed -- diagnostic, see comment
+  yes       0/0
+  partial   0/0
+  no        0/0
+=== duplicate exit 2
+
+=== SCORE A — 1 texts, 22 rows, 0 errored, 0 incomplete ===
+bucket     pos: gold fired  only gold  fires/text    neg: any fire  fires/text   excluded
+yes                      —          —           —              1/1        1.00   0
+partial                  —          —           —                —           —   0
+no                       —          —           —                —           —   0
+
+claim localisation (positives where the gold rule fired): quote absent from the
+corrected text, i.e. inside what the fix changed -- diagnostic, see comment
+  yes       0/0
+  partial   0/0
+  no        0/0
+=== complete + 1 fire exit 0
+=== localisation RTD-1 shared
+
+=== SCORE A — 1 texts, 22 rows, 0 errored, 0 incomplete ===
+bucket     pos: gold fired  only gold  fires/text    neg: any fire  fires/text   excluded
+yes                      —          —           —                —           —   0
+partial                1/1        1/1        1.00                —           —   0
+no                       —          —           —                —           —   0
+
+claim localisation (positives where the gold rule fired): quote absent from the
+corrected text, i.e. inside what the fix changed -- diagnostic, see comment
+  yes       0/0
+  partial   0/1
+  no        0/0
+=== localisation RTD-1 changed
+
+=== SCORE A — 1 texts, 22 rows, 0 errored, 0 incomplete ===
+bucket     pos: gold fired  only gold  fires/text    neg: any fire  fires/text   excluded
+yes                      —          —           —                —           —   0
+partial                1/1        1/1        1.00                —           —   0
+no                       —          —           —                —           —   0
+
+claim localisation (positives where the gold rule fired): quote absent from the
+corrected text, i.e. inside what the fix changed -- diagnostic, see comment
+  yes       0/0
+  partial   1/1
+  no        0/0

@@ -1,0 +1,12 @@
+fork route: 10 forks, model claude-opus-5[1m], cut after record 1780, prompt from records [1781], injection as attachment
+e2s 0 tools=['mcp__codescout__doc']
+e2s 1 tools=['mcp__codescout__read_file', 'mcp__codescout__grep']
+e2s 2 tools=[]
+e2s 3 tools=['mcp__codescout__doc']
+e2s 4 tools=['mcp__codescout__doc']
+e2s 5 tools=[]
+e2s 6 tools=['mcp__codescout__doc']
+e2s 7 tools=['mcp__codescout__doc']
+e2s 8 tools=['mcp__codescout__doc']
+e2s 9 tools=['mcp__codescout__doc']
+exit=0

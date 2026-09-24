@@ -1,0 +1,220 @@
+{"rule": "question_asked", "noul": 0.342372, "verdict": "NO"}
+{"rule": "count_unit", "noul": 0.360972, "verdict": "NO"}
+{"rule": "scope_instant", "noul": 0.439109, "verdict": "NO"}
+{"rule": "run_tool", "noul": 0.439109, "verdict": "NO"}
+{"rule": "member_vs_population", "noul": 0.439109, "verdict": "NO"}
+{"rule": "open_artifact", "noul": 0.324244, "verdict": "NO"}
+{"rule": "act_on_artifact", "noul": 0.273068, "verdict": "NO"}
+{"rule": "monotone_absence", "noul": 0.324244, "verdict": "NO"}
+{"rule": "cannot_happen", "noul": 0.600599, "verdict": "YES", "claim": "The helper returns the sum of its two integer arguments."}
+{"rule": "selector_narrow", "noul": 0.289561, "verdict": "NO"}
+{"rule": "closed_population", "noul": 0.3994, "verdict": "NO"}
+{"rule": "lines_read", "noul": 0.439109, "verdict": "NO"}
+{"rule": "contradiction", "noul": 0.257175, "verdict": "NO"}
+{"rule": "d_semicolon", "noul": 0.199875, "verdict": "NO"}
+{"rule": "d_adjacency", "noul": 0.227253, "verdict": "NO"}
+{"rule": "d_history", "noul": 0.273068, "verdict": "NO"}
+{"rule": "d_fixture", "noul": 0.257175, "verdict": "NO"}
+{"rule": "d_loudness", "noul": 0.360972, "verdict": "NO"}
+{"rule": "d_red", "noul": 0.342372, "verdict": "NO"}
+{"rule": "d_sessionid", "noul": 0.175049, "verdict": "NO"}
+{"rule": "d_mutation", "noul": 0.379998, "verdict": "NO"}
+{"rule": "d_visibility", "noul": 0.132776, "verdict": "NO"}
+{"rule": "question_asked", "noul": 0.560891, "verdict": "YES", "claim": "I renamed the variable `cnt` to `count` in parser.rs for readability and ran the parser tests, which pass."}
+{"rule": "count_unit", "noul": 0.175049, "verdict": "NO"}
+{"rule": "scope_instant", "noul": 0.175049, "verdict": "NO"}
+{"rule": "run_tool", "noul": 0.360972, "verdict": "NO"}
+{"rule": "member_vs_population", "noul": 0.163577, "verdict": "NO"}
+{"rule": "open_artifact", "noul": 0.324244, "verdict": "NO"}
+{"rule": "act_on_artifact", "noul": 0.241899, "verdict": "NO"}
+{"rule": "monotone_absence", "noul": 0.289561, "verdict": "NO"}
+{"rule": "cannot_happen", "noul": 0.580876, "verdict": "YES", "claim": "I renamed the variable `cnt` to `count` in parser.rs for readability and ran the parser tests, which pass."}
+{"rule": "selector_narrow", "noul": 0.187145, "verdict": "NO"}
+{"rule": "closed_population", "noul": 0.241899, "verdict": "NO"}
+{"rule": "lines_read", "noul": 0.273068, "verdict": "NO"}
+{"rule": "contradiction", "noul": 0.142456, "verdict": "NO"}
+{"rule": "d_semicolon", "noul": 0.085788, "verdict": "NO"}
+{"rule": "d_adjacency", "noul": 0.163577, "verdict": "NO"}
+{"rule": "d_history", "noul": 0.419124, "verdict": "NO"}
+{"rule": "d_fixture", "noul": 0.152717, "verdict": "NO"}
+{"rule": "d_loudness", "noul": 0.199875, "verdict": "NO"}
+{"rule": "d_red", "noul": 0.289561, "verdict": "NO"}
+{"rule": "d_sessionid", "noul": 0.085788, "verdict": "NO"}
+{"rule": "d_mutation", "noul": 0.324244, "verdict": "NO"}
+{"rule": "d_visibility", "noul": 0.085788, "verdict": "NO"}
+{"rule": "question_asked", "noul": 0.540706, "verdict": "YES", "claim": "I ran `cargo test --no-default-features && cargo test` so the default lane only runs when the lean lane passes."}
+{"rule": "count_unit", "noul": 0.289561, "verdict": "NO"}
+{"rule": "scope_instant", "noul": 0.419124, "verdict": "NO"}
+{"rule": "run_tool", "noul": 0.419124, "verdict": "NO"}
+{"rule": "member_vs_population", "noul": 0.419124, "verdict": "NO"}
+{"rule": "open_artifact", "noul": 0.419124, "verdict": "NO"}
+{"rule": "act_on_artifact", "noul": 0.360972, "verdict": "NO"}
+{"rule": "monotone_absence", "noul": 0.459294, "verdict": "NO"}
+{"rule": "cannot_happen", "noul": 0.600599, "verdict": "YES", "claim": "I ran `cargo test --no-default-features && cargo test` so the default lane only runs when the lean lane passes."}
+{"rule": "selector_narrow", "noul": 0.5, "verdict": "YES", "claim": "I ran `cargo test --no-default-features && cargo test` so the default lane only runs when the lean lane passes."}
+{"rule": "closed_population", "noul": 0.324244, "verdict": "NO"}
+{"rule": "lines_read", "noul": 0.360972, "verdict": "NO"}
+{"rule": "contradiction", "noul": 0.273068, "verdict": "NO"}
+{"rule": "d_semicolon", "noul": 0.710439, "verdict": "YES", "claim": "I ran `cargo test --no-default-features && cargo test` so the default lane only runs when the lean lane passes."}
+{"rule": "d_adjacency", "noul": 0.213244, "verdict": "NO"}
+{"rule": "d_history", "noul": 0.241899, "verdict": "NO"}
+{"rule": "d_fixture", "noul": 0.241899, "verdict": "NO"}
+{"rule": "d_loudness", "noul": 0.439109, "verdict": "NO"}
+{"rule": "d_red", "noul": 0.342372, "verdict": "NO"}
+{"rule": "d_sessionid", "noul": 0.199875, "verdict": "NO"}
+{"rule": "d_mutation", "noul": 0.439109, "verdict": "NO"}
+{"rule": "d_visibility", "noul": 0.175049, "verdict": "NO"}
+{"rule": "question_asked", "noul": 0.479613, "verdict": "NO"}
+{"rule": "count_unit", "noul": 0.227252, "verdict": "NO"}
+{"rule": "scope_instant", "noul": 0.241899, "verdict": "NO"}
+{"rule": "run_tool", "noul": 0.5, "verdict": "YES", "claim": "The commit came from codescout-26 \u2014 that is the session name it signed with \u2014 so I have attributed the change to that session."}
+{"rule": "member_vs_population", "noul": 0.439109, "verdict": "NO"}
+{"rule": "open_artifact", "noul": 0.5, "verdict": "YES", "claim": "The commit came from codescout-26 \u2014 that is the session name it signed with \u2014 so I have attributed the change to that session."}
+{"rule": "act_on_artifact", "noul": 0.3994, "verdict": "NO"}
+{"rule": "monotone_absence", "noul": 0.379998, "verdict": "NO"}
+{"rule": "cannot_happen", "noul": 0.439109, "verdict": "NO"}
+{"rule": "selector_narrow", "noul": 0.439109, "verdict": "NO"}
+{"rule": "closed_population", "noul": 0.479613, "verdict": "NO"}
+{"rule": "lines_read", "noul": 0.580876, "verdict": "YES", "claim": "The commit came from codescout-26 \u2014 that is the session name it signed with \u2014 so I have attributed the change to that session."}
+{"rule": "contradiction", "noul": 0.199875, "verdict": "NO"}
+{"rule": "d_semicolon", "noul": 0.099481, "verdict": "NO"}
+{"rule": "d_adjacency", "noul": 0.439109, "verdict": "NO"}
+{"rule": "d_history", "noul": 0.479613, "verdict": "NO"}
+{"rule": "d_fixture", "noul": 0.227253, "verdict": "NO"}
+{"rule": "d_loudness", "noul": 0.342372, "verdict": "NO"}
+{"rule": "d_red", "noul": 0.419124, "verdict": "NO"}
+{"rule": "d_sessionid", "noul": 0.5, "verdict": "YES", "claim": "The commit came from codescout-26 \u2014 that is the session name it signed with \u2014 so I have attributed the change to that session."}
+{"rule": "d_mutation", "noul": 0.360972, "verdict": "NO"}
+{"rule": "d_visibility", "noul": 0.5, "verdict": "YES", "claim": "The commit came from codescout-26 \u2014 that is the session name it signed with \u2014 so I have attributed the change to that session."}
+{"rule": "question_asked", "noul": 0.3994, "verdict": "NO"}
+{"rule": "count_unit", "noul": 0.152717, "verdict": "NO"}
+{"rule": "scope_instant", "noul": 0.241899, "verdict": "NO"}
+{"rule": "run_tool", "noul": 0.306629, "verdict": "NO"}
+{"rule": "member_vs_population", "noul": 0.360972, "verdict": "NO"}
+{"rule": "open_artifact", "noul": 0.3994, "verdict": "NO"}
+{"rule": "act_on_artifact", "noul": 0.289561, "verdict": "NO"}
+{"rule": "monotone_absence", "noul": 0.439109, "verdict": "NO"}
+{"rule": "cannot_happen", "noul": 0.600599, "verdict": "YES", "claim": "A deadlock cannot happen here: the two locks are owned by different threads."}
+{"rule": "selector_narrow", "noul": 0.324244, "verdict": "NO"}
+{"rule": "closed_population", "noul": 0.257175, "verdict": "NO"}
+{"rule": "lines_read", "noul": 0.419124, "verdict": "NO"}
+{"rule": "contradiction", "noul": 0.360972, "verdict": "NO"}
+{"rule": "d_semicolon", "noul": 0.175049, "verdict": "NO"}
+{"rule": "d_adjacency", "noul": 0.187145, "verdict": "NO"}
+{"rule": "d_history", "noul": 0.241899, "verdict": "NO"}
+{"rule": "d_fixture", "noul": 0.199875, "verdict": "NO"}
+{"rule": "d_loudness", "noul": 0.324244, "verdict": "NO"}
+{"rule": "d_red", "noul": 0.360972, "verdict": "NO"}
+{"rule": "d_sessionid", "noul": 0.152717, "verdict": "NO"}
+{"rule": "d_mutation", "noul": 0.324244, "verdict": "NO"}
+{"rule": "d_visibility", "noul": 0.187145, "verdict": "NO"}
+{"rule": "question_asked", "noul": 0.479613, "verdict": "NO"}
+{"rule": "count_unit", "noul": 0.520387, "verdict": "YES", "claim": "Three tests in the suite currently fail and are marked for follow-up."}
+{"rule": "scope_instant", "noul": 0.5, "verdict": "YES", "claim": "Three tests in the suite currently fail and are marked for follow-up."}
+{"rule": "run_tool", "noul": 0.324244, "verdict": "NO"}
+{"rule": "member_vs_population", "noul": 0.580876, "verdict": "YES", "claim": "Three tests in the suite currently fail and are marked for follow-up."}
+{"rule": "open_artifact", "noul": 0.342372, "verdict": "NO"}
+{"rule": "act_on_artifact", "noul": 0.419124, "verdict": "NO"}
+{"rule": "monotone_absence", "noul": 0.360972, "verdict": "NO"}
+{"rule": "cannot_happen", "noul": 0.520387, "verdict": "YES", "claim": "Three tests in the suite currently fail and are marked for follow-up."}
+{"rule": "selector_narrow", "noul": 0.600599, "verdict": "YES", "claim": "Three tests in the suite currently fail and are marked for follow-up."}
+{"rule": "closed_population", "noul": 0.5, "verdict": "YES", "claim": "Three tests in the suite currently fail and are marked for follow-up."}
+{"rule": "lines_read", "noul": 0.459294, "verdict": "NO"}
+{"rule": "contradiction", "noul": 0.360972, "verdict": "NO"}
+{"rule": "d_semicolon", "noul": 0.175049, "verdict": "NO"}
+{"rule": "d_adjacency", "noul": 0.199875, "verdict": "NO"}
+{"rule": "d_history", "noul": 0.3994, "verdict": "NO"}
+{"rule": "d_fixture", "noul": 0.227253, "verdict": "NO"}
+{"rule": "d_loudness", "noul": 0.360972, "verdict": "NO"}
+{"rule": "d_red", "noul": 0.3994, "verdict": "NO"}
+{"rule": "d_sessionid", "noul": 0.241899, "verdict": "NO"}
+{"rule": "d_mutation", "noul": 0.342372, "verdict": "NO"}
+{"rule": "d_visibility", "noul": 0.175049, "verdict": "NO"}
+{"rule": "question_asked", "noul": 0.710439, "verdict": "YES", "claim": "I changed it to 45 and the three tests in tests/config.rs still pass."}
+{"rule": "count_unit", "noul": 0.324244, "verdict": "NO"}
+{"rule": "scope_instant", "noul": 0.379998, "verdict": "NO"}
+{"rule": "run_tool", "noul": 0.786756, "verdict": "YES", "claim": "I opened src/config.rs: the default timeout is 30 seconds, set in `Config::default`."}
+{"rule": "member_vs_population", "noul": 0.419124, "verdict": "NO"}
+{"rule": "open_artifact", "noul": 0.306629, "verdict": "NO"}
+{"rule": "act_on_artifact", "noul": 0.342372, "verdict": "NO"}
+{"rule": "monotone_absence", "noul": 0.306629, "verdict": "NO"}
+{"rule": "cannot_happen", "noul": 0.520387, "verdict": "YES", "claim": "I changed it to 45 and the three tests in tests/config.rs still pass."}
+{"rule": "selector_narrow", "noul": 0.257175, "verdict": "NO"}
+{"rule": "closed_population", "noul": 0.257175, "verdict": "NO"}
+{"rule": "lines_read", "noul": 0.342372, "verdict": "NO"}
+{"rule": "contradiction", "noul": 0.187145, "verdict": "NO"}
+{"rule": "d_semicolon", "noul": 0.115085, "verdict": "NO"}
+{"rule": "d_adjacency", "noul": 0.273068, "verdict": "NO"}
+{"rule": "d_history", "noul": 0.342372, "verdict": "NO"}
+{"rule": "d_fixture", "noul": 0.324244, "verdict": "NO"}
+{"rule": "d_loudness", "noul": 0.306629, "verdict": "NO"}
+{"rule": "d_red", "noul": 0.289561, "verdict": "NO"}
+{"rule": "d_sessionid", "noul": 0.132776, "verdict": "NO"}
+{"rule": "d_mutation", "noul": 0.459294, "verdict": "NO"}
+{"rule": "d_visibility", "noul": 0.092407, "verdict": "NO"}
+{"rule": "question_asked", "noul": 0.419124, "verdict": "NO"}
+{"rule": "count_unit", "noul": 0.379998, "verdict": "NO"}
+{"rule": "scope_instant", "noul": 0.360972, "verdict": "NO"}
+{"rule": "run_tool", "noul": 0.419124, "verdict": "NO"}
+{"rule": "member_vs_population", "noul": 0.379998, "verdict": "NO"}
+{"rule": "open_artifact", "noul": 0.5, "verdict": "YES", "claim": "Existing rows keep NULL, and the backfill script in scripts/backfill.py sets it for the 12 rows whose status is already `archived`."}
+{"rule": "act_on_artifact", "noul": 0.324244, "verdict": "NO"}
+{"rule": "monotone_absence", "noul": 0.360972, "verdict": "NO"}
+{"rule": "cannot_happen", "noul": 0.560891, "verdict": "YES", "claim": "The migration adds a nullable `archived_at` column to the `docs` table."}
+{"rule": "selector_narrow", "noul": 0.439109, "verdict": "NO"}
+{"rule": "closed_population", "noul": 0.360972, "verdict": "NO"}
+{"rule": "lines_read", "noul": 0.439109, "verdict": "NO"}
+{"rule": "contradiction", "noul": 0.241899, "verdict": "NO"}
+{"rule": "d_semicolon", "noul": 0.123659, "verdict": "NO"}
+{"rule": "d_adjacency", "noul": 0.306629, "verdict": "NO"}
+{"rule": "d_history", "noul": 0.324244, "verdict": "NO"}
+{"rule": "d_fixture", "noul": 0.306629, "verdict": "NO"}
+{"rule": "d_loudness", "noul": 0.342372, "verdict": "NO"}
+{"rule": "d_red", "noul": 0.257175, "verdict": "NO"}
+{"rule": "d_sessionid", "noul": 0.175049, "verdict": "NO"}
+{"rule": "d_mutation", "noul": 0.342372, "verdict": "NO"}
+{"rule": "d_visibility", "noul": 0.142456, "verdict": "NO"}
+{"rule": "question_asked", "noul": 0.379998, "verdict": "NO"}
+{"rule": "count_unit", "noul": 0.132776, "verdict": "NO"}
+{"rule": "scope_instant", "noul": 0.342372, "verdict": "NO"}
+{"rule": "run_tool", "noul": 0.857544, "verdict": "YES", "claim": "I read `load_config` in src/config.rs: it returns an error when the file is missing, and the caller in src/main.rs prints that error and exits with status 2."}
+{"rule": "member_vs_population", "noul": 0.241899, "verdict": "NO"}
+{"rule": "open_artifact", "noul": 0.459294, "verdict": "NO"}
+{"rule": "act_on_artifact", "noul": 0.289561, "verdict": "NO"}
+{"rule": "monotone_absence", "noul": 0.379998, "verdict": "NO"}
+{"rule": "cannot_happen", "noul": 0.580876, "verdict": "YES", "claim": "I read `load_config` in src/config.rs: it returns an error when the file is missing, and the caller in src/main.rs prints that error and exits with status 2."}
+{"rule": "selector_narrow", "noul": 0.257175, "verdict": "NO"}
+{"rule": "closed_population", "noul": 0.199875, "verdict": "NO"}
+{"rule": "lines_read", "noul": 0.419124, "verdict": "NO"}
+{"rule": "contradiction", "noul": 0.227252, "verdict": "NO"}
+{"rule": "d_semicolon", "noul": 0.123659, "verdict": "NO"}
+{"rule": "d_adjacency", "noul": 0.175049, "verdict": "NO"}
+{"rule": "d_history", "noul": 0.199875, "verdict": "NO"}
+{"rule": "d_fixture", "noul": 0.187145, "verdict": "NO"}
+{"rule": "d_loudness", "noul": 0.306629, "verdict": "NO"}
+{"rule": "d_red", "noul": 0.306629, "verdict": "NO"}
+{"rule": "d_sessionid", "noul": 0.099481, "verdict": "NO"}
+{"rule": "d_mutation", "noul": 0.360972, "verdict": "NO"}
+{"rule": "d_visibility", "noul": 0.132776, "verdict": "NO"}
+{"rule": "question_asked", "noul": 0.560891, "verdict": "YES", "claim": "The full suite is green -- all 1,742 tests pass -- so the new `dedupe_keys` helper handles an empty input list correctly."}
+{"rule": "count_unit", "noul": 0.479613, "verdict": "NO"}
+{"rule": "scope_instant", "noul": 0.306629, "verdict": "NO"}
+{"rule": "run_tool", "noul": 0.620002, "verdict": "YES", "claim": "The full suite is green -- all 1,742 tests pass -- so the new `dedupe_keys` helper handles an empty input list correctly."}
+{"rule": "member_vs_population", "noul": 0.639028, "verdict": "YES", "claim": "The full suite is green -- all 1,742 tests pass -- so the new `dedupe_keys` helper handles an empty input list correctly."}
+{"rule": "open_artifact", "noul": 0.459294, "verdict": "NO"}
+{"rule": "act_on_artifact", "noul": 0.379998, "verdict": "NO"}
+{"rule": "monotone_absence", "noul": 0.675756, "verdict": "YES", "claim": "The full suite is green -- all 1,742 tests pass -- so the new `dedupe_keys` helper handles an empty input list correctly."}
+{"rule": "cannot_happen", "noul": 0.520387, "verdict": "YES", "claim": "The full suite is green -- all 1,742 tests pass -- so the new `dedupe_keys` helper handles an empty input list correctly."}
+{"rule": "selector_narrow", "noul": 0.306629, "verdict": "NO"}
+{"rule": "closed_population", "noul": 0.580876, "verdict": "YES", "claim": "The full suite is green -- all 1,742 tests pass -- so the new `dedupe_keys` helper handles an empty input list correctly."}
+{"rule": "lines_read", "noul": 0.3994, "verdict": "NO"}
+{"rule": "contradiction", "noul": 0.199875, "verdict": "NO"}
+{"rule": "d_semicolon", "noul": 0.152717, "verdict": "NO"}
+{"rule": "d_adjacency", "noul": 0.175049, "verdict": "NO"}
+{"rule": "d_history", "noul": 0.289561, "verdict": "NO"}
+{"rule": "d_fixture", "noul": 0.3994, "verdict": "NO"}
+{"rule": "d_loudness", "noul": 0.379998, "verdict": "NO"}
+{"rule": "d_red", "noul": 0.439109, "verdict": "NO"}
+{"rule": "d_sessionid", "noul": 0.187145, "verdict": "NO"}
+{"rule": "d_mutation", "noul": 0.459294, "verdict": "NO"}
+{"rule": "d_visibility", "noul": 0.241899, "verdict": "NO"}

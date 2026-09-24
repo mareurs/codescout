@@ -1,0 +1,22 @@
+judge: claude-sonnet-5 via claude -p, config /tmp/claude-1000/-home-marius-work-claude-codescout/571eb3d6-c879-43f6-b3f9-5a51e744e1af/scratchpad/judge-config-main
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 22 rules x 10 texts x 3 runs, subscription judge ===
+  clean-1        expect none            hit 3/3   fired [[], [], []]   PASS
+  clean-2        expect none            hit 3/3   fired [[], [], []]   PASS
+  semicolon      expect d_semicolon     hit 3/3   fired [['d_semicolon'], ['d_semicolon'], ['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 3/3   fired [['d_sessionid'], ['d_sessionid'], ['d_sessionid']]   PASS
+  cannot         expect cannot_happen   hit 3/3   fired [['cannot_happen'], ['cannot_happen'], ['cannot_happen']]   PASS
+  contradiction  expect contradiction   hit 3/3   fired [['contradiction'], ['contradiction', 'scope_instant'], ['contradiction']]   PASS
+  clean-3        expect none            hit 3/3   fired [[], [], []]   PASS
+  clean-4        expect none            hit 3/3   fired [[], [], []]   PASS
+  clean-5        expect none            hit 3/3   fired [[], [], []]   PASS
+  member         expect member_vs_population hit 3/3   fired [['member_vs_population', 'monotone_absence', 'question_asked'], ['member_vs_population', 'monotone_absence', 'question_asked'], ['member_vs_population', 'monotone_absence', 'question_asked']]   PASS
+
+gate: 10/10   errored rows: 0
+exit=0

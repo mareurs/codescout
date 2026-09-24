@@ -1,0 +1,144 @@
+=== CHECKER GATE for rtd9 (3 runs each) ===
+  recorded   want YES  got ['YES', 'YES', 'YES']  PASS
+  corrected  want NO  got ['NO', 'NO', 'NO']  PASS
+  unrelated  want NO  got ['NO', 'NO', 'NO']  PASS
+Traceback (most recent call last):
+  File "/home/marius/work/claude/codescout/scripts/phase2-score-dp1.py", line 160, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/home/marius/work/claude/codescout/scripts/phase2-score-dp1.py", line 147, in main
+    votes = [judge(q, r["text"]) for _ in range(3)]
+             ~~~~~^^^^^^^^^^^^^^
+  File "/home/marius/work/claude/codescout/scripts/phase2-score-dp1.py", line 99, in judge
+    raw, _ = _p.complete(f"{question}\n\n<text>\n{text}\n</text>{TAIL}")
+             ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/marius/work/claude/prompt-engineering/src/prompt_tdd/judge.py", line 162, in complete
+    msg = client.messages.create(
+        model=self.model,
+        max_tokens=2048,
+        messages=[{"role": "user", "content": prompt}],
+    )
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/_utils/_utils.py", line 294, in wrapper
+    return func(*args, **kwargs)
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/resources/messages/messages.py", line 1050, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/v1/messages",
+        ^^^^^^^^^^^^^^^
+    ...<30 lines>...
+        stream_cls=Stream[RawMessageStreamEvent],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/_base_client.py", line 1536, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/_base_client.py", line 1195, in request
+    raise self._make_status_error_from_response(response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-10-01 at 00:00 UTC.'}, 'request_id': 'req_011CfLEiVCVPZn3nndz2jycV'}
+=== CHECKER GATE for rtd9 (3 runs each) ===
+Traceback (most recent call last):
+  File "/home/marius/work/claude/codescout/scripts/phase2-score-dp1.py", line 160, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/home/marius/work/claude/codescout/scripts/phase2-score-dp1.py", line 127, in main
+    got = [judge(q, text) for _ in range(3)]
+           ~~~~~^^^^^^^^^
+  File "/home/marius/work/claude/codescout/scripts/phase2-score-dp1.py", line 99, in judge
+    raw, _ = _p.complete(f"{question}\n\n<text>\n{text}\n</text>{TAIL}")
+             ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/marius/work/claude/prompt-engineering/src/prompt_tdd/judge.py", line 162, in complete
+    msg = client.messages.create(
+        model=self.model,
+        max_tokens=2048,
+        messages=[{"role": "user", "content": prompt}],
+    )
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/_utils/_utils.py", line 294, in wrapper
+    return func(*args, **kwargs)
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/resources/messages/messages.py", line 1050, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/v1/messages",
+        ^^^^^^^^^^^^^^^
+    ...<30 lines>...
+        stream_cls=Stream[RawMessageStreamEvent],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/_base_client.py", line 1536, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/_base_client.py", line 1195, in request
+    raise self._make_status_error_from_response(response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-10-01 at 00:00 UTC.'}, 'request_id': 'req_011CfLEiYwDwdoTNWxyC3gAd'}
+=== CHECKER GATE for rtd10 (3 runs each) ===
+Traceback (most recent call last):
+  File "/home/marius/work/claude/codescout/scripts/phase2-score-dp1.py", line 160, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/home/marius/work/claude/codescout/scripts/phase2-score-dp1.py", line 127, in main
+    got = [judge(q, text) for _ in range(3)]
+           ~~~~~^^^^^^^^^
+  File "/home/marius/work/claude/codescout/scripts/phase2-score-dp1.py", line 99, in judge
+    raw, _ = _p.complete(f"{question}\n\n<text>\n{text}\n</text>{TAIL}")
+             ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/marius/work/claude/prompt-engineering/src/prompt_tdd/judge.py", line 162, in complete
+    msg = client.messages.create(
+        model=self.model,
+        max_tokens=2048,
+        messages=[{"role": "user", "content": prompt}],
+    )
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/_utils/_utils.py", line 294, in wrapper
+    return func(*args, **kwargs)
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/resources/messages/messages.py", line 1050, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/v1/messages",
+        ^^^^^^^^^^^^^^^
+    ...<30 lines>...
+        stream_cls=Stream[RawMessageStreamEvent],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/_base_client.py", line 1536, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/_base_client.py", line 1195, in request
+    raise self._make_status_error_from_response(response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-10-01 at 00:00 UTC.'}, 'request_id': 'req_011CfLEicdivNpyxmYzid74z'}
+=== CHECKER GATE for rtd10 (3 runs each) ===
+Traceback (most recent call last):
+  File "/home/marius/work/claude/codescout/scripts/phase2-score-dp1.py", line 160, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/home/marius/work/claude/codescout/scripts/phase2-score-dp1.py", line 127, in main
+    got = [judge(q, text) for _ in range(3)]
+           ~~~~~^^^^^^^^^
+  File "/home/marius/work/claude/codescout/scripts/phase2-score-dp1.py", line 99, in judge
+    raw, _ = _p.complete(f"{question}\n\n<text>\n{text}\n</text>{TAIL}")
+             ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/marius/work/claude/prompt-engineering/src/prompt_tdd/judge.py", line 162, in complete
+    msg = client.messages.create(
+        model=self.model,
+        max_tokens=2048,
+        messages=[{"role": "user", "content": prompt}],
+    )
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/_utils/_utils.py", line 294, in wrapper
+    return func(*args, **kwargs)
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/resources/messages/messages.py", line 1050, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/v1/messages",
+        ^^^^^^^^^^^^^^^
+    ...<30 lines>...
+        stream_cls=Stream[RawMessageStreamEvent],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/_base_client.py", line 1536, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/marius/work/claude/prompt-engineering/.venv/lib/python3.13/site-packages/anthropic/_base_client.py", line 1195, in request
+    raise self._make_status_error_from_response(response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-10-01 at 00:00 UTC.'}, 'request_id': 'req_011CfLEigDmuASWMTxFmagLc'}
+exit=1

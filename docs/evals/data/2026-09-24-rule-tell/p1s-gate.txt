@@ -1,0 +1,17 @@
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 22 rules x 6 texts x 3 runs, subscription judge ===
+  clean-1        expect none            hit 0/3   fired [['d_loudness', 'lines_read', 'open_artifact', 'run_tool', 'selector_narrow'], ['act_on_artifact', 'd_history', 'd_loudness', 'open_artifact', 'run_tool'], ['d_loudness', 'open_artifact', 'run_tool', 'selector_narrow']]   FAIL
+  clean-2        expect none            hit 0/3   fired [['closed_population', 'd_history', 'scope_instant'], ['closed_population', 'scope_instant'], ['d_history', 'd_loudness', 'member_vs_population', 'scope_instant']]   FAIL
+  semicolon      expect d_semicolon     hit 3/3   fired [['closed_population', 'd_history', 'd_loudness', 'd_semicolon', 'monotone_absence', 'run_tool'], ['cannot_happen', 'closed_population', 'd_fixture', 'd_history', 'd_loudness', 'd_red', 'd_semicolon', 'd_sessionid', 'monotone_absence', 'run_tool', 'scope_instant'], ['act_on_artifact', 'd_loudness', 'd_semicolon', 'monotone_absence', 'question_asked', 'run_tool', 'scope_instant']]   PASS
+  sessionid      expect d_sessionid     hit 3/3   fired [['act_on_artifact', 'd_history', 'd_loudness', 'd_sessionid', 'd_visibility', 'run_tool', 'scope_instant'], ['act_on_artifact', 'd_history', 'd_red', 'd_sessionid', 'run_tool', 'scope_instant'], ['closed_population', 'd_sessionid', 'd_visibility', 'run_tool']]   PASS
+  cannot         expect cannot_happen   hit 3/3   fired [['act_on_artifact', 'cannot_happen', 'closed_population', 'd_history', 'd_loudness', 'd_red', 'lines_read', 'member_vs_population', 'monotone_absence', 'open_artifact', 'question_asked', 'run_tool', 'selector_narrow'], ['act_on_artifact', 'cannot_happen', 'closed_population', 'd_fixture', 'd_history', 'd_loudness', 'lines_read', 'member_vs_population', 'monotone_absence', 'open_artifact', 'question_asked', 'run_tool', 'scope_instant', 'selector_narrow'], ['cannot_happen', 'closed_population', 'd_history', 'd_loudness', 'd_mutation', 'd_visibility', 'member_vs_population', 'monotone_absence', 'open_artifact', 'question_asked', 'run_tool', 'scope_instant']]   PASS
+  contradiction  expect contradiction   hit 2/3   fired [['cannot_happen', 'closed_population', 'd_adjacency', 'd_fixture', 'd_history', 'd_loudness', 'd_red', 'monotone_absence', 'run_tool', 'scope_instant', 'selector_narrow'], ['act_on_artifact', 'cannot_happen', 'contradiction', 'count_unit', 'd_history', 'd_loudness', 'd_red', 'member_vs_population', 'open_artifact', 'run_tool', 'scope_instant', 'selector_narrow'], ['cannot_happen', 'closed_population', 'contradiction', 'd_history', 'd_loudness', 'd_red', 'd_visibility', 'monotone_absence', 'open_artifact', 'run_tool', 'scope_instant', 'selector_narrow']]   PASS
+
+gate: 4/6   errored rows: 0
+exit=1

@@ -1,0 +1,11 @@
+=== CHECKER GATE for rtd9 (3 runs each) ===
+  recorded   want YES  got ['YES', 'YES', 'YES']  PASS
+  corrected  want NO  got ['NO', 'NO', 'NO']  PASS
+  unrelated  want NO  got ['NO', 'NO', 'NO']  PASS
+
+=== rtd9 ===
+arm   violation  compliant  not-observable  errored   violation rate (of observable)
+  0            7          3               0        0   7/10
+  1b           3          6               1        0   3/9
+  s0           5          3               2        0   5/8
+EXIT=0

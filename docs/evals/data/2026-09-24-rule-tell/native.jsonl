@@ -1,0 +1,285 @@
+{"task_id": "RTD-10::CTL3-1", "native": "NO", "raw": "NO\n\nThe text names the specific places it examined: the lean lane and the default lane, with measured counts (0 librarian tests in lean lane vs. 1732 in default lane) and a control check (101 prompts "}
+{"task_id": "RTD-10::CTL3-2", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-10::CTL3-3", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTL3-4", "native": "NO", "raw": "NO\n\nThe text examines specific cases: it names the `bytes > 0` check \"per shape\" and explains what happens when \"a shape whose section is gone\" occurs (it receives a 491-byte fallback). It scopes the "}
+{"task_id": "RTD-10::CTL3-5", "native": "NO", "raw": "NO\n\nThe text specifies what was examined: four consecutive samples during a build and three test processes during a `cli_doc` run. It names the specific places and cases that were checked rather than "}
+{"task_id": "RTD-10::CTL3-6", "native": "NO", "raw": "NO\n\nThe text scopes the impossibility to a specific named site (\"the observation window mandated in `CLAUDE.md`\") and supports it with an enumerated check (\"produced **zero** prospective samples in it"}
+{"task_id": "RTD-10::CTL3-7", "native": "NO", "raw": "NO\n\nThe text scopes the impossibility to specific named conditions: when `default` names no `server-stack`, the four commands never compile certain dependencies. This is not an absolute, unsupported s"}
+{"task_id": "RTD-10::CTL3-8", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTL3-9", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-10::CTL3-10", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-10::CTL3-11", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTL8-1", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTL8-2", "native": "NO", "raw": "NO\n\nThe text enumerates specific places that were checked: `~/.cargo/bin/codescout` (a symlink), `target/release/`, and the live MCP binary path. It describes the specific mechanism and locations invo"}
+{"task_id": "RTD-10::CTL8-3", "native": "NO", "raw": "NO\n\nThe text names specific places that were examined: it identifies `ListFunctions` and `ListDocs` as the implementations checked, notes they \"were registered nowhere,\" and references \"a passing test"}
+{"task_id": "RTD-10::CTL8-4", "native": "NO", "raw": "NO\n\nThe text names the specific places it examined: \"every check a scan emits,\" \"one check,\" and \"a second check.\" It enumerates what was surveyed rather than making a flat assertion of impossibility "}
+{"task_id": "RTD-10::CTL8-5", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTL8-6", "native": "NO", "raw": "NO\n\nThe text names specific places it examined: `src/usage/db.rs:315-322`, identifies the explicit condition (\"only on an explicit user utterance\"), and scopes the claim to a particular named site (co"}
+{"task_id": "RTD-10::CTL8-7", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTL8-8", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTL8-9", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTL8-10", "native": "NO", "raw": "NO\n\nThe text scopes the impossibility to a specific named site or kind: \"what its RECORDING filters out\" \u2014 it is not asserting an absolute, general impossibility but rather one tied to a particular me"}
+{"task_id": "RTD-10::CTL8-11", "native": "NO", "raw": "NO\n\nThe text specifies named places that were examined: it names the two specific weight tests (`from_dir_produces_a_stable_384d_vector` and `from_dir_matches_the_hub_path_for_the_same_model`) and ide"}
+{"task_id": "RTD-10::CTL9-1", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-10::CTL9-2", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTL9-3", "native": "NO", "raw": "NO\n\nThe text scopes the impossibility claim (\"does not check that the QUESTION asked of the first is answerable\") to a specific named site or kind \u2014 \"naming both addressees\" on \"the guard's first real"}
+{"task_id": "RTD-10::CTL9-4", "native": "NO", "raw": "NO\n\nThe text names specific places it examined: \"3 of 96 `usage.db` files\", \"codescout\", specific row counts, a specific date \"2026-05-17\", and \"the write path\" as a named kind. It does not assert an "}
+{"task_id": "RTD-10::CTL9-5", "native": "NO", "raw": "NO\n\nThe text names specific places it examined (10 of 63 archived bug files, 3594 commits) and scopes findings to particular cases rather than making a flat, unsubstantiated claim of impossibility."}
+{"task_id": "RTD-10::CTL9-6", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTL9-7", "native": "NO", "raw": "NO\n\nThe text names specific cases that were examined (C13 and C14) and scopes the claims to those particular named instances rather than asserting an absolute, unexamined impossibility."}
+{"task_id": "RTD-10::CTL9-8", "native": "NO", "raw": "NO\n\nThe text names the specific places and cases examined: the `docs/issues` directory, a peer's 141-line bug file, and a specific commit with a particular subject about patch-id citations. It does no"}
+{"task_id": "RTD-10::CTL9-9", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTL9-10", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTL9-11", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTL10-1", "native": "NO", "raw": "NO\n\nThe text names a specific place that was examined: `scripts/pre-push-foreign-session-guard.sh`. It also scopes the impossibility to a particular context (\"No server-side rule can separate one sess"}
+{"task_id": "RTD-10::CTL10-2", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTL10-3", "native": "NO", "raw": "NO\n\nThe text scopes the impossibility to a specific named site or kind: \"the red is observed in the pre-fix state, which is the one configuration where both bounds are absent.\" It identifies the parti"}
+{"task_id": "RTD-10::CTL10-4", "native": "NO", "raw": "NO\n\nThe text does not claim that some failure, confusion, error, or collision cannot occur. Instead, it describes what *does* break or what *can* happen if a detail is removed (the test stops discrimi"}
+{"task_id": "RTD-10::CTL10-5", "native": "NO", "raw": "NO\n\nThe text scopes the impossibility to a specific named situation (\"this one\") and explains why it cannot be caught in a particular way (\"because the members did not exist yet\"), rather than asserti"}
+{"task_id": "RTD-10::CTL10-6", "native": "NO", "raw": "NO\n\nThe text scopes the impossibility claim to a specific, named case: \"you cannot write a test for a case you cannot express\" \u2014 it is limited to cases that cannot be expressed in the grammar, not ass"}
+{"task_id": "RTD-10::CTL10-7", "native": "NO", "raw": "NO\n\nThe text scopes the impossibility claim to a specific situation: \"if you must keep a dead path\" and describes a particular named site/mechanism (\"the gate cannot tell the difference\"). It is not a"}
+{"task_id": "RTD-10::CTL10-8", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-10::CTL10-9", "native": "NO", "raw": "NO\n\nThe text scopes the impossibility to a specific named site or kind: \"a cargo alias\" (a particular type of thing that cannot run a precondition). It is not asserting an absolute, general impossibil"}
+{"task_id": "RTD-10::CTL10-10", "native": "NO", "raw": "NO\n\nThe text scopes the impossibility to a specific named case: \"the `;`-chained form\" \u2014 it identifies the particular construct being discussed rather than making a flat claim about everything."}
+{"task_id": "RTD-10::CTL10-11", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTL10-12", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-10::CTL10-13", "native": "NO", "raw": "NO\n\nThe text names specific places and cases that were checked: it enumerates \"a GitHub App, a deploy key, Actions' `GITHUB_TOKEN`\" as examples of credentials that are refused, and it names specific w"}
+{"task_id": "RTD-10::CTLX-1", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-10::CTLX-2", "native": "NO", "raw": "NO\n\nThe text scopes the impossibility claim to a specific condition (\"provided both lanes actually run\") and then explicitly narrows or withdraws that absolute wording by showing the condition is inad"}
+{"task_id": "RTD-10::CTLX-3", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTLX-4", "native": "NO", "raw": "NO\n\nThe text names the specific places and paths that were examined: the `experiments` branch (which is never deleted), the `master` branch (which never receives in-progress work directly), and the re"}
+{"task_id": "RTD-10::CTLX-5", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTLX-6", "native": "NO", "raw": "NO\n\nThe text names specific places and cases that were examined: it identifies `ListAgents`, specifies a measurement date (2026-09-01), states the reported count (2 peers), the actual count (16 sessio"}
+{"task_id": "RTD-10::CTLX-7", "native": "NO", "raw": "NO\n\nThe text names specific places examined: the `~/.claude-sdd` profile and identifies specific operations (\"native `Bash`, `Read` and `Edit`\") that were measured/tested."}
+{"task_id": "RTD-10::CTLX-8", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-10::CTLX-9", "native": "NO", "raw": "NO\n\nThe text does not claim that any failure, confusion, error, or collision cannot occur. It provides instructions about what to record (fix SHA and patch-id, not pending-master-SHA line) and notes t"}
+{"task_id": "RTD-10::CTLX-10", "native": "NO", "raw": "NO\n\nThe text names specific places that were examined: \"five subsystems\" including \"file-format navigation, markdown editing, the citation resolver, four shell gates, symbol navigation\" and quantifies"}
+{"task_id": "RTD-10::CTLX-11", "native": "NO", "raw": "NO\n\nThe text specifies named sites and paths: it refers to \"the checkout,\" \"the shared tree,\" \"every other session's `cargo test`,\" and distinguishes between \"the PRODUCTION path\" and \"the test's inpu"}
+{"task_id": "RTD-3::CTL3-1", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-3::CTL3-2", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL3-3", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL3-4", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL3-5", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL3-6", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-3::CTL3-7", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL3-8", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-3::CTL3-9", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-3::CTL3-10", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-3::CTL3-11", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL8-1", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL8-2", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL8-3", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL8-4", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL8-5", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL8-6", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL8-7", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL8-8", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL8-9", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL8-10", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL8-11", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL9-1", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL9-2", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL9-3", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL9-4", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL9-5", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL9-6", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL9-7", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL9-8", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL9-9", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL9-10", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL9-11", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL10-1", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-3::CTL10-2", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL10-3", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL10-4", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL10-5", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL10-6", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL10-7", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL10-8", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-3::CTL10-9", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-3::CTL10-10", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL10-11", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTL10-12", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-3::CTL10-13", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTLX-1", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTLX-2", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTLX-3", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTLX-4", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTLX-5", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTLX-6", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTLX-7", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTLX-8", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-3::CTLX-9", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTLX-10", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-3::CTLX-11", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL3-1", "native": "NO", "raw": "NO\n\nThe text scopes the negative claim (\"never runs a librarian test\") by explicitly stating \"in the lean lane\" and specifies the time and measurement method (\"Measured 2026-09-06 over one gate run\")."}
+{"task_id": "RTD-8::CTL3-2", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL3-3", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL3-4", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL3-5", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL3-6", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-8::CTL3-7", "native": "YES", "raw": "YES\n\nThe text asserts \"never compile `dep:qdrant-client`\" as an unrestricted universal negative about the named things, but the evidence covers only what happens when `default = [\"remote-embed\", \"http"}
+{"task_id": "RTD-8::CTL3-8", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL3-9", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-8::CTL3-10", "native": "YES", "raw": "YES\n\nThe text asserts \"nobody writes one about *where the refusal sends you*\" as an unrestricted universal negative in its own voice, with no apparent evidence that this claim has been systematically "}
+{"task_id": "RTD-8::CTL3-11", "native": "NO", "raw": "NO\n\nThe text uses \"zero\" and \"none of six\" with explicit, narrow scope qualifiers. \"Zero times\" is scoped to a specific property and guards being discussed. \"None of six tests\" is explicitly measured "}
+{"task_id": "RTD-8::CTL8-1", "native": "NO", "raw": "NO\n\nThe text contains a negative (\"no amount of compliance closes it\") but it is scoped in context\u2014it refers specifically to a particular situation involving the trap/lane mechanism described in the p"}
+{"task_id": "RTD-8::CTL8-2", "native": "NO", "raw": "NO\n\nThe negative \"nothing rebuilds\" is scoped in place and time\u2014it applies specifically to \"that path\" in the context of isolating the release profile, and the text explains the reasoning (\"a symlink "}
+{"task_id": "RTD-8::CTL8-3", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-8::CTL8-4", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL8-5", "native": "NO", "raw": "NO\n\nThe text uses qualifying language (\"of what the tool examined\") and explicitly discusses the scope limitation of negative results. It distinguishes between what a tool actually examined versus bro"}
+{"task_id": "RTD-8::CTL8-6", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-8::CTL8-7", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL8-8", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL8-9", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL8-10", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL8-11", "native": "NO", "raw": "NO\n\nThe text uses a scoped qualifier: \"the only two that catch a correctly-shaped but silently WRONG vector\" - this restricts the claim to a specific category of tests (those that catch a particular t"}
+{"task_id": "RTD-8::CTL9-1", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-8::CTL9-2", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL9-3", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL9-4", "native": "NO", "raw": "NO\n\nThe text qualifies its negatives with specific scope: \"0 rows against ~70,000 calls\" (scoped to codescout), \"3 of 96 files\" (scoped to this machine), and \"once, ever\" (temporal qualifier). The cla"}
+{"task_id": "RTD-8::CTL9-5", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL9-6", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL9-7", "native": "NO", "raw": "NO\n\nThe text uses scoped language (\"C14 is 0/3 on BOTH arms\") that restricts the negative claim to a specific, named context rather than asserting an unrestricted universal negative."}
+{"task_id": "RTD-8::CTL9-8", "native": "NO", "raw": "NO\n\nThe text contains a scoped negative (\"never been committed\") that is restricted by time and context (a specific peer's file that was uncommitted). Additionally, the negative appears within a descr"}
+{"task_id": "RTD-8::CTL9-9", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL9-10", "native": "NO", "raw": "NO\n\nThe statement contains a restricting qualifier (\"only ever locks against tests that opt in\"), which scopes the negative claim to a specific category of tests rather than making an unrestricted uni"}
+{"task_id": "RTD-8::CTL9-11", "native": "NO", "raw": "NO\n\nThe text qualifies the universal negative with \"six times, never once as a shared name\" \u2014 it specifies a particular scope and condition (shared name), making it a scoped negative rather than an un"}
+{"task_id": "RTD-8::CTL10-1", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-8::CTL10-2", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL10-3", "native": "NO", "raw": "NO\n\nThe text uses a scoped negative (\"the red is observed in the pre-fix state, which is the one configuration where both bounds are absent\"), specifying a particular condition/configuration where the"}
+{"task_id": "RTD-8::CTL10-4", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL10-5", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL10-6", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL10-7", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL10-8", "native": "NO", "raw": "NO\n\nThe negative here (\"has no site to occur\") is scoped by a qualifying condition (\"so the conflation has no site to occur at\") - it's restricted to situations where data owner and schema owner are d"}
+{"task_id": "RTD-8::CTL10-9", "native": "NO", "raw": "NO\n\nThe text does not assert an unrestricted universal negative. It states a specific constraint about cargo aliases (\"cannot run a precondition\"), which is a scoped negative about a particular capabi"}
+{"task_id": "RTD-8::CTL10-10", "native": "NO", "raw": "NO\n\nThe text does not assert an unrestricted universal negative about a named thing. It makes a positive assertion (\"exits non-zero if any lane failed\") and explains a capability difference between tw"}
+{"task_id": "RTD-8::CTL10-11", "native": "NO", "raw": "NO\n\nThe text uses a scoped negative: \"cannot collide with any real field\" is restricted by the qualifier \"real field\" (a specific kind). Additionally, the text explicitly distinguishes this from an ab"}
+{"task_id": "RTD-8::CTL10-12", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTL10-13", "native": "NO", "raw": "NO\n\nThe negative claim \"no workflow does today\" is immediately followed by a parenthetical that specifies the scope of what was examined: `ci.yml`/`manual.yml`. This scopes the claim to those specific"}
+{"task_id": "RTD-8::CTLX-1", "native": "NO", "raw": "NO\n\nThe text contains absolute negatives (\"never deleted\", \"never commit\"), but they are scoped by context: the first set applies specifically to the branching workflow being described, and the second"}
+{"task_id": "RTD-8::CTLX-2", "native": "NO", "raw": "NO\n\nThe text uses a scoped negative: \"cannot arm the trap for anyone else \u2014 **provided both lanes actually run.**\" The condition explicitly restricts the scope of the claim. Additionally, the text ide"}
+{"task_id": "RTD-8::CTLX-3", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTLX-4", "native": "NO", "raw": "NO\n\nThe negative \"never deleted\" and \"never commit\" carry implicit temporal and contextual qualifiers (within the described workflow/process). Additionally, \"never\" here describes a procedural rule/po"}
+{"task_id": "RTD-8::CTLX-5", "native": "NO", "raw": "NO\n\nThe text uses a scoped negative (\"no reader can join it\" - referring specifically to prose, a particular form/place where the adjudication went). Additionally, the following sentence provides meas"}
+{"task_id": "RTD-8::CTLX-6", "native": "NO", "raw": "NO\n\nThe text includes a time-scoped qualifier (\"Measured 2026-09-01\") and specifies the scope of what was examined (specific sessions, profiles, and checkout). The negative claim about invisibility is"}
+{"task_id": "RTD-8::CTLX-7", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTLX-8", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTLX-9", "native": "NO", "raw": "NO\n\nThe negative \"never a pending-master-SHA line\" carries a restricting qualifier: it applies specifically to what should be recorded (the fix SHA and its patch-id). The scope is narrowed by the cont"}
+{"task_id": "RTD-8::CTLX-10", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-8::CTLX-11", "native": "NO", "raw": "NO\n\nThe text uses \"never\" with a restricting qualifier \u2014 it specifies the context as \"an assertion's existence\" (not in absolute terms, but relative to what should be demanded). Additionally, the nega"}
+{"task_id": "RTD-9::CTL3-1", "native": "NO", "raw": "NO\n\nThe text states the span of time its source covers: \"Measured 2026-09-06 over one gate run.\" This provides a measurement window, so the condition for YES is not met."}
+{"task_id": "RTD-9::CTL3-2", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL3-3", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL3-4", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL3-5", "native": "NO", "raw": "NO\n\nThe text specifies the span of time its observations cover: \"four consecutive samples during a build\" and \"three test processes alive.\" These are explicit observation windows, not all-time claims "}
+{"task_id": "RTD-9::CTL3-6", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL3-7", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL3-8", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL3-9", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL3-10", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL3-11", "native": "NO", "raw": "NO\n\nThe text states a specific measurement: \"a locator widened to swallow its whole section killed none of six tests.\" This frames the figure as an observation over a specific, bounded set of tests (s"}
+{"task_id": "RTD-9::CTL8-1", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL8-2", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL8-3", "native": "NO", "raw": "NO\n\nThe text frames the figure as an observation over a window of time (\"for months\") rather than stating an all-time count without a time span."}
+{"task_id": "RTD-9::CTL8-4", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL8-5", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL8-6", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL8-7", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL8-8", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL8-9", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL8-10", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL8-11", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL9-1", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL9-2", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL9-3", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL9-4", "native": "YES", "raw": "YES"}
+{"task_id": "RTD-9::CTL9-5", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL9-6", "native": "NO", "raw": "NO\n\nThe text specifies a coverage window: \"three real subscription sweeps\" with \"30+ runs\" observed in that defined set of test executions. The claim is framed as an observation over a specific interv"}
+{"task_id": "RTD-9::CTL9-7", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL9-8", "native": "NO", "raw": "NO\n\nThe text states the span its source covers: \"Measured 2026-08-30\" provides a specific date/time window for when this measurement was taken."}
+{"task_id": "RTD-9::CTL9-9", "native": "NO", "raw": "NO\n\nThe text does not state an all-time count or frequency based on stored records. It describes a procedural action (\"runs one `reindex`\") and reports a result, but does not make a claim about how ma"}
+{"task_id": "RTD-9::CTL9-10", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL9-11", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL10-1", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL10-2", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL10-3", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL10-4", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL10-5", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL10-6", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL10-7", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL10-8", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL10-9", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL10-10", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL10-11", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL10-12", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTL10-13", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTLX-1", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTLX-2", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTLX-3", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTLX-4", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTLX-5", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTLX-6", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTLX-7", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTLX-8", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTLX-9", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTLX-10", "native": "NO", "raw": "NO"}
+{"task_id": "RTD-9::CTLX-11", "native": "NO", "raw": "NO"}
+{"task_id": "contradiction::CTL3-1", "native": "NO", "raw": "NO\n\nThe text contains only one passage making an absolute claim about the lean lane (\"never runs a librarian test\"), and the supporting data (0 librarian tests vs. 1732 in the default lane) is consist"}
+{"task_id": "contradiction::CTL3-2", "native": "NO", "raw": "NO\n\nThe text contains only one passage making an absolute claim (\"every in-tree caller installs the provider first\"). There is no second passage elsewhere in the text that describes a case contradicti"}
+{"task_id": "contradiction::CTL3-3", "native": "NO", "raw": "NO\n\nThe text contains only one passage making a claim. There is no second passage elsewhere in the text to contradict it."}
+{"task_id": "contradiction::CTL3-4", "native": "NO", "raw": "NO\n\nThe passage discusses a single scenario with specific conditions (a shape whose section is gone receives a 491-byte fallback). There are no two passages making absolute claims that contradict each"}
+{"task_id": "contradiction::CTL3-5", "native": "NO", "raw": "NO\n\nThe text does not contain two passages that state things that cannot both be true. There is only one main passage here discussing cargo holds and releases of a lock file. While it mentions differe"}
+{"task_id": "contradiction::CTL3-6", "native": "NO", "raw": "NO\n\nThe text contains only one passage making an absolute claim (\"And an annotation nobody consumes will not be written\"), and then provides a supporting example (zero samples in the first two days). "}
+{"task_id": "contradiction::CTL3-7", "native": "NO", "raw": "NO\n\nThe text does not contain two passages making absolute claims about the same subject that contradict each other. There is only one continuous passage discussing configuration defaults and cargo bu"}
+{"task_id": "contradiction::CTL3-8", "native": "NO", "raw": "NO\n\nThe text contains only one passage making an absolute claim (\"every\" available signal reported success). There is no second passage elsewhere in the text that contradicts this or describes a case "}
+{"task_id": "contradiction::CTL3-9", "native": "NO", "raw": "NO\n\nThe text contains only one passage making an absolute claim about a single scenario (the 2026-09-01 ledger case). There is no second passage elsewhere in the text describing a different case or be"}
+{"task_id": "contradiction::CTL3-10", "native": "NO", "raw": "NO\n\nThe text contains only one absolute claim (\"Every assertion is about *who is refused*\") and its corresponding negation (\"nobody writes one about *where the refusal sends you*\"). These are compleme"}
+{"task_id": "contradiction::CTL3-11", "native": "NO", "raw": "NO\n\nThe text contains only one passage with absolute language (\"zero\" and \"none of six\"), and these statements are consistent with each other - they both describe cases where tests were not affected. "}
+{"task_id": "contradiction::CTL8-1", "native": "NO", "raw": "NO"}
+{"task_id": "contradiction::CTL8-2", "native": "NO", "raw": "NO\n\nThe text contains only one passage making an absolute claim (\"nothing rebuilds, for every session on every profile\"), and there is no second passage anywhere else in the text that contradicts it. "}
+{"task_id": "contradiction::CTL8-3", "native": "NO", "raw": "NO\n\nThe text does not contain two passages that state things that cannot both be true. There is only one main claim being made: that `ListFunctions` and `ListDocs` implemented the `Tool` trait, were r"}
+{"task_id": "contradiction::CTL8-4", "native": "NO", "raw": "NO\n\nThe text contains only one passage describing a specific historical situation (a measurement from 2026-09-16). There are no two separate passages making conflicting absolute claims. The single pas"}
+{"task_id": "contradiction::CTL8-5", "native": "NO", "raw": "NO\n\nThe text does not contain two passages that state things that cannot both be true. There is only one main claim being made: that a negative result from a search tool is \"always true **of what the "}
+{"task_id": "contradiction::CTL8-6", "native": "NO", "raw": "NO\n\nThe text contains only one passage making an absolute claim (\"nothing reads it\"). There is no second passage elsewhere in the text describing a case where something does read it. Since there is on"}
+{"task_id": "contradiction::CTL8-7", "native": "NO", "raw": "NO"}
+{"task_id": "contradiction::CTL8-8", "native": "NO", "raw": "NO\n\nThe text contains only one passage making an absolute claim (\"A count of a defect population must arrive with its unit or not at all\"). The second sentence provides an illustrative example that su"}
+{"task_id": "contradiction::CTL8-9", "native": "NO", "raw": "NO\n\nThe text contains only one passage making an absolute claim (\"nothing races to refuse an input here\"), and there is no second passage elsewhere in the text that describes a contradictory case or b"}
+{"task_id": "contradiction::CTL8-10", "native": "NO", "raw": "NO\n\nThe text does not contain two passages that state things that cannot both be true. The entire text is a single cohesive statement explaining a principle about tests and recording filters, with cla"}
+{"task_id": "contradiction::CTL8-11", "native": "NO", "raw": "NO\n\nThe text does not contain two passages making contradictory absolute claims. It contains only one passage discussing which tests compile in the default lane. There is no second passage elsewhere i"}
+{"task_id": "contradiction::CTL9-1", "native": "NO", "raw": "NO\n\nThe text contains only one passage making an absolute claim (\"nothing anywhere is shaped like a gap\"), and there is no other passage elsewhere in the text that describes a contradictory case or co"}
+{"task_id": "contradiction::CTL9-2", "native": "NO", "raw": "NO\n\nThe text does not contain two passages that state things that cannot both be true. It is a single, brief passage describing one event (a `pre-push` foreign-session guard refusing on its first real"}
+{"task_id": "contradiction::CTL9-3", "native": "NO", "raw": "NO\n\nThe text does not contain two passages that state things that cannot both be true. There is only one continuous passage that describes a specific situation (the author's state on 2026-09-07 being "}
+{"task_id": "contradiction::CTL9-4", "native": "NO", "raw": "NO\n\nThe text contains only a single passage describing the current state of a database table. There are no two separate passages making conflicting absolute claims. While the passage contains specific"}
+{"task_id": "contradiction::CTL9-5", "native": "NO", "raw": "NO\n\nThe text contains only one passage making claims about a specific measurement/observation. There are no two separate passages that contradict each other. The text is a single, unified note about a"}
+{"task_id": "contradiction::CTL9-6", "native": "NO", "raw": "NO\n\nThe text contains only a single passage making claims about subscription sweeps. There is no second passage elsewhere in the text that could contradict it. To answer YES, I would need to find two "}
+{"task_id": "contradiction::CTL9-7", "native": "NO", "raw": "NO\n\nThe text contains only one passage making claims about SKIP guards. There are no two separate passages elsewhere in the text that could contradict each other. The text is a single, continuous stat"}
+{"task_id": "contradiction::CTL9-8", "native": "NO", "raw": "NO\n\nThe text contains only one passage describing a specific incident from 2026-08-30. There are no two separate passages making contradictory claims, no absolute universal claims (like \"all,\" \"none,\""}
+{"task_id": "contradiction::CTL9-9", "native": "NO", "raw": "NO\n\nThere is only one passage in this text. A contradiction requires at least two passages making claims about the same subject. Since there is no second passage to compare against the first, there ca"}
+{"task_id": "contradiction::CTL9-10", "native": "NO", "raw": "NO\n\nThe text consists of a single sentence that makes one claim about `#[serial]`. There are no two passages to compare, and therefore no contradiction can be identified."}
+{"task_id": "contradiction::CTL9-11", "native": "NO", "raw": "NO\n\nThe text provided is only a single sentence fragment, not multiple passages. There is only one claim being made, so there cannot be two passages that contradict each other."}
+{"task_id": "contradiction::CTL10-1", "native": "NO", "raw": "NO\n\nThe text contains only one passage making an absolute claim about agent sessions and their constraints. There is no second passage elsewhere in the text that describes a contradictory case or beha"}
+{"task_id": "contradiction::CTL10-2", "native": "NO", "raw": "NO\n\nThe text does not contain two passages that state things that cannot both be true. The entire passage discusses test assertions and their purposes, with no absolute claims that contradict other st"}
+{"task_id": "contradiction::CTL10-3", "native": "NO", "raw": "NO\n\nThe text provided is a single passage fragment, not multiple passages. To identify a contradiction, I would need at least two separate passages making claims that cannot both be true. Since only o"}
+{"task_id": "contradiction::CTL10-4", "native": "NO", "raw": "NO\n\nThe text does not contain two passages that state things that cannot both be true. The text is a single coherent statement about testing practices and what happens when details are removed from te"}
+{"task_id": "contradiction::CTL10-5", "native": "NO", "raw": "NO\n\nThe text contains only one passage making an absolute claim (\"Every instance above is a set fixed at authoring time\"). There is no second passage elsewhere in the text describing a contradictory c"}
+{"task_id": "contradiction::CTL10-6", "native": "NO", "raw": "NO\n\nThe text contains only one main claim about parsers and does not present two passages that contradict each other. The passage discusses a single concept: that a parser interpreting every token in "}
+{"task_id": "contradiction::CTL10-7", "native": "NO", "raw": "NO\n\nThe text contains only one passage making an absolute claim (\"Do not soften a live citation...\"), and there is no other passage elsewhere in the text describing a case or behavior that contradicts"}
+{"task_id": "contradiction::CTL10-8", "native": "NO", "raw": "NO\n\nThe text contains only a single passage making a claim. There is no second passage elsewhere in the text to contradict it. A contradiction requires at least two distinct passages making incompatib"}
+{"task_id": "contradiction::CTL10-9", "native": "NO", "raw": "NO\n\nThe text contains only one passage making a single claim about cargo aliases and preconditions. There is no second passage elsewhere in the text that could contradict it. A contradiction requires "}
+{"task_id": "contradiction::CTL10-10", "native": "NO", "raw": "NO\n\nThe text contains only one passage making an absolute claim about behavior (that the script \"exits non-zero if any lane failed\"). There is no second passage elsewhere in the text that contradicts "}
+{"task_id": "contradiction::CTL10-11", "native": "NO", "raw": "NO\n\nThe text contains only one passage, not two passages making contradictory claims. There is nothing to compare against it elsewhere in the text."}
+{"task_id": "contradiction::CTL10-12", "native": "NO", "raw": "NO\n\nThere is only one passage in this text making claims about scope roots and workspace trees. To find a contradiction, I would need at least two separate passages making incompatible absolute claims"}
+{"task_id": "contradiction::CTL10-13", "native": "NO", "raw": "NO\n\nThe text contains only one passage making an absolute claim (\"Any credential that is not the owner's user account is refused on both branches\"). There is no second passage elsewhere in the text th"}
+{"task_id": "contradiction::CTLX-1", "native": "NO", "raw": "NO\n\nThe first passage states an absolute claim about `master` branch protection (\"all experimental work,\" \"never deleted,\" \"never commit\"). The second passage describes agent sessions and SSH key auth"}
+{"task_id": "contradiction::CTLX-2", "native": "YES", "raw": "YES\n\nThe first passage states that the guarantee applies \"provided both lanes actually run\" \u2014 making this condition sufficient for the guarantee to hold.\n\nThe second passage states that this same cond"}
+{"task_id": "contradiction::CTLX-3", "native": "NO", "raw": "NO\n\nThe second passage does not contradict the first. The first passage states that typing four things directly is correct and canonical for what runs and in what order. The second passage states that"}
+{"task_id": "contradiction::CTLX-4", "native": "NO", "raw": "NO\n\nThe first passage states that `experiments` is \"never deleted,\" which is an absolute claim. The second passage describes that `experiments` is \"rebased after every ship,\" which results in commits "}
+{"task_id": "contradiction::CTLX-5", "native": "NO", "raw": "NO\n\nThe text does not present two passages that state things that cannot both be true. There is only one passage making a claim here - the statement \"Every automated reader of those params sees 19 cle"}
+{"task_id": "contradiction::CTLX-6", "native": "YES", "raw": "YES\n\nThe first passage states \"The number is deliberately not stated here\" (an absolute claim that the number is not stated).\n\nThe second passage states \"Measured 2026-09-01: `ListAgents` reported 2 p"}
+{"task_id": "contradiction::CTLX-7", "native": "NO", "raw": "NO\n\nThe first passage makes an absolute claim that the Claude Code plugin is \"always active\" and its hooks fire \"on every call.\" The second passage is a specific measurement from a particular date (20"}
+{"task_id": "contradiction::CTLX-8", "native": "NO", "raw": "NO\n\nThe first passage states that a cargo alias cannot run a precondition. The second passage discusses that `cargo rb` still works and is the canonical name, along with references to where it's quote"}
+{"task_id": "contradiction::CTLX-9", "native": "NO", "raw": "NO\n\nThe first passage states an absolute instruction about what to record going forward (\"never a pending-master-SHA line\"). The second passage acknowledges that older archived files still carry the o"}
+{"task_id": "contradiction::CTLX-10", "native": "YES", "raw": "YES\n\nThe first passage states there is \"deliberately **no count of these laws**\" \u2014 an absolute claim that no tally exists.\n\nThe second passage provides a specific count: \"**27 instances across five su"}
+{"task_id": "contradiction::CTLX-11", "native": "NO", "raw": "NO\n\nThe first passage states \"demand an observed RED, never an assertion's existence\" and instructs to \"mutate the PRODUCTION path, not the test's inputs.\"\n\nThe second passage states \"Do not hand-roll"}

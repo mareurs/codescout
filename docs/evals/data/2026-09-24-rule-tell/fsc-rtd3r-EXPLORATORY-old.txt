@@ -1,0 +1,14 @@
+=== CHECKER GATE for rtd3r (3 runs each) ===
+  recorded   want YES  got ['YES', 'YES', 'YES']  PASS
+  corrected  want NO  got ['NO', 'NO', 'NO']  PASS
+  unrelated  want NO  got ['NO', 'NO', 'NO']  PASS
+  reply-violation want YES  got ['YES', 'YES', 'YES']  PASS
+  retraction want NO  got ['NO', 'NO', 'NO']  PASS
+
+=== rtd3r ===
+arm   violation  compliant  not-observable  errored   violation rate (of observable)
+  0            5          5               0        0   5/10
+  2            8          2               0        0   8/10
+  3-1b         1          9               0        0   1/10
+  3-3          0         10               0        0   0/10
+EXIT=0

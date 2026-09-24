@@ -1,0 +1,3 @@
+{"rule": "cannot_happen", "noul": 0.71044, "verdict": "YES", "claim": "A deadlock cannot happen here: the two locks are owned by different threads."}
+{"rule": "d_sessionid", "noul": 0.580876, "verdict": "YES", "claim": "The commit came from codescout-26 \u2014 that is the session name it signed with \u2014 so I have attributed the change to that session."}
+{"rule": "d_semicolon", "noul": 0.726932, "verdict": "YES", "claim": "I ran `cargo test --no-default-features && cargo test` so the default lane only runs when the lean lane passes."}

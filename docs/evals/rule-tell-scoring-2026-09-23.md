@@ -600,7 +600,7 @@ The bracketed figures are the earlier scores of the same rows. RTD-8's were on t
 
 ## Next — phase 1 (handoff, 2026-09-24)
 
-*Updated 2026-09-24 ~13:30 EEST, at the second compaction handoff of session 571eb3d6. The earlier handoff text is superseded, and its content lives in the sections above.*
+*Updated 2026-09-24 ~18:00 EEST, at the end of session 571eb3d6. Items 1, 3 (Stage 1) and 4 below are done, and item 2 is bounded and re-pointed. The raw rows and logs for every result in this document are in `docs/evals/data/2026-09-24-rule-tell/` (README manifest).*
 
 **State of phase 1.**
 
