@@ -376,3 +376,24 @@ A first build of the **mined correction pairs**, with no model call and nothing 
 2. **Or synthetic-first:** mined pairs become a secondary, audited source, and synthetic pairs (model calls through the subscription, under the recorded permission) are the main one.
 
 **Carried to the next build, whichever is chosen:** a stricter pairing rule; commit-subject markers (165 rows) excluded or labelled separately; sentence splitting that respects wrapped lines, inline code and lists; and the document, not the incident, as the fold unit, since the amendment keeps a source document's other paragraphs in one fold. Documents are currently grouped by filename to survive archive moves, which could in principle merge two files that share a name.
+
+## Amendment — S0 form 4q: `question_asked` widened alone, 2026-09-24 (registered after form 4's gate, before this ran)
+
+**Why this arm, and its disclosure.** Form 4's gate failed (6/8): the widened `count_unit` and `scope_instant` fired on clean texts. **The widened `question_asked` was the one spec that passed**: silent on all five clean texts, firing on its positive 3/3. So this arm was **chosen on gate evidence**, after seeing it. That is disclosed, and it is why the gate is run again from scratch rather than reusing form 4's rows.
+
+**Arm.** Form 3's question and specs, with only `question_asked` replaced by its `SPECS_F4` wording (form `4q`). Sonnet 5, clean channel. Only `question_asked` is judged (`--rules question_asked`); every other rule's rows are carried from form 3's Score A (`--carry p1s-S0f3-corpus.jsonl`). About 60 calls in all.
+
+**Gate, which stops the run:** the five clean texts clean and `f4-question` firing, ≥ 2 of 3 runs each, 0 errored rows. The other positives are n/a.
+
+**Predictions:**
+
+- **Q1:** gold fires on **≥ 2 of the 3** `question_asked` positives, RTD-1, RTD-11 and RTD-12, all `partial`. RTD-1 and RTD-12 are audit V cases. Under form 3 it fired on 0 of the 3.
+- **Q2:** negatives with any fire rise by **at most 1 text** over form 3's 5/21.
+
+**Reading:**
+
+- **Q1 holds:** for this rule, the silence was spec coverage. A spec naming the shape lets S0 fire on the texts it missed, at the cost Q2 measures. It is still tailored, so this does not show the spec generalises (T's job).
+- **Gold fires on 0 of 3:** even a spec that names the shape does not make S0 fire on these excerpts, and the judge, not the spec, is the limit for this rule.
+- **1 of 3:** reported per case, with nothing concluded.
+
+**Limits.** Three positives, one run each, the fourth use of Score A, and an author who has read the texts.

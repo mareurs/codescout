@@ -135,7 +135,11 @@ SPECS_F4: dict[str, str] = {
 }
 assert SPECS_F4.keys() <= SPECS.keys()
 QUESTION_FORMS["4"] = QUESTION_FORMS["3"]
-SPEC_FORMS = {"2b": SPECS, "3": SPECS, "4": {**SPECS, **SPECS_F4}}
+# Form 4q: form 4 narrowed to the one widened spec that passed form 4's gate (question_asked),
+# registered AFTER that gate was seen -- a choice of arm made on gate evidence, disclosed.
+QUESTION_FORMS["4q"] = QUESTION_FORMS["3"]
+SPEC_FORMS = {"2b": SPECS, "3": SPECS, "4": {**SPECS, **SPECS_F4},
+              "4q": {**SPECS, "question_asked": SPECS_F4["question_asked"]}}
 
 
 CLAIM_RE = re.compile(r"^[\s*_>#-]*CLAIM:[\s*_]*(.+?)\s*$", re.I | re.M)
@@ -506,7 +510,7 @@ def main() -> int:
     global QUESTION, SPECS, GATE, JUDGED
     QUESTION = QUESTION_FORMS[args.form]
     SPECS = SPEC_FORMS[args.form]
-    if args.form == "4":
+    if args.form.startswith("4"):
         GATE = GATE + GATE_F4
     if args.rules:
         JUDGED = args.rules.split(",")
