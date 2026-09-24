@@ -15,7 +15,7 @@ entry_prefix:
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
 entry_high_water_DWF: 7
-entry_high_water_DCS: 6
+entry_high_water_DCS: 7
 ---
 
 # Deep-agent workflow observations and session coverage
@@ -98,6 +98,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DCS-5 | 2026-09-24 | coverage | session-receipt | 571eb3d6/post-compaction-2026-09-24 |
 | DWF-7 | 2026-09-24 | workflow | routine-first | sebf651ec-open-bug-verify-sweep |
 | DCS-6 | 2026-09-24 | coverage | session-receipt | sebf651ec-open-bug-verify-sweep |
+| DCS-7 | 2026-09-24 | coverage | session-receipt | 571eb3d6/post-compaction-3-2026-09-24 |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -356,6 +357,23 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 **Capture gaps:** the verifier transcripts are process-local task files and are not retained. The durable evidence is the per-bug notes written into each bug file, the ledger-vs-transcript injection table in `c161cc27ddff5672`, and the `usage.db` row ids cited there. The fork's report was relayed to the peer, and its one error (which ledger `post_compact` cleared) was corrected on the peer's prompt.
 
 **Recording effort:** three ledger appends and three updates, about 6 tool calls of roughly 250 in the interval. No task was displaced.
+
+## DCS-7 — Session 571eb3d6 — rtd8c, the form-3 ablation, JevK5 Stage 1 and the API-route clean re-score, third post-compaction interval
+
+**Valid:** dated 2026-09-24
+
+| Field | Record |
+|---|---|
+| Session / principal / collector | Session `571eb3d6-c879-43f6-b3f9-5a51e744e1af`. Principal: the operator, via this coordinating session. Collector: the same session. Model: claude-opus-5.5 |
+| Observed interval (UTC) | Third post-compaction stretch, 2026-09-24, about 11:00 to 15:00, approximate. DCS-2 and DCS-5 cover the earlier stretches |
+| Workspace | `/home/marius/work/claude/codescout`, branch `experiments`, shared checkout. Peers ebf651ec and 3b4fae98 had uncommitted entries in this ledger |
+| Coverage | `partial`, retrospective |
+| DCTX routine / enrichment | None recorded. This session's routine sample was already recorded as `missed-capture` in DCS-2. Context choices made this interval without a pre-action snapshot: running the generic-clause ablation blind rather than first reading the judge's reasons on the corpus (to avoid tailoring), and running JevK5's determinism check on a neutral text outside every gate |
+| DWF routine / enrichment | None recorded. Outcomes are in the eval docs, commits `d8e6f4d5` to `f3321e40`: the rtd8c result, S0 form 3, JevK5 Stage 1, the API-route clean re-score, and the data bundle |
+| Native / delegated / unobserved gaps | No subagents. About 2,300 `claude -p` judge calls (Sonnet and Haiku) ran outside `usage.db`, as did the local JevK5 GPU runs and the background shell jobs that launched them |
+| Notable, for the review | Two of this session's own claims were retracted before anything was built on them: a Stage-1 probability range, and the reading that recall is lost to rule assignment (it is mostly silence). A third, a gate-precision cost attributed to form 3, was withdrawn once form 2b's log showed it predated the change. Each was caught by recounting from the rows. At the operator's direction, peer entries DWF-4 and DWF-7 were committed with DCS-2 and DCS-5 in `502265fc`, with their authors named in the commit body. The live peer ebf651ec was told |
+| Unresolved pending entries | None. Local-route Stage 2 has not started |
+| Collection overhead | About 10 minutes for this receipt, estimated |
 
 ## Template for new entries
 
