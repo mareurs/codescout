@@ -313,8 +313,10 @@ impl Tool for Symbols {
         // never builds it, and a default-constructed audit there would report
         // "0 source files accepted" for a perfectly trustworthy zero.
         let mut audit: Option<WalkAudit> = None;
+        // Branch A's counterpart to `audit`: the files it could not read symbols from.
+        let mut unread_by_lsp: Vec<(PathBuf, String)> = Vec::new();
         if let Some(rel) = get_path_param(&input, false)? {
-            search_files_restricted(
+            unread_by_lsp = search_files_restricted(
                 rel,
                 ctx,
                 &root,
@@ -372,7 +374,11 @@ impl Tool for Symbols {
         // agent concluding "this symbol does not exist" from an answer that actually
         // meant "the walk never saw the file".
         if result["total"].as_u64() == Some(0) {
-            if let Some(w) = audit.as_ref().and_then(|a| a.completeness_warning(&root)) {
+            let warning = audit
+                .as_ref()
+                .and_then(|a| a.completeness_warning(&root))
+                .or_else(|| unread_files_warning(&unread_by_lsp, &root));
+            if let Some(w) = warning {
                 result["completeness_warning"] = json!(w);
             }
         }
@@ -438,6 +444,13 @@ impl Tool for Symbols {
 
 /// Restricted search (branch A of `Symbols::call`): a `path`/glob was supplied,
 /// so run `textDocument/documentSymbol` per file and collect the matches.
+///
+/// Returns the files whose symbols could NOT be read, each with the reason. A file
+/// the language server did not answer for is not a file without the symbol, and
+/// this branch builds no `WalkAudit`, so without this list a cold server's
+/// non-answer reached the caller as a bare `0 matches` indistinguishable from a
+/// real absence (`docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`,
+/// Bug B).
 #[allow(clippy::too_many_arguments)]
 async fn search_files_restricted(
     rel: &str,
@@ -448,7 +461,7 @@ async fn search_files_restricted(
     depth: usize,
     kind_filter: Option<&str>,
     matches: &mut Vec<Value>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Vec<(PathBuf, String)>> {
     // Restricted search: per-file textDocument/documentSymbol
     let files: Vec<PathBuf> = if is_glob(rel) {
         resolve_glob_for(&ctx.agent, ctx.workspace_override.as_deref(), rel).await?
@@ -470,6 +483,7 @@ async fn search_files_restricted(
         }
     };
 
+    let mut unread = Vec::new();
     for file_path in &files {
         let Some(lang) = ast::detect_language(file_path) else {
             continue;
@@ -479,12 +493,20 @@ async fn search_files_restricted(
             .agent
             .lsp_mux_override(ctx.workspace_override.as_deref(), lang)
             .await;
-        let Ok(client) = ctx.lsp.get_or_start(lang, root, mux_override).await else {
-            continue;
+        let client = match ctx.lsp.get_or_start(lang, root, mux_override).await {
+            Ok(client) => client,
+            Err(e) => {
+                unread.push((file_path.clone(), format!("{e:#}")));
+                continue;
+            }
         };
         let timer = LspTimer::start();
-        let Ok(symbols) = client.document_symbols(file_path, language_id).await else {
-            continue;
+        let symbols = match client.document_symbols(file_path, language_id).await {
+            Ok(symbols) => symbols,
+            Err(e) => {
+                unread.push((file_path.clone(), format!("{e:#}")));
+                continue;
+            }
         };
         timer.record(&*ctx.lsp, lang, root).await;
         let source = if include_body {
@@ -503,7 +525,23 @@ async fn search_files_restricted(
             kind_filter,
         );
     }
-    Ok(())
+    Ok(unread)
+}
+
+/// The warning a zero from branch A carries when some files went unread. `None`
+/// when every file was answered: an answered, empty lookup is a real absence, and
+/// warning on it would train the reader to skip the warning that matters.
+fn unread_files_warning(unread: &[(PathBuf, String)], root: &std::path::Path) -> Option<String> {
+    let (first, reason) = unread.first()?;
+    let shown = first.strip_prefix(root).unwrap_or(first).display();
+    let more = match unread.len() - 1 {
+        0 => String::new(),
+        n => format!(" (and {n} more file{})", if n == 1 { "" } else { "s" }),
+    };
+    Some(format!(
+        "the language server gave no symbols for {shown}{more}: {reason} — so this 0 is not \
+         evidence the symbol is absent. Retry shortly, or read the file directly."
+    ))
 }
 
 /// What the project walk could not see.

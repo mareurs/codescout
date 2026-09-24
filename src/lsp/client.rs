@@ -685,6 +685,19 @@ impl LspClient {
         })
     }
 
+    /// Whether this client is inside its cold-start window, where a server is still
+    /// loading and transient non-answers are expected. Shared by `request`'s error
+    /// retry and `document_symbols`' null-answer retry, so both read one clock.
+    ///
+    /// Anchored at init completion if we have it; otherwise at construction time,
+    /// so in-flight init requests (and socket clients, which never run `initialize`)
+    /// still get the patient window.
+    fn in_cold_start_window(&self) -> bool {
+        const COLD_START_WINDOW: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+        let anchor = self.init_completed_at.get().unwrap_or(&self.started_at);
+        anchor.elapsed() < COLD_START_WINDOW
+    }
+
     /// Send a JSON-RPC request and await the response.
     pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
         // During the cold-start indexing window (e.g. Gradle import for kotlin-lsp),
@@ -695,7 +708,6 @@ impl LspClient {
         //       Linux ≈ 45 s max, macOS ≈ 67 s, Windows ≈ 90 s (per
         //       `cold_start_max_retries`).
         // Warm:  3 retries × 300 ms linear backoff ≈ 1.2 s max wait.
-        const COLD_START_WINDOW: std::time::Duration = std::time::Duration::from_secs(5 * 60);
         // cap-class: NOT_A_CAP — retry ceiling; exhaustion surfaces as an error, never as a shortened result
         const MAX_RETRIES_COLD: usize = cold_start_max_retries();
         const RETRY_DELAY_COLD_MS: u64 = 3_000;
@@ -703,11 +715,7 @@ impl LspClient {
         const MAX_RETRIES_WARM: usize = 3;
         const RETRY_DELAY_WARM_MS: u64 = 300;
 
-        // Anchor cold-start budget at init completion if we have it; otherwise
-        // fall back to construction time so in-flight init requests still
-        // benefit from the patient window.
-        let anchor = self.init_completed_at.get().unwrap_or(&self.started_at);
-        let in_cold_start = anchor.elapsed() < COLD_START_WINDOW;
+        let in_cold_start = self.in_cold_start_window();
         let (max_retries, retry_delay_ms) = if in_cold_start && uses_cold_start_retry_budget(method)
         {
             (MAX_RETRIES_COLD, RETRY_DELAY_COLD_MS)
@@ -1181,16 +1189,49 @@ impl LspClient {
             partial_result_params: Default::default(),
         };
 
-        let result = self
-            .request("textDocument/documentSymbol", serde_json::to_value(params)?)
-            .await?;
+        // A null answer is re-asked, never read as "no symbols". rust-analyzer answers a
+        // SUCCESSFUL `null` for every open file while it swaps its crate graph during a
+        // workspace (re)load — measured 2026-09-24 at 0.2–0.7 s per swap, twice during
+        // start-up, with correct answers on either side. `request` retries only -32800 /
+        // -32801 ERRORS, so a null used to become `Ok(vec![])` here: `references` said
+        // "symbol not found" and path-scoped `symbols` said "0 matches" for symbols that
+        // exist (docs/issues/2026-08-27-references-symbol-not-found-while-lsp-warms.md).
+        // An empty ARRAY is an answer and is returned as one; only null is re-asked.
+        const NULL_ANSWER_RETRY_INTERVAL: std::time::Duration =
+            std::time::Duration::from_millis(200);
+        // cap-class: NOT_A_CAP — wait ceiling; exhaustion surfaces as an error, never as a shortened result
+        let null_answer_budget = if self.in_cold_start_window() {
+            std::time::Duration::from_secs(5)
+        } else {
+            std::time::Duration::from_secs(1)
+        };
+        let params = serde_json::to_value(params)?;
+        let first_asked = std::time::Instant::now();
+        let result = loop {
+            let result = self
+                .request("textDocument/documentSymbol", params.clone())
+                .await?;
+            if !result.is_null() {
+                break result;
+            }
+            if first_asked.elapsed() >= null_answer_budget {
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "the language server answered textDocument/documentSymbol with null for {} \
+                         on every attempt for {} ms",
+                        path.display(),
+                        null_answer_budget.as_millis()
+                    ),
+                    "null means the server has not answered, not that the file has no symbols \
+                     — rust-analyzer sends it while it reloads its workspace. Retry shortly.",
+                )
+                .into());
+            }
+            tokio::time::sleep(NULL_ANSWER_RETRY_INTERVAL).await;
+        };
 
         // LSP returns either DocumentSymbol[] (hierarchical) or SymbolInformation[] (flat)
         // We prefer hierarchical and convert both to SymbolInfo
-        if result.is_null() {
-            return Ok(vec![]);
-        }
-
         let file_path = path.to_path_buf();
 
         // Try hierarchical first
@@ -2875,6 +2916,122 @@ struct Point {
         );
 
         client.shutdown().await.unwrap();
+    }
+
+    /// A scripted LSP peer on a Unix socket, served by `LspClient::connect`: it answers
+    /// the first `nulls` `textDocument/documentSymbol` requests with a successful `null`
+    /// and every later one with a single `alpha` function. Returns the socket path, the
+    /// documentSymbol request counter, and the tempdir that owns both.
+    ///
+    /// This is rust-analyzer's real behaviour, measured 2026-09-24 against a cold 1.97.1
+    /// server on this repo: it answers `null` — a SUCCESS, not an error, so the -32800 /
+    /// -32801 retry in `request` never sees it — for every open file while it swaps its
+    /// crate graph (`Building CrateGraph` → `Roots Scanned`), 0.2–0.7 s per swap, twice
+    /// during start-up (`docs/issues/2026-08-27-references-symbol-not-found-while-lsp-warms.md`).
+    #[cfg(unix)]
+    async fn scripted_null_document_symbol_peer(
+        nulls: usize,
+    ) -> (
+        tempfile::TempDir,
+        std::path::PathBuf,
+        Arc<std::sync::atomic::AtomicUsize>,
+    ) {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("peer.sock");
+        let listener = tokio::net::UnixListener::bind(&sock).unwrap();
+        let served = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let served_by_peer = served.clone();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (read_half, mut write_half) = stream.into_split();
+            let mut reader = BufReader::new(read_half);
+            // `connect` reads one init message carrying the cached InitializeResult.
+            transport::write_message(
+                &mut write_half,
+                &json!({"jsonrpc": "2.0", "id": 0, "result": {"capabilities": {}}}),
+            )
+            .await
+            .unwrap();
+            while let Ok(msg) = transport::read_message(&mut reader).await {
+                let Some(id) = msg.get("id").cloned() else {
+                    continue; // didOpen and other notifications need no answer
+                };
+                let result = if msg["method"] == "textDocument/documentSymbol" {
+                    let n = served_by_peer.fetch_add(1, Ordering::SeqCst) + 1;
+                    if n <= nulls {
+                        Value::Null
+                    } else {
+                        let at = json!({"start": {"line": 0, "character": 3},
+                                        "end": {"line": 0, "character": 8}});
+                        json!([{"name": "alpha", "kind": 12, "range": at, "selectionRange": at}])
+                    }
+                } else {
+                    Value::Null
+                };
+                let reply = json!({"jsonrpc": "2.0", "id": id, "result": result});
+                if transport::write_message(&mut write_half, &reply)
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        });
+        (dir, sock, served)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn document_symbols_waits_out_a_null_answer_instead_of_reporting_no_symbols() {
+        let (dir, sock, served) = scripted_null_document_symbol_peer(2).await;
+        let file = dir.path().join("lib.rs");
+        std::fs::write(&file, "fn alpha() {}\n").unwrap();
+        let client = LspClient::connect(&sock, dir.path().to_path_buf())
+            .await
+            .unwrap();
+
+        let symbols = client.document_symbols(&file, "rust").await.unwrap();
+
+        assert_eq!(
+            symbols.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            vec!["alpha"],
+            "a null answer means the server has not answered yet — an empty list here is the \
+             false 'symbol not found' / '0 matches' of d25aa6db and 523233935 Bug B"
+        );
+        assert_eq!(
+            served.load(Ordering::SeqCst),
+            3,
+            "two null answers must each be re-asked, and the real answer taken on the third"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn document_symbols_reports_a_persistent_null_as_no_answer_not_as_no_symbols() {
+        let (dir, sock, served) = scripted_null_document_symbol_peer(usize::MAX).await;
+        let file = dir.path().join("lib.rs");
+        std::fs::write(&file, "fn alpha() {}\n").unwrap();
+        let mut client = LspClient::connect(&sock, dir.path().to_path_buf())
+            .await
+            .unwrap();
+        // Warm the client so the test waits out the short budget, not the cold one.
+        client.started_at = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(600))
+            .unwrap();
+
+        let err = client.document_symbols(&file, "rust").await.expect_err(
+            "a server that never answers must not be reported as a file with no symbols",
+        );
+
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("null"),
+            "the error must name what the server sent: {msg}"
+        );
+        assert!(
+            served.load(Ordering::SeqCst) > 1,
+            "the null answer must have been re-asked before giving up"
+        );
     }
 
     #[cfg(unix)]

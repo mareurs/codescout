@@ -11,6 +11,10 @@ use crate::lsp::SymbolInfo;
 
 pub struct MockLspClient {
     symbols: HashMap<PathBuf, Vec<SymbolInfo>>,
+    /// When set for a path, `document_symbols` fails with this message instead of
+    /// answering: a server that gave no answer (e.g. a persistent null, which
+    /// `LspClient::document_symbols` reports as an error). Use `with_symbols_error`.
+    symbols_errors: HashMap<PathBuf, String>,
     /// BUG-041 test infra: when set for a path, `document_symbols` returns the
     /// FRONT of the queue (without popping), and `did_change` pops the front
     /// (unless only one entry remains, which then sticks). Simulates an LSP
@@ -51,6 +55,7 @@ impl MockLspClient {
     pub fn new() -> Self {
         Self {
             symbols: HashMap::new(),
+            symbols_errors: HashMap::new(),
             symbols_sequence: std::sync::Mutex::new(HashMap::new()),
             definitions: HashMap::new(),
             workspace_results: vec![],
@@ -61,6 +66,13 @@ impl MockLspClient {
             outgoing_calls_results: std::sync::Mutex::new(std::collections::HashMap::new()),
             references_results: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
+    }
+
+    /// Make `document_symbols` fail for `path` with `message`, as a server does
+    /// when it never answers. The path must match exactly what the tool passes.
+    pub fn with_symbols_error(mut self, path: impl Into<PathBuf>, message: &str) -> Self {
+        self.symbols_errors.insert(path.into(), message.to_string());
+        self
     }
 
     /// Pre-load symbol results for a given file path.
@@ -147,6 +159,9 @@ impl LspClientOps for MockLspClient {
         path: &Path,
         _language_id: &str,
     ) -> anyhow::Result<Vec<SymbolInfo>> {
+        if let Some(message) = self.symbols_errors.get(path) {
+            return Err(anyhow::anyhow!("{message}"));
+        }
         if let Some(front) = self
             .symbols_sequence
             .lock()

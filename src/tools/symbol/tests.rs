@@ -9249,6 +9249,142 @@ async fn search_on_a_populated_tree_returns_a_bare_zero_for_a_missing_symbol() {
     assert_eq!(hit["total"].as_u64(), Some(1), "fixture must be searchable");
 }
 
+async fn path_scoped_ctx(
+    dir: &std::path::Path,
+    lsp: std::sync::Arc<dyn crate::lsp::ops::LspProvider>,
+) -> ToolContext {
+    ToolContext {
+        agent: Agent::new(Some(dir.to_path_buf())).await.unwrap(),
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    }
+}
+
+/// Branch A (`path=` supplied) used to `continue` past a file whose LSP lookup
+/// failed, so a server that never answered gave the same bare `0 matches` as a file
+/// that really lacks the symbol, and there was no audit on this branch to say
+/// otherwise. Measured six times in one run on 2026-09-24 against a 1–3 s old
+/// rust-analyzer. Guards
+/// `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`
+/// (Bug B, the path-scoped branch its 08-07 fix never covered).
+#[tokio::test]
+async fn a_path_scoped_zero_names_the_files_the_language_server_did_not_answer_for() {
+    use crate::lsp::mock::{MockLspClient, MockLspProvider};
+
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    let file = std::fs::canonicalize(dir.path())
+        .unwrap()
+        .join("src")
+        .join("lib.rs");
+    // `alpha` IS in the file, so a zero can only mean the lookup failed — the
+    // fixture's one load-bearing detail. Remove it and the test still passes while
+    // no longer telling "no answer" apart from "no such symbol".
+    std::fs::write(&file, "fn alpha() {}\n").unwrap();
+    let lsp = MockLspProvider::with_client(
+        MockLspClient::new().with_symbols_error(&file, "server answered documentSymbol with null"),
+    );
+    let ctx = path_scoped_ctx(dir.path(), lsp).await;
+
+    let result = Symbols
+        .call(json!({ "name": "alpha", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(result["total"].as_u64(), Some(0));
+    let w = result["completeness_warning"]
+        .as_str()
+        .expect("a zero drawn from a file the server never answered for must say so");
+    assert!(
+        w.contains("lib.rs"),
+        "must name the file that went unread: {w}"
+    );
+    assert!(
+        w.contains("answered documentSymbol with null"),
+        "must carry the server's reason, so the reader can tell a cold server from a wrong path: {w}"
+    );
+}
+
+/// The over-match guard for the test above: a server that DID answer, with no
+/// symbols, makes the zero a real statement about the file — it must stay bare.
+#[tokio::test]
+async fn a_path_scoped_zero_from_an_answering_server_stays_bare() {
+    use crate::lsp::mock::{MockLspClient, MockLspProvider};
+
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src").join("lib.rs"), "fn alpha() {}\n").unwrap();
+    // Inert on purpose: no `with_symbols` for the file, so the mock answers
+    // `Ok(vec![])` — an answer, and an empty one.
+    let lsp = MockLspProvider::with_client(MockLspClient::new());
+    let ctx = path_scoped_ctx(dir.path(), lsp).await;
+
+    let result = Symbols
+        .call(json!({ "name": "alpha", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(result["total"].as_u64(), Some(0));
+    assert!(
+        result.get("completeness_warning").is_none(),
+        "an answered, empty lookup must leave the zero bare: {result}"
+    );
+}
+
+/// The other half of branch A's unread list: the language server would not START,
+/// so no file was asked at all. Same false-zero shape, a different arm of
+/// `search_files_restricted`, which the mock provider (it always starts) cannot reach.
+#[tokio::test]
+async fn a_path_scoped_zero_names_a_file_whose_language_server_would_not_start() {
+    struct NeverStarts;
+    #[async_trait::async_trait]
+    impl crate::lsp::ops::LspProvider for NeverStarts {
+        async fn get_or_start(
+            &self,
+            _language: &str,
+            _workspace_root: &std::path::Path,
+            _mux_override: Option<bool>,
+        ) -> anyhow::Result<std::sync::Arc<dyn crate::lsp::ops::LspClientOps>> {
+            anyhow::bail!("rust-analyzer failed to start: spawn refused")
+        }
+        async fn notify_file_changed(&self, _path: &std::path::Path) {}
+        async fn shutdown_all(&self) {}
+    }
+
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src").join("lib.rs"), "fn alpha() {}\n").unwrap();
+    let ctx = path_scoped_ctx(dir.path(), std::sync::Arc::new(NeverStarts)).await;
+
+    let result = Symbols
+        .call(json!({ "name": "alpha", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(result["total"].as_u64(), Some(0));
+    let w = result["completeness_warning"]
+        .as_str()
+        .expect("a zero from a server that never started must say so");
+    assert!(
+        w.contains("lib.rs"),
+        "must name the file that went unread: {w}"
+    );
+    assert!(
+        w.contains("failed to start"),
+        "must carry the start failure: {w}"
+    );
+}
+
 /// The defect itself: `ignore::Walk` yields `Result<DirEntry, _>` and the previous
 /// `.flatten()` discarded every `Err`, so a walk truncated by an unreadable
 /// directory was indistinguishable from a complete one. An unreadable directory is
