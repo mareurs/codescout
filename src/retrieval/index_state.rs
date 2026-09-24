@@ -572,10 +572,27 @@ mod tests {
             .arg("30")
             .spawn()
             .expect("spawn the copied probe");
-        // `spawn` returns only after exec succeeded, so the image is mapped: unlinking
-        // now leaves a running process with no file behind it.
-        fs::remove_file(&copy).unwrap();
         let proc_exe = std::path::PathBuf::from(format!("/proc/{}/exe", child.id()));
+        // `spawn` returning does NOT mean the child's /proc entry names the new image yet.
+        // Measured 2026-09-25: about 1 run in 500 locally, and most Linux CI lanes, read
+        // /proc/<pid>/exe while it still named THIS test binary (the hash matched the test
+        // executable's), so the assertion below compared the wrong file. Wait until the
+        // entry names the copy before unlinking it; a timeout fails loudly rather than
+        // letting the test assert about the parent.
+        // docs/issues/2026-09-25-build-id-deleted-binary-test-is-red-on-every-linux-ci-lane-and-green-locally.md
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while fs::read_link(&proc_exe)
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n != "sleepy"))
+            .unwrap_or(true)
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the child's {proc_exe:?} never named the copied probe"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        fs::remove_file(&copy).unwrap();
 
         let via_proc = build_id_of(&proc_exe);
         let via_readlink = fs::read_link(&proc_exe).ok().and_then(|p| build_id_of(&p));
@@ -590,7 +607,7 @@ mod tests {
         assert_eq!(
             via_readlink, None,
             "and the readlink string must NOT — it names '<path> (deleted)', which is \
-             why build_id_of is never handed a resolved path"
+         why build_id_of is never handed a resolved path"
         );
     }
 
