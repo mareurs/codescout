@@ -1,63 +1,63 @@
 commits scanned: 4325
-candidates found: 1038   kept: 940
-dropped: {'shingle: fork-drafts': 26, 'shingle (any)': 76, 'shingle: controls': 56, 'duplicate pair': 2, 'shingle: phase1A-pairs': 10, 'held-out source doc': 20}
-kinds: {'rewrite': 931, 'note': 9}
-marker source: {'twin': 228, 'added-block': 541, 'note': 9, 'subject': 162}
-distinct incidents: 509   distinct doc groups: 247
+candidates found: 1038   kept: 944
+dropped: {'shingle: fork-drafts': 30, 'shingle (any)': 72, 'shingle: controls': 53, 'duplicate pair': 2, 'shingle: phase1A-pairs': 10, 'held-out source doc': 20}
+kinds: {'rewrite': 935, 'note': 9}
+marker source: {'twin': 228, 'added-block': 545, 'note': 9, 'subject': 162}
+distinct incidents: 513   distinct doc groups: 248
 doc-group pairs sharing an 8-token shingle: 25
 rule_hint distribution (single hint):
-  None                   611
+  None                   616
   closed_population      141
   count_unit             47
   monotone_absence       31
-  run_tool               24
+  run_tool               23
   question_asked         23
-  selector_narrow        23
+  selector_narrow        21
   scope_instant          12
   act_on_artifact        10
   contradiction          6
   d_sessionid            4
   d_semicolon            3
   d_visibility           2
+  cannot_happen          2
+  d_adjacency            2
   member_vs_population   1
-  cannot_happen          1
-  d_adjacency            1
 rule_hint distribution (any hint):
   closed_population      169
   count_unit             49
-  selector_narrow        46
-  monotone_absence       38
+  selector_narrow        44
+  monotone_absence       37
   question_asked         28
-  run_tool               26
+  run_tool               25
   scope_instant          13
   act_on_artifact        11
   contradiction          6
   d_sessionid            5
   d_semicolon            4
   d_visibility           3
+  cannot_happen          2
+  d_adjacency            2
   member_vs_population   1
-  cannot_happen          1
-  d_adjacency            1
 
 random sample of 10, random.Random(20260924):
 --- rewrite ccee0849 docs/plans/2026-05-30-per-request-workspace-pinning.md  marker='correction' (added-block)  hint=None:None
   POS : The remaining risk is execution discipline across the ~100 call sites, not design.
   TWIN: Remaining risk is the concurrency-model change (per-entry locking, Phase 1) and execution discipline across ~100 sites (Phases 3–4), not the data model.
---- rewrite 9b6f4713 docs/issues/2026-09-14-every-reader-of-a-cmd-buffer-takes-stdout-only-so-the-stored-stderr-reaches-nobody.md  marker='corrected' (added-block)  hint=closed_population:'every'
-  POS : **Concatenate at read time** — simplest, and it silently changes line numbering for every existing `sed -n 'N,Mp' @cmd_*` caller.
-  TWIN: **Concatenate at read time** — silently changes line numbering for every existing `sed -n 'N,Mp' @cmd_*` caller.
---- rewrite 45c1e2ab docs/issues/archive/2026-09-08-the-taken-clause-in-the-triage-query-cannot-match.md  marker='narrower' (added-block)  hint=None:None
-  POS : Nothing in the tests depends on that, and the reachability test is what covers the path an end-to-end check would exercise.
-  TWIN: The verifier cross-checked the id against two sources independent of this code — their scratchpad path component and `CLAUDE_CODE_SESSION_ID` — and all three agreed.
---- rewrite cb54d062 docs/trackers/issue-clusters/IC-14-guard-narrower-than-its-name.md  marker='narrower' (twin)  hint=count_unit:'n=12'
-  POS : **Members:** `filter={"tags": {"contains": "cluster/guard-narrower-than-its-name"}}` — **`n=12`, 2026-09-02, re-derived** by anchored file count.
-  TWIN: Inherits the parent's class. — `filter={"tags": {"contains": "cluster/guard-narrower-than-its-name"}}` — **`n=12`, 2026-09-02, re-derived** by anchored file count.
---- rewrite ab231cbf CLAUDE.md  marker='corrected' (added-block)  hint=None:None
-  POS : its own scratchpad path, because the harness makes the session id a path component — so the id is *given* rather than inferred.
-  TWIN: its own scratchpad path, because the harness makes the session id a path component — so the **sessionId** is *given* rather than inferred.
---- rewrite 9c1709b0 docs/trackers/resume-artifact-chunk-grain-retrieval.md  marker='superseded' (twin)  hint=None:None
-  POS : **What is owed.** Decide whether `c77fb370f61fc309` closes as *superseded by* `921a192357e54bad`
-  TWIN: **What is owed.** Decide whether `c77fb370f61fc309` closes as *superseded by* `6ee86ac5b140576f`
+--- rewrite e901b597 docs/issues/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md  marker='was wrong' (added-block)  hint=None:None
+  POS : Not implemented, and the cheap form is likely right: carry `stderr` in the `test` envelope as the `generic` one does.
+  TWIN: So copying `summarize_generic`'s shape into the `test` path would have dropped the verdict on the common case, with the field present and a suite green at small sizes.
+--- rewrite 1497eddd docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md  marker='correction' (twin)  hint=None:None
+  POS : One failure, one pass, and a correction to the *instrument* the
+  TWIN: **Two** failures, one pass, and a correction to the *instrument* the
+--- rewrite 5909c464 docs/trackers/2026-09-20-handoff-overflow-retrieval-discriminator.md  marker='overstates' (added-block)  hint=None:None
+  POS : The *interpretation* is not, because nothing records what the caller wanted.
+  TWIN: Nothing in `usage.db` records what the caller wanted.
+--- rewrite 005dd9e6 docs/trackers/issue-clusters.md  marker='narrower' (added-block)  hint=None:None
+  POS : **git index — OWNED.** `scripts/post-index-change-stage-log.sh` records `(staged blob, path) → session id` into `$GIT_DIR/session-stage-log`, keyed on the pair so a stat-refresh reassigns nothing; `sc
+  TWIN: **git index — OWNED, and as of 2026-09-02 durably.** `scripts/post-index-change-stage-log.sh` records `(staged blob, path) → session id` into `$GIT_DIR/session-stage-log`, keyed on the pair so a stat-
+--- rewrite 8320d5b0 docs/trackers/resume-cross-machine-catalog-restore.md  marker='SUPERSEDED' (twin)  hint=None:None
+  POS : **Next:** decide on the fix, which touches a shared primitive and so is not a
+  TWIN: **Next (SUPERSEDED 2026-09-06 — the shipped fix took the other option; see the banner above):** decide on the fix, which touches a shared primitive and so is not a
 --- rewrite 5f306383 docs/superpowers/plans/2026-09-10-parameter-alias-collapse.md  marker='was wrong' (subject)  hint=question_asked:'established'
   POS : (established in Task 1; the plan's original `crate::tools::param_alias::…` does not compile).
   TWIN: (established in Task 1; the form this plan originally used, with a `core::` segment between `tools::` and `param_alias::`, does not compile).
@@ -65,8 +65,8 @@ random sample of 10, random.Random(20260924):
   POS : Separately still worth deciding, and unchanged from the original filing: whether the production fallback should self-limit at all.
   TWIN: One fear in the original framing turned out to be unfounded: this was called a 14-call-site refactor, and it was five files.
 --- rewrite 5c353d8f docs/issues/2026-09-02-the-worktree-notice-prescribes-two-calls-a-served-peer-cannot-make.md  marker='was wrong' (added-block)  hint=None:None
-  POS : **Give `ToolContext` a peer-serve marker** and suppress the notice for served calls.
-  TWIN: The first draft treated the choice as *suppress the notice for peer-serve, or leave it*.
---- rewrite 2eb63105 docs/superpowers/specs/2026-09-02-retrieval-engine-coordination-design.md  marker='corrected' (twin)  hint=closed_population:'no'
-  POS : **Resolution, 2026-09-02 (Plan 3 Task 2).** `shape_total` no longer filters on the guide marker — it sums every block in the call's `Content` array after the primary, renamed to
-  TWIN: **Resolution, 2026-09-02 (Plan 3 Task 2), ceiling corrected 2026-09-02 (fix round 1).** `shape_total` no longer filters on the guide marker — it sums every block in the call's `Content` array after th
+  POS : But it writes to the very argument the strip exists to control, so it needs a test proving a caller-supplied value still cannot survive.
+  TWIN: **Suppress entirely for served calls.** Cheapest, and it discards the fact the notice exists to convey, in the one setting where nobody is watching for it.
+--- rewrite 0d6c07c3 docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md  marker='Corrected' (added-block)  hint=selector_narrow:'grep'
+  POS : So the notice reaches the caller on JSON-object responses (`artifact`, `librarian`, …) and is dropped on the read tools an agent actually uses: `symbols`, `grep`, `tree`, `read_file`, `read_markdown`,
+  TWIN: The real population is **ten**, all declaring `OutputForm::Text`: `grep`, `tree`, `symbols`, `symbol_at`, `references`, `call_graph`, `read_file`, `read_markdown`, `memory`, `library`.

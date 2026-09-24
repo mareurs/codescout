@@ -92,6 +92,16 @@ def norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
+def window(text: str, sentence: str, width: int = 1500) -> str:
+    """`width` characters of `text` CENTRED on `sentence`. A prefix cut from the start of the
+    hunk left the positive outside its own context in 147 of 940 rows, every one of them
+    at the cap. A sentence not found in `text` (should not happen) falls back to the prefix."""
+    i = text.find(sentence)
+    if i < 0 or len(text) <= width:
+        return text[:width]
+    start = max(0, min(i - (width - len(sentence)) // 2, len(text) - width))
+    return text[start:start + width]
+
 def prose_line(ln: str) -> bool:
     s = ln.strip()
     return bool(s) and not s.startswith(("|", "```", "#", "<!--", "---")) \
@@ -188,8 +198,8 @@ def mine(log: pathlib.Path):
                     add_text = " ".join(add)
                     add_marker = MARKER_RE.search(add_text)
                     rem_marker = MARKER_RE.search(" ".join(rem))
-                    before = norm(" ".join(l for l in old_side if prose_line(l)))[:1500]
-                    after = norm(" ".join(l for l in new_side if prose_line(l)))[:1500]
+                    before_full = norm(" ".join(l for l in old_side if prose_line(l)))
+                    after_full = norm(" ".join(l for l in new_side if prose_line(l)))
                     Aset = set(A)
                     # rewrite pairs
                     for r in R:
@@ -211,7 +221,8 @@ def mine(log: pathlib.Path):
                         rows.append(dict(kind="rewrite", sha=c["sha"], date=c["date"],
                                          subject=c["subject"], path=f["path"], positive=r,
                                          twin=best, ratio=round(ratio, 2),
-                                         context_before=before, context_after=after,
+                                         context_before=window(before_full, r),
+                                         context_after=window(after_full, best),
                                          marker=m.group(0), marker_source=src))
                     # appended correction notes after a kept sentence
                     for j, a in enumerate(A):
@@ -219,7 +230,8 @@ def mine(log: pathlib.Path):
                             rows.append(dict(kind="note", sha=c["sha"], date=c["date"],
                                              subject=c["subject"], path=f["path"],
                                              positive=A[j - 1], twin=None, ratio=None,
-                                             context_before=before, context_after=after,
+                                             context_before=window(before_full, A[j - 1]),
+                                             context_after=window(after_full, a),
                                              marker=NOTE_RE.match(a).group(1),
                                              marker_source="note", note=a[:300]))
     return rows, first_seen, len(all_commits)
