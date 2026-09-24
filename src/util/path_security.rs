@@ -1391,6 +1391,58 @@ fn grep_is_counting(stage: &str) -> bool {
     })
 }
 
+/// Index of the token that names the program a pipeline segment actually runs, skipping what
+/// the shell or a wrapper consumes first: leading `NAME=value` assignments, and a closed set of
+/// wrappers that exec their argument — `env` (plus its own assignments/flags), `nice [-n N]`,
+/// `timeout [flags] DURATION`, `nohup`, `time`, `command`.
+///
+/// Without it the first token was the head, so `FOO=1 cargo test | grep` read as the unknown
+/// command `FOO=1`, fell to "ambiguous -> bounded", and the pipe masked cargo's exit status —
+/// the harm IL-3 exists for, reproduced by exactly the `CARGO_TARGET_DIR=` prefix
+/// `scripts/gate.sh` sets. docs/issues/2026-09-24-il3-unbounded-pipe-block-is-bypassed-by-a-leading-env-assignment.md
+///
+/// **A closed wrapper list, and the limit is stated rather than hidden:** a wrapper not named
+/// here (`stdbuf`, `ionice`, a shell function) still reads as its own name and falls to
+/// bounded — the module's documented false-negative direction, one unbuffered pipe, never a
+/// refusal of something legitimate. The CALLER must slice the token list at this index, not
+/// merely take its head: later checks read positions (`git`'s subcommand is `tokens[1]`).
+fn producer_index(tokens: &[String]) -> usize {
+    fn is_assignment(t: &str) -> bool {
+        let Some((name, _)) = t.split_once('=') else {
+            return false;
+        };
+        let mut chars = name.chars();
+        matches!(chars.next(), Some(c) if c == '_' || c.is_ascii_alphabetic())
+            && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+    }
+    let mut i = 0;
+    while let Some(t) = tokens.get(i).map(String::as_str) {
+        if is_assignment(t) {
+            i += 1;
+            continue;
+        }
+        match t {
+            "env" | "nohup" | "time" | "command" | "nice" => {
+                i += 1;
+                // The wrapper's own options: `-n 5` takes a value; `-i`, `-p` do not.
+                while let Some(opt) = tokens.get(i).filter(|o| o.starts_with('-')) {
+                    i += if t == "nice" && opt == "-n" { 2 } else { 1 };
+                }
+            }
+            "timeout" => {
+                i += 1;
+                // `-k DUR` and `-s SIG` take a value; then exactly one DURATION.
+                while let Some(opt) = tokens.get(i).filter(|o| o.starts_with('-')) {
+                    i += if opt == "-k" || opt == "-s" { 2 } else { 1 };
+                }
+                i += 1;
+            }
+            _ => return i,
+        }
+    }
+    i
+}
+
 /// Classify an LHS shell command as unbounded (arbitrarily-large output) for
 /// IL3 purposes. Conservative: when shape parsing is ambiguous, treat as
 /// bounded (allow the pipe) — false negatives cost a buffer dance, false
@@ -1405,7 +1457,9 @@ fn grep_is_counting(stage: &str) -> bool {
 /// a file literally named `-maxdepth` — which is accepted: IL3 governs output
 /// size, not safety, and the cost is one unbuffered pipe.
 fn is_unbounded_lhs(lhs: &str) -> bool {
-    let tokens = shell_tokens(lhs);
+    let all = shell_tokens(lhs);
+    // Sliced, not just re-headed: the branches below read positions.
+    let tokens = &all[producer_index(&all).min(all.len())..];
     let head = match tokens.first() {
         Some(h) => h.as_str(),
         None => return false,
@@ -1438,7 +1492,7 @@ fn is_unbounded_lhs(lhs: &str) -> bool {
     // See [`git_output_is_bounded`] for the token set and why `--oneline` is
     // not in it.
     if head == "git" {
-        return !git_output_is_bounded(&tokens);
+        return !git_output_is_bounded(tokens);
     }
 
     false
@@ -4088,6 +4142,49 @@ mod tests {
         let hint = detect_il3_violation("cargo test | grep FAILED").expect("should block");
         assert!(hint.contains("IL3 violation"));
         assert!(hint.contains("cargo test"));
+    }
+
+    /// A leading `NAME=value` is an ASSIGNMENT, not the command, and a wrapper (`env`,
+    /// `timeout 60`, `nice -n 5`, ...) runs the command it names. Measured 2026-09-24: each of
+    /// `FOO=1 cargo`, `env cargo`, `timeout 60 cargo` and `nice cargo` piped to `head` was
+    /// ALLOWED while bare `cargo` was refused — the head was read as `FOO=1`/`env`/..., fell to
+    /// "ambiguous -> bounded", and the pipe masked cargo's exit status, the harm IL-3 exists
+    /// for. docs/issues/2026-09-24-il3-unbounded-pipe-block-is-bypassed-by-a-leading-env-assignment.md
+    #[test]
+    fn il3_sees_the_producer_behind_assignments_and_wrappers() {
+        for cmd in [
+            "FOO=1 cargo test | grep FAILED",
+            "CARGO_TARGET_DIR=/tmp/t RUST_LOG=debug cargo test --lib 2>&1 | grep FAILED",
+            "env cargo test | grep FAILED",
+            "env FOO=1 cargo test | grep FAILED",
+            "timeout 60 cargo test | grep FAILED",
+            "timeout -k 5 60 cargo test | grep FAILED",
+            "nice -n 5 cargo test | grep FAILED",
+            "nohup cargo test | grep FAILED",
+            "time cargo test | grep FAILED",
+        ] {
+            assert!(detect_il3_violation(cmd).is_some(), "must block: {cmd}");
+        }
+    }
+
+    /// The two ways that fix could over-reach, each pinned.
+    ///
+    /// * A BOUNDED producer behind an assignment stays allowed — a fix that refused every
+    ///   assignment-prefixed pipe would pass the test above.
+    /// * POSITIONAL logic still reads the producer's own arguments: the `git` branch takes
+    ///   `tokens[1]` as the subcommand, so a fix that only moved `head` would read `git` as
+    ///   git's subcommand and refuse `rev-parse`, which prints one line. Load-bearing: only the
+    ///   SLICED token list passes this.
+    #[test]
+    fn il3_skipping_a_prefix_keeps_bounded_producers_bounded() {
+        for cmd in [
+            "FOO=1 ls | head -3",
+            "env ls | head -3",
+            "FOO=1 git rev-parse HEAD | head -1",
+            "timeout 60 git rev-parse HEAD | head -1",
+        ] {
+            assert!(detect_il3_violation(cmd).is_none(), "must allow: {cmd}");
+        }
     }
 
     #[test]
