@@ -1,21 +1,19 @@
 ---
 id: '1efc6488cb2b8946'
 kind: bug
-status: taken
+status: fixed
 title: Two correct pre-commit guards have an empty intersection on an entangled index
 owners:
 - marius
 tags:
 - cluster/shared-resource-carries-no-owner
 topic: shared-checkout commit coordination
-claimed_at: 2026-09-24
-claimed_by: e4fbc7ef-27b7-4707-8469-ccdffa8e4e92
-closed: null
+closed: 2026-09-24
 opened: 2026-09-01
 owner: marius
 related: []
 severity: high
-unverified: This record is LEGITIMATELY OPEN and the declared patch-id is a citation, not a claim. `## Fix` reads "Not designed. Three directions, none costed", and direction 3 was falsified 2026-09-02 by codescout-8a hitting the same empty intersection inside a private linked worktree. The patch-id 0e7feedf232c5ed9e22fd975c6fe36baa109e1d2 in the body belongs to a DIFFERENT bug -- d5af3d3ceff1d08c, fixed at 74b9cc67 -- cited because it superseded the two guards this file proposed. doctor's non_terminal_status_with_fix_anchor cannot separate a cited patch-id from a claimed one, and that misreading is itself filed as docs/issues/archive/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md. Verified at the bytes 2026-09-15 by reading the citing paragraph; not inferred from the status field.
+unverified: 'RESOLVED 2026-09-24. The record now closes on its OWN fix, d859d04b / patch-id 4b8dc425cc40fc65c42e148f5d5029d11eb5c4b8; the 0e7feedf232c5ed9e22fd975c6fe36baa109e1d2 in the body stays a citation of d5af3d3ceff1d08c (74b9cc67), not a claim. Was: This record is LEGITIMATELY OPEN and the declared patch-id is a citation, not a claim. `## Fix` reads "Not designed. Three directions, none costed", and direction 3 was falsified 2026-09-02 by codescout-8a hitting the same empty intersection inside a private linked worktree. The patch-id 0e7feedf232c5ed9e22fd975c6fe36baa109e1d2 in the body belongs to a DIFFERENT bug -- d5af3d3ceff1d08c, fixed at 74b9cc67 -- cited because it superseded the two guards this file proposed. doctor''s non_terminal_status_with_fix_anchor cannot separate a cited patch-id from a claimed one, and that misreading is itself filed as docs/issues/archive/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md. Verified at the bytes 2026-09-15 by reading the citing paragraph; not inferred from the status field.'
 ---
 
 # BUG: two correct pre-commit guards have an empty intersection on an entangled index
@@ -469,6 +467,13 @@ fourth direction is now **shipped** for that route — fix the discriminator, as
 can answer instead of one it cannot.
 ## Tests added
 
+`tests/commit-mine.sh` (own CI job `commit-mine-tests`) — R1–R3 reproduction, F1–F9 contract;
+red first (17 passed / 20 failed), then 37/0. `scripts/mutation-probe.sh`, 8 mutations one per
+guarded site, **8 of 8 killed**; the suite header records which assertion kills each, including two
+backstops (`b.txt is not in HEAD`, `HEAD's IC-1 lacks B's line`) that kill nothing alone because an
+earlier guard refuses first. `tests/hooks-discrimination.sh` 151/0 and
+`tests/pre-commit-ledger-divergence.sh` 24/0 unchanged.
+
 None. This is a report, not a fix. The simulation harness that produced the six-row table
 (`GIT_INDEX_FILE` + `git read-tree HEAD`, with a HEAD-only control) is the right shape for a
 regression test and was not retained.
@@ -511,6 +516,30 @@ peer's hunk, the pathspec form takes the whole worktree file, so that narrower r
 (`93b30111`: *a pathspec commit DOES capture*). **Code-read verdict, not a live reproduction** — the
 scratch-clone repro is the natural first red for whichever direction is chosen. Decision between
 directions 1 and 2 still owed. Checked by sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`.
+
+### Fixed 2026-09-24 — direction 1, `scripts/commit-mine.sh`
+
+Operator chose direction 1. Landed as **`d859d04b`, patch-id `4b8dc425cc40fc65c42e148f5d5029d11eb5c4b8`**.
+
+`scripts/commit-mine.sh -m "..."` builds a private `GIT_INDEX_FILE` from HEAD plus only the staged
+entries the foreign-index guard attributes to the caller, and commits from it — so all three guards
+judge exactly the caller's set: foreign-index finds no foreign path, unreviewed-content stands down
+(not a `next-index-*` index, and every entry is one the caller staged), ledger-counts reads the
+private index and sees the coupled pair together. The owner lookup is **not** copied: the guard
+gained a read-only `--classify` mode that prints its own loop's verdict, and every stand-down that
+fails open in the guard fails closed there (exit 2/3). No shared-index repair is needed afterwards — an
+entry you own holds the blob you just committed — and the recorder already ignores private-index
+writes (`scripts/post-index-change-stage-log.sh:102-110`). The bare-commit refusal now names the helper.
+
+**Reproduced live before the fix** (not only code-read, as the 2026-09-24 re-read above had it):
+`tests/commit-mine.sh` R1–R3 build the entangled index in a throwaway repo and all three commit forms
+refuse, with the three guards' own texts. They stay as regression cases.
+
+**The limit, stated at the site:** one index entry holding two authors' hunks — a peer re-staged the
+file over yours — is still refused. Ownership is per `(blob, path)`, so that entry is theirs and is
+left out, and the refusal that follows is correct rather than a deadlock of two right guards.
+
+First real use: `d859d04b` itself was committed with the helper, through the live six-hook chain.
 
 ## References
 

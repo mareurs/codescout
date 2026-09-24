@@ -242,6 +242,11 @@ results of the binaries after it. Recorded so the next reader does not re-derive
 mechanism is known that could — plan shape is not visible to any hook or test in this repo. Ruled with
 and recorded by sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`.
 
+**Landed as `052a099b`, patch-id `e0810a170a898edcba6e0ec6593027fd5282291e`** (the three surfaces above,
+plus this archive move), with the gate green on the tree it was written against: `FMT=0 CLIPPY=0
+LEAN=0 DEFAULT=0`, and `the_tail_teaches_separate_calls_never_a_chained_commit`,
+`every_refusing_hook_emits_the_shared_tail` and the four `claude_md_*` tests read out of both lanes.
+
 ## Tests added
 
 None, and the reason is the finding rather than a gap: the defect is in a *message*, and pinning

@@ -459,6 +459,26 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | Trajectory | 1. `ListAgents` + reaching-peer-sessions Step 1 in the same minute (19:20:49Z): 10 vs 28 sessions / 4 profiles. 2. Skill file grep + registry-row key scan: `CWD` column unchanged since `claude-plugins:43cc1e0`; 18 registry keys, none project-shaped. 3. `audit_log(tbl=artifact, op=delete, since=09-18)`: 85 rows; a python pass over the buffer checked every non-move delete's path on disk (31, all absent) and every verb-null delete's archive twin (22, all present). 4. `/proc/<server>/environ` vs each profile's `settings.json` / `.claude.json`: 13 keys, 0 from `.claude-sdd/settings.json`. 5. `git log` over the three hook scripts since 09-07 (26 commits) + read `pre-commit-foreign-index.sh:250-358` for the ack scope. 6. `scripts/gate.sh` grep: no `--no-fail-fast`. Friction: a peer `cargo rb` at 19:15:29Z respawned the MCP server at 19:17:50Z, dropping activation (one write refused) and every pre-restart `@tool_*` buffer (one re-query) |
 
 **Outcome 2026-09-24 (verification phase).** `good` / `verified-complete` for the stated check — each bug got a dated verdict backed by command output, written into its own file through the catalog (6 files, +119/−5): cross-account **still live** (17 of 27 peers invisible, a 4th profile appeared); cwd-column **still live**, no option applied; zombie trigger **not met** over the whole window (first use of `audit_log` for it); mcp-reconnect **not reproducible from a session** — and on `.claude-sdd`/`.claude-kat` the env surface is `.claude.json`, not `settings.json`; pre-commit guards **still structurally live**, the 09-16 ack excludes its shape by construction — **code-read, not a live reproduction**; deliberately-red: DWF-7's verdict stands, `gate.sh` still fail-fast. Five claimed `taken`; zombie left `zombie`. What the check did NOT establish: any fix. Four of six are gated on an operator decision or an operator-typed `/mcp`, which is the delegation-relevant finding: a bounded re-verify workflow completes autonomously, and the next step does not. |
+
+**Outcome 2026-09-24 (fix phase, after the operator's four rulings).** Kept separate from the
+verification outcome above, which stands as written.
+
+- **Guards (direction 1):** `good` / `verified-complete`. `d859d04b` (patch-id `4b8dc425…`) adds
+  `scripts/commit-mine.sh` + a `--classify` mode on the foreign-index guard. Observed failing baseline:
+  `tests/commit-mine.sh` 17/20 before implementation, R1–R3 reproducing the bug live (correcting this
+  entry's earlier "code-read, not a live reproduction"). Post-fix 37/0; mutation-probe 8/8 killed,
+  which also **refuted two of the collector's own claims** about which assertion killed which mutation.
+  Committed with the helper itself through the live hook chain. Bug `fixed`, left at its live path:
+  archiving needs a repoint sweep over 11+ citing files incl. a peer-active IC file.
+- **Cross-task reds:** `good` / `verified-complete` as a policy. `052a099b`; bug `mitigated`, archived.
+- **CWD column:** `mixed` / `partial`. `claude-plugins:91b3205`, tests green, **not live** — release
+  would also ship three unreleased hook commits by another session; left to the operator.
+- **MCP env experiment:** `unknown` / `blocked`. Phase 1 control observed (the `.claude.json` layer IS
+  re-read on `/mcp`); phase 2 awaits an operator `/mcp` — one "continue" arrived without it, and the
+  unchanged server pid (3543619) is what separated "no reconnect" from "deletion not applied".
+- **Intervention / concurrency:** two MCP respawns (one peer `cargo rb`, one operator `/mcp`) each dropped
+  activation; a peer pushed `c92a43fa` + `052a099b` under its own operator ack and reported it; the gate's
+  `FMT=1` was a live peer's uncommitted `.rs`, attributed by `fmt-mine` and confirmed against HEAD.
 | Rests on / grouping / overhead | Canonical records: the six `docs/issues/` files named above; related DWF-7 (earlier open-bug sweep today). Capture ~5 min |
 
 ## DWF-10 — Review model-vs-context experiment: 24 cross-model review runs settle what they can — the model picks WHICH defects, priming changes nothing
