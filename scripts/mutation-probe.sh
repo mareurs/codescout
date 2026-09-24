@@ -150,7 +150,25 @@ mkdir -p "$MARKER_DIR"
 if [ "$SHARED" -eq 1 ]; then
     TREE="$ROOT"; MODE="shared"
 else
-    TREE="${ROOT}.worktrees/mutation-$SID"; MODE="isolated"
+    # Leased per RUN from a pool, not keyed on the session: a session-keyed tree was never
+    # removed (72G across 18 on 2026-09-24,
+    # docs/issues/2026-09-24-mutation-probe-worktrees-are-never-reclaimed.md) and gave two
+    # concurrent runs from one session the same tree. Same lease as scripts/gate.sh: the
+    # lock sits on an fd the test command inherits, deliberately without `flock -o`, so a
+    # SIGKILLed probe whose command still runs keeps its tree (bug-fix-session-log:F-173).
+    POOL="${ROOT}.worktrees"
+    mkdir -p "$POOL" || exit 2
+    SLOT=0
+    while :; do
+        exec {SLOT_FD}>"$POOL/mutation-slot-$SLOT.lock" || exit 2
+        flock -n "$SLOT_FD"; lock_rc=$?
+        [ "$lock_rc" -eq 0 ] && break
+        exec {SLOT_FD}>&-
+        # Exit 1 means held; anything else (flock missing, say) would loop forever.
+        [ "$lock_rc" -eq 1 ] || { echo "mutation-probe: flock failed with exit $lock_rc" >&2; exit 2; }
+        SLOT=$((SLOT + 1))
+    done
+    TREE="$POOL/mutation-slot-$SLOT"; MODE="isolated"
 fi
 TARGET="$TREE/$FILE"
 BACKUP=$(mktemp)
@@ -163,7 +181,7 @@ WTPATCH=$(mktemp)
 # is aimed at the window rather than away from it.
 cleanup() {
     [ -f "$BACKUP" ] && [ -f "$TARGET" ] && cp "$BACKUP" "$TARGET"
-    rm -f "$BACKUP" "$RUNLOG" "$MARKER"
+    rm -f "$BACKUP" "$RUNLOG" "$WTPATCH" "$MARKER"
 }
 trap cleanup EXIT INT TERM
 

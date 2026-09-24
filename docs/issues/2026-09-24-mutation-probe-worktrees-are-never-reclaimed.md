@@ -51,19 +51,39 @@ N/A.
 
 ## Fix
 
-Not started. Candidates:
+The tree is now leased per RUN from a pool, `<repo>.worktrees/mutation-slot-N`, with the same lock as `scripts/gate.sh`. It takes the first slot whose `mutation-slot-N.lock` a non-blocking `flock` can take, on an fd the test command inherits, deliberately without `-o` (`bug-fix-session-log:F-173`). A later run from ANY session reuses a freed tree warm, and two concurrent runs from one session get separate trees; before this, they shared one, and each run's `reset --hard` reverted the other's mutation.
 
-- **Reuse across sessions** with the same leased-slot pattern as `scripts/gate.sh`: a non-blocking `flock` on an inherited fd, first free slot, never `-o` (`bug-fix-session-log:F-173`). This is the second instance of the pattern; a shared helper is worth considering only at a third.
-- **Reap on entry:** remove the worktrees of sessions positively known dead. This depends on the liveness inference that `docs/issues/archive/2026-09-17-a-full-disk-truncates-a-live-sessions-registry-row-so-provenance-reports-it-dead.md` shows fails under disk pressure, so it is the weaker option.
-- Any one-time cleanup of existing trees must use `git worktree remove`, never a bare `rm`, so git's worktree registry stays consistent.
+A second leak was found and fixed in the same change. `cleanup()` never removed `WTPATCH` (the carried working-tree patch), so every isolated run left one file in `/tmp`. On 2026-09-24 there were 398 `/tmp/tmp.*` files beginning `diff --git` plus 244 empty ones, and a single probe run moved the count from 646 to 647.
+
+The fix SHA and patch-id are recorded after commit.
 
 ## Tests added
 
-None yet: open.
+`tests/mutation-probe.sh` gained cases 22–26. The suite already runs in CI job `mutation-probe-tests`.
+
+- **22:** a second session reuses the freed tree, and one worktree is left.
+- **23:** a concurrent same-session run gets its own tree.
+- **24:** SIGKILLing the probe while its command runs keeps the tree leased. A precondition checks that the killed pid is the probe, read from its own marker.
+- **25:** a `flock` that exits 127 stops the probe with exit 2 and creates no worktree. It runs under `timeout 20`.
+- **26:** an isolated run leaves `TMPDIR` empty.
+
+**Red observed first.** Cases 22–25 gave 53 passed / 6 failed against the old script; every failure was a new assertion, and the new controls passed. Case 26 gave 60/1 before the `WTPATCH` fix. The final run is 61/0.
+
+**Mutations, one per guarded site, all KILLED**, via the probe mutating itself: the outer run executes from the main checkout, and the inner suite runs in the leased tree.
+
+- **N1**, lease never checked: 57/4.
+- **N2**, command does not inherit the lease: case 24 fails. This mutant also breaks `--shared` capture, since its `{SLOT_FD}>&-` is a bad redirect where no slot is leased.
+- **N3**, never reuse a slot: 59/2.
+- **N4**, flock-failure guard removed: 60/1, with the loop bounded by `timeout`.
+- **N5**, `WTPATCH` kept: 60/1.
+
+After every mutation run I checked for survivors (hold processes, `/tmp` inodes) and found none.
 
 ## Workarounds
 
 `git worktree remove --force <path>` for a tree whose session is known dead, then `git worktree prune`.
+
+**Applied 2026-09-24, with operator approval, to DEAD sessions only.** Liveness was taken from registry rows in every `~/.claude*/sessions/` plus `CLAUDE_CODE_SESSION_ID` in process environments: 29 live ids, and 0 unreadable rows for a live pid. I also checked that no process had its cwd or an open file inside any tree, and that none was `locked`. 11 trees (~42G) were removed and 7 live sessions' trees (~30G) kept. Once no probe runs from a pre-fix copy of the script, nothing uses those 7 either. Removing them is a further operator decision.
 
 ## Resume
 

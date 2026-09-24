@@ -47,7 +47,10 @@ eq() { # eq <label> <actual> <expected>
 }
 
 WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT
+BGPIDS=()
+# Kill every background pid by ITS pid before removing anything: a process that outlives
+# the suite can fill a shared tmpfs (bug-fix-session-log:F-175).
+trap 'for p in "${BGPIDS[@]:-}"; do [ -n "$p" ] && kill -9 "$p" 2>/dev/null; done; rm -rf "$WORK"' EXIT
 SID="test-sid-0000"
 
 # A throwaway git repo, because the probe resolves its root with `rev-parse` and
@@ -367,6 +370,85 @@ has  "21 a non-cargo runner -> INCONCLUSIVE" "$OUT" "INCONCLUSIVE"
 has  "21 names the non-cargo runner as a cause" "$OUT" "not CARGO"
 has  "21 and says where the verdict IS readable" "$OUT" "summary line"
 eq   "21 and still renders no verdict" "$(printf '%s' "$OUT" | grep -cE 'KILLED|SURVIVED')" "0"
+
+# --- 22-25. THE ISOLATED WORKTREE IS LEASED PER RUN, not keyed on the session --------
+# Keying the tree on the session id left one 3.5-7.5G worktree per session that ever
+# ran the probe, never removed: 72G across 18 on 2026-09-24
+# (docs/issues/2026-09-24-mutation-probe-worktrees-are-never-reclaimed.md). It also
+# handed two CONCURRENT runs from one session (parallel subagents share the id) the
+# same tree, where each run's reset reverts the other's mutation.
+tree_of() { printf '%s\n' "$1" | sed -n 's/.*ARMED .* tree=//p' | head -1; }
+probe_trees() { git -C "$1" worktree list | grep -cF "$1.worktrees/"; }
+hold_cmd() { # hold_cmd <tag> -> a test command that parks until $WORK/hold-<tag> is removed
+    printf 'echo $$ > %q; : > %q; for i in $(seq 1 300); do [ -e %q ] || break; sleep 0.1; done' \
+        "$WORK/cmd-$1.pid" "$WORK/started-$1" "$WORK/hold-$1"
+}
+wait_for() { for _ in $(seq 1 150); do [ -e "$1" ] && return 0; sleep 0.1; done; return 1; }
+
+# 22. A later session reuses the tree a finished session freed.
+R=$(newrepo)
+run "$R" sid-a --file src/lib.rs --find 'guard();' --replace '' -- true
+TA=$(tree_of "$OUT")
+run "$R" sid-b --file src/lib.rs --find 'guard();' --replace '' -- true
+TB=$(tree_of "$OUT")
+eq "22 the first run armed an isolated tree" "$([ -n "$TA" ] && echo armed || echo none)" "armed"
+eq "22 a second session reuses the freed tree" "$TB" "$TA"
+eq "22 two sessions leave ONE probe worktree" "$(probe_trees "$R")" "1"
+
+# 23. Two concurrent runs from the SAME session never share a tree.
+R=$(newrepo); : > "$WORK/hold-c"
+( cd "$R" && CLAUDE_CODE_SESSION_ID=sid-c exec "$PROBE" --file src/lib.rs --find 'guard();' \
+    --replace '' -- bash -c "$(hold_cmd c)" ) > "$WORK/out-c" 2>&1 & BGPIDS+=("$!")
+if wait_for "$WORK/started-c"; then
+    BGPIDS+=("$(cat "$WORK/cmd-c.pid")")
+    run "$R" sid-c --file src/lib.rs --find 'guard();' --replace '' -- true
+    TC=$(tree_of "$(cat "$WORK/out-c")"); TD=$(tree_of "$OUT")
+    eq "23 a concurrent same-session run gets its OWN tree" \
+        "$([ -n "$TD" ] && [ "$TD" != "$TC" ] && echo distinct || echo "shared-or-refused")" "distinct"
+else
+    FAIL=$((FAIL + 1)); echo "FAIL: 23 holder never started: $(cat "$WORK/out-c")"
+fi
+rm -f "$WORK/hold-c"; wait 2>/dev/null
+
+# 24. SIGKILLing the probe while its command runs does NOT free the tree: the command
+# still holds the lease, so a same-session run started now must get another tree.
+R=$(newrepo); : > "$WORK/hold-e"
+( cd "$R" && CLAUDE_CODE_SESSION_ID=sid-e exec "$PROBE" --file src/lib.rs --find 'guard();' \
+    --replace '' -- bash -c "$(hold_cmd e)" ) > "$WORK/out-e" 2>&1 & PE=$!; BGPIDS+=("$PE")
+if wait_for "$WORK/started-e"; then
+    W=$(cat "$WORK/cmd-e.pid"); BGPIDS+=("$W")
+    # Precondition: the pid about to be killed IS the probe (its marker records $$).
+    MPID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' \
+        "$R/.codescout/mutations/sid-e.json" 2>/dev/null)
+    eq "24 the killed pid is the probe itself" "$MPID" "$PE"
+    kill -9 "$PE"; wait "$PE" 2>/dev/null
+    eq "24 the command outlives its SIGKILLed probe" "$(kill -0 "$W" 2>/dev/null && echo alive || echo dead)" "alive"
+    run "$R" sid-e --file src/lib.rs --find 'guard();' --replace '' -- true
+    TE=$(tree_of "$(cat "$WORK/out-e")"); TF=$(tree_of "$OUT")
+    eq "24 the orphaned command keeps its tree leased" \
+        "$([ -n "$TF" ] && [ "$TF" != "$TE" ] && echo distinct || echo "shared-or-refused")" "distinct"
+else
+    FAIL=$((FAIL + 1)); echo "FAIL: 24 holder never started: $(cat "$WORK/out-e")"
+fi
+rm -f "$WORK/hold-e"
+
+# 25. A flock that cannot run stops the probe before any worktree exists, and never
+# spins. `timeout` bounds a mutant that would loop (bug-fix-session-log:F-175).
+R=$(newrepo); mkdir -p "$WORK/noflock"
+printf '#!/usr/bin/env bash\nexit 127\n' > "$WORK/noflock/flock"; chmod +x "$WORK/noflock/flock"
+OUT=$(cd "$R" && PATH="$WORK/noflock:$PATH" CLAUDE_CODE_SESSION_ID=sid-f timeout 20 "$PROBE" \
+    --file src/lib.rs --find 'guard();' --replace '' -- true 2>&1); RC=$?
+eq "25 the probe exits 2" "$RC" "2"
+eq "25 no probe worktree was created" "$(probe_trees "$R")" "0"
+
+# 26. An isolated run leaves nothing in TMPDIR. `WTPATCH` (the carried working-tree
+# patch) was never removed, so every run leaked one file: often a copy of peers'
+# uncommitted diffs.
+R=$(newrepo); mkdir -p "$WORK/tmp26"
+OUT=$(cd "$R" && TMPDIR="$WORK/tmp26" CLAUDE_CODE_SESSION_ID=sid-g "$PROBE" \
+    --file src/lib.rs --find 'guard();' --replace '' -- true 2>&1); RC=$?
+eq "26 the run armed" "$(tree_of "$OUT" | grep -c .)" "1"
+eq "26 TMPDIR is empty after the run" "$(ls -A "$WORK/tmp26" | wc -l | tr -d ' ')" "0"
 
 echo
 echo "mutation-probe: $PASS passed, $FAIL failed"

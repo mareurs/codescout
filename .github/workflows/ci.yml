@@ -234,7 +234,7 @@ jobs:
   # plausible answer, which is the defect class the script itself serves — so the
   # suite is the only thing standing between that class and its own tool.
   #
-  # Needs git and python3; no Rust toolchain — the fixtures pass `-- true` as the
+  # Needs git, python3 and flock; no Rust toolchain — the fixtures pass `-- true` as the
   # test command, so nothing here compiles.
   mutation-probe-tests:
     name: mutation-probe discriminators
