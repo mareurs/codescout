@@ -9391,7 +9391,7 @@ async fn a_path_scoped_zero_names_a_file_whose_language_server_would_not_start()
 /// and again at 1.16 s, correct (38 locations, declaration present) from 10.48 s.
 /// The cross-file scan cannot fire here — every use is in the definition file — so
 /// before the fix this was a bare `0`. Guards
-/// `docs/issues/2026-09-24-references-silent-false-zero-for-file-local-symbols-while-warming.md`.
+/// `docs/issues/archive/2026-09-24-references-silent-false-zero-for-file-local-symbols-while-warming.md`.
 #[tokio::test]
 async fn references_warns_when_the_answer_omits_even_the_declaration() {
     use crate::lsp::mock::{MockLspClient, MockLspProvider};

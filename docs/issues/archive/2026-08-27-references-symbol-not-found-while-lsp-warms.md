@@ -229,7 +229,7 @@ Nothing left. **Live check passed 2026-09-24** on a release binary built at 19:4
 
 **What it does NOT prove:** that the null retry itself fired. Nothing logs a retry, and rust-analyzer being slow to answer would give the same timeline. The deterministic proof stays the two scripted-peer tests.
 
-**Found by the same run and filed separately:** all four `references` returned `0 references` during warm-up. Three were correctly warned by `corroborate_zero_references`. The fourth, a symbol used only in its own file, was silent: `docs/issues/2026-09-24-references-silent-false-zero-for-file-local-symbols-while-warming.md` (`079f8b10a0d3e14a`).
+**Found by the same run and filed separately:** all four `references` returned `0 references` during warm-up. Three were correctly warned by `corroborate_zero_references`. The fourth, a symbol used only in its own file, was silent: `docs/issues/archive/2026-09-24-references-silent-false-zero-for-file-local-symbols-while-warming.md` (`7a481ad70c6a9308`), since fixed in `1ea1d36b`.
 ## References
 - `docs/issues/archive/2026-06-09-references-false-zero-stale-graph.md` — same
   root-cause class, different symptom; its `corroborate_zero_references` guard

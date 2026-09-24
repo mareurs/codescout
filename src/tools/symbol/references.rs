@@ -456,7 +456,7 @@ impl Tool for References {
         // `null` at each crate-graph swap, correct from 10.5 s). This needs no text
         // scan, which is what makes it reach a FILE-LOCAL symbol, where the scan below
         // has no other file to find it in and used to leave a bare zero
-        // (docs/issues/2026-09-24-references-silent-false-zero-for-file-local-symbols-while-warming.md).
+        // (docs/issues/archive/2026-09-24-references-silent-false-zero-for-file-local-symbols-while-warming.md).
         if total_raw == 0 && result.get("completeness_warning").is_none() {
             result["completeness_warning"] = json!("LSP returned no locations at all — not even the symbol's own declaration, which this request asks it to include — so the reference index is not ready yet (a cold or reloading language server answers this way). Re-run shortly, or corroborate with grep / call_graph(direction='callers') before treating this symbol as unused.");
         } else if external_refs == 0 && result.get("completeness_warning").is_none() {
