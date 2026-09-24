@@ -1525,8 +1525,11 @@ async fn activate_project_unknown_id_with_no_slash_returns_error() {
 /// removing an asymmetry. It is not. That branch's event is a `/clear`, which the poll CAN
 /// see: `Rendezvous::poll` returns the new session id when it CHANGES. A compaction changes
 /// nothing it can see — the session id is identical across one ("a repeated stamp of the
-/// SAME session must be silent"), and the companion stamps only `hook_at`, never the
-/// source. A live companion is therefore not evidence about whether a compaction happened.
+/// SAME session must be silent"). A live companion is therefore not evidence about whether
+/// a compaction happened. What IS evidence is the `SessionStart` source the companion has
+/// stamped since `claude-plugins:cf5ea29c`, and `ba3a787e` gates on that record instead —
+/// see `post_compact_keeps_the_ledger_when_the_last_session_start_was_not_a_compaction`.
+/// This test pins the other side: live rendezvous, NO recorded source, still clears.
 ///
 /// Gating here would mean a genuine compaction never re-arms the ledger for any session
 /// running the companion — which is every session in this repo — trading an n=1 over-serve
