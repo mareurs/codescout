@@ -343,8 +343,20 @@ def report_corpus(rows: list[dict]) -> int:
     want = collections.Counter(RULES.keys())   # NOT Counter(RULES): a dict's values are read as counts
     incomplete = {k for k, rs in texts.items()
                   if collections.Counter(r["rule"] for r in rs) != want}
-    print(f"\n=== SCORE A — {len(texts)} texts, {len(rows)} rows, {len(errs)} errored, "
-          f"{len(incomplete)} incomplete ===")
+    # ...and the TEXTS are checked against the corpus the same way: the rule check above
+    # only sees texts that have at least one row, so an empty file, or one with whole texts
+    # dropped, reported "0 incomplete" and exit 0 on an undeclared subset
+    # (docs/issues/2026-09-24-codex-phase1-missing-case-groups.md).
+    cases = _p1.load_cases(_p1.EVAL_SET)
+    expected = {(c["id"], side) for c in cases for side in ("positive", "negative")}
+    missing, unexpected = expected - texts.keys(), texts.keys() - expected
+    print(f"\n=== SCORE A — {len(texts)} of {len(expected)} texts, {len(rows)} rows, "
+          f"{len(errs)} errored, {len(incomplete)} incomplete, {len(missing)} missing, "
+          f"{len(unexpected)} unexpected ===")
+    for k in sorted(missing):
+        print(f"⚠ MISSING {k}: no rows -- the scores below cover a subset")
+    for k in sorted(unexpected):
+        print(f"⚠ UNEXPECTED {k}: not in the corpus -- EXCLUDED")
     if errs:
         print("⚠ ERRORS PRESENT — a text with an errored rule is EXCLUDED, not counted")
     for k in sorted(incomplete):
@@ -356,12 +368,11 @@ def report_corpus(rows: list[dict]) -> int:
     # fix, so a gold-rule quote that ALSO appears verbatim in the corrected text sits in
     # a sentence the fix left alone -- likely the wrong sentence. Diagnostic, not proof:
     # a fix that only appends a qualifier legitimately keeps the violating sentence.
-    neg = {c["id"]: _norm("\n\n[…]\n\n".join(c["negative"]))
-           for c in _p1.load_cases(_p1.EVAL_SET)}
+    neg = {c["id"]: _norm("\n\n[…]\n\n".join(c["negative"])) for c in cases}
     for key, rs in texts.items():
         side = key[1]
         k = (rs[0]["text_detectable"], side)
-        if key in incomplete or any("error" in r for r in rs):
+        if key in incomplete or key in unexpected or any("error" in r for r in rs):
             b[k]["excluded"] += 1
             continue
         f = {r["rule"] for r in fired(rs)}
@@ -391,7 +402,7 @@ def report_corpus(rows: list[dict]) -> int:
     for td in ("yes", "partial", "no"):
         p = b[(td, "positive")]
         print(f"  {td:<9} {p['in_fix']}/{p['gold_quoted']}")
-    return 2 if errs or incomplete else 0
+    return 2 if errs or incomplete or missing or unexpected else 0
 
 
 # --- Score B input: per-run injections for the fork route -----------------------
