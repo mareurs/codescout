@@ -1,16 +1,18 @@
 ---
 id: '84b3e8d0960b439e'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: mutation-probe.sh keys its isolated worktree on the session id and never removes it — 72G across 18 trees'
 owners:
 - marius
 tags:
 - cluster/unclassified
+closed: 2026-09-24
 opened: 2026-09-24
 related:
 - docs/issues/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md
 severity: medium
+unverified: 'The mutation-probe-tests CI job has not yet run cases 22-26: nothing is pushed. 7 legacy per-session worktrees (~30G) of LIVE sessions remain; nothing uses them after b8b7bf85, and removing them is an operator decision.'
 ---
 
 # BUG: mutation-probe.sh keys its isolated worktree on the session id and never removes it — 72G across 18 trees
@@ -55,7 +57,10 @@ The tree is now leased per RUN from a pool, `<repo>.worktrees/mutation-slot-N`, 
 
 A second leak was found and fixed in the same change. `cleanup()` never removed `WTPATCH` (the carried working-tree patch), so every isolated run left one file in `/tmp`. On 2026-09-24 there were 398 `/tmp/tmp.*` files beginning `diff --git` plus 244 empty ones, and a single probe run moved the count from 646 to 647.
 
-The fix SHA and patch-id are recorded after commit.
+**Fixed:** `b8b7bf85` on `experiments`, 2026-09-24.
+**patch-id:** `44d11cb407376015c7279aad914979445bf34ed4`
+
+Gate green on it: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`.
 
 ## Tests added
 
