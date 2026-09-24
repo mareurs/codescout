@@ -1677,7 +1677,7 @@ proven against a CI-equivalent tree before pushing.
 ## W-8 — Reading the fallback gate eliminated the hypothesis a whole harness was going to measure
 
 **Observed:** 2026-08-06, round 6, working the open-bug ledger. The `symbols` search flake
-(`docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`) was
+(`docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`) was
 filed with an explicit instruction: *"Not proposed — root cause unconfirmed. Needs a
 controlled, scripted reproduction (N parallel `symbols(name=X)` calls immediately
 post-activation, repeated across several projects/runs) before a fix can be targeted."*
@@ -1912,7 +1912,7 @@ decision.
 ## W-10 — Apparent duplication was the recovery path; merging it would have worsened the bug being fixed
 
 **Observed:** 2026-08-07, fixing the `symbols` 0-match flake
-(`docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`).
+(`docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`).
 
 **Pattern:** Before merging two code paths that apply the same filter and look redundant,
 establish what *triggers* the second one. If the second path runs precisely when the first

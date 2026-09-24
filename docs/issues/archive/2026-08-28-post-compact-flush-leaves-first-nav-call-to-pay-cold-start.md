@@ -143,7 +143,7 @@ call_graph"*. That guard works. The timeout has no equivalent.
    different source. Recorded because the wrong probe returned a *number*.)
 
 3. **Hypothesis:** this is the zombie
-   `docs/issues/2026-08-27-references-symbol-not-found-while-lsp-warms.md`
+   `docs/issues/archive/2026-08-27-references-symbol-not-found-while-lsp-warms.md`
    recurring.
    **Test:** that file's re-open trigger is `references` returning
    **`symbol not found`** for a symbol `symbols(name=…)` resolves.
@@ -396,7 +396,7 @@ prewarm that the `activate` branch does. If it does not, (a) is a small change.
 
 ## References
 
-- `docs/issues/2026-08-27-references-symbol-not-found-while-lsp-warms.md` — **zombie**, adjacent but NOT this: its trigger is `symbol not found`, and its cold-start mechanism is refuted
+- `docs/issues/archive/2026-08-27-references-symbol-not-found-while-lsp-warms.md` — **zombie**, adjacent but NOT this: its trigger is `symbol not found`, and its cold-start mechanism is refuted
 - `docs/issues/archive/2026-06-09-references-false-zero-stale-graph.md` — mitigated; the guarded false-zero probe A hit, working as designed
 - `docs/issues/archive/2026-04-24-find-symbol-cold-start-hang.md` — fixed; the same 60s cold-start shape on `find_symbol`
 - `docs/issues/archive/2026-07-10-lsp-shutdown-all-holds-clients-lock-across-await.md` — fixed; `post_compact` stalling navigation via a lock held during *shutdown*, which is the other half of this path

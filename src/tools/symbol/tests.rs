@@ -9122,7 +9122,7 @@ fn format_search_symbols_single_file_no_global_header() {
 /// means "absent" or "not searched". `references.rs` hit the same trap first
 /// (BUG 2026-05-21) — a warning that renders only alongside results explains
 /// nothing about the result that needed explaining.
-/// Guards `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`.
+/// Guards `docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`.
 #[test]
 fn format_search_symbols_surfaces_completeness_warning_on_zero_matches() {
     use crate::tools::symbol::display::format_search_symbols;
@@ -9175,7 +9175,7 @@ fn format_search_symbols_surfaces_completeness_warning_alongside_results() {
 /// hits are filtered through its accepted-files set and the tree-sitter fallback
 /// re-walks the same root — so "0 accepted" means nothing could have matched,
 /// whatever the symbol.
-/// Guards `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`.
+/// Guards `docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`.
 #[tokio::test]
 async fn search_on_a_tree_with_no_source_files_says_so_instead_of_a_bare_zero() {
     let dir = tempdir().unwrap();
@@ -9272,7 +9272,7 @@ async fn path_scoped_ctx(
 /// that really lacks the symbol, and there was no audit on this branch to say
 /// otherwise. Measured six times in one run on 2026-09-24 against a 1–3 s old
 /// rust-analyzer. Guards
-/// `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`
+/// `docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`
 /// (Bug B, the path-scoped branch its 08-07 fix never covered).
 #[tokio::test]
 async fn a_path_scoped_zero_names_the_files_the_language_server_did_not_answer_for() {

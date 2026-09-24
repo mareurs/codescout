@@ -319,7 +319,7 @@ read — a red run has to be triaged by job `steps` count and test name before i
 ## Resume
 
 Status stays `open` deliberately, matching the precedent set by
-`docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`: the harm is
+`docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`: the harm is
 neutralised and the next occurrence is self-diagnosing, but the MSVC symptom was never reproduced,
 so nothing here has actually been proven fixed.
 

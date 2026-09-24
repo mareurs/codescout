@@ -294,7 +294,7 @@ the name CLAUDE.md uses). Every citation is a plain rename:
 
 ```
 docs/trackers/bug-fix-session-log.md:2512                                   <- GATES
-docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md:53,84
+docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md:53,84
 docs/issues/2026-07-28-il3-gate-matches-pipes-inside-heredoc-text.md:183
 docs/issues/archive/2026-07-28-memory-sections-filter-matches-h3-only.md:226
 ```

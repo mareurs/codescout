@@ -110,9 +110,9 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-58 | 2 | ListAgents omits live cross-profile sessions in the same checkout, and two sessions' counts are **incomparable** rather than merely short | **done-archived** 2026-09-13 — bug is `mitigated` + archived. Prior detail retained: **partial** — root cause still blocked upstream (harness, not this repo); local mitigation SHIPPED as `scripts/peer-sessions.sh` + a `docs/PROBES.md` row, so it fires at the moment of use instead of when someone opens the bug file (`W-85`'s placement lesson, which this entry was itself an instance of). Measured 2026-08-30: `ListAgents` reported **3** in this checkout, the probe found **5**, and `807989` had run since **11:10:52** — before any inter-session message that day — invisible to every participant. The afternoon's six misattributions were eliminations over a set short by **two**. Invisible is not unreachable: any pid is addressable as `uds:<sock>`. The probe bounds the POPULATION and does not attribute a write, and says so in its own output. **Corrected before publication:** a relayed claim that one session's view was *entirely disjoint* from the five is an observed STATE, not a property — 0 of 5 at ~20:06, 1 of 5 at ~20:2x, same count with rotated membership; asking the source rather than relaying is what caught it. Sharper fact underneath: those readings showed **2 of 2** sessions outside this checkout and **1 of 4** inside it, so the view is skewed against the population every attribution asks about — elimination is *unrelated to the question*, not merely weak, and socket addressing is the only correct method rather than a fallback. Both open attributions were then settled by asking, one round each, after three rounds of elimination got them wrong | `1950479aff0acb5b` |
 | BL-59 | 2 | the buddy compact banner's `from=<sid>` names another live session, reading as "your own pre-compaction transcript" | **blocked** — `claude-plugins`, not this repo. Worse than BL-58 in kind: that one understates who else writes your files, this overstates what **you** wrote, and cannot be refuted from the inside | `f35a24bccf46bfc8` |
 | BL-60 | 1 | the CLI's `artifact create` / `artifact update` silently drop `time_scope` and `extra` | **done-archived** — `0c4931ef`, patch-id `a0a4a3b4…`. Both flags on both subcommands, marshalled at the depth each tool expects; `build_create_tool_args` extracted so the create half is testable without a catalog, as `19289b1f` already did for update. 8 tests, 3 mutations spent — incl. a characterization guard proving the extraction was behaviour-preserving. The bug's "nothing to run" was itself worth running: `--force` present alongside both flags absent proved the gap was current, not a stale build | `64c7dab799d1bca7` |
-| BL-61 | 3 | ZOMBIE WATCH: `references` answers a warming LSP with `symbol not found` | open (**watch, not work**) — re-open trigger is `symbol not found` only; a timeout and a guarded zero are outside it, and BL-49 was checked against it | `d25aa6db7b4e6367` |
+| BL-61 | 3 | ZOMBIE WATCH: `references` answers a warming LSP with `symbol not found` | **done-archived** 2026-09-24 — bug is `fixed` + archived. The trigger fired twice on 09-24; the cause was measured as rust-analyzer's successful `null` during a crate-graph swap, read as no symbols. Fixed in `e26da0b2`, patch-id `65ab673b…`. | `7bdeb054a5ab2f46` |
 | BL-62 | 3 | ZOMBIE WATCH: two Windows CI tests flake on wall-clock/race assumptions | open (**watch, not work**) — check the wine skip-list first; W-64 took it 32 → 8 with every survivor classified | `7db5aa17c12be838` |
-| BL-63 | 3 | ZOMBIE WATCH: `symbols` search mode 0-matches then succeeds on retry | open (**watch, not work**) — Bug A fixed, Bug B mitigated + instrumented; read the instrumentation before treating it as live | `523233935cc53bc4` |
+| BL-63 | 3 | ZOMBIE WATCH: `symbols` search mode 0-matches then succeeds on retry | **done-archived** 2026-09-24 — bug is `fixed` + archived. Bug A was fixed in `b2344aab`. Bug B's path-scoped mechanism (the same rust-analyzer `null`) was fixed in `e26da0b2`, patch-id `65ab673b…`; that branch now warns on a zero it cannot vouch for. | `bf02ad346f61bf00` |
 | BL-69 | 1 | Repair the 3 files with an unterminated fence | done | — |
 | BL-70 | 1 | Catalog-integrity sweep — the 3 IN-REPO doctor findings | done | — |
 | BL-71 | 1 | Triage the link-graph findings, and test whether the volume gate discriminates | done | `9b67295c125cfcb6` |
@@ -749,17 +749,9 @@ have caught a field silently lost in a 60-line move — the same class of loss a
 bug, arriving by refactor instead of by omission.
 ### BL-61 — ZOMBIE WATCH: `references` answers a warming LSP with `symbol not found`
 
-**Status:** open — **watch, not work.** **Valid:** conditional — until the trigger below fires
+**Status:** done-archived — 2026-09-24. **Valid:** dated 2026-09-24
 
-`docs/issues/2026-08-27-references-symbol-not-found-while-lsp-warms.md`, `status: zombie`:
-no longer observed, root cause unconfirmed. Listed here only so the roster is complete —
-which is BL-58's lesson applied to this queue, since these three sat live in the bug ledger
-and invisible to the queue.
-
-**Do not pick up.** Re-open trigger, quoted: `references` returns **`symbol not found`** for
-a symbol `symbols(name=…)` resolves. A timeout and a guarded zero are both explicitly
-outside it — BL-49 was checked against this trigger and is a separate bug. Its cold-start
-mechanism is already refuted; do not re-file it.
+`docs/issues/archive/2026-08-27-references-symbol-not-found-while-lsp-warms.md` (`7bdeb054a5ab2f46`), `status: fixed`. The re-open trigger fired twice on 2026-09-24, under four parallel subagents against a 1–2 s old rust-analyzer. A boundary probe then found the mechanism: rust-analyzer answers `documentSymbol` with a successful `null` while it swaps its crate graph, and `LspClient::document_symbols` read that as "no symbols". Fixed in `e26da0b2` (patch-id `65ab673b88f82817b3c85466671a28a969c7ddd1`). A `null` is now re-asked within a budget, and a persistent one is reported as "no answer". The watch's standing claim, "its cold-start mechanism is already refuted", was true only of the 19 s probe age. The window is sub-second and earlier than that.
 
 ### BL-62 — ZOMBIE WATCH: two Windows CI timing flakes
 
@@ -774,16 +766,9 @@ exposes" — applies here too.
 
 ### BL-63 — ZOMBIE WATCH: `symbols` search 0-matches then succeeds on retry
 
-**Status:** open — **watch, not work.** **Valid:** conditional — until the instrumentation records a recurrence
+**Status:** done-archived — 2026-09-24. **Valid:** dated 2026-09-24
 
-`docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`,
-`status: zombie` and already partly closed: Bug A fixed in `b2344aab`, Bug B mitigated and
-**instrumented**. Read what the instrumentation has recorded before treating it as live —
-that is the cheapest available evidence and it did not exist when the file was written.
-
-Worth more than its phase-3 priority suggests if it does recur: retry-succeeds is exactly
-what a false negative looks like from the caller's side, which is this project's
-most-repeated law (`reconnaissance-patterns` law C, a zero that lies).
+`docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md` (`bf02ad346f61bf00`), `status: fixed`. Bug A was fixed in `b2344aab`. Bug B recurred six times on the path-scoped branch on 2026-09-24, from the same rust-analyzer `null` as BL-61. It was fixed in the same commit, `e26da0b2`: the path branch now records files it could not read, and a zero carries a `completeness_warning` naming them. **TRACKED in the bug file:** four other `document_symbols` callers still swallow an `Err`. They get the `null` retry, but a failure that outlasts the budget stays silent there.
 ### BL-65 — the CLI's `doctor` exposes no `--fix`, so all six repairs are MCP-only
 
 **Status:** **done** 2026-09-09 — `953c98f3`, patch-id

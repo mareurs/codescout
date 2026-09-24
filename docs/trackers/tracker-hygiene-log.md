@@ -113,7 +113,7 @@ a docs/FEATURES.md retirement audit (named bare, not code-spanned: the file was 
 
 **Result: 0 of 2 eligible entries were zombie-open.**
 
-- `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`
+- `docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`
   — correctly open. Its own body states that Bug A shipped (`0f6815f8`) and that
   *"Bug B — search-mode intermittent 0-matches — remains open and unconfirmed. It is
   the only reason this file is still open."* Nothing to reconcile.

@@ -449,7 +449,7 @@ impl Tool for Symbols {
 /// the language server did not answer for is not a file without the symbol, and
 /// this branch builds no `WalkAudit`, so without this list a cold server's
 /// non-answer reached the caller as a bare `0 matches` indistinguishable from a
-/// real absence (`docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`,
+/// real absence (`docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`,
 /// Bug B).
 #[allow(clippy::too_many_arguments)]
 async fn search_files_restricted(
@@ -552,7 +552,7 @@ fn unread_files_warning(unread: &[(PathBuf, String)], root: &std::path::Path) ->
 /// `accepted_files` by the `in_walk` predicate, and the tree-sitter fallback
 /// re-walks the same root — so a partial walk silently zeroes both at once. That is
 /// the shape of the flake in
-/// `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`:
+/// `docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`:
 /// observed inside a parallel batch, recovered on a solo retry.
 #[derive(Default)]
 struct WalkAudit {

@@ -1195,7 +1195,7 @@ impl LspClient {
         // start-up, with correct answers on either side. `request` retries only -32800 /
         // -32801 ERRORS, so a null used to become `Ok(vec![])` here: `references` said
         // "symbol not found" and path-scoped `symbols` said "0 matches" for symbols that
-        // exist (docs/issues/2026-08-27-references-symbol-not-found-while-lsp-warms.md).
+        // exist (docs/issues/archive/2026-08-27-references-symbol-not-found-while-lsp-warms.md).
         // An empty ARRAY is an answer and is returned as one; only null is re-asked.
         const NULL_ANSWER_RETRY_INTERVAL: std::time::Duration =
             std::time::Duration::from_millis(200);
@@ -2927,7 +2927,7 @@ struct Point {
     /// server on this repo: it answers `null` — a SUCCESS, not an error, so the -32800 /
     /// -32801 retry in `request` never sees it — for every open file while it swaps its
     /// crate graph (`Building CrateGraph` → `Roots Scanned`), 0.2–0.7 s per swap, twice
-    /// during start-up (`docs/issues/2026-08-27-references-symbol-not-found-while-lsp-warms.md`).
+    /// during start-up (`docs/issues/archive/2026-08-27-references-symbol-not-found-while-lsp-warms.md`).
     #[cfg(unix)]
     async fn scripted_null_document_symbol_peer(
         nulls: usize,
@@ -2996,7 +2996,7 @@ struct Point {
             symbols.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
             vec!["alpha"],
             "a null answer means the server has not answered yet — an empty list here is the \
-             false 'symbol not found' / '0 matches' of d25aa6db and 523233935 Bug B"
+             false 'symbol not found' / '0 matches' of 7bdeb054a5ab2f46 and bf02ad346f61bf00 Bug B"
         );
         assert_eq!(
             served.load(Ordering::SeqCst),

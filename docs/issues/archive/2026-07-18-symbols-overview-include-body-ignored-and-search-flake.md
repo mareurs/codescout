@@ -1,7 +1,7 @@
 ---
 kind: bug
-status: open
-title: 'BUG: symbols search mode occasionally 0-matches then succeeds on retry (Bug A fixed in b2344aab; Bug B mitigated + instrumented)'
+status: fixed
+title: 'BUG: symbols search mode occasionally 0-matches then succeeds on retry (Bug A fixed in b2344aab; Bug B fixed in e26da0b2)'
 tags:
 - cluster/lazy-warmup-bills-the-first-caller
 - symbols
@@ -9,7 +9,7 @@ tags:
 - overview-mode
 - list_overview
 - parameter-ignored
-closed: null
+closed: 2026-09-24
 last_observed: 2026-09-24
 last_verified: 2026-08-26
 opened: 2026-07-18
@@ -363,7 +363,7 @@ Open-bug sweep (`deep-agent-workflow-observations:DWF-7`), verifier evidence at 
 
 - **Bug A is fixed.** `list_overview.rs:243,425,578` all read `optional_bool_param(&input, "include_body")`. Fix `b2344aab`: not a merge, an ancestor of HEAD, patch-id `23f38cdf91e814d9598823b5d5bf34115796a732`.
 - **Bug B recurred today, on the path-scoped branch.** `usage.db` row 137400 (2026-09-24 08:16:54, 1 ms, `success`) was `{"name":"GuideLedger/adopt","path":"src/tools/guide_ledger.rs"}`, which takes `search_files_restricted` (`symbols.rs:442-507`). On that branch, `let Ok(client) = ctx.lsp.get_or_start(…) else { continue; };` and `let Ok(symbols) = client.document_symbols(…) else { continue; };` drop LSP errors silently. There is no tree-sitter fallback, and `audit` is deliberately `None` ("the path/glob branch below never builds it"), so no `completeness_warning` can fire. **The 08-07 WalkAudit instrumentation covers only the project-scope branch.**
-- **A second silent path, a lead only:** `LspClient::document_symbols` (`src/lsp/client.rs:1156-1231`) returns `Ok(vec![])` both when the result is null and when neither parse succeeds. The same 1-2 ms, issued-alongside-another-LSP-call shape recurs in `d25aa6db7b4e6367`'s `references` false negatives; those two may share one cause. Not checked: which of these paths produced the 1 ms zero.
+- **A second silent path, a lead only:** `LspClient::document_symbols` (`src/lsp/client.rs:1156-1231`) returns `Ok(vec![])` both when the result is null and when neither parse succeeds. The same 1-2 ms, issued-alongside-another-LSP-call shape recurs in `7bdeb054a5ab2f46`'s `references` false negatives; those two may share one cause. Not checked: which of these paths produced the 1 ms zero.
 
 Next step: give `search_files_restricted` the same audit/completeness surface as the project-scope branch, then find out whether `document_symbols`' empty-on-failure return is what both bugs are hitting.
 
@@ -394,7 +394,7 @@ generic, is to honor it.
 | 14:49:18.817 | `concurrent_principals_each_receive_their_own_first_call_guide` | `src/server.rs` |
 | 14:49:18.960 | `GuideLedger` | `src/tools/guide_ledger.rs` |
 
-**Not monotone in process age.** In the same window, `symbols(name="poll_guide_rearm", path="src/server.rs")` **succeeded** at 14:49:17.34, and an overview `symbols(path="src/tools/guide_ledger.rs")` returned 32 symbols at 17.585. After that, every path-scoped name search on those files failed. **This is the Resume's "no warning at all" outcome.** Per the bullet above, that outcome is expected on the path-scoped branch: `search_files_restricted` never builds the audit, so no warning *could* fire. It does not yet discriminate between the walk-truncation and root-race hypotheses, which the project-scope branch's warning would. The same run's `references` calls hit `symbol not found` on the same files at 18.197 and 18.432. `docs/issues/2026-08-27-references-symbol-not-found-while-lsp-warms.md` derives that those came from `LspClient::document_symbols` returning an empty `Ok` list (`src/lsp/client.rs:1156-1231`: `null`, `[]`, or unparseable). So the "second silent path" lead above is now **the likely shared site**. It is not yet established that the `symbols` zeros took that path rather than a `continue`-dropped `Err`, because the branch discards both.
+**Not monotone in process age.** In the same window, `symbols(name="poll_guide_rearm", path="src/server.rs")` **succeeded** at 14:49:17.34, and an overview `symbols(path="src/tools/guide_ledger.rs")` returned 32 symbols at 17.585. After that, every path-scoped name search on those files failed. **This is the Resume's "no warning at all" outcome.** Per the bullet above, that outcome is expected on the path-scoped branch: `search_files_restricted` never builds the audit, so no warning *could* fire. It does not yet discriminate between the walk-truncation and root-race hypotheses, which the project-scope branch's warning would. The same run's `references` calls hit `symbol not found` on the same files at 18.197 and 18.432. `docs/issues/archive/2026-08-27-references-symbol-not-found-while-lsp-warms.md` derives that those came from `LspClient::document_symbols` returning an empty `Ok` list (`src/lsp/client.rs:1156-1231`: `null`, `[]`, or unparseable). So the "second silent path" lead above is now **the likely shared site**. It is not yet established that the `symbols` zeros took that path rather than a `continue`-dropped `Err`, because the branch discards both.
 
 **Next step, sharpened.** One change would answer both files' open questions: make `document_symbols` report which empty path it took, and make `search_files_restricted` record the `Err`s it `continue`s past. Recorded by sessionId `ebf651ec-5ab7-42d9-a526-dcf9758692e1`.
 
@@ -533,6 +533,20 @@ reader would learn to skip the warning that matters.
   surface the warning in both the zero and normal branches) — a warning that renders only
   alongside results explains nothing about the result that needed explaining.
 
+### Bug B — root cause found and fixed (2026-09-24, `e26da0b2`)
+
+**Mechanism, measured at the boundary.** rust-analyzer answers `textDocument/documentSymbol` with a successful `null` for every open file while it swaps its crate graph. That was measured twice against a cold 1.97.1 server on this repo: 0.2–0.7 s per swap, twice during start-up, correct answers on either side. `LspClient::document_symbols` turned that `null` into `Ok(vec![])`. On the path-scoped branch, `search_files_restricted` then collected nothing from the file, and because that branch builds no `WalkAudit`, the zero went out bare. The method and both timelines are in `docs/issues/archive/2026-08-27-references-symbol-not-found-while-lsp-warms.md` § *Root cause*, which the same event produced.
+
+**This settles the "one thing that does NOT yet add up" above, for this branch.** The tree-sitter fallback and the root-race hypothesis are both project-scope stories. The path-scoped branch has no fallback, so an LSP empty is the whole answer.
+
+**Fix, two sites:**
+- `document_symbols` re-asks a `null` (200 ms interval; budget 5 s cold, 1 s warm) and reports a persistent `null` as a `RecoverableError`, not as `Ok(vec![])`.
+- `search_files_restricted` no longer `continue`s silently past a failed file. It returns the files whose server would not start or did not answer, each with the reason. `Symbols::call` then attaches `completeness_warning` to a zero naming the file and the reason. That is the audit surface this file's 09-24 re-verification asked for. An answered, empty lookup stays a bare zero.
+
+The second site is not optional once the first exists. A persistent `null` became an `Err`, and the old `continue` would have swallowed exactly that into the same silent zero.
+
+**TRACKED: four other callers still swallow a `document_symbols` `Err`.** They are `list_overview.rs:265` (`if let Ok`), `resolve_range_via_document_symbols` (`.ok()?`), `audit_doc_refs/resolver.rs:556` (`.ok()`), and `list_overview`'s concurrent path. All four now get the `null` retry, which removes the measured cause for them too. A failure that outlasts the budget is still silent there. Not changed here: each needs its own decision about what a partial overview or an unresolved doc ref should say.
+
 ## Tests added (2026-07-28)
 
 Two in `src/tools/symbol/tests.rs`, both asserting the hint *string* rather than the
@@ -593,27 +607,25 @@ incomplete, not that the test is bad.
 Gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, 3515 passed / 0 failed
 / 44 ignored.
 
+
+**Added 2026-09-24 (`e26da0b2`), all observed RED first:**
+- `tools::symbol::tests::a_path_scoped_zero_names_the_files_the_language_server_did_not_answer_for`: the mock fails `document_symbols` for a file that DOES contain the symbol. The zero must carry a warning naming the file and the server's reason.
+- `tools::symbol::tests::a_path_scoped_zero_names_a_file_whose_language_server_would_not_start`: the provider's `get_or_start` fails. Same assertion, for the other `continue` arm.
+- `tools::symbol::tests::a_path_scoped_zero_from_an_answering_server_stays_bare`: the over-warning control. An answered, empty lookup must stay a bare zero.
+- The `document_symbols` null-retry pair, recorded in `7bdeb054a5ab2f46` § *Tests added*.
+
+**Mutations**, one per site (`scripts/mutation-probe.sh`, isolated worktree): the document-symbols `Err` arm stops recording **KILLED**; the `get_or_start` `Err` arm stops recording **SURVIVED** until the would-not-start test was added, then **KILLED**; `Symbols::call` never consults the unread list **KILLED**.
+
 ## Resume
 
-**Status is deliberately `open`, not `mitigated` or `fixed`.** A real defect was found and
-fixed (walk errors discarded) and the *harm* is neutralised (a false zero now announces
-itself) — but the originating symptom has never been reproduced, so which path actually fired
-in the two observed failures is unconfirmed. `mitigated` would be defensible; it would also
-drop this file out of `artifact(find, kind="bug", status in [open, investigating])`, and a
-recurring flake with an unconfirmed cause is better left visible to triage.
+**Status `fixed`.** Bug A was fixed in `b2344aab`. Bug B's measured mechanism, the rust-analyzer crate-graph `null` read as "no symbols" on the path-scoped branch, is fixed in `e26da0b2`, with the path branch now warning on a zero it cannot vouch for.
 
-**What would close it.** The next occurrence is now self-diagnosing — that is the whole point
-of the change. When a 0-match happens again, read the `completeness_warning`:
+**STANDING: the pre-09-24 project-scope observations are not re-derived.** The 2026-07-18 failures predate any capture of which branch ran. The project branch reads the same `document_symbols` (per-file for its matches, `resolve_range_via_document_symbols` for ranges), so the same `null` may explain them. That is inference, not measurement. That branch has self-diagnosed through `WalkAudit` since 08-07, and its Resume triage (read the `completeness_warning`) still applies if it recurs.
 
-- *"could not read N entries"* → the walk-truncation hypothesis is confirmed. Bound the cause
-  next: compare `ulimit -n` against the number of concurrent `symbols` calls plus running LSP
-  servers. Flip to `fixed` if the count explains it.
-- *"accepted 0 source files"* → the **root race** is confirmed instead, and the fix belongs in
-  activation ordering, not in `symbols`. Precedent:
-  `docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md`.
-- **No warning at all, on a symbol that provably exists** → both hypotheses are wrong and a
-  third mechanism is at work. That is the most informative outcome of the three, and it is one
-  this file previously could not distinguish from either.
+**Live check owed to the next release rebuild:** as in `7bdeb054a5ab2f46` § *Resume*. Parallel subagents run path-scoped `symbols` immediately after `/mcp`. They should never see a bare `0 matches` for an existing symbol.
 
-**Bookkeeping.** The fix SHA is on `experiments` only. The current promotion is a fast-forward,
-which mints no new SHAs, so the citation stays valid as written once `master` catches up.
+## Fix provenance
+
+- **SHA:** `e26da0b2` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `65ab673b88f82817b3c85466671a28a969c7ddd1` — content hash of the diff; survives rebase and cherry-pick.
+- **Bug A (earlier):** `b2344aab`, patch-id `23f38cdf91e814d9598823b5d5bf34115796a732`.

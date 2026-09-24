@@ -13,7 +13,7 @@ closed: 2026-08-07
 opened: 2026-08-06
 owner: marius
 related:
-- '523233935cc53bc4'
+- bf02ad346f61bf00
 severity: medium
 ---
 
@@ -282,7 +282,7 @@ per-ref LSP response, not a per-run LSP availability.
 - The flapping refs were in `docs/conventions/` and `docs/evals/`, both of which had
   just been edited to fix genuine drift — so the surviving refs there are
   symbol-bearing, matching hypothesis 1.
-- `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`
+- `docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`
   (open) records a sibling flake: `symbols` search mode occasionally 0-matches then
   succeeds on retry. Same substrate.
 
@@ -492,7 +492,7 @@ cleanup pass.
 **Why this stays open rather than closing here.** The two changes remove the *consequence*
 — a flap can no longer decide green-versus-red — without establishing *why* an individual
 `document_symbols` call occasionally returns `None`. That question is still open, it is
-shared with `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`,
+shared with `docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`,
 and it now has a clean instrument: with `degraded` no longer saturated, a run where a real
 language server fails to answer is visible in `lsp_languages_offline` instead of being
 buried under a permanent `["unknown"]`.
@@ -567,7 +567,7 @@ the Evidence section above if needed; the load-bearing details are the `pkill` t
   `degraded_languages` field on `ResolveCtx` that records the cold-LSP path.
 - `src/librarian/tools/audit_doc_refs/severity.rs` — `default_severity`, where
   `SymbolMissing` is `High` and `Unknown` is `Low`.
-- `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md` —
+- `docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md` —
   sibling flake, still open.
 - `docs/issues/archive/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` — the
   backlog this was found while working.

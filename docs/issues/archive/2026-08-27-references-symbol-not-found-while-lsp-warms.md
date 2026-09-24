@@ -1,20 +1,20 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/lazy-warmup-bills-the-first-caller
 - references
 - lsp
 - cold-start
 - misleading-error
-- refuted-mechanism
-closed: null
+closed: 2026-09-24
 last_observed: 2026-09-24
 opened: 2026-08-27
 owner: marius
 related: []
 severity: low
-unverified: 'Recurred 2026-09-24 (twice, at a 1-2 s old rust-analyzer, under 4 parallel subagents): see Reproduction § 2026-09-24. Derived from code: the error comes from document_symbols returning an Ok empty list (null, [], or unparseable response), not from a request error. Which of the three, and why rust-analyzer answered empty, is unknown because none is logged. The 19 s cold-start refutation stands for that age only.'
+unverified:
+  __delete__: true
 ---
 
 # BUG: `references` answers a warming LSP with `symbol not found` — a resolution error, which the false-zero guard cannot see
@@ -121,7 +121,7 @@ These are the three captures this file's Resume asks for:
 
 **What is now narrowed, and how it was derived, not guessed.** `References::call` (`src/tools/symbol/references.rs:311-312`) runs `c.document_symbols(&p, &l).await?` and then `find_unique_symbol_by_name_path`. A **request error** would propagate through `?` as a different message, so these two errors came from an `Ok` list with no matching symbol. The bare message (no suggestions) means the leaf search also found nothing. `live_ledger` is a field **and** a method in `server.rs`, so any real symbol list for that file would have produced a suggestion. The list was empty. `LspClient::document_symbols` (`src/lsp/client.rs:1156-1231`) returns `Ok(vec![])` in three cases: rust-analyzer answered `null`, rust-analyzer answered `[]`, or neither response shape parsed. Which of the three fired is **not recoverable**, because none of them is logged.
 
-**Two facts that argue against a plain "too young" reading.** In the same window, a subagent's path-scoped `symbols` call on `src/server.rs` **succeeded** at 14:49:17.34 and an overview of `guide_ledger.rs` succeeded at 17.585. After that, every path-scoped lookup on those files failed from 17.83 to 18.96. So the failures are **not monotone in process age**. The same run's `symbols` zeros are recorded in `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`, which this now very likely shares a site with: `document_symbols`' empty-on-failure return. The mechanism behind rust-analyzer's empty answer is still unknown. The next step is to make `document_symbols` say which of its three empty paths it took, rather than to guess.
+**Two facts that argue against a plain "too young" reading.** In the same window, a subagent's path-scoped `symbols` call on `src/server.rs` **succeeded** at 14:49:17.34 and an overview of `guide_ledger.rs` succeeded at 17.585. After that, every path-scoped lookup on those files failed from 17.83 to 18.96. So the failures are **not monotone in process age**. The same run's `symbols` zeros are recorded in `docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`, which this now very likely shares a site with: `document_symbols`' empty-on-failure return. The mechanism behind rust-analyzer's empty answer is still unknown. The next step is to make `document_symbols` say which of its three empty paths it took, rather than to guess.
 
 Recorded by sessionId `ebf651ec-5ab7-42d9-a526-dcf9758692e1`.
 ## Environment
@@ -133,27 +133,20 @@ Recorded by sessionId `ebf651ec-5ab7-42d9-a526-dcf9758692e1`.
 
 ## Root cause
 
-**Unknown, and the originally-filed cause is REFUTED.**
+**Found and measured 2026-09-24. rust-analyzer answers `textDocument/documentSymbol` with a SUCCESSFUL `null` while it swaps its crate graph, and `LspClient::document_symbols` read that `null` as "this file has no symbols".**
 
-This entry first claimed: *"same root-cause class as the archived false-zero bug,
-but a resolution error rather than a successful zero — so
-`corroborate_zero_references`, which fires on `external_refs == 0`, cannot reach
-this symptom."* The reasoning was sound and the premise was wrong. A deliberate
-cold start does **not** produce a resolution error; it produces the guarded
-false-zero, guard firing. So there is no evidence that a warming LSP can yield
-`symbol not found` at all, and the gap this entry was filed to name may not exist.
+This was measured at the component boundary, bypassing codescout. A scripted LSP client spoke to a cold rust-analyzer 1.97.1 on this repo using codescout's own `initialize` capabilities. It opened `src/server.rs`, `src/tools/guide_ledger.rs` and `src/lsp/client.rs`, and polled `documentSymbol` every 150 ms, logging each reply as null, `[]`, N symbols or an error, next to rust-analyzer's `$/progress` stream. The run was done twice:
 
-What is established:
+| run | 32 / 10 / 20 symbols | `null` for every file | back to symbols | second `null` window |
+|---|---|---|---|---|
+| 1 | 0.02 s | 0.72 s, at `Fetching` end, then `Building CrateGraph`, then `Roots Scanned 0/451` | 1.40 / 1.81 s | none seen at 150 ms polling |
+| 2 | 0.02 s | 0.40 s, at the same transition | 0.77 s | 1.20–1.39 s, at the next `Building CrateGraph` → `Roots Scanned` |
 
-- The observation happened (verbatim error quoted under Symptom).
-- `symbols(name="ToolCapabilities")` and `symbol_at(path, 464)` both resolved the
-  same name at the same path at that moment, so the arguments were correct.
-- It has not recurred across many `references` calls since, including two
-  deliberate cold starts and one post-edit probe.
+So the answer is correct from `didOpen`, empties for every open file at each crate-graph swap, and recovers. That is exactly the **non-monotone** pattern recorded under Reproduction § 2026-09-24 (a success at 17.34 s, then failures from 17.83 to 18.96 s). It is why a single age threshold never explained this record: the 2026-08-27 probes at 19 s landed after the swaps.
 
-measured 2026-08-27: `workspace(post_compact=true)` → `references` on a fresh
-(19s-old) rust-analyzer → `0 references` + completeness warning, twice; comment
-insert above the struct → 31 references, no failure.
+**Why nothing caught it.** `request` retries only the `-32800` / `-32801` **errors** (`is_retryable_lsp_error`). A `null` is a success, so it went straight through, and `document_symbols` had `if result.is_null() { return Ok(vec![]); }`. `References::call` (`references.rs:311-312`) resolves the name against that list, so an empty list became `symbol not found`. The bare message (no "did you mean") is the tell: the leaf search over the file's symbols also found nothing. The 1–2 ms latencies of the three `usage.db` instances under *Fix* history fit a server answering from its swap state.
+
+**The originally filed class was right in spirit and wrong in mechanism.** It *is* a warming language server. But the symptom is an empty `Ok`, not an error, and it comes from the crate-graph swap, not from indexing time.
 ## Evidence
 ### Ordering of the four batches, single session
 ```
@@ -204,65 +197,32 @@ path passed to `references` were correct.
    the struct to shift its line number, queried immediately. **Verdict:** rejected
    — 31 references; probe reverted.
 ## Fix
-**REOPENED from `zombie` — 2026-09-24: it came back twice** (open-bug sweep, `deep-agent-workflow-observations:DWF-7`). The mitigation `corroborate_zero_references` is in place (`src/tools/symbol/references.rs:162`, test at `tests.rs:5888`), but it does not cover this path. The "symbol not found" text comes from `symbol/query.rs:866-876`, reached when `document_symbols` returns a list without the name (`references.rs:311-318`), which is a resolution error rather than a zero. `usage.db` holds two more instances after this file was opened. Both were re-checked by the collector: `git grep` at each row's `project_sha` shows the symbol existed at that path.
 
-| row | when (UTC) | call | latency | symbol at that tree |
-|---|---|---|---|---|
-| 76406 | 2026-08-27 18:13 | `ToolCapabilities` @ `src/tools/core/types.rs` | 2 ms | (the original) |
-| 79110 | 2026-08-31 21:45 | `GetUsageStats` @ `src/tools/usage.rs` | 1 ms | `5d405b6:src/tools/usage.rs:6: pub struct GetUsageStats;` |
-| 126947 | 2026-09-15 13:17 | `backup_db` @ `src/librarian/catalog/mod.rs` | 2 ms | `b4660a9:src/librarian/catalog/mod.rs:500: fn backup_db(…)` |
+**FIXED in `e26da0b2` (2026-09-24).**
 
-All three share one shape: issued in the same parallel batch as another LSP call, and answered in 1-2 ms. That is the same shape as a same-day `symbols` false zero (`usage.db` row 137400, 1 ms, path-scoped) recorded under `523233935cc53bc4`. **Unconfirmed lead:** `LspClient::document_symbols` (`src/lsp/client.rs:1156-1231`) returns `Ok(vec![])` when the result is null, and also when neither parse succeeds, so a warming or contended server can look like a file with no symbols. Confirming that is the next step.
+- **`LspClient::document_symbols` (`src/lsp/client.rs`) re-asks a `null`** every 200 ms within a budget: 5 s inside the cold-start window, 1 s once warm. The window is read from `in_cold_start_window()`, which is now shared with `request`'s error retry, so both use one clock. An empty **array** is still returned as an answer; only `null` is re-asked.
+- **A persistent `null` is reported as "no answer"** (`RecoverableError`: *"the language server answered textDocument/documentSymbol with null for … on every attempt for N ms"*, with a hint that this is not evidence the file has no symbols). It is no longer reported as `Ok(vec![])`. So if the swap ever outlasts the budget, `references` says the server did not answer instead of `symbol not found`.
 
-None, and none is warranted while the mechanism is unknown and the filed cause is
-refuted. Writing a "fix" for a resolution-error path that no probe can produce
-would be the empty-population defect — code that compiles, tests that pass, and
-zero cases acted on.
+This is one site, and it covers every production caller of `document_symbols` (`references`, `call_graph`, `edit_code` rename, `fetch_validated_symbol`, path-scoped `symbols`, `list_overview`, `resolve_range_via_document_symbols`, `audit_doc_refs`).
 
-**A positive finding worth keeping instead:** the mitigation from
-`docs/issues/archive/2026-06-09-references-false-zero-stale-graph.md` is now
-**validated in a live cold-start window** rather than only by unit test. Its
-`corroborate_zero_references` text scan fired on a genuinely 19-second-old
-rust-analyzer, correctly identified 5+ other files containing the identifier, and
-named `grep` / `call_graph(direction='callers')` as corroboration. That archived
-entry recorded its guard as a mitigation with the LSP barrier deferred; this is
-the first end-to-end confirmation that the guard does its job.
+**STANDING: the unparseable branch is untouched.** If neither response shape parses, `document_symbols` still returns `Ok(vec![])`. That branch was not observed in any recorded failure, and making it an error is a separate decision about servers codescout has not measured.
+
+**History, kept because the rejected direction would otherwise be retried:** until the 2026-09-24 boundary probe this section said no fix was warranted, because the only filed mechanism was refuted and a fix for an unproduced path would guard nothing. That was correct at the time. The fix became warranted only once the mechanism was measured.
 ## Tests added
 
-None. Justified: there is no established defect left to guard. The symptom this
-entry was opened for is unreproduced and its proposed mechanism is refuted; the
-adjacent real behaviour (cold-start false zero) already has a guard, and that
-guard is now confirmed working in production conditions.
+All were observed RED against the pre-fix code, and all are gate-runnable (`#[cfg(unix)]`, no `#[ignore]`). They use a scripted LSP peer on a Unix socket via `LspClient::connect`, **not** the `tests/fixtures/fake_lsp_*.py` harness, whose tests are `#[ignore]`d and so never run in the gate.
 
-If `symbol not found` recurs, the test to write is a `References::call` unit case
-pinning the error TEXT for an unresolvable symbol — the original hint
-(*"Trait impl methods use format …"*) was actively misleading for a plain
-top-level struct, and that is fixable independently of whatever causes the
-resolution to fail.
+- `lsp::client::tests::document_symbols_waits_out_a_null_answer_instead_of_reporting_no_symbols`: two `null`s, then one symbol. It asserts the symbol comes back and that exactly 3 requests were served. Pre-fix: `left: []`.
+- `lsp::client::tests::document_symbols_reports_a_persistent_null_as_no_answer_not_as_no_symbols`: `null` forever on a warm client. It asserts an error naming `null`, and that the request was re-asked. Pre-fix: `Ok([])`.
+
+**Mutations** (`scripts/mutation-probe.sh`, isolated worktree): "take the null as the answer" **KILLED**; "budget exhausted → return the old `Ok(vec![])`" **KILLED**. The path-scoped `symbols` half of the same fix is recorded in `docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`.
 ## Workarounds
-- Re-run `references` once. It is a warming window, not a persistent state.
-- Warm LSP first, or corroborate with `grep "\bSYMBOL\b"` /
-  `call_graph(direction="callers")`.
-- Treat `symbol not found` from `references` as "unknown, retry" rather than
-  "the name is wrong" — especially early in a session, and *especially* when
-  `symbols(name=...)` finds the same symbol.
+
+None needed after `e26da0b2`. On an older binary: re-run `references` once, or corroborate with `symbols(name=…)` / `grep`. The window is the rust-analyzer crate-graph swap, under a second.
 
 ## Resume
 
-**Nothing to do unless it recurs.** Re-open trigger: `references` returns
-`symbol not found` for a symbol that `symbols(name=…)` resolves at the same path.
-If that happens, capture in the same turn, before anything warms:
-
-1. `ps -o pid,etime -C rust-analyzer` — process age, to establish whether it is
-   genuinely a cold-start window (the 2026-08-27 probes were 19s and did NOT
-   reproduce, so a recurrence at similar age argues against cold start entirely).
-2. `symbols(name="<sym>")` and `symbol_at(path, line)` — confirm the arguments
-   resolve by other means, as they did originally.
-3. The exact preceding call sequence in the session, since the one observation
-   followed a `workspace(activate)` and an in-place edit to the same file.
-
-Do NOT re-file the refuted mechanism. Both cold-start and stale-position are
-probed and rejected — see Hypotheses tried, entries 4 and 5.
+Nothing left. **The live check is owed to the next release rebuild**: after `./scripts/rb.sh` plus `/mcp`, dispatch several parallel subagents whose first calls are path-scoped `symbols` / `references`, so they land inside rust-analyzer's crate-graph swaps. There should be no `symbol not found` or bare `0 matches` for existing symbols. At worst there should be the new "answered … with null" error or `completeness_warning`, never a silent zero. The boundary probe used to find the cause is reproducible from the Root cause table's method: speak to rust-analyzer over stdio and poll `documentSymbol` during start-up.
 ## References
 - `docs/issues/archive/2026-06-09-references-false-zero-stale-graph.md` — same
   root-cause class, different symptom; its `corroborate_zero_references` guard
@@ -276,3 +236,10 @@ probed and rejected — see Hypotheses tried, entries 4 and 5.
 - Noticed while verifying `shell_command_mode = "disabled"` end-to-end, commit
   `6058dad6` (`feat(tools): hide run_command when shell_command_mode is
   disabled`).
+
+## Fix provenance
+
+- **SHA:** `e26da0b2` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `65ab673b88f82817b3c85466671a28a969c7ddd1` — content hash of the diff; survives rebase and cherry-pick.
+
+`fix(lsp): a null documentSymbol answer is re-asked, never read as 'no symbols'; path-scoped symbols names the files it could not read`

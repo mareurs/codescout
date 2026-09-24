@@ -14,7 +14,7 @@ entry_prefix:
 - DWF
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
-entry_high_water_DWF: 7
+entry_high_water_DWF: 8
 entry_high_water_DCS: 7
 ---
 
@@ -99,6 +99,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DWF-7 | 2026-09-24 | workflow | routine-first | sebf651ec-open-bug-verify-sweep |
 | DCS-6 | 2026-09-24 | coverage | session-receipt | sebf651ec-open-bug-verify-sweep |
 | DCS-7 | 2026-09-24 | coverage | session-receipt | 571eb3d6/post-compaction-3-2026-09-24 |
+| DWF-8 | 2026-09-24 | workflow | routine-first | 938e2953/gate-cache-disk |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -270,7 +271,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 - **Task / authority / substrate:** user: debug why `project-activation-bootstrap` "arms continuously" in session `571eb3d6`, then "file the bugs, write regression tests and start fixing", later "ok, go" on fixing the re-arm scoping. Workspace `/home/marius/work/claude/codescout`, branch `experiments`, shared checkout (peers committing concurrently).
 - **Pre-action evidence:** unknown (lost to compaction) — not reconstructed.
 - **Initial next action / completion check:** unknown for the first cycle. Second cycle (post-compaction, prospective in substance): verify fix `971ed73f` live through the real hook chain and a real `/mcp` restart; check = the probe principal's on-disk ledger rewritten by the NEW process still carrying the OLD process's timestamp.
-- **Trajectory (summary; canonical records linked):** forensic transcript read → refuted shared-server hypothesis → three candidate mechanisms → one filed and fixed (`971ed73f`, regression test RED→GREEN) → rebuild + live probe (dispatch, resume, `/mcp`, resume) → live check passed → verification surfaced two more mechanisms, both measured directly (`6d671794cd4da970` companion restore strips parent marks; `5201164f55ec16ff` re-arm consumed by any principal) plus a zombie recurrence (`523233935cc53bc4`) and stale served guides (`d01eaef12cce9b8a`) → re-arm scoping fixed test-first (new test RED at the intended assertion, GREEN 66/66; three isolated mutations each KILLED by exactly the intended test).
+- **Trajectory (summary; canonical records linked):** forensic transcript read → refuted shared-server hypothesis → three candidate mechanisms → one filed and fixed (`971ed73f`, regression test RED→GREEN) → rebuild + live probe (dispatch, resume, `/mcp`, resume) → live check passed → verification surfaced two more mechanisms, both measured directly (`6d671794cd4da970` companion restore strips parent marks; `5201164f55ec16ff` re-arm consumed by any principal) plus a zombie recurrence (`bf02ad346f61bf00`) and stale served guides (`d01eaef12cce9b8a`) → re-arm scoping fixed test-first (new test RED at the intended assertion, GREEN 66/66; three isolated mutations each KILLED by exactly the intended test).
 - **Effects / recovery:** commits `971ed73f`, `09f7b2c2`, and the re-arm fix pending the gate. One self-caught error: a pre-compaction retraction of the re-arm mechanism as an accepted design tradeoff was reversed by direct measurement; recorded in the bug file.
 - **Outcome / basis:** good / partial — fixes verified by observed RED→GREEN and a live check; the companion-side restore fix (`6d671794cd4da970`) is awaiting an operator decision.
 - **Delegation candidate:** "live-verify a guide-ledger fix across a restart" is a bounded workflow: dispatch probe → read per-principal ledger file → operator `/mcp` → resume probe → compare stamps. Missing input for a worker: the `/mcp` step needs the operator. Proposal only.
@@ -361,7 +362,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 **Update 2026-09-24, interval extended to about 14:55Z.** After the sweep, the same session fixed the race (`69e89228`, archived as `c161cc27ddff5672` in `8e2a40ae`). It then went through one `/compact` (between 14:41Z and 14:45Z), rebuilt the release binary, and ran a live check after `/mcp`. **Selection is unchanged.** Those episodes are later substantive work and were not first-eligible, so no new DWF or DCX was opened. Their evidence lives in `c161cc27ddff5672` § *Resume*.
 - **Delegates added:** 4 read-only live-check subagents, on Sonnet. Principals are observable only as CC agent ids, and all four are named in that table.
 - **Capture gap, declared:** one subagent's self-report omitted a delivery its transcript holds. The collector counted from transcripts, but the task-file transcripts are process-local and are not retained. The durable evidence is the timestamped stamp-to-delivery table.
-- **Enrichment, linked rather than duplicated:** the same run recurred `d25aa6db7b4e6367`'s trigger and `523233935cc53bc4`'s Bug B. The evidence is written into those two files.
+- **Enrichment, linked rather than duplicated:** the same run recurred `7bdeb054a5ab2f46`'s trigger and `bf02ad346f61bf00`'s Bug B. The evidence is written into those two files.
 - **Recording effort for the extension:** four bug-file updates and this one, about 5 of roughly 45 tool calls.
 
 ## DCS-7 — Session 571eb3d6 — rtd8c, the form-3 ablation, JevK5 Stage 1 and the API-route clean re-score, third post-compaction interval
@@ -380,6 +381,50 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | Notable, for the review | Two of this session's own claims were retracted before anything was built on them: a Stage-1 probability range, and the reading that recall is lost to rule assignment (it is mostly silence). A third, a gate-precision cost attributed to form 3, was withdrawn once form 2b's log showed it predated the change. Each was caught by recounting from the rows. At the operator's direction, peer entries DWF-4 and DWF-7 were committed with DCS-2 and DCS-5 in `502265fc`, with their authors named in the commit body. The live peer ebf651ec was told |
 | Unresolved pending entries | None. Local-route Stage 2 has not started |
 | Collection overhead | About 10 minutes for this receipt, estimated |
+
+## DWF-8 — Gate cache filled /home: orphan reclaim, snapshot pinning found, then slot-pool fix — pre-action packet for the fix
+
+**Status:** pending-outcome
+**Valid:** dated 2026-09-24
+
+**Sampling / capture mode:** `routine-first`, **retrospective** for the investigation and **prospective** for the fix. The investigation was the session's first substantive multi-step task, and it finished before this capture. The fix's pre-action packet below was written before the dependent step.
+
+**Identity / key / times:** capture key `938e2953/gate-cache-disk`. Coordinating host sessionId `938e2953-de0e-4241-a543-9b761a70326a`. Model: Sonnet 5 at the start, then Opus 5.5 after a mid-session switch. The switch appears in the transcript as a system notice. No child principals. Start time unknown. Capture at 2026-09-24T15:09:52Z. Finish pending.
+
+**Task / authority:** The user asked: *"lets understand why codescout-gate files are consuming the hdd and how we could fix it"*. They later approved deleting the confirmed-orphan trees and designing a permanent fix, then approved the implementation (*"yes"*). Workspace: `experiments` @ `eb48fe28`. The tree is dirty with peer-owned Rust (`src/lsp/*`, `src/tools/symbol/*`), which is not mine and must not be touched. Targets: `scripts/gate.sh` and the new `tests/gate-slot.sh`.
+
+**Trajectory (retrospective, investigation):**
+
+1. `du` showed `~/.cache/codescout-gate` at 323G across 17 trees, and `df` showed `/home` at 97%.
+2. I classified liveness by registry row plus `/proc`, then widened the scope to all 5 config dirs and added a `CLAUDE_CODE_SESSION_ID` scan over `/proc/*/environ`, because the archived bug `c23d86eb` shows registry rows lie under disk pressure. Result: 11 orphan trees and 6 live.
+3. The first delete aborted without removing anything: `fuser` exits 1 when nothing holds the path, and `set -e` treated that as an error.
+4. The second delete removed all 11. `du` fell from 323G to 125G, but `df` did not move: snapper `@home` snapshots pin the deleted trees, and listing them needs root.
+5. Filed bug `37b251b33adb37eb`.
+6. Ran recon. `bug-fix-session-log:F-173` measured `flock -o` against no-`-o` and reversed the lock-mode recommendation.
+
+**Pre-action (fix):**
+
+- **Evidence available:** `scripts/gate.sh:61` keys `CARGO_TARGET_DIR` on the session id, with no teardown. F-173's probe results. The pinning test covers only START/END/order.
+- **Intended next action:** write `tests/gate-slot.sh`, which drives the real `gate.sh` with stub `cargo` and `fmt-mine.sh` and temp `HOME` and pool. Observe it RED against the current script. Then implement a pool of slots leased by a non-blocking `flock` held on an inherited fd, without `-o`.
+- **Completion check:**
+  - the new suite goes GREEN;
+  - one mutation per guarded site is KILLED;
+  - the real `./scripts/gate.sh` runs and reports its slot;
+  - the default lane contains no new failures attributable to this change.
+- **Uncertainty:** peer WIP in `src/` may red the lanes independently of this change.
+
+**Outcome (added 2026-09-24; the pre-action fields above are unchanged):** `mixed`, `verified-complete` for the fix itself.
+
+- **Failing baseline observed first:** `tests/gate-slot.sh` against the pre-pool script gave 7 failed and 4 passed.
+- **Post-fix:** 14/0.
+- **Mutation:** one mutation per guarded site, 5 of 5 KILLED. After each run I checked for survivors (suite env marker, temp dirs, inode count) and found none.
+- **Real gate:** `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`. It leased `slot-1` (19G), the pool total was 164G, and all 77 `test result:` lines showed 0 failures.
+- **Self-inflicted effects, the reason for `mixed`:**
+  - `bug-fix-session-log:F-174`: the uncommitted script went live for 2 peers on save and triggered cold builds.
+  - `bug-fix-session-log:F-175`: a looping M4 mutant outlived its suite and exhausted `/tmp` inodes machine-wide. The classifier refused both my kill and my delete. A peer (`ebf651ec`) reported the damage and declined to delete on my behalf. The operator then authorized the removal.
+  - A second defect in my own test was caught only by mutation M2, which first SURVIVED: case D killed a wrapper subshell, not the gate.
+- **What the checks establish:** the lease, reuse, isolation, orphan-worker and flock-failure behaviours of `gate.sh`, driven through stubs. They say nothing about behaviour under real concurrent cargo load beyond the one real gate run.
+- **Delegation candidate (a proposal only):** a deterministic post-mutation survivor check, meaning processes carrying the suite's env marker plus growth in its temp root. The mutation verdict line cannot show either.
 
 ## Template for new entries
 

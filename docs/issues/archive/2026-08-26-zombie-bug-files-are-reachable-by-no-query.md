@@ -83,7 +83,7 @@ one is `2026-07-07`, 50 days at time of filing.
 
 - `7db5aa17c12be838` — `last_verified: 2026-08-26` (today). Explicitly `zombie` by
   maintainer decision, actively tracked — working as designed, not neglected.
-- `523233935cc53bc4` — title states its underlying bugs ("Bug A", "Bug B") are already
+- `bf02ad346f61bf00` — title states its underlying bugs ("Bug A", "Bug B") are already
   fixed/mitigated. Residual instrumented-watch state, not neglect.
 - `6d6a6efca4d2bdd9` — the stalest (`last_observed: 2026-07-18`), but already went
   through one reopen-and-fail-to-reproduce cycle before settling into `zombie`.
