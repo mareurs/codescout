@@ -155,6 +155,9 @@ impl ServerEnv {
     }
 }
 
+/// A shared handle to one principal's guide ledger. See `CodeScoutServer::live_ledger`.
+type LedgerHandle = Arc<parking_lot::Mutex<crate::tools::guide_ledger::GuideLedger>>;
+
 #[derive(Clone)]
 pub struct CodeScoutServer {
     agent: Agent,
@@ -179,7 +182,19 @@ pub struct CodeScoutServer {
     /// reconnect within one conversation — in which case
     /// `CodeScoutServer::from_parts_with_env` re-arms the project-scoped
     /// topic itself, before any `activate` runs.
-    guide_hints_emitted: Arc<parking_lot::Mutex<crate::tools::guide_ledger::GuideLedger>>,
+    ///
+    /// **A slot holding a HANDLE, not the ledger itself.** Adoption swaps which
+    /// principal's ledger the slot points at; it never rewrites a ledger's contents
+    /// in place. Each call resolves its handle once, at adoption, and carries that
+    /// handle in its `ToolContext` for the whole call. So a call still running when a
+    /// sibling principal adopts keeps writing to its own ledger. When adoption used to
+    /// swap contents under one shared `Arc`, a slow call decided its guide delivery
+    /// against whichever principal adopted last: measured 2026-09-24 as 2 of 4 parallel
+    /// subagents denied a first-call guide while a third got it three times
+    /// (docs/issues/2026-09-24-concurrent-subagents-guide-deliveries-land-in-the-wrong-subagent.md).
+    /// Read it through [`live_ledger`](Self::live_ledger); inside a call, use
+    /// `ctx.guide_hints_emitted`, never the slot.
+    live_ledger: Arc<parking_lot::Mutex<LedgerHandle>>,
     /// Ledgers for principals this process has served but is not serving right
     /// now — the "restore" half that [`GuideLedger::rekey`] alone cannot provide,
     /// because its re-arm is total by design.
@@ -200,11 +215,14 @@ pub struct CodeScoutServer {
     /// the starvation above for a principal that merely paused. An entry is a
     /// `BTreeMap` of topic→timestamp, so the cost is bytes rather than anything
     /// structural.
-    parked_ledgers: Arc<
-        parking_lot::Mutex<
-            std::collections::HashMap<String, crate::tools::guide_ledger::GuideLedger>,
-        >,
-    >,
+    ///
+    /// **Never holds the live ledger.** `poll_rendezvous` rekeys the live ledger IN
+    /// PLACE on `/clear`, so if it were also filed here under its old key, that entry
+    /// would silently point at a ledger keyed to the new conversation, and a later
+    /// re-adoption of the old key would restore the wrong history. Adoption therefore
+    /// MOVES handles: the target leaves this map as it becomes live, and the outgoing
+    /// handle enters it as it stops being live (`bug-fix-session-log:W-145`).
+    parked_ledgers: Arc<parking_lot::Mutex<std::collections::HashMap<String, LedgerHandle>>>,
     /// The ledger key this process was constructed with — the PARENT's identity.
     ///
     /// A parent's calls assert no principal, so `None` cannot mean "leave the
@@ -561,7 +579,7 @@ impl CodeScoutServer {
             section_coverage,
             base_ledger_key,
             parked_ledgers: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
-            guide_hints_emitted,
+            live_ledger: Arc::new(parking_lot::Mutex::new(guide_hints_emitted)),
             session_id: uuid::Uuid::new_v4().to_string(),
             cc_session_id,
             session_key,
@@ -664,10 +682,15 @@ impl CodeScoutServer {
             .map_err(|e| CallToolResult::error(vec![Content::text(e.to_string())]))
     }
 
+    /// `ledger` is the handle adoption resolved for this call. It is a parameter,
+    /// not a read of the slot, so a sibling principal's concurrent adoption has no
+    /// window in which to hand this call the sibling's ledger
+    /// (docs/issues/2026-09-24-concurrent-subagents-guide-deliveries-land-in-the-wrong-subagent.md).
     fn build_context(
         &self,
         progress: Option<Arc<progress::ProgressReporter>>,
         peer: Option<Peer<RoleServer>>,
+        ledger: LedgerHandle,
     ) -> ToolContext {
         ToolContext {
             agent: self.agent.clone(),
@@ -676,10 +699,21 @@ impl CodeScoutServer {
             progress,
             peer,
             section_coverage: self.section_coverage.clone(),
-            guide_hints_emitted: self.guide_hints_emitted.clone(),
+            guide_hints_emitted: ledger,
             workspace_override: None,
         }
     }
+
+    /// The ledger handle the slot points at RIGHT NOW. A snapshot: a concurrent
+    /// adoption can repoint the slot the moment this returns. So a tool call must
+    /// never use this to decide delivery. It uses the handle
+    /// `adopt_request_conversation` resolved for it, carried in its `ToolContext`.
+    /// Fine for server-level work that runs before adoption (`poll_rendezvous`) and
+    /// for tests.
+    fn live_ledger(&self) -> LedgerHandle {
+        self.live_ledger.lock().clone()
+    }
+
     /// Phase 2: extract an optional `workspace` pin from tool input. The value
     /// is a path string, canonicalized to match the registry's canonical-root
     /// keys. No tool consumes this yet — Phase 3 wires `with_project_at`.
@@ -1110,7 +1144,8 @@ impl CodeScoutServer {
             let changed = rv.poll();
             (changed, rv.is_active(), rv.current().map(str::to_string))
         };
-        let mut led = self.guide_hints_emitted.lock();
+        let live = self.live_ledger();
+        let mut led = live.lock();
         led.set_rendezvous_active(active);
         if let Some(session) = changed {
             tracing::info!(
@@ -1122,12 +1157,15 @@ impl CodeScoutServer {
         current
     }
     /// Consume the pending subagent guide-rearm request addressed to this process
-    /// AND to the calling principal's agent, re-arming the named topics on the live
-    /// ledger — which, by the time this runs, `adopt_request_conversation` has made
-    /// THAT subagent's. Called from `call_tool_inner` immediately after adoption —
-    /// same "before `tool.call_content` decides guide delivery" requirement as
-    /// `poll_rendezvous`, so a re-armed topic can be delivered in THIS response
-    /// rather than one call late.
+    /// AND to the calling principal's agent, re-arming the named topics on that
+    /// principal's ledger. Called from `call_tool_inner` immediately after adoption,
+    /// with the handle adoption resolved: the same "before `tool.call_content`
+    /// decides guide delivery" requirement as `poll_rendezvous`, so a re-armed topic
+    /// can be delivered in THIS response rather than one call late.
+    ///
+    /// `ledger` is the handle adoption resolved for THIS call, never the slot, which
+    /// a concurrent adoption may already have repointed at a sibling
+    /// (docs/issues/2026-09-24-concurrent-subagents-guide-deliveries-land-in-the-wrong-subagent.md).
     ///
     /// `agent` is `None` for a parent (unstamped) call, which consumes nothing.
     /// Consuming on whichever principal called next re-armed the PARENT's whole
@@ -1138,7 +1176,7 @@ impl CodeScoutServer {
     /// indistinguishable from its parent and no longer receives a re-arm.
     ///
     /// See `src/tools/guide_rearm.rs` module docs for why this exists at all.
-    fn poll_guide_rearm(&self, agent: Option<&str>) {
+    fn poll_guide_rearm(&self, agent: Option<&str>, ledger: &LedgerHandle) {
         let Some(agent) = agent else {
             return;
         };
@@ -1148,10 +1186,23 @@ impl CodeScoutServer {
         }
         let refs: Vec<&str> = topics.iter().map(String::as_str).collect();
         tracing::info!(topics = ?refs, agent, "re-arming guide topics for the subagent that requested them");
-        self.guide_hints_emitted.lock().re_arm(&refs);
+        ledger.lock().re_arm(&refs);
     }
 
-    /// Serve `asserted`'s ledger, parking whichever principal's we were serving.
+    /// Serve `asserted`'s ledger, parking whichever principal's we were serving, and
+    /// return the handle THIS call must use for the rest of its life.
+    ///
+    /// **The returned handle is the point.** The slot is process-wide and a sibling
+    /// principal's call can repoint it at any moment, so everything downstream in
+    /// the same call — `set_session_start_source`, `poll_guide_rearm`, and the
+    /// `ToolContext` guide delivery reads — takes this handle and never re-reads the
+    /// slot. Swapping ledger CONTENTS under one shared `Arc` is what let a slow call
+    /// decide delivery against the last principal to adopt
+    /// (docs/issues/2026-09-24-concurrent-subagents-guide-deliveries-land-in-the-wrong-subagent.md).
+    /// The slot lock is held for the whole decision, so two concurrent adoptions
+    /// cannot interleave their park and restore. Lock order: slot, then
+    /// `parked_ledgers`, then a ledger's own lock, each briefly. No tool holds a
+    /// ledger lock while taking either of the first two.
     ///
     /// **`None` means "the parent", never "leave the ledger alone".** That
     /// distinction is the whole of this function. A parent's calls carry no
@@ -1177,11 +1228,11 @@ impl CodeScoutServer {
     ///
     /// So the three cases are:
     ///
-    /// | asserted | ledger already on it | action |
+    /// | asserted | slot already on it | action |
     /// |---|---|---|
     /// | any | yes | nothing — the common case, every call after the first |
-    /// | seen before, by THIS process | no | park the outgoing, RESTORE the parked one |
-    /// | never seen by this process | no | park the outgoing, [`adopt`](GuideLedger::adopt) — read the principal's on-disk file if an earlier process left one, else start empty |
+    /// | seen before, by THIS process | no | park the outgoing handle, RESTORE the parked one |
+    /// | never seen by this process | no | park the outgoing handle, [`adopt`](GuideLedger::adopt) a copy of it — read the principal's on-disk file if an earlier process left one, else start empty |
     ///
     /// Restoring from `parked_ledgers` is what a bare [`rekey`](GuideLedger::rekey)
     /// cannot do within one process's memory. `adopt` extends that one step
@@ -1197,7 +1248,7 @@ impl CodeScoutServer {
     /// there is no key to file it under — so a process with no resolvable session
     /// behaves exactly as it did before this existed.
     ///
-    /// The return value is deliberately `asserted` rather than the resolved
+    /// The first return value is deliberately `asserted` rather than the resolved
     /// target: it feeds `serving_session`, where `None` must keep falling through
     /// to the rendezvous. Restoring the parent is a ledger operation, not a claim
     /// about which conversation the rendezvous should report.
@@ -1205,38 +1256,45 @@ impl CodeScoutServer {
         &self,
         asserted: Option<String>,
         rendezvous_fallback: Option<String>,
-    ) -> Option<String> {
-        let target = asserted
+    ) -> (Option<String>, LedgerHandle) {
+        let mut slot = self.live_ledger.lock();
+        let Some(target) = asserted
             .clone()
             .or(rendezvous_fallback)
-            .or_else(|| self.base_ledger_key.clone())?;
-
-        let mut live = self.guide_hints_emitted.lock();
-        if live.key() == Some(target.as_str()) {
-            return asserted;
+            .or_else(|| self.base_ledger_key.clone())
+        else {
+            return (asserted, slot.clone());
+        };
+        if slot.lock().key() == Some(target.as_str()) {
+            return (asserted, slot.clone());
         }
 
         let mut parked = self.parked_ledgers.lock();
-        if let Some(outgoing) = live.key().map(str::to_string) {
-            parked.insert(outgoing, live.clone());
-        }
-        match parked.remove(&target) {
+        let outgoing = slot.clone();
+        let incoming = match parked.remove(&target) {
             Some(restored) => {
-                *live = restored;
                 tracing::info!(
                     principal = %target,
                     "restored the guide ledger of a previously served principal"
                 );
+                restored
             }
             None => {
-                live.adopt(&target);
+                let mut fresh = outgoing.lock().clone();
+                fresh.adopt(&target);
                 tracing::info!(
                     principal = %target,
                     "principal not parked by this process; adopted its on-disk ledger, if any"
                 );
+                Arc::new(parking_lot::Mutex::new(fresh))
             }
+        };
+        let outgoing_key = outgoing.lock().key().map(str::to_string);
+        if let Some(key) = outgoing_key {
+            parked.insert(key, outgoing);
         }
-        asserted
+        *slot = incoming.clone();
+        (asserted, incoming)
     }
 
     /// Drive [`poll_rendezvous`](Self::poll_rendezvous) without routing a tool
@@ -1382,27 +1440,24 @@ impl CodeScoutServer {
         // conversation-scoped key — and is kept as the path that needs no plugin
         // once one does. Without the companion both are `None` and this leaves the
         // rendezvous result exactly as it was.
-        let serving_session = self
-            .adopt_request_conversation(
-                asserted_principal.or(asserted_conversation),
-                rendezvous_session.clone(),
-            )
-            .or(rendezvous_session);
-        // After adoption, so it lands on whichever ledger is now live — a copy made
-        // before `adopt_request_conversation` swapped ledgers would sit on the parked
-        // one. Two locks in sequence, never held together. See
-        // `GuideLedger::session_start_source`.
+        let (asserted_back, ledger) = self.adopt_request_conversation(
+            asserted_principal.or(asserted_conversation),
+            rendezvous_session.clone(),
+        );
+        let serving_session = asserted_back.or(rendezvous_session);
+        // On THIS call's resolved ledger, never the slot: after adoption, so it lands
+        // on the principal being served, and through `ledger`, so a sibling adopting
+        // concurrently cannot redirect it. Two locks in sequence, never held
+        // together. See `GuideLedger::session_start_source`.
         let session_start = self
             .rendezvous
             .lock()
             .session_start_source()
             .map(str::to_string);
-        self.guide_hints_emitted
-            .lock()
-            .set_session_start_source(session_start);
-        self.poll_guide_rearm(asserted_agent.as_deref());
+        ledger.lock().set_session_start_source(session_start);
+        self.poll_guide_rearm(asserted_agent.as_deref(), &ledger);
 
-        let mut ctx = self.build_context(progress, peer);
+        let mut ctx = self.build_context(progress, peer, ledger);
         ctx.workspace_override = workspace_override;
 
         let timeout_secs = if tool_skips_server_timeout(&req.name, &input) {
@@ -9972,7 +10027,7 @@ pub(crate) mod test_support {
             progress: None,
             peer: None,
             section_coverage: server.section_coverage.clone(),
-            guide_hints_emitted: server.guide_hints_emitted.clone(),
+            guide_hints_emitted: server.live_ledger(),
             workspace_override: None,
         }
     }
@@ -10889,7 +10944,8 @@ mod guide_hint_tests {
 
         // Seed a non-empty ledger that deliberately lacks the bootstrap topic.
         {
-            let mut led = server.guide_hints_emitted.lock();
+            let live = server.live_ledger();
+            let mut led = live.lock();
             led.insert("librarian".to_string());
             led.insert("progressive-disclosure".to_string());
             assert!(!led.is_empty());
@@ -11485,20 +11541,17 @@ mod guide_hint_tests {
         {
             let server = build("restart-survival-session").await;
             assert!(
-                !server.guide_hints_emitted.lock().contains("librarian"),
+                !server.live_ledger().lock().contains("librarian"),
                 "a fresh session starts with an empty ledger"
             );
-            server
-                .guide_hints_emitted
-                .lock()
-                .insert("librarian".to_string());
+            server.live_ledger().lock().insert("librarian".to_string());
         } // server dropped — simulates a /mcp reconnect re-spawning the process.
 
         // Second MCP process, same project + same session id: must RELOAD the
         // persisted ledger, not re-arm. This is the regression bar.
         let server2 = build("restart-survival-session").await;
         assert!(
-            server2.guide_hints_emitted.lock().contains("librarian"),
+            server2.live_ledger().lock().contains("librarian"),
             "guide ledger must survive MCP restart within one conversation"
         );
 
@@ -11506,7 +11559,7 @@ mod guide_hint_tests {
         // concurrent CC windows must not inherit each other's emitted set.
         let server3 = build("other-session").await;
         assert!(
-            !server3.guide_hints_emitted.lock().contains("librarian"),
+            !server3.live_ledger().lock().contains("librarian"),
             "a different session must not inherit another session's ledger"
         );
     }
@@ -11571,7 +11624,7 @@ mod guide_hint_tests {
         // no opener has fired yet on this server.
         assert!(
             !server2
-                .guide_hints_emitted
+                .live_ledger()
                 .lock()
                 .contains(crate::prompts::SESSION_OPENING_GUIDE),
             "a restart against a different project must re-open the session for \
@@ -11636,10 +11689,7 @@ mod guide_hint_tests {
                 .call_tool_by_name("tree", json!({"path": "."}))
                 .await
                 .expect("dispatch ok");
-            server
-                .guide_hints_emitted
-                .lock()
-                .insert("librarian".to_string());
+            server.live_ledger().lock().insert("librarian".to_string());
         } // dropped — simulates an /mcp reconnect against the SAME project.
 
         let server2 = build().await;
@@ -11647,7 +11697,7 @@ mod guide_hint_tests {
         // Bootstrap absent before any call — the reconnect re-opened the session.
         assert!(
             !server2
-                .guide_hints_emitted
+                .live_ledger()
                 .lock()
                 .contains(crate::prompts::SESSION_OPENING_GUIDE),
             "a same-project reconnect must also re-arm the bootstrap topic"
@@ -11655,7 +11705,7 @@ mod guide_hint_tests {
         // The tool-contract topic must survive: this is what distinguishes a
         // surgical re-arm from a blunt clear().
         assert!(
-            server2.guide_hints_emitted.lock().contains("librarian"),
+            server2.live_ledger().lock().contains("librarian"),
             "a re-arm must not touch tool-contract topics the model already holds \
              — if this fails, the startup path used clear() instead of re_arm()"
         );
@@ -11687,12 +11737,9 @@ mod guide_hint_tests {
         let server =
             CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
 
+        server.live_ledger().lock().insert("librarian".to_string());
         server
-            .guide_hints_emitted
-            .lock()
-            .insert("librarian".to_string());
-        server
-            .guide_hints_emitted
+            .live_ledger()
             .lock()
             .insert("progressive-disclosure".to_string());
 
@@ -11710,7 +11757,8 @@ mod guide_hint_tests {
 
         server.rendezvous_poll_for_test();
 
-        let ledger = server.guide_hints_emitted.lock();
+        let live = server.live_ledger();
+        let ledger = live.lock();
         assert!(
             !ledger.contains("librarian"),
             "a new conversation re-arms every topic"
@@ -11759,20 +11807,17 @@ mod guide_hint_tests {
         let server =
             CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
 
-        server
-            .guide_hints_emitted
-            .lock()
-            .insert("librarian".to_string());
+        server.live_ledger().lock().insert("librarian".to_string());
 
         server.rendezvous_poll_for_test();
         server.rendezvous_poll_for_test();
 
         assert!(
-            server.guide_hints_emitted.lock().contains("librarian"),
+            server.live_ledger().lock().contains("librarian"),
             "no hook stamp ⇒ no re-arm; the server must not depend on the companion"
         );
         assert!(
-            !server.guide_hints_emitted.lock().rendezvous_active(),
+            !server.live_ledger().lock().rendezvous_active(),
             "no hook stamp ⇒ the gate stays closed; a hardcoded `true` here \
              would send Task 3 down the precise path on a hookless client"
         );
@@ -11805,10 +11850,7 @@ mod guide_hint_tests {
         let server =
             CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
 
-        server
-            .guide_hints_emitted
-            .lock()
-            .insert("librarian".to_string());
+        server.live_ledger().lock().insert("librarian".to_string());
 
         let slot = servers.path().join(format!("{}.json", std::process::id()));
         let mut entry: crate::tools::rendezvous::Entry =
@@ -11871,7 +11913,7 @@ mod guide_hint_tests {
         );
 
         assert!(
-            !server.guide_hints_emitted.lock().contains("librarian"),
+            !server.live_ledger().lock().contains("librarian"),
             "a tool call must poll the rendezvous and re-arm for the new conversation"
         );
     }
@@ -11902,10 +11944,7 @@ mod guide_hint_tests {
             .unwrap();
         let server =
             CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
-        server
-            .guide_hints_emitted
-            .lock()
-            .insert("librarian".to_string());
+        server.live_ledger().lock().insert("librarian".to_string());
 
         // As the SessionStart hook leaves the slot after a plain (non-compaction) start
         // of THIS conversation: same session id, a stamp, and the source.
@@ -11930,7 +11969,7 @@ mod guide_hint_tests {
         );
 
         assert!(
-            server.guide_hints_emitted.lock().contains("librarian"),
+            server.live_ledger().lock().contains("librarian"),
             "the last session start was a resume, not a compaction — the ledger must survive"
         );
     }
@@ -11974,10 +12013,7 @@ mod guide_hint_tests {
             .call_tool_by_name("tree", as_subagent(json!({ "path": "." })))
             .await
             .expect("first dispatch ok");
-        server
-            .guide_hints_emitted
-            .lock()
-            .insert("librarian".to_string());
+        server.live_ledger().lock().insert("librarian".to_string());
 
         let request_path = rearm_dir.path().join(format!(
             "{}-{}.json",
@@ -12008,7 +12044,7 @@ mod guide_hint_tests {
 
         assert!(
             server
-                .guide_hints_emitted
+                .live_ledger()
                 .lock()
                 .contains(crate::prompts::SESSION_OPENING_GUIDE),
             "the requested topic must be RE-DELIVERED and therefore re-marked \
@@ -12018,7 +12054,7 @@ mod guide_hint_tests {
              before call_content decided"
         );
         assert!(
-            server.guide_hints_emitted.lock().contains("librarian"),
+            server.live_ledger().lock().contains("librarian"),
             "an unrequested topic must survive — a surgical re-arm, not a wholesale clear"
         );
         assert!(
@@ -12143,10 +12179,7 @@ mod guide_hint_tests {
             !call(&server, None).await.is_empty(),
             "the opener fires on the parent's first call"
         );
-        server
-            .guide_hints_emitted
-            .lock()
-            .insert("librarian".to_string());
+        server.live_ledger().lock().insert("librarian".to_string());
 
         // A LIVE pair, not an invented one: on 2026-09-24 the companion wrote
         // `<pid>-e6143c2506b9f291.json` for agent `a3ba615808d91a57d`. An invented
@@ -12166,7 +12199,7 @@ mod guide_hint_tests {
             "a request addressed to a subagent must not re-arm the parent"
         );
         assert!(
-            server.guide_hints_emitted.lock().contains("librarian"),
+            server.live_ledger().lock().contains("librarian"),
             "the parent's other topics must survive a subagent's pending request"
         );
         assert!(
@@ -12178,6 +12211,154 @@ mod guide_hint_tests {
         assert!(
             !request_path.exists(),
             "the named subagent's own call consumes its request"
+        );
+    }
+
+    /// Regression for
+    /// docs/issues/2026-09-24-concurrent-subagents-guide-deliveries-land-in-the-wrong-subagent.md.
+    /// Adoption used to swap the CONTENTS of one process-wide ledger slot, and every
+    /// call's `ToolContext` held that same slot. So a slow call adopted as X, still
+    /// running when Y's call adopted Y, decided its guide delivery against Y's
+    /// ledger: X was denied its first-call guide and Y's ledger was stamped with it.
+    /// Measured live 2026-09-24 as 2 of 4 parallel verifiers starved of a guide
+    /// while a third received it three times.
+    ///
+    /// The overlap is real, not simulated. X's command sleeps, and Y's call starts
+    /// inside that sleep, so Y's adoption lands between X's adoption and X's
+    /// post-phase. Both calls pass `effect: "read"`: a write call takes the write
+    /// guard, which would serialize the two and hide the race, so this test would
+    /// pass against the defect.
+    #[tokio::test]
+    async fn concurrent_principals_each_receive_their_own_first_call_guide() {
+        async fn call(server: &CodeScoutServer, principal: &str, command: &str) -> Vec<String> {
+            let mut arguments = serde_json::Map::new();
+            arguments.insert("command".to_string(), json!(command));
+            arguments.insert("effect".to_string(), json!("read"));
+            arguments.insert(
+                crate::tools::session_key::PRINCIPAL_ARG_KEY.to_string(),
+                json!(principal),
+            );
+            let params = json!({
+                "name": "run_command",
+                "arguments": Value::Object(arguments),
+            });
+            let req: CallToolRequestParams = serde_json::from_value(params).unwrap();
+            let out = server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .expect("dispatch ok");
+            guide_blocks(&out.content)
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+
+        let x = "conv-A/agentXXXXXXXXXXXX";
+        let y = "conv-A/agentYYYYYYYYYYYY";
+        let (x_first, y_first) = tokio::join!(call(&server, x, "sleep 0.8; echo x"), async {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            call(&server, y, "echo y").await
+        });
+
+        assert!(
+            !y_first.is_empty(),
+            "Y's first call must receive the opener (control: the fast call is not the victim)"
+        );
+        assert!(
+            !x_first.is_empty(),
+            "X's first call must receive the opener even though Y adopted while X was running \
+             — an empty result here is X's delivery decided against Y's ledger"
+        );
+        assert!(
+            call(&server, x, "echo x2").await.is_empty(),
+            "X's ledger must have been stamped by X's own first delivery; a guide here means \
+             that stamp landed in another principal's ledger"
+        );
+        assert!(
+            call(&server, y, "echo y2").await.is_empty(),
+            "Y's ledger must record exactly its own delivery"
+        );
+    }
+
+    /// `parked_ledgers` is what carries a principal's IN-MEMORY state across a hop
+    /// to another principal and back, and a one-shot notice is the state that
+    /// proves it. Guide topics write through to disk, so a re-adoption that missed
+    /// the parked handle would silently reload them from the principal's file, and
+    /// every topic-based restore test stays green (measured 2026-09-24: dropping the
+    /// `parked.insert` in `adopt_request_conversation` SURVIVED all 57
+    /// `guide_hint_tests`). `notices` are never persisted, so only the parked handle
+    /// can bring them back. Without it, the parent's next refusal would repeat a
+    /// gate condition it has already been shown.
+    #[tokio::test]
+    async fn a_parent_keeps_its_one_shot_notices_across_a_subagent_hop() {
+        async fn call(server: &CodeScoutServer, principal: Option<&str>, command: &str) -> usize {
+            let mut arguments = serde_json::Map::new();
+            arguments.insert("command".to_string(), json!(command));
+            if let Some(p) = principal {
+                arguments.insert(
+                    crate::tools::session_key::PRINCIPAL_ARG_KEY.to_string(),
+                    json!(p),
+                );
+            }
+            let params = json!({
+                "name": "run_command",
+                "arguments": Value::Object(arguments),
+            });
+            let req: CallToolRequestParams = serde_json::from_value(params).unwrap();
+            server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .expect("dispatch ok")
+                .content
+                .len()
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let env = ServerEnv {
+            // Keyed, so the parent's ledger has a key to be parked under: an
+            // anonymous ledger is never parked, and this test would then prove
+            // nothing about the parked path.
+            session_id_explicit: Some("conv-A".to_string()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+
+        // IL-3 refuses pre-execution, so nothing runs. The first refusal of the
+        // family carries the gate condition as a second block.
+        assert_eq!(
+            call(&server, None, "cargo test | grep FAILED").await,
+            2,
+            "control: the parent's first IL-3 refusal carries the gate condition"
+        );
+        call(&server, Some("conv-A/agentZZZZZZZZZZZZ"), "echo sub").await;
+        assert_eq!(
+            call(&server, None, "cargo build | head -5").await,
+            1,
+            "the parent's second IL-3 refusal must not repeat the gate condition after a \
+             subagent hop: its one-shot notices live only in memory, so a repeat here \
+             means the parent was restored from disk instead of from its parked handle"
         );
     }
 
@@ -12205,7 +12386,7 @@ mod guide_hint_tests {
         let server =
             CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
         server
-            .guide_hints_emitted
+            .live_ledger()
             .lock()
             .insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
 
@@ -12216,7 +12397,7 @@ mod guide_hint_tests {
 
         assert!(
             server
-                .guide_hints_emitted
+                .live_ledger()
                 .lock()
                 .contains(crate::prompts::SESSION_OPENING_GUIDE),
             "with no request file, the ledger must be unaffected by guide-rearm polling"
@@ -12326,7 +12507,7 @@ mod guide_hint_tests {
             CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
 
         assert!(
-            !server.guide_hints_emitted.lock().rendezvous_active(),
+            !server.live_ledger().lock().rendezvous_active(),
             "no hook has stamped our slot yet"
         );
 
@@ -12345,7 +12526,7 @@ mod guide_hint_tests {
         assert!(result.is_error.is_none_or(|e| !e), "tree should succeed");
 
         assert!(
-            server.guide_hints_emitted.lock().rendezvous_active(),
+            server.live_ledger().lock().rendezvous_active(),
             "an ordinary tool call must copy Rendezvous::is_active onto the ledger"
         );
     }
@@ -12429,7 +12610,7 @@ mod guide_hint_tests {
             .await
             .unwrap();
         assert!(
-            !server.guide_hints_emitted.lock().is_empty(),
+            !server.live_ledger().lock().is_empty(),
             "the session opener must still fire in-memory for an anonymous session"
         );
 
@@ -12476,17 +12657,18 @@ mod guide_hint_tests {
         let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
 
         {
-            let mut ledger = server.guide_hints_emitted.lock();
+            let live = server.live_ledger();
+            let mut ledger = live.lock();
             ledger.insert("librarian".to_string());
             ledger.backdate_for_test("librarian", chrono::Duration::hours(3));
         }
 
-        let rearmed = server.guide_hints_emitted.lock().tick();
+        let rearmed = server.live_ledger().lock().tick();
         assert_eq!(
             rearmed, 1,
             "a topic backdated 3h past the 2h default TTL must re-arm"
         );
-        assert!(!server.guide_hints_emitted.lock().contains("librarian"));
+        assert!(!server.live_ledger().lock().contains("librarian"));
     }
 
     /// The `CODESCOUT_GUIDE_TTL_SECS=0` opt-out (`ServerEnv.guide_idle_ttl =
@@ -12517,17 +12699,18 @@ mod guide_hint_tests {
         let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
 
         {
-            let mut ledger = server.guide_hints_emitted.lock();
+            let live = server.live_ledger();
+            let mut ledger = live.lock();
             ledger.insert("librarian".to_string());
             ledger.backdate_for_test("librarian", chrono::Duration::days(100));
         }
 
-        let rearmed = server.guide_hints_emitted.lock().tick();
+        let rearmed = server.live_ledger().lock().tick();
         assert_eq!(
             rearmed, 0,
             "the =0 opt-out must never re-arm, however stale"
         );
-        assert!(server.guide_hints_emitted.lock().contains("librarian"));
+        assert!(server.live_ledger().lock().contains("librarian"));
     }
 
     /// The compaction side of the fix: `/compact` summarizes the guide bodies
