@@ -1,0 +1,944 @@
+{"id": 0, "label": "not-a-violation", "reason": "Status updated to superseded.", "second_rule": null}
+{"id": 1, "label": "not-a-violation", "reason": "Server name and timing updated.", "second_rule": null}
+{"id": 2, "label": "not-a-pair", "reason": "Twin is an unrelated pointer sentence.", "second_rule": null}
+{"id": 3, "label": "not-a-pair", "reason": "Twin is an unrelated archive pointer.", "second_rule": null}
+{"id": 4, "label": "not-a-pair", "reason": "Twin is an unrelated pointer sentence.", "second_rule": null}
+{"id": 5, "label": "not-a-violation", "reason": "Technical description of RRF scoring corrected; factual.", "second_rule": null}
+{"id": 6, "label": "not-a-pair", "reason": "Twin is tuning guidance, not a correction of the score-range sentence.", "second_rule": null}
+{"id": 7, "label": "not-a-violation", "reason": "Correction of a wrong RRF score formula and threshold consequence; factual error.", "second_rule": null}
+{"id": 8, "label": "not-a-violation", "reason": "Vague advice replaced by concrete tuning value; editorial/factual refinement.", "second_rule": null}
+{"id": 9, "label": "not-a-pair", "reason": "Twin misdiagnosis note is a different sentence from the promotion line.", "second_rule": null}
+{"id": 10, "label": "not-a-violation", "reason": "Path updated to archive location.", "second_rule": null}
+{"id": 11, "label": "not-a-violation", "reason": "Path repointed to archive; updated fact.", "second_rule": null}
+{"id": 12, "label": "not-a-violation", "reason": "Relabels 'confirmed' to 'mechanism, still valid' after root cause changed; editorial status correction.", "second_rule": null}
+{"id": 13, "label": "not-a-violation", "reason": "Plan step replaced with completion report.", "second_rule": null}
+{"id": 14, "label": "not-a-violation", "reason": "Editorial rewording of confidence rationale.", "second_rule": null}
+{"id": 15, "label": "not-a-violation", "reason": "Risk statement refined; editorial.", "second_rule": null}
+{"id": 16, "label": "not-a-violation", "reason": "Clarifies granularity matches but not key value; factual refinement.", "second_rule": null}
+{"id": 17, "label": "not-a-violation", "reason": "Option text updated after the fix landed.", "second_rule": null}
+{"id": 18, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about a doc comment.", "second_rule": null}
+{"id": 19, "label": "not-a-pair", "reason": "Twin corresponds to a different option sentence.", "second_rule": null}
+{"id": 20, "label": "not-a-violation", "reason": "Status updated to fixed-verified.", "second_rule": null}
+{"id": 21, "label": "not-a-violation", "reason": "Factual correction: only SearchResult graduated to a live consumer; no rule breach visible.", "second_rule": null}
+{"id": 22, "label": "not-a-violation", "reason": "Tracker header scope updated.", "second_rule": null}
+{"id": 23, "label": "not-a-violation", "reason": "Confidence revised after re-run; updated fact.", "second_rule": null}
+{"id": 24, "label": "not-a-violation", "reason": "Adds a cross-reference; editorial.", "second_rule": null}
+{"id": 25, "label": "not-a-violation", "reason": "Appends a cross-reference.", "second_rule": null}
+{"id": 26, "label": "not-a-pair", "reason": "Note corrects a different corollary, not the positive sentence.", "second_rule": null}
+{"id": 27, "label": "not-a-violation", "reason": "Site list expanded and line numbers dropped; factual/editorial update.", "second_rule": null}
+{"id": 28, "label": "not-a-violation", "reason": "Design detail and rationale added.", "second_rule": null}
+{"id": 29, "label": "not-a-violation", "reason": "Design correction: events to observations table; factual design change.", "second_rule": null}
+{"id": 30, "label": "not-a-violation", "reason": "Parenthetical removed; editorial.", "second_rule": null}
+{"id": 31, "label": "not-a-violation", "reason": "Design corrected from renumber to merge.", "second_rule": null}
+{"id": 32, "label": "not-a-pair", "reason": "Twin replaces the preceding merge sentence, not this one.", "second_rule": null}
+{"id": 33, "label": "not-a-violation", "reason": "Minor wording change (its to all history); editorial.", "second_rule": null}
+{"id": 34, "label": "not-a-violation", "reason": "Design spec corrected (example ids, matching criterion); factual/design change.", "second_rule": null}
+{"id": 35, "label": "not-a-violation", "reason": "Deferral reasoning found half right; factual revision, not a menu rule breach.", "second_rule": null}
+{"id": 36, "label": "not-a-violation", "reason": "Status annotation added; factual update.", "second_rule": null}
+{"id": 37, "label": "not-a-violation", "reason": "Status update: cgroup cap drafted, oom_score_adj review marked done.", "second_rule": null}
+{"id": 38, "label": "not-a-violation", "reason": "Signature updated from slice to by-value Vec.", "second_rule": null}
+{"id": 39, "label": "not-a-violation", "reason": "Call-site scope added; factual.", "second_rule": null}
+{"id": 40, "label": "not-a-violation", "reason": "Signature corrected to by-value.", "second_rule": null}
+{"id": 41, "label": "not-a-pair", "reason": "Note corrects the F: Fn signature sentence, not the IndexLock one.", "second_rule": null}
+{"id": 42, "label": "not-a-violation", "reason": "Fix superseded by round 2; updated fact.", "second_rule": null}
+{"id": 43, "label": "not-a-violation", "reason": "Commit list updated with superseding round.", "second_rule": null}
+{"id": 44, "label": "not-a-violation", "reason": "Reframed as round 1; update.", "second_rule": null}
+{"id": 45, "label": "monotone_absence", "reason": "Treats absence of a lock file as proof no indexing ran; correction inverts it to presence as proof.", "second_rule": null}
+{"id": 46, "label": "monotone_absence", "reason": "Absence of a lock file taken as proof load was not indexing; it was indexing.", "second_rule": null}
+{"id": 47, "label": "not-a-violation", "reason": "Clarifies the referent; editorial.", "second_rule": null}
+{"id": 48, "label": "not-a-violation", "reason": "Recommendation superseded by the actual fix.", "second_rule": null}
+{"id": 49, "label": "not-a-violation", "reason": "Code description narrowed after a fix; factual.", "second_rule": null}
+{"id": 50, "label": "not-a-pair", "reason": "Twin about the replace path is a different sentence.", "second_rule": null}
+{"id": 51, "label": "not-a-pair", "reason": "Twin describes a different failure (blank line), not this sentence.", "second_rule": null}
+{"id": 52, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about plain // comments.", "second_rule": null}
+{"id": 53, "label": "not-a-violation", "reason": "List extended with later reversals; update.", "second_rule": null}
+{"id": 54, "label": "not-a-violation", "reason": "List updated with new rounds; editorial.", "second_rule": null}
+{"id": 55, "label": "not-a-violation", "reason": "Stale MSRV and CI job list updated; factual update.", "second_rule": null}
+{"id": 56, "label": "not-a-violation", "reason": "Status update to promoted-to-bug-tracker.", "second_rule": null}
+{"id": 57, "label": "not-a-pair", "reason": "Twin is a recommendation to delete the hook, not a rewrite of this sentence.", "second_rule": null}
+{"id": 58, "label": "not-a-violation", "reason": "Open question answered; updated fact.", "second_rule": null}
+{"id": 59, "label": "not-a-violation", "reason": "Wrong factual claim about the extractor; no basis stated, so no rule breach visible.", "second_rule": null}
+{"id": 60, "label": "not-a-pair", "reason": "Twin proposing to take file_symbol out of the gate is a different sentence.", "second_rule": null}
+{"id": 61, "label": "not-a-pair", "reason": "Diagnosis sentence and fix recommendation are unrelated.", "second_rule": null}
+{"id": 62, "label": "not-a-violation", "reason": "Mechanism description refined; factual.", "second_rule": null}
+{"id": 63, "label": "not-a-violation", "reason": "Hypothesis re-ranked after diagnosis; factual update.", "second_rule": null}
+{"id": 64, "label": "not-a-violation", "reason": "Status update: bug narrowed by reading the search path.", "second_rule": null}
+{"id": 65, "label": "not-a-pair", "reason": "Twin is unrelated sentence about retry after activation.", "second_rule": null}
+{"id": 66, "label": "monotone_absence", "reason": "A watcher's silence and queued status taken as proof jobs never started; they ran, status lied.", "second_rule": "question_asked"}
+{"id": 67, "label": "not-a-violation", "reason": "Option struck through as adopted.", "second_rule": null}
+{"id": 68, "label": "run_tool", "reason": "Tool bug 'confirmed via source read' rather than running it; correction demotes it to original finding.", "second_rule": null}
+{"id": 69, "label": "not-a-violation", "reason": "Drifting line number removed.", "second_rule": null}
+{"id": 70, "label": "lines_read", "reason": "Diagnosis of a race stated from the failure message alone; corrected after actually reading the test.", "second_rule": null}
+{"id": 71, "label": "not-a-pair", "reason": "Twin about the tally being non-deterministic is unrelated to the positive.", "second_rule": null}
+{"id": 72, "label": "not-a-violation", "reason": "Status update adding provenance question as done.", "second_rule": null}
+{"id": 73, "label": "not-a-violation", "reason": "Status update covering the provenance question.", "second_rule": null}
+{"id": 74, "label": "not-a-violation", "reason": "Editorial tightening of a description.", "second_rule": null}
+{"id": 75, "label": "not-a-violation", "reason": "Factual correction of how the backend mismatch occurred.", "second_rule": null}
+{"id": 76, "label": "not-a-violation", "reason": "One decision resolved, leaving only step 1; updated fact.", "second_rule": null}
+{"id": 77, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about restarting a session.", "second_rule": null}
+{"id": 78, "label": "not-a-violation", "reason": "Open decision replaced by chosen action.", "second_rule": null}
+{"id": 79, "label": "not-a-violation", "reason": "Status sentence updated with added work.", "second_rule": null}
+{"id": 80, "label": "not-a-violation", "reason": "Reworded from canonical to shipping state with model detail; editorial/factual.", "second_rule": null}
+{"id": 81, "label": "not-a-violation", "reason": "Recommendation restructured and details corrected; factual.", "second_rule": null}
+{"id": 82, "label": "open_artifact", "reason": "States code's fallback behaviour on the strength of what .env.gpu says; correction drops that doc-based claim.", "second_rule": null}
+{"id": 83, "label": "not-a-pair", "reason": "Twin is a heading fragment.", "second_rule": null}
+{"id": 84, "label": "not-a-violation", "reason": "Recommendation retracted after wider sample; factual.", "second_rule": null}
+{"id": 85, "label": "not-a-violation", "reason": "Workaround marked superseded.", "second_rule": null}
+{"id": 86, "label": "not-a-violation", "reason": "Editorial condensing of a status bullet; no rule breach visible.", "second_rule": null}
+{"id": 87, "label": "not-a-violation", "reason": "Decision made; step updated.", "second_rule": null}
+{"id": 88, "label": "not-a-violation", "reason": "Punctuation edit.", "second_rule": null}
+{"id": 89, "label": "not-a-violation", "reason": "Inference 'had to' reworded to observed fact after measurement; editorial.", "second_rule": null}
+{"id": 90, "label": "not-a-violation", "reason": "Fix withdrawn; reason not visible as a rule breach.", "second_rule": null}
+{"id": 91, "label": "question_asked", "reason": "Empty find cited as verifying the gitignore pattern works; it never tested the pattern, which proved ineffective.", "second_rule": "monotone_absence"}
+{"id": 92, "label": "not-a-violation", "reason": "Status updated after the fix settled.", "second_rule": null}
+{"id": 93, "label": "not-a-violation", "reason": "Step no longer needed; updated fact.", "second_rule": null}
+{"id": 94, "label": "not-a-violation", "reason": "Recommended fix reversed after it was falsified; factual correction.", "second_rule": null}
+{"id": 95, "label": "not-a-pair", "reason": "Twin about VDI comparison is unrelated to Option B instruction.", "second_rule": null}
+{"id": 96, "label": "not-a-violation", "reason": "Plan step later landed; updated fact.", "second_rule": null}
+{"id": 97, "label": "not-a-pair", "reason": "Twin 'It now states the precondition' is unrelated.", "second_rule": null}
+{"id": 98, "label": "not-a-pair", "reason": "Twin about presenting unknown-id behaviour as a settled fix; unrelated to sweeping phantoms.", "second_rule": null}
+{"id": 99, "label": "not-a-pair", "reason": "Twin is a different sentence about separate failures.", "second_rule": null}
+{"id": 100, "label": "not-a-violation", "reason": "Planned test replaced by actual tests added.", "second_rule": null}
+{"id": 101, "label": "not-a-violation", "reason": "Editorial condensing after the fix.", "second_rule": null}
+{"id": 102, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about how the bug was found.", "second_rule": null}
+{"id": 103, "label": "not-a-violation", "reason": "Updated after the fix landed.", "second_rule": null}
+{"id": 104, "label": "not-a-pair", "reason": "Twin about .gitignore glob is a different instruction from the nearest-match one.", "second_rule": null}
+{"id": 105, "label": "not-a-violation", "reason": "Rewording with added reason.", "second_rule": null}
+{"id": 106, "label": "not-a-pair", "reason": "Twin is an unrelated instruction about the .gitignore glob.", "second_rule": null}
+{"id": 107, "label": "not-a-violation", "reason": "Phantom-directory claim corrected; breach mechanism not visible in text.", "second_rule": null}
+{"id": 108, "label": "not-a-violation", "reason": "Removes an invalid phantom-directory inference; factual correction, original already respects absence limits.", "second_rule": null}
+{"id": 109, "label": "not-a-violation", "reason": "Restructured; the correction is factual (three string models, not two).", "second_rule": null}
+{"id": 110, "label": "not-a-violation", "reason": "Formatting/quoting change.", "second_rule": null}
+{"id": 111, "label": "contradiction", "reason": "Master-side SHAs to record and 'fast-forward mints no SHAs' cannot both be true; correction says so.", "second_rule": null}
+{"id": 112, "label": "not-a-violation", "reason": "Status updated to implemented.", "second_rule": null}
+{"id": 113, "label": "not-a-violation", "reason": "Proposed guard later implemented.", "second_rule": null}
+{"id": 114, "label": "not-a-pair", "reason": "Twin about porting references rule is unrelated.", "second_rule": null}
+{"id": 115, "label": "not-a-violation", "reason": "Restructured heading, same content.", "second_rule": null}
+{"id": 116, "label": "not-a-violation", "reason": "Editorial wording change.", "second_rule": null}
+{"id": 117, "label": "not-a-violation", "reason": "Clause removed after the fix added verification; updated fact.", "second_rule": null}
+{"id": 118, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 119, "label": "question_asked", "reason": "Treats cargo check output as the real scope, but a runtime test failure is what compiles cannot show.", "second_rule": null}
+{"id": 120, "label": "not-a-violation", "reason": "Correction note restructured; editorial.", "second_rule": null}
+{"id": 121, "label": "not-a-violation", "reason": "Spec step dropped because the substrate cannot do it; factual.", "second_rule": null}
+{"id": 122, "label": "not-a-violation", "reason": "'At startup' removed; factual correction.", "second_rule": null}
+{"id": 123, "label": "not-a-violation", "reason": "False rationale in comment corrected; factual error.", "second_rule": null}
+{"id": 124, "label": "not-a-violation", "reason": "Wrong worktree path corrected.", "second_rule": null}
+{"id": 125, "label": "not-a-violation", "reason": "Design rationale falsified by measurement; factual correction.", "second_rule": null}
+{"id": 126, "label": "not-a-violation", "reason": "Hedged guess about current behaviour, later measured false.", "second_rule": null}
+{"id": 127, "label": "not-a-pair", "reason": "Twin is an unrelated framing sentence.", "second_rule": null}
+{"id": 128, "label": "not-a-pair", "reason": "Benchmark-null note and backend-coverage sentence are unrelated.", "second_rule": null}
+{"id": 129, "label": "not-a-pair", "reason": "Twin about worktree bug divergences is unrelated.", "second_rule": null}
+{"id": 130, "label": "not-a-pair", "reason": "Twin about backend coverage is unrelated to the mutation-verify sentence.", "second_rule": null}
+{"id": 131, "label": "not-a-violation", "reason": "Status updated after fix.", "second_rule": null}
+{"id": 132, "label": "not-a-pair", "reason": "Twin is a later sentence referring to it, not its correction.", "second_rule": null}
+{"id": 133, "label": "not-a-pair", "reason": "Twin is a different sentence about the control arm.", "second_rule": null}
+{"id": 134, "label": "not-a-pair", "reason": "Twin corrects a different claim about delete reattaching to preceding key.", "second_rule": null}
+{"id": 135, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about the function being kept.", "second_rule": null}
+{"id": 136, "label": "not-a-violation", "reason": "Editorial wording change.", "second_rule": null}
+{"id": 137, "label": "not-a-pair", "reason": "Twin about pinning a contract is unrelated to the syntax-check sentence.", "second_rule": null}
+{"id": 138, "label": "not-a-violation", "reason": "Follow-up later discharged; updated fact.", "second_rule": null}
+{"id": 139, "label": "not-a-violation", "reason": "Instruction became optional after scope behaviour ruled intended; updated fact.", "second_rule": null}
+{"id": 140, "label": "not-a-violation", "reason": "Factual correction of what scope=all yields after a wontfix decision.", "second_rule": null}
+{"id": 141, "label": "not-a-pair", "reason": "Twin corrects the call-site count sentence, not this one.", "second_rule": null}
+{"id": 142, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about threading a parameter.", "second_rule": null}
+{"id": 143, "label": "not-a-pair", "reason": "Option A cost sentence and fix-all-three sentence describe different options.", "second_rule": null}
+{"id": 144, "label": "not-a-violation", "reason": "Editorial rewording.", "second_rule": null}
+{"id": 145, "label": "not-a-pair", "reason": "Twin states a different consideration, not a correction of 'kills the leak outright'.", "second_rule": null}
+{"id": 146, "label": "not-a-violation", "reason": "Cost description corrected.", "second_rule": null}
+{"id": 147, "label": "not-a-violation", "reason": "Corrects a measured figure's magnitude (144-per-run vs ~97% coverage); factual update, no rule breach visible.", "second_rule": null}
+{"id": 148, "label": "not-a-pair", "reason": "Twin about call-site count fear; unrelated to self-limiting fallback decision.", "second_rule": null}
+{"id": 149, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about store sharing.", "second_rule": null}
+{"id": 150, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about store sharing.", "second_rule": null}
+{"id": 151, "label": "selector_narrow", "reason": "Bare cargo test offered as the full run; correction widens to --workspace --no-fail-fast.", "second_rule": null}
+{"id": 152, "label": "not-a-violation", "reason": "Expected-value comment corrected to the current figure.", "second_rule": null}
+{"id": 153, "label": "not-a-violation", "reason": "Proposal updated to implemented.", "second_rule": null}
+{"id": 154, "label": "not-a-violation", "reason": "Proposal rewritten after fix to describe actual error shape; editorial/factual update.", "second_rule": null}
+{"id": 155, "label": "not-a-pair", "reason": "Twin is option 1's implementation, not a correction of option 2 fragment.", "second_rule": null}
+{"id": 156, "label": "not-a-violation", "reason": "Proposal restated as shipped fact.", "second_rule": null}
+{"id": 157, "label": "not-a-violation", "reason": "Verdict reversed on move's correctness; factual error.", "second_rule": null}
+{"id": 158, "label": "run_tool", "reason": "Runtime behaviour of move (id preserved, response echo) asserted from reading source only; wrong.", "second_rule": null}
+{"id": 159, "label": "not-a-violation", "reason": "Promote-when condition marked fired; status update.", "second_rule": null}
+{"id": 160, "label": "not-a-violation", "reason": "Promotion condition met; conditional wording dropped.", "second_rule": null}
+{"id": 161, "label": "not-a-violation", "reason": "Factual correction: the row was measured on this desktop.", "second_rule": null}
+{"id": 162, "label": "not-a-violation", "reason": "Advice scoped to tracked files; factual limitation added.", "second_rule": null}
+{"id": 163, "label": "cannot_happen", "reason": "'The window cannot be closed' was false; git commit --only closes it.", "second_rule": null}
+{"id": 164, "label": "not-a-violation", "reason": "Rewording of the same maxim.", "second_rule": null}
+{"id": 165, "label": "count_unit", "reason": "Count of 'affected' ids included a non-member; correction sharpens unit to genuinely affected and re-derives.", "second_rule": null}
+{"id": 166, "label": "not-a-violation", "reason": "Names the specific tracker; editorial precision.", "second_rule": null}
+{"id": 167, "label": "selector_narrow", "reason": "'Every id' claim came from a capped grep (subject); subset reported as whole population.", "second_rule": null}
+{"id": 168, "label": "selector_narrow", "reason": "Claim that every id is quoted came from a capped grep, reported as covering the whole population.", "second_rule": "closed_population"}
+{"id": 169, "label": "not-a-pair", "reason": "Twin about capped collection is unrelated.", "second_rule": null}
+{"id": 170, "label": "not-a-violation", "reason": "Path updated to archive location.", "second_rule": null}
+{"id": 171, "label": "not-a-violation", "reason": "One item closed; count updated three to two.", "second_rule": null}
+{"id": 172, "label": "monotone_absence", "reason": "Absence of degraded flag on scoped scans taken as proof they are more trustworthy; retracted.", "second_rule": null}
+{"id": 173, "label": "not-a-violation", "reason": "Editorial restructuring of the re-measure instruction.", "second_rule": null}
+{"id": 174, "label": "not-a-pair", "reason": "Twin is an unrelated testing instruction.", "second_rule": null}
+{"id": 175, "label": "not-a-violation", "reason": "Wrong claim about fallback corrected; basis of original not visible.", "second_rule": null}
+{"id": 176, "label": "not-a-violation", "reason": "Fixes a broken quotation and exact wording; editorial correction.", "second_rule": null}
+{"id": 177, "label": "not-a-violation", "reason": "Promote-when fired; status update.", "second_rule": null}
+{"id": 178, "label": "not-a-violation", "reason": "Promote-when fired; status update.", "second_rule": null}
+{"id": 179, "label": "not-a-violation", "reason": "Percentage corrected 30% to 24%; unit named, arithmetic error.", "second_rule": null}
+{"id": 180, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about flag noise.", "second_rule": null}
+{"id": 181, "label": "not-a-pair", "reason": "Twin about the flag firing is a different sentence.", "second_rule": null}
+{"id": 182, "label": "not-a-pair", "reason": "Create-time option sentence and tracker-count sentence are unrelated.", "second_rule": null}
+{"id": 183, "label": "not-a-violation", "reason": "Wrong count corrected; unit named in both, a factual error.", "second_rule": null}
+{"id": 184, "label": "not-a-violation", "reason": "Path updated to archive location.", "second_rule": null}
+{"id": 185, "label": "not-a-violation", "reason": "'No atomic path exists' reframed as allocator unreachable; factual reframing.", "second_rule": null}
+{"id": 186, "label": "not-a-violation", "reason": "Cap value and unit corrected.", "second_rule": null}
+{"id": 187, "label": "not-a-violation", "reason": "Status reframed after same-day findings.", "second_rule": null}
+{"id": 188, "label": "not-a-violation", "reason": "Recommendation superseded by an implemented third direction.", "second_rule": null}
+{"id": 189, "label": "not-a-violation", "reason": "Requirement replaced with what the fix did.", "second_rule": null}
+{"id": 190, "label": "not-a-violation", "reason": "Updated after one test was written.", "second_rule": null}
+{"id": 191, "label": "not-a-violation", "reason": "Names the specific test; editorial clarification.", "second_rule": null}
+{"id": 192, "label": "not-a-violation", "reason": "Open question later ratified; updated fact.", "second_rule": null}
+{"id": 193, "label": "not-a-pair", "reason": "Twin about W-27 threshold is unrelated to the include_str! resolution sentence.", "second_rule": null}
+{"id": 194, "label": "not-a-violation", "reason": "Bug archived and marked fixed.", "second_rule": null}
+{"id": 195, "label": "not-a-pair", "reason": "Twin is a fragment about option trade-offs, not a rewrite.", "second_rule": null}
+{"id": 196, "label": "scope_instant", "reason": "Original named a narrower scope than was scanned; correction states the real scope and that nothing was filtered.", "second_rule": null}
+{"id": 197, "label": "not-a-violation", "reason": "Reproduction commit updated.", "second_rule": null}
+{"id": 198, "label": "not-a-violation", "reason": "Wrong prescription about partial paths corrected; basis not visible.", "second_rule": null}
+{"id": 199, "label": "not-a-violation", "reason": "Wrong prescription (partial path suffices) corrected to full path; factual error, no rule breach visible.", "second_rule": null}
+{"id": 200, "label": "not-a-pair", "reason": "Twin is about the parity comment, unrelated.", "second_rule": null}
+{"id": 201, "label": "cannot_happen", "reason": "Unqualified 'no ordering fixes this' impossibility claim; correction says it is false.", "second_rule": null}
+{"id": 202, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 203, "label": "not-a-violation", "reason": "Editorial status wording change; no rule breached.", "second_rule": null}
+{"id": 204, "label": "not-a-violation", "reason": "Reworded conclusion after stale arithmetic corrected; editorial.", "second_rule": null}
+{"id": 205, "label": "not-a-pair", "reason": "Twin is a fragment quoting the positive.", "second_rule": null}
+{"id": 206, "label": "not-a-violation", "reason": "Option later shipped; sentence updated to report outcome.", "second_rule": null}
+{"id": 207, "label": "not-a-pair", "reason": "Twin about segment-specific routing is a different sentence.", "second_rule": null}
+{"id": 208, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 209, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about tiers.", "second_rule": null}
+{"id": 210, "label": "not-a-violation", "reason": "Path updated to archive plus fixed status.", "second_rule": null}
+{"id": 211, "label": "not-a-violation", "reason": "Path repointed to archive location; updated fact.", "second_rule": null}
+{"id": 212, "label": "not-a-violation", "reason": "'This' generalised to 'a sweep'; editorial.", "second_rule": null}
+{"id": 213, "label": "not-a-violation", "reason": "Adds a clause on correcting stale SHAs; editorial extension.", "second_rule": null}
+{"id": 214, "label": "not-a-pair", "reason": "Twin describes a different hook entry.", "second_rule": null}
+{"id": 215, "label": "not-a-violation", "reason": "Hook names renamed to current; factual update.", "second_rule": null}
+{"id": 216, "label": "not-a-violation", "reason": "Status progressed to step 2 done.", "second_rule": null}
+{"id": 217, "label": "not-a-pair", "reason": "Twin about uncitable entries under (a) is not the step-0 decision sentence.", "second_rule": null}
+{"id": 218, "label": "not-a-pair", "reason": "Next-steps sentence and step-1 commit sentence are unrelated.", "second_rule": null}
+{"id": 219, "label": "not-a-violation", "reason": "Editorial shortening.", "second_rule": null}
+{"id": 220, "label": "not-a-violation", "reason": "Progress updated: step 3 now done.", "second_rule": null}
+{"id": 221, "label": "not-a-pair", "reason": "Twin is about steps done; unrelated to the guide sentence.", "second_rule": null}
+{"id": 222, "label": "not-a-violation", "reason": "Tense updated after guide fixed.", "second_rule": null}
+{"id": 223, "label": "not-a-violation", "reason": "One constraint dropped, caveat condensed; progress update.", "second_rule": null}
+{"id": 224, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 225, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 226, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about metric value.", "second_rule": null}
+{"id": 227, "label": "scope_instant", "reason": "Bare 'open' status of changing state; correction adds scope (codescout) and date.", "second_rule": null}
+{"id": 228, "label": "not-a-violation", "reason": "Scope changed to a handoff; editorial.", "second_rule": null}
+{"id": 229, "label": "not-a-violation", "reason": "Adds clarifying context; editorial.", "second_rule": null}
+{"id": 230, "label": "not-a-pair", "reason": "Twin is a fragment quoting the original text.", "second_rule": null}
+{"id": 231, "label": "not-a-violation", "reason": "Marks the next action superseded and adds a time; a status update, no rule breach.", "second_rule": null}
+{"id": 232, "label": "not-a-violation", "reason": "Status updated as the experiment was superseded; updated fact.", "second_rule": null}
+{"id": 233, "label": "not-a-violation", "reason": "Path re-pointed to archive.", "second_rule": null}
+{"id": 234, "label": "not-a-violation", "reason": "Drops 'fully specified' as factually wrong.", "second_rule": null}
+{"id": 235, "label": "monotone_absence", "reason": "Null hook stamps read as the hook being broken; the absence had another cause (reconnect).", "second_rule": null}
+{"id": 236, "label": "not-a-pair", "reason": "Twin about the nearest sibling for check 1 is a different sentence.", "second_rule": null}
+{"id": 237, "label": "not-a-pair", "reason": "Check-2 note and check-1 next-step sentence are different statements.", "second_rule": null}
+{"id": 238, "label": "not-a-violation", "reason": "Instruction made more specific; no rule breach visible.", "second_rule": null}
+{"id": 239, "label": "not-a-violation", "reason": "Plan step updated after check 2 shipped.", "second_rule": null}
+{"id": 240, "label": "not-a-violation", "reason": "Datapoint count updated with dates; updated fact.", "second_rule": null}
+{"id": 241, "label": "not-a-violation", "reason": "Status line updated to fixed-verified with archive path.", "second_rule": null}
+{"id": 242, "label": "count_unit", "reason": "Cited count 'seven more' was wrong and underived; replaced with non-count wording.", "second_rule": null}
+{"id": 243, "label": "not-a-pair", "reason": "Twin is an unrelated summary line.", "second_rule": null}
+{"id": 244, "label": "not-a-violation", "reason": "Wrong record count corrected; unit named in both.", "second_rule": null}
+{"id": 245, "label": "not-a-violation", "reason": "Wrong count 7 corrected to 8 of 9.", "second_rule": null}
+{"id": 246, "label": "not-a-violation", "reason": "Positive sentence unchanged; only a link prefixed.", "second_rule": null}
+{"id": 247, "label": "scope_instant", "reason": "Unqualified 'nothing notices' reports a search result with no scope; correction scopes it to codescout.", "second_rule": null}
+{"id": 248, "label": "not-a-pair", "reason": "Third-surface sentence and W-5 sentence are unrelated.", "second_rule": null}
+{"id": 249, "label": "not-a-violation", "reason": "Editorial rewording.", "second_rule": null}
+{"id": 250, "label": "not-a-violation", "reason": "Prospective status replaced by the realised status; updated fact.", "second_rule": null}
+{"id": 251, "label": "not-a-violation", "reason": "Status updated to promoted.", "second_rule": null}
+{"id": 252, "label": "question_asked", "reason": "Readiness judged from a datapoint count without reading the promotion criterion.", "second_rule": null}
+{"id": 253, "label": "not-a-violation", "reason": "Reverts a wrongly set status label; factual correction.", "second_rule": null}
+{"id": 254, "label": "unsure", "reason": "Promoted status reverted; basis (one back-cited occurrence) may be a grep hit but not shown as unread.", "second_rule": null}
+{"id": 255, "label": "question_asked", "reason": "A back-citation occurrence count was taken as proof the proposal landed; it was not promoted.", "second_rule": "lines_read"}
+{"id": 256, "label": "not-a-violation", "reason": "Wrong status label corrected from promoted to open.", "second_rule": null}
+{"id": 257, "label": "not-a-violation", "reason": "Field descriptions reworded.", "second_rule": null}
+{"id": 258, "label": "not-a-violation", "reason": "Adds obligation_state to the unchanged-counter clause; editorial extension.", "second_rule": null}
+{"id": 259, "label": "not-a-violation", "reason": "Terminology rename.", "second_rule": null}
+{"id": 260, "label": "not-a-violation", "reason": "'anywhere' dropped; minor editorial, scope already named.", "second_rule": null}
+{"id": 261, "label": "not-a-violation", "reason": "Prior-art detail condensed; editorial.", "second_rule": null}
+{"id": 262, "label": "not-a-violation", "reason": "Condensed rewording of the same claim; editorial.", "second_rule": null}
+{"id": 263, "label": "not-a-pair", "reason": "Control-policy sentence and embeddings-only sentence are unrelated.", "second_rule": null}
+{"id": 264, "label": "not-a-violation", "reason": "Quotation condensed; editorial.", "second_rule": null}
+{"id": 265, "label": "not-a-violation", "reason": "Rewording and restructuring of the same statement; no rule breach.", "second_rule": null}
+{"id": 266, "label": "not-a-violation", "reason": "Folded into a parenthetical; editorial.", "second_rule": null}
+{"id": 267, "label": "not-a-violation", "reason": "Imperative dropped as workaround retired; editorial.", "second_rule": null}
+{"id": 268, "label": "not-a-violation", "reason": "Workaround retired for new capability; updated fact.", "second_rule": null}
+{"id": 269, "label": "not-a-violation", "reason": "Reworded for server-formatted headings; editorial.", "second_rule": null}
+{"id": 270, "label": "not-a-violation", "reason": "Procedure updated after tool change.", "second_rule": null}
+{"id": 271, "label": "not-a-violation", "reason": "Defect fixed; sentence moved to past tense.", "second_rule": null}
+{"id": 272, "label": "not-a-pair", "reason": "Twin describes push_citation mechanism, not the measured count sentence.", "second_rule": null}
+{"id": 273, "label": "not-a-violation", "reason": "Figure superseded as inflated; original already caveated scope; factual correction of a number.", "second_rule": null}
+{"id": 274, "label": "not-a-violation", "reason": "Path moved to archive plus added note; updated fact.", "second_rule": null}
+{"id": 275, "label": "not-a-violation", "reason": "Path archived and tense updated after the fix.", "second_rule": null}
+{"id": 276, "label": "question_asked", "reason": "Threshold 'measured' with a query using the wrong predicate, so the count answered a neighbouring question.", "second_rule": null}
+{"id": 277, "label": "not-a-violation", "reason": "Description updated to include must_follow field.", "second_rule": null}
+{"id": 278, "label": "not-a-violation", "reason": "Reflow and added text; sentence unchanged.", "second_rule": null}
+{"id": 279, "label": "d_history", "reason": "Superseded T-14..T-21 ids in prose resolve as live citations; rewritten to avoid the tokens.", "second_rule": null}
+{"id": 280, "label": "not-a-violation", "reason": "Blockquote line reflow only.", "second_rule": null}
+{"id": 281, "label": "d_history", "reason": "Writes the retired id T-7 in prose, creating a false live citation; correction avoids the literal token.", "second_rule": null}
+{"id": 282, "label": "not-a-violation", "reason": "Citation path moved to archive; the positive sentence itself breaks no rule.", "second_rule": null}
+{"id": 283, "label": "not-a-violation", "reason": "Stated reason for the limitation corrected; factual.", "second_rule": null}
+{"id": 284, "label": "not-a-violation", "reason": "Factual correction of how the two surfaces rank.", "second_rule": null}
+{"id": 285, "label": "not-a-pair", "reason": "Twin is a different step.", "second_rule": null}
+{"id": 286, "label": "not-a-violation", "reason": "Plan step rewritten with a measured model ceiling; editorial/factual revision.", "second_rule": null}
+{"id": 287, "label": "not-a-violation", "reason": "Hedged hypothesis later refuted by measurement; updated fact.", "second_rule": null}
+{"id": 288, "label": "run_tool", "reason": "Runtime propagation 'confirmed' by reading source; the trigger error was refuted by what the stack actually emits.", "second_rule": null}
+{"id": 289, "label": "run_tool", "reason": "Runtime behaviour for oversized chunks concluded by reading flush_pending; stack actually emits a different error.", "second_rule": null}
+{"id": 290, "label": "not-a-violation", "reason": "Tense updated after the sweep found one member.", "second_rule": null}
+{"id": 291, "label": "not-a-violation", "reason": "Corrects the alias description; factual.", "second_rule": null}
+{"id": 292, "label": "not-a-violation", "reason": "Corrects a factual registration claim.", "second_rule": null}
+{"id": 293, "label": "unsure", "reason": "Note corrects the following '19 now pass' inference, not clearly this sentence; possible member-vs-population breach nearby.", "second_rule": null}
+{"id": 294, "label": "not-a-violation", "reason": "Editorial rewording.", "second_rule": null}
+{"id": 295, "label": "not-a-pair", "reason": "Twin is a test name, not a corrected version of the sentence.", "second_rule": null}
+{"id": 296, "label": "not-a-violation", "reason": "Path re-pointed to archive after the bug was archived.", "second_rule": null}
+{"id": 297, "label": "selector_narrow", "reason": "Sweep of two slugs reported as a repo-wide class sweep with no stragglers; correction names the actual selector.", "second_rule": "scope_instant"}
+{"id": 298, "label": "selector_narrow", "reason": "Sweep for two slugs reported as class swept repo-wide; correction narrows to both slugs.", "second_rule": "scope_instant"}
+{"id": 299, "label": "d_sessionid", "reason": "Third session attributed by registry name, which was wrong.", "second_rule": null}
+{"id": 300, "label": "d_sessionid", "reason": "Attributed in-flight work to session by name 'claude-plugins-15'; the name was wrong and is removed.", "second_rule": null}
+{"id": 301, "label": "not-a-violation", "reason": "Punctuation change only; editorial.", "second_rule": null}
+{"id": 302, "label": "not-a-violation", "reason": "Pointer to a correction reworded.", "second_rule": null}
+{"id": 303, "label": "not-a-violation", "reason": "Removes a wrong hypothetical claim about link_scan; no basis stated, so a factual correction.", "second_rule": null}
+{"id": 304, "label": "not-a-violation", "reason": "Described outcome retracted as impossible; factual error.", "second_rule": null}
+{"id": 305, "label": "unsure", "reason": "Twin is a garbled merge; subject says described failure cannot occur, but the breach is not visible here.", "second_rule": null}
+{"id": 306, "label": "not-a-violation", "reason": "Refines an imprecise rule wording (command line vs invocation); editorial/factual correction.", "second_rule": null}
+{"id": 307, "label": "not-a-violation", "reason": "Adds a consequence clause; editorial.", "second_rule": null}
+{"id": 308, "label": "not-a-violation", "reason": "Factual correction: a second bug-file deletion existed; the clause naming only one is removed.", "second_rule": null}
+{"id": 309, "label": "not-a-pair", "reason": "Twin states a different hypothesis altogether, not a correction of this one.", "second_rule": null}
+{"id": 310, "label": "not-a-pair", "reason": "Twin rewords a different sentence about report-repair agreement.", "second_rule": null}
+{"id": 311, "label": "not-a-violation", "reason": "Reworded open question; editorial.", "second_rule": null}
+{"id": 312, "label": "not-a-violation", "reason": "Editorial shortening.", "second_rule": null}
+{"id": 313, "label": "not-a-violation", "reason": "Path updated to archive location.", "second_rule": null}
+{"id": 314, "label": "not-a-violation", "reason": "Updated status and path of a related bug.", "second_rule": null}
+{"id": 315, "label": "unsure", "reason": "Twin records the original proposal's model; what was wrong about it is not shown.", "second_rule": null}
+{"id": 316, "label": "not-a-violation", "reason": "Formatting change to a regression note.", "second_rule": null}
+{"id": 317, "label": "not-a-violation", "reason": "Factual removal of 'than the one it was pinned to'.", "second_rule": null}
+{"id": 318, "label": "not-a-violation", "reason": "Status updated to fixed-verified; updated fact.", "second_rule": null}
+{"id": 319, "label": "not-a-violation", "reason": "Tense change after resolution.", "second_rule": null}
+{"id": 320, "label": "not-a-violation", "reason": "Factual correction of where the variable was present.", "second_rule": null}
+{"id": 321, "label": "unsure", "reason": "Twin is a re-check note; basis of the retracted runtime claim is not shown.", "second_rule": null}
+{"id": 322, "label": "not-a-violation", "reason": "Verdict status updated from in progress to rejected with result.", "second_rule": null}
+{"id": 323, "label": "not-a-violation", "reason": "Verified after restart; status update.", "second_rule": null}
+{"id": 324, "label": "cannot_happen", "reason": "'Permanent by design, can never be repaired' from one code path; measurement showed a later stamp repairs it.", "second_rule": null}
+{"id": 325, "label": "not-a-pair", "reason": "Positive retained verbatim; the prepended note corrects a different sentence ('permanent by design').", "second_rule": null}
+{"id": 326, "label": "scope_instant", "reason": "'The only on-disk record' is a search result with no named scope; refuted when the archive held others.", "second_rule": null}
+{"id": 327, "label": "not-a-violation", "reason": "Only punctuation changed.", "second_rule": null}
+{"id": 328, "label": "not-a-violation", "reason": "Status updated to closed.", "second_rule": null}
+{"id": 329, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about tests.", "second_rule": null}
+{"id": 330, "label": "not-a-pair", "reason": "Twin describes a different test that was added.", "second_rule": null}
+{"id": 331, "label": "not-a-violation", "reason": "Path repointed to archive; updated fact.", "second_rule": null}
+{"id": 332, "label": "not-a-violation", "reason": "Procedure method corrected; no rule breach visible in the sentence.", "second_rule": null}
+{"id": 333, "label": "not-a-violation", "reason": "Minor wording change following method correction.", "second_rule": null}
+{"id": 334, "label": "not-a-violation", "reason": "Method claim and count corrected; factual.", "second_rule": null}
+{"id": 335, "label": "not-a-violation", "reason": "Corrects a wrong method claim and instance count; a factual error, no menu rule breach visible.", "second_rule": null}
+{"id": 336, "label": "not-a-violation", "reason": "Minor rewording of the stated limit.", "second_rule": null}
+{"id": 337, "label": "not-a-violation", "reason": "Status and path updated after archive.", "second_rule": null}
+{"id": 338, "label": "not-a-violation", "reason": "Adds patch-id; editorial.", "second_rule": null}
+{"id": 339, "label": "not-a-violation", "reason": "Owner corrects stated cause; basis not shown, factual correction.", "second_rule": null}
+{"id": 340, "label": "not-a-violation", "reason": "Wrong causal link between conflated adjacent bugs corrected; factual error not matching a menu rule.", "second_rule": null}
+{"id": 341, "label": "not-a-violation", "reason": "Status superseded same day; marked as true when written.", "second_rule": null}
+{"id": 342, "label": "not-a-violation", "reason": "Overstated 'no disruption' clause removed; factual correction.", "second_rule": null}
+{"id": 343, "label": "not-a-violation", "reason": "Wrong claim that retry doubles removed; factual.", "second_rule": null}
+{"id": 344, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 345, "label": "not-a-violation", "reason": "Open bug became fixed and archived; updated fact.", "second_rule": null}
+{"id": 346, "label": "run_tool", "reason": "Runtime routing of every failure asserted from reading two source strings; impact claim false.", "second_rule": null}
+{"id": 347, "label": "not-a-violation", "reason": "Path archived and fix recorded; updated fact.", "second_rule": null}
+{"id": 348, "label": "not-a-pair", "reason": "Twin is a retrospective note about the claim, not a replacement sentence.", "second_rule": null}
+{"id": 349, "label": "run_tool", "reason": "Runtime serialization of mocks asserted from reading sleep calls in code; correction calls it an unconfirmed hypothesis.", "second_rule": null}
+{"id": 350, "label": "not-a-pair", "reason": "Twin about mockito threading hypothesis is a different sentence.", "second_rule": null}
+{"id": 351, "label": "not-a-pair", "reason": "Twin is an unrelated stub note.", "second_rule": null}
+{"id": 352, "label": "not-a-pair", "reason": "Twin concerns option 3's ceiling, unrelated to option 4 sentence.", "second_rule": null}
+{"id": 353, "label": "not-a-pair", "reason": "Twin is about the ceiling option, not the sentence endorsing option 4.", "second_rule": null}
+{"id": 354, "label": "not-a-violation", "reason": "Path and id updated after archive.", "second_rule": null}
+{"id": 355, "label": "not-a-violation", "reason": "Status and id updated after archive.", "second_rule": null}
+{"id": 356, "label": "not-a-violation", "reason": "Promotion target corrected; factual/editorial.", "second_rule": null}
+{"id": 357, "label": "not-a-violation", "reason": "Updated with later evidence of delivery; original already hedged accepted vs read.", "second_rule": null}
+{"id": 358, "label": "scope_instant", "reason": "Peer listing result reported as a property without its instant; correction stamps the time.", "second_rule": null}
+{"id": 359, "label": "scope_instant", "reason": "Enumeration result stated as property; correction dates it as observed state.", "second_rule": null}
+{"id": 360, "label": "not-a-pair", "reason": "Twin is a retrospective note, not the corrected sentence.", "second_rule": null}
+{"id": 361, "label": "not-a-violation", "reason": "Pending step later done; updated fact.", "second_rule": null}
+{"id": 362, "label": "d_sessionid", "reason": "Attributes design work to session name codescout-ae; correction drops the name attribution.", "second_rule": null}
+{"id": 363, "label": "scope_instant", "reason": "'Every file is at HEAD' over a shared checkout, scope unnamed; narrowed to this session's files.", "second_rule": "closed_population"}
+{"id": 364, "label": "not-a-pair", "reason": "Twin is a retrospective sentence, not the corrected proposal.", "second_rule": null}
+{"id": 365, "label": "not-a-violation", "reason": "Argument state updated; no rule breach.", "second_rule": null}
+{"id": 366, "label": "not-a-violation", "reason": "Status of who holds the work and file counts updated; factual.", "second_rule": null}
+{"id": 367, "label": "not-a-violation", "reason": "Detail trimmed from description of pinned corpus; editorial.", "second_rule": null}
+{"id": 368, "label": "unsure", "reason": "Verification list extended; subject hints agreeing instruments share a scope, but breach not visible.", "second_rule": null}
+{"id": 369, "label": "not-a-violation", "reason": "Promote-when criterion redefined; editorial decision change.", "second_rule": null}
+{"id": 370, "label": "not-a-violation", "reason": "Retracted diagnosis replaced.", "second_rule": null}
+{"id": 371, "label": "not-a-violation", "reason": "Marked superseded and past tense; status update.", "second_rule": null}
+{"id": 372, "label": "not-a-violation", "reason": "Rewording after a correction elsewhere.", "second_rule": null}
+{"id": 373, "label": "not-a-violation", "reason": "Recommendation retracted after a different fix was chosen.", "second_rule": null}
+{"id": 374, "label": "not-a-pair", "reason": "Twin states a reframe; not a rewrite of the tie-break sentence.", "second_rule": null}
+{"id": 375, "label": "not-a-violation", "reason": "Doc comment description updated to current state.", "second_rule": null}
+{"id": 376, "label": "not-a-pair", "reason": "Twin describes a different assertion's weakness, not this sentence.", "second_rule": null}
+{"id": 377, "label": "not-a-pair", "reason": "Twin is a different sentence about first-call cost.", "second_rule": null}
+{"id": 378, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about the fix, not a correction of the 9-of-10 claim.", "second_rule": null}
+{"id": 379, "label": "not-a-violation", "reason": "Marks a Next step superseded after recovery; status update.", "second_rule": null}
+{"id": 380, "label": "count_unit", "reason": "Figure labelled bytes was characters; unit corrected to characters and bytes.", "second_rule": null}
+{"id": 381, "label": "not-a-violation", "reason": "Rewording adds the command output; the original states a fact without a visible rule breach.", "second_rule": null}
+{"id": 382, "label": "not-a-violation", "reason": "Overclaim 'no longer exists' softened to 'no longer matches exactly'; factual precision.", "second_rule": null}
+{"id": 383, "label": "question_asked", "reason": "An allocator collision is offered as the condition firing, though context admits it is not the params three-way case in question.", "second_rule": null}
+{"id": 384, "label": "not-a-violation", "reason": "Replaces an orphaned SHA citation with a patch-id; factual/citation update.", "second_rule": null}
+{"id": 385, "label": "not-a-violation", "reason": "Orphaned SHAs replaced by patch-ids; factual repair.", "second_rule": null}
+{"id": 386, "label": "not-a-violation", "reason": "Bug archived and marked fixed.", "second_rule": null}
+{"id": 387, "label": "not-a-violation", "reason": "'open' dropped as defect fixed.", "second_rule": null}
+{"id": 388, "label": "not-a-violation", "reason": "Planned test recommendation replaced by what was done.", "second_rule": null}
+{"id": 389, "label": "not-a-violation", "reason": "Coverage updated after backfill.", "second_rule": null}
+{"id": 390, "label": "not-a-violation", "reason": "Unbackfilled count updated after backfill.", "second_rule": null}
+{"id": 391, "label": "not-a-violation", "reason": "Timing clause removed; factual correction.", "second_rule": null}
+{"id": 392, "label": "not-a-violation", "reason": "Population and count updated (ten to eleven clusters); factual update, unit named.", "second_rule": null}
+{"id": 393, "label": "not-a-violation", "reason": "Adds a newly opened class; updated fact.", "second_rule": null}
+{"id": 394, "label": "contradiction", "reason": "Says 'all three sit in the Windows/wine lane' while members field states n=11; correction notes seven lie outside.", "second_rule": null}
+{"id": 395, "label": "contradiction", "reason": "Members says n=3 while Promotes-to in same entry says n=1; correction sets n=1.", "second_rule": null}
+{"id": 396, "label": "not-a-violation", "reason": "Remedy description corrected from grep to check.", "second_rule": null}
+{"id": 397, "label": "not-a-violation", "reason": "Promotion target updated to OB-6 after promotion.", "second_rule": null}
+{"id": 398, "label": "not-a-violation", "reason": "Mechanism status updated to designed.", "second_rule": null}
+{"id": 399, "label": "not-a-violation", "reason": "Remedy withdrawn as it does the opposite; factual correction.", "second_rule": null}
+{"id": 400, "label": "not-a-violation", "reason": "Member count updated after backfill; original dated and scoped.", "second_rule": null}
+{"id": 401, "label": "not-a-violation", "reason": "Promotion target updated.", "second_rule": null}
+{"id": 402, "label": "not-a-pair", "reason": "Twin about where classes touch is unrelated.", "second_rule": null}
+{"id": 403, "label": "not-a-violation", "reason": "Editorial merge of two sentences of the claim.", "second_rule": null}
+{"id": 404, "label": "cannot_happen", "reason": "'Coordination is impossible by construction' asserted; later falsified by IC-17.", "second_rule": null}
+{"id": 405, "label": "not-a-violation", "reason": "Member count updated after a cluster split; original named query, date and unit.", "second_rule": null}
+{"id": 406, "label": "not-a-violation", "reason": "Falsifier restated after class split.", "second_rule": null}
+{"id": 407, "label": "not-a-violation", "reason": "Sentence extended with consequence; original breaks no rule.", "second_rule": null}
+{"id": 408, "label": "not-a-violation", "reason": "Editorial wording change.", "second_rule": null}
+{"id": 409, "label": "unsure", "reason": "Stale zombie-open status; possibly unchecked prior belief, but the basis is not visible in the sentence.", "second_rule": null}
+{"id": 410, "label": "not-a-pair", "reason": "Sentence unchanged; correction concerns a different sentence's count.", "second_rule": null}
+{"id": 411, "label": "closed_population", "reason": "'Nothing does' claimed over open set of actors; a peer did it within the hour.", "second_rule": "scope_instant"}
+{"id": 412, "label": "not-a-violation", "reason": "Proposed option replaced by report that it landed; updated fact.", "second_rule": null}
+{"id": 413, "label": "not-a-violation", "reason": "Reworded after hooks feature landed.", "second_rule": null}
+{"id": 414, "label": "not-a-violation", "reason": "Tools removed; note updated to reflect deletion.", "second_rule": null}
+{"id": 415, "label": "not-a-violation", "reason": "Count updated as new member filed.", "second_rule": null}
+{"id": 416, "label": "count_unit", "reason": "Quotes 'four more' from CLAUDE.md as a current count without derivation; correction drops it.", "second_rule": null}
+{"id": 417, "label": "not-a-violation", "reason": "Reframed after third instance; editorial update.", "second_rule": null}
+{"id": 418, "label": "not-a-violation", "reason": "Residual status updated.", "second_rule": null}
+{"id": 419, "label": "not-a-violation", "reason": "Fix landed later; N/A status superseded by an updated fact.", "second_rule": null}
+{"id": 420, "label": "not-a-violation", "reason": "Tense and citation updated after fix.", "second_rule": null}
+{"id": 421, "label": "lines_read", "reason": "Only one function was read at the bytes; blast radius extended to other fields' detection without reading them.", "second_rule": null}
+{"id": 422, "label": "not-a-violation", "reason": "Reworded after fix.", "second_rule": null}
+{"id": 423, "label": "not-a-violation", "reason": "Generalises line 54 to line N; editorial.", "second_rule": null}
+{"id": 424, "label": "count_unit", "reason": "Count carried rather than derived; corrected 7 to 8, re-derived.", "second_rule": null}
+{"id": 425, "label": "run_tool", "reason": "Claimed hook runtime behaviour (blocks, instructs git -C) unprobed; retracted by probe.", "second_rule": null}
+{"id": 426, "label": "unsure", "reason": "Subject says the collision was unprobed (run_tool), but no basis is stated in the text.", "second_rule": null}
+{"id": 427, "label": "d_adjacency", "reason": "Owner inferred from commits in the same directory; correction admits adjacency attribution.", "second_rule": null}
+{"id": 428, "label": "not-a-violation", "reason": "Diagnosis of the misattribution corrected; factual rediagnosis.", "second_rule": null}
+{"id": 429, "label": "not-a-violation", "reason": "Stale count replaced by pointer to recounted live figure; updated fact.", "second_rule": null}
+{"id": 430, "label": "question_asked", "reason": "A pid-to-session substrate offered to answer a path-to-session question.", "second_rule": null}
+{"id": 431, "label": "not-a-pair", "reason": "Twin about catches confirmed; not a rewrite of promote-when.", "second_rule": null}
+{"id": 432, "label": "not-a-violation", "reason": "Status updated after promotion.", "second_rule": null}
+{"id": 433, "label": "unsure", "reason": "Denominator error lives in a table not shown; positive sentence itself shows no breach.", "second_rule": null}
+{"id": 434, "label": "not-a-violation", "reason": "Count updated 2 to 3 after retag.", "second_rule": null}
+{"id": 435, "label": "not-a-violation", "reason": "Count updated n=8 to n=9 with unit and date.", "second_rule": null}
+{"id": 436, "label": "not-a-violation", "reason": "Editorial; added framing sentence.", "second_rule": null}
+{"id": 437, "label": "count_unit", "reason": "Count corrected 19 to 21, re-derived with prescribed file-count form rather than carried.", "second_rule": null}
+{"id": 438, "label": "not-a-violation", "reason": "Count updated and re-derived by file count; original named method and date.", "second_rule": null}
+{"id": 439, "label": "unsure", "reason": "Count sentence dropped; reason (non-members or moved count) not decidable from the row.", "second_rule": null}
+{"id": 440, "label": "unsure", "reason": "Sentence unchanged; appended note says concentration evidence sits in non-members; rule breached is not decidable from what is shown.", "second_rule": null}
+{"id": 441, "label": "not-a-violation", "reason": "Adds a dated correction header to the same sentence; editorial.", "second_rule": null}
+{"id": 442, "label": "unsure", "reason": "Provenance datapoint corrected, but what was wrong cannot be determined from what is shown.", "second_rule": null}
+{"id": 443, "label": "not-a-violation", "reason": "Rescopes what was not personally verified; editorial precision, not a rule breach.", "second_rule": null}
+{"id": 444, "label": "not-a-violation", "reason": "Count updated as the population shrank; unit named, factual update.", "second_rule": null}
+{"id": 445, "label": "not-a-violation", "reason": "Argument withdrawn after membership ruling changed the count; updated fact.", "second_rule": null}
+{"id": 446, "label": "not-a-pair", "reason": "Twin about escalation to unresolvable is a different sentence.", "second_rule": null}
+{"id": 447, "label": "selector_narrow", "reason": "Two per-profile instruments' agreement taken as proving the whole population complete; correction requires a whole-namespace instrument.", "second_rule": null}
+{"id": 448, "label": "not-a-violation", "reason": "'sharpest' changed to 'other sharp'; editorial.", "second_rule": null}
+{"id": 449, "label": "not-a-violation", "reason": "Status updated to FIRED.", "second_rule": null}
+{"id": 450, "label": "not-a-violation", "reason": "Instance count updated from two to three.", "second_rule": null}
+{"id": 451, "label": "not-a-violation", "reason": "Promotion condition reframed after closure.", "second_rule": null}
+{"id": 452, "label": "not-a-violation", "reason": "Spread re-derived after ruling; counts already carry units.", "second_rule": null}
+{"id": 453, "label": "not-a-pair", "reason": "Positive is the coarse-unit sentence, twin the fine-unit sentence.", "second_rule": null}
+{"id": 454, "label": "not-a-violation", "reason": "Count with named unit re-derived after membership change; updated fact.", "second_rule": null}
+{"id": 455, "label": "not-a-violation", "reason": "False factual claim with no stated basis; instruction says unshown basis alone is no breach.", "second_rule": null}
+{"id": 456, "label": "unsure", "reason": "Twin only marks the plan text superseded; what was wrong with it cannot be determined from the row.", "second_rule": null}
+{"id": 457, "label": "unsure", "reason": "Twin is the same sentence struck through; reason for retraction not shown.", "second_rule": null}
+{"id": 458, "label": "not-a-pair", "reason": "Method-credit sentence and base-rate sentence are different statements.", "second_rule": null}
+{"id": 459, "label": "not-a-pair", "reason": "Twin states different content; the method credit is replaced, not corrected.", "second_rule": null}
+{"id": 460, "label": "not-a-pair", "reason": "Twin about a fourth family is a different sentence.", "second_rule": null}
+{"id": 461, "label": "not-a-violation", "reason": "Member count updated 9 to 10; unit and population already named.", "second_rule": null}
+{"id": 462, "label": "not-a-violation", "reason": "Count updated 6 to 7; unit unchanged by correction.", "second_rule": null}
+{"id": 463, "label": "not-a-violation", "reason": "Note corrects a reasoned blind-spot claim (dyn Trait); factual error, no rule breach visible in sentence.", "second_rule": null}
+{"id": 464, "label": "contradiction", "reason": "Field says not yet n=2 while same entry says both promotion bars clear at spread 3.", "second_rule": null}
+{"id": 465, "label": "not-a-violation", "reason": "Count updated 5 to 6; unit and instant present.", "second_rule": null}
+{"id": 466, "label": "not-a-violation", "reason": "Appends a newer sixth instance; original sentence unchanged and breaks no rule.", "second_rule": null}
+{"id": 467, "label": "not-a-violation", "reason": "Superseded count updated to n=6.", "second_rule": null}
+{"id": 468, "label": "not-a-pair", "reason": "Twin corresponds to the Promotes-to n=4 sentence, not the remedy-split sentence.", "second_rule": null}
+{"id": 469, "label": "not-a-violation", "reason": "Positive kept verbatim; correction targets preceding sentence.", "second_rule": null}
+{"id": 470, "label": "not-a-violation", "reason": "Observation moved to IC-10; reclassification.", "second_rule": null}
+{"id": 471, "label": "d_history", "reason": "Superseded n=2 quote in prose backticked so it is not read as a live count.", "second_rule": null}
+{"id": 472, "label": "not-a-violation", "reason": "Item voided on later measurement; no basis stated originally.", "second_rule": null}
+{"id": 473, "label": "contradiction", "reason": "Resume routes to strategy A while the same tracker's review rejected it.", "second_rule": null}
+{"id": 474, "label": "monotone_absence", "reason": "A zero-difference result taken as proof two instruments are interchangeable; such files already existed.", "second_rule": null}
+{"id": 475, "label": "not-a-violation", "reason": "Incorrect POSIX claim removed; factual correction.", "second_rule": null}
+{"id": 476, "label": "unsure", "reason": "Drops 'Measured' label from a source reading; which rule, if any, the correction repairs is unclear.", "second_rule": null}
+{"id": 477, "label": "not-a-violation", "reason": "Promotion criterion narrowed; editorial.", "second_rule": null}
+{"id": 478, "label": "not-a-violation", "reason": "Corrects mechanism description and cost estimate; factual.", "second_rule": null}
+{"id": 479, "label": "not-a-violation", "reason": "Instruction reworded after the fix SHA was recorded; updated fact.", "second_rule": null}
+{"id": 480, "label": "unsure", "reason": "Claim that a build red points at the change was wrong; maybe d_adjacency, but not clearly an attribution.", "second_rule": null}
+{"id": 481, "label": "not-a-violation", "reason": "Restates the same provenance point with corrected referent; factual/editorial.", "second_rule": null}
+{"id": 482, "label": "not-a-violation", "reason": "Surface count updated after a second closure.", "second_rule": null}
+{"id": 483, "label": "not-a-violation", "reason": "One surface now covered; count and list updated.", "second_rule": null}
+{"id": 484, "label": "not-a-violation", "reason": "Path re-pointed to archive.", "second_rule": null}
+{"id": 485, "label": "not-a-pair", "reason": "Twin contains the positive verbatim plus a prepended sentence; the edit is to a neighbouring sentence, not this one.", "second_rule": null}
+{"id": 486, "label": "question_asked", "reason": "git-dir != common-dir check proves linked worktree, not the private index it was cited for.", "second_rule": null}
+{"id": 487, "label": "not-a-violation", "reason": "Design wording changed to implemented description.", "second_rule": null}
+{"id": 488, "label": "not-a-violation", "reason": "Path and artifact id updated after archive move; updated fact.", "second_rule": null}
+{"id": 489, "label": "not-a-violation", "reason": "False environment fact removed.", "second_rule": null}
+{"id": 490, "label": "not-a-pair", "reason": "Note corrects the core.hooksPath sentence, not this one.", "second_rule": null}
+{"id": 491, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about composing filed halves.", "second_rule": null}
+{"id": 492, "label": "not-a-violation", "reason": "Line-number citation updated after file drift.", "second_rule": null}
+{"id": 493, "label": "not-a-violation", "reason": "Line-number correction.", "second_rule": null}
+{"id": 494, "label": "not-a-violation", "reason": "Line range drifted and was updated.", "second_rule": null}
+{"id": 495, "label": "not-a-violation", "reason": "Line numbers drifted and were updated.", "second_rule": null}
+{"id": 496, "label": "not-a-violation", "reason": "Line reference shifted by a later commit; updated and re-checked.", "second_rule": null}
+{"id": 497, "label": "not-a-pair", "reason": "Twin about key construction via registry is a different sentence.", "second_rule": null}
+{"id": 498, "label": "lines_read", "reason": "Budget described from its module name (per subject); reading showed it counts rules, not bytes.", "second_rule": "open_artifact"}
+{"id": 499, "label": "unsure", "reason": "p50 ceiling attribution removed; may be a module-name description, but breach not visible here.", "second_rule": null}
+{"id": 500, "label": "lines_read", "reason": "Budget enforcement described from the module name; correction records it was wrong in every clause.", "second_rule": "open_artifact"}
+{"id": 501, "label": "not-a-violation", "reason": "Only quote-marker formatting changed.", "second_rule": null}
+{"id": 502, "label": "unsure", "reason": "Twin reveals budget was described from module name; not visible in original context, so breach undecidable here.", "second_rule": null}
+{"id": 503, "label": "not-a-violation", "reason": "Near-identical rewording.", "second_rule": null}
+{"id": 504, "label": "lines_read", "reason": "Budget coverage inferred from module name (subject: described from module name); correction widens uncovered set.", "second_rule": null}
+{"id": 505, "label": "unsure", "reason": "Sentence unchanged with a correction note appended; breach not visible in the shown text.", "second_rule": null}
+{"id": 506, "label": "unsure", "reason": "Subject says a budget was described from its module name, but unclear this sentence carries that breach.", "second_rule": null}
+{"id": 507, "label": "lines_read", "reason": "Called a budget an independent ceiling from its module name, without reading it.", "second_rule": "open_artifact"}
+{"id": 508, "label": "not-a-violation", "reason": "Member count re-derived and updated; scope and instant already named.", "second_rule": null}
+{"id": 509, "label": "not-a-violation", "reason": "Count updated with unit and date; updated fact.", "second_rule": null}
+{"id": 510, "label": "not-a-violation", "reason": "Count updated n=11 to n=12 with new derivation.", "second_rule": null}
+{"id": 511, "label": "count_unit", "reason": "Spread adjudication cited over n=11 kept as if current at n=12; correction states which population it was derived over.", "second_rule": "scope_instant"}
+{"id": 512, "label": "not-a-violation", "reason": "Wrong causal explanation replaced with correct one; factual.", "second_rule": null}
+{"id": 513, "label": "not-a-violation", "reason": "Punctuation change only.", "second_rule": null}
+{"id": 514, "label": "not-a-violation", "reason": "Status updated to unblocked.", "second_rule": null}
+{"id": 515, "label": "not-a-violation", "reason": "Updated fact: strategy now fixed.", "second_rule": null}
+{"id": 516, "label": "not-a-violation", "reason": "Reworded after the ruling.", "second_rule": null}
+{"id": 517, "label": "not-a-violation", "reason": "Status updated from proposed to rejected.", "second_rule": null}
+{"id": 518, "label": "not-a-violation", "reason": "Count updated 11 to 12.", "second_rule": null}
+{"id": 519, "label": "question_asked", "reason": "Prescribed command emits character counts, so it cannot perform the text comparison it is cited for.", "second_rule": null}
+{"id": 520, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about exemption.", "second_rule": null}
+{"id": 521, "label": "not-a-violation", "reason": "Wrong characterization of librarian description corrected; factual.", "second_rule": null}
+{"id": 522, "label": "not-a-violation", "reason": "Path repointed to archive; updated fact.", "second_rule": null}
+{"id": 523, "label": "not-a-violation", "reason": "Rewording of a pointer to a removed sentence; no new breach.", "second_rule": null}
+{"id": 524, "label": "not-a-pair", "reason": "Twin corrects the 'five' count sentence, not the positive sentence about the sibling file.", "second_rule": null}
+{"id": 525, "label": "not-a-pair", "reason": "Twin is a different sentence about the falsified counting remedy.", "second_rule": null}
+{"id": 526, "label": "question_asked", "reason": "'Verified, it works' rests on counts matching filesystem grep, not on what the index-reading gate checks; peer named by registry name.", "second_rule": "d_sessionid"}
+{"id": 527, "label": "not-a-violation", "reason": "Editorial rewording.", "second_rule": null}
+{"id": 528, "label": "not-a-violation", "reason": "Harmful remedy clause withdrawn; a wrong instruction, not a menu rule breach.", "second_rule": null}
+{"id": 529, "label": "not-a-pair", "reason": "Twin is a different sentence about graft coverage.", "second_rule": null}
+{"id": 530, "label": "not-a-violation", "reason": "Instruction replaced by record that it was not done.", "second_rule": null}
+{"id": 531, "label": "not-a-violation", "reason": "Design changed from hard ratchet to justified raise.", "second_rule": null}
+{"id": 532, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about notifying sessions.", "second_rule": null}
+{"id": 533, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about new capability.", "second_rule": null}
+{"id": 534, "label": "unsure", "reason": "Twin drops the count header; unclear whether a rule or a relocation drove it.", "second_rule": null}
+{"id": 535, "label": "not-a-violation", "reason": "Mechanism description corrected; factual error.", "second_rule": null}
+{"id": 536, "label": "unsure", "reason": "Removal of 'there is no defined twice' may reflect a later-added check; reason for correction not decidable.", "second_rule": null}
+{"id": 537, "label": "not-a-violation", "reason": "Wrong tool names corrected.", "second_rule": null}
+{"id": 538, "label": "unsure", "reason": "Scope error on semantic_search is in the preceding sentence; basis of the original claim is not visible.", "second_rule": null}
+{"id": 539, "label": "not-a-violation", "reason": "Change count updated to include a payload field; factual.", "second_rule": null}
+{"id": 540, "label": "not-a-pair", "reason": "Twin about opaque ids and moves is not the schema sentence's correction.", "second_rule": null}
+{"id": 541, "label": "not-a-violation", "reason": "Elaborates the cascade requirement.", "second_rule": null}
+{"id": 542, "label": "not-a-violation", "reason": "'each' to 'every'; wording only.", "second_rule": null}
+{"id": 543, "label": "not-a-violation", "reason": "Open decision replaced by the decision taken; status update.", "second_rule": null}
+{"id": 544, "label": "not-a-violation", "reason": "Editorial rewording.", "second_rule": null}
+{"id": 545, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 546, "label": "not-a-violation", "reason": "Only backtick formatting of n=15 changes.", "second_rule": null}
+{"id": 547, "label": "not-a-violation", "reason": "Only backtick formatting of n=12 changes.", "second_rule": null}
+{"id": 548, "label": "not-a-violation", "reason": "Count merely backticked; formatting change.", "second_rule": null}
+{"id": 549, "label": "d_history", "reason": "Stored count backticked as quotation once counts are derived, so prose figure is not read as live.", "second_rule": "count_unit"}
+{"id": 550, "label": "not-a-violation", "reason": "Reworded after mitigation; editorial.", "second_rule": null}
+{"id": 551, "label": "not-a-violation", "reason": "Assessment of a remedy corrected: it narrows contention rather than equalising units.", "second_rule": null}
+{"id": 552, "label": "not-a-pair", "reason": "Twin is an unrelated explanatory sentence.", "second_rule": null}
+{"id": 553, "label": "not-a-violation", "reason": "Remedy analysis replaced by reproduction finding; factual correction.", "second_rule": null}
+{"id": 554, "label": "not-a-pair", "reason": "Twin about addressability breaking does not correspond to the attribution-rule sentence.", "second_rule": null}
+{"id": 555, "label": "not-a-violation", "reason": "Positive sentence kept verbatim; the correction targets an adjacent sentence.", "second_rule": null}
+{"id": 556, "label": "not-a-violation", "reason": "Clarifies 'id' as sessionId; no attribution by name shown.", "second_rule": null}
+{"id": 557, "label": "count_unit", "reason": "'n=15 ... +1' ambiguous whether the +1 is included; correction marks it the fifteenth.", "second_rule": null}
+{"id": 558, "label": "scope_instant", "reason": "Present-tense 'still reports zero' for changing state; corrected to past tense and a derivation probe.", "second_rule": "count_unit"}
+{"id": 559, "label": "not-a-violation", "reason": "Adds durability qualifier to verified status; factual update.", "second_rule": null}
+{"id": 560, "label": "not-a-violation", "reason": "Adds justification; editorial.", "second_rule": null}
+{"id": 561, "label": "not-a-pair", "reason": "Positive retained; appended note corrects a different sentence about git commit staging.", "second_rule": null}
+{"id": 562, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 563, "label": "not-a-violation", "reason": "Superseded figures consolidated; editorial.", "second_rule": null}
+{"id": 564, "label": "not-a-violation", "reason": "Wrong line citation for Qdrant path; no basis stated, so a factual error rather than a rule breach.", "second_rule": null}
+{"id": 565, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about index_repo_sync.", "second_rule": null}
+{"id": 566, "label": "not-a-pair", "reason": "Twin describes the first draft's framing; not a correction of this sentence.", "second_rule": null}
+{"id": 567, "label": "not-a-pair", "reason": "Twin describes the first draft's framing, not a correction of this sentence.", "second_rule": null}
+{"id": 568, "label": "not-a-violation", "reason": "Recommendation reworded after retag.", "second_rule": null}
+{"id": 569, "label": "not-a-violation", "reason": "Cost estimate of an option updated with the new discriminator.", "second_rule": null}
+{"id": 570, "label": "not-a-pair", "reason": "Twin states a different recommendation, not a correction of option 3's sentence.", "second_rule": null}
+{"id": 571, "label": "not-a-pair", "reason": "Twin describes a different candidate option.", "second_rule": null}
+{"id": 572, "label": "not-a-pair", "reason": "Twin describes a different option.", "second_rule": null}
+{"id": 573, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 574, "label": "not-a-violation", "reason": "Plan step reversed after finding the change redundant; factual correction.", "second_rule": null}
+{"id": 575, "label": "not-a-violation", "reason": "Plan named a comment as a statement site; basis for error not visible in the sentence.", "second_rule": null}
+{"id": 576, "label": "not-a-violation", "reason": "Heading adds that ceiling was later corrected; updated fact.", "second_rule": null}
+{"id": 577, "label": "not-a-violation", "reason": "Adds a correction stamp; text otherwise identical.", "second_rule": null}
+{"id": 578, "label": "not-a-violation", "reason": "Decision found already taken; factual update.", "second_rule": null}
+{"id": 579, "label": "not-a-violation", "reason": "Positive kept; a new member appended.", "second_rule": null}
+{"id": 580, "label": "question_asked", "reason": "A passing gate treated as sanction or adjudication, a question the gate does not answer.", "second_rule": null}
+{"id": 581, "label": "question_asked", "reason": "Checking format_compact implementers answers a neighbouring question; rendering depends on output_form, the wrong criterion per correction.", "second_rule": null}
+{"id": 582, "label": "not-a-violation", "reason": "Enumerated tool list was wrong; corrected population list, factual error.", "second_rule": null}
+{"id": 583, "label": "count_unit", "reason": "Count of tools implementing format_compact offered as the affected population; unit misread.", "second_rule": null}
+{"id": 584, "label": "not-a-violation", "reason": "Updated fact: a further task shipped.", "second_rule": null}
+{"id": 585, "label": "not-a-violation", "reason": "Task range updated after Task 10 shipped; updated fact.", "second_rule": null}
+{"id": 586, "label": "not-a-violation", "reason": "Plan checkbox ticked with result.", "second_rule": null}
+{"id": 587, "label": "not-a-violation", "reason": "Path updated to archive location.", "second_rule": null}
+{"id": 588, "label": "not-a-violation", "reason": "Path updated to archive location.", "second_rule": null}
+{"id": 589, "label": "not-a-violation", "reason": "Path updated to archive location.", "second_rule": null}
+{"id": 590, "label": "not-a-violation", "reason": "Path repointed to archive with fix SHA; updated fact.", "second_rule": null}
+{"id": 591, "label": "not-a-violation", "reason": "Members list restructured; editorial.", "second_rule": null}
+{"id": 592, "label": "not-a-violation", "reason": "Stored count removed during restructuring; original carried unit, method and date.", "second_rule": null}
+{"id": 593, "label": "not-a-violation", "reason": "Relocates an appended member; editorial.", "second_rule": null}
+{"id": 594, "label": "not-a-violation", "reason": "Member list extended with a new member; update.", "second_rule": null}
+{"id": 595, "label": "not-a-violation", "reason": "Appends a member.", "second_rule": null}
+{"id": 596, "label": "not-a-violation", "reason": "Record updated to fixed predecessor in archive.", "second_rule": null}
+{"id": 597, "label": "not-a-violation", "reason": "Members list extended; update.", "second_rule": null}
+{"id": 598, "label": "not-a-violation", "reason": "New member appended.", "second_rule": null}
+{"id": 599, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about gating and budget movement.", "second_rule": null}
+{"id": 600, "label": "not-a-violation", "reason": "Corrects that the gate was never measured; factual.", "second_rule": null}
+{"id": 601, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about splitting and accuracy.", "second_rule": null}
+{"id": 602, "label": "not-a-pair", "reason": "Twin is an unrelated list entry, not a correction of the read-first sentence.", "second_rule": null}
+{"id": 603, "label": "not-a-pair", "reason": "Twin about identical arms and A-27; unrelated.", "second_rule": null}
+{"id": 604, "label": "not-a-pair", "reason": "Twin about low-power prediction; unrelated to Valid field.", "second_rule": null}
+{"id": 605, "label": "not-a-pair", "reason": "Twin prepends unrelated classification text; positive content otherwise retained.", "second_rule": null}
+{"id": 606, "label": "not-a-violation", "reason": "Hedged mechanism status updated after mechanism found shipped.", "second_rule": null}
+{"id": 607, "label": "not-a-pair", "reason": "Twin is about the uncommitted half, unrelated to the candidate sentence.", "second_rule": null}
+{"id": 608, "label": "not-a-pair", "reason": "Twin is a different sentence contrasting with 'none yet'.", "second_rule": null}
+{"id": 609, "label": "not-a-violation", "reason": "Hedged open question replaced by record after sweep; factual update.", "second_rule": null}
+{"id": 610, "label": "not-a-violation", "reason": "Already hedged; status updated after mechanism shipped.", "second_rule": null}
+{"id": 611, "label": "not-a-violation", "reason": "Later reproduced; sentence reframed as why earlier probes failed.", "second_rule": null}
+{"id": 612, "label": "not-a-violation", "reason": "Describes code before a fix; twin describes code after.", "second_rule": null}
+{"id": 613, "label": "not-a-violation", "reason": "Cluster tag reclassified after retraction.", "second_rule": null}
+{"id": 614, "label": "not-a-violation", "reason": "Restated during retraction of mechanism; factual correction.", "second_rule": null}
+{"id": 615, "label": "not-a-violation", "reason": "Environment line updated after the bug was retracted; factual update.", "second_rule": null}
+{"id": 616, "label": "not-a-pair", "reason": "Twin about hook intent on a shared checkout; unrelated.", "second_rule": null}
+{"id": 617, "label": "not-a-pair", "reason": "Twin is a different hypothesis.", "second_rule": null}
+{"id": 618, "label": "not-a-pair", "reason": "Twin states a different hypothesis.", "second_rule": null}
+{"id": 619, "label": "not-a-pair", "reason": "Twin is a different hypothesis.", "second_rule": null}
+{"id": 620, "label": "question_asked", "reason": "Reading disk state at a later instant was taken as a test of the move; a peer's stash window explained it.", "second_rule": null}
+{"id": 621, "label": "not-a-violation", "reason": "Verdict reworded as part of a retraction; factual.", "second_rule": null}
+{"id": 622, "label": "not-a-pair", "reason": "Twin is a different sentence from a retraction.", "second_rule": null}
+{"id": 623, "label": "not-a-violation", "reason": "Shortened rewording of the same advice; editorial.", "second_rule": null}
+{"id": 624, "label": "not-a-violation", "reason": "Condensed rewording of the same advice; editorial.", "second_rule": null}
+{"id": 625, "label": "cannot_happen", "reason": "Asserts chunk grain cannot have the problem by construction; an unsplittable line breaks it, correction scopes the claim.", "second_rule": null}
+{"id": 626, "label": "not-a-violation", "reason": "Rename note added to old slug; editorial.", "second_rule": null}
+{"id": 627, "label": "not-a-violation", "reason": "Path and id updated after archive.", "second_rule": null}
+{"id": 628, "label": "not-a-violation", "reason": "Path and id updated after archive move.", "second_rule": null}
+{"id": 629, "label": "not-a-violation", "reason": "Path and id updated after archive.", "second_rule": null}
+{"id": 630, "label": "not-a-violation", "reason": "Path re-pointed to archive.", "second_rule": null}
+{"id": 631, "label": "not-a-violation", "reason": "Path updated to archive location.", "second_rule": null}
+{"id": 632, "label": "not-a-violation", "reason": "Status token annotated; editorial.", "second_rule": null}
+{"id": 633, "label": "contradiction", "reason": "Field says 'not yet' while next clause says 'it clears on both bars'; twin names the self-contradiction.", "second_rule": null}
+{"id": 634, "label": "not-a-violation", "reason": "Tense changed after premise moved; updated fact.", "second_rule": null}
+{"id": 635, "label": "monotone_absence", "reason": "A re-run returning legacy: 0 was presented as a control; an absence cannot serve as positive control.", "second_rule": null}
+{"id": 636, "label": "unsure", "reason": "Wrong remedy (/mcp); subject hints a non-discriminating output, but basis not visible in the sentence.", "second_rule": null}
+{"id": 637, "label": "not-a-pair", "reason": "Probe report and cache-verification sentence are different statements.", "second_rule": null}
+{"id": 638, "label": "not-a-violation", "reason": "Wrong artifact id corrected.", "second_rule": null}
+{"id": 639, "label": "not-a-violation", "reason": "Wrong artifact id replaced with correct one.", "second_rule": null}
+{"id": 640, "label": "not-a-violation", "reason": "Artifact id re-pointed after archive.", "second_rule": null}
+{"id": 641, "label": "not-a-violation", "reason": "Prescription outdated because the instrumentation shipped.", "second_rule": null}
+{"id": 642, "label": "not-a-violation", "reason": "Code changed; the .ok() is gone.", "second_rule": null}
+{"id": 643, "label": "not-a-violation", "reason": "Count replaced by the file path; editorial clarification.", "second_rule": null}
+{"id": 644, "label": "not-a-violation", "reason": "Wrong claim about watermark behaviour corrected; no basis stated.", "second_rule": null}
+{"id": 645, "label": "not-a-pair", "reason": "Note corrects the following sentence, not the positive.", "second_rule": null}
+{"id": 646, "label": "not-a-violation", "reason": "Next step marked superseded by a shipped fix; status update.", "second_rule": null}
+{"id": 647, "label": "not-a-violation", "reason": "Stale blocked status updated after the decision was taken; updated fact.", "second_rule": null}
+{"id": 648, "label": "not-a-violation", "reason": "Blocker shipped; tense changed and marked historical.", "second_rule": null}
+{"id": 649, "label": "unsure", "reason": "Live-config half removed; why it was wrong is not decidable from the row.", "second_rule": null}
+{"id": 650, "label": "unsure", "reason": "Claim reversed to NOT on row 2; whether a stale observation or other breach caused it is not shown.", "second_rule": null}
+{"id": 651, "label": "not-a-violation", "reason": "Tense updated after the questions were asked.", "second_rule": null}
+{"id": 652, "label": "not-a-violation", "reason": "Status updated after decisions shipped.", "second_rule": null}
+{"id": 653, "label": "not-a-violation", "reason": "Queue item marked done; updated fact.", "second_rule": null}
+{"id": 654, "label": "not-a-pair", "reason": "Twin corresponds to a different option sentence, not the Qdrant requirement sentence.", "second_rule": null}
+{"id": 655, "label": "not-a-pair", "reason": "Twin about CI catching it is a different sentence from option 2's cost.", "second_rule": null}
+{"id": 656, "label": "not-a-violation", "reason": "Editorial restructuring of option description; same claim.", "second_rule": null}
+{"id": 657, "label": "unsure", "reason": "Twin only quotes the original; what was wrong with 'costs nothing, catches nothing' is not shown.", "second_rule": null}
+{"id": 658, "label": "not-a-violation", "reason": "Reframes the same option-3 point more strongly; editorial rewording.", "second_rule": null}
+{"id": 659, "label": "not-a-violation", "reason": "Judgement reversed on option weakness; editorial reassessment.", "second_rule": null}
+{"id": 660, "label": "not-a-violation", "reason": "Removes a factual overstatement about git push granularity.", "second_rule": null}
+{"id": 661, "label": "cannot_happen", "reason": "Absolute 'two states, not three' impossibility scoped to default git push in correction.", "second_rule": null}
+{"id": 662, "label": "not-a-violation", "reason": "Narrowed 'push' to 'git push <branch>'; precision edit, no menu rule.", "second_rule": null}
+{"id": 663, "label": "not-a-violation", "reason": "Proposed marker later shipped; updated fact.", "second_rule": null}
+{"id": 664, "label": "not-a-pair", "reason": "Twin about latent gap is a different sentence.", "second_rule": null}
+{"id": 665, "label": "not-a-violation", "reason": "Original honestly flagged self-report; correction upgrades evidence to channel-derived.", "second_rule": null}
+{"id": 666, "label": "not-a-violation", "reason": "Attribution strength upgraded after channel derivation; factual update.", "second_rule": null}
+{"id": 667, "label": "question_asked", "reason": "Self-quoted scratchpad path answers what a session claims, not which process it is; correction withdraws 'given'.", "second_rule": null}
+{"id": 668, "label": "not-a-violation", "reason": "Path updated to archive location.", "second_rule": null}
+{"id": 669, "label": "not-a-violation", "reason": "Proposal later implemented; updated fact.", "second_rule": null}
+{"id": 670, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about allocate_entry_id.", "second_rule": null}
+{"id": 671, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 672, "label": "question_asked", "reason": "The published control showed the scan opens files, a neighbouring question to whether this check works; it was the weaker control.", "second_rule": null}
+{"id": 673, "label": "not-a-violation", "reason": "Rewording of the same control statement.", "second_rule": null}
+{"id": 674, "label": "not-a-violation", "reason": "Root cause diagnosis corrected; factual.", "second_rule": null}
+{"id": 675, "label": "not-a-pair", "reason": "Twin about verifier cross-check is a different sentence.", "second_rule": null}
+{"id": 676, "label": "not-a-violation", "reason": "Wrong failure count corrected; factual.", "second_rule": null}
+{"id": 677, "label": "not-a-violation", "reason": "Removes a count statement after the third instance was retracted; factual correction.", "second_rule": null}
+{"id": 678, "label": "not-a-pair", "reason": "Twin about test running against the real script; unrelated.", "second_rule": null}
+{"id": 679, "label": "not-a-violation", "reason": "Overclaiming clause removed; no menu rule clearly breached.", "second_rule": null}
+{"id": 680, "label": "not-a-violation", "reason": "Adds a note of the previous section text; the original sentence breaks no rule.", "second_rule": null}
+{"id": 681, "label": "not-a-violation", "reason": "Provenance/attribution of the strength bar corrected; factual.", "second_rule": null}
+{"id": 682, "label": "not-a-violation", "reason": "Provenance detail corrected; attribution already by sessionId.", "second_rule": null}
+{"id": 683, "label": "not-a-violation", "reason": "Tense changed to past after the fix; updated fact.", "second_rule": null}
+{"id": 684, "label": "not-a-violation", "reason": "Tense changed and scope 'on its own' added; editorial.", "second_rule": null}
+{"id": 685, "label": "not-a-violation", "reason": "Remaining-work sentence updated as cohort progressed; editorial/factual update.", "second_rule": null}
+{"id": 686, "label": "not-a-violation", "reason": "Tense change after shipping.", "second_rule": null}
+{"id": 687, "label": "not-a-violation", "reason": "Tense change only.", "second_rule": null}
+{"id": 688, "label": "not-a-violation", "reason": "Moved to past tense after fix; count dropped as no longer current.", "second_rule": null}
+{"id": 689, "label": "not-a-violation", "reason": "Plan step rewritten in past tense after shipping.", "second_rule": null}
+{"id": 690, "label": "not-a-violation", "reason": "Plan step trimmed after shipping; editorial.", "second_rule": null}
+{"id": 691, "label": "not-a-pair", "reason": "Twin concerns reseat_worktree scope, unrelated to the read_to_string cost sentence.", "second_rule": null}
+{"id": 692, "label": "not-a-violation", "reason": "Tense change only; editorial.", "second_rule": null}
+{"id": 693, "label": "not-a-violation", "reason": "Tense change only.", "second_rule": null}
+{"id": 694, "label": "not-a-violation", "reason": "Replaced by the branch's actual resolution; factual update.", "second_rule": null}
+{"id": 695, "label": "not-a-violation", "reason": "Quote-marker reflow only.", "second_rule": null}
+{"id": 696, "label": "not-a-violation", "reason": "Claim reaffirmed with 'stands'; no rule breach repaired.", "second_rule": null}
+{"id": 697, "label": "not-a-violation", "reason": "Word change 'sequencing problem' to 'coupling'; editorial.", "second_rule": null}
+{"id": 698, "label": "not-a-violation", "reason": "Audience wording changed.", "second_rule": null}
+{"id": 699, "label": "not-a-violation", "reason": "Prescription marked superseded while measurement kept.", "second_rule": null}
+{"id": 700, "label": "not-a-violation", "reason": "Only quote-marker formatting changed; editorial.", "second_rule": null}
+{"id": 701, "label": "not-a-pair", "reason": "Twin is a fragment unrelated to the const sentence.", "second_rule": null}
+{"id": 702, "label": "not-a-violation", "reason": "Marks the finding as standing; editorial.", "second_rule": null}
+{"id": 703, "label": "not-a-violation", "reason": "Rewording of the same finding; tense and phrasing only.", "second_rule": null}
+{"id": 704, "label": "not-a-violation", "reason": "Status update: blast radius was paid.", "second_rule": null}
+{"id": 705, "label": "not-a-violation", "reason": "Reworded, noting independence from above; editorial.", "second_rule": null}
+{"id": 706, "label": "unsure", "reason": "Absence claims removed, but whether they were wrong or just moved cannot be decided from what is shown.", "second_rule": null}
+{"id": 707, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 708, "label": "not-a-violation", "reason": "Sentence restructured; editorial.", "second_rule": null}
+{"id": 709, "label": "not-a-violation", "reason": "Retracts a wrong causal guess; factual correction.", "second_rule": null}
+{"id": 710, "label": "d_adjacency", "reason": "Change attributed to a commit because it touched the plausible field, not positively identified; real cause was another commit.", "second_rule": null}
+{"id": 711, "label": "not-a-violation", "reason": "Removes an incorrect example from the list; factual.", "second_rule": null}
+{"id": 712, "label": "not-a-violation", "reason": "Marked as stale at time of filing; factual update.", "second_rule": null}
+{"id": 713, "label": "not-a-violation", "reason": "Tense and snapshot scoping changed after fix; updated fact.", "second_rule": null}
+{"id": 714, "label": "not-a-violation", "reason": "Credit reframed as hindsight at peer's request.", "second_rule": null}
+{"id": 715, "label": "not-a-violation", "reason": "Adds a cross-reference.", "second_rule": null}
+{"id": 716, "label": "not-a-violation", "reason": "Reworded after ambiguity measured; updated fact.", "second_rule": null}
+{"id": 717, "label": "not-a-violation", "reason": "Factual rescoping of 'refuses' to 'cannot format'.", "second_rule": null}
+{"id": 718, "label": "contradiction", "reason": "Same path given as correct and as the non-compiling original; correction describes the old form without writing it.", "second_rule": "d_history"}
+{"id": 719, "label": "not-a-violation", "reason": "Wrong instruction (delete vs replace attribute) corrected.", "second_rule": null}
+{"id": 720, "label": "not-a-violation", "reason": "Wrong suppression instruction replaced; factual error without visible rule breach.", "second_rule": null}
+{"id": 721, "label": "not-a-violation", "reason": "Path re-pointed to archive.", "second_rule": null}
+{"id": 722, "label": "not-a-violation", "reason": "Refines the check's siting to divergent pushes; factual refinement.", "second_rule": null}
+{"id": 723, "label": "not-a-violation", "reason": "Reasoning refined: part 1 needs no fetch.", "second_rule": null}
+{"id": 724, "label": "not-a-pair", "reason": "Twin is a different sentence about reaching the remote value without network.", "second_rule": null}
+{"id": 725, "label": "not-a-violation", "reason": "Article change only.", "second_rule": null}
+{"id": 726, "label": "not-a-violation", "reason": "Resume note updated with new facts about what may have moved.", "second_rule": null}
+{"id": 727, "label": "not-a-violation", "reason": "Tense and count wording updated after the fix.", "second_rule": null}
+{"id": 728, "label": "not-a-violation", "reason": "Line-number citations dropped after its own fix moved them; factual update.", "second_rule": null}
+{"id": 729, "label": "not-a-violation", "reason": "Overgeneral claim scoped to the render paths it covers; factual.", "second_rule": null}
+{"id": 730, "label": "not-a-violation", "reason": "Stale factual claim separated from the standing decision.", "second_rule": null}
+{"id": 731, "label": "not-a-violation", "reason": "Path re-pointed to archive.", "second_rule": null}
+{"id": 732, "label": "not-a-violation", "reason": "Path updated to archive location.", "second_rule": null}
+{"id": 733, "label": "not-a-violation", "reason": "Tense updated and a confirming test run cited after the fix.", "second_rule": null}
+{"id": 734, "label": "not-a-pair", "reason": "Twin is an unrelated tests-field line.", "second_rule": null}
+{"id": 735, "label": "not-a-violation", "reason": "Hedged and scoped as n=1 candidate; editorial update.", "second_rule": null}
+{"id": 736, "label": "not-a-violation", "reason": "Path updated to archive plus fix SHA.", "second_rule": null}
+{"id": 737, "label": "not-a-pair", "reason": "Positive unchanged; twin is positive plus appended new member text.", "second_rule": null}
+{"id": 738, "label": "not-a-violation", "reason": "Path and id re-pointed to archive.", "second_rule": null}
+{"id": 739, "label": "selector_narrow", "reason": "Scan of main transcripts (isSidechain zero) reported as the whole substrate lacking subagent records; later found false.", "second_rule": "monotone_absence"}
+{"id": 740, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 741, "label": "not-a-violation", "reason": "Purely editorial rewording.", "second_rule": null}
+{"id": 742, "label": "not-a-violation", "reason": "Editorial restatement of the remaining decision.", "second_rule": null}
+{"id": 743, "label": "not-a-violation", "reason": "Framing trimmed; retracted claim lies elsewhere.", "second_rule": null}
+{"id": 744, "label": "not-a-violation", "reason": "Removed 'currently under-scoped' clause; editorial.", "second_rule": null}
+{"id": 745, "label": "scope_instant", "reason": "'Documented nowhere else' reports a search result without scope; the rule is in fact documented.", "second_rule": null}
+{"id": 746, "label": "not-a-violation", "reason": "Artifact id re-pointed after a move.", "second_rule": null}
+{"id": 747, "label": "not-a-violation", "reason": "Fix prescription corrected; factual.", "second_rule": null}
+{"id": 748, "label": "not-a-violation", "reason": "Reworded with a line citation; editorial.", "second_rule": null}
+{"id": 749, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about measuring before building.", "second_rule": null}
+{"id": 750, "label": "not-a-pair", "reason": "Twin about build.rs build id is a different sentence.", "second_rule": null}
+{"id": 751, "label": "not-a-violation", "reason": "Guard behaviour overclaimed, narrowed after measurement; no stated basis breach.", "second_rule": null}
+{"id": 752, "label": "not-a-violation", "reason": "Guard behaviour narrowed to measured residual cases; factual.", "second_rule": null}
+{"id": 753, "label": "cannot_happen", "reason": "Asserts no escape form exists without a check; measuring the guard found an escape that merely does not scale.", "second_rule": "run_tool"}
+{"id": 754, "label": "unsure", "reason": "Claim rested on a superseded reproduction; no menu rule clearly fits from the shown text.", "second_rule": null}
+{"id": 755, "label": "lines_read", "reason": "Context says guard not read at the bytes; cost claim wrong, correction reads code showing comment skipping already ships.", "second_rule": "open_artifact"}
+{"id": 756, "label": "unsure", "reason": "Effort estimate corrected after measurement; unclear which rule, if any, applied.", "second_rule": null}
+{"id": 757, "label": "unsure", "reason": "Implied no-escape claim made without reading bytes; unclear whether a menu rule applies.", "second_rule": null}
+{"id": 758, "label": "not-a-pair", "reason": "Twin describes remaining gaps, not this sentence.", "second_rule": null}
+{"id": 759, "label": "not-a-violation", "reason": "Minor editorial deletion of 'note'.", "second_rule": null}
+{"id": 760, "label": "not-a-violation", "reason": "Scope extended (not the language either); factual refinement.", "second_rule": null}
+{"id": 761, "label": "run_tool", "reason": "Unmeasured claim that wip_authors cannot split a red by author; retracted after it did.", "second_rule": null}
+{"id": 762, "label": "not-a-pair", "reason": "Positive is a fragment; twin is a different sentence.", "second_rule": null}
+{"id": 763, "label": "not-a-violation", "reason": "Scope narrowed to the explicit background form; factual correction.", "second_rule": null}
+{"id": 764, "label": "not-a-violation", "reason": "Overstated 'established' narrowed to half established; factual.", "second_rule": null}
+{"id": 765, "label": "unsure", "reason": "Twin is the following sentence, not a rewrite; 'only explicit form is silent' may overgeneralise one measurement, but cannot be decided from this.", "second_rule": null}
+{"id": 766, "label": "question_asked", "reason": "Measurement of auto-backgrounded form extended to the gate's own form, which it did not measure.", "second_rule": null}
+{"id": 767, "label": "not-a-pair", "reason": "Twin is an explanatory sentence, not a correction of the positive.", "second_rule": null}
+{"id": 768, "label": "scope_instant", "reason": "'Nothing ... or elsewhere checks' reports a negative search without scope; a test already existed.", "second_rule": null}
+{"id": 769, "label": "not-a-violation", "reason": "Id updated to archived bug and fix SHA added.", "second_rule": null}
+{"id": 770, "label": "not-a-pair", "reason": "Positive is a fragment; twin is unrelated.", "second_rule": null}
+{"id": 771, "label": "not-a-violation", "reason": "Tense updated after measurement taken.", "second_rule": null}
+{"id": 772, "label": "d_adjacency", "reason": "Pusher inferred from tip commit author by temporal proximity; correction says it is not evidence.", "second_rule": null}
+{"id": 773, "label": "not-a-pair", "reason": "Note corrects a different sentence about Session-Id inference.", "second_rule": null}
+{"id": 774, "label": "not-a-violation", "reason": "Same claim expanded with explanation; editorial.", "second_rule": null}
+{"id": 775, "label": "not-a-violation", "reason": "False claim about gate corrected; basis not visible.", "second_rule": null}
+{"id": 776, "label": "not-a-pair", "reason": "Twin about ledger contention; unrelated.", "second_rule": null}
+{"id": 777, "label": "not-a-violation", "reason": "Reference to a deleted checklist removed.", "second_rule": null}
+{"id": 778, "label": "not-a-violation", "reason": "Status statement updated; commit later made.", "second_rule": null}
+{"id": 779, "label": "not-a-violation", "reason": "Checkpoint sentence condensed to a current-state fact.", "second_rule": null}
+{"id": 780, "label": "not-a-pair", "reason": "Twin about no refactor implemented is unrelated to keeping one MCP surface.", "second_rule": null}
+{"id": 781, "label": "not-a-violation", "reason": "Updated fact after work was later committed.", "second_rule": null}
+{"id": 782, "label": "not-a-pair", "reason": "Copilot-blocker sentence and commit statement are unrelated.", "second_rule": null}
+{"id": 783, "label": "not-a-pair", "reason": "Twin is an unrelated commit-status sentence.", "second_rule": null}
+{"id": 784, "label": "not-a-pair", "reason": "Twin is an unrelated status sentence.", "second_rule": null}
+{"id": 785, "label": "not-a-pair", "reason": "Local-copies sentence and work-stream-committed sentence have different subjects.", "second_rule": null}
+{"id": 786, "label": "not-a-pair", "reason": "Twin about no runtime refactor; not a rewrite of this sentence.", "second_rule": null}
+{"id": 787, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 788, "label": "not-a-pair", "reason": "Twin states no refactor implemented; not a rewrite of this instruction.", "second_rule": null}
+{"id": 789, "label": "not-a-violation", "reason": "Status statement updated.", "second_rule": null}
+{"id": 790, "label": "not-a-violation", "reason": "Exclusion list updated after the corpus moved.", "second_rule": null}
+{"id": 791, "label": "not-a-violation", "reason": "Editorial shortening.", "second_rule": null}
+{"id": 792, "label": "not-a-pair", "reason": "Twin is option 2's sentence; option 1 was withdrawn.", "second_rule": null}
+{"id": 793, "label": "not-a-violation", "reason": "Word order change only.", "second_rule": null}
+{"id": 794, "label": "not-a-violation", "reason": "Corrects when new scripts are caught; factual.", "second_rule": null}
+{"id": 795, "label": "not-a-violation", "reason": "Timing corrected from commit to staging; factual error.", "second_rule": null}
+{"id": 796, "label": "act_on_artifact", "reason": "Tells the next session not to re-read, relying on an earlier scouting; the premise was already false.", "second_rule": "open_artifact"}
+{"id": 797, "label": "not-a-violation", "reason": "Appends a new member.", "second_rule": null}
+{"id": 798, "label": "not-a-pair", "reason": "Twin corrects an unrelated citation to augmentation.rs:724.", "second_rule": null}
+{"id": 799, "label": "unsure", "reason": "False deadlock inference retracted; rule broken (absence-as-proof vs elimination) not determinable from what is shown.", "second_rule": null}
+{"id": 800, "label": "not-a-pair", "reason": "Twin is a different fragment; the positive sentence was deleted rather than corrected.", "second_rule": null}
+{"id": 801, "label": "unsure", "reason": "Clause about fmt-mine refusing removed in a retraction commit; which rule, if any, it broke is not visible.", "second_rule": null}
+{"id": 802, "label": "not-a-pair", "reason": "Positive is a fragment; the note corrects a different sentence.", "second_rule": null}
+{"id": 803, "label": "not-a-pair", "reason": "Twin corrects the lever sentence, not this one.", "second_rule": null}
+{"id": 804, "label": "not-a-violation", "reason": "Falsified hypothesis about the lever withdrawn; factual.", "second_rule": null}
+{"id": 805, "label": "not-a-violation", "reason": "Id token repointed; editorial citation fix.", "second_rule": null}
+{"id": 806, "label": "not-a-violation", "reason": "Escaped newlines fixed; editorial.", "second_rule": null}
+{"id": 807, "label": "not-a-violation", "reason": "Citation id re-pointed.", "second_rule": null}
+{"id": 808, "label": "not-a-violation", "reason": "Class claim widened to cover new members.", "second_rule": null}
+{"id": 809, "label": "not-a-violation", "reason": "Claim line widened to cover new members; editorial broadening.", "second_rule": null}
+{"id": 810, "label": "not-a-violation", "reason": "Stray parenthesis removed; typo.", "second_rule": null}
+{"id": 811, "label": "not-a-violation", "reason": "Retracts a false factual claim about activation scope.", "second_rule": null}
+{"id": 812, "label": "not-a-violation", "reason": "Reference scoped and a pointer added.", "second_rule": null}
+{"id": 813, "label": "not-a-violation", "reason": "Adds an addendum reference; editorial.", "second_rule": null}
+{"id": 814, "label": "not-a-pair", "reason": "Positive is a fragment retained in the twin; correction targets another sentence.", "second_rule": null}
+{"id": 815, "label": "not-a-violation", "reason": "Original openly hedged as unverified; correction reports re-derivation.", "second_rule": null}
+{"id": 816, "label": "not-a-violation", "reason": "Diagnosis superseded; basis for the original is not shown.", "second_rule": null}
+{"id": 817, "label": "not-a-violation", "reason": "Correction heading updated to note a second correction.", "second_rule": null}
+{"id": 818, "label": "not-a-violation", "reason": "Path updated to archive location.", "second_rule": null}
+{"id": 819, "label": "not-a-violation", "reason": "Path and id updated after fix and archive.", "second_rule": null}
+{"id": 820, "label": "unsure", "reason": "Clause resting on 0/77 snapshot removed; which rule it breaks is not clear from shown text.", "second_rule": null}
+{"id": 821, "label": "not-a-violation", "reason": "Mitigation marked superseded by a tool.", "second_rule": null}
+{"id": 822, "label": "not-a-violation", "reason": "Hypothesis marked falsified by later probe.", "second_rule": null}
+{"id": 823, "label": "not-a-violation", "reason": "Advice narrowed to correct scope; factual.", "second_rule": null}
+{"id": 824, "label": "not-a-violation", "reason": "Wrong test name corrected; a factual naming error.", "second_rule": null}
+{"id": 825, "label": "not-a-violation", "reason": "Wrong test name corrected.", "second_rule": null}
+{"id": 826, "label": "not-a-violation", "reason": "Test was renamed; sentence updated to the new name.", "second_rule": null}
+{"id": 827, "label": "not-a-violation", "reason": "Rewritten in past tense once the loose end closed; updated fact.", "second_rule": null}
+{"id": 828, "label": "not-a-violation", "reason": "Path updated to archive location after file move.", "second_rule": null}
+{"id": 829, "label": "not-a-violation", "reason": "Status updated.", "second_rule": null}
+{"id": 830, "label": "unsure", "reason": "Discriminator claim wrong due to confounded control; could be question_asked, but basis unclear from what is shown.", "second_rule": null}
+{"id": 831, "label": "unsure", "reason": "Note corrects the following discriminator claim; the shown sentence itself is an observation.", "second_rule": null}
+{"id": 832, "label": "not-a-pair", "reason": "Twin is a retraction heading, not the corrected sentence.", "second_rule": null}
+{"id": 833, "label": "not-a-violation", "reason": "Retracted an over-broad explanatory claim; none of the 22 rules applies.", "second_rule": null}
+{"id": 834, "label": "not-a-pair", "reason": "Twin is a separate retraction note, not a rewrite of this sentence.", "second_rule": null}
+{"id": 835, "label": "not-a-violation", "reason": "Garbled sentence rewritten after retraction; editorial repair.", "second_rule": null}
+{"id": 836, "label": "not-a-violation", "reason": "Narrows the claim to the third row; factual.", "second_rule": null}
+{"id": 837, "label": "not-a-pair", "reason": "Twin retracts a different claim in the passage.", "second_rule": null}
+{"id": 838, "label": "not-a-pair", "reason": "Twin is an unrelated fragment about two wrong inferences.", "second_rule": null}
+{"id": 839, "label": "open_artifact", "reason": "Recommends copying the generic envelope's shape from belief; context says that rendering path was not read, and it was wrong.", "second_rule": null}
+{"id": 840, "label": "not-a-pair", "reason": "Twin states a different claim about reproductions, not a correction of this sentence.", "second_rule": null}
+{"id": 841, "label": "not-a-violation", "reason": "Proposed mitigation updated to shipped form.", "second_rule": null}
+{"id": 842, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 843, "label": "not-a-violation", "reason": "'Simplest' removed; editorial.", "second_rule": null}
+{"id": 844, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 845, "label": "not-a-violation", "reason": "Editorial condensing.", "second_rule": null}
+{"id": 846, "label": "not-a-violation", "reason": "Editorial trim of an option description.", "second_rule": null}
+{"id": 847, "label": "not-a-violation", "reason": "Claim that option 3 changes no reads was factually wrong; corrected.", "second_rule": null}
+{"id": 848, "label": "not-a-violation", "reason": "Scope of the warning narrowed after partial fix.", "second_rule": null}
+{"id": 849, "label": "not-a-violation", "reason": "Updated recommendation to prefer .err.", "second_rule": null}
+{"id": 850, "label": "not-a-violation", "reason": "Option updated to note it is the only closure and an operator decision.", "second_rule": null}
+{"id": 851, "label": "not-a-violation", "reason": "Cost estimate falsified by measurement; no basis stated originally.", "second_rule": null}
+{"id": 852, "label": "not-a-violation", "reason": "Option status updated to retired.", "second_rule": null}
+{"id": 853, "label": "not-a-violation", "reason": "Drops a reason no longer true after citations were repointed; updated fact.", "second_rule": null}
+{"id": 854, "label": "run_tool", "reason": "'Read by nobody' concluded from reading read_from_buffer source; falsified at runtime by .err suffix handles.", "second_rule": "scope_instant"}
+{"id": 855, "label": "not-a-violation", "reason": "Question marked answered; status update.", "second_rule": null}
+{"id": 856, "label": "d_sessionid", "reason": "Attributed to 'peer 40130' label; correction adds sessionId confirmed from commit trailers.", "second_rule": null}
+{"id": 857, "label": "scope_instant", "reason": "'What remained staged when I checked' reports changing state without an instant; correction removes it, per subject 'dropped the instant'.", "second_rule": null}
+{"id": 858, "label": "not-a-violation", "reason": "Editorial qualifier added.", "second_rule": null}
+{"id": 859, "label": "not-a-violation", "reason": "Tense updated after mitigation was replaced.", "second_rule": null}
+{"id": 860, "label": "not-a-violation", "reason": "Duplicate artifact id corrected.", "second_rule": null}
+{"id": 861, "label": "not-a-violation", "reason": "Path repointed to archive with fix SHA; updated fact.", "second_rule": null}
+{"id": 862, "label": "not-a-violation", "reason": "Path updated to archive location.", "second_rule": null}
+{"id": 863, "label": "count_unit", "reason": "Commit-behind count wrong and underived; correction gives range and instant it was derived.", "second_rule": "scope_instant"}
+{"id": 864, "label": "count_unit", "reason": "'15 commits behind' had no comparand and was wrong; correction derives 5 with explicit range and instant.", "second_rule": "scope_instant"}
+{"id": 865, "label": "cannot_happen", "reason": "'Could not support it' generalized impossibility; corrected to a per-build 'did not establish it'.", "second_rule": null}
+{"id": 866, "label": "unsure", "reason": "Correction scopes the control to one binary; unclear whether sentence itself overgeneralises or only neighbouring text does.", "second_rule": null}
+{"id": 867, "label": "cannot_happen", "reason": "General claim a line search cannot express the question, from one build; narrowed to per-build after control.", "second_rule": null}
+{"id": 868, "label": "not-a-violation", "reason": "Adds header flagging a later clause wrong; the positive strings sentence itself breaks no rule.", "second_rule": null}
+{"id": 869, "label": "question_asked", "reason": "ldd checks dynamic linkage, not whether statically linked ONNX is present; absence read as proof.", "second_rule": "monotone_absence"}
+{"id": 870, "label": "question_asked", "reason": "ldd was cited as answering linkage, but static linking means it could not measure that question.", "second_rule": null}
+{"id": 871, "label": "scope_instant", "reason": "A size of a changing line was given bare; correction names which line and stamps the instant.", "second_rule": null}
+{"id": 872, "label": "not-a-pair", "reason": "Twin about prevention unavailable is a different sentence.", "second_rule": null}
+{"id": 873, "label": "not-a-violation", "reason": "Option marked adopted; status update.", "second_rule": null}
+{"id": 874, "label": "not-a-pair", "reason": "Twin concerns option 2's lockout, not option 3 sentence.", "second_rule": null}
+{"id": 875, "label": "not-a-violation", "reason": "Assessment of option 2 revised: prevention unavailable at that layer.", "second_rule": null}
+{"id": 876, "label": "question_asked", "reason": "Local scan exit_code cited as 'CI green after', but the passing CI run predated the fix.", "second_rule": null}
+{"id": 877, "label": "question_asked", "reason": "Re-run by the same instrument cited as independent confirmation; it measures repeatability, not correctness.", "second_rule": null}
+{"id": 878, "label": "not-a-violation", "reason": "Status of the OB candidate updated.", "second_rule": null}
+{"id": 879, "label": "not-a-violation", "reason": "Editorial restructuring.", "second_rule": null}
+{"id": 880, "label": "not-a-violation", "reason": "Adds a scoping condition to advice; editorial refinement.", "second_rule": null}
+{"id": 881, "label": "not-a-violation", "reason": "Instruction replaced by the outcome once archiving happened; updated fact.", "second_rule": null}
+{"id": 882, "label": "not-a-violation", "reason": "Mechanism corrected from authorship split to staging split; factual error.", "second_rule": null}
+{"id": 883, "label": "not-a-violation", "reason": "Mechanism corrected from authorship split to staging split; factual error.", "second_rule": null}
+{"id": 884, "label": "not-a-violation", "reason": "Factual correction of what the refusal message names.", "second_rule": null}
+{"id": 885, "label": "cannot_happen", "reason": "'Neither can commit, no narrowing exists' impossibility falsified by a legal staging state.", "second_rule": null}
+{"id": 886, "label": "not-a-pair", "reason": "Twin is an unrelated sentence.", "second_rule": null}
+{"id": 887, "label": "not-a-pair", "reason": "Positive is a sentence fragment.", "second_rule": null}
+{"id": 888, "label": "not-a-violation", "reason": "Membership list corrected by removing two entries; factual edit.", "second_rule": null}
+{"id": 889, "label": "not-a-violation", "reason": "Pointer sentence removed during restructure; editorial.", "second_rule": null}
+{"id": 890, "label": "not-a-violation", "reason": "Instance count updated from three to four.", "second_rule": null}
+{"id": 891, "label": "not-a-violation", "reason": "Ordinal 'third' replaced by 'further' as population grew; count update.", "second_rule": null}
+{"id": 892, "label": "count_unit", "reason": "Cites 'three instances' from another ledger as a current fact; it went stale and the count is dropped.", "second_rule": "scope_instant"}
+{"id": 893, "label": "count_unit", "reason": "14 stale processes treated as 14 peer sessions; one is a mux, so the unit read two ways.", "second_rule": null}
+{"id": 894, "label": "not-a-pair", "reason": "Twin about sentence-level boundaries is unrelated to the not-amended note.", "second_rule": null}
+{"id": 895, "label": "not-a-violation", "reason": "Editorial rewording.", "second_rule": null}
+{"id": 896, "label": "not-a-violation", "reason": "Item marked done with new archived id.", "second_rule": null}
+{"id": 897, "label": "not-a-pair", "reason": "Positive is a fragment; twin unrelated.", "second_rule": null}
+{"id": 898, "label": "not-a-pair", "reason": "Twin is an unrelated sentence about when a command was run.", "second_rule": null}
+{"id": 899, "label": "not-a-pair", "reason": "Twin about the original diagnosis is a different sentence.", "second_rule": null}
+{"id": 900, "label": "not-a-violation", "reason": "Clause of retracted diagnosis removed.", "second_rule": null}
+{"id": 901, "label": "not-a-violation", "reason": "Retracted diagnosis replaced; factual correction.", "second_rule": null}
+{"id": 902, "label": "not-a-violation", "reason": "Misquoted bytes corrected; how the error arose is not visible.", "second_rule": null}
+{"id": 903, "label": "cannot_happen", "reason": "Asserts the detector is unstaffable, an impossibility claim with no check; correction says it is staffable.", "second_rule": null}
+{"id": 904, "label": "not-a-pair", "reason": "Twin corresponds to a different sentence about the author re-reading.", "second_rule": null}
+{"id": 905, "label": "not-a-violation", "reason": "Attribution of framing corrected; factual.", "second_rule": null}
+{"id": 906, "label": "not-a-violation", "reason": "Retracted diagnosis rewritten as history; factual correction.", "second_rule": null}
+{"id": 907, "label": "not-a-pair", "reason": "Twin corresponds to the following sentence, not the positive heading sentence.", "second_rule": null}
+{"id": 908, "label": "not-a-violation", "reason": "Unsupported causal explanation removed as part of a retracted diagnosis; factual.", "second_rule": null}
+{"id": 909, "label": "not-a-violation", "reason": "Retracts a wrong diagnosis; factual.", "second_rule": null}
+{"id": 910, "label": "not-a-violation", "reason": "Emphasis only.", "second_rule": null}
+{"id": 911, "label": "not-a-violation", "reason": "Marks option shipped.", "second_rule": null}
+{"id": 912, "label": "contradiction", "reason": "Option skips only symlinks targeting inside the project, yet risk says it drops outside targets.", "second_rule": null}
+{"id": 913, "label": "unsure", "reason": "Authorship 'mine' corrected to 9403d62d; basis of original attribution not shown.", "second_rule": null}
+{"id": 914, "label": "selector_narrow", "reason": "Seven sampled markers reported as proof the whole content is intact; replaced by a full diff.", "second_rule": null}
+{"id": 915, "label": "not-a-violation", "reason": "Wrong subject session corrected; factual.", "second_rule": null}
+{"id": 916, "label": "not-a-violation", "reason": "Open decision resolved.", "second_rule": null}
+{"id": 917, "label": "not-a-pair", "reason": "Twin about symlink_metadata traversal is a different sentence from the option comparison.", "second_rule": null}
+{"id": 918, "label": "not-a-violation", "reason": "Adds a reason to the instruction; editorial.", "second_rule": null}
+{"id": 919, "label": "not-a-violation", "reason": "Plan replaced with what shipped.", "second_rule": null}
+{"id": 920, "label": "not-a-pair", "reason": "Positive unchanged; twin is positive plus an appended new member.", "second_rule": null}
+{"id": 921, "label": "not-a-pair", "reason": "Twin is an unrelated description sentence.", "second_rule": null}
+{"id": 922, "label": "not-a-pair", "reason": "Intro sentence vs twin about measured url/api_key behaviour; unrelated sentences.", "second_rule": null}
+{"id": 923, "label": "not-a-violation", "reason": "Plan item updated to implemented state.", "second_rule": null}
+{"id": 924, "label": "not-a-violation", "reason": "Restart claim retracted; positive sentence does not show a rule breach.", "second_rule": null}
+{"id": 925, "label": "open_artifact", "reason": "Runtime hook-loading claim rests on a prior belief about CC, never checked against the load path.", "second_rule": "run_tool"}
+{"id": 926, "label": "not-a-violation", "reason": "Prefix rename T to SRI.", "second_rule": null}
+{"id": 927, "label": "not-a-violation", "reason": "Prefix renamed T to SRI.", "second_rule": null}
+{"id": 928, "label": "not-a-violation", "reason": "Withdrawn after it reproduced; updated fact.", "second_rule": null}
+{"id": 929, "label": "not-a-violation", "reason": "Only the Members label prefix dropped; editorial restructuring.", "second_rule": null}
+{"id": 930, "label": "not-a-violation", "reason": "Proposed proxy later falsified; updated fact.", "second_rule": null}
+{"id": 931, "label": "not-a-violation", "reason": "Characterisation changed after the proxy was falsified; no rule breach visible.", "second_rule": null}
+{"id": 932, "label": "question_asked", "reason": "Probe measures next-call handle syntax, not whether buffers were ever queried; 'never retrieved' overclaims.", "second_rule": "selector_narrow"}
+{"id": 933, "label": "not-a-violation", "reason": "Editorial rewording of emphasis.", "second_rule": null}
+{"id": 934, "label": "unsure", "reason": "Unclear why the recoverable-rate claim was narrowed; breach not visible.", "second_rule": null}
+{"id": 935, "label": "scope_instant", "reason": "'Nothing records' search result given without scope; correction names usage.db.", "second_rule": null}
+{"id": 936, "label": "question_asked", "reason": "Argument equality measured, offered as redundancy; correction says it does not imply content equality, only a candidate.", "second_rule": null}
+{"id": 937, "label": "not-a-violation", "reason": "Artifact id re-pointed; no rule breach.", "second_rule": null}
+{"id": 938, "label": "not-a-violation", "reason": "Appends a new member; no correction of a breach.", "second_rule": null}
+{"id": 939, "label": "not-a-violation", "reason": "Structural move of the members field; no breach repaired.", "second_rule": null}
+{"id": 940, "label": "not-a-violation", "reason": "Path repointed to archive; updated fact.", "second_rule": null}
+{"id": 941, "label": "not-a-violation", "reason": "Later result restored claim; conditional sentence removed as updated fact.", "second_rule": null}
+{"id": 942, "label": "not-a-violation", "reason": "Path updated to archive location.", "second_rule": null}
+{"id": 943, "label": "not-a-violation", "reason": "Preceding clause added; content unchanged.", "second_rule": null}
