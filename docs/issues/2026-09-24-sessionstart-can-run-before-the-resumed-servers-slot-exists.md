@@ -10,7 +10,7 @@ owner: marius
 related:
 - a5054d135acacbe3
 - '54a1a8011bca0358'
-severity: medium
+severity: high
 ---
 
 # BUG: SessionStart can run before the resumed session's codescout server publishes its slot, so that SessionStart never stamps it
@@ -38,8 +38,22 @@ What survives is "the hook's scan found no slot in its ancestry". That's consist
 
 ## Not measured
 
-- **Whether a fresh interactive `startup` can lose the same race.** If it can, that server has no predecessor to inherit a session from. It would stay unstamped for its whole life, because `refreshLivenessStamp` never opens the gate (invariant 1). That would put the whole session on the anonymous/blunt-clear path.
-- `claude -p` startups won on every observation this session (margins 51, 62 and 86 ms).
+**Fresh interactive startup: observed once, and it's the severe case.** Reported by the same peer, then read independently by sessionId `774ba049-d97c-443a-b31d-f662a9cb6a1e` at ~11:30Z:
+
+- Session `ebf651ec-5ab7-42d9-a526-dcf9758692e1` started at 11:21:10Z (`~/.claude`, `"kind":"interactive"`, `"entrypoint":"cli"`, parent `comm` `claude`, alive).
+- Its slot `servers/1689248.json` reads `{…,"session":"ebf651ec…","hook_at":null}`. The server wrote `session` itself at construction (the keyed tier's env id). `hook_at: null` means no `SessionStart` stamp ever landed.
+- Since `Rendezvous::poll` opens the gate only on a non-null `hook_at`, and `refreshLivenessStamp` never opens it (its invariant 1), **that session runs without the rendezvous until its first compaction or `/clear`.** The peer reports the slot was still byte-unchanged at ~11:35Z, although a subagent of that session made a codescout call at 11:29:07Z. So the gate held closed for at least ~14 minutes of activity. Without the rendezvous it gets the blunt clear on activation, a `/clear` it cannot see, and no `SessionStart` source.
+
+**The observations split cleanly by launch mode.** This is a sample, not a rate:
+
+| launch | stamped | observations |
+|---|---|---|
+| `claude -p` startup | **5 of 5** | all by `774ba049`, 10:51–11:27Z; slot-to-stamp margins 51–86 ms |
+| interactive (`cli`) | **0 of 3** | two `--resume`s (`~/.claude-sdd`) and one startup (`~/.claude`), by the peer |
+
+The split is consistent with interactive Claude Code (2.1.281 here) connecting MCP servers asynchronously, after `SessionStart` has fired. `claude -p` would then be the mode that waits for them. That's a hypothesis, not measured. `session-start.mjs:51-52`'s premise, "MCP initialize runs before SessionStart", may have held for an older Claude Code.
+
+**Still not measured:** the hook's own scan time. Instrumenting it (log scan time and a no-slot result) is the step that turns this into a measurement.
 
 ## Fix
 
