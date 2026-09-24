@@ -1,12 +1,12 @@
 ---
-id: 1eec62f89aebb74e
+id: '1eec62f89aebb74e'
 kind: bug
 status: fixed
 title: 'BUG: the written_by check compares shas only, so two different dirty builds at one commit compare equal and the warning is suppressed'
 tags:
 - cluster/guard-narrower-than-its-name
 closed: 2026-09-24
-unverified: 'The IndexStatus call site is reached by no local test: it sits behind a live Qdrant, and mutation M10 SURVIVED there as predicted. ProjectStatus''s `server.build_id` has not yet been seen on the live binary; that needs `cargo rb` and `/mcp`.'
+unverified: 'CLEARED 2026-09-24. Both halves were observed on the live binary (pid 2849232) after cargo rb and /mcp. Was: the IndexStatus call site is reached by no local test (it sits behind a live Qdrant; mutation M10 SURVIVED there as predicted), and ProjectStatus''s server.build_id had not been seen live.'
 ---
 
 ## Summary
@@ -364,6 +364,14 @@ All three passed after the fix. The refuted-repair test was rewritten, not defen
 M9 and M10 are the *unreachable by a test you could write* reading of SURVIVED, not *untested*. The frontmatter `unverified:` field carries the live half.
 
 Gate green: FMT 0, CLIPPY 0, LEAN 0, DEFAULT 0. The new tests appear by name in both lanes.
+
+
+**Live check 2026-09-24, after `cargo rb` and `/mcp` (server pid 2849232, `git_sha` `89581c6f`).**
+
+- *`ProjectStatus`:* `server.build_id` read `642898d4…`. The same value came back from `sha256sum /proc/2849232/exe` and from `sha256sum` of the binary `~/.cargo/bin/codescout` resolves to: three routes, one of them independent of the code under test.
+- *`IndexStatus`, the call site M10 could not reach:* against the live Qdrant, the sidecar's writer is a pre-field build (`052a099b`, `build_id: null`). The comparison therefore fell back to the SHA, found it different, and reported. `reading_build_id` carried `642898d4…`. That is the discriminator M10's mutation removes: a call site passing `None` would print `null` there.
+
+**Not seen live, and why that is not a caveat:** the bug's own case, equal SHAs with different build ids, needs two different builds at one commit reading each other's sidecar. It is covered by `equal_shas_with_different_build_ids_report` and by M1/M2. Staging it live would mean arming a second binary on the shared checkout for no information the unit test lacks.
 
 ## Resume
 
