@@ -1,10 +1,12 @@
 ---
-id: bfdfeebd4e5ca130
+id: 1eec62f89aebb74e
 kind: bug
-status: investigating
+status: fixed
 title: 'BUG: the written_by check compares shas only, so two different dirty builds at one commit compare equal and the warning is suppressed'
 tags:
 - cluster/guard-narrower-than-its-name
+closed: 2026-09-24
+unverified: 'The IndexStatus call site is reached by no local test: it sits behind a live Qdrant, and mutation M10 SURVIVED there as predicted. ProjectStatus''s `server.build_id` has not yet been seen on the live binary; that needs `cargo rb` and `/mcp`.'
 ---
 
 ## Summary
@@ -319,6 +321,49 @@ too.
 
 None. A regression test needs two builds at one sha with different content, so the cheap version
 pins the *predicate's inputs* — that `dirty` participates — rather than the end-to-end scenario.
+
+## Fixed 2026-09-24 — the predicate, with the content-derived identity this file prescribed
+
+`f35af160` · patch-id `83605838530f7046f8a7bf9a5d32f606682f1187`. Session `09093108`.
+
+**What landed.** The runtime-artifact-hash route from § *Fix*, as that section refined it:
+
+- `WriterProvenance` gains `build_id`: the SHA-256 of `fs::read("/proc/self/exe")`. It is never computed through `current_exe()` and never from the readlink string. It is lazy, `OnceLock`-cached, and `None` off Linux.
+- `written_by_report` compares build ids when both sides recorded one, and otherwise falls back to `git_sha`. A pre-field sidecar or a non-Linux reader therefore behaves exactly as before, and `None` is never compared as a value.
+- `ProjectStatus`'s `server` block carries the same field from the same constructor. Constraint 1 above (the two-conventions fork) turned out not to need paying. Once the comparison has a sound input, *presence-means-a-problem* holds again. The unconditional sibling gains the field too, which closes the same SHA-only blind spot for a human comparing the two sites.
+
+**Both measurements § *Fix* asked for, taken before the code.**
+
+- *Byte-identical rebuilds:* two `cargo build --release --features server-stack` runs over identical source were compared: a clean worktree at `049afe2e`, then `touch src/main.rs src/lib.rs` to force a recompile and relink in the same leased slot. Both hashed `e32b3c3b…` at 65,260,480 bytes, so a harmless relink does not report *different build*. One pair on one machine, recorded as that.
+- *Cost:* 46 ms through `sha256sum` for the 62 MiB binary, paid once per process.
+- *The non-Linux route:* not measured. It returns `None` and falls back to the SHA comparison, the honest fallback § *Fix* named.
+
+**Tests: red observed first.** With the plumbing in place and the predicate unchanged, exactly three tests failed at their intended assertions:
+
+- `equal_shas_with_different_build_ids_report`: this bug.
+- `the_writer_stamps_this_build_and_this_process`: its new `build_id` assertion, with the expected value derived through the live test binary's path, not `/proc/self/exe`.
+- `project_status_declares_the_binary_that_answered`: its Linux `is_string` check. The equality check beside it passes vacuously while both sides are `None`, and the comment says so.
+
+All three passed after the fix. The refuted-repair test was rewritten, not defended, as its own doc comment asked. It now pins *equal build ids with disagreeing dirty flags stay silent*, and the fallback gets its own test covering both halves. `build_id_reads_the_inode_of_a_deleted_binary` re-runs § *Fix*'s measurement as a test: a copied `sleep` is unlinked while running, and the test asserts `/proc/<pid>/exe` hashes to the original bytes while the readlink string yields `None`.
+
+**Mutations** (`scripts/mutation-probe.sh`, isolated, one per guarded site), 23 tests per run:
+
+| # | mutation | verdict |
+|---|---|---|
+| M1 | both-ids arm compares SHAs instead | KILLED |
+| M2 | both-ids arm always "same" | KILLED |
+| M3 | fallback always silent | KILLED |
+| M4 | fallback compares the `Option`s as values | KILLED |
+| M5 | report puts the writer's id under the reader's key | KILLED |
+| M6 | constructor records `None` | KILLED |
+| M7 | `build_id_of` resolves the link before reading | KILLED |
+| M8 | `ProjectStatus` drops the field | KILLED |
+| M9 | `/proc/self/exe` literal replaced by `current_exe()` | **SURVIVED, predicted**: only a test that unlinks its own running binary can see it |
+| M10 | `IndexStatus` passes `None` for the reader's id | **SURVIVED, predicted**: behind a live Qdrant, the unreachable path constraint 2 names |
+
+M9 and M10 are the *unreachable by a test you could write* reading of SURVIVED, not *untested*. The frontmatter `unverified:` field carries the live half.
+
+Gate green: FMT 0, CLIPPY 0, LEAN 0, DEFAULT 0. The new tests appear by name in both lanes.
 
 ## Resume
 

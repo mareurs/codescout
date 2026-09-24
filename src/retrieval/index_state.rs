@@ -143,7 +143,7 @@ pub struct WriterProvenance {
     /// incidentally fresh. `None` off Linux, when the read fails, and in every
     /// sidecar written before this field existed; `None` means "not recorded" and
     /// must never be compared as a value.
-    /// docs/issues/2026-09-11-the-written_by-check-compares-shas-only-so-two-dirty-builds-at-one-commit-are-equal.md
+    /// docs/issues/archive/2026-09-11-the-written_by-check-compares-shas-only-so-two-dirty-builds-at-one-commit-are-equal.md
     pub build_id: Option<String>,
 }
 

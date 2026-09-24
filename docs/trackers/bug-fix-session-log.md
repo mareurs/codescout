@@ -13879,7 +13879,7 @@ it inside the entry that exists to catch this shape of error.
 
 **And the instrument has a weakness we had already rejected elsewhere — except here it does not
 bite, which is the part worth knowing.** Inode comparison is vulnerable in principle to the same
-inode REUSE that killed the `fstat` shortcut for `bfdfeebd4e5ca130` (a freed inode number is handed
+inode REUSE that killed the `fstat` shortcut for `1eec62f89aebb74e` (a freed inode number is handed
 to a later file, so a dead build's identity is inherited). It cannot bite here, and the reason is
 exact: **a live process pins its inode.** The number is not freed while any process holds the file
 open, so a running server's inode can never be reused by a later build, and `same inode` between a
@@ -13947,7 +13947,7 @@ question to a peer's retraction found a live defect. `codescout-75` (sessionId b
 half of a published sentence — a probe that could not distinguish pre- from post-refactor — and
 **kept** the other half because it rested on `reading_binary_sha`. That second half does not survive
 either: `reading_binary_sha` is `env!("CODESCOUT_GIT_SHA")` with no dirty companion, and the binary
-it names reports `git_dirty: true`. Filed as `bfdfeebd4e5ca130` —
+it names reports `git_dirty: true`. Filed as `1eec62f89aebb74e` —
 `src/tools/semantic/index.rs:767-777` gates its "a different build wrote this" report on `w.git_sha
 != env!("CODESCOUT_GIT_SHA")`, so two different dirty builds at one commit compare EQUAL and the
 warning is suppressed in exactly the configuration this repo runs. `w.git_dirty` is read on the next

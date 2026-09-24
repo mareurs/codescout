@@ -552,7 +552,7 @@ impl Tool for IndexProject {
 /// **Sameness is decided by `build_id` when both sides recorded one** — a hash of the
 /// executable's bytes, the one identity that differs between two builds of one dirty
 /// commit — and by `git_sha` otherwise, which is what it was before the field existed:
-/// `docs/issues/2026-09-11-the-written_by-check-compares-shas-only-so-two-dirty-builds-at-one-commit-are-equal.md`.
+/// `docs/issues/archive/2026-09-11-the-written_by-check-compares-shas-only-so-two-dirty-builds-at-one-commit-are-equal.md`.
 /// The dirty flags it reports are for a reader to diagnose with and must not be
 /// branched on — `build.rs` computes that flag from a `git status` with no pathspec
 /// (so a markdown edit sets it) and declares rerun triggers that do not cover the
