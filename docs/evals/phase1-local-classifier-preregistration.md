@@ -356,3 +356,23 @@ Nothing in Stages 2–4 has run, so these are corrections to the plan, not to an
 - **In between:** reported per case, with no follow-up started from this alone.
 
 **Limits.** Score A is used a fourth time and the corpus is not blind to the author. One run per row. RTD-16's negative also violates `count_unit` by the corpus's own note, so a fire there is not a false positive.
+
+## Stage 2 status — the mined-pair candidate build, 2026-09-24 (a status note, not a freeze)
+
+A first build of the **mined correction pairs**, with no model call and nothing frozen. Script, summary and candidates are in `docs/evals/data/2026-09-24-rule-tell/stage2/`, and the 97 MB git-log extract it read is not kept. It applies this file's amended Stage 2: incident grouping, the 8-token shingle filter against every held-out source, and dropping anything from this campaign's own documents.
+
+**Counts.** 4,325 commits scanned; 1,038 candidates, 946 kept. Of the 92 dropped, 70 overlap a held-out text (48 of them the phase-0 controls), 20 come from a held-out source document, and 2 are duplicates. The 946 group into 513 incidents across 250 source documents. 20 document pairs share a shingle, so the cross-fold filter has real work to do.
+
+**The candidates are not training data yet, for two reasons:**
+
+- **About 30–40% are genuine pairs**, judged on a 10-row sample (`random.Random(20260924)`): 3 genuine, 1 weak, 5 mismatched (two unrelated sentences from one hunk, joined by a loose 0.35 similarity threshold), 1 fragment. The candidates whose correction marker sits in the corrected sentence itself (230) are the obvious stricter subset. Neither the subset nor a higher threshold has been measured.
+- **A diff does not say which rule was broken.** Stage 2 labels "the violating sentence positive for its rule", but the correction shows which sentence changed, not which of the 22 rules it broke, and many corrections fix a factual error that breaks none of them. The 10% audit can only measure disagreement with a label that already exists. **This plan names no one who assigns the rule.** The miner's keyword `rule_hint` is a pointer for a labeller, not a label: 615 of 946 match no rule, and the largest hint, `closed_population` (169), only matches "all / every / none".
+
+**Against the stopping rule.** Mined pairs alone would bring **no rule** to the ≥ 50-positive bar at the observed precision: `count_unit` is nearest at 50 raw hints, about 15 after the sample's precision. So the route cannot run on mined pairs alone. It needs the synthetic pairs, which carry their rule by construction, and a labelling decision for the mined half.
+
+**The decision this leaves for the operator, before any labelling starts:**
+
+1. **Who assigns rules to mined candidates.** One option: a named labeller labels every admitted candidate with a rule or `not a violation` against `SPECS`, a second labeller covers a fixed sample, agreement is published, and `not a violation` rows are dropped rather than kept as negatives.
+2. **Or synthetic-first:** mined pairs become a secondary, audited source, and synthetic pairs (model calls through the subscription, under the recorded permission) are the main one.
+
+**Carried to the next build, whichever is chosen:** a stricter pairing rule; commit-subject markers (165 rows) excluded or labelled separately; sentence splitting that respects wrapped lines, inline code and lists; and the document, not the incident, as the fold unit, since the amendment keeps a source document's other paragraphs in one fold. Documents are currently grouped by filename to survive archive moves, which could in principle merge two files that share a name.

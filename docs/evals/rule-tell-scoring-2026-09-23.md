@@ -636,6 +636,31 @@ Registered in `eb48fe28` before any positive excerpt was read for it. No model c
 
 **Limits.** A tell was written by someone who knew the violation, so V and S say an excerpt is judgeable *given the tell*, not that a rule-level judge could find it. Nine cases, one auditor, no interval claimed.
 
+## Phase 1 — S0 form 4, widened specs: gate fails on precision, Score A not run, registered
+
+Registered in `15c37237` before it ran, as a diagnostic: does S0 fire when the spec names the shape the `partial` audit found? Form 3's question, with `count_unit`, `question_asked` and `scope_instant` widened (`SPECS_F4`). Only those three rules were judged. Sonnet 5, clean channel, 3 runs per text. Log: `docs/evals/data/2026-09-24-rule-tell/form4-gate.txt`.
+
+| gate text | expected | fired, 3 runs | |
+|---|---|---|---|
+| clean-1, clean-2, clean-5 | none | nothing | pass |
+| **clean-3** ("the three tests in tests/config.rs still pass") | none | `count_unit` ×3 | **FAIL** |
+| **clean-4** ("sets it for the 12 rows whose status is already `archived`") | none | `count_unit` + `scope_instant` ×3 | **FAIL** |
+| f4-count | `count_unit` | `count_unit` (+ `scope_instant`) ×3 | pass |
+| f4-question | `question_asked` | only it, ×3 | pass |
+| f4-scope | `scope_instant` | it ×3 (+ `count_unit` once) | pass |
+| the five other-rule positives | — | not judged in this run | n/a |
+
+**Gate 6/8, 0 errored rows: failed, so Score A was not run**, as registered. **P1 failed**, on the risk it named (clean-4's "12 rows") and on one it did not (clean-3's "three tests").
+
+**What the gate alone shows.**
+
+- **Every widened spec fires on a plain case of its shape** (3/3 each). So these specs can fire: the silence was never a judge that cannot say YES.
+- **`count_unit`, widened to "a count with no derivation", fires on ordinary counts.** Everyday engineering prose states small counts of things it just looked at, and the widened spec cannot tell "the three tests I ran" from "38 open bugs". **The "derive it" half of the law is not expressible as a sentence-level shape** without also catching those.
+- **`scope_instant` fires on clean-4 as well**, where "the 12 rows" is a count with no time. The spec's clause "a count of changing state with no time" was in form 3's spec already; widening the rest made the judge apply it.
+- **`question_asked` alone passed**: silent on all five clean texts and firing on its positive. That makes it the only widened spec whose Score A reading would mean anything.
+
+**P2–P4 are unanswered**, since they were Score A predictions. Any follow-up, such as running Score A for `question_asked` alone, is a new registration chosen after seeing this gate, and is disclosed as such.
+
 ## Next — phase 1 (handoff, 2026-09-24)
 
 *Updated 2026-09-24 ~18:00 EEST, at the end of session 571eb3d6. Items 1, 3 (Stage 1) and 4 below are done, and item 2 is bounded and re-pointed. The raw rows and logs for every result in this document are in `docs/evals/data/2026-09-24-rule-tell/` (README manifest).*

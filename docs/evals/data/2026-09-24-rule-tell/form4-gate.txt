@@ -1,0 +1,25 @@
+judge: claude-sonnet-5 via claude -p, config /tmp/claude-1000/-home-marius-work-claude-codescout/571eb3d6-c879-43f6-b3f9-5a51e744e1af/scratchpad/judge-config-main, form 4, judging 3 of 22 rules
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 3 rules x 13 texts x 3 runs, subscription judge ===
+  clean-1        expect none            hit 3/3   fired [[], [], []]   PASS
+  clean-2        expect none            hit 3/3   fired [[], [], []]   PASS
+  semicolon      expect d_semicolon     n/a -- rule not judged in this run
+  sessionid      expect d_sessionid     n/a -- rule not judged in this run
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 0/3   fired [['count_unit'], ['count_unit'], ['count_unit']]   FAIL
+  clean-4        expect none            hit 0/3   fired [['count_unit', 'scope_instant'], ['count_unit', 'scope_instant'], ['count_unit', 'scope_instant']]   FAIL
+  clean-5        expect none            hit 3/3   fired [[], [], []]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  f4-count       expect count_unit      hit 3/3   fired [['count_unit', 'scope_instant'], ['count_unit', 'scope_instant'], ['count_unit', 'scope_instant']]   PASS
+  f4-question    expect question_asked  hit 3/3   fired [['question_asked'], ['question_asked'], ['question_asked']]   PASS
+  f4-scope       expect scope_instant   hit 3/3   fired [['scope_instant'], ['scope_instant'], ['count_unit', 'scope_instant']]   PASS
+
+gate: 6/8   errored rows: 0
+exit=1

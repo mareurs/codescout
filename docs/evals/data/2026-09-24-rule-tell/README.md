@@ -22,6 +22,7 @@ These are raw rows and run logs behind `docs/evals/rule-tell-scoring-2026-09-23.
 | `p1s-S0b-gate.txt` | S0 form 2b gate, 10/10. The `.DISCARDED-interrupted` copy is an interrupted run, discarded and never scored |
 | `p1s-S0b-corpus.{txt,jsonl}` | S0 form 2b Score A, 924 rows |
 | `form3-gate.txt`, `form3-span.txt`, `p1s-S0f3-corpus.{txt,jsonl}` | S0 form 3, the generic clause ablated: gates and Score A |
+| `form4-gate.txt` | S0 form 4, three widened specs, judged alone: the gate that failed 6/8, so no Score A exists |
 | `l0-gate.{txt,jsonl}`, `l0-span.{txt,jsonl}` | local Stage 1, L0-frozen (JevK5 zero-shot); the `.jsonl` holds every rule's `noul` probability |
 
 ## Phase 2: API route (Messages-API replays)
@@ -62,6 +63,18 @@ Added after the campaign copy, by the same session. These files are the audit it
 | `partial-audit-verdicts.json` | the auditor's V / S / N verdict, quote and (a)/(b) reading per case, committed **before** the operator's blind check was asked |
 | `partial-audit-check.py` | the two registered mechanical checks (quote verbatim in the positive, absent from the negative), then S0's rows for the same 9 positives. No model call |
 | `partial-audit-check.txt` | its output |
+
+## Local route, Stage 2: mined-pair candidates (`stage2/`)
+
+A candidate build, not frozen data; see the pre-registration's § *Stage 2 status*. No model call.
+
+| file | what |
+|---|---|
+| `stage2/mine_pairs.py` | the miner: correction-marker list and its reasons in the docstring, incident and document grouping, the held-out shingle filter |
+| `stage2/mined-candidates.jsonl` | 946 candidate pairs, each `rule: null` with a keyword `rule_hint` for a labeller |
+| `stage2/summary.txt` | the run's counts, drops by reason, hint distribution and a 10-row sample |
+
+The 97 MB `git log -p` extract the miner read is not kept; the script regenerates it.
 
 ## Checker fixtures
 
