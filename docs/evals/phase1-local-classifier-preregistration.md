@@ -402,3 +402,61 @@ A first build of the **mined correction pairs**, with no model call and nothing 
 - **1 of 3:** reported per case, with nothing concluded.
 
 **Limits.** Three positives, one run each, the fourth use of Score A, and an author who has read the texts.
+
+## Amendment — Stage 2 labelling of the mined candidates, and how T is drawn, 2026-09-24 (registered before any label exists)
+
+**Operator decision, 2026-09-24:** the auditing agent labels every mined candidate, and the operator blind-labels a fixed random sample; agreement is published before T is frozen. Training draws mostly on synthetic pairs, which carry their rule by construction. This closes the "no one assigns the rule" gap in § *Stage 2 status*.
+
+**Population:** all 944 rows of `docs/evals/data/2026-09-24-rule-tell/stage2/mined-candidates.jsonl` as committed in `98dbd016`. No pre-filter: the noise the 10-row sample showed is what the labels are for.
+
+**What a labeller sees, identical for both labellers:** the positive sentence, `context_before` (its own pre-correction context, centred on it), the twin (the corrected sentence), the commit subject, and the 22-rule menu, each rule with its law text (`OPTIONS`) and form-2b spec (`SPECS`). **Hidden:** `rule_hint`, the marker, the path, and the other labeller's label.
+
+**Label, one per row:**
+
+| label | meaning |
+|---|---|
+| `<rule>` | the positive breaks this rule and the twin repairs that breach; an optional second rule when two apply |
+| `not-a-violation` | a genuine correction, but of a factual or editorial error that breaks none of the 22 rules |
+| `not-a-pair` | the positive and twin are not one sentence and its correction (mismatched, fragment, or unrelated) |
+| `unsure` | the row cannot be decided from what is shown. **A legal answer, not a failure**, and counted separately |
+
+**Rules are judged by the law, with the spec as guidance.** Where the form-2b spec and the law text disagree, the law wins. That is the gap forms 4 and 4q found, and labelling to the tailored spec would make T measure agreement with the author's wording.
+
+**The auditing agent's labels:**
+
+- Produced by Claude Opus 5.5 subagents, in batches, all under one fixed instruction committed with the labels.
+- Rows are shuffled with seed 20260925. The label file and its sha256 are committed **before** the operator's sample is sent.
+
+**The operator's sample:**
+
+- 40 rows drawn with `random.Random(20260926).sample(ids, 40)` over the 944 row ids in file order.
+- The operator sees exactly what the agent saw, and never the agent's label.
+
+**Agreement, reported in full:**
+
+- **Collapsed label** (violation / not-a-violation / not-a-pair / unsure): raw agreement and Cohen's κ.
+- **Exact rule**, on rows both call a violation: raw agreement.
+- Every disagreement is listed.
+
+**Admission rule, fixed now:**
+
+- **κ ≥ 0.6 on the collapsed label:** the agent's labels are admitted for T and for mined training rows.
+- **κ < 0.6:** they are not used. The protocol is revised under a new registration, with no relabelling to reach the bar.
+- Rows labelled `not-a-pair`, `unsure` or `not-a-violation` are dropped. They are never kept as negatives: the amendment of `c061be8b` makes a twin a negative only for its own rule.
+
+**How T is drawn from the admitted rows, fixed now so the draw cannot follow the labels:**
+
+1. Form connected components over document groups, joining any two groups that share an 8-token shingle (25 pairs at `98dbd016`).
+2. Assign each component to T with probability 0.3 under `random.Random(20260927)`. Everything else is available to train, validation and calibration.
+3. T's per-rule positive counts are published. A rule with fewer than 10 T positives is **T-underpowered** under the existing stopping rule, and its T claims are withheld.
+
+**Predictions, stated before labelling:**
+
+- `not-a-pair` + `not-a-violation` ≥ 50% of rows, since the 10-row sample put genuine pairs at about 30–40%.
+- κ ≥ 0.6 on the collapsed label.
+- Fewer than half of the 22 rules reach 10 T positives. This is a guess, and it says why synthetic pairs carry training.
+
+**Limits.**
+
+- The labeller is a model of the family that will be tested, and the author of the specs. The operator sample is the only independent check, at n = 40.
+- Batched subagents may drift from one another; the fixed instruction and the committed hash are the only controls.
