@@ -1157,6 +1157,49 @@ impl LspClient {
         .await
     }
 
+    /// How long a SUCCESSFUL-but-empty answer is re-asked before it is taken as final:
+    /// 5 s inside the cold-start window, 1 s once warm. See `request_until_answered`.
+    fn not_answered_budget(&self) -> std::time::Duration {
+        // cap-class: NOT_A_CAP — wait ceiling; each caller decides what exhaustion means
+        if self.in_cold_start_window() {
+            std::time::Duration::from_secs(5)
+        } else {
+            std::time::Duration::from_secs(1)
+        }
+    }
+
+    /// Send `method` and re-ask while the answer is `not_answered` — a SUCCESS that
+    /// carries nothing — every 200 ms within `not_answered_budget`. Returns the answer,
+    /// or `None` if every attempt in the budget was not-answered.
+    ///
+    /// rust-analyzer answers this way while it loads its workspace, and `request`'s
+    /// retry cannot see it because it retries only -32800 / -32801 ERRORS. Measured
+    /// 2026-09-24 against a cold 1.97.1 server on this repo: `documentSymbol` answers
+    /// `null` for every open file at each crate-graph swap (0.2–0.7 s, twice during
+    /// start-up); `references` answers `[]` and `null` in the same window, then -32801
+    /// until cache priming ends (~10 s)
+    /// (docs/issues/archive/2026-08-27-references-symbol-not-found-while-lsp-warms.md).
+    async fn request_until_answered(
+        &self,
+        method: &str,
+        params: Value,
+        not_answered: fn(&Value) -> bool,
+    ) -> Result<Option<Value>> {
+        const RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
+        let budget = self.not_answered_budget();
+        let first_asked = std::time::Instant::now();
+        loop {
+            let result = self.request(method, params.clone()).await?;
+            if !not_answered(&result) {
+                return Ok(Some(result));
+            }
+            if first_asked.elapsed() >= budget {
+                return Ok(None);
+            }
+            tokio::time::sleep(RETRY_INTERVAL).await;
+        }
+    }
+
     /// Request document symbols for a file.
     ///
     /// Returns the hierarchical `DocumentSymbol[]` response parsed into our
@@ -1189,45 +1232,29 @@ impl LspClient {
             partial_result_params: Default::default(),
         };
 
-        // A null answer is re-asked, never read as "no symbols". rust-analyzer answers a
-        // SUCCESSFUL `null` for every open file while it swaps its crate graph during a
-        // workspace (re)load — measured 2026-09-24 at 0.2–0.7 s per swap, twice during
-        // start-up, with correct answers on either side. `request` retries only -32800 /
-        // -32801 ERRORS, so a null used to become `Ok(vec![])` here: `references` said
-        // "symbol not found" and path-scoped `symbols` said "0 matches" for symbols that
-        // exist (docs/issues/archive/2026-08-27-references-symbol-not-found-while-lsp-warms.md).
-        // An empty ARRAY is an answer and is returned as one; only null is re-asked.
-        const NULL_ANSWER_RETRY_INTERVAL: std::time::Duration =
-            std::time::Duration::from_millis(200);
-        // cap-class: NOT_A_CAP — wait ceiling; exhaustion surfaces as an error, never as a shortened result
-        let null_answer_budget = if self.in_cold_start_window() {
-            std::time::Duration::from_secs(5)
-        } else {
-            std::time::Duration::from_secs(1)
-        };
-        let params = serde_json::to_value(params)?;
-        let first_asked = std::time::Instant::now();
-        let result = loop {
-            let result = self
-                .request("textDocument/documentSymbol", params.clone())
-                .await?;
-            if !result.is_null() {
-                break result;
-            }
-            if first_asked.elapsed() >= null_answer_budget {
-                return Err(RecoverableError::with_hint(
-                    format!(
-                        "the language server answered textDocument/documentSymbol with null for {} \
-                         on every attempt for {} ms",
-                        path.display(),
-                        null_answer_budget.as_millis()
-                    ),
-                    "null means the server has not answered, not that the file has no symbols \
-                     — rust-analyzer sends it while it reloads its workspace. Retry shortly.",
-                )
-                .into());
-            }
-            tokio::time::sleep(NULL_ANSWER_RETRY_INTERVAL).await;
+        // A null answer is re-asked, never read as "no symbols" — see
+        // `request_until_answered`. It used to become `Ok(vec![])` here: `references`
+        // said "symbol not found" and path-scoped `symbols` said "0 matches" for symbols
+        // that exist. An empty ARRAY is an answer and is returned as one.
+        let Some(result) = self
+            .request_until_answered(
+                "textDocument/documentSymbol",
+                serde_json::to_value(params)?,
+                Value::is_null,
+            )
+            .await?
+        else {
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "the language server answered textDocument/documentSymbol with null for {} \
+                     on every attempt for {} ms",
+                    path.display(),
+                    self.not_answered_budget().as_millis()
+                ),
+                "null means the server has not answered, not that the file has no symbols \
+                 — rust-analyzer sends it while it reloads its workspace. Retry shortly.",
+            )
+            .into());
         };
 
         // LSP returns either DocumentSymbol[] (hierarchical) or SymbolInformation[] (flat)
@@ -1296,9 +1323,20 @@ impl LspClient {
             partial_result_params: Default::default(),
         };
 
+        // `null` and `[]` are both "not answered yet" here: with `includeDeclaration:
+        // true`, a server that has resolved the symbol returns at least its declaration.
+        // Re-asked within the budget (see `request_until_answered`). On exhaustion the
+        // empty answer is KEPT, not turned into an error: a server that ignores
+        // `includeDeclaration` answers `[]` for a genuinely unused symbol, and
+        // `References::call` warns on a zero with no declaration instead.
         let result = self
-            .request("textDocument/references", serde_json::to_value(params)?)
-            .await?;
+            .request_until_answered(
+                "textDocument/references",
+                serde_json::to_value(params)?,
+                |v| v.is_null() || v.as_array().is_some_and(|a| a.is_empty()),
+            )
+            .await?
+            .unwrap_or(Value::Null);
 
         if result.is_null() {
             return Ok(vec![]);
@@ -2936,6 +2974,31 @@ struct Point {
         std::path::PathBuf,
         Arc<std::sync::atomic::AtomicUsize>,
     ) {
+        let at = json!({"start": {"line": 0, "character": 3}, "end": {"line": 0, "character": 8}});
+        scripted_not_ready_peer(
+            "textDocument/documentSymbol",
+            Value::Null,
+            nulls,
+            json!([{"name": "alpha", "kind": 12, "range": at, "selectionRange": at}]),
+        )
+        .await
+    }
+
+    /// The general form: the first `not_ready_count` requests for `method` get
+    /// `not_ready` (a SUCCESS carrying nothing), every later one gets `answer`, and any
+    /// other request gets `null`. Returns the tempdir, the socket path, and the counter
+    /// of `method` requests served.
+    #[cfg(unix)]
+    async fn scripted_not_ready_peer(
+        method: &'static str,
+        not_ready: Value,
+        not_ready_count: usize,
+        answer: Value,
+    ) -> (
+        tempfile::TempDir,
+        std::path::PathBuf,
+        Arc<std::sync::atomic::AtomicUsize>,
+    ) {
         let dir = tempdir().unwrap();
         let sock = dir.path().join("peer.sock");
         let listener = tokio::net::UnixListener::bind(&sock).unwrap();
@@ -2956,14 +3019,12 @@ struct Point {
                 let Some(id) = msg.get("id").cloned() else {
                     continue; // didOpen and other notifications need no answer
                 };
-                let result = if msg["method"] == "textDocument/documentSymbol" {
+                let result = if msg["method"] == method {
                     let n = served_by_peer.fetch_add(1, Ordering::SeqCst) + 1;
-                    if n <= nulls {
-                        Value::Null
+                    if n <= not_ready_count {
+                        not_ready.clone()
                     } else {
-                        let at = json!({"start": {"line": 0, "character": 3},
-                                        "end": {"line": 0, "character": 8}});
-                        json!([{"name": "alpha", "kind": 12, "range": at, "selectionRange": at}])
+                        answer.clone()
                     }
                 } else {
                     Value::Null
@@ -3031,6 +3092,110 @@ struct Point {
         assert!(
             served.load(Ordering::SeqCst) > 1,
             "the null answer must have been re-asked before giving up"
+        );
+    }
+
+    /// A real reference answer: one location. The not-ready replies it follows in the
+    /// tests below are rust-analyzer's cold answers to `textDocument/references` with
+    /// `includeDeclaration: true`, measured 2026-09-24: `[]` at 0.02 s and 1.16 s,
+    /// `null` at each crate-graph swap, then correct (38 locations, declaration present)
+    /// from 10.48 s. Both not-ready shapes carry no locations, not even the declaration.
+    #[cfg(unix)]
+    fn one_reference_location() -> Value {
+        json!([{"uri": "file:///ws/lib.rs",
+                "range": {"start": {"line": 0, "character": 3}, "end": {"line": 0, "character": 8}}}])
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn references_waits_out_an_empty_answer_during_warm_up() {
+        let (dir, sock, served) = scripted_not_ready_peer(
+            "textDocument/references",
+            json!([]),
+            2,
+            one_reference_location(),
+        )
+        .await;
+        let file = dir.path().join("lib.rs");
+        std::fs::write(&file, "fn alpha() {}\n").unwrap();
+        let client = LspClient::connect(&sock, dir.path().to_path_buf())
+            .await
+            .unwrap();
+
+        let refs = client.references(&file, 0, 3, "rust").await.unwrap();
+
+        assert_eq!(
+            refs.len(),
+            1,
+            "the real answer after two empty ones must come back"
+        );
+        assert_eq!(
+            served.load(Ordering::SeqCst),
+            3,
+            "each empty answer must be re-asked"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn references_waits_out_a_null_answer_during_warm_up() {
+        let (dir, sock, served) = scripted_not_ready_peer(
+            "textDocument/references",
+            Value::Null,
+            2,
+            one_reference_location(),
+        )
+        .await;
+        let file = dir.path().join("lib.rs");
+        std::fs::write(&file, "fn alpha() {}\n").unwrap();
+        let client = LspClient::connect(&sock, dir.path().to_path_buf())
+            .await
+            .unwrap();
+
+        let refs = client.references(&file, 0, 3, "rust").await.unwrap();
+
+        assert_eq!(
+            refs.len(),
+            1,
+            "the real answer after two null ones must come back"
+        );
+        assert_eq!(
+            served.load(Ordering::SeqCst),
+            3,
+            "each null answer must be re-asked"
+        );
+    }
+
+    /// Exhaustion keeps the empty answer rather than failing: a server that ignores
+    /// `includeDeclaration` answers `[]` for a genuinely unused symbol, and an error
+    /// there would break the commonest `references` question. `References::call`
+    /// warns on such a zero instead.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn references_returns_a_persistent_empty_answer_as_empty_not_as_an_error() {
+        let (dir, sock, served) = scripted_not_ready_peer(
+            "textDocument/references",
+            json!([]),
+            usize::MAX,
+            Value::Null,
+        )
+        .await;
+        let file = dir.path().join("lib.rs");
+        std::fs::write(&file, "fn alpha() {}\n").unwrap();
+        let mut client = LspClient::connect(&sock, dir.path().to_path_buf())
+            .await
+            .unwrap();
+        // Warm the client so the test waits out the short budget, not the cold one.
+        client.started_at = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(600))
+            .unwrap();
+
+        let refs = client.references(&file, 0, 3, "rust").await.unwrap();
+
+        assert!(refs.is_empty());
+        assert!(
+            served.load(Ordering::SeqCst) > 1,
+            "the empty answer must have been re-asked before it was accepted"
         );
     }
 

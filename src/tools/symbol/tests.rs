@@ -9385,6 +9385,128 @@ async fn a_path_scoped_zero_names_a_file_whose_language_server_would_not_start()
     );
 }
 
+/// A file-local symbol's `references` while the reference index warms: the server
+/// answers `[]` — no locations at all, not even the declaration `includeDeclaration`
+/// asks for. Measured 2026-09-24 against a cold rust-analyzer 1.97.1: `[]` at 0.02 s
+/// and again at 1.16 s, correct (38 locations, declaration present) from 10.48 s.
+/// The cross-file scan cannot fire here — every use is in the definition file — so
+/// before the fix this was a bare `0`. Guards
+/// `docs/issues/2026-09-24-references-silent-false-zero-for-file-local-symbols-while-warming.md`.
+#[tokio::test]
+async fn references_warns_when_the_answer_omits_even_the_declaration() {
+    use crate::lsp::mock::{MockLspClient, MockLspProvider};
+    use crate::lsp::{SymbolInfo, SymbolKind};
+    use crate::tools::symbol::references::References;
+
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    let file = std::fs::canonicalize(dir.path())
+        .unwrap()
+        .join("src")
+        .join("lib.rs");
+    // `helper` is used only in this file, and no other file exists: the one
+    // load-bearing detail. A second file naming `helper` would let the pre-existing
+    // cross-file scan warn, and the test would pass without the fix.
+    std::fs::write(&file, "fn helper() {}\nfn main() { helper(); }\n").unwrap();
+    let helper = SymbolInfo {
+        name: "helper".to_string(),
+        name_path: "helper".to_string(),
+        kind: SymbolKind::Function,
+        file: file.clone(),
+        start_line: 0,
+        end_line: 0,
+        start_col: 3,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    // No `references_results` entry: the mock answers `[]`, as the cold server did.
+    let lsp = MockLspProvider::with_client(MockLspClient::new().with_symbols(&file, vec![helper]));
+    let ctx = path_scoped_ctx(dir.path(), lsp).await;
+
+    let result = References
+        .call(json!({ "symbol": "helper", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(result["total"].as_u64(), Some(0));
+    let w = result["completeness_warning"]
+        .as_str()
+        .expect("an answer missing even the declaration must not be a bare zero");
+    assert!(
+        w.contains("declaration"),
+        "must say what is missing, so the reader sees the zero is impossible: {w}"
+    );
+}
+
+/// The over-warning control for the test above: the server answers with just the
+/// declaration — a real answer for an unused, file-local symbol. No warning.
+#[tokio::test]
+async fn references_on_an_unused_file_local_symbol_that_returns_its_declaration_stays_bare() {
+    use crate::lsp::mock::{MockLspClient, MockLspProvider};
+    use crate::lsp::{SymbolInfo, SymbolKind};
+    use crate::tools::symbol::references::References;
+
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    let file = std::fs::canonicalize(dir.path())
+        .unwrap()
+        .join("src")
+        .join("lib.rs");
+    std::fs::write(&file, "fn helper() {}\n").unwrap();
+    let helper = SymbolInfo {
+        name: "helper".to_string(),
+        name_path: "helper".to_string(),
+        kind: SymbolKind::Function,
+        file: file.clone(),
+        start_line: 0,
+        end_line: 0,
+        start_col: 3,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let at = lsp_types::Range {
+        start: lsp_types::Position {
+            line: 0,
+            character: 3,
+        },
+        end: lsp_types::Position {
+            line: 0,
+            character: 9,
+        },
+    };
+    let declaration = lsp_types::Location {
+        uri: format!("file://{}", file.display())
+            .parse::<lsp_types::Uri>()
+            .unwrap(),
+        range: at,
+    };
+    let mock = MockLspClient::new().with_symbols(&file, vec![helper]);
+    mock.references_results
+        .lock()
+        .unwrap()
+        .insert(file.clone(), vec![declaration]);
+    let ctx = path_scoped_ctx(dir.path(), MockLspProvider::with_client(mock)).await;
+
+    let result = References
+        .call(json!({ "symbol": "helper", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result["total"].as_u64(),
+        Some(1),
+        "the declaration itself is the one location"
+    );
+    assert!(
+        result.get("completeness_warning").is_none(),
+        "a real answer for an unused symbol must stay unwarned: {result}"
+    );
+}
+
 /// The defect itself: `ignore::Walk` yields `Result<DirEntry, _>` and the previous
 /// `.flatten()` discarded every `Err`, so a walk truncated by an unreadable
 /// directory was indistinguishable from a complete one. An unreadable directory is
