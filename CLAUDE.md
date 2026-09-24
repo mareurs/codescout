@@ -622,7 +622,7 @@ Why this exists, and the measured history:
 `docs/issues/archive/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`,
 `docs/issues/2026-08-31-cross-account-agents-cannot-see-each-other.md`, and the five-instance
 authorship record in
-`docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`. The skill went
+`docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`. The skill went
 uninvoked for a whole session while its trigger condition was observed and stated out loud —
 `skill-frictions:SKF-22`, whose lesson is that **a trigger the model must notice is a policy, not
 a mechanism.** Treat this section as the standing instruction that replaces the noticing.

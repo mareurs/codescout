@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: superseded
 tags:
 - cluster/authorship-unrecoverable-after-the-fact
 - companion-plugin
@@ -8,7 +8,7 @@ tags:
 - attribution
 - misleading-instrument
 - multi-session
-closed: null
+closed: 2026-09-24
 opened: 2026-08-30
 owner: marius
 related: []
@@ -231,6 +231,7 @@ plants — *you did this and do not remember* — predicts exactly the absence o
 memory that a compacted agent actually has. Only external evidence breaks it.
 
 ## Fix
+**SUPERSEDED by `ad69bec0f2cfc31d` — 2026-09-24** (open-bug sweep, `deep-agent-workflow-observations:DWF-7`). Same mechanism: the buddy hook stores the previous session's id in `.buddy/.current_session_id`, and whichever session writes it last is the one recorded. `docs/issues/2026-09-03-buddy-reload-payload-authorship-can-name-a-peer-session.md` has already done this file's § Resume step (reading the hook source), and it carries the live evidence. The defect is still open in `claude-plugins`: `buddy/scripts/hook_entry.py:68-76`, `hook_helpers.py:341-348`, `reload.py:274,305`. The cluster tag differs between the two files; the surviving record's `cluster/transient-shared-state-lies-to-readers` is kept. This file stays in the archive for § *Why this one is worse than its siblings*.
 
 Not implemented, and the shape matters more than the patch.
 

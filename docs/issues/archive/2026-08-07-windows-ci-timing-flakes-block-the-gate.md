@@ -1,7 +1,7 @@
 ---
-id: e817931ef9d51dd0
+id: 7db5aa17c12be838
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: two Windows CI tests flake on wall-clock/race assumptions — one is skip-listed on wine but gates on MSVC'
 tags:
 - cluster/repro-env-diverges-from-gate-env
@@ -10,7 +10,7 @@ tags:
 - flake
 - test-portability
 - timing
-closed: ''
+closed: 2026-09-24
 last_observed: 2026-08-07
 last_verified: 2026-08-26
 opened: 2026-08-07
@@ -221,7 +221,7 @@ says nothing about **which** job failed, and this file's whole subject is which:
 what a shared wall-clock assumption looks like and is consistent with this file's root cause.
 
 **The wine lane decoupled on `2d04c6ad`** — passed while all three MSVC lanes failed. That is the
-evidence that `05b157e0c38b765a` is a *separate* fault rather than the same one seen through a
+evidence that `9bf178f28cc9c14d` is a *separate* fault rather than the same one seen through a
 different toolchain, and it is why these stay two bug files. Recorded here because the pair had no
 measurement separating them before today; the split was assumed.
 
@@ -251,6 +251,9 @@ next step rather than something this pass did.
    within normal emulated-runner jitter.
 
 ## Fix
+**MITIGATED — 2026-09-24** (open-bug sweep, `deep-agent-workflow-observations:DWF-7`). Item 1 is fixed: `176a77e5` virtual-clocks `lsp::budget_tests::cold_start_over_budget_returns_none_but_keeps_warming` (`src/lsp/mod.rs:122`, `#[tokio::test(start_paused = true)]`). Item 2, `tools::run_command::tests::background_command_with_quotes_captures_output`, has not recurred. Over the `windows-latest` jobs on `experiments` from 2026-09-01T00:00Z to 2026-09-24T03:18Z — 537 jobs: 232 success, 102 failure, 203 cancelled — **none of the 102 failure logs names either test**. The common Windows failures in that window are other tests (`agent::write_guard::tests::*` ×28, `librarian::tools::append_entry::tests::*unpushed*` ×26, `retrieval::embedder::tests::*` ×11).
+
+**Correction to the 2026-09-02 re-open in § Evidence:** the three runs it cites (33570342471, 33574961971, 33577436407) failed on *other* tests (`a_nested_independent_checkout_is_walked_through_not_reported`, `librarian::catalog::audit::shard::tests::*`). The re-open rested on lane colour, which this file's own trigger text says not to use. The wine skip for item 2 is still present at `.github/workflows/ci.yml:819`; that is why this is `mitigated`, not `fixed`. Runs before 2026-09-01 were not re-examined.
 
 Item 1 **fixed and verified**; item 2 **mitigated**, root cause unconfirmed by design.
 
@@ -341,3 +344,10 @@ above. Item 1 needs nothing further.
 - `.github/workflows/ci.yml` — the wine job's `--skip` list
 - `docs/trackers/windows-platform-support.md` — WIN-27 baseline, and WIN-30 for this entry
 - `docs/issues/archive/2026-07-02-windows-gnu-wine-20-test-failures.md` — the 20-failure inventory
+
+## Fix provenance
+
+- **SHA:** `176a77e5` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `1fac7c17078b53ee1069aa78cd93d9d912407ce4` — content hash of the diff; survives rebase and cherry-pick.
+
+`fix(tests): virtual-clock the LSP budget test; make the bg-output failure name its own cause` — item 1, and item 2's diagnostic.

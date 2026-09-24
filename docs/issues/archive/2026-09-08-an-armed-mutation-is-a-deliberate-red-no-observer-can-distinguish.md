@@ -544,7 +544,7 @@ import.
 
 - `docs/issues/2026-09-08-a-claimed-bug-file-names-the-author-of-the-wip-that-reds-the-build.md` —
   the routing sibling. Same substrate, different missing bit.
-- `docs/issues/2026-09-03-the-gates-first-step-reformats-every-peers-uncommitted-rust.md` — the
+- `docs/issues/archive/2026-09-03-the-gates-first-step-reformats-every-peers-uncommitted-rust.md` — the
   write-side of the same shared tree.
 - `docs/trackers/issue-clusters/IC-12-transient-shared-state-lies-to-readers.md` — the class.
 

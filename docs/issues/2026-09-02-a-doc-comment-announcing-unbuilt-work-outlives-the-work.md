@@ -121,6 +121,11 @@ to be acted on.
   in its own doc comments**, which is the sentence this file exists for.
 
 ## Fix
+### Re-verified 2026-09-24 — instance fixed, class unguarded
+
+Open-bug sweep (`deep-agent-workflow-observations:DWF-7`), verifier evidence. **The instance is fixed:** `4aba4c3d` (not a merge, an ancestor of HEAD, patch-id `2d28df258492fbf2c0a0bf8008bff747a36364f5`, matching the value this file records), and `doctor.rs:4395-4398` now carries the dated retraction. **The class has no guard**, and a live instance still exists: `src/agent/mod.rs:792` reads *"Level-2 sub-project pinning within a pinned workspace is not yet wired"*. That is still true (`with_project_at` pins at workspace level), so it is a correct forward reference today and just as liable to outlive its work.
+
+**Possible new instance, unconfirmed:** re-running this file's own population regex finds `src/retrieval/config.rs:208-211`, which says the shadow warning *"lands with Task 5"*. Task 5a landed on 2026-09-17 as `dotenv_shadowed_fields`, which covers dotenv-vs-config, not `dense_model_name_override`. Whether that sentence is now stale was not settled.
 
 **Corrected in `4aba4c3d`** (patch-id `2d28df258492fbf2c0a0bf8008bff747a36364f5`): the comment now
 names `scan_cited_but_undeclared` as shipped, and records that it read "not-yet-shipped" until

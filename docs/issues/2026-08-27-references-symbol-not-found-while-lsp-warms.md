@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: zombie
+status: open
 tags:
 - cluster/lazy-warmup-bills-the-first-caller
 - references
@@ -186,6 +186,15 @@ path passed to `references` were correct.
    the struct to shift its line number, queried immediately. **Verdict:** rejected
    — 31 references; probe reverted.
 ## Fix
+**REOPENED from `zombie` — 2026-09-24: it came back twice** (open-bug sweep, `deep-agent-workflow-observations:DWF-7`). The mitigation `corroborate_zero_references` is in place (`src/tools/symbol/references.rs:162`, test at `tests.rs:5888`), but it does not cover this path. The "symbol not found" text comes from `symbol/query.rs:866-876`, reached when `document_symbols` returns a list without the name (`references.rs:311-318`), which is a resolution error rather than a zero. `usage.db` holds two more instances after this file was opened. Both were re-checked by the collector: `git grep` at each row's `project_sha` shows the symbol existed at that path.
+
+| row | when (UTC) | call | latency | symbol at that tree |
+|---|---|---|---|---|
+| 76406 | 2026-08-27 18:13 | `ToolCapabilities` @ `src/tools/core/types.rs` | 2 ms | (the original) |
+| 79110 | 2026-08-31 21:45 | `GetUsageStats` @ `src/tools/usage.rs` | 1 ms | `5d405b6:src/tools/usage.rs:6: pub struct GetUsageStats;` |
+| 126947 | 2026-09-15 13:17 | `backup_db` @ `src/librarian/catalog/mod.rs` | 2 ms | `b4660a9:src/librarian/catalog/mod.rs:500: fn backup_db(…)` |
+
+All three share one shape: issued in the same parallel batch as another LSP call, and answered in 1-2 ms. That is the same shape as a same-day `symbols` false zero (`usage.db` row 137400, 1 ms, path-scoped) recorded under `523233935cc53bc4`. **Unconfirmed lead:** `LspClient::document_symbols` (`src/lsp/client.rs:1156-1231`) returns `Ok(vec![])` when the result is null, and also when neither parse succeeds, so a warming or contended server can look like a file with no symbols. Confirming that is the next step.
 
 None, and none is warranted while the mechanism is unknown and the filed cause is
 refuted. Writing a "fix" for a resolution-error path that no probe can produce

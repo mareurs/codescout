@@ -81,7 +81,7 @@ one is `2026-07-07`, 50 days at time of filing.
 **Measured before choosing, per this file's own recommendation.** Checked the 3 live
 `status: zombie` records (not 4 — one had been reclassified since filing):
 
-- `e817931ef9d51dd0` — `last_verified: 2026-08-26` (today). Explicitly `zombie` by
+- `7db5aa17c12be838` — `last_verified: 2026-08-26` (today). Explicitly `zombie` by
   maintainer decision, actively tracked — working as designed, not neglected.
 - `523233935cc53bc4` — title states its underlying bugs ("Bug A", "Bug B") are already
   fixed/mitigated. Residual instrumented-watch state, not neglect.

@@ -10,7 +10,7 @@ tags:
 - context
 topic: deep-agent-observation
 time_scope: '2026-09-18_to_2026-10-02'
-entry_high_water_DCX: 1
+entry_high_water_DCX: 2
 entry_prefix:
 - DCX
 snapshot_anchor: '| ID | Date UTC | Sampling | Capture key | Observation |'
@@ -82,6 +82,7 @@ Group by canonical incident, session/task and source lineage. First report cover
 | ID | Date UTC | Sampling | Capture key | Observation |
 |---|---|---|---|---|
 | DCX-1 | 2026-09-18 | historical-seed | seed-context-injection-W3 | Recipient-specific guide delivery |
+| DCX-2 | 2026-09-24 | routine-first | sebf651ec-open-bug-verify-sweep-brief | verifier brief contents for 34-bug sweep |
 
 ## DCX-1 — Historical seed — recipient-specific guide delivery
 
@@ -97,6 +98,25 @@ Group by canonical incident, session/task and source lineage. First report cover
 **Outcome / basis:** good, provisional historical-source label. Source W-3 records parent redeliveries 2 to 0 while child delivery and a fresh parent guide remained available. This measures delivery precision, not comprehension or task improvement. Delivery timing for a substantive task: unknown.
 **Counterfactual / missingness:** this collection did not rerun the experiment; exact pre-decision context, actor attribution and downstream task outcome are missing.
 **Rests on:** [context-injection-session-log:W-3](context-injection-session-log.md). Group all records of that experiment together.
+
+## DCX-2 — Verifier brief for the 34-bug open-issue sweep: doctor citations, the two-mode lesson, and read-only limits
+
+**Status:** pending-outcome
+**Valid:** dated 2026-09-24
+
+**Sampling / capture mode:** routine-first / prospective. This is the first context decision this session made before a dependent action and captured in time. Earlier decisions (whether to trust a peer's slot-file claim; what to put in a fork brief) were not captured and are declared missed in this session's DCS receipt.
+
+**Identity / capture key:** session `ebf651ec-5ab7-42d9-a526-dcf9758692e1` (collector and coordinator), model Opus 5.5; recipients are four general-purpose Opus subagents. Key `sebf651ec-open-bug-verify-sweep-brief`.
+
+**Time / substrate:** decided and captured 2026-09-24T11:41Z; HEAD `436a8ff6`, dirty tree (see `DWF-7`).
+
+**Objective / trigger:** brief the delegates that will verify 34 old bug files. Iron Law 6 says delegates see only what their brief carries.
+
+**Pre-action evidence:** the coordinator holds the doctor output (`open_bug_cited_from_source` rows naming the source files that cite 5 of the bugs), the per-bug id/path list, the part-1 finding that bug files can describe more than one failure mode and that fixes often land under other bug files, and CLAUDE.md's "run the reproduction before reading the fix plan" rule and shared-target hazards.
+
+**Context decision:** include in each brief: the bug id/path list for its batch; the doctor-cited source files per bug; the two-failure-mode lesson (verify every claimed mode, not only the headline); where fixes hide (sibling archived bug files, `git log -S`, `git log --since=<opened> -- <cited paths>`); read-only limits (no edits, no git index/HEAD moves, no `--no-default-features` builds, no mutations in the shared tree); patch-id recipe; the verdict vocabulary. Told to fetch `get_guide("tracker-conventions")` themselves if needed. **Not included:** the full doctor output and unrelated open bugs. Intended next action: dispatch.
+
+**Observed sequence:** the briefs were delivered at dispatch; all four agents stayed read-only; no edits or git state changes were reported or observed. The two-mode lesson was visibly used: batch C split `f47274c1` into three modes with separate verdicts, and batch A split `523233935` A/B and found B recurring on a branch the earlier fix did not cover. Guide delivery to the recipients was **not** as intended: two of the four verifiers were silently starved of `symbol-navigation` by the race filed as `e76556484627a41a`, while a third got it three times. **Outcome / basis:** mixed. The brief context was useful (per-mode verdicts observed), but the auto-delivered context was misrouted; delivery outcome `absent` for 2 of 4 recipients. **Counterfactual / missingness:** no alternative brief was tried. Whether the starved verifiers' reports suffered is not established; batch C's report was solid, and its work leaned on scripts rather than symbol navigation. **Rests on / related:** `DWF-7`, `e76556484627a41a`.
 
 ## Template for new entries
 

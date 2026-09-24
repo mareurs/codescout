@@ -1152,7 +1152,7 @@ Temporarily restore `.into_iter().next()` on the chunk list. Run `cargo test --l
 > delivered. It was **held for the recipient user's approval** and never reached that session; the
 > `[Cross-session delivery notice]` saying so arrived **asynchronously, after this text was
 > committed**. So the red *would* have been the anonymous kind recorded in
-> `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`, and the
+> `docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`, and the
 > author believed otherwise on the strength of a success return.
 >
 > The practice is still right — announce before mutating a shared tree — but **treat the send as

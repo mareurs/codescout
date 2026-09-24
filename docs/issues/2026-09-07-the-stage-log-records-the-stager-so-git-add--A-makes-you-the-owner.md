@@ -115,6 +115,11 @@ new bug: the mechanism is this file's, and a second record would have split one 
 paths (`bug-fix-session-log:F-171`, `issue-clusters:IC-17`).
 
 ## Fix
+### Re-verified 2026-09-24 — the `-A` headline does not reproduce; the named-path mode stands
+
+Open-bug sweep (`deep-agent-workflow-observations:DWF-7`), verifier evidence, reproduced with the real hook copied into a temp repo. **`git add -A` does not make you the recorded owner.** `CLAUDE_CODE_SESSION_ID=sessA git add -A` wrote the rows `-  351be5b my_file.txt unnamed` and `- c9f6d41 peer_file.txt unnamed` (owner `-`), and the real `pre-commit-foreign-index.sh` then refused the bare commit (exit 1, "blanket add"). That behaviour comes from `names_path` / the cold-log rule (`scripts/post-index-change-stage-log.sh:285`, `:391-399`), introduced by `fa9b3aff` on 2026-09-01, six days before this file was opened. So the title's `-A` claim was likely never true against shipped code; history was not replayed to confirm.
+
+**The named-path mode is still open and structural:** `git add peer_file.txt` records `sessA … named`, so explicitly naming a shared file, or a peer's untracked file, still makes the stager its recorded owner. The refusal's own remedy ("re-stage by explicit path and the bare commit passes") steers toward exactly that route. Consider retitling this file to the named-path mode.
 
 Not fixed. Three directions, cheapest first, none costed:
 

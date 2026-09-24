@@ -220,5 +220,5 @@ at SEND time, not from memory of who said what earlier in the session.
 ## References
 
 - `docs/trackers/issue-clusters/IC-6-addressing-without-an-escape-hatch.md`
-- `docs/issues/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md` — `database is locked`
+- `docs/issues/archive/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md` — `database is locked`
   as a *test* symptom under contention; a different subject, listed so the two are not merged.

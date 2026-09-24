@@ -73,7 +73,7 @@ formats, sees success, and commits through a path without a `rustfmt --check` ho
 `--no-verify` — ships an unformatted tree and never learns. It also means **running the gate's
 `cargo fmt` inside someone else's stash window is a silent no-op**, which is a second and
 quieter failure mode of
-`docs/issues/2026-09-03-the-gates-first-step-reformats-every-peers-uncommitted-rust.md`: that
+`docs/issues/archive/2026-09-03-the-gates-first-step-reformats-every-peers-uncommitted-rust.md`: that
 file records `fmt` doing too much to other people, this records it doing nothing at all and
 saying otherwise.
 

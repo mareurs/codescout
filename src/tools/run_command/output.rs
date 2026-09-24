@@ -462,7 +462,7 @@ pub(crate) async fn handle_successful_output(
         // failure became an ABSENT key group rather than a reported one: the caller
         // sees a response with no `unfiltered_output`, indistinguishable from a run
         // that produced no capture at all. Named as the highest-value instrumentation
-        // point in `docs/issues/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md`
+        // point in `docs/issues/archive/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md`
         // § Resume, after a load-contention flake on the wine lane dropped exactly this
         // key group — the tell being that the surviving keys are set in the same block
         // as the missing ones, so the response could not have come from that block.

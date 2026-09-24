@@ -99,7 +99,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-52 | 2 | the rendezvous gate latches open, so a hook going quiet mid-process leaves `/clear` invisible again | **blocked** — sketched fix refuted (`hook_at` ages 0.6–25h, so no window discriminates); viable fix is cross-repo + a design decision; next step is measurement, not code | `52a9448b312dbbf6` |
 | BL-53 | 3 | guide topics are atomic nodes in an unmodelled graph — also `GG-7`, sequenced there; do not fix from here | open (cross-ref) | `7579b32b1cd2362f` |
 | BL-54 | 2 | workspace `read_only` flips mid-session with no `activate` — also `WP-5`; may share a `with_project_at` root cause with BL-46 | done-archived | `6a3bb4d968d1d514` |
-| BL-55 | 3 | three unrelated tests failed together on the wine lane under load — the reference case for "flaky by wall clock" vs "defect load exposes" (`F-78`) | open | `05b157e0c38b765a` |
+| BL-55 | 3 | three unrelated tests failed together on the wine lane under load — the reference case for "flaky by wall clock" vs "defect load exposes" (`F-78`) | open | `9bf178f28cc9c14d` |
 | BL-56 | 1 | SDD ledger directory and its catalog rows both vanished between sessions — gitignored catalog means unrecoverable, not stale | **zombie 2026-08-30** — the disposition its own Resume prescribed. Hypotheses 4 and 6 acquitted from code + live measurement, plus a newly-found 9 (→ BL-64) acquitted twice. Survivor is 8 (a foreign `codex` writer), and it is **unfalsifiable, not untested**: the catalog keeps no write audit trail, so "who deleted these rows" has no answer once the window closes. Re-open trigger in frontmatter | `73158c500ff6b293` |
 | BL-65 | 1 | the CLI's `doctor` exposes no `--fix`, so all six repairs are MCP-only | done | `4692a5219854dcce` |
 | BL-64 | 3 | `reindex_cli` is test-only and carries a broken copy of a DELETE deliberately removed for causing data loss | **done** — `9f743091`, patch-id `92db5adf65b7a748`. Took (a) delete-the-block over (b) plumb-`force`: **both** `index_repo` call sites are test-only while `index_repo` is public API, so (b) was a semver break serving only tests, building a reference implementation nothing references. A comment now stands where the block was — that is the remedy, the hazard being a reader "fixing" the missing `%`. Regression test mutation-verified: **with** `%` FAILS, **without** `%` passes | `6ff4394bb3b18d86` |
@@ -108,10 +108,10 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-68 | 3 | 37 tests in `crates/codescout-embed/` are not compiled by either gate test command; 33 of them would execute | **done** — swapped `cargo test` → `cargo test --workspace` in `CLAUDE.md`; gate stays **four** commands, **+2.6s** warm, subsumption verified by `-- --list` set-difference (0 tests present in bare and absent from workspace). Measured: `-p codescout-embed --features remote-embed` → **56 compiled, 52 executing** (4 `ollama_*` are `#[ignore]`d), `--no-default-features` → **19**. Bare `cargo test` builds only the ROOT package (0 of them); `cargo test --workspace --no-default-features` builds the member with `remote-embed` off. Not a `tests/`-directory issue — `remote::tests` inline `#[cfg(test)]` is 32 of the 33, including the regression guards for three bugs fixed the same day. **CI does cover them** via its `default` matrix lane (`cargo test --workspace`, `flags: ""`), so this is `W-81`'s feedback-latency axis rather than missing coverage. Candidate remedy is a fifth gate command; adding one is the operator's call, surfaced with the measurement rather than applied | — |
 | BL-57 | 1 | `@tool_*` buffer grep returns the JSON envelope, not the stdout | **done-archived — fixed (`61476cb5`) and archived 2026-08-30** | `4eea94e21203cd46` |
 | BL-58 | 2 | ListAgents omits live cross-profile sessions in the same checkout, and two sessions' counts are **incomparable** rather than merely short | **done-archived** 2026-09-13 — bug is `mitigated` + archived. Prior detail retained: **partial** — root cause still blocked upstream (harness, not this repo); local mitigation SHIPPED as `scripts/peer-sessions.sh` + a `docs/PROBES.md` row, so it fires at the moment of use instead of when someone opens the bug file (`W-85`'s placement lesson, which this entry was itself an instance of). Measured 2026-08-30: `ListAgents` reported **3** in this checkout, the probe found **5**, and `807989` had run since **11:10:52** — before any inter-session message that day — invisible to every participant. The afternoon's six misattributions were eliminations over a set short by **two**. Invisible is not unreachable: any pid is addressable as `uds:<sock>`. The probe bounds the POPULATION and does not attribute a write, and says so in its own output. **Corrected before publication:** a relayed claim that one session's view was *entirely disjoint* from the five is an observed STATE, not a property — 0 of 5 at ~20:06, 1 of 5 at ~20:2x, same count with rotated membership; asking the source rather than relaying is what caught it. Sharper fact underneath: those readings showed **2 of 2** sessions outside this checkout and **1 of 4** inside it, so the view is skewed against the population every attribution asks about — elimination is *unrelated to the question*, not merely weak, and socket addressing is the only correct method rather than a fallback. Both open attributions were then settled by asking, one round each, after three rounds of elimination got them wrong | `1950479aff0acb5b` |
-| BL-59 | 2 | the buddy compact banner's `from=<sid>` names another live session, reading as "your own pre-compaction transcript" | **blocked** — `claude-plugins`, not this repo. Worse than BL-58 in kind: that one understates who else writes your files, this overstates what **you** wrote, and cannot be refuted from the inside | `6411eb594cd7231d` |
+| BL-59 | 2 | the buddy compact banner's `from=<sid>` names another live session, reading as "your own pre-compaction transcript" | **blocked** — `claude-plugins`, not this repo. Worse than BL-58 in kind: that one understates who else writes your files, this overstates what **you** wrote, and cannot be refuted from the inside | `f35a24bccf46bfc8` |
 | BL-60 | 1 | the CLI's `artifact create` / `artifact update` silently drop `time_scope` and `extra` | **done-archived** — `0c4931ef`, patch-id `a0a4a3b4…`. Both flags on both subcommands, marshalled at the depth each tool expects; `build_create_tool_args` extracted so the create half is testable without a catalog, as `19289b1f` already did for update. 8 tests, 3 mutations spent — incl. a characterization guard proving the extraction was behaviour-preserving. The bug's "nothing to run" was itself worth running: `--force` present alongside both flags absent proved the gap was current, not a stale build | `64c7dab799d1bca7` |
 | BL-61 | 3 | ZOMBIE WATCH: `references` answers a warming LSP with `symbol not found` | open (**watch, not work**) — re-open trigger is `symbol not found` only; a timeout and a guarded zero are outside it, and BL-49 was checked against it | `d25aa6db7b4e6367` |
-| BL-62 | 3 | ZOMBIE WATCH: two Windows CI tests flake on wall-clock/race assumptions | open (**watch, not work**) — check the wine skip-list first; W-64 took it 32 → 8 with every survivor classified | `e817931ef9d51dd0` |
+| BL-62 | 3 | ZOMBIE WATCH: two Windows CI tests flake on wall-clock/race assumptions | open (**watch, not work**) — check the wine skip-list first; W-64 took it 32 → 8 with every survivor classified | `7db5aa17c12be838` |
 | BL-63 | 3 | ZOMBIE WATCH: `symbols` search mode 0-matches then succeeds on retry | open (**watch, not work**) — Bug A fixed, Bug B mitigated + instrumented; read the instrumentation before treating it as live | `523233935cc53bc4` |
 | BL-69 | 1 | Repair the 3 files with an unterminated fence | done | — |
 | BL-70 | 1 | Catalog-integrity sweep — the 3 IN-REPO doctor findings | done | — |
@@ -529,7 +529,7 @@ before either is designed.
 
 **Valid:** dated 2026-08-29
 
-`docs/issues/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md`. Believed genuine
+`docs/issues/archive/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md`. Believed genuine
 wall-clock flakiness with no defect underneath — and that belief is now load-bearing, because
 this session used it as the contrast class that (wrongly) explained a *real* defect: an
 `embed_one_batch` `try_join!` race that load merely exposed (`bug-fix-session-log:F-78`,
@@ -692,7 +692,7 @@ by delivering to one.
 
 **Status:** blocked — `claude-plugins`, not this repo. **Valid:** dated 2026-08-30
 
-`docs/issues/2026-08-30-buddy-compact-banner-names-a-peers-session-as-your-own.md`, filed
+`docs/issues/archive/2026-08-30-buddy-compact-banner-names-a-peers-session-as-your-own.md`, filed
 by `codescout-3b`. The SessionStart banner's `from=<sid>` reads as "this session's own
 pre-compaction transcript" and can name a **different live session**.
 
@@ -765,7 +765,7 @@ mechanism is already refuted; do not re-file it.
 
 **Status:** open — **watch, not work.** **Valid:** conditional — until a wine/MSVC lane fails again
 
-`docs/issues/2026-08-07-windows-ci-timing-flakes-block-the-gate.md`, `status: zombie`.
+`docs/issues/archive/2026-08-07-windows-ci-timing-flakes-block-the-gate.md`, `status: zombie`.
 Related to BL-55 by **symptom**, not by established cause. Before treating it as live,
 check whether either test is already retired: `bug-fix-session-log:W-64` took the
 windows-gnu skip-list from 32 entries to 8 with every survivor classified. The

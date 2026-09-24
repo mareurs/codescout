@@ -1,12 +1,13 @@
 ---
-id: '2fc50a3d46aa77a9'
+id: 863b801018a947e4
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the mandated gate''s first step is workspace-wide cargo fmt, so following it correctly rewrites every peer''s uncommitted Rust'
 owners:
 - marius
 tags:
 - cluster/blast-radius-exceeds-visibility
+closed: 2026-09-24
 opened: 2026-09-03
 severity: medium
 ---
@@ -123,18 +124,26 @@ instrument is destroyed by an adjacent mechanism, and the honest answer was "I c
 
 ## Fix
 
-Not fixed. Two candidate directions, and they are not equivalent:
+**FIXED — both failure modes, by three commits that landed under other bug files.** This file
+was never pointed at them, so it stayed `open` after its defect was gone. Closed 2026-09-24
+after re-deriving each anchor (all three reachable from `experiments`; patch-ids recomputed,
+and the two already recorded elsewhere matched).
 
-- **Scope the gate's fmt to changed paths**, e.g. `cargo fmt -- $(git diff --name-only …)` or
-  rustfmt over a file list. Matches what `.pre-commit-config.yaml` already does for the hook.
-  Risk: a whole-tree `fmt --check` is what catches drift in files nobody touched.
-- **Check before formatting.** `cargo fmt --check` first, and only proceed when the files it
-  names are yours. This session did exactly that before the final gate run and confirmed the
-  only file `fmt` would rewrite was its own — cheap, and it turns an invisible side effect into
-  an observation. Weaker as a mechanism because it is a step someone must remember.
+- **Mode 1 — `fmt` reaches peers' files.** `2caf55c5` added `scripts/fmt-mine.sh`, which
+  formats only what `scripts/file-provenance.py` attributes to the running session and refuses
+  the rest (the *scope* direction above, implemented as a mechanism rather than the *check
+  first* policy). `02a86104` then made it step 1 of the documented gate, closing the last step
+  that left the sibling bug `mitigated`. `scripts/gate.sh` runs it today.
+  Tracked in `docs/issues/archive/2026-09-09-the-documented-gates-first-command-rewrites-every-peers-uncommitted-rust.md`.
+- **Mode 2 — `fmt` reports success and pre-commit's stash-restore reverts it.** `074b749e`
+  removed the stash: the commit-stage checks run through `scripts/pre-commit-run.sh`, and the
+  `cargo-fmt` check reads `:<path>` from the index instead of the working tree, so it checks
+  the bytes being committed. Tracked in
+  `docs/issues/archive/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md`.
 
-The first is a mechanism; the second is a policy. `CLAUDE.md` § *Observer Blindness* prefers
-the former on exactly this shape.
+The two candidate directions originally listed here were: scope the gate's `fmt` to changed
+paths, or run `cargo fmt --check` first and proceed only on your own files. The first shipped,
+keyed on provenance rather than `git diff`.
 
 ## Tests added
 
@@ -150,9 +159,7 @@ If they are not, either stage-scope or tell the checkout before you run it.
 
 ## Resume
 
-Decide between the two directions above. If scoping: `CLAUDE.md` § *Development Commands*,
-`docs/conventions/gate-ordering.md` (which holds the derivations and is where the reasoning
-belongs), and `src/prompts/mod.rs`'s pinning test must move together.
+Nothing left. Closed as fixed; see § *Fix* and § *Fix provenance*.
 
 ## References
 
@@ -166,3 +173,20 @@ belongs), and `src/prompts/mod.rs`'s pinning test must move together.
 - Class note: filed `IC-1` on the remedy test — the blast radius of a write is wider than the
   set of peers the writer can see, and the remedy is an ownership/scoping protocol over the
   shared resource rather than a provenance channel after the fact (which would be `IC-10`).
+
+## Fix provenance
+
+- **SHA:** `2caf55c5` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `35f0ccc37590baafad49fcc4c8f5519877b23853` — content hash of the diff; survives rebase and cherry-pick.
+
+`feat(scripts): fmt-mine.sh formats only this session's Rust and refuses the rest` — mode 1's mechanism.
+
+- **SHA:** `02a86104` (on `experiments`)
+- **patch-id:** `9660b6ca0767622206ed721bee6d39ac982740fc`
+
+`docs(gate): step 1 is ./scripts/fmt-mine.sh, not bare cargo fmt` — puts mode 1's fix on the path the gate actually follows.
+
+- **SHA:** `074b749e` (on `experiments`)
+- **patch-id:** `4c3958557408b19cdf60354a5f8288167e4342e4`
+
+Stops pre-commit from stashing, and makes the `cargo-fmt` check read the index — mode 2.

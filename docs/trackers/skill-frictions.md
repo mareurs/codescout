@@ -278,7 +278,7 @@ first turn of the session. It went uninvoked through:
 
 - three peer messages routed on the incomplete set (a broadcast that reached **two of the five
   peers** in this checkout);
-- a fifth instance filed in `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`
+- a fifth instance filed in `docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`
   concluding *"positive identification is unavailable"*;
 - a paragraph promoted into `CLAUDE.md` § *Observer Blindness* stating that as a rule.
 

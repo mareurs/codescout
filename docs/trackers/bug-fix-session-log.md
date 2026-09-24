@@ -553,7 +553,7 @@ plausible number rather than an error.
 
 **Status:** mitigated
 
-**Fix idea / Pointer:** `F-108`; `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`. A durable version would have the server report the git SHA it was built from, so the question stops being answerable only by inference.
+**Fix idea / Pointer:** `F-108`; `docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`. A durable version would have the server report the git SHA it was built from, so the question stops being answerable only by inference.
 
 **Rests on:** `/proc/<pid>/exe` continuing to mark a replaced inode `(deleted)`,
 and `target/release/codescout` being the path every server is launched from.
@@ -6061,7 +6061,7 @@ wrong. **Impossible combinations mean the observation is wrong** — a partial w
 truncated read, contention, a stale binary, a clobbered fixture. Different failure, different
 hunt, and the second one is invisible if you start from "which line computed this?".
 
-Filed as `docs/issues/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md` with the
+Filed as `docs/issues/archive/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md` with the
 mechanism explicitly unproven — contention fits all three symptoms but nothing was
 instrumented, so `unverified:` says lead-not-finding, and the two tempting fixes (retries,
 raising the SQLite busy timeout) are named as harmful rather than deferred.
@@ -7398,7 +7398,7 @@ cause and messaged them to that effect.
 1. `codescout-24` ran the full suite with that `remote.rs` dirty throughout (4644 passed, 0
    failed) and the test **5/5 in isolation** against the same tree. My attribution was wrong.
    We both then read that as a timing flake under concurrent load, comparing it to
-   `docs/issues/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md`.
+   `docs/issues/archive/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md`.
 2. The ET session read the code and found a **real defect in the test**, fixed in `21174425`
    (*"fix(test): remove a race in the wedged-peer embedder test"*, +18/-10). Verified here at
    the bytes: `embed_one_batch` (`embedder.rs:606`) drives both legs through
@@ -9777,7 +9777,7 @@ Every part true: F-83 is real, it is in the file seven times, it is not mine. No
 claim false, so nothing reads as wrong on review. And **no step was checked against the object
 in front of me** — the window, which I had designed forty minutes earlier and which the tool
 prints on its own output line. Same structure as the three misattributions in
-`docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`, and this
+`docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`, and this
 time the instrument that would have answered was already open.
 
 **Why "corroboration" specifically is the exposed spot:** the verdict itself came from the tool
@@ -9805,7 +9805,7 @@ transcript returned **15**, of which two carried numbers into a **committed** ar
 
 **Got:** both numbers are now false.
 
-| published in `05fceb5783a0290e` | at audit |
+| published in `2e0135b426faa7dd` | at audit |
 |---|---:|
 | the owning session used `Write` **8** times | **9** |
 | that transcript mentions `doctor.rs` **80** times | **187** |
@@ -12362,7 +12362,7 @@ or revert a commit that is not the cause. What stopped it was pulling the **dist
 instead of trusting the two sampled endpoints: `Shell suites` is red at **3 of the last 12**
 runs, and two of those three (`9a1a3905`, `5a44c347`) predate `c7db63eb` by hours. Locally it
 is 91 passed / 0 failed, three consecutive runs. Filed
-`docs/issues/2026-09-08-the-shell-suites-lane-is-flaky-and-ci-endpoint-sampling-misattributes-it.md`,
+`docs/issues/archive/2026-09-08-the-shell-suites-lane-is-flaky-and-ci-endpoint-sampling-misattributes-it.md`,
 `cluster/repro-env-diverges-from-gate-env`, and `IC-5` gains a member that discharges its
 standing conditional.
 

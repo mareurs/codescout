@@ -124,7 +124,7 @@ by peer message): an unattributable red gate. Three of my tests and six `cargo f
 in `src/agent/write_guard.rs` reddened their gate run while my `acquire()` signature change was
 mid-flight. They ran the instrument, got `UNKNOWN`, and **correctly declined to guess** — which
 is the first recorded instance of a party believing this verdict instead of substituting a proxy.
-`docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md` records three
+`docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md` records three
 parties producing three wrong answers on one evening; this one produced none. The instrument's
 design worked. Its coverage did not.
 
@@ -188,7 +188,7 @@ its control.
 
 - `scripts/file-provenance.py` — `write_targets`' dispatch; `CS_WRITE_TOOLS`;
   `BASH_WRITE_PATTERNS`.
-- `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md` — the bug
+- `docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md` — the bug
   this instrument was built for; its § *Implementation* documents the 2.8% residual this file
   narrows.
 - `docs/issues/2026-09-07-the-source-redirect-names-tools-a-partial-tool-set-does-not-have.md` —

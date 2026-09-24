@@ -204,6 +204,9 @@ member gone unbuilt, that would have been this same error one level further in, 
 correction of the correction. It had not; `5730` is complete for what `cargo test --workspace`
 runs.
 ## Fix
+### Re-verified 2026-09-24 — instance resolved, class open
+
+Open-bug sweep (`deep-agent-workflow-observations:DWF-7`), verifier evidence. **The instance is gone:** `d5f2b736` is an ancestor of HEAD, and the test `required_names_no_key_that_has_a_declared_alias` no longer exists, removed by `bf0a5241` ("Task 7: replace the four vacuous alias-honesty gates"). **The class is unaddressed:** no convention anywhere rules on reds that span a task boundary (the grep hits are this file, one archived bug, two plans and IC-12). The fail-fast masking escalation also still applies: `scripts/gate.sh` has no `--no-fail-fast`, so a future deliberate red in one test binary still hides the results of the binaries after it.
 
 1. **Put the interpretation in the failure output** — done, in the assertion message: name the plan,
    name the task that deletes the gate, state that a reader who did not touch those four schemas is

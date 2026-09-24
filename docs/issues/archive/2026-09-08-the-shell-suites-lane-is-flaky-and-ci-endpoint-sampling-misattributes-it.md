@@ -1,15 +1,15 @@
 ---
-status: open
+kind: bug
+status: superseded
+tags:
+- cluster/repro-env-diverges-from-gate-env
+closed: 2026-09-24
 opened: 2026-09-08
-closed:
-severity: medium
 owner: marius
 related:
-  - docs/issues/archive/2026-09-01-an-absent-stage-log-makes-the-foreign-index-guard-pass.md
-  - docs/issues/archive/2026-09-01-foreign-index-guard-passed-a-peers-staged-deletion.md
-kind: bug
-tags:
-  - cluster/repro-env-diverges-from-gate-env
+- docs/issues/archive/2026-09-01-an-absent-stage-log-makes-the-foreign-index-guard-pass.md
+- docs/issues/archive/2026-09-01-foreign-index-guard-passed-a-peers-staged-deletion.md
+severity: medium
 ---
 
 # BUG: the `Shell suites` CI lane is intermittently red at ~25% on one three-assertion block, and CI's two-endpoint sampling makes that read as a regression by whoever pushed last
@@ -104,6 +104,7 @@ finding**, and no measurement in this file supports it yet.
 - *"The runner image rolled."* **Refuted** — byte-identical image version.
 
 ## Fix
+**SUPERSEDED by `24ea8fd4e40fb821` — 2026-09-24** (open-bug sweep, `deep-agent-workflow-observations:DWF-7`). Both files describe the same three `hooks-discrimination` assertions. `docs/issues/2026-09-16-three-hooks-discrimination-cases-failed-once-and-did-not-reproduce.md` holds the root cause (`git status` does not always write the index, so `post-index-change` does not fire and the stage log stays absent) and the diagnostic fix `aa831668`, which adds a precondition failure naming that cause. That also removes this file's attribution hazard: a red in that block now says why. **The flake itself is not fixed**, and it is tracked there. This file's CI measurement moves there as well: over the Shell suites jobs on `experiments` from 2026-09-01 to 2026-09-24 (177 jobs: 166 success, 8 failure, 3 cancelled), all 8 failures are exactly these three assertions, the latest on 2026-09-14T17:40 (run 34876146168). This file stays in the archive for its CI-endpoint-sampling analysis; new evidence goes to the surviving record.
 
 None. Filed for the distribution and the attribution hazard, which are worth more than a fix
 attempt against an unreproduced timing bug.

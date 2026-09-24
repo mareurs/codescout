@@ -271,7 +271,7 @@ fix. Flagged rather than edited: the fix is another session's uncommitted work.
 ## References
 
 - `src/retrieval/embedder.rs:1926-1971` — the test and its design comment.
-- `docs/issues/2026-08-07-windows-ci-timing-flakes-block-the-gate.md` — same class
+- `docs/issues/archive/2026-08-07-windows-ci-timing-flakes-block-the-gate.md` — same class
   (wall-clock assumptions gating the suite), currently `zombie` and scoped to Windows
   CI. This one fails on Linux locally, so it is a separate instance.
 - `reconnaissance-patterns:R-129` — in a shared checkout a peer seeing this failure has

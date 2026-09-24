@@ -1,7 +1,7 @@
 ---
-id: '908d1a59914b0785'
+id: ee2d823b259a2164
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: SendMessage returns success: true for a message that was held for the recipient user''s approval and never delivered'
 tags:
 - cluster/record-asserts-an-unchecked-completion
@@ -9,13 +9,14 @@ tags:
 - shared-checkout
 - coordination
 - harness
+closed: 2026-09-24
 opened: 2026-09-02
 owner: marius
 related:
 - docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md
-- docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md
+- docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md
 severity: medium
-unverified: Root cause is inferred from the observable pair, not read in harness source — the mechanism is not readable from this repo. Also unknown whether a never-actioned message ever produces a notice; see Resume.
+unverified: 'STANDING — the mechanism lives in Claude Code, whose source is not in this repo, so it cannot be read or fixed here. Partly answered 2026-09-24: the SendMessage tool description now states a held message may expire (see § Fix). Original caveat, retained verbatim: Root cause is inferred from the observable pair, not read in harness source — the mechanism is not readable from this repo. Also unknown whether a never-actioned message ever produces a notice; see Resume.'
 ---
 
 ## Summary
@@ -70,7 +71,7 @@ Unknown at the harness level — `SendMessage` is a harness tool, not codescout'
 
 ### The cost, in this session
 
-An advance announcement of a mutation window was sent to `codescout-20` before mutating `src/librarian/indexer.rs` on a shared checkout. The purpose was precisely so that a red build observed during the window would have a known author rather than being the anonymous kind recorded in `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`.
+An advance announcement of a mutation window was sent to `codescout-20` before mutating `src/librarian/indexer.rs` on a shared checkout. The purpose was precisely so that a red build observed during the window would have a known author rather than being the anonymous kind recorded in `docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`.
 
 The announcement was never delivered. On the strength of the `success` return, the following was written into `docs/superpowers/plans/2026-09-02-artifact-chunk-grain-retrieval.md` and **committed at `8dee33a8`**:
 
@@ -88,6 +89,9 @@ That sentence was false when committed. Corrected in place afterwards; the corre
    **Verdict:** rejected — both delivered, both answered with substantive replies.
 
 ## Fix
+**MITIGATED on the harness side — 2026-09-24** (open-bug sweep, `deep-agent-workflow-observations:DWF-7`). This file's core complaint (§ Summary) was an unhedged `success: true`, with an arrow that read as "delivered". Claude Code no longer returns that. Observed today in this session, a cross-session send returned `… → uds:…; queued there — a [Cross-session delivery notice] follows if that session holds it (different permission mode: its user must approve first) or refuses it`. The `SendMessage` tool description now states that a successful send "means the message reached that session, not that its Claude read it", and that a held message may expire. That also answers § Resume's question: the notice fires when a message is held.
+
+What remains is by design and external: no *synchronous* field says held vs delivered, only an asynchronous notice. Nothing in this repo can change that. No fix commit exists here, so this file deliberately carries no `## Fix provenance` section.
 
 None in this repo — the tool is the harness's. **The remedy is a documentation and practice change**, and it is the one that generalises:
 
@@ -113,7 +117,6 @@ Open question, not yet investigated: does the hold notice arrive at all if the r
 ## References
 
 - `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` § *Instance 5*
-- `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`
+- `docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`
 - `docs/superpowers/plans/2026-09-02-artifact-chunk-grain-retrieval.md` § *Task 6* Step 5 (carries the correction)
 - `CLAUDE.md` § *Reaching a Peer Session*
-

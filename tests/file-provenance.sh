@@ -6,7 +6,7 @@
 # ---------------
 # The tool answers "is this working-tree file mine?" on a checkout shared by several
 # Claude Code sessions — the missing channel in
-# docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md,
+# docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md,
 # where three parties produced three wrong authorship answers in one evening.
 #
 # Two failure modes make a naive implementation WORSE than nothing, and every case

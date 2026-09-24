@@ -3374,7 +3374,7 @@ async fn non_filter_pipe_no_unfiltered_ref() {
 
 /// The wine-lane flake's inferred mechanism, pinned instead of assumed.
 ///
-/// `docs/issues/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md` recorded two
+/// `docs/issues/archive/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md` recorded two
 /// `run_command` failures whose responses were missing keys that
 /// `src/tools/run_command/output.rs` sets in the **same block** as keys that were
 /// present. That impossibility is what identified the run, rather than the code, as

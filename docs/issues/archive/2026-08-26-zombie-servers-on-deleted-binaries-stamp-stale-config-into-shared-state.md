@@ -653,7 +653,7 @@ unrelated rebuild) were never answered because the minimal form does not need th
 For the 2026-08-26 `shutdown_with_deadline` fix (`ca2b0226`), two unit tests in
 `src/server.rs`, both `#[tokio::test(start_paused = true)]` per this file's established
 timing-test convention (real-clock sleeps flake under CI/wine — see
-`docs/issues/2026-08-07-windows-ci-timing-flakes-block-the-gate.md`):
+`docs/issues/archive/2026-08-07-windows-ci-timing-flakes-block-the-gate.md`):
 
 - `shutdown_with_deadline_returns_after_deadline_when_inner_never_resolves` — a
   `std::future::pending::<()>()` inner future; asserts the wrapper still returns at/after the

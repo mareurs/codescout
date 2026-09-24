@@ -119,6 +119,9 @@ comparison unmeasurable on one side.
    nothing filters `Bash` out because nothing ever offers it.
 
 ## Fix
+### Re-verified 2026-09-24 — smaller than filed; narrow it, do not close it
+
+Open-bug sweep (`deep-agent-workflow-observations:DWF-7`), verifier evidence. **The `Bash` half is closed by policy:** since the shell eval concluded on 2026-09-20, `permissions.deny` holds `Bash`, `Write` and `Edit` in all three profiles' `settings.json`, so native `Bash` work, the arm this file was about, no longer happens. **The rest is unchanged:** the recorder is still mounted on MCP calls only, so native `Read`, `Grep`, `Glob`, `Agent` and `WebFetch` remain unrecorded. Tier 1 (scope labels beside the counts) is not done: `src/mcp_resources/tool_usage.rs` (`doctor://tool-usage`) has no scope field. The only scope note, in `.claude/skills/analyze-usage/SKILL.md:255,387`, dates from `dffd1ce3` (2026-05) and sits in the session-analysis step, not beside the numbers. Suggested next step: retitle this file to the native-non-shell-tool blind spot, and build Tier 1.
 
 Two tiers. **Do the first regardless; the second is the one that needs a decision.**
 

@@ -59,7 +59,7 @@ Separating them is the point of this file; they were run together in the first t
 | | failure | who it reaches | what fixing it alone buys |
 |---|---|---|---|
 | 1 | **misrouting** — the alarm went to `ad379a7c`, who had not written the file | the wrong session | they still could not fix it — see 2 |
-| 2 | **unanswerability** — even correctly routed, the recipient cannot repair another session's uncommitted Rust; doing so is the defect `docs/issues/2026-09-03-the-gates-first-step-reformats-every-peers-uncommitted-rust.md` describes | the right session, uselessly | the alarm arrives somewhere it can be *reported* but not *acted on* |
+| 2 | **unanswerability** — even correctly routed, the recipient cannot repair another session's uncommitted Rust; doing so is the defect `docs/issues/archive/2026-09-03-the-gates-first-step-reformats-every-peers-uncommitted-rust.md` describes | the right session, uselessly | the alarm arrives somewhere it can be *reported* but not *acted on* |
 
 This is `CLAUDE.md` § *Testing Discipline*'s arrival-versus-answerability law holding one layer up:
 the addressee can be named correctly and still have no move available.
@@ -275,11 +275,11 @@ both parties.
 
 ## References
 
-- `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md` — the same
+- `docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md` — the same
   read-side problem via `-D dead-code`. **Its title and Root cause are narrower than its class**:
   this instance fails compilation by a type error, so it does not belong under that title even
   though the class fits.
-- `docs/issues/2026-09-03-the-gates-first-step-reformats-every-peers-uncommitted-rust.md` — the
+- `docs/issues/archive/2026-09-03-the-gates-first-step-reformats-every-peers-uncommitted-rust.md` — the
   write-side, and the reason failure 2 above is unanswerable.
 - `docs/issues/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md` — the same
   shared-`target/` substrate, different mechanism.

@@ -99,6 +99,13 @@ enumeration and no hard-coded `"artifacts"` remaining in the write or read paths
    never opens it. Query cost is zero, not merely small.
 
 ## Fix
+### ⚠ DO NOT DELETE — re-verified 2026-09-24: the collection is growing, so something still writes it
+
+Open-bug sweep (`deep-agent-workflow-observations:DWF-7`). Verifier evidence from read-only Qdrant GETs and counts; nothing was deleted. **This file's premise has changed.** The `artifacts` collection's exact count is now **5394** points, against 2425 when this file was written on 2026-09-06. It is not orphaned: some writer is still adding to it. 993 points carry a non-empty `project_id` (e.g. `/home/marius/work/mirela`, `/home/marius/work/stefanini/southpole`), and 4401 carry an empty one, some with UUID-shaped `artifact_id`s.
+
+The current tree has **no** Qdrant write to `"artifacts"`. The only source hit is a stale July worktree, `codescout.worktrees/check-codescout-integration/src/librarian/mod.rs:123,398`, with no built binary. Every running `codescout` process started on 09-18 or later. There is no `doctor` Qdrant check.
+
+**The writer is unidentified, and this file's own pre-DELETE caveat ("confirm no other tool writes that name") now fires.** Identifying the writer comes before any cleanup. A DELETE today would destroy data that something is actively producing.
 
 Not implemented. It is one command, and the reason to file rather than just run it is that
 the command is **irreversible and host-local**, so it wants a decision rather than a

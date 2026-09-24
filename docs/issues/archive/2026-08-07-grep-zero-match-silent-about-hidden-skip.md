@@ -14,7 +14,7 @@ opened: 2026-08-07
 owner: marius
 related:
 - docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md
-- docs/issues/2026-08-07-windows-ci-timing-flakes-block-the-gate.md
+- docs/issues/archive/2026-08-07-windows-ci-timing-flakes-block-the-gate.md
 severity: low
 ---
 
@@ -265,7 +265,7 @@ a hidden directory still returns empty. If that becomes worth changing it is a b
 - `src/tools/symbol/symbols.rs` — `WalkAudit` / `completeness_warning`, the pattern to copy
 - `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md` — the
   sibling false-negative, same defect class
-- `docs/issues/2026-08-07-windows-ci-timing-flakes-block-the-gate.md` — the session this
+- `docs/issues/archive/2026-08-07-windows-ci-timing-flakes-block-the-gate.md` — the session this
   surfaced in
 
 ## Fix provenance

@@ -15,7 +15,7 @@ entry_prefix:
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
 entry_high_water_DWF: 7
-entry_high_water_DCS: 5
+entry_high_water_DCS: 6
 ---
 
 # Deep-agent workflow observations and session coverage
@@ -97,6 +97,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DCS-4 | 2026-09-24 | coverage | session-receipt | 774ba049/post-compaction |
 | DCS-5 | 2026-09-24 | coverage | session-receipt | 571eb3d6/post-compaction-2026-09-24 |
 | DWF-7 | 2026-09-24 | workflow | routine-first | sebf651ec-open-bug-verify-sweep |
+| DCS-6 | 2026-09-24 | coverage | session-receipt | sebf651ec-open-bug-verify-sweep |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -337,6 +338,24 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 **Initial next action / completion check:** dispatch four read-only verifier batches, each returning a per-bug verdict (FIXED with SHA+patch-id / PARTIAL / STILL-OPEN / EXTERNAL / CANNOT-DETERMINE) backed by lines read. The check: this collector spot-verifies every FIXED verdict before changing any status, and the user decides on closures.
 
 **Outcome update — 2026-09-24T12:30Z.** Four verifiers returned 34 verdicts: 2 FIXED, 1 probably fixed, 9 partial or mitigated, 6 external/not-a-code-defect, 3 not recurred, 12 still open, 1 cannot-determine, and 1 zombie that came back. The per-batch totals reconcile to 34; the 12 still-open includes the design-limit and structural cases. The collector re-derived the spot checks before any status change: `05fceb57`'s two anchors (reachable, non-merge, patch-ids matched), and the zombie `d25aa6db`'s two recurrences (`usage.db` rows 79110 and 126947; `git grep` at each row's `project_sha` confirmed both symbols existed). Status changes were not applied; they were handed to the user. **Unplanned finding (enrichment):** the dispatch itself exposed a concurrent guide-ledger race, filed as `e76556484627a41a`. Batch B reported three injections of one topic; the collector counted each ledger's stamps against each transcript's injections and traced it to `src/server.rs:679`/`:1204`. A side effect: one verifier activated the project read-only, which blocked the coordinator's reindex until it was re-run with `workspace=` pinned. **Outcome:** good / partial. The investigation is complete as verdicts; closures await the user.
+
+## DCS-6 — Session ebf651ec — open-issue review, 34-bug verify sweep, and the guide-ledger race it exposed
+
+**Status:** observed
+**Valid:** dated 2026-09-24
+
+**Session / interval:** `ebf651ec-5ab7-42d9-a526-dcf9758692e1`, profile `~/.claude`, from session start (about 11:20Z) to the commit of this sweep (about 13:45Z). Model: Sonnet 5 at first, then Opus 5.5 from the user's first task onward. No compaction in the interval.
+
+**Selected IDs:** `DWF-7` (routine-first; prospective for the dispatch, with the earlier 2fc50a3d closure summarised retrospectively inside it) and `DCX-2` (routine-first, prospective).
+
+**Coverage:**
+- **Missed captures, declared rather than backfilled:** (1) the first context decision of the session, whether to trust a peer's slot-file claim and what to put in the fork brief for the a5054d13 live-check, was not captured before acting; (2) the first substantive multi-step episode, closing `2fc50a3d`, ran before selection, so it appears in DWF-7 only as retrospective context.
+- **Enrichment:** the concurrent guide-ledger race filed as `e76556484627a41a` was found during the DWF-7 dispatch. It is recorded in DWF-7's outcome update and in DCX-2's delivery outcome, not as a separate DCX entry.
+- **Delegates:** 1 fork (the a5054d13 diagnostic) and 4 verifier subagents (DWF-7). Their principals are observable only as CC agent ids.
+
+**Capture gaps:** the verifier transcripts are process-local task files and are not retained. The durable evidence is the per-bug notes written into each bug file, the ledger-vs-transcript injection table in `e76556484627a41a`, and the `usage.db` row ids cited there. The fork's report was relayed to the peer, and its one error (which ledger `post_compact` cleared) was corrected on the peer's prompt.
+
+**Recording effort:** three ledger appends and three updates, about 6 tool calls of roughly 250 in the interval. No task was displaced.
 
 ## Template for new entries
 

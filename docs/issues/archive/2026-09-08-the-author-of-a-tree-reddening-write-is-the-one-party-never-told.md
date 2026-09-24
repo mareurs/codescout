@@ -507,7 +507,7 @@ None yet — nothing built to test.
 - `docs/issues/archive/2026-09-08-a-claimed-bug-file-names-the-author-of-the-wip-that-reds-the-build.md`
   — the reader-side half, fixed at `de546287`. Its closing section names this as the
   unbuilt half.
-- `docs/issues/2026-09-03-the-gates-first-step-reformats-every-peers-uncommitted-rust.md` —
+- `docs/issues/archive/2026-09-03-the-gates-first-step-reformats-every-peers-uncommitted-rust.md` —
   why a reader repairing the author's file is not an option.
 - `docs/trackers/issue-clusters/IC-2-gate-keyed-on-unobservable-event.md` — the class.
 

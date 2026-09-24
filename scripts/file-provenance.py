@@ -9,7 +9,7 @@ can say WHOSE it is: git's author field is a constant across sessions, and uncom
 state has no commit to carry a Session-Id trailer. On 2026-09-01 that gap produced
 three wrong authorship answers in one evening, from three parties who were each
 actively reasoning about attribution at the time
-(docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md).
+(docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md).
 
 SUBSTRATE, and why it is the transcripts rather than the obvious candidate
 -------------------------------------------------------------------------

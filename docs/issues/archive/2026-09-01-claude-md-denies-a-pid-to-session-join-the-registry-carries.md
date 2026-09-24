@@ -13,7 +13,7 @@ opened: 2026-09-01
 owner: marius
 related:
 - docs/issues/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md
-- docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md
+- docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md
 severity: medium
 ---
 

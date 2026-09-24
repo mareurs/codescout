@@ -184,5 +184,5 @@ local gate cannot discriminate here:
   all. A Linux run of the *original* fixtures passed whether the bug was present or not.
 - All three `windows-latest` lanes green on run `34577640274`. The recurring red on
   `experiments` is `Windows-gnu cross (MinGW + wine)` — a separate open bug
-  (`docs/issues/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md`), not a residual of
+  (`docs/issues/archive/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md`), not a residual of
   this one.

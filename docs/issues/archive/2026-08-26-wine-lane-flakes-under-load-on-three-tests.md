@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: wontfix
 tags:
 - cluster/repro-env-diverges-from-gate-env
 - windows
@@ -8,12 +8,12 @@ tags:
 - ci
 - flake
 - concurrency
-closed: null
+closed: 2026-09-24
 opened: 2026-08-26
 owner: marius
 related: []
 severity: low
-unverified: 'NARROWED 2026-08-26 by CI run 32997878934: two of the three tests failed there with the wine-9.0 `timed_out` signature, NOT this file''''s partial-key payload, so they belong to the lane''''s already-classified wine-9 hang group and are skipped there. Only run_migrations_is_safe_under_concurrent_connections remains in scope for this file — observed ONCE, locally, never on CI, mechanism inferred (contention) and never instrumented. Treat it as a lead, not a finding, and do NOT add retries or raise the SQLite busy timeout on this evidence.'
+unverified: 'STANDING — closed 2026-09-24 as not recurred (0 failures of the one in-scope test across the wine jobs of 2026-09-01..24; see § Fix). Original caveat, retained verbatim: NARROWED 2026-08-26 by CI run 32997878934: two of the three tests failed there with the wine-9.0 `timed_out` signature, NOT this file''s partial-key payload, so they belong to the lane''s already-classified wine-9 hang group and are skipped there. Only run_migrations_is_safe_under_concurrent_connections remains in scope for this file — observed ONCE, locally, never on CI, mechanism inferred (contention) and never instrumented. Treat it as a lead, not a finding, and do NOT add retries or raise the SQLite busy timeout on this evidence.'
 ---
 
 # BUG: three unrelated tests failed together on the wine lane under load, and passed on the next run
@@ -134,7 +134,7 @@ Status unchanged: already `open`, correctly. What is new is job-grain data acros
 **Two of four for this lane — and `2d04c6ad` is the row that earns its keep.** The wine lane passed
 while all three `windows-latest` MSVC lanes failed, so the two populations move independently. Until
 today the split between this file and
-`docs/issues/2026-08-07-windows-ci-timing-flakes-block-the-gate.md` rested on the *reasoning* that
+`docs/issues/archive/2026-08-07-windows-ci-timing-flakes-block-the-gate.md` rested on the *reasoning* that
 wine-under-load and MSVC wall-clock are different mechanisms; it now rests on an observation where
 one fired and the other did not. Cross-referenced from that file's Evidence section.
 
@@ -157,6 +157,9 @@ next step than another pass/fail tally.
    evidence, **not confirmed**.
 
 ## Fix
+**WONTFIX — not recurred, 2026-09-24** (open-bug sweep, `deep-agent-workflow-observations:DWF-7`). The one test still in scope under this file's `unverified:` note, `librarian::catalog::tests::run_migrations_is_safe_under_concurrent_connections`, never failed on the wine lane between 2026-09-01 and 2026-09-24. Unit: wine jobs on `experiments` in that window, 179 in total — 48 success, 82 failure, 49 cancelled. The 82 failures break down as 51 apt dependency failures, 24 compile errors and 7 other tests; **75 of the 82 never reached the test stage**, so they give no evidence either way. In all 7 logs where tests ran, the test printed `... ok`, and `database is locked` appears 0 times across all 82 failure logs. There is nothing to fix and no recurrence to chase. If the test ever fails on wine again, reopen this file rather than filing a new one.
+
+The wine lane's **current** red is a different problem — the apt install of `winehq-devel` fails (`Depends: wine-devel (= 11.17~noble-1)`) — and is filed separately.
 
 None, deliberately. A flake seen once, whose mechanism is inferred, does not justify a
 change — and the two changes it would invite are both actively harmful:

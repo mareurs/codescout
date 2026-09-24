@@ -774,7 +774,7 @@ jobs:
       # locally under wine 11.16 for a COMPLETELY DIFFERENT and unrelated reason — a
       # load-sensitive flake that yields an impossible payload (2 of 4 keys that
       # `output.rs` sets in one block), documented in
-      # docs/issues/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md. Same two test
+      # docs/issues/archive/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md. Same two test
       # names, two distinct causes, and only the payload tells them apart: a `timed_out`
       # envelope is THIS group; a partial key set is that flake. Do not let a local
       # reproduction of one convince you that you have reproduced the other.

@@ -8,7 +8,7 @@ opened: 2026-09-08
 owner: marius
 related:
 - docs/conventions/test-env-isolation.md
-- docs/issues/2026-09-08-the-shell-suites-lane-is-flaky-and-ci-endpoint-sampling-misattributes-it.md
+- docs/issues/archive/2026-09-08-the-shell-suites-lane-is-flaky-and-ci-endpoint-sampling-misattributes-it.md
 severity: high
 ---
 

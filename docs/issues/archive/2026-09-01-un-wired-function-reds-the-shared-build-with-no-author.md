@@ -1,9 +1,9 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/authorship-unrecoverable-after-the-fact
-closed: null
+closed: 2026-09-24
 opened: 2026-09-01
 owner: marius
 related: []
@@ -540,6 +540,12 @@ unavailable**, and the row can now be filled.
    During the window that caused the cost, no test existed that could have returned this answer.
 
 ## Fix
+**FIXED — verified 2026-09-24 against HEAD `436a8ff6`** (open-bug sweep, `deep-agent-workflow-observations:DWF-7`). The defect this file names is the missing *attribution channel*: a red with no answer to "whose dirty file is this?". Both halves of that channel now exist:
+
+- `0e657dc5` added `scripts/file-provenance.py`, which answers "is this dirty file mine?" by session.
+- `de546287` made `run_command` attach that answer to any failing or failure-shaped output (`scripts/attribute-red.py`, the `wip_authors` line).
+
+Checked live: piping a fake `--> <dirty path>:10:4` diagnostic into `attribute-red.py` named the author session, with its scope caveat. A shared build going red on a peer's WIP is correct by design; what was wrong was that nobody could say whose WIP it was. The remaining limits are documented in the scripts' headers and are not open work: non-Claude writers are invisible, `UNKNOWN` never means "not mine", and native `Bash` bypasses the hook (now denied at harness level).
 
 No fix proposed for `-D dead-code`; it is correct. The gap is the missing channel, and the
 candidate remedies are `H`-shaped (a mechanism, not a discipline) exactly as `IC-10` predicts:
@@ -602,3 +608,15 @@ the write-side twin.
 - `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` — the write-side twin.
 - `reconnaissance-patterns` F-80 — elimination over an incompletely-reported population, sent as a
   positive ID. This bug is another instance, committed while reading about the class.
+
+## Fix provenance
+
+- **SHA:** `0e657dc5` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `94b00d42f15b3559f05bd5aee5eaa66121d6c9e4` — content hash of the diff; survives rebase and cherry-pick.
+
+`feat(scripts): file-provenance answers "is this dirty file mine?" on a shared checkout`
+
+- **SHA:** `de546287` (on `experiments`)
+- **patch-id:** `555cf20c539e87f5a23677c37a7e6e367a5eb6f6`
+
+`feat(run_command): a red now names who holds the dirty files it points at`

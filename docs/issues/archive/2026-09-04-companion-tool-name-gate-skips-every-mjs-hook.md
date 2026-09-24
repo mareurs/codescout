@@ -280,7 +280,7 @@ without the hook fixes reds the build, the hook fixes without the gate go unguar
 | claude-plugins | `677fb6c9433477b921c8620e94323b2d41d2c490` | `ecf9efa7a9202f8f613fef23f42ad070949a41ab` |
 
 **Gate:** `cargo fmt` scoped to `src/server.rs` (a peer held uncommitted Rust, and workspace-wide
-`fmt` would have rewritten it — `2fc50a3d46aa77a9`); clippy `-D warnings` exit 0; lean lane exit 0;
+`fmt` would have rewritten it — `863b801018a947e4`); clippy `-D warnings` exit 0; lean lane exit 0;
 default lane exit 0.
 
 Read by **test name, not lane total**: `companion_surfaces_reference_only_real_tools`,

@@ -184,6 +184,13 @@ occurred, so it is the first that is evidence about the mechanism rather than ab
 **The armed effect is still unmeasured in the direction that matters:** nothing here exercises a
 non-empty `active_specialists`, and severity rests entirely on how often a session holds one.
 ## Evidence
+### Re-verified 2026-09-24 — still firing, and one duplicate absorbed
+
+Open-bug sweep (`deep-agent-workflow-observations:DWF-7`). The mechanism is unchanged in `claude-plugins` main (`1cc83fb`), in origin/main (`0916e0f`), and in all 9 installed caches (buddy 0.11.3/0.11.4/0.11.5 × three profiles): `hook_entry.py:68-76` reads `.buddy/.current_session_id` into `BUDDY_PREV_SID`, `hook_helpers.py:341-348` sets `parent_sid = prev_sid` whenever it differs, and `reload.py:274,305` prints `from={prev_sid}`. `claude-plugins` closed its own copy as a duplicate pointing here (`docs/issues/archive/2026-09-08-prev-sid-pointer-names-a-peer-as-the-compacted-sessions-parent.md`, `wontfix`), and there is no fix commit there.
+
+Live evidence: `.buddy/.session-start-trace.log` covers 2026-09-11T09:29Z to 2026-09-24T11:31Z (it keeps only its last ~150-200 lines). It holds 101 `source=compact` lines, **66 of them with `prev≠sid`**. The latest, at 11:31Z today, names session `ebf651ec…` as the previous session. Subagent-originated compactions were not separated out of that count.
+
+`docs/issues/archive/2026-08-30-buddy-compact-banner-names-a-peers-session-as-your-own.md` (the banner symptom of the same mechanism) is now `superseded` by this file.
 
 Quoted from the peer's cross-session message (2026-09-03):
 

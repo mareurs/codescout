@@ -1,9 +1,9 @@
 ---
 kind: bug
-status: open
+status: wontfix
 tags:
 - cluster/unclassified
-closed: null
+closed: 2026-09-24
 opened: 2026-09-04
 owner: marius
 related: []
@@ -102,6 +102,9 @@ same id, same intent, no intervening change to the artifact.
    `insert_after` that landed the banner this session. **Verdict:** rejected.
 
 ## Fix
+**WONTFIX — not a code defect; root cause found 2026-09-24** (open-bug sweep, `deep-agent-workflow-observations:DWF-7`). The refusal was accurate. In `usage.db`, 15 `doc`/`artifact` calls since this file was opened carry a `patch` whose `json_type` is `text` — a string, not an object. All 15 failed, and **14 of the 15 strings are not valid JSON**. One of the two calls this file reports (row 104000, 00:39:45 UTC) ends in `…"}]` with its closing `}` missing. Against that, 1893 object-typed patches went through in the same window. So the caller produced malformed JSON, the client passed it on as a string, and `update.rs:448-454` correctly refused it. "Transport mangling" in this file was close, but the origin is the caller, not the server.
+
+One optional, cheap improvement, not tracked as work: when `patch` arrives as a *string*, the refusal could say so. Today its hint only mentions "array or scalar", so a caller cannot tell it sent a string.
 
 None proposed. Deciding between the two readings needs the bytes the server received, so the next
 step is instrumentation rather than a code change: log the raw `patch` value on the rejection path,

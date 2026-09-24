@@ -357,6 +357,15 @@ the claim would be wrong. The hint is not truncated and exists to answer "what d
 next", which is the question being answered.
 
 ## Fix
+### Re-verified 2026-09-24 — Bug A fixed; Bug B recurred on a branch its fix never covered
+
+Open-bug sweep (`deep-agent-workflow-observations:DWF-7`), verifier evidence at HEAD `436a8ff6`. The collector re-derived only the `usage.db` row.
+
+- **Bug A is fixed.** `list_overview.rs:243,425,578` all read `optional_bool_param(&input, "include_body")`. Fix `b2344aab`: not a merge, an ancestor of HEAD, patch-id `23f38cdf91e814d9598823b5d5bf34115796a732`.
+- **Bug B recurred today, on the path-scoped branch.** `usage.db` row 137400 (2026-09-24 08:16:54, 1 ms, `success`) was `{"name":"GuideLedger/adopt","path":"src/tools/guide_ledger.rs"}`, which takes `search_files_restricted` (`symbols.rs:442-507`). On that branch, `let Ok(client) = ctx.lsp.get_or_start(…) else { continue; };` and `let Ok(symbols) = client.document_symbols(…) else { continue; };` drop LSP errors silently. There is no tree-sitter fallback, and `audit` is deliberately `None` ("the path/glob branch below never builds it"), so no `completeness_warning` can fire. **The 08-07 WalkAudit instrumentation covers only the project-scope branch.**
+- **A second silent path, a lead only:** `LspClient::document_symbols` (`src/lsp/client.rs:1156-1231`) returns `Ok(vec![])` both when the result is null and when neither parse succeeds. The same 1-2 ms, issued-alongside-another-LSP-call shape recurs in `d25aa6db7b4e6367`'s `references` false negatives; those two may share one cause. Not checked: which of these paths produced the 1 ms zero.
+
+Next step: give `search_files_restricted` the same audit/completeness surface as the project-scope branch, then find out whether `document_symbols`' empty-on-failure return is what both bugs are hitting.
 
 **Bug A:** In `list_overview.rs`, replace all three occurrences of
 `let include_body = guard.should_include_body();` with the same explicit-param-first pattern

@@ -227,7 +227,7 @@ turning on 15 tests that have not run in 3.5 months is its own change with its o
 in a comment so the next reader does not have to rediscover the population.
 
 Also filed on notice while fixing the prose:
-`docs/issues/2026-09-04-grep-served-pre-edit-content-after-a-successful-write.md` — `grep` returned
+`docs/issues/archive/2026-09-04-grep-served-pre-edit-content-after-a-successful-write.md` — `grep` returned
 pre-edit bytes immediately after four successful `edit_file` writes, which reads exactly like "my
 edits silently failed".
 ## Resume

@@ -175,6 +175,18 @@ the main checkout covering the same class, did not surface in a semantic
    **Not tested** — needs `src/librarian/indexer.rs` `index_repo_sync` read at the source.
 
 ## Fix
+### Root cause found 2026-09-24 — a deliberate skip that reports itself only to the log
+
+Open-bug sweep (`deep-agent-workflow-observations:DWF-7`), verifier evidence at HEAD `436a8ff6`. **This file's "root cause unknown" and hypothesis 6 are out of date.** The zero-file walk is intentional:
+
+```
+indexer.rs:286-297
+if is_linked_worktree(abs_root) { tracing::warn!(...); return Ok((report, Vec::new())); }
+```
+
+It is pinned by the test `index_repo_sync_skips_linked_worktree` and was added in `9d84f347` (2026-06-14). The worktree's catalog rows exist because a doc write there forks its row on first write, not because reindex ran.
+
+**What remains is the reporting half, and it is this file's defect exactly.** The skip is disclosed only through `tracing::warn`, which no caller sees. The tool response is an all-zero report carrying `unknown_sample_note: "complete"`, with nothing in the response path naming the skip. Remedy direction: put the skip in the report itself (a field naming the root that was skipped and why), per `docs/adrs/2026-08-27-negative-results-name-their-scope.md`. No live reindex was run for this check, since it would write to the catalog.
 
 *Not yet fixed, and the root cause is not established — do not write a fix before testing
 hypothesis 5.*

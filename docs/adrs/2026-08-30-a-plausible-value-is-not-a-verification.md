@@ -299,7 +299,7 @@ twelve days earlier.
 - `bug-fix-session-log:W-74` — when the closure step *is* the broken operation, run it.
 - `docs/issues/archive/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`
   (`open-issue-work-queue:BL-58`) — the worst member, filed separately.
-- `docs/issues/2026-08-30-buddy-compact-banner-names-a-peers-session-as-your-own.md`
+- `docs/issues/archive/2026-08-30-buddy-compact-banner-names-a-peers-session-as-your-own.md`
   (`BL-59`) — adjacent: it overstates what *you* wrote rather than misreporting an
   artifact, and cannot be refuted from inside the session.
 - `7930e0b7` — the commit that carried a peer's two lines past a `--stat` check.

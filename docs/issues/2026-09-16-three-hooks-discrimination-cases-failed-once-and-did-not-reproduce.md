@@ -200,3 +200,7 @@ directions above become worth costing.
 
 Observed while mutation-testing `scripts/pre-commit-orphaned-citations.sh`; the mutation
 itself behaved correctly and its verdict was confirmed by the re-runs above.
+
+## Absorbed duplicate — 2026-09-24
+
+`docs/issues/archive/2026-09-08-the-shell-suites-lane-is-flaky-and-ci-endpoint-sampling-misattributes-it.md` described these same three assertions from the CI side and is now `superseded` by this file. Its CI measurement belongs here. Over the Shell suites jobs on `experiments` from 2026-09-01 to 2026-09-24 there were 177 jobs: 166 success, 8 failure, 3 cancelled. **All 8 failures are exactly these three assertions**: 09-04, 09-06, 09-07 ×3, 09-09, 09-11, and 09-14T17:40 (run 34876146168, the latest). After that come 20 successes and 3 cancellations. Only 2 CI runs have landed since `aa831668`, so its precondition message has not yet been seen in CI. Unit and window from the open-bug sweep (`deep-agent-workflow-observations:DWF-7`); runs before 09-01 were not re-examined.

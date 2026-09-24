@@ -345,7 +345,7 @@ a refspec carries its whole prefix.
 - `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` — the adjacent
   case: a peer's *commit* capturing uncommitted work. This is its downstream twin, one step later
   in the pipeline, and the two share a resource but not a remedy.
-- `docs/issues/2026-09-03-the-gates-first-step-reformats-every-peers-uncommitted-rust.md` — same
+- `docs/issues/archive/2026-09-03-the-gates-first-step-reformats-every-peers-uncommitted-rust.md` — same
   checkout, same evening, the mandated-write member of the neighbouring class.
 - `CLAUDE.md` § *Reaching a Peer Session* — *"Visibility is not authority"*, the grant-direction
   statement of this asymmetry.

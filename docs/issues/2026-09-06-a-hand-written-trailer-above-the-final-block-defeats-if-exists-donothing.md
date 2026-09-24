@@ -221,6 +221,15 @@ duplicated ones. This is what caps the severity: every mechanical consumer is ri
    header's own account of why `interpret-trailers` was chosen.
 
 ## Fix
+### Re-verified 2026-09-24 — three modes, one fixed, one dormant, one belongs elsewhere
+
+Open-bug sweep (`deep-agent-workflow-observations:DWF-7`). Verifier evidence; reproductions were run in temp repos only.
+
+- **(a) Duplicate `Session-Id` is dormant.** It still reproduces: a message carrying `Session-Id: abc` above the `Co-Authored-By` paragraph, run through `interpret-trailers --if-exists doNothing`, ends with raw=2, and the guard at `scripts/prepare-commit-msg-session-id.sh:81-85` is unchanged. But 0 of the 246 commits since 2026-09-17 carry a duplicate raw `Session-Id` line: the habit stopped, the defect did not.
+- **(b) A pasted `Co-Authored-Session-Id` invisible to queries is fixed** by `05c6f153` (2026-09-16; not a merge, an ancestor of HEAD, patch-id `20ef09260e836da6f933f809b865a573970bc3db`). The hook now writes the acked sids itself with `addIfDifferent`. A hand-pasted line above the block now parses once (parsed=1); only the raw text duplicates.
+- **(c) The `7a986ac3` capture with no ack** is invisible to this hook by construction. It belongs to `e421be689a23ae2a` / `04e069162e1fb15f`.
+
+**Guidance drift to fix alongside:** `scripts/pre-commit-foreign-index.sh:355-358` and `:466-475` still tell the committer to record or paste these trailers, which the hook now writes itself. No `Co-Authored-Session-Id` trailer appears in any commit since 09-17, so the ack path has not been exercised in practice.
 
 **Not fixed. Two options, and the cheaper one is not a code change.**
 

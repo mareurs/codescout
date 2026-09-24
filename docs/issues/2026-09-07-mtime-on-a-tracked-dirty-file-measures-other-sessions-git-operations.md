@@ -139,6 +139,9 @@ subsequent rounds. Having the right field in hand did not prevent reaching for t
    outlives it.
 
 ## Fix
+### Re-verified 2026-09-24 — the most frequent trigger is gone; the property is not
+
+Open-bug sweep (`deep-agent-workflow-observations:DWF-7`), verifier evidence. **The per-commit trigger is removed:** `074b749e` (patch-id `4c3958557408b19cdf60354a5f8288167e4342e4`) retired pre-commit's stash-and-restore cycle. `scripts/pre-commit-run.sh` mentions stash only in comments, the installed `.git/hooks/pre-commit` has 0 `stash` occurrences, and `rebase.autoStash` is unset. **The property this file describes still holds:** reproduced in a temp repo, an explicit `git stash; git stash pop` moved a dirty file's mtime from 2026-09-01 00:00 to 2026-09-24 14:46 with no content change, and `rebase --autostash` behaves the same way. So mtime on a tracked, dirty file is still not authorship evidence, just much less often wrong. The remedy this file proposes, a triage rule plus a `doctor` `last_observed` check, was never built (0 hits in `src/librarian`). This is a property of git rather than a code defect in this repo.
 
 There is nothing to repair in code — mtime is doing what a filesystem does. The fix is a
 **triage rule**, and it belongs where triage happens:
@@ -198,4 +201,3 @@ stays open as a pointer rather than a task.
   count) and `89d91024-cd66-4361-9300-c55b87b179ea` (who caused both perturbations). Cited by
   sessionId rather than name: a name is registry-minted and re-minted by compaction or a restart,
   a sessionId is not.
-

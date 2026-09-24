@@ -1,7 +1,7 @@
 ---
-id: '87c41034e7bd8b4d'
+id: e9d98a49aa72fd5e
 kind: bug
-status: open
+status: fixed
 title: 'BUG: grep served pre-edit content immediately after four successful edit_file writes, reporting the old bytes as current'
 tags:
 - cluster/transient-shared-state-lies-to-readers
@@ -9,6 +9,8 @@ tags:
 - edit_file
 - silent-wrong-answer
 - read-after-write
+closed: 2026-09-24
+unverified: STANDING — the mechanism is attributed by timing (a peer commit 1 s before the recorded mtime), not reproduced; usage.db holds no row for the incident, so the exact grep time is unknown. The attributed mechanism was removed by 074b749e, and no recurrence has been reported since.
 ---
 
 ## Summary
@@ -111,6 +113,7 @@ but which world each one read*. This is that, with the two worlds separated by m
 than by a retired datastore.
 
 ## Fix
+**FIXED — closed 2026-09-24 on an attributed mechanism** (open-bug sweep, `deep-agent-workflow-observations:DWF-7`; see the `unverified:` caveat in the frontmatter). `grep` cannot serve stale content from its own state: it reads each walked file with `std::fs::read` and has no content cache (`src/tools/grep.rs`; the `HashMap` there caches enclosing-symbol lookups only). `edit_file` writes synchronously through `atomic_write` before returning. The only process that could put old bytes back is outside both tools, and the timing fits one: peer commit `c79c629d` landed at 17:00:18 +0300, and this file records the edited file's mtime as 17:00:19. That is the pre-commit framework restoring its stash, the mechanism of `docs/issues/archive/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md`. `074b749e` removed that stash: `scripts/pre-commit-run.sh` runs the checks "with NO STASH", and the installed `.git/hooks/pre-commit` contains no `stash`.
 
 Not implemented; root cause not established, and a fix chosen before the mechanism is known would
 be a guess.
@@ -133,3 +136,10 @@ the four prose edits it required were followed by a verification `grep` that sho
 had applied. Filed on notice rather than at task end, because the interesting half — that the
 sanctioned verification instrument is the one that returned the wrong answer — is the half that
 would have been dropped from a summary written later.
+
+## Fix provenance
+
+- **SHA:** `074b749e` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `4c3958557408b19cdf60354a5f8288167e4342e4` — content hash of the diff; survives rebase and cherry-pick.
+
+Stops pre-commit from stashing, which removes the mechanism this incident is attributed to. The same commit closes the stash-window bug linked in § *Fix*.

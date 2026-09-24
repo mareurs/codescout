@@ -798,7 +798,7 @@ compares each *pathspec'd file* against its worktree copy. `adapter.rs` was stag
 worktree delta, so it passes — the hook has no notion of **cross-file** atomicity with an
 unstaged `types.rs`. The guard test would have fired, but only after the commit had landed on
 `experiments`, where five other sessions rebase onto it. That is the shape of
-`docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`, whose fifth
+`docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`, whose fifth
 instance CLAUDE.md discusses at length; this would have been a sixth.
 
 **Second finding, from the same exchange: a NAME-keyed peer record decays, a PID-keyed one does
