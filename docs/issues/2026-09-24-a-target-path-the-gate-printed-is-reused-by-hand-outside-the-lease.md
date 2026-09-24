@@ -108,7 +108,9 @@ Delete the tree once `ebf651ec` exits. It belongs to a live session until then.
 
 ## Resume
 
-`ebf651ec`'s 4.5G tree stays until that session exits. It was told about `with-slot.sh`. Sessions started before `3591f2ca` are the finite set that can still produce per-session trees.
+**Resolved 2026-09-24 about 20:27 UTC, by its owner.** Session `ebf651ec` was told about `with-slot.sh`. It switched its targeted runs to it and deleted its own tree, which it reported as 6.1G by then. Verified by this session afterwards: `~/.cache/codescout-gate` holds only `slot-0` through `slot-2` (62G), and `slot-0.lock` was touched at 23:26 local time, consistent with a `with-slot.sh` lease.
+
+Sessions started before `3591f2ca` are the finite set that could still produce per-session trees.
 
 ## References
 
