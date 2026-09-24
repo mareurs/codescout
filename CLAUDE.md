@@ -492,6 +492,24 @@ information than that hook does.
 
 **Cite a fix by SHA *and* patch-id — the SHA alone is not durable.** Both promotion paths stay available (cherry-pick for single fixes, fast-forward for large cohorts), and neither needs checking before you cite: `experiments` is rebased after every ship, so a cherry-picked commit's original is orphaned and eventually garbage-collected, while `git show <sha> | git patch-id --stable` is a content hash of the diff that survives both. Record the pair once at fix time — no decision, no follow-up reconciliation.
 
+**On this checkout committing IS publishing — so a commit your operator told you to HOLD must not
+exist yet.** `git push <branch>` sends every commit beneath the tip, not the pusher's own, and git
+records who *authored* a commit and nothing about whether its author may publish it. That leaves
+two states per change, not three: **uncommitted** — withheld, in the working tree or a patch file
+(a scratch branch is not available: `git checkout -b` moves the tree for every session here) — and
+**committed**, publishable by any push the operator authorises. **Ordinary unpushed work is the
+second state and is fine to commit:** the pre-push guard names every foreign session in the range,
+so the operator decides with the list in front of them, and publication *without a decision* is the
+failure, not publication. A change your operator explicitly said to hold is the first state and
+only the first, because nothing can mark a commit withheld. The refspec form
+`git push origin <sha>:<branch>` publishes a prefix, so it can leave a held commit *above* yours
+unpublished and never one beneath — the pusher's side is `docs/RELEASE.md` § *Concurrent-Work
+Rules*. **No marker mechanism, deliberately:** a withheld-trailer or note checked by a hook fails
+open for any session that never installed or read it, reproducing the defect while reading as a
+fix. Instances and derivation →
+`docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md`,
+`docs/issues/2026-09-06-a-withheld-commit-is-indistinguishable-from-an-unpushed-one.md`.
+
 Full release cycle, standard ship sequence, SHA + patch-id citation rule, chained-git state-check, and concurrent-work reset safety → **`docs/RELEASE.md`**. SHA-citation + cross-repo `<repo>:<sha>` prefix discipline → memory `gotchas`. Commit style → memory `conventions`.
 ## Reaching a Peer Session — address by scope, not by the list you were handed
 
