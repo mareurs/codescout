@@ -21,7 +21,7 @@ For a command whose last pipe stage is a filter (`… | head`, `… | grep`), `r
 
 ## Symptom (Effect)
 
-Measured 2026-09-24 ~15:18Z, `/tmp` a 63 G tmpfs that a still-unidentified process had filled (it later fell back to 18 G used). Two consecutive calls:
+Measured 2026-09-24 ~15:18Z. `/tmp` is a 63 G tmpfs mounted with `nr_inodes=1048576`, and it was out of space. Most likely it ran out of **inodes**, not bytes (see *Evidence*). Two consecutive calls:
 
 ```
 run_command("du -sh /tmp/* 2>/dev/null | sort -rh | head -8; ls -la /tmp | grep -c rustc")
@@ -51,7 +51,9 @@ Scope, from the same read: the temp file is created **only** when `detect_termin
 
 ## Evidence
 
-The two refusals above, and `Monitor` (which runs a plain shell and has no such capture) working throughout the same window: `df` from it read `tmpfs 63G 18G 46G` a minute later, so the fill was transient.
+The two refusals above, and `Monitor` (which runs a plain shell and has no such capture) working throughout the same window.
+
+**What was exhausted is inferred, not measured at the instant.** `ENOSPC` came while bytes were NOT full: `df` from `Monitor` a minute later read `tmpfs 63G 18G 46G`, and a 30-minute watcher alerting on bytes above 50 G never fired. `Glob` counted 365,356 files in `/tmp` at the time. After the operator's cleanup, `df -i` reads 169,283 of 1,048,576 inodes used (17%), with bytes at 13 G. That fits inode exhaustion under `nr_inodes=1048576`. `df -i` was not taken at the failure, so the byte-fill reading this file first gave is withdrawn rather than replaced by a certainty. The defect is the same either way: `tempfile()` fails on either kind of `ENOSPC`.
 
 ## Hypotheses tried
 
