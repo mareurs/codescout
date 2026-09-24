@@ -368,7 +368,7 @@ none is a half-finished change sitting in the tree.
 - **`owner:` vs `owners:` in bug frontmatter** — 495 files use the scalar, 109 the list, 68
   neither. The catalog indexes `owners`, so an owners-filter query returns `count: 0` for a file
   it demonstrably holds (verified at the tool surface on
-  `2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`). `docs/issues/_TEMPLATE.md`
+  `docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`). `docs/issues/_TEMPLATE.md`
   prescribes the invisible spelling. Widest reach of anything on this list.
 - **An `IC-14` 17th member** — the `ledger-counts` guard's stated subject is the `**Members:**`
   FIELD; its parsed extent is that field's first LINE (`scripts/pre-commit-ledger-counts.py:376`).

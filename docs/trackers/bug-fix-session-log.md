@@ -3086,7 +3086,7 @@ acquires the authority of a record the moment it is committed."*
 ## F-38 — A verify-open pass filed a false narrowing by reading a compact summary as the result
 
 **Observed:** 2026-07-28, re-running the reproduction in
-`docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md` before
+`docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md` before
 deciding between its two proposed fixes.
 
 **When:** Earlier the same day, a verify-open pass on that bug file had narrowed its scope
