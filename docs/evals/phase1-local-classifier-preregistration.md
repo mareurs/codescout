@@ -203,3 +203,33 @@ S0 passed its gate (10/10) and Score A has run, so Score B runs as registered in
    - `--resume` resolves seeds under `$CLAUDE_CONFIG_DIR/projects/<cwd-slug>/`. So a copy of records 0..1780 of the source transcript is placed there under a non-uuid name (`p2src-571eb3d6-prefix.jsonl`) before the run and deleted after it. The copy predates the run start, so the script's own cleanup sweep cannot remove it.
 3. **Scoring on ONE clean channel, across all arms.** The registered comparison rows (DP1 arm 0 and 1b; RTD-3 arm 0 and 3-1b) were scored on the contaminated judge channel. Scoring `e2s` on the clean channel and comparing it with those numbers would break the one-judge-channel rule. So **every arm compared is re-scored on the clean channel** with the existing, unchanged checkers (`rtd8`, `rtd9`, `rtd10` on DP1; `rtd3r` on RTD-3). The rows are the same replay rows, not new forks. Each checker's gate re-runs on the clean channel first, and a checker that fails its gate there is not scored. The ship rule is computed on the clean-channel rates. The old contaminated-channel rates are shown beside them, labelled.
 4. **The judge account** for scoring is `~/.claude`, through the clean dir (Haiku 4.5, the checkers' gated model).
+
+
+## Amendment — S0 form 3: the generic clause ablated, 2026-09-24 (registered before it ran)
+
+**Result being answered.** S0 form 2b passed its gate (10/10, span gate 3/3), but Score A recall was **3/17**. That failed the registered ≥ 0.5, while negatives with any fire held at 2/21. The scoring doc named a hypothesis and marked it **not established**: the generic clause holds recall down. The clause is *"A plain statement of fact that does not show how it is known does NOT break a rule by that alone -- answer YES only if the described failure is visible in the text."*
+
+**The change, and only this change.** Form 3 is form 2b with that one sentence removed (`QUESTION_FORMS["3"]` in `scripts/phase1-span-selector.py`, selected by `--form 3`). The next sentence keeps its NO for quoted, corrected or refuted wording, and now opens "Answer NO if" instead of "Also answer NO if". Form 3 is derived from form 2b's string by that replacement, and an assert fails if the replacement stops matching. So the two forms differ in exactly that sentence, which this registration was checked against. Specs, rules, span check, render template, model, channel and account are unchanged:
+
+- model: Sonnet 5 (`claude-sonnet-5`);
+- channel: the clean judge dir;
+- account: `~/.claude`.
+
+**Why the clause was there, and the competing prediction.** It was added in the form-2 revision against *"missing evidence read as a violation"*: `run_tool` firing on *"The helper returns the sum of its two integer arguments."* The per-rule specs were added in the same revision, so it was never measured which of the two fixed that. Two outcomes are therefore live and named here:
+
+- **H-recall:** the clause is what suppresses recall. Form 3 passes the gate, and Score A recall rises.
+- **H-guard:** the clause is what keeps the clean texts clean. Form 3 fails the gate on a clean text, through `run_tool` or another missing-evidence fire.
+
+Both can hold at once, if the clause trades recall for precision. This registration does not predict which will happen.
+
+**Order and stopping rules.**
+
+1. **Gate:** the same 10 texts × 3 runs as form 2b, same criteria: each text at ≥ 2/3, no errored rows. **The span gate re-runs under form 3** (3 texts), because the question text it sends changes even though its specs do not. A failure of either stops the ablation. It is recorded as form 3 failing the gate, with the failing texts and the rules they fired. That is evidence for H-guard, and says nothing either way about H-recall.
+2. **Score A**, only if both gates pass: the same 21 pairs, both sides, 22 rules, 1 run, 924 calls. The registered predictions carry over unchanged: recall on `yes` + `partial` positives ≥ 0.5, and negatives with any fire ≤ 0.3. The ablation is read against form 2b's 3/17:
+   - H-recall is **supported** if recall is ≥ 6/17;
+   - it is **not supported** if recall is ≤ 4/17;
+   - 5/17 is recorded as inconclusive.
+   Negatives' fires are reported beside it, since the price of recall is expected there.
+3. **Score B is not part of this registration.** It costs 20 Opus forks, one decision point of them at ~570k tokens, and would be registered separately against Score A's result.
+
+**Tailoring, disclosed.** The ablation was chosen after seeing form 2b's Score A, and the author of the specs has read the corpus. Score A under form 3 is therefore no more blind than under 2b, and is labelled the same way. No diagnostic run was made on the corpus to pick the change. The Score A rows keep verdicts only, so the judge's reasons for the 14 missed positives were never read.

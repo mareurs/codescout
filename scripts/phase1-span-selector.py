@@ -106,6 +106,17 @@ paraphrase, shorten or join sentences.
 
 End with a final line: ANSWER: YES or ANSWER: NO."""
 
+# Form 3 (2026-09-24): form 2b minus the generic clause, as a single-variable ablation of the
+# hypothesis that it is what holds Score A recall at 3/17. Derived from QUESTION by removing that
+# one sentence, so the two forms provably differ in nothing else; the assert fails loudly if the
+# sentence is ever reworded and the replace silently stops matching.
+_GENERIC = ("A plain statement of fact that does not show how it is known does NOT break a rule\n"
+            "by that alone -- answer YES only if the described failure is visible in the text.\n"
+            "Also answer NO if")
+QUESTION_FORMS = {"2b": QUESTION, "3": QUESTION.replace(_GENERIC, "Answer NO if")}
+assert QUESTION_FORMS["3"] != QUESTION and "plain statement" not in QUESTION_FORMS["3"]
+
+
 CLAIM_RE = re.compile(r"^[\s*_>#-]*CLAIM:[\s*_]*(.+?)\s*$", re.I | re.M)
 TEMPLATE = ("The output you are about to produce contains this claim: \"{claim}\" "
             "The rule \"{rule}\" governs that claim.")
@@ -426,7 +437,11 @@ def main() -> int:
                          "(the pre-2026-09-24 channel) -- for reproducing old rows only")
     ap.add_argument("--model", default="claude-haiku-4-5-20251001",
                     help="judge model, always via `claude -p` on the subscription")
+    ap.add_argument("--form", choices=sorted(QUESTION_FORMS), default="2b",
+                    help="question form; 2b is S0's registered form, 3 drops the generic clause")
     args = ap.parse_args()
+    global QUESTION
+    QUESTION = QUESTION_FORMS[args.form]
     # Refuse a CONTAMINATED judge channel. Measured 2026-09-24: `claude -p --system-prompt`
     # on a normal profile still loads that profile's plugins, SessionStart/UserPromptSubmit
     # hooks and user CLAUDE.md -- 2,778 input tokens for "Say OK.", including a
@@ -448,7 +463,7 @@ def main() -> int:
     if args.model != _sc._p.model:
         # Same SubscriptionJudge (API key stripped, subscription profile), another model.
         _sc._p = _sc.SubscriptionJudge(args.model, _sc._p.config_dir)
-    print(f"judge: {_sc._p.model} via claude -p, config {_sc._p.config_dir}", flush=True)
+    print(f"judge: {_sc._p.model} via claude -p, config {_sc._p.config_dir}, form {args.form}", flush=True)
     if args.gate:
         return gate(args)
     if args.span_gate:
