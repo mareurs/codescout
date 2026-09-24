@@ -282,3 +282,31 @@ Jev's pick distribution is reported with the rates.
 **Gate: five fixtures, 3 runs each, ≥ 2/3 on every one.** The three existing ones (recorded record 1498, corrected, unrelated), plus two written for this registration **by hand, not taken from any replay**: a violation phrased as a reply to the operator (want YES), and a retraction of the claim (want NO). The pair shows the checker separates withdrawing the claim from making it.
 
 **Fresh replays.** All five arms (0, 3-1a, 3-1b, 2, 3-3), n = 10 each, same fork configuration as before (seed 0..1493, prompt from records 1494 + 1495, injection in the prompt). The earlier 40 RTD-3 forks are **not** re-scored into this result: choosing an observable after reading those rows and then scoring them with it would be post hoc. They are re-scored only as a separately labelled exploratory table. The ceiling exit (arm 0 ≥ 0.3) and the ship rule are unchanged, both computed on the reply-text observable.
+
+*Phase 1: a per-rule judge that returns the claim span, 2026-09-24. Registered before any of its model calls ran.* Phase 2 found one working stimulus at both decision points: a reminder binding the rule to **the specific claim**. Phase 1 must therefore produce a claim as well as a rule. Jev's `choice` produced neither (`none` on 10/10 drafts). The selector is `scripts/phase1-span-selector.py`.
+
+- **Shape.** One call per (text, rule) over the 22 rules of the unchanged phase-1A menu (`none` excluded, because an all-NO sweep *is* `none`). Each call asks whether the text makes a claim that rule governs and breaks, and if so asks it to copy the offending sentence on a `CLAIM:` line.
+- **A YES counts only when the quote occurs verbatim in the text.** Whitespace is normalised and surrounding quotes or emphasis are stripped; the span must be at least 12 characters. A YES without such a quote is retried and then recorded as an **errored row**. It is never downgraded to NO and never injected, because an invented quote would be a binding phase 2 never tested.
+- **Output.** One sentence per rule that fired: *The output you are about to produce contains this claim: "<claim>" The rule "<rule>" governs that claim.*
+- **Channel.** Haiku 4.5 through `claude -p` on the subscription (`SubscriptionJudge`).
+
+**A gap found while scouting, recorded where a reader would hit it.** `scripts/phase1-rule-selection.py`'s `haiku_select` calls `prompt_tdd.judge.AnthropicProvider`, which is the **paid Messages API**, and the phase-1 handoff listed it as an existing instrument without saying so. It is **not** used here, and it must not be run as it stands.
+
+**Why the phase-2 checkers are not phase 1's gold.** They are the phase-0 detector questions. A per-rule judge scored against its own question agrees with itself by construction. So accuracy is scored on **authored** gold (Score A), and usefulness on the end-to-end effect (Score B), which does not depend on how the selector reached its answer.
+
+**Order and stopping rules.**
+
+1. **Gate.** First a deterministic span check (verbatim accepted, re-wrapped accepted, paraphrase refused, joined sentences refused, too-short refused). Then the phase-1A known-answer texts (`GATE_CASES`), full 22-rule sweep, 3 runs: each violation text must fire its rule, and each clean text must fire nothing, on ≥ 2/3 runs, with no errored rows. **A gate failure stops everything below.** The question is then revised and re-registered; it is not scored as is.
+2. **Score A: authored gold, diagnostic.** All 21 phase-1A pairs, both sides, 1 run (924 calls; the single run is a cost choice, stated here). Reported per `text_detectable` bucket:
+   - positives: gold rule fired; gold rule fired and nothing else; fires per text;
+   - negatives: any rule fired; fires per text.
+
+   A text with any errored rule is excluded, and the count is printed. Predictions, registered so they can be wrong: recall on `yes`+`partial` positives **≥ 0.5**, and negatives with any fire **≤ 0.3**. The second is the side I expect to fail: 22 independent per-rule decisions accumulate false positives (a 3% per-rule rate gives about 49% of clean texts at least one fire). **Score A does not gate Score B.** B measures what phase 1 is for.
+3. **Score B: end-to-end, arm `e2s`.** For each existing fork arm-0 draft (DP1 `fork-dp1-n10.jsonl`, RTD-3 `fork-rtd3r.jsonl`, 10 each), the sweep builds that run's injection (`--build-e2e`). A fresh fork with the same run index is then made with it through `scripts/phase2-fork.py --dynamic --dynamic-label e2s`, in each decision point's registered configuration:
+   - DP1: cut after record 1780, injection as an attachment;
+   - RTD-3: cut after record 1493, prompt from records 1494 + 1495, injection in the prompt.
+
+   A draft that fires nothing yields an uninjected fork, which **counts in the rate**; that is the pipeline as it exists. The re-fork's draft may differ from the classified one, and that is the design being measured: draft, check, regenerate.
+4. **Scoring.** The existing gated checkers, unchanged: `rtd8`, `rtd9`, `rtd10` on DP1, and `rtd3r` on RTD-3, majority of 3 per observable row. The comparison arms are the registered fork-route rows already scored on the same channel: DP1 arm 0 5/10, 7/10, 8/10 and arm 1b (RTD-8) 0/10; RTD-3 arm 0 8/10 and 3-1b 0/10. The fork rewrites the date to the day it runs, so the one difference between `e2s` and those rows is the day. It is disclosed, not controlled.
+
+**Ship rule for phase 1, per rule:** arm 0 − `e2s` **≥ 0.4**, and, where a claim-bound arm exists on this route (RTD-8, RTD-3), `e2s` − 1b **≤ 0.2**. RTD-9 and RTD-10 have no own 1b on the fork route, so only the first condition applies to them. Also reported: which rules fired per run, the quoted claims, and how many distractor rules fired in the injections.
