@@ -183,7 +183,7 @@ fn multi_filter_test_command(original_command: &str) -> Option<(Vec<String>, Str
     // `cargo test`. Without this the scan ran to the end of the line, so a piped `grep`, a
     // redirect target or a whole `; next-command` were reported as filters that "matched
     // NOTHING", and `rposition("--")` could pick a LATER command's `--` (`; git log -- src`).
-    // docs/issues/2026-09-24-partial-test-selection-reads-shell-pipeline-tokens-as-test-filters.md
+    // docs/issues/archive/2026-09-24-partial-test-selection-reads-shell-pipeline-tokens-as-test-filters.md
     let is_boundary = |t: &str| matches!(t, "|" | "||" | "&&" | ";" | "&");
     let mut start = 0;
     let mut segment = None;
@@ -948,7 +948,7 @@ mod tests {
     /// piped grep reported `2>&1`, `|` and grep's pattern as six filters that "matched
     /// NOTHING"; a peer's `> log 2>&1; grep …` chain reported seven, including the redirect
     /// target and the whole following command.
-    /// docs/issues/2026-09-24-partial-test-selection-reads-shell-pipeline-tokens-as-test-filters.md
+    /// docs/issues/archive/2026-09-24-partial-test-selection-reads-shell-pipeline-tokens-as-test-filters.md
     #[test]
     fn multi_filter_test_command_stops_at_shell_syntax() {
         for (cmd, want) in [

@@ -1,10 +1,11 @@
 ---
-id: '2adb81a1d0e71579'
+id: 9246def7568184ad
 kind: bug
-status: open
+status: fixed
 title: 'BUG: IL-3''s unbounded-pipe block is bypassed by a leading environment assignment'
 tags:
 - cluster/guard-narrower-than-its-name
+closed: 2026-09-24
 opened: 2026-09-24
 ---
 
@@ -47,19 +48,29 @@ same reading and NOT yet run: wrapper commands (`env cargo`, `time cargo`, `nice
 
 ## Fix
 
-Not yet applied. Skip leading `NAME=value` tokens (a POSIX assignment word: `[A-Za-z_][A-Za-z0-9_]*=`)
-before taking the head; decide separately whether to also skip known wrappers (`env`, `time`,
-`nice`, `timeout <n>`), which is a list over an open namespace and owes the escape/disambiguator
-questions of `CLAUDE.md` § *Parsers Over a Namespace*. Regression test beside
-`il3_blocks_cargo_test_pipe_grep` (`src/util/path_security.rs`): the assignment-prefixed form
-blocked, plus a bounded LHS with an assignment prefix (`FOO=1 ls | head`) still allowed, so the fix
-cannot pass by blocking every assignment.
+**FIXED 2026-09-24 at `1fb66cf6`.** The wrapper probes were run before the fix and all
+bypassed, so they are in scope: `env cargo`, `timeout 60 cargo` and `nice cargo` piped to `head`
+each ran while bare `cargo` was refused.
+
+New `producer_index` (`src/util/path_security.rs`) skips leading POSIX assignment words and a
+CLOSED set of wrappers that exec their argument — `env` (+ its assignments/flags),
+`nice [-n N]`, `timeout [-k DUR] [-s SIG] DURATION`, `nohup`, `time`, `command`. `is_unbounded_lhs`
+now SLICES the token list at that index rather than re-heading it, because later branches read
+positions (`git`'s subcommand is `tokens[1]`). A wrapper not on the list still falls to bounded —
+the module's documented false-negative direction, stated at the site.
 
 ## Tests added
 
-None yet.
+`il3_sees_the_producer_behind_assignments_and_wrappers` (nine spellings) and
+`il3_skipping_a_prefix_keeps_bounded_producers_bounded` (bounded producers behind a prefix stay
+allowed; `FOO=1 git rev-parse HEAD | head -1` pins the slicing), both in
+`src/util/path_security.rs`. Mutation via `scripts/mutation-probe.sh`, 6/6 KILLED.
+
+## Fix provenance
+
+- **SHA:** `1fb66cf6` (`experiments`)
+- **patch-id:** `e4e6eefe3b31d567d87c0fb2cc1bc0b390764feb`
 
 ## Resume
 
-Implement the assignment skip in `is_unbounded_lhs`, then run the wrapper-command probes before
-deciding whether they belong in the same fix.
+N/A — fixed.

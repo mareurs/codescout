@@ -1399,7 +1399,7 @@ fn grep_is_counting(stage: &str) -> bool {
 /// Without it the first token was the head, so `FOO=1 cargo test | grep` read as the unknown
 /// command `FOO=1`, fell to "ambiguous -> bounded", and the pipe masked cargo's exit status —
 /// the harm IL-3 exists for, reproduced by exactly the `CARGO_TARGET_DIR=` prefix
-/// `scripts/gate.sh` sets. docs/issues/2026-09-24-il3-unbounded-pipe-block-is-bypassed-by-a-leading-env-assignment.md
+/// `scripts/gate.sh` sets. docs/issues/archive/2026-09-24-il3-unbounded-pipe-block-is-bypassed-by-a-leading-env-assignment.md
 ///
 /// **A closed wrapper list, and the limit is stated rather than hidden:** a wrapper not named
 /// here (`stdbuf`, `ionice`, a shell function) still reads as its own name and falls to
@@ -4149,7 +4149,7 @@ mod tests {
     /// `FOO=1 cargo`, `env cargo`, `timeout 60 cargo` and `nice cargo` piped to `head` was
     /// ALLOWED while bare `cargo` was refused — the head was read as `FOO=1`/`env`/..., fell to
     /// "ambiguous -> bounded", and the pipe masked cargo's exit status, the harm IL-3 exists
-    /// for. docs/issues/2026-09-24-il3-unbounded-pipe-block-is-bypassed-by-a-leading-env-assignment.md
+    /// for. docs/issues/archive/2026-09-24-il3-unbounded-pipe-block-is-bypassed-by-a-leading-env-assignment.md
     #[test]
     fn il3_sees_the_producer_behind_assignments_and_wrappers() {
         for cmd in [

@@ -1,10 +1,11 @@
 ---
-id: '7cfa25dfc576c1bd'
+id: a19ffc66415317a2
 kind: bug
-status: open
+status: fixed
 title: 'BUG: run_command''s partial-test-selection diagnostic reads shell pipeline tokens as cargo test filters'
 tags:
 - cluster/addressing-without-an-escape-hatch
+closed: 2026-09-24
 opened: 2026-09-24
 ---
 
@@ -60,17 +61,32 @@ the listing is correct and only the diff against it is polluted.
 
 ## Fix
 
-Not yet applied. End the filter list at the first shell control/redirection token (`|`, `||`, `&&`,
-`;`, `&`, any token containing `>` or `<`, and any token ENDING in `;` or `&` -- the peer's `2>&1;` case), which is the escape this parser owes per `CLAUDE.md`
-§ *Parsers Over a Namespace*. A regression test pins a piped command, an `&&` chain, and a `2>&1`
-redirection, each with two matching filters, asserting no partial-miss report; plus the existing
-positive case, so the fix cannot pass by never reporting.
+**FIXED 2026-09-24 at `aa045e32`.** The line is split into shell SEGMENTS first (`|` `||` `&&`
+`;` `&`, with a GLUED trailing `;` split off — both `2>&1;` and `bb;` carry it, and `bb` is a real
+filter), only the segment running `cargo test` is read, and a redirection (`2>&1`, `>file`, and a
+bare `>`'s target) is not a filter.
+
+**Found while fixing, not in the original filing:** `rposition("--")` over the whole line could
+pick a LATER command's `--` (`; git log -- src`), so the `--list` command was built from the wrong
+segment. Now scoped to the cargo segment, keeping any `cd sub &&` prefix so the listing runs in
+the right directory.
+
+Staged by blob: `output.rs` carried a live peer's unrelated uncommitted hunks, so the commit is
+HEAD's file plus only this change, written with `git update-index --cacheinfo <mode> <blob> <path>`
+(the separated form, which the stage-log attributes). No `--no-verify`.
 
 ## Tests added
 
-None yet.
+`multi_filter_test_command_stops_at_shell_syntax` (piped grep, `&&`, `> file 2>&1`, and the
+peer's exact `; grep` chain) and `multi_filter_test_command_lists_from_the_cargo_segment`, in
+`src/tools/run_command/output.rs`. Both red first. Mutation via `scripts/mutation-probe.sh`, 6/6
+KILLED.
+
+## Fix provenance
+
+- **SHA:** `aa045e32` (`experiments`)
+- **patch-id:** `788a5253ab9bac67b55156df22c674d09f30187f`
 
 ## Resume
 
-Fix `multi_filter_test_command` as above; tests beside the existing
-`partial_test_selection_diagnostic_with` tests (`src/tools/run_command/output.rs:893`, `:914`).
+N/A — fixed.
