@@ -9507,6 +9507,97 @@ async fn references_on_an_unused_file_local_symbol_that_returns_its_declaration_
     );
 }
 
+/// The other arm of C2's promise: the server STARTED, but `document_symbols` failed —
+/// e.g. a `null` that outlasted the retry budget, which since `e26da0b2` is an error
+/// rather than an empty list. The glob overview used `if let Ok`, so the file vanished
+/// from `files` with no entry, no fallback and no mark.
+#[tokio::test]
+async fn glob_overview_keeps_a_file_whose_symbol_lookup_failed() {
+    use crate::lsp::mock::{MockLspClient, MockLspProvider};
+
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    let file = std::fs::canonicalize(dir.path())
+        .unwrap()
+        .join("src")
+        .join("lib.rs");
+    std::fs::write(&file, "fn alpha() {}\n").unwrap();
+    let lsp = MockLspProvider::with_client(
+        MockLspClient::new().with_symbols_error(&file, "server answered documentSymbol with null"),
+    );
+    let ctx = path_scoped_ctx(dir.path(), lsp).await;
+
+    let result = Symbols
+        .call(json!({ "path": "src/*.rs" }), &ctx)
+        .await
+        .expect("glob overview must succeed when one file's lookup fails");
+
+    let files = result["files"].as_array().expect("files array");
+    let entry = files
+        .iter()
+        .find(|f| f["file"].as_str() == Some("src/lib.rs"))
+        .unwrap_or_else(|| panic!("a file whose lookup failed must stay visible: {result}"));
+    assert_eq!(
+        entry["lsp"].as_str(),
+        Some("warming"),
+        "the fallback must be marked: {entry}"
+    );
+    let names: Vec<&str> = entry["symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+    assert!(
+        names.contains(&"alpha"),
+        "tree-sitter must serve the symbols: {entry}"
+    );
+}
+
+/// The single-file overview's version of the same failure. Before `e26da0b2` a
+/// persistent `null` was `Ok([])`, which the BUG-054 mitigation below it turned into a
+/// tree-sitter answer; after it, the `Err` reached `?` and the whole call failed. An
+/// overview must degrade to tree-sitter, marked, not refuse.
+#[tokio::test]
+async fn single_file_overview_falls_back_to_tree_sitter_when_the_symbol_lookup_fails() {
+    use crate::lsp::mock::{MockLspClient, MockLspProvider};
+
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    let file = std::fs::canonicalize(dir.path())
+        .unwrap()
+        .join("src")
+        .join("lib.rs");
+    std::fs::write(&file, "fn alpha() {}\n").unwrap();
+    let lsp = MockLspProvider::with_client(
+        MockLspClient::new().with_symbols_error(&file, "server answered documentSymbol with null"),
+    );
+    let ctx = path_scoped_ctx(dir.path(), lsp).await;
+
+    let result = Symbols
+        .call(json!({ "path": "src/lib.rs" }), &ctx)
+        .await
+        .expect("a single-file overview must degrade to tree-sitter, not fail");
+
+    assert_eq!(
+        result["lsp"].as_str(),
+        Some("warming"),
+        "the fallback must be marked: {result}"
+    );
+    let names: Vec<&str> = result["symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+    assert!(
+        names.contains(&"alpha"),
+        "tree-sitter must serve the symbols: {result}"
+    );
+}
+
 /// The defect itself: `ignore::Walk` yields `Result<DirEntry, _>` and the previous
 /// `.flatten()` discarded every `Err`, so a walk truncated by an unreadable
 /// directory was indistinguishable from a complete one. An unreadable directory is

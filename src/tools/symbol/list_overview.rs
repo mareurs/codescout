@@ -260,34 +260,49 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
                 crate::lsp::LSP_FIRST_CALL_BUDGET,
             )
             .await;
-            if let Some(client) = budget_client {
-                let timer = LspTimer::start();
-                if let Ok(symbols) = client.document_symbols(file_path, language_id).await {
-                    timer.record(&*ctx.lsp, lang, &root).await;
-                    let rel = file_path.strip_prefix(&root).unwrap_or(file_path);
-                    let source = if include_body {
-                        std::fs::read_to_string(file_path).ok()
-                    } else {
-                        None
-                    };
-                    let json_symbols: Vec<Value> = symbols
-                        .iter()
-                        .map(|s| symbol_to_json(s, include_body, source.as_deref(), depth, false))
-                        .collect();
-                    let json_symbols = if lang == "bash" {
-                        filter_variable_symbols(json_symbols)
-                    } else {
-                        json_symbols
-                    };
-                    let mut entry = json!({
-                        "file": to_forward_slash(rel),
-                        "symbols": json_symbols,
-                    });
-                    if include_docs {
-                        entry["docstrings"] = json!(collect_docstrings(file_path));
+            // A failed lookup (a server that never answered, a dropped connection) is
+            // treated like a budget miss: serve tree-sitter and mark the entry, rather than
+            // `if let Ok`-ing the file out of `files` with no trace.
+            let lsp_symbols = match budget_client {
+                Some(client) => {
+                    let timer = LspTimer::start();
+                    match client.document_symbols(file_path, language_id).await {
+                        Ok(symbols) => {
+                            timer.record(&*ctx.lsp, lang, &root).await;
+                            Some(symbols)
+                        }
+                        Err(e) => {
+                            tracing::debug!(file = %file_path.display(), error = %e, "glob overview: document_symbols failed; serving tree-sitter");
+                            None
+                        }
                     }
-                    result.push(entry);
                 }
+                None => None,
+            };
+            if let Some(symbols) = lsp_symbols {
+                let rel = file_path.strip_prefix(&root).unwrap_or(file_path);
+                let source = if include_body {
+                    std::fs::read_to_string(file_path).ok()
+                } else {
+                    None
+                };
+                let json_symbols: Vec<Value> = symbols
+                    .iter()
+                    .map(|s| symbol_to_json(s, include_body, source.as_deref(), depth, false))
+                    .collect();
+                let json_symbols = if lang == "bash" {
+                    filter_variable_symbols(json_symbols)
+                } else {
+                    json_symbols
+                };
+                let mut entry = json!({
+                    "file": to_forward_slash(rel),
+                    "symbols": json_symbols,
+                });
+                if include_docs {
+                    entry["docstrings"] = json!(collect_docstrings(file_path));
+                }
+                result.push(entry);
             } else if let Ok(symbols) = crate::ast::extract_symbols(file_path) {
                 // LSP still warming: serve tree-sitter so the overview is not
                 // blocked or silently missing files; mark the entry.
@@ -369,7 +384,7 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
                 // I-4: single-retry on transient LSP-mux disconnect (covers Kotlin LSP
                 // eviction churn). Closure is idempotent — document_symbols is a pure
                 // read of the LSP-side index.
-                let symbols = retry_on_mux_disconnect(
+                let looked_up = retry_on_mux_disconnect(
                     &ctx.agent,
                     &*ctx.lsp,
                     &full_path,
@@ -381,9 +396,23 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
                         async move { c.document_symbols(&p, &l).await }
                     },
                 )
-                .await?;
-                timer.record(&*ctx.lsp, raw_lang, &root).await;
-                symbols
+                .await;
+                match looked_up {
+                    Ok(symbols) => {
+                        timer.record(&*ctx.lsp, raw_lang, &root).await;
+                        symbols
+                    }
+                    // A failed lookup degrades like a budget miss when there is a grammar
+                    // to degrade to. Since `document_symbols` reports a persistent `null`
+                    // as an error rather than `Ok(vec![])`, this is the path that used to
+                    // reach the BUG-054 fallback below; without it the `?` failed the call.
+                    Err(e) if ast::get_ts_language(raw_lang).is_some() => {
+                        tracing::debug!(file = %full_path.display(), error = %e, "overview: document_symbols failed; serving tree-sitter");
+                        lsp_warming = true;
+                        ast::extract_symbols(&full_path)?
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             None => {
                 if ast::get_ts_language(raw_lang).is_none() {
