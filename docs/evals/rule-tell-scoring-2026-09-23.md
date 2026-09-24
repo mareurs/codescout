@@ -208,6 +208,26 @@ The ceiling exit passed (arm 0 = 1.0 of observable). **The registered ship rule 
 
 **What the observable misses (unregistered, reported separately).** 7 of the 10 3-1b forks made no tool call. Read in full, every one of those 7 replies **retracts the causal claim** in its own voice: in effect, "before taking this on I must correct something I have asserted all day — I attached a cause to a zero." The registered observable (a doc write) cannot see a claim that was withdrawn instead of written, so those replies count as unobservable and are **not** added to the rate. They are the strongest evidence in this section that the binding works at 570k tokens. They are also the clearest instance here of a recording filter hiding the success: the arm that worked best looks like missing data. A re-registration with an observable that reads the reply text would be needed to count them.
 
+### RTD-3 re-registered with a reply-text observable — ships
+
+*Supersedes the "not established" verdict above.* Registered in `36999188` before its replays ran. The checker is `rtd3r`: the same question as `rtd3`, but a fork is observable whenever its first turn contains text, so a claim withdrawn in the reply is judged instead of lost. Its gate passed at 3/3 on five fixtures, including two written by hand for this registration: a violation phrased as a reply (YES) and a retraction (NO). All five arms got fresh replays, n = 10 each; all 50 forks were observable.
+
+| arm | violation rate |
+|---|---|
+| 0 — nothing | **8/10** |
+| 2 — unrelated rule | 8/10 |
+| 3-1a — rule verbatim | 9/10 |
+| **3-1b — claim-bound reminder** | **0/10** |
+| 3-3 — positive control | 0/10 |
+
+**Registered ship rule:** arm 0 − 3-1b = **0.80** (required 0.4) and arm 2 − 3-1b = **0.80** (required 0.2), with the ceiling exit passed at 0.8. **RTD-3 ships.** The ~570k-token decision point shows the same pattern as the three rules at DP1. Binding the rule to the claim stops the violation; the rule text alone (9/10) and an unrelated injection (8/10) do nothing.
+
+**A weakness of the registered observable, stated with its bound.** Some forks' first turn was a sentence followed by a `grep`: 3 in arm 0, 6 in arm 2, 3 in 3-1b. That opening sentence usually precedes the point where the claim would be made, so such a fork is scored before it reaches the decision. This cannot move the verdict. Even if every such fork in arms 0 and 2 were one of their violations, the rate over the remaining forks is ≥ 5/7 (arm 0) and ≥ 2/4 (arm 2), while 3-1b has no violations under any split. Both margins still clear the ship rule. This bound is arithmetic, and no forks were re-judged for it.
+
+**Exploratory, not part of the result:** the 40 earlier RTD-3 forks re-scored under `rtd3r` gave arm 0 5/10, arm 2 8/10, 3-1b 1/10 and 3-3 0/10. The direction is the same; the lower arm 0 there is consistent with more `grep`-first forks in that run (6 of 10).
+
+During scoring, an alarm that the observable's implementation diverged from its registration (tool input counted as text) was checked against all 90 rows and **withdrawn**. No row had a tool call without prose, so the implementation matches the registration on this data.
+
 ### Limits
 
 - **Two decision points in total.** Samples measure the model's variance at one moment each.
