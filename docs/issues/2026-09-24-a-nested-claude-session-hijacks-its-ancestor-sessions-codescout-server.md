@@ -1,10 +1,11 @@
 ---
 id: '54a1a8011bca0358'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a nested `claude` session''s SessionStart re-stamps its ancestor session''s codescout server, hijacking that server''s session identity'
 tags:
 - cluster/gate-keyed-on-unobservable-event
+closed: 2026-09-24
 opened: 2026-09-24
 owner: marius
 related:
@@ -91,17 +92,47 @@ Server side: `Rendezvous::poll` sees the session change and calls `GuideLedger::
 
 ## Fix
 
-Not implemented. Candidate: stamp only the slots whose `ppid` is the **nearest** Claude process in the ancestry, identified positively. Walk up from the hook and stop at the first pid P for which `$CLAUDE_CONFIG_DIR/sessions/P.json` exists with a `sessionId` equal to the hook's `session_id`.
+**Implemented 2026-09-24:** `claude-plugins:1cc83fbf6cf46c43fb5d408fb5a57715b1b4cb1e` (branch `main`, not pushed), patch-id `aaac514635807cf51e6270fec2ec8dc1738ea8d5`.
 
-**Unverified:** whether a `claude -p` process writes a `sessions/<pid>.json` row. Both probes had exited before I checked.
+Both ancestry walks now **end at the nearest Claude process**, which is included in the walk. That's `lib.mjs` `ownAncestry()`, which serves `refreshLivenessStamp` and `resolveOwnServerPids`, and `session-start.mjs`'s own copy, which serves the stamp. One predicate, `lib.mjs` `isClaudeProcess(pid)`, recognizes a Claude process by either of two signals, because each covers the other's gap:
 
-A weaker alternative is to stop at the first ancestor that parents *any* slot. It fails when the nested session's own server hasn't published its slot yet, and that startup race is real: the measured slot-to-stamp margins were 51 ms and 86 ms.
+- **A registry row, `$CLAUDE_CONFIG_DIR/sessions/<pid>.json`.**
+  - Measured present for `claude -p` (`"entrypoint":"sdk-cli"`) as well as interactive sessions.
+  - Written at startup, so it races the hooks. Measured once: row at 11:18:54.755Z, SessionStart stamp at .820Z.
+- **`comm` `claude`.**
+  - Set at exec, so it can't lose that race.
+  - Linux-only, and true only of the native binary (an npm install runs as `node`).
 
-Apply the same scoping to `resolveOwnServerPids` if its callers mean "my own servers".
+**Residual, documented at the predicate.** A stale registry row whose pid was reused by a process in our chain ends the walk early. Our own server is then left unstamped: the pre-rendezvous state, and the safe direction. The row's `procStart` equals `/proc/<pid>/stat` field 22 (verified: 84228601 for PID 50568), which is the discriminator if this is ever worth a third guard.
+
+The weaker alternative (stop at the first ancestor that parents *any* slot) was rejected. It fails whenever the nested session's own server hasn't published its slot yet.
 
 ## Tests added
 
-None.
+All in `claude-plugins`. Each was observed RED against the unfixed hooks, with its positive control PASSING in the same run:
+
+- **`codescout-companion/hooks/session-start.test.sh`:** two nested cases, each fabricating the nested Claude as an intermediate process that owns the inner slot, with the outer slot's `ppid` one hop above it.
+  - **(A)** A plain `bash` with a registry row in a private `CLAUDE_CONFIG_DIR`, so only the registry signal can fire.
+  - **(B)** A `bash` exec'd through a symlink named `claude`, with no row, so only the `comm` signal can fire. Its `comm` is checked as a fixture precondition, not assumed.
+  - Each case asserts that the inner slot IS stamped (positive control) and that the outer slot keeps its session.
+- **`codescout-companion/hooks/cs-liveness.test.sh` case 5:** the same shape through `lib.mjs`'s walk. The inner slot is refreshed; the outer is untouched.
+- **Mutations, run on scratch copies only because the working tree is live for every profile.** Each pattern was asserted to occur exactly once, and each mutation was KILLED by exactly its intended case:
+
+  | mutation | killed by | stayed green |
+  |---|---|---|
+  | drop the stop in session-start's walk | (A) and (B) | cs-liveness |
+  | drop the stop in lib's walk | cs-liveness #5 | (A) and (B) |
+  | disable the registry signal | (A) and cs-liveness #5 | (B) |
+  | disable the `comm` signal | (B) | (A) |
+
+  These kills were measured with a real Claude process above the test run. Without one, as in CI, the unfixed walk has nowhere earlier to stop, so the same assertions would red. That follows from reading the walk; it was not measured.
+- **Suites:** all 18 hook `*.test.sh` files and `host-normalization.test.mjs` are green. `tests/run-all.sh` has one red suite, `test-pre-push-guard.sh` (six parity assertions). It is **not caused by this change**: in a worktree of the same repo at HEAD, with the same history and shared `.git/hooks` and with all four changed files applied, that suite shows 0 failures. Whether it was already red in the live tree before this change was not measured.
+
+**Verified live 2026-09-24T11:27Z** with the original reproduction: a `claude -p` run from this session's own `run_command`, not detached. Afterwards:
+
+- My slot (`servers/3393665.json`) still read `774ba049…` with `hook_source` `compact`.
+- The probe's own slot (`servers/2568872.json`, `ppid` = the probe's Claude) was stamped `e5864c3d…`/`startup`.
+- Exactly one slot carried the probe's id, where the unfixed hook produced two.
 
 ## Workarounds
 
@@ -110,9 +141,12 @@ None.
 
 ## Resume
 
-1. Check whether `claude -p` writes `$CLAUDE_CONFIG_DIR/sessions/<pid>.json`: keep one alive (a long prompt) and look.
-2. Work test-first in `claude-plugins:codescout-companion/hooks/session-start.test.sh`. A slot whose `ppid` is an ancestor *beyond* the nearest Claude process must not be stamped, and the sibling-window exclusion must still hold. **The working tree is live for every profile:** run mutations on a scratch copy only.
-3. Audit the callers of `resolveOwnServerPids`.
+Fixed and verified live. Archive in one pass with `c186c45e2ed2a038` and `a5054d135acacbe3`. The move mints a new id, so re-point, in the same pass:
+
+- the four `claude-plugins` citations of this path: `hooks/lib.mjs`, `hooks/session-start.mjs`, `hooks/session-start.test.sh`, `hooks/cs-liveness.test.sh`;
+- this id in `issue-clusters/IC-2` Members.
+
+`~/.claude-kat` has not been probed, but all three profiles use the same directory marketplace.
 
 ## References
 

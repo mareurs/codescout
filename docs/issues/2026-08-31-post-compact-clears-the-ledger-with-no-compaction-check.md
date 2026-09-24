@@ -148,6 +148,9 @@ The design in § *The one viable design*, plus one piece it missed. **The measur
 - **Mechanism.** On `startup`/`resume` the source only arrives if the new server's slot exists before SessionStart runs. The measured slot-to-stamp margins were 51 ms and 86 ms. That peer's resumed session holds a slot with no source; the cause isn't decided between no slot yet, an empty `source`, and old code loaded.
 - **Consequence.** Losing the race degrades to `"cleared"`, the pre-fix behaviour, which is the safe direction.
 - **Scope.** The measured case (a mistaken call after `/mcp`) is unaffected, because the source was stamped into the predecessor slot long before.
-- **Not measured:** how often the race is lost.
+- **Observed rate:** the source was lost on **2 of 2** real resumes observed by that session (`~/.claude-sdd`), the second on companion 1.20.14.
+  - At 11:16:51Z the server published its slot at .394Z, and the `SessionStart:resume` attachment was recorded at .499Z. The slot was never stamped; its next write was the liveness refresher.
+  - The peer ruled out an empty `source` (it was `resume`) and old code (1.20.14's `session-start.mjs` has the stamping). "No slot yet at scan time" survives, but it isn't proven, because the hook's start time is not recorded.
+  - **So `"kept"` may be close to unreachable after a resume, rather than occasionally missed.** The measured `/mcp` case is unaffected. A remedy would decouple the source from slot timing, for example a per-session record the server reads at adoption: `b586243d43574c1b`.
 
 Archive together with `c186c45e2ed2a038` in one pass (see its Resume for the citations to re-point).
