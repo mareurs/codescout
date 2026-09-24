@@ -169,16 +169,66 @@ fn multi_filter_test_command(original_command: &str) -> Option<(Vec<String>, Str
     if !original_command.contains("cargo test") {
         return None;
     }
-    let tokens: Vec<&str> = original_command.split_whitespace().collect();
-    let dash_idx = tokens.iter().rposition(|&t| t == "--")?;
-    let filters: Vec<String> = tokens[dash_idx + 1..]
-        .iter()
-        .filter(|t| !t.starts_with('-'))
-        .map(|s| s.to_string())
+    // Split a GLUED trailing `;` into its own token first — `2>&1;` and `bb;` both carry the
+    // separator attached, and `bb` is a real filter that dropping the whole token would lose.
+    let tokens: Vec<&str> = original_command
+        .split_whitespace()
+        .flat_map(|t| match t.strip_suffix(';') {
+            Some(stem) if !stem.is_empty() => vec![stem, ";"],
+            _ => vec![t],
+        })
         .collect();
+
+    // Split into shell SEGMENTS before looking for `--`, and read only the segment that runs
+    // `cargo test`. Without this the scan ran to the end of the line, so a piped `grep`, a
+    // redirect target or a whole `; next-command` were reported as filters that "matched
+    // NOTHING", and `rposition("--")` could pick a LATER command's `--` (`; git log -- src`).
+    // docs/issues/2026-09-24-partial-test-selection-reads-shell-pipeline-tokens-as-test-filters.md
+    let is_boundary = |t: &str| matches!(t, "|" | "||" | "&&" | ";" | "&");
+    let mut start = 0;
+    let mut segment = None;
+    for (i, t) in tokens.iter().enumerate() {
+        let boundary = is_boundary(t);
+        if boundary || i + 1 == tokens.len() {
+            let end = if boundary { i } else { i + 1 };
+            if tokens[start..end]
+                .windows(2)
+                .any(|w| w[0] == "cargo" && w[1] == "test")
+            {
+                segment = Some((start, end));
+                break;
+            }
+            start = i + 1;
+        }
+    }
+    let (seg_start, seg_end) = segment?;
+    let dash_idx = seg_start
+        + tokens[seg_start..seg_end]
+            .iter()
+            .rposition(|&t| t == "--")?;
+
+    // Within the segment, a redirection is not a filter either: `2>&1`, `>file`, and a bare
+    // `>` / `2>` whose target is the NEXT token.
+    let mut filters = Vec::new();
+    let mut skip_target = false;
+    for t in &tokens[dash_idx + 1..seg_end] {
+        if skip_target {
+            skip_target = false;
+            continue;
+        }
+        if t.contains('>') || t.contains('<') {
+            skip_target = t.ends_with('>') || t.ends_with('<');
+            continue;
+        }
+        if !t.starts_with('-') {
+            filters.push(t.to_string());
+        }
+    }
     if filters.len() < 2 {
         return None;
     }
+    // Everything up to and including the cargo segment's `--`, so a `cd sub &&` prefix still
+    // runs the listing in the right directory.
     let list_command = format!("{} --list", tokens[..=dash_idx].join(" "));
     Some((filters, list_command))
 }
@@ -892,5 +942,50 @@ mod tests {
     #[test]
     fn multi_filter_test_command_declines_a_non_test_command() {
         assert!(multi_filter_test_command("cargo build --workspace").is_none());
+    }
+
+    /// Shell syntax after the filters is not a filter. Measured 2026-09-24 on both shapes: a
+    /// piped grep reported `2>&1`, `|` and grep's pattern as six filters that "matched
+    /// NOTHING"; a peer's `> log 2>&1; grep …` chain reported seven, including the redirect
+    /// target and the whole following command.
+    /// docs/issues/2026-09-24-partial-test-selection-reads-shell-pipeline-tokens-as-test-filters.md
+    #[test]
+    fn multi_filter_test_command_stops_at_shell_syntax() {
+        for (cmd, want) in [
+            (
+                r#"cargo test --lib -- aa bb 2>&1 | grep -E "x|y""#,
+                vec!["aa", "bb"],
+            ),
+            ("cargo test -- aa bb && echo done", vec!["aa", "bb"]),
+            ("cargo test -- aa bb > out.log 2>&1", vec!["aa", "bb"]),
+        ] {
+            let (filters, _) = multi_filter_test_command(cmd)
+                .unwrap_or_else(|| panic!("two real filters must still be found: {cmd}"));
+            assert_eq!(filters, want, "{cmd}");
+        }
+        // The peer's exact shape: the only name (`zz`) sits BEFORE `--`, so after the syntax
+        // is discarded there are no filters at all — previously seven phantom ones. Load-bearing:
+        // `2>&1;` has the `;` GLUED on, which a check for a bare `;` token misses.
+        assert!(
+            multi_filter_test_command(
+                r#"cargo test --lib zz -- --ignored --nocapture > $S/r.log 2>&1; grep -E "REPLAY|test result" $S/r.log"#
+            )
+            .is_none()
+        );
+    }
+
+    /// The `--list` command is built from the `--` of the segment that runs `cargo test`, and
+    /// keeps anything before it. Load-bearing: the later `git log -- src` has its own `--`,
+    /// which the old `rposition` over the whole line would have picked; and `cd sub &&` must
+    /// survive, or the listing runs in the wrong directory.
+    #[test]
+    fn multi_filter_test_command_lists_from_the_cargo_segment() {
+        let (filters, list) =
+            multi_filter_test_command("cargo test -- aa bb; git log -- src").unwrap();
+        assert_eq!(filters, vec!["aa", "bb"]);
+        assert_eq!(list, "cargo test -- --list");
+
+        let (_, list) = multi_filter_test_command("cd sub && cargo test -- aa bb | tail").unwrap();
+        assert_eq!(list, "cd sub && cargo test -- --list");
     }
 }
