@@ -593,3 +593,40 @@ If condition 1 fails, the agent labels are not admitted and Stage 2's mined rout
 - Which labeller is right on these rows is not established. Both are models, and the agent labels share the spec author's model family. The only violation Codex found that the agent missed is row 47. No row is relabelled.
 
 **Consequence, as registered:** T is drawn next from the admitted labels by the registered procedure, and its per-rule counts are published. The 62% confirmation rate is a limit any T claim carries. Restricting T to rows both labellers call violations would be a new registration, and it would need Codex labels on all 944 rows.
+
+## Stage 2 — T drawn from the admitted labels, 2026-09-25 (the registered draw's result)
+
+**Procedure:** as registered in the Stage 2 labelling amendment, in `draw_t.py`, which was committed before it ran (`64ec611b`).
+
+- Shingles and group pairs come from the miner's own code, and the script asserts the published count: **25 pairs, reproduced.**
+- **The one choice the registration left open**, the order in which components meet the generator, was fixed in that commit before the draw: alphabetical by each component's first doc group. The draw reads no label.
+- **Files:** `t-split.jsonl` (each row's id, doc group and split) and `t-counts.txt`.
+
+**T:**
+
+- 72 of 230 components.
+- 75 of 248 doc groups.
+- **237 of 944 rows (25%)**.
+- **27 of the 114 admitted positives.**
+
+| rule | T | rest |
+|---|---|---|
+| `question_asked` | 6 | 16 |
+| `run_tool` | 4 | 5 |
+| `selector_narrow` | 4 | 4 |
+| `monotone_absence` | 4 | 3 |
+| `scope_instant` | 3 | 10 |
+| `count_unit` | 2 | 11 |
+| `cannot_happen` | 2 | 9 |
+| `contradiction` | 1 | 7 |
+| `open_artifact` | 1 | 2 |
+| `lines_read`, `d_history`, `d_sessionid`, `d_adjacency`, `act_on_artifact`, `closed_population` | 0 | 7, 4, 4, 3, 1, 1 |
+| the other 7 rules | 0 | 0 |
+
+**Against the registered readings:**
+
+- **Every rule is T-underpowered.** None of the 22 reaches 10 T positives; the largest is 6. **So every per-rule T claim is withheld** under the stopping rule. The prediction "fewer than half of the 22 rules reach 10" held, at zero.
+- Seven rules have no admitted mined positive anywhere.
+- **The agent labels on T's 27 positives carry the admission's limit:** Codex confirmed 10 of 16 agent violation calls on the two samples.
+
+**What this leaves.** The mined route cannot supply a per-rule held-out test at this corpus size. A claim pooled over rules ("any violation", 27 T positives) is not registered, so none is made here. That, synthetic pairs, or a larger mined corpus would each be a new registration.

@@ -1,0 +1,22 @@
+doc groups 248, shingle pairs 25, components 230 (largest 10 groups)
+T: 72 components, 75 groups, 237 of 944 rows
+admitted positives (primary label): T 27, rest 87
+
+rule                     T  rest  T-powered (>= 10)?
+question_asked           6    16  no -- T-underpowered
+run_tool                 4     5  no -- T-underpowered
+selector_narrow          4     4  no -- T-underpowered
+monotone_absence         4     3  no -- T-underpowered
+scope_instant            3    10  no -- T-underpowered
+count_unit               2    11  no -- T-underpowered
+cannot_happen            2     9  no -- T-underpowered
+contradiction            1     7  no -- T-underpowered
+open_artifact            1     2  no -- T-underpowered
+lines_read               0     7  no -- T-underpowered
+d_history                0     4  no -- T-underpowered
+d_sessionid              0     4  no -- T-underpowered
+d_adjacency              0     3  no -- T-underpowered
+act_on_artifact          0     1  no -- T-underpowered
+closed_population        0     1  no -- T-underpowered
+
+rules with any admitted positive: 15 of 22; T-powered: 0
