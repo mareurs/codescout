@@ -479,6 +479,14 @@ verification outcome above, which stands as written.
 - **Intervention / concurrency:** two MCP respawns (one peer `cargo rb`, one operator `/mcp`) each dropped
   activation; a peer pushed `c92a43fa` + `052a099b` under its own operator ack and reported it; the gate's
   `FMT=1` was a live peer's uncommitted `.rs`, attributed by `fmt-mine` and confirmed against HEAD.
+
+**Outcome 2026-09-24 21:08Z (MCP env experiment, supersedes its `unknown / blocked` line above).**
+`good` / `verified-complete` as an investigation, no code patch: two layers, same edit shape, each with an
+in-phase control. `.claude.json` `mcpServers.<name>.env` applies a deletion (`f085792c`); `settings.json`
+§ `env` drops one (`3e0f95c2`) — the 2026-08-30 bug reproduced on 2.1.282 and narrowed to one layer. A
+baseline reading between the two runs is what excluded a reused-key-name confound. Five operator `/mcp`s;
+both files restored (env map equal / `cmp` byte-identical). Upstream report drafted for operator review;
+the mechanism stays an untested hypothesis with its test named in the bug file.
 | Rests on / grouping / overhead | Canonical records: the six `docs/issues/` files named above; related DWF-7 (earlier open-bug sweep today). Capture ~5 min |
 
 ## DWF-10 — Review model-vs-context experiment: 24 cross-model review runs settle what they can — the model picks WHICH defects, priming changes nothing
