@@ -53,6 +53,16 @@ These are raw rows and run logs behind `docs/evals/rule-tell-scoring-2026-09-23.
 | `e2s-score-*.txt`, `rtd8c-score.txt` | e2s scores; `rtd8c-score.txt` is the rtd8c gate plus the clean re-score of every DP1 fork arm |
 | `score-b-s0.sh` | the pipeline script as run. Its absolute paths point at a session scratchpad that no longer exists |
 
+## Phase 1: the `partial` excerpt audit (`eb48fe28`)
+
+Added after the campaign copy, by the same session. These files are the audit itself, not copies from the scratchpad.
+
+| file | what |
+|---|---|
+| `partial-audit-verdicts.json` | the auditor's V / S / N verdict, quote and (a)/(b) reading per case, committed **before** the operator's blind check was asked |
+| `partial-audit-check.py` | the two registered mechanical checks (quote verbatim in the positive, absent from the negative), then S0's rows for the same 9 positives. No model call |
+| `partial-audit-check.txt` | its output |
+
 ## Checker fixtures
 
 `rtd8-corrected.txt`, `rtd-9-corrected.txt`, `rtd-9-positive.txt`, `rtd-10-corrected.txt`, `rtd-10-positive.txt`, `rtd-3-corrected.txt`, and `rtd3-recorded.json` (RTD-3's recorded first-turn output).

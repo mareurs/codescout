@@ -1,0 +1,33 @@
+RTD-1   in_pos=True  absent_from_neg=True   'An exact shared-ID join now exists.'
+RTD-2   in_pos=True  absent_from_neg=True   'The Kat window contains the Codex window and is four times l'
+RTD-4   in_pos=True  absent_from_neg=True   'seven times, in one scan'
+RTD-5   in_pos=True  absent_from_neg=True   'a leftover of the L-01 split that moved the live cache to `.'
+RTD-7   in_pos=True  absent_from_neg=True   'repairing every one of its candidates emit byte-identical sc'
+RTD-11  in_pos=True  absent_from_neg=True   'The surface that answers all three today is the T-N ledger'
+RTD-12  in_pos=True  absent_from_neg=True   'So **id allocation already survives a catalog loss**, becaus'
+RTD-12  in_pos=True  absent_from_neg=True   '**not exercised end-to-end against a derived row bearing a n'
+RTD-16  in_pos=True  absent_from_neg=True  (exempt) '**15 of 31 augmented trackers** in this project declare an `'
+RTD-19  in_pos=True  absent_from_neg=True   'The ledger population is **68 prefix pairs across 54 artifac'
+
+verdicts after checks: {'RTD-1': 'V', 'RTD-2': 'S', 'RTD-4': 'S', 'RTD-5': 'S', 'RTD-7': 'S', 'RTD-11': 'S', 'RTD-12': 'V', 'RTD-16': 'V', 'RTD-19': 'S'}
+V=3 S=6 N=0  V+S=9/9
+
+S0 rows, partial positives (rules fired / claim quoted):
+  form 2b RTD-1   V  n_rows=22  fired=[]
+  form 2b RTD-2   S  n_rows=22  fired=[]
+  form 2b RTD-4   S  n_rows=22  fired=[]
+  form 2b RTD-5   S  n_rows=22  fired=[]
+  form 2b RTD-7   S  n_rows=22  fired=[]
+  form 2b RTD-11  S  n_rows=22  fired=[]
+  form 2b RTD-12  V  n_rows=22  fired=[]
+  form 2b RTD-16  V  n_rows=22  fired=[]
+  form 2b RTD-19  S  n_rows=22  fired=[]
+  form 3  RTD-1   V  n_rows=22  fired=[]
+  form 3  RTD-2   S  n_rows=22  fired=[]
+  form 3  RTD-4   S  n_rows=22  fired=[('scope_instant', 'And its close-rule has already reported success fo')]
+  form 3  RTD-5   S  n_rows=22  fired=[]
+  form 3  RTD-7   S  n_rows=22  fired=[]
+  form 3  RTD-11  S  n_rows=22  fired=[('closed_population', 'The surface that answers all three today is the T-')]
+  form 3  RTD-12  V  n_rows=22  fired=[]
+  form 3  RTD-16  V  n_rows=22  fired=[]
+  form 3  RTD-19  S  n_rows=22  fired=[]
