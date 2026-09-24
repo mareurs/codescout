@@ -40,4 +40,4 @@ No production or peer files changed; no model calls, full Rust gate, or mutation
 
 **Class retagged** from `cluster/unclassified` to `cluster/capped-result-presented-as-complete` (`IC-13`). A partial sweep scored as a whole-corpus metric is a truncated result presented as complete.
 
-**Not archived:** `CLAUDE.md` archives on gate green **plus a regression test**. This script is not in the Rust gate and has no automated test; the check above is a manual re-run. Archive when a test pins the exit-2 refusal.
+**Regression test, added 2026-09-24 in `138bdb60`:** `tests/test_phase1_span_selector_report.py` case `test_one_rule_missing_from_a_present_text_is_refused_by_name` pins the exit-2 refusal and the `INCOMPLETE` line on the committed S0 sweep. Observed red: removing `incomplete` from the exit condition, in an isolated worktree through `scripts/mutation-probe.sh`, reds that test and no other. The same commit closed a sibling hole this check could not see, whole texts missing (`docs/issues/2026-09-24-codex-phase1-missing-case-groups.md`). This script is not in the Rust gate, so the Python test is its regression guard.
