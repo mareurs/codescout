@@ -4948,7 +4948,7 @@ fn scan_undefined_entries(
 /// [`scan_cited_prefix_with_no_definer`] could not represent. Both of its older remedies damage
 /// such a namespace: defining headings hands allocation to the librarian and turns silent
 /// citations dangling (measured −1 finding, +6), and `entry_prefix` locks id allocation to the
-/// librarian's allocator. docs/issues/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md
+/// librarian's allocator. docs/issues/archive/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md
 ///
 /// **A map rather than a set, because the authority is what makes silence earned.** A bare
 /// `external_prefix: TC` would mute the check forever, including after the suite it names is
@@ -13150,7 +13150,7 @@ mod tests {
     /// represent: alive and authoritative somewhere the resolver does not read (`TC-N` is owned
     /// by `scripts/tc-suites/legacy-natural.json`). Both prescribed remedies damage it — defining
     /// headings measured −1 finding, +6 dangling citations.
-    /// docs/issues/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md
+    /// docs/issues/archive/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md
     ///
     /// Load-bearing fixture details, each named so a tidy-up cannot silently remove it:
     ///   * `CL` is cited in the SAME files and declares nothing. It must still fire, which is

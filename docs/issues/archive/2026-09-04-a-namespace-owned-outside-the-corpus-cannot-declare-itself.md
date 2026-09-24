@@ -1,9 +1,9 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/addressing-without-an-escape-hatch
-closed: null
+closed: 2026-09-24
 opened: 2026-09-04
 owner: marius
 related: []
@@ -181,30 +181,55 @@ layer up.)*
 
 ## Fix
 
-Not applied, and **the naive fix must not be applied** — see *Evidence*. Three candidate directions,
-in increasing order of cost:
+**FIXED 2026-09-24 by direction 1, with one change from its sketch: the declaration names its
+authority, and the silence is re-earned every run.** A plain set (`external_prefix: TC`) would be
+a mute button that survives the suite's deletion; a map from prefix to file lets the check verify
+the claim.
 
-1. **An external-namespace declaration.** Let an artifact declare a prefix as owned elsewhere —
-   e.g. frontmatter `external_prefix: TC` naming the authority (`scripts/tc-suites/*.json`). The
-   check reads it as a third silence condition, `link_scan` keeps treating the tokens as prose, and
-   nobody is invited to hand allocation to the librarian. Smallest change that makes the true state
-   *representable*, which is the defect.
-2. **Split the finding by evidence.** The check already knows the citation volume; it could also
-   ask whether the prefix appears in non-markdown files under the repo and say so, turning one
-   verdict into two distinguishable ones.
-3. **Do nothing about `TC` specifically** and accept the finding as a permanent known-noise row.
-   Cheapest, and it leaves the next reader to re-derive everything above — which is why this file
-   exists.
+```yaml
+external_prefix:
+  TC: scripts/tc-suites/legacy-natural.json   # repo-relative
+```
 
-Whichever lands, **fix the `TC-21`–`TC-25` gap separately**: it is a genuine content defect and is
-independent of this mechanism.
+`scan_cited_prefix_with_no_definer` stays silent for a declared prefix only while the named file
+exists under the declaring artifact's git root **and** holds a `PREFIX-<digits>` id. Otherwise the
+finding fires and names the stale declaration and why (`does not exist`, or `holds no TC-<n> id`)
+instead of repeating the two harmful remedies. The generic message now offers the third remedy
+beside them. Read by doctor only (`declared_external_prefixes`, `external_authority_problem` in
+`src/librarian/tools/doctor.rs`): it is deliberately NOT added to `DocExtract`, so `link_scan`
+keeps treating these tokens as prose, which is the property the Evidence section showed the naive
+remedy destroys. Documented in `get_guide("tracker-conventions")` beside the third state.
+
+**Applied:** `docs/trackers/retrieval-benchmark.md` declares both `TC` and `AE`. A session-built
+binary's `doctor` reports `cited_prefix_with_no_definer` **11 -> 9** against the real suite files.
+
+**Not in scope, still open:** the `TC-21`-`TC-25` gap below is a content defect, independent of
+this mechanism, and this fix neither closes nor hides it (a declaration verifies that the authority
+holds the *prefix*, not every cited id).
 
 ## Tests added
 
-None yet. A regression test for direction 1 is a fixture with a prefix cited above threshold, an
-`external_prefix` declaration, and an assertion of silence — plus its negative control, the same
-fixture without the declaration, asserting the finding still fires. Both are needed: a silence
-assertion alone is monotone under the check being disabled entirely.
+In `src/librarian/tools/doctor.rs`, read by name out of the default gate lane:
+
+- `cited_prefix_is_silent_when_declared_external_and_its_authority_holds_it` -- with a clustered
+  undeclared control prefix in the same files that must still fire, so the silence is not
+  monotone under a check that reports nothing. This is the negative control the old Resume asked for.
+- `cited_prefix_declared_external_fires_when_the_authority_is_missing` -- owned by the EXISTS bound.
+- `cited_prefix_declared_external_fires_when_the_authority_no_longer_holds_the_prefix` -- owned by
+  the ID-SHAPE bound; the fixture mentions `TC` bare so a substring test would wrongly accept it.
+- `cited_prefix_declared_external_is_silent_when_any_one_declaration_holds` -- the only fixture
+  where `any` and `all` differ.
+- `cited_prefix_with_no_definer_fires_above_threshold` gained a remedy-SHAPE assertion: the message
+  must name `external_prefix`.
+
+Mutation, one per guarded site, all KILLED via `scripts/mutation-probe.sh`: git-root resolution,
+exists bound, id-shape bound, declaration collection, the `continue`, the generic remedy text.
+`any`->`all` SURVIVED on the first pass and is now killed by the fourth test above.
+
+## Fix provenance
+
+- **SHA:** `7513f2de` (`experiments`)
+- **patch-id:** `86a6eb85a99b3490f0e9d12744f4b5f0b977d7a3`
 
 ## Workarounds
 
@@ -215,12 +240,9 @@ remedy is net-negative.
 
 ## Resume
 
-Decide between directions 1–3 in `## Fix`. If direction 1: the silence conditions are
-`src/librarian/tools/doctor.rs:3811` (`scan_cited_prefix_with_no_definer`), and the two existing
-silence tests at `:8933` and `:8963` are the pattern to copy for a third. Independently, hand the
-`TC-21`–`TC-25` gap to whoever owns `docs/trackers/retrieval-benchmark.md` — five cited test cases
-exist in neither `scripts/tc-suites/legacy-natural.json` nor
-`docs/research/2026-04-03-embedding-model-benchmark.md`.
+N/A for the mechanism -- fixed at `7513f2de`. The `TC-21`-`TC-25` content gap stays with whoever
+owns `docs/trackers/retrieval-benchmark.md`: five cited cases exist in neither
+`scripts/tc-suites/legacy-natural.json` nor `docs/research/2026-04-03-embedding-model-benchmark.md`.
 
 ## References
 

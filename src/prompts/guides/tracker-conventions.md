@@ -721,7 +721,7 @@ external_prefix:
 and holds a `TC-<n>` id** — the silence is re-checked every run, so a deleted or
 rewritten suite re-arms the finding and names the stale declaration. `link_scan`
 does not read the key and keeps treating the tokens as prose, which is the point.
-`docs/issues/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md`.
+`docs/issues/archive/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md`.
 
 
 ### Citing an entry — bare, or qualified

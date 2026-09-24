@@ -161,7 +161,7 @@ the same mandate is unaffected. The `DCS` receipts `CLAUDE.md:435` asks for are 
 
 ### The declaration route is closed too
 
-`docs/issues/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md` records
+`docs/issues/archive/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md` records
 that `cited_prefix_with_no_definer` has two silence conditions — a heading definer, or an
 `entry_prefix` declaration. Neither is available here: the heading cannot define
 (`def_re` rejects it) and the declaration is discarded by `clean_prefix`. The check is silent for a
@@ -254,7 +254,7 @@ appear once the prefix is three characters.
 - `CLAUDE.md` § *Deep-agent observation window* — the mandate, lines 423 and 435
 - `docs/issues/2026-09-20-observation-window-yields-zero-prospective-samples.md` — the file whose
   three adjacent table rows are the control
-- `docs/issues/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md` — the
+- `docs/issues/archive/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md` — the
   sibling: a namespace that cannot declare itself because its authority is outside the corpus. Here
   it is inside the corpus and the declaration is discarded by a length rule.
 - `docs/issues/2026-08-31-an-entry-id-cannot-be-mentioned-without-citing-it.md` — the opposite

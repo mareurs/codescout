@@ -2139,7 +2139,7 @@ population was deferred intact. **Measured 2026-09-11 ~09:45 local, at HEAD `1a3
 | check | count | why it needs a per-item verdict |
 |---|---|---|
 | `entry_cited_from_outside_but_undeclared` | 17 | Each needs a decision on whether the entry should declare a `**Valid:**` class, priced by cross-file citation count (`exposure ≥ 5`), not by age. |
-| `cited_prefix_with_no_definer` | 9 | A prefix cited with no `## PREFIX-N` heading anywhere. `TC-N` alone is cited 120× across 15 files and declared by nothing — and `docs/issues/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md` argues some of these are namespaces owned *outside* this corpus, which cannot declare themselves here. |
+| `cited_prefix_with_no_definer` | 9 | A prefix cited with no `## PREFIX-N` heading anywhere. `TC-N` alone is cited 120× across 15 files and declared by nothing — and `docs/issues/archive/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md` argues some of these are namespaces owned *outside* this corpus, which cannot declare themselves here. |
 | `entry_conditional_past_due` | 5 | A `conditional — <event>` whose event has passed. Retire, repoint, or re-date — three different verdicts. |
 | `prefix_conflicts_live` | 3 | From `link_scan`, not `doctor`. `T-N` is the known case (`docs/issues/archive/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`, open). |
 | `entry_dated_stale` | 2 | `dated` past the freshness threshold; needs re-derivation of the underlying fact, which is the work. |
