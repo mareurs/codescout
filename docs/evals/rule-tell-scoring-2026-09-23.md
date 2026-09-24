@@ -281,3 +281,30 @@ Chance on this menu is 1/23 (4%).
 - The mean probability it gives `none` is 0.27 on corrected text and 0.24 on violating text, so as a separator between violation and fix, `none` is weak.
 
 **Reading.** On this set, Jev passes the gate where the reasoning LLM does not, and beats it on every measure. Its top-1 accuracy (24%) is too low to inject on directly; its top-3 (53%) suggests it could serve as a candidate filter in front of a slower check. The set is small, 21 pairs, and this is one run of an unregistered arm. The before-the-turn half of phase 1, predicting the rule from the context leading up to the wrong step, is not measured here.
+
+## Next — phase 1 (handoff, 2026-09-24)
+
+**Where phase 2 left it.** At both decision points and for all four rules (RTD-3, 8, 9, 10), a reminder that **names the specific claim and the rule governing it** stops the violation (0/9–0/10). The rule's text alone does not do so reliably, and an unrelated injection never does. Removing the rules from `CLAUDE.md` did not raise violation rates. **So the whole value sits in phase 1 producing that binding:** find the claim in the draft, and pick the rule. Today's selector does neither. Jev's `choice` over the rule menu said `none` on 10/10 real drafts, with the gold rules at ranks 4–18. Phase 1A's corpus top-1 was 24%.
+
+**What phase 1 must output, fixed by phase 2's evidence.** A claim span plus a rule, rendered like the 1b arms: *"The output you are about to produce contains <claim>. The rule '<rule>' governs that claim."* A rule label without the claim is the end-to-end arm, and there is no evidence it works.
+
+**Inputs already on disk (session scratchpad; the transcript is the durable source).**
+
+- Real drafts: the fork-route arm-0 rows, `fork-dp1-n10.jsonl` (DP1) and `fork-rtd3r.jsonl` (RTD-3).
+- The phase-1A corpus: `docs/evals/rule-tell-detection.md`, with the menu and gold in `scripts/phase1-rule-selection.py`.
+
+**Instruments that exist.**
+
+- `scripts/phase2-fork.py`: the replay route on the subscription.
+- `scripts/phase2-score-dp1.py`: gated checkers `rtd3`, `rtd3r`, `rtd8`, `rtd9`, `rtd10`.
+- `scripts/phase2-e2e-build.py`: turns a selector's output into per-run injections. Its template must gain the claim span.
+- `scripts/phase1-rule-selection.py`: Jev and Haiku selectors, with a `--gate`.
+
+**Standing constraints.**
+
+- Model calls go through the **subscription** (`claude -p`, `apiKeySource: 'none'`), never the paid API.
+- The Jev key lives in `prompt-engineering/.env` and is never printed.
+- Register before running.
+- Arms are compared within one route and one judge channel only.
+
+The open design question is whether phase 1 should be a claim *extractor* followed by a rule matcher, or a single judge asked per rule whether this draft makes this rule's claim-shape. The detector prompts of phase 0 are the second shape.
