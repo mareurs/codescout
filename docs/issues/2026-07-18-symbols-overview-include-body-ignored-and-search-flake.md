@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: zombie
+status: open
 title: 'BUG: symbols search mode occasionally 0-matches then succeeds on retry (Bug A fixed in b2344aab; Bug B mitigated + instrumented)'
 tags:
 - cluster/lazy-warmup-bills-the-first-caller
@@ -10,7 +10,7 @@ tags:
 - list_overview
 - parameter-ignored
 closed: null
-last_observed: 2026-08-07
+last_observed: 2026-09-24
 last_verified: 2026-08-26
 opened: 2026-07-18
 owner: marius
@@ -28,6 +28,18 @@ severity: medium
 # BUG: `symbols` overview mode silently ignores `include_body=true`; search mode occasionally 0-matches then succeeds on retry
 
 ## Summary
+> **2026-09-24 — trigger 1 FIRED. Re-opened `zombie` → `open`.** A path-scoped search-mode call 0-matched for a symbol that exists, between two successes of the byte-identical call. Observed by a probe subagent (principal `774ba049-…/a3ba615808d91a57d`) on server PID 2072420, ~25 s after an `/mcp` restart (process start 11:16:26 +0300), no project explicitly activated yet. From `.codescout/usage.db` (`tool_calls`, `agent_id='a3ba615808d91a57d'`):
+>
+> | id | started_at (UTC) | latency_ms | outcome | output |
+> |---|---|---|---|---|
+> | 137399 | 08:16:51.552 | 104 | success | 6173 B — `GuideLedger/adopt` found, `src/tools/guide_ledger.rs:316-331` |
+> | **137400** | **08:16:54.811** | **1** | **success** | **1921 B — worktree notice + `0 matches`** |
+>
+> Call: `symbols(name="GuideLedger/adopt", path="src/tools/guide_ledger.rs")`. The raw `0 matches` tool result is in the probe's transcript (verified at the bytes, not only its report). Two later identical calls from the parent, same process, both found it.
+>
+> **The new lead is the latency: 1 ms.** Nothing that ran an LSP `workspace/symbol` query or a project walk answers in 1 ms — the neighbouring successes took 104 / 72 / 51 / 24 ms — so this zero came from a short-circuit that returns an empty result as a clean negative, not from a slow or cold backend answering early. That narrows the search to early-return paths in search mode before any backend is consulted.
+>
+> **Instrumentation did not catch it:** `symbols: project walk entry unreadable` — **0** firings across all seven `.codescout/diagnostic-*.log`. The diagnostic logs do not contain the probe's two `symbols` calls in the 08:16:4x–5x window at all (they rotate small and are per-process), so they cannot speak to this occurrence either way. Recorded by sessionId `774ba049-d97c-443a-b31d-f662a9cb6a1e` while live-verifying `971ed73f`; not investigated further.
 > **Status: `zombie` as of 2026-08-07, by maintainer decision.** Bug A is fixed (`b2344aab`); Bug B
 > is mitigated and instrumented, has not recurred, and its root cause is unconfirmed. There is no
 > work available — it resolves only by firing again, and the instrumentation is already in place to

@@ -90,9 +90,12 @@ impl Tool for GetGuide {
                     //    later explicit fetch's "first" status);
                     //  - a repeat fetch is flagged so a caller still holding the guide can
                     //    skip re-reading it. The flag must NOT assert that the CALLER
-                    //    fetched it: the ledger is session-keyed and shared parent<->subagent,
-                    //    so a SUBAGENT's very first fetch always takes this branch, with an
-                    //    empty context. Wording like "you already fetched this" is false for
+                    //    fetched it: without the companion's per-subagent principal stamp
+                    //    the ledger is shared parent<->subagent, so a SUBAGENT's very first
+                    //    fetch takes this branch, with an empty context. (With the stamp,
+                    //    each subagent has its own ledger — docs/adrs/2026-09-14-a-subagent-
+                    //    is-a-principal.md — but the note cannot tell which case it is in.)
+                    //    Wording like "you already fetched this" is false for
                     //    it and invites it to discard the body it just received.
                     //    docs/issues/2026-09-01-subagent-told-to-skip-guides-it-never-received.md
                     // The body is NEVER withheld: the ledger is not cleared on `/compact`,
@@ -106,9 +109,10 @@ impl Tool for GetGuide {
                         )
                     } else {
                         format!(
-                            "get_guide(\"{t}\") was already delivered once in this session — \
-                             possibly to a DIFFERENT agent, since the ledger is shared \
-                             parent↔subagent and a subagent's first fetch always lands here. \
+                            "get_guide(\"{t}\") was already delivered once to this ledger — \
+                             to you, or, where subagents share their parent's ledger (no \
+                             per-subagent stamp from the companion hook), possibly to a \
+                             DIFFERENT agent. \
                              The full body above is authoritative: if it is not already in \
                              your context, read it. (A caller that still holds its earlier \
                              copy can skip re-reading; re-fetch after compaction is normal.)"
@@ -380,8 +384,8 @@ mod tests {
         // flips from "don't re-call" on the first fetch to a prior-delivery notice on
         // the repeat.
         //
-        // The repeat branch is ALSO where a SUBAGENT's very first fetch lands, because
-        // the ledger is session-keyed and shared parent<->subagent. So the repeat note
+        // The repeat branch is ALSO where a SUBAGENT's very first fetch lands whenever
+        // it shares its parent's ledger (no per-subagent principal stamp). So the repeat note
         // is asserted here to stay context-neutral: it may not claim this caller
         // already fetched the guide, and may not tell it to skip the body outright.
         // docs/issues/2026-09-01-subagent-told-to-skip-guides-it-never-received.md

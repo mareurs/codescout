@@ -1121,24 +1121,33 @@ impl CodeScoutServer {
         }
         current
     }
-    /// Consume every pending subagent guide-rearm request addressed to this
-    /// process, re-arming the named topics on the live ledger. Called from
-    /// `call_tool_inner` immediately alongside `poll_rendezvous` — same funnel,
-    /// same "before `tool.call_content` decides guide delivery" requirement, so a
-    /// re-armed topic can be delivered in THIS response rather than one call late.
+    /// Consume the pending subagent guide-rearm request addressed to this process
+    /// AND to the calling principal's agent, re-arming the named topics on the live
+    /// ledger — which, by the time this runs, `adopt_request_conversation` has made
+    /// THAT subagent's. Called from `call_tool_inner` immediately after adoption —
+    /// same "before `tool.call_content` decides guide delivery" requirement as
+    /// `poll_rendezvous`, so a re-armed topic can be delivered in THIS response
+    /// rather than one call late.
     ///
-    /// See `src/tools/guide_rearm.rs` module docs for why this exists: the
-    /// existing snapshot/restore hook bracket around a subagent's lifetime only
-    /// edits the ON-DISK ledger file, which this already-running process never
-    /// re-reads. This is what reaches the live in-memory ledger instead.
-    /// docs/issues/archive/2026-08-31-subagents-receive-guides-their-parent-already-holds.md
-    fn poll_guide_rearm(&self) {
-        let topics = self.guide_rearm.poll();
+    /// `agent` is `None` for a parent (unstamped) call, which consumes nothing.
+    /// Consuming on whichever principal called next re-armed the PARENT's whole
+    /// ledger after every subagent dispatch or resume — measured live as 11 topics
+    /// lost to one zero-tool-call resume
+    /// (docs/issues/2026-09-24-guide-rearm-request-is-consumed-by-whichever-principal-calls-next.md).
+    /// Cost of the scoping, accepted there: an unstamped subagent is
+    /// indistinguishable from its parent and no longer receives a re-arm.
+    ///
+    /// See `src/tools/guide_rearm.rs` module docs for why this exists at all.
+    fn poll_guide_rearm(&self, agent: Option<&str>) {
+        let Some(agent) = agent else {
+            return;
+        };
+        let topics = self.guide_rearm.poll(agent);
         if topics.is_empty() {
             return;
         }
         let refs: Vec<&str> = topics.iter().map(String::as_str).collect();
-        tracing::info!(topics = ?refs, "re-arming guide topics for a fresh subagent dispatch");
+        tracing::info!(topics = ?refs, agent, "re-arming guide topics for the subagent that requested them");
         self.guide_hints_emitted.lock().re_arm(&refs);
     }
 
@@ -1379,7 +1388,7 @@ impl CodeScoutServer {
                 rendezvous_session.clone(),
             )
             .or(rendezvous_session);
-        self.poll_guide_rearm();
+        self.poll_guide_rearm(asserted_agent.as_deref());
 
         let mut ctx = self.build_context(progress, peer);
         ctx.workspace_override = workspace_override;
@@ -11855,11 +11864,13 @@ mod guide_hint_tests {
         );
     }
     #[tokio::test]
-    /// The wiring itself: a request file addressed to this server's own pid must
-    /// be consumed by an ordinary tool call, and the re-arm must land BEFORE
-    /// `tool.call_content` decides guide delivery — same position requirement as
-    /// `poll_rendezvous`, proven the same way: via the SESSION_OPENING_GUIDE body
-    /// actually appearing in THIS response, not merely via the ledger state after.
+    /// The wiring itself: a request file addressed to this server's own pid AND to
+    /// the calling subagent must be consumed by that subagent's ordinary tool call,
+    /// and the re-arm must land BEFORE `tool.call_content` decides guide delivery —
+    /// same position requirement as `poll_rendezvous`, proven the same way: via the
+    /// SESSION_OPENING_GUIDE body actually appearing in THIS response, not merely via
+    /// the ledger state after. The parent must NOT consume it —
+    /// `a_parent_call_does_not_consume_a_subagents_guide_rearm_request`.
     async fn a_tool_call_polls_the_guide_rearm_inbox_and_re_arms_named_topics() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
@@ -11879,19 +11890,28 @@ mod guide_hint_tests {
             .unwrap();
         let server =
             CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+        let as_subagent = |mut args: Value| {
+            args[crate::tools::session_key::PRINCIPAL_ARG_KEY] = json!("conv-A/testagent");
+            args
+        };
 
-        // Ledger already carries the opener AND an unrelated topic — the request
-        // below names only the opener, so a surgical re-arm must forget the
-        // opener while leaving the unrelated topic in place.
-        {
-            let mut led = server.guide_hints_emitted.lock();
-            led.insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
-            led.insert("librarian".to_string());
-        }
+        // The subagent's first call opens ITS ledger (the opener lands there); it then
+        // also holds an unrelated topic. The request below names only the opener, so
+        // a surgical re-arm must forget the opener while leaving the other in place.
+        server
+            .call_tool_by_name("tree", as_subagent(json!({ "path": "." })))
+            .await
+            .expect("first dispatch ok");
+        server
+            .guide_hints_emitted
+            .lock()
+            .insert("librarian".to_string());
 
-        let request_path = rearm_dir
-            .path()
-            .join(format!("{}-testagent.json", std::process::id()));
+        let request_path = rearm_dir.path().join(format!(
+            "{}-{}.json",
+            std::process::id(),
+            crate::tools::guide_rearm::request_hash("testagent")
+        ));
         std::fs::write(
             &request_path,
             serde_json::json!({ "topics": [crate::prompts::SESSION_OPENING_GUIDE] }).to_string(),
@@ -11899,7 +11919,7 @@ mod guide_hint_tests {
         .unwrap();
 
         let result = server
-            .call_tool_by_name("tree", json!({ "path": "." }))
+            .call_tool_by_name("tree", as_subagent(json!({ "path": "." })))
             .await
             .expect("dispatch ok");
         assert!(result.is_error.is_none_or(|e| !e), "tree should succeed");
@@ -11957,14 +11977,21 @@ mod guide_hint_tests {
             .unwrap();
         let server =
             CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+        let as_subagent = |mut args: Value| {
+            args[crate::tools::session_key::PRINCIPAL_ARG_KEY] = json!("conv-A/testagent");
+            args
+        };
 
+        // Opens the subagent's own ledger, so the opener is already delivered there.
         server
-            .guide_hints_emitted
-            .lock()
-            .insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
-        let request_path = rearm_dir
-            .path()
-            .join(format!("{}-testagent.json", std::process::id()));
+            .call_tool_by_name("tree", as_subagent(json!({ "path": "." })))
+            .await
+            .expect("opening dispatch ok");
+        let request_path = rearm_dir.path().join(format!(
+            "{}-{}.json",
+            std::process::id(),
+            crate::tools::guide_rearm::request_hash("testagent")
+        ));
         std::fs::write(
             &request_path,
             serde_json::json!({ "topics": [crate::prompts::SESSION_OPENING_GUIDE] }).to_string(),
@@ -11972,13 +11999,13 @@ mod guide_hint_tests {
         .unwrap();
 
         server
-            .call_tool_by_name("tree", json!({ "path": "." }))
+            .call_tool_by_name("tree", as_subagent(json!({ "path": "." })))
             .await
             .expect("first dispatch ok");
         // The first call already re-armed and re-delivered the opener, which
         // re-marks it delivered — so a second ordinary call must not show it again.
         let second = server
-            .call_tool_by_name("tree", json!({ "path": "." }))
+            .call_tool_by_name("tree", as_subagent(json!({ "path": "." })))
             .await
             .expect("second dispatch ok");
 
@@ -11989,6 +12016,96 @@ mod guide_hint_tests {
         assert!(
             !all_text(&second).contains(&marker),
             "a consumed request must not re-arm the topic a second time"
+        );
+    }
+
+    /// Regression for
+    /// docs/issues/2026-09-24-guide-rearm-request-is-consumed-by-whichever-principal-calls-next.md.
+    /// A re-arm request names ONE subagent — `<pid>-<shortHash(agent_id)>.json` —
+    /// and consuming it on the parent's call re-armed the PARENT's whole ledger:
+    /// measured live as 11 topics lost to a single zero-tool-call subagent resume.
+    /// The parent must leave the request alone; only the named subagent's own call
+    /// consumes it.
+    #[tokio::test]
+    async fn a_parent_call_does_not_consume_a_subagents_guide_rearm_request() {
+        async fn call(server: &CodeScoutServer, principal: Option<&str>) -> Vec<String> {
+            let mut arguments = serde_json::Map::new();
+            arguments.insert("command".to_string(), json!("echo hi"));
+            if let Some(p) = principal {
+                arguments.insert(
+                    crate::tools::session_key::PRINCIPAL_ARG_KEY.to_string(),
+                    json!(p),
+                );
+            }
+            let params = json!({
+                "name": "run_command",
+                "arguments": Value::Object(arguments),
+            });
+            let req: CallToolRequestParams = serde_json::from_value(params).unwrap();
+            let out = server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .expect("dispatch ok");
+            guide_blocks(&out.content)
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let rearm_dir = tempfile::tempdir().unwrap();
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            guide_rearm_dir: Some(rearm_dir.path().to_path_buf()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+
+        assert!(
+            !call(&server, None).await.is_empty(),
+            "the opener fires on the parent's first call"
+        );
+        server
+            .guide_hints_emitted
+            .lock()
+            .insert("librarian".to_string());
+
+        // A LIVE pair, not an invented one: on 2026-09-24 the companion wrote
+        // `<pid>-e6143c2506b9f291.json` for agent `a3ba615808d91a57d`. An invented
+        // hash would pass against a server that hashes differently from the hook —
+        // the one mismatch that silently disables the mechanism for every subagent.
+        let request_path = rearm_dir
+            .path()
+            .join(format!("{}-e6143c2506b9f291.json", std::process::id()));
+        std::fs::write(
+            &request_path,
+            json!({ "topics": [crate::prompts::SESSION_OPENING_GUIDE, "librarian"] }).to_string(),
+        )
+        .unwrap();
+
+        assert!(
+            call(&server, None).await.is_empty(),
+            "a request addressed to a subagent must not re-arm the parent"
+        );
+        assert!(
+            server.guide_hints_emitted.lock().contains("librarian"),
+            "the parent's other topics must survive a subagent's pending request"
+        );
+        assert!(
+            request_path.exists(),
+            "the request must be left for the subagent it names"
+        );
+
+        call(&server, Some("conv-A/a3ba615808d91a57d")).await;
+        assert!(
+            !request_path.exists(),
+            "the named subagent's own call consumes its request"
         );
     }
 

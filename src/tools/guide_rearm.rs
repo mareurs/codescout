@@ -1,6 +1,8 @@
 //! One-shot "please re-arm these topics" requests, written by the companion's
-//! `SubagentStart` hook for a fresh (non-`fork`) subagent dispatch, and consumed by
-//! the ALREADY RUNNING server on its very next request.
+//! `SubagentStart` hook for a (non-`fork`) subagent dispatch — and, measured
+//! 2026-09-24, on every `SendMessage` resume too — and consumed by the ALREADY
+//! RUNNING server on the NAMED subagent's own next request, never on another
+//! principal's (see [`GuideRearmInbox::poll`]).
 //!
 //! Why this exists: `GuideLedger::load` runs once at server construction and the
 //! in-memory ledger is authoritative for the process's life (`GuideLedger::persist`
@@ -27,7 +29,7 @@
 //! written once and consumed exactly once (deleted on read), so there is no repeated
 //! stamp to dedupe against and no mtime to track.
 //!
-//! Gated by the request file's existence and pid match ALONE — not by
+//! Gated by the request file's existence and its pid AND agent match — not by
 //! `Rendezvous::is_active()`. A freshly-written file addressed to this server's own
 //! pid is itself stronger, more current proof of a live companion hook than the
 //! latched `rendezvous_active` boolean (which can stay true from a stamp made hours
@@ -72,39 +74,33 @@ impl GuideRearmInbox {
         Self { dir: Some(dir) }
     }
 
-    /// Consume every pending request addressed to `std::process::id()`, returning
-    /// the union of requested topics. Best-effort throughout: a request file that
-    /// fails to read or parse is skipped AND removed — never retried, since a
-    /// malformed request will not parse differently on the next poll. Presence of
-    /// a file addressed to us IS the gate; there is no separate liveness check.
-    pub fn poll(&self) -> Vec<String> {
+    /// Consume the pending request addressed to this process AND to `agent_id` —
+    /// `<pid>-<request_hash(agent_id)>.json` — returning its topics. Only the named
+    /// subagent's own call may consume it: consumed on any other principal's call,
+    /// it re-armed THAT principal's ledger, so the parent's next call after a
+    /// dispatch or resume lost its entire ledger
+    /// (docs/issues/2026-09-24-guide-rearm-request-is-consumed-by-whichever-principal-calls-next.md).
+    /// A request whose agent never calls again waits for its server to exit, and the
+    /// next server's dead-pid [`gc`] removes it.
+    ///
+    /// Best-effort: a file that fails to parse is removed rather than retried, since
+    /// it will not parse differently on the next poll.
+    pub fn poll(&self, agent_id: &str) -> Vec<String> {
         let Some(dir) = self.dir.as_deref() else {
             return Vec::new();
         };
-        let Ok(entries) = std::fs::read_dir(dir) else {
+        let path = dir.join(format!(
+            "{}-{}.json",
+            std::process::id(),
+            request_hash(agent_id)
+        ));
+        let Ok(text) = std::fs::read_to_string(&path) else {
             return Vec::new();
         };
-        let my_pid = std::process::id();
-        let mut topics = Vec::new();
-        for entry in entries.filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-            let Some(pid) = pid_prefix(&path) else {
-                continue;
-            };
-            if pid != my_pid {
-                continue;
-            }
-            if let Ok(text) = std::fs::read_to_string(&path) {
-                if let Ok(req) = serde_json::from_str::<RearmRequest>(&text) {
-                    topics.extend(req.topics);
-                }
-            }
-            let _ = std::fs::remove_file(&path);
-        }
-        topics
+        let _ = std::fs::remove_file(&path);
+        serde_json::from_str::<RearmRequest>(&text)
+            .map(|req| req.topics)
+            .unwrap_or_default()
     }
 }
 
@@ -115,6 +111,16 @@ fn pid_prefix(path: &Path) -> Option<u32> {
     let stem = path.file_stem()?.to_str()?;
     let (pid_str, _rest) = stem.split_once('-')?;
     pid_str.parse::<u32>().ok()
+}
+
+/// The companion's `shortHash(agentId)` (`codescout-companion/hooks/lib.mjs`):
+/// sha256 of the agent id, hex, first 16 characters. A request filename's second
+/// half is the only thing tying it to the subagent it was written for, so this must
+/// stay byte-identical to the hook's — a mismatch leaves every request unconsumed,
+/// silently. Pinned by `request_hash_matches_a_filename_the_companion_actually_wrote`.
+pub fn request_hash(agent_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(agent_id.as_bytes()))[..16].to_string()
 }
 
 /// Remove request files whose server process is gone. Same dead-pid check as
@@ -152,17 +158,29 @@ mod tests {
         std::fs::write(&path, body.to_string()).unwrap();
     }
 
+    const AGENT: &str = "agent-x";
+
+    #[test]
+    fn request_hash_matches_a_filename_the_companion_actually_wrote() {
+        // Load-bearing fixture: this pair was NOT computed here. On 2026-09-24 the
+        // companion's SubagentStart hook (lib.mjs `shortHash`) wrote
+        // `2072420-e6143c2506b9f291.json` for agent `a3ba615808d91a57d`. Replacing it
+        // with a pair derived from `request_hash` itself makes this test tautological,
+        // and a hook/server hash mismatch leaves every request silently unconsumed.
+        assert_eq!(request_hash("a3ba615808d91a57d"), "e6143c2506b9f291");
+    }
+
     #[test]
     fn poll_with_no_directory_returns_empty_and_never_panics() {
         let inbox = GuideRearmInbox { dir: None };
-        assert_eq!(inbox.poll(), Vec::<String>::new());
+        assert_eq!(inbox.poll(AGENT), Vec::<String>::new());
     }
 
     #[test]
     fn poll_with_an_empty_directory_returns_empty() {
         let dir = tempfile::tempdir().unwrap();
         let inbox = GuideRearmInbox::new(Some(dir.path().to_path_buf()));
-        assert_eq!(inbox.poll(), Vec::<String>::new());
+        assert_eq!(inbox.poll(AGENT), Vec::<String>::new());
     }
 
     #[test]
@@ -173,11 +191,11 @@ mod tests {
         write_request(
             dir.path(),
             my_pid,
-            "abc123",
+            &request_hash(AGENT),
             &["librarian", "progressive-disclosure"],
         );
 
-        let mut topics = inbox.poll();
+        let mut topics = inbox.poll(AGENT);
         topics.sort();
         assert_eq!(
             topics,
@@ -194,9 +212,14 @@ mod tests {
         let inbox = GuideRearmInbox::new(Some(dir.path().to_path_buf()));
         // A dead-but-plausible pid: written directly (bypassing `new`'s own GC,
         // which already ran) so the file exists for `poll` to examine.
-        write_request(dir.path(), 999_999_999, "abc123", &["librarian"]);
+        write_request(
+            dir.path(),
+            999_999_999,
+            &request_hash(AGENT),
+            &["librarian"],
+        );
 
-        assert_eq!(inbox.poll(), Vec::<String>::new());
+        assert_eq!(inbox.poll(AGENT), Vec::<String>::new());
     }
 
     #[test]
@@ -204,30 +227,43 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let inbox = GuideRearmInbox::new(Some(dir.path().to_path_buf()));
         let my_pid = std::process::id();
-        write_request(dir.path(), my_pid, "abc123", &["librarian"]);
+        write_request(dir.path(), my_pid, &request_hash(AGENT), &["librarian"]);
 
-        assert_eq!(inbox.poll(), vec!["librarian".to_string()]);
+        assert_eq!(inbox.poll(AGENT), vec!["librarian".to_string()]);
         assert_eq!(
-            inbox.poll(),
+            inbox.poll(AGENT),
             Vec::<String>::new(),
             "the second poll must find nothing — the first must have deleted the file"
         );
     }
 
     #[test]
-    fn poll_unions_topics_from_concurrent_request_files_for_the_same_pid() {
+    fn poll_takes_only_the_calling_agents_request_and_leaves_the_others() {
         let dir = tempfile::tempdir().unwrap();
         let inbox = GuideRearmInbox::new(Some(dir.path().to_path_buf()));
         let my_pid = std::process::id();
-        write_request(dir.path(), my_pid, "agentone", &["librarian"]);
-        write_request(dir.path(), my_pid, "agenttwo", &["workspace-state"]);
+        write_request(
+            dir.path(),
+            my_pid,
+            &request_hash("agent-one"),
+            &["librarian"],
+        );
+        write_request(
+            dir.path(),
+            my_pid,
+            &request_hash("agent-two"),
+            &["workspace-state"],
+        );
 
-        let mut topics = inbox.poll();
-        topics.sort();
         assert_eq!(
-            topics,
-            vec!["librarian".to_string(), "workspace-state".to_string()],
-            "two concurrently-dispatched subagents' requests must not clobber each other"
+            inbox.poll("agent-one"),
+            vec!["librarian".to_string()],
+            "a call consumes only the request naming its own agent"
+        );
+        assert_eq!(
+            inbox.poll("agent-two"),
+            vec!["workspace-state".to_string()],
+            "a concurrently-dispatched sibling's request must survive the first agent's poll"
         );
     }
 
@@ -236,10 +272,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let inbox = GuideRearmInbox::new(Some(dir.path().to_path_buf()));
         let my_pid = std::process::id();
-        let path = dir.path().join(format!("{my_pid}-badjson.json"));
+        let path = dir
+            .path()
+            .join(format!("{my_pid}-{}.json", request_hash(AGENT)));
         std::fs::write(&path, "{ not valid json").unwrap();
 
-        assert_eq!(inbox.poll(), Vec::<String>::new());
+        assert_eq!(inbox.poll(AGENT), Vec::<String>::new());
         assert!(
             !path.exists(),
             "a request that will never parse must be removed, not retried on every future poll"
@@ -253,7 +291,7 @@ mod tests {
         let stray = dir.path().join("README.txt");
         std::fs::write(&stray, "not ours").unwrap();
 
-        assert_eq!(inbox.poll(), Vec::<String>::new());
+        assert_eq!(inbox.poll(AGENT), Vec::<String>::new());
         assert!(stray.exists());
     }
 
@@ -261,7 +299,12 @@ mod tests {
     fn gc_removes_a_request_file_whose_pid_is_dead() {
         let dir = tempfile::tempdir().unwrap();
         // Construction runs gc(); seed the dead-pid file first so `new` reaps it.
-        write_request(dir.path(), 999_999_999, "abc123", &["librarian"]);
+        write_request(
+            dir.path(),
+            999_999_999,
+            &request_hash(AGENT),
+            &["librarian"],
+        );
         let _inbox = GuideRearmInbox::new(Some(dir.path().to_path_buf()));
 
         let remaining: Vec<_> = std::fs::read_dir(dir.path())
@@ -278,11 +321,11 @@ mod tests {
     fn gc_keeps_a_request_file_whose_pid_is_alive() {
         let dir = tempfile::tempdir().unwrap();
         let my_pid = std::process::id();
-        write_request(dir.path(), my_pid, "abc123", &["librarian"]);
+        write_request(dir.path(), my_pid, &request_hash(AGENT), &["librarian"]);
         let inbox = GuideRearmInbox::new(Some(dir.path().to_path_buf()));
 
         // Still there after construction's own gc — `poll` (not gc) is what
         // consumes a live pid's own request.
-        assert_eq!(inbox.poll(), vec!["librarian".to_string()]);
+        assert_eq!(inbox.poll(AGENT), vec!["librarian".to_string()]);
     }
 }

@@ -121,8 +121,10 @@ scouting.
 Subagents that share the parent's MCP server share:
 
 - The same active project (no per-subagent override)
-- The same `guide_hints_emitted` set (parent-triggered hints don't
-  re-fire for subagents)
+- The same `guide_hints_emitted` set — **only when their calls arrive
+  unstamped**. With the codescout-companion hook (Claude Code) each
+  subagent is its own principal with its own ledger, so hints you
+  triggered still fire for it
 - The same `path_note_emitted_since_activation` flag
 
 A subagent that needs the workspace pointed at a different root must

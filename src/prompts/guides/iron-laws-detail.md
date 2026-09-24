@@ -253,11 +253,12 @@ not relay automatically.
 - Avoid context dumps. "Everything I know" wastes the subagent's
   budget; "what the subagent needs to act on this task" is the bar.
 - **State which get_guide topics you've already triggered — and tell the
-  subagent to fetch them itself.** The `guide_hints_emitted` ledger is shared
-  parent↔subagent, so once you trigger a topic the subagent will NOT receive
-  its auto-inject independently. Your context is not its context: it holds
-  none of those bodies. The brief is therefore "I've triggered [librarian,
-  tracker-conventions]; the auto-inject will not fire for you — call
+  subagent to fetch them itself.** Your context is not its context: it holds
+  none of those bodies. Whether their auto-inject reaches it is not yours to
+  rely on — each subagent gets its own guide ledger only when the companion
+  hook stamps its calls; otherwise the `guide_hints_emitted` ledger is shared
+  parent↔subagent and a topic you triggered will NOT auto-inject for it. The
+  brief is therefore "I've triggered [librarian, tracker-conventions] — call
   `get_guide` on the ones your task needs." **Never tell it the guides are
   already loaded, and never tell it to skip a fetch as redundant** — nothing
   is redundant in a context window that never received it.

@@ -14,7 +14,7 @@ entry_prefix:
 - DWF
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
-entry_high_water_DWF: 5
+entry_high_water_DWF: 6
 entry_high_water_DCS: 3
 ---
 
@@ -91,6 +91,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DWF-3 | 2026-09-23 | workflow | enrichment | 571eb3d6/fork-route |
 | DWF-5 | 2026-09-24 | workflow | enrichment | 09093108:prefix-uniqueness |
 | DCS-3 | 2026-09-24 | coverage | session-receipt | 09093108/whole-session |
+| DWF-6 | 2026-09-24 | workflow | routine-first | 774ba049/guide-rearm-debug |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -217,6 +218,22 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | Noteworthy, not separately sampled | `rekey_prefix` moved the body but left the frontmatter declaration behind (filed and fixed in `c8d4e0d6`); a temporary-index commit raced a peer's commit between `read-tree` and `commit`, and the foreign-index guard refused it before it could silently revert their file; a guide edit moved a line-keyed test exemption and redded the gate |
 | Unresolved pending entries | none of this session's; DWF-5 carries its outcome |
 | Collection overhead | about 10 min for DWF-5's outcome and this receipt; estimated, not measured |
+
+## DWF-6 — Guide re-delivery debug → three ledger mechanisms fixed/filed, one fix verified live across a real restart
+
+**Status:** observed
+**Valid:** dated 2026-09-24
+
+- **Sampling / capture mode:** routine-first, **retrospective** — the session's first substantive workflow began before a context compaction, and its pre-action facts were not captured beforehand. Per this ledger's protocol they are NOT reconstructed from the later fix; they are marked unknown.
+- **Identity / key / times:** session `774ba049-d97c-443a-b31d-f662a9cb6a1e` (host agent, collector = same); capture key `774ba049/guide-rearm-debug`; provider/model: Claude Code, Opus-class host (subagent probe on Sonnet). Start: unknown (pre-compaction); capture 2026-09-24 ~08:45Z; finish pending the gate.
+- **Task / authority / substrate:** user: debug why `project-activation-bootstrap` "arms continuously" in session `571eb3d6`, then "file the bugs, write regression tests and start fixing", later "ok, go" on fixing the re-arm scoping. Workspace `/home/marius/work/claude/codescout`, branch `experiments`, shared checkout (peers committing concurrently).
+- **Pre-action evidence:** unknown (lost to compaction) — not reconstructed.
+- **Initial next action / completion check:** unknown for the first cycle. Second cycle (post-compaction, prospective in substance): verify fix `971ed73f` live through the real hook chain and a real `/mcp` restart; check = the probe principal's on-disk ledger rewritten by the NEW process still carrying the OLD process's timestamp.
+- **Trajectory (summary; canonical records linked):** forensic transcript read → refuted shared-server hypothesis → three candidate mechanisms → one filed and fixed (`971ed73f`, regression test RED→GREEN) → rebuild + live probe (dispatch, resume, `/mcp`, resume) → live check passed → verification surfaced two more mechanisms, both measured directly (`c186c45e2ed2a038` companion restore strips parent marks; `084cfc7d1eb60c45` re-arm consumed by any principal) plus a zombie recurrence (`523233935cc53bc4`) and stale served guides (`8bb2ec02b621c3f7`) → re-arm scoping fixed test-first (new test RED at the intended assertion, GREEN 66/66; three isolated mutations each KILLED by exactly the intended test).
+- **Effects / recovery:** commits `971ed73f`, `09f7b2c2`, and the re-arm fix pending the gate. One self-caught error: a pre-compaction retraction of the re-arm mechanism as an accepted design tradeoff was reversed by direct measurement; recorded in the bug file.
+- **Outcome / basis:** good / partial — fixes verified by observed RED→GREEN and a live check; the companion-side restore fix (`c186c45e2ed2a038`) is awaiting an operator decision.
+- **Delegation candidate:** "live-verify a guide-ledger fix across a restart" is a bounded workflow: dispatch probe → read per-principal ledger file → operator `/mcp` → resume probe → compare stamps. Missing input for a worker: the `/mcp` step needs the operator. Proposal only.
+- **Rests on / grouping / overhead:** bug files named above; one incident group with `571eb3d6`. Capture overhead ~5 min, estimated.
 
 ## Template for new entries
 

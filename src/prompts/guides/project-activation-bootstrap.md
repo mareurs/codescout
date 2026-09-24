@@ -55,10 +55,11 @@ so the next session inherits them.
 ## When you dispatch subagents — brief them
 
 Pass what you already loaded: memories read, open bugs, prior results. For
-guides, pass the *instruction to fetch*, not a "these are loaded" note — the
-guide-hint ledger is shared parent↔subagent, so a topic you triggered will not
-auto-inject for them, and your context is not theirs. Name the topics and tell
-them to call `get_guide` on the ones their task needs; an explicit fetch always
+guides, pass the *instruction to fetch*, not a "these are loaded" note — your
+context is not theirs, and unless the companion hook gives each subagent its
+own guide ledger, a topic you triggered will not auto-inject for them. Name
+the topics and tell them to call `get_guide` on the ones their task needs; an
+explicit fetch always
 returns the full body. A subagent re-discovering what you already knew is a
 dispatch defect (Iron Law 6), not the subagent's fault — but a subagent fetching
 its own guide is doing exactly what it should.
