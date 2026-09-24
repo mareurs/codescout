@@ -1,0 +1,37 @@
+=== codex (gpt-6-astra/medium) vs AGENT labels -- the admission comparison
+n=40  collapsed raw agreement 0.725  kappa 0.563  (chance 0.371)
+marginals a: {'not-a-pair': 16, 'not-a-violation': 17, 'violation': 7}  b: {'not-a-violation': 26, 'violation': 8, 'not-a-pair': 6}
+both call a violation: 6; same rule: 6
+
+disagreements (id: a | b):
+  16: not-a-pair | not-a-violation  -- b: Clarifies granularity matches but not key value; factual refinement.
+  47: monotone_absence | not-a-violation  -- b: Clarifies the referent; editorial.
+  53: not-a-pair | not-a-violation  -- b: List extended with later reversals; update.
+  197: not-a-pair | not-a-violation  -- b: Reproduction commit updated.
+  231: not-a-pair | not-a-violation  -- b: Marks the next action superseded and adds a time; a status update, no rule breach.
+  507: not-a-pair | lines_read  -- b: Called a budget an independent ceiling from its module name, without reading it.
+  517: not-a-pair | not-a-violation  -- b: Status updated from proposed to rejected.
+  556: not-a-pair | not-a-violation  -- b: Clarifies 'id' as sessionId; no attribution by name shown.
+  615: not-a-pair | not-a-violation  -- b: Environment line updated after the bug was retracted; factual update.
+  812: not-a-pair | not-a-violation  -- b: Reference scoped and a pointer added.
+  870: not-a-pair | question_asked  -- b: ldd was cited as answering linkage, but static linking means it could not measure that question.
+
+=== codex vs MAIN-SESSION labels
+n=40  collapsed raw agreement 0.675  kappa 0.492  (chance 0.361)
+marginals a: {'not-a-pair': 16, 'not-a-violation': 17, 'violation': 7}  b: {'not-a-violation': 25, 'unsure': 1, 'violation': 8, 'not-a-pair': 6}
+both call a violation: 6; same rule: 6
+
+disagreements (id: a | b):
+  16: not-a-pair | not-a-violation  -- b: Adds that the granularity matches but the key value does not; a clarification, the original claim was not fals
+  47: monotone_absence | not-a-violation  -- b: Clarifies the referent of 'this'; editorial.
+  53: not-a-pair | not-a-violation  -- b: List extended with later reversals; update.
+  74: not-a-violation | unsure  -- b: Drops a runtime consequence it attributes to .env.gpu; whether that misquotes the file or was never run cannot
+  197: not-a-pair | not-a-violation  -- b: Reproduction commit updated.
+  231: not-a-pair | not-a-violation  -- b: 'Current' next action marked superseded; status update.
+  461: not-a-violation | count_unit  -- b: A partition count carried from a superseded tally, per the commit; cited, not re-derived.
+  507: not-a-pair | lines_read  -- b: Describes what a budget governs from its module name, per the commit subject; the lines were not read.
+  517: not-a-pair | not-a-violation  -- b: Status update from proposed to rejected.
+  556: not-a-pair | not-a-violation  -- b: 'the id' clarified to 'the sessionId'; it did not attribute by name.
+  615: not-a-pair | not-a-violation  -- b: Environment line updated after the cause was found; no breach in the sentence.
+  812: not-a-pair | not-a-violation  -- b: Citation expanded; editorial.
+  870: not-a-pair | not-a-violation  -- b: Summary line rewritten after the ldd claim was corrected; the summary itself makes no rule-shaped claim.

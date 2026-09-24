@@ -1,0 +1,40 @@
+{"id": 74, "label": "not-a-violation", "second_rule": null, "reason": "The revision removes a failure claim; the shown evidence does not establish a specific rule breach repaired by that removal."}
+{"id": 47, "label": "monotone_absence", "second_rule": null, "reason": "The recommendation preserves an inference attributing traffic from an absent lock; the correction replaces that negative diagnostic with durable positive evidence."}
+{"id": 16, "label": "not-a-pair", "second_rule": null, "reason": "Both extracted texts are fragments of a sentence about workspace hash granularity."}
+{"id": 600, "label": "not-a-violation", "second_rule": null, "reason": "The original explicitly requests measurement before committing; the revision clarifies that the reference implementation had not been measured."}
+{"id": 234, "label": "not-a-violation", "second_rule": null, "reason": "The correction removes an inaccurate claim of specification completeness; no listed evidentiary failure is visible."}
+{"id": 870, "label": "not-a-pair", "second_rule": null, "reason": "The extracted recap is a fragment, and its replacement does not directly correct the three-probe count."}
+{"id": 517, "label": "not-a-pair", "second_rule": null, "reason": "These are status metadata fragments rather than a sentence and its correction."}
+{"id": 863, "label": "count_unit", "second_rule": "scope_instant", "reason": "The count lacks a concrete comparison and derivation; the correction supplies commit endpoints and an explicit measurement instant."}
+{"id": 189, "label": "not-a-violation", "second_rule": null, "reason": "A prospective requirement is updated to describe its implementation; the original does not visibly breach a rule."}
+{"id": 642, "label": "not-a-violation", "second_rule": null, "reason": "The correction records a code change removing the previously identified instrumentation gap."}
+{"id": 36, "label": "not-a-violation", "second_rule": null, "reason": "The defaults changed while the matcher inconsistency remained; this updates implementation status rather than repairing a listed breach."}
+{"id": 117, "label": "not-a-violation", "second_rule": null, "reason": "The revision removes a proposed diagnostic and preserves uncertainty; no visible rule breach explains the deletion."}
+{"id": 380, "label": "count_unit", "second_rule": null, "reason": "The original labels a character count as bytes; the correction distinguishes the two units and supplies the byte count."}
+{"id": 507, "label": "not-a-pair", "second_rule": null, "reason": "The twin is an unfinished parenthetical quotation of the original claim, not a complete corrective sentence."}
+{"id": 786, "label": "not-a-pair", "second_rule": null, "reason": "The original concerns measurement limitations; the twin concerns whether a runtime refactor was implemented."}
+{"id": 252, "label": "question_asked", "second_rule": null, "reason": "A datapoint count is used to establish promotion readiness without measuring the actual promotion criterion."}
+{"id": 874, "label": "not-a-pair", "second_rule": null, "reason": "The original evaluates reporting as option three; the twin evaluates lockout from the different prevention option."}
+{"id": 231, "label": "not-a-pair", "second_rule": null, "reason": "Both excerpts stop at extend and omit the object needed to complete the instruction."}
+{"id": 131, "label": "not-a-violation", "second_rule": null, "reason": "The replacement reports that the proposed work and source-of-truth decision are complete."}
+{"id": 705, "label": "not-a-violation", "second_rule": null, "reason": "The numerical corrections are retained; the revision clarifies their independence from surrounding retracted arguments."}
+{"id": 766, "label": "question_asked", "second_rule": null, "reason": "A measured background completion form is treated as representative of the real gate, whose own envelope remains unmeasured."}
+{"id": 418, "label": "not-a-violation", "second_rule": null, "reason": "The correction updates the residual decision after the directory was removed; the original completion claim is retained."}
+{"id": 719, "label": "not-a-violation", "second_rule": null, "reason": "The prescription changes from deleting to replacing an attribute; no listed rule violation is established by the shown context."}
+{"id": 53, "label": "not-a-pair", "second_rule": null, "reason": "Both excerpts are lists of entry identifiers and statuses, not complete sentences."}
+{"id": 737, "label": "not-a-pair", "second_rule": null, "reason": "The twin repeats the original unchanged and appends a different issue; it is not a correction of that sentence."}
+{"id": 317, "label": "not-a-violation", "second_rule": null, "reason": "The revision corrects the factual assertion that the write was pinned; no listed rule breach is visible."}
+{"id": 732, "label": "not-a-violation", "second_rule": null, "reason": "Only the issue link changes to its archive location."}
+{"id": 556, "label": "not-a-pair", "second_rule": null, "reason": "Both excerpts begin midway through a sentence; the revision merely makes the identifier spelling explicit."}
+{"id": 626, "label": "not-a-violation", "second_rule": null, "reason": "The correction explains a renamed slug; the historical name remains relevant to the explicitly described original filing."}
+{"id": 865, "label": "cannot_happen", "second_rule": null, "reason": "One build-specific failed control becomes a categorical claim that the method cannot support the verdict; the correction limits it to observed failure."}
+{"id": 205, "label": "not-a-pair", "second_rule": null, "reason": "The original is a fragment; the twin ends inside a quotation and combines it with a different claim."}
+{"id": 593, "label": "not-a-violation", "second_rule": null, "reason": "The shared classification sentence is unchanged; deleting an appended membership discussion does not visibly repair a listed rule breach."}
+{"id": 615, "label": "not-a-pair", "second_rule": null, "reason": "Both excerpts are environment inventories without a complete sentence."}
+{"id": 784, "label": "not-a-pair", "second_rule": null, "reason": "Provisional prioritization and absence of an implemented runtime refactor are different claims, not a sentence and its correction."}
+{"id": 461, "label": "not-a-violation", "second_rule": null, "reason": "The membership count is updated from nine to ten; the unit and measured partition are already identified."}
+{"id": 713, "label": "not-a-violation", "second_rule": null, "reason": "The correction marks previously accurate behavior as historical; it does not repair the stated schema analysis."}
+{"id": 167, "label": "selector_narrow", "second_rule": null, "reason": "The subject identifies a capped grep as the basis for a claim covering every identifier in both directories."}
+{"id": 197, "label": "not-a-pair", "second_rule": null, "reason": "Both excerpts are commit and environment metadata fragments."}
+{"id": 894, "label": "not-a-pair", "second_rule": null, "reason": "The original justifies preserving a quoted number; the twin explains sentence-level applicability of remedies, a different claim."}
+{"id": 812, "label": "not-a-pair", "second_rule": null, "reason": "The original is a reference-list fragment; the twin expands that reference and adds another list item."}

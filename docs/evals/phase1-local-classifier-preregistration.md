@@ -494,3 +494,27 @@ A first build of the **mined correction pairs**, with no model call and nothing 
 - A run that errors, or returns fewer than 40 valid rows, is reported and not scored.
 
 **Prediction:** κ ≥ 0.6, but below the 0.86 Claude–Claude figure, with most disagreements on rows where one side calls a violation and the other `not-a-violation`.
+
+**Result, 2026-09-24:**
+
+- **Run:** one, exit 0. The run header confirms `gpt-6-astra`, reasoning effort `medium`. The output is 40 valid rows with 40 distinct sample ids.
+- **Blindness:** verified from the run log. All five of Codex's shell commands read only the three files in its working directory, and nothing references a label file or the repo.
+- **Files:** `codex-sample-labels.jsonl`, `agreement-codex.txt` and `codex-run-header.txt` in the Stage 2 data directory.
+
+| comparison | collapsed raw | κ (chance) | both call a violation → same rule |
+|---|---|---|---|
+| **Codex vs agent labels, the admission comparison** | 29/40 | **0.563** (0.371) | 6 → 6 |
+| Codex vs main-session labels | 27/40 | 0.492 (0.361) | 6 → 6 |
+| *(for reference)* main session vs agent labels | 37/40 | 0.859 (0.469) | 7 → 7 |
+
+**Against the registered readings:**
+
+- **Admission rule: κ = 0.563 < 0.6, so the agent labels are NOT admitted.** No relabelling or re-scoring is done to reach the bar.
+- **Prediction: failed on both halves.** κ fell below 0.6. And most disagreements (8 of 11) were not violation against `not-a-violation`, as predicted, but **`not-a-pair` against `not-a-violation`**: Codex called 16 rows `not-a-pair` where the agent labels had 6.
+- **Where it matters most, the rule chosen agrees.** Every row both call a violation gets the same rule (6 of 6), and the three violation-level disagreements are rows 47, 507 and 870.
+
+**What the disagreement is, read from the rows.** Codex labels status updates and follow-ups `not-a-pair`: a proposal marked rejected, a to-do replaced by its completion, a commit id updated. Its reason is that the new sentence is not a *correction* of the old one. The instruction lists "an updated fact" under `not-a-violation`, so Codex departed from its letter. But the instruction's `not-a-pair` definition ("not one sentence and its correction") also fits those rows, so the categories overlap, and **that is a defect in the instruction**, not only in one labeller.
+
+**Exploratory, decided after seeing the data, and not an admission test:** on the binary that decides what enters T (a rule versus anything dropped), Codex and the agent labels agree on 37 of 40, κ = 0.754. Both `not-a-pair` and `not-a-violation` rows are dropped at admission, so the 4-way metric registered here counted a distinction the downstream use does not make. Admitting on that basis would need a new registration. Choosing the binary after seeing the 4-way result is disclosed as exactly that.
+
+**A reading Codex made that both Claude passes missed:** row 47, `monotone_absence`. The paragraph attributes the GPU traffic *because no index lock existed*, an absence used as proof, and the correcting commit says "the GPU load WAS indexing". It is the same pattern as the model-vs-context experiment: a different model family catches a different defect.
