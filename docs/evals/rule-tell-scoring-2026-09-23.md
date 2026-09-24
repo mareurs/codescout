@@ -363,6 +363,34 @@ Errored rows: 0. The span gate carries over at 3/3 (9/9 on-target), as registere
 
 **Next, per the registration:** Score A (21 pairs × 2 sides × 22 rules, 1 run, completeness-checked), then Score B (the `e2s` fork arms). S0 is now the phase-1 baseline.
 
+## Phase 1 — S0 Score A: precise, low recall, registered
+
+This is the Score A registered in `bbba4aa2` and carried to S0. It ran on Sonnet 5, form 2b, the clean channel, the `~/.claude` account, over all 21 phase-1A pairs, both sides, 22 rules, 1 run: **924 rows, 0 errored, 0 incomplete.** It is not blind, because the author of the specs has read this corpus.
+
+| `text_detectable` | positives: gold fired | gold only | fires / text | negatives: any fire | fires / text |
+|---|---|---|---|---|---|
+| yes (8 pairs) | **3/8** | 2/8 | 0.62 | 2/8 | 0.25 |
+| partial (9) | **0/9** | 0/9 | 0.00 | 0/9 | 0.00 |
+| no (4) | 0/4 | 0/4 | 0.25 | 0/4 | 0.00 |
+
+**Claim localisation:** 3/3. Every gold-rule quote sits in text that the correction changed.
+
+**Against the registered predictions:**
+
+- **Recall on yes + partial ≥ 0.5: FAILED.** It was **3/17 = 0.18** (Wilson 95% ≈ [0.06, 0.41]).
+- **Negatives with any fire ≤ 0.3: HELD.** It was **2/21 = 0.10**: `d_history` on RTD-17 and `selector_narrow` on RTD-20.
+
+**What was caught, and what was not:**
+
+- **Hits:** RTD-3 (`monotone_absence`, plus a stray `closed_population`), RTD-8 (`contradiction`, alone) and RTD-10 (`cannot_happen`, alone). **These are three of the four rules phase 2 has checkers for.**
+- **Misses:** the fourth, RTD-9 (`count_unit`/`contradiction`), and every `partial` case. These gold rules went unfired: `question_asked` (0/3), `count_unit` (0/4), `scope_instant`, `open_artifact`, `run_tool`, `member_vs_population`, `lines_read` and `closed_population`.
+- **Wrong rule on 2 positives:** RTD-20 fired `selector_narrow` for gold `lines_read`, and RTD-21 fired `count_unit` for gold `closed_population`.
+- **Silence:** 16 of 21 positives fired nothing at all.
+
+**Reading.** The three gates bought precision by teaching the judge restraint, and Score A shows the cost. The generic clause (*"a plain statement of fact that does not show how it is known does not break a rule by that alone"*) plus the NO clauses of form 2 turn most of the corpus's violations into NO. Many of them are, by the corpus's own `partial` label, only partly visible in the excerpt. It is the mirror image of form 1's failure: form 1 fired on everything, form 2b fires on the rules whose violations are *visible in the sentence*. It is **a hypothesis, not established**, that the generic clause is what does it. Removing it would be a new registration, and the gate would have to be re-passed.
+
+**Score B is unaffected by this reading and still registered next.** It measures whether S0's output changes behaviour at DP1 and RTD-3. Three of the four rules it needs are among S0's hits. RTD-9, the one S0 missed, is registered to count as a rate on arm `e2s` like any other.
+
 ## Next — phase 1 (handoff, 2026-09-24)
 
 **Where phase 2 left it.** At both decision points and for all four rules (RTD-3, 8, 9, 10), a reminder that **names the specific claim and the rule governing it** stops the violation (0/9–0/10). The rule's text alone does not do so reliably, and an unrelated injection never does. Removing the rules from `CLAUDE.md` did not raise violation rates. **So the whole value sits in phase 1 producing that binding:** find the claim in the draft, and pick the rule. Today's selector does neither. Jev's `choice` over the rule menu said `none` on 10/10 real drafts, with the gold rules at ranks 4–18. Phase 1A's corpus top-1 was 24%.
