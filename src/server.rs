@@ -1153,16 +1153,36 @@ impl CodeScoutServer {
     /// unsafe direction, and it is the original subagent defect in mirror image.
     /// Caught before it could ship, at `context-injection-session-log:F-3`.
     ///
+    /// **`rendezvous_fallback` must outrank `base_ledger_key`, not merely
+    /// exist alongside it.** `base_ledger_key` is a construction-time
+    /// snapshot, frozen for the process's life — it is not the field
+    /// `poll_rendezvous` updates when a `/clear` rekeys `live` earlier in
+    /// THIS SAME call. Falling back to the stale key instead of the
+    /// rendezvous's current belief made this function re-adopt the OLD
+    /// conversation moments after `poll_rendezvous` had correctly moved off
+    /// it — invisible while the re-adopt used a blind [`rekey`](GuideLedger::rekey)
+    /// (both land on empty), and a real regression once it became
+    /// [`adopt`](GuideLedger::adopt): the old conversation's on-disk history
+    /// was resurrected right back into the ledger the rekey had just
+    /// cleared. Guarded by `guide_hint_tests::a_tool_call_polls_the_rendezvous_and_re_arms`.
+    ///
     /// So the three cases are:
     ///
     /// | asserted | ledger already on it | action |
     /// |---|---|---|
     /// | any | yes | nothing — the common case, every call after the first |
-    /// | seen before | no | park the outgoing, RESTORE the stored one |
-    /// | never seen | no | park the outgoing, re-arm fresh via `rekey` |
+    /// | seen before, by THIS process | no | park the outgoing, RESTORE the parked one |
+    /// | never seen by this process | no | park the outgoing, [`adopt`](GuideLedger::adopt) — read the principal's on-disk file if an earlier process left one, else start empty |
     ///
-    /// Restoring is what `rekey` alone cannot do: its re-arm is total by design,
-    /// correct for a principal we have never served and wrong for one returning.
+    /// Restoring from `parked_ledgers` is what a bare [`rekey`](GuideLedger::rekey)
+    /// cannot do within one process's memory. `adopt` extends that one step
+    /// further, past this process's own lifetime: a principal `parked_ledgers`
+    /// has never held (a subagent's first call after THIS server restarted,
+    /// or the parent itself reconnecting mid-conversation) may still have a
+    /// rich history on disk from an earlier process, and `rekey`'s "start
+    /// empty" contract — correct for a conversation that provably has no
+    /// file yet, such as a fresh `/clear` — silently discarded it.
+    /// docs/issues/2026-09-24-rekey-never-consults-the-on-disk-ledger-of-the-principal-it-targets.md
     ///
     /// An **anonymous** ledger (no identity at construction) is never parked —
     /// there is no key to file it under — so a process with no resolvable session
@@ -1172,8 +1192,15 @@ impl CodeScoutServer {
     /// target: it feeds `serving_session`, where `None` must keep falling through
     /// to the rendezvous. Restoring the parent is a ledger operation, not a claim
     /// about which conversation the rendezvous should report.
-    fn adopt_request_conversation(&self, asserted: Option<String>) -> Option<String> {
-        let target = asserted.clone().or_else(|| self.base_ledger_key.clone())?;
+    fn adopt_request_conversation(
+        &self,
+        asserted: Option<String>,
+        rendezvous_fallback: Option<String>,
+    ) -> Option<String> {
+        let target = asserted
+            .clone()
+            .or(rendezvous_fallback)
+            .or_else(|| self.base_ledger_key.clone())?;
 
         let mut live = self.guide_hints_emitted.lock();
         if live.key() == Some(target.as_str()) {
@@ -1193,10 +1220,10 @@ impl CodeScoutServer {
                 );
             }
             None => {
-                live.rekey(&target);
+                live.adopt(&target);
                 tracing::info!(
                     principal = %target,
-                    "principal not served before; re-arming the guide ledger"
+                    "principal not parked by this process; adopted its on-disk ledger, if any"
                 );
             }
         }
@@ -1347,7 +1374,10 @@ impl CodeScoutServer {
         // once one does. Without the companion both are `None` and this leaves the
         // rendezvous result exactly as it was.
         let serving_session = self
-            .adopt_request_conversation(asserted_principal.or(asserted_conversation))
+            .adopt_request_conversation(
+                asserted_principal.or(asserted_conversation),
+                rendezvous_session.clone(),
+            )
             .or(rendezvous_session);
         self.poll_guide_rearm();
 
@@ -10706,6 +10736,95 @@ mod guide_hint_tests {
         assert!(
             call(&server, Some("sess-1/agent-a")).await.is_empty(),
             "a returning principal must be restored, not re-armed"
+        );
+    }
+
+    /// A subagent principal returning after the codescout SERVER PROCESS
+    /// itself restarted — not merely after another principal's call within
+    /// the same process — must be restored from its on-disk ledger file,
+    /// not treated as never-served.
+    ///
+    /// `docs/issues/2026-09-24-rekey-never-consults-the-on-disk-ledger-of-the-principal-it-targets.md`.
+    /// `parked_ledgers` is in-memory only and empty at construction, so a
+    /// fresh process has nothing parked for ANY principal that isn't the
+    /// base session — even one with a rich, previously-persisted history.
+    /// Two SEPARATE `CodeScoutServer`s sharing one `guide_hints_dir` and one
+    /// session id is what distinguishes this from
+    /// `a_parent_call_after_a_subagent_restores_the_parents_own_ledger`
+    /// above, which tests one process's in-memory park/restore and cannot
+    /// see a restart at all.
+    #[tokio::test]
+    async fn a_subagent_returning_after_a_server_restart_is_restored_from_its_on_disk_ledger() {
+        async fn call(server: &CodeScoutServer, principal: Option<&str>) -> Vec<String> {
+            let mut arguments = serde_json::Map::new();
+            arguments.insert("command".to_string(), json!("echo hi"));
+            if let Some(p) = principal {
+                arguments.insert(
+                    crate::tools::session_key::PRINCIPAL_ARG_KEY.to_string(),
+                    json!(p),
+                );
+            }
+            let params = json!({
+                "name": "run_command",
+                "arguments": Value::Object(arguments),
+            });
+            let req: CallToolRequestParams = serde_json::from_value(params).unwrap();
+            let out = server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .unwrap();
+            guide_blocks(&out.content)
+        }
+
+        async fn server_at(
+            dir: &std::path::Path,
+            session_id: &str,
+            ws_path: &std::path::Path,
+        ) -> CodeScoutServer {
+            let env = ServerEnv {
+                session_id_explicit: Some(session_id.to_string()),
+                librarian: crate::librarian::LibrarianEnv {
+                    workspace: Some(ws_path.to_path_buf()),
+                    db: Some(dir.join("librarian.db")),
+                    ..Default::default()
+                },
+                ..test_env(dir)
+            };
+            let agent = crate::agent::Agent::new(Some(dir.to_path_buf()))
+                .await
+                .unwrap();
+            let lsp = LspManager::new_arc();
+            CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let ws_path = dir.path().join("librarian-workspace.toml");
+        std::fs::write(&ws_path, "").unwrap();
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let principal = format!("{session_id}/agent-a");
+
+        // 1. FIRST PROCESS. The subagent is served, accumulating real
+        //    on-disk history under its principal key.
+        let server_a = server_at(dir.path(), &session_id, &ws_path).await;
+        assert!(
+            !call(&server_a, Some(&principal)).await.is_empty(),
+            "a subagent's first call must be served"
+        );
+        drop(server_a); // the process exits — parked_ledgers dies with it
+
+        // 2. SECOND PROCESS, same session id, same guide_hints_dir —
+        //    simulates a restart (`/mcp` reconnect, crash, sleep/wake).
+        //    Its `parked_ledgers` starts empty; nothing in THIS process
+        //    remembers serving agent-a.
+        let server_b = server_at(dir.path(), &session_id, &ws_path).await;
+
+        // 3. THE ASSERTION THIS TEST EXISTS FOR. agent-a already has a
+        //    populated on-disk ledger file from step 1. It must be
+        //    restored, not re-armed just because this process is new.
+        assert!(
+            call(&server_b, Some(&principal)).await.is_empty(),
+            "a principal with existing on-disk history must not be re-armed just because this process never served it"
         );
     }
 

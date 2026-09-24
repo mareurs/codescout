@@ -1,0 +1,146 @@
+---
+id: '33cf7528bbba0107'
+kind: bug
+status: open
+title: 'BUG: adopt_request_conversation''s "principal not served before" branch calls rekey(), which never consults the on-disk ledger of the principal it targets'
+owners:
+- marius
+tags:
+- cluster/unclassified
+closed: null
+opened: 2026-09-24
+owner: marius
+related:
+- a5054d135acacbe3
+severity: high
+---
+
+# BUG: `adopt_request_conversation`'s "principal not served before" branch calls `rekey()`, which never consults the on-disk ledger of the principal it targets
+
+## Summary
+
+`CodeScoutServer::adopt_request_conversation` (`src/server.rs:1175-1204`) restores a returning principal's guide ledger from its **in-memory** `parked_ledgers: HashMap` only. `parked_ledgers` is constructed empty on every server-process startup (`src/server.rs:203-207`) and is never itself persisted. When a principal (a subagent, or the parent across a process restart) is not found there, the code falls to `live.rekey(&target)` — which unconditionally discards the live in-memory ledger and starts a fresh, empty one, **without checking whether a rich on-disk history already exists for that exact principal.** It does: `GuideLedger::persist()` writes one JSON file per principal-key, and those files demonstrably accumulate real, multi-topic state over a session's life.
+
+## Symptom (Effect)
+
+A principal that has genuinely already received a set of guide topics — evidenced by a populated, correctly-named on-disk ledger file for its exact key — is treated by `adopt_request_conversation` as never having been served, and every one of those topics is redelivered to the model as if for the first time.
+
+Observed via forensic filesystem enumeration of `~/.local/state/codescout/guide_hints/` for one real, long-lived Claude Code session (`571eb3d6-c879-43f6-b3f9-5a51e744e1af`):
+
+- The session's own **base** ledger file, `571eb3d6-c879-43f6-b3f9-5a51e744e1af.json`, held **exactly one topic** (`project-activation-bootstrap`, stamped `2026-09-24T06:20:48Z`) despite the session being ~4 days old and 7491 transcript lines long at investigation time — consistent with having been reset to empty and re-earning only one topic since.
+- **33 separate `571eb3d6-c879-43f6-b3f9-5a51e744e1af_a<16-hex>.json` files** exist for that one session id — one per distinct dispatched subagent — with mtimes spanning **2026-09-20 13:34 through 2026-09-24 09:13** (the session's entire life), sizes up to 1015 bytes (a dozen-plus accumulated topics each).
+- No codescout server process currently claims session `571eb3d6-c879-43f6-b3f9-5a51e744e1af` (cross-checked against all 26 live `codescout start` processes' rendezvous slots) — the server instance(s) that served it are gone, i.e. at least one restart/handoff has occurred.
+
+## Reproduction
+
+```
+git rev-parse HEAD          # 0fef556273c211db4fe61a34d2b8ff20a92d91bb, branch experiments
+```
+
+Minimal reproduction (not yet run as an automated test — see Tests added):
+
+1. Start a codescout server for session `S`, with `guide_hints_dir` pointing at a real directory.
+2. As principal `S_a<hash>` (a subagent), insert several topics (e.g. via `get_guide`) so its on-disk ledger file `S_a<hash>.json` accumulates real content and is persisted.
+3. Kill the server process (simulating any restart: `/mcp` reconnect, crash, machine sleep/wake).
+4. Start a **new** server process for the same session `S` (fresh `parked_ledgers`, empty).
+5. Make a tool call asserting principal `S_a<hash>` again (the same subagent identity returning).
+6. Expected: the ledger for `S_a<hash>` is restored from its on-disk file, so previously-delivered topics are NOT redelivered.
+7. Actual: `adopt_request_conversation` finds nothing in the fresh process's `parked_ledgers`, falls to `rekey(&target)`, and every topic that principal already held is forgotten and redelivered on next touch.
+
+## Environment
+
+Linux, `experiments` @ `0fef556273c211db4fe61a34d2b8ff20a92d91bb`, codescout MCP over stdio, per-CC-process server (confirmed: 26 distinct rendezvous-slot-bearing processes observed live, no sharing).
+
+## Root cause
+
+`CodeScoutServer::adopt_request_conversation` (`src/server.rs:1175-1204`), case 3 ("never seen"):
+
+```rust
+match parked.remove(&target) {
+    Some(restored) => { *live = restored; /* … */ }
+    None => {
+        live.rekey(&target);   // <-- total wipe, no disk consultation
+        /* … */
+    }
+}
+```
+
+`GuideLedger::rekey` (`src/tools/guide_ledger.rs:265-281`) repoints `self.path` at the new key's file location but does **not** read it — its own doc comment states *"a new conversation holds nothing"* and its own test (`rekey_repoints_the_path_and_forgets_every_topic`, `src/tools/guide_ledger.rs`) asserts `is_empty()` immediately after rekeying to a key with a pre-existing on-disk file, confirming this is the *intended, tested* contract of `rekey()` **as a general-purpose method**.
+
+That contract is correct for `rekey()`'s **other** caller, `CodeScoutServer::poll_rendezvous` (`src/server.rs:1105-1123`), which uses it specifically for a genuinely new conversation (`/clear` mints a session id that has never existed, so no file exists to lose). It is **not** correct for `adopt_request_conversation`'s case 3, which restores a principal that may have a real, populated file from this same session's earlier life — in an **earlier server process** that has since exited. `GuideLedger::load` (`src/tools/guide_ledger.rs:116-132`) — used only once, for the base/parent principal, at server construction (`src/server.rs`, ~line 511) — already implements exactly the read-if-present logic that's missing here; it is simply never called for a re-adopted non-base principal.
+
+*inferred from `src/server.rs:1175-1204`, `src/tools/guide_ledger.rs:116-132,265-281` — not measured against a live process restart; see Reproduction.*
+
+## Evidence
+
+### Base ledger file for `571eb3d6-c879-43f6-b3f9-5a51e744e1af`
+
+```
+{"project-activation-bootstrap":"2026-09-24T06:20:48.466163121Z"}
+```
+65 bytes, mtime 2026-09-24 09:20 — one topic, for a session active since 2026-09-20.
+
+### Subagent ledger file count for the same session id
+
+```
+$ ls ~/.local/state/codescout/guide_hints/ | grep -c '^571eb3d6-c879-43f6-b3f9-5a51e744e1af_'
+33
+```
+mtimes span 2026-09-20 13:34 → 2026-09-24 09:13. Sample content (`_a000a99d500d01a41.json`, 469 bytes):
+```
+{"librarian#Artifact Model":"2026-09-20T10:31:39...","librarian#docs/trackers/ — Backing Store, Not a Docs Folder":"...","librarian#librarian(action=...) — Reference":"...","progressive-disclosure":"2026-09-20T10:31:27...","project-activation-bootstrap":"2026-09-20T10:31:08...","symbol-navigation":"...","tracker-conventions":"..."}
+```
+
+### No live process currently serving this session
+
+```
+$ ps aux | grep 'codescout start' | wc -l
+26
+```
+26 rendezvous slot files under `~/.local/state/codescout/servers/`, none stamped `"session":"571eb3d6-c879-43f6-b3f9-5a51e744e1af"`.
+
+## Hypotheses tried
+
+1. **Hypothesis:** codescout's MCP server is shared across multiple concurrent Claude Code sessions, so peer sessions' hooks fight over one rendezvous slot and cause the observed repeat guide delivery.
+   **Test:** enumerate `~/.local/state/codescout/servers/*.json` against `ps aux | grep codescout`.
+   **Verdict:** rejected — 26 slot files map 1:1 to 26 distinct processes; none share a slot.
+
+2. **Hypothesis:** the repeat delivery is fully explained by `poll_guide_rearm`'s parent/subagent race (Decision #8 in `docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md`).
+   **Test:** read the spec and the 2026-09-14 ADR directly.
+   **Verdict:** confirmed as A contributing, but already-accepted, mechanism — not this bug. That race is explicitly ruled "Acceptable" and does not explain a session's **base** ledger holding only one topic after 4 days, nor 33 independently-reset subagent files.
+
+3. **Hypothesis (this bug):** `parked_ledgers` being in-memory-only, combined with `rekey()` never consulting disk, explains the base-ledger thinness and the subagent-file count independently of the Decision-#8 race.
+   **Test:** read `adopt_request_conversation` and `rekey()` directly; cross-reference against the ADR's "Deliberately out of scope" list (no mention of restart-across-process principal restoration).
+   **Verdict:** confirmed as a plausible, unaddressed mechanism. Not yet confirmed by a controlled reproduction (Resume).
+
+## Fix
+
+*Plan first, implementation second.*
+
+Add a new `GuideLedger` method that mirrors `rekey()`'s path-repointing but **populates from disk when a file exists** for the target key, instead of unconditionally clearing — effectively the same logic `GuideLedger::load` already uses for the base principal at construction. Call it from `adopt_request_conversation`'s case-3 branch **only** (`src/server.rs`, the `None => { live.rekey(&target); … }` arm); leave `rekey()` itself, and `poll_rendezvous`'s use of it, untouched — that call site genuinely wants "a new conversation holds nothing" and has its own passing test asserting exactly that contract, which a shared-method change would break.
+
+Not implemented yet — see Tests added / Resume.
+
+- **SHA** — none yet (branch `experiments`).
+- **patch-id** — none yet.
+
+## Tests added
+
+None yet — this record opens the defect; a regression test proving the restoration (not just the current wipe) is the next step. Planned: a `CodeScoutServer`-level test analogous to the existing `guide_hint_tests` module in `src/server.rs`, constructing two servers in sequence against the same `guide_hints_dir` (simulating a process restart) and asserting the second server's `adopt_request_conversation` for a principal with a pre-existing on-disk file does **not** re-deliver topics that file already recorded.
+
+## Workarounds
+
+None known. The cost is redundant guide re-delivery (token cost, conversation noise), not data loss or incorrect answers.
+
+## Resume
+
+Write the regression test named above (`src/server.rs`, near the existing `guide_hint_tests` module), watch it fail for the right reason (asserts restoration; current code wipes), then add the disk-consulting `GuideLedger` method and wire it into `adopt_request_conversation`'s case-3 branch only. Run `./scripts/gate.sh` before closing.
+
+## References
+
+- `src/server.rs:1175-1204` (`adopt_request_conversation`), `:203-207` (`parked_ledgers` field), `:1105-1123` (`poll_rendezvous`, the other `rekey()` caller)
+- `src/tools/guide_ledger.rs:116-132` (`load`), `:265-281` (`rekey`)
+- `docs/adrs/2026-09-14-a-subagent-is-a-principal.md` — introduces the principal/park-restore model; does not address restart-across-process restoration
+- `docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md` § Decision #8 — the related-but-distinct, already-accepted race this bug is NOT
+- `docs/trackers/context-injection-session-log.md` F-13 (this repo) — the session-log record of the investigation that found this
+- Sibling, already-open bug: `a5054d135acacbe3` (`docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`) — a different mechanism reaching a similar symptom (over-broad ledger clearing)

@@ -298,6 +298,38 @@ impl GuideLedger {
         true
     }
 
+    /// Point this ledger at a different conversation, restoring its on-disk
+    /// history if one exists rather than assuming there is none.
+    ///
+    /// The surgical twin of [`rekey`](Self::rekey): `rekey` always starts the
+    /// new key empty, which is correct for a conversation that provably
+    /// cannot have a file yet (a fresh `/clear` mints an id that has never
+    /// existed) but wrong for a principal re-adopted by a DIFFERENT server
+    /// process than the one that last served it — `parked_ledgers`
+    /// (`CodeScoutServer`) is in-memory only and does not survive a server
+    /// restart, so the on-disk file is the only place that principal's
+    /// history still lives. Reads like [`load`](Self::load), minus the GC
+    /// pass, which stays the responsibility of the process constructing the
+    /// base ledger rather than every later re-adoption.
+    ///
+    /// docs/issues/2026-09-24-rekey-never-consults-the-on-disk-ledger-of-the-principal-it-targets.md
+    pub fn adopt(&mut self, session: &str) {
+        let repointed = self
+            .path
+            .as_deref()
+            .and_then(Path::parent)
+            .map(|dir| dir.join(format!("{}.json", sanitize(session))));
+        self.emitted = repointed.as_deref().map(read_entries).unwrap_or_default();
+        if repointed.is_some() {
+            self.path = repointed;
+        }
+        self.key = Some(session.to_string());
+        // Not persisted (see `persist`'s doc comment — it writes `emitted`
+        // only), so there is nothing on disk to restore; clear for the same
+        // reason `rekey` does: the model on the other end has never been told.
+        self.notices.clear();
+    }
+
     /// The conversation this ledger is currently keyed to, if any.
     ///
     /// `None` means anonymous — no session identity was resolvable at

@@ -12,7 +12,7 @@ topic: context-injection
 entry_prefix:
   - F
   - W
-entry_high_water_F: 12
+entry_high_water_F: 13
 entry_high_water_W: 5
 ---
 
@@ -46,6 +46,7 @@ author to make.
 | F-10 | 2026-09-14 | high | tooling | fixed-verified | The schema is hand-written too, so "prefer the schema" rests on a false premise — and I shipped its stale claim to four surfaces |
 | F-11 | 2026-09-14 | med | tooling | open | A control whose subject was relabelled in transit — `2>&1` made my stderr evidence stdout |
 | F-12 | 2026-09-14 | med | self-friction | open | Third today: the falsifier was in my own § E1, three sections below the claim it refutes |
+| F-13 | 2026-09-24 | high | architectural | open | The "shared server" hypothesis was wrong — resolves F-6's open question, surfaces two unfiled ledger-restore gaps |
 
 ## Wins Index
 
@@ -1426,6 +1427,40 @@ six corrections are countable; the counterfactual vague version is not, since no
 
 **Status:** validated — six corrections landed, all six improved the shipped fix or the record,
 and the fix that shipped depends on two specifics the vague version would not have carried.
+
+## F-13 — The "shared server" hypothesis was wrong — resolves F-6's open question, surfaces two unfiled ledger-restore gaps
+
+**Observed:** 2026-09-24, live debugging session (user report: `get_guide('project-activation-bootstrap')` "arms continuously" instead of firing once per session). Investigating session `571eb3d6-c879-43f6-b3f9-5a51e744e1af` (a 4-day, 7491-line, subagent-heavy `.claude-kat` conversation) plus live reproduction in this session.
+
+**When:** Mid-investigation, after ruling out `workspace(activate)` call volume (~11 calls) and `post_compact` call volume (4 calls) as insufficient to explain ~44 unique re-fires of `project-activation-bootstrap` alone in `571eb3d6`.
+
+**Expected (my working hypothesis):** codescout's MCP server process is shared across multiple concurrent Claude Code sessions/worktrees in this checkout — CLAUDE.md's "several agent sessions routinely share this checkout" plus `session-start.mjs`'s own POST-COMPACT text ("the server is shared per workspace, not per session," referring to the LSP) led me to generalize *that documented LSP-sharing fact* to the MCP server process itself, without checking. So peer sessions' hooks would fight over one rendezvous slot, flapping `Rendezvous::poll()`'s "changed" detection and triggering `GuideLedger::rekey()` (full wipe) continuously.
+
+**Got (scouted reality):** Dispatched a forensic subagent to enumerate live state directly. `ps aux | grep codescout` + `~/.local/state/codescout/servers/*.json`: **26 rendezvous slot files map 1:1 to 26 distinct running `codescout start` processes** (11 rooted at this exact checkout) — no two processes share one slot file; each polls only its own via `std::process::id()`-keyed paths (`src/tools/rendezvous.rs:87-135`). The per-CC-process architecture is intact; the hypothesis was flatly wrong.
+
+The real mechanism, found by reading `src/tools/guide_ledger.rs` / `src/server.rs` / `src/tools/guide_rearm.rs` directly:
+
+1. Already-filed, still-open bug `a5054d135acacbe3`: `workspace(post_compact=true)` blunt-clears the whole ledger without checking a real compaction happened. Confirmed live in the `571eb3d6` transcript at an exact `/mcp` reconnect immediately followed by a spurious `post_compact` call (transcript lines ~6880-6910).
+2. `poll_guide_rearm()` (`src/server.rs:1135-1143`) drains `GuideRearmInbox` — scoped only by server PID, not by principal (`src/tools/guide_rearm.rs`) — and applies `re_arm()` to whichever ledger is live *after* `adopt_request_conversation` has already run for the current call (confirmed call order at `src/server.rs:1336-1352`: `poll_rendezvous` → `adopt_request_conversation` → `poll_guide_rearm`). A subagent-dispatch re-arm request that lands before the new subagent's own first call reaches the server — routine with backgrounded dispatch — gets applied to the *parent's* restored ledger instead. Reproduced live, this session, with zero `post_compact` calls involved, directly correlated with two subagent dispatches (`project-activation-bootstrap` and `symbol-navigation` both re-fired as "first call this session" a second/third time).
+3. `parked_ledgers` (`src/server.rs:203-207`) is an in-memory-only `HashMap`, empty at every server-process construction, and `GuideLedger::rekey()` (`src/tools/guide_ledger.rs:265-281`) never reads the on-disk file for the principal it's rekeying *to* — its own doc comment says "a new conversation holds nothing," and its own test `rekey_repoints_the_path_and_forgets_every_topic` asserts `is_empty()` immediately after rekeying to a key with a pre-existing on-disk file. Evidenced by `571eb3d6`'s 33 separate `_a<hex>.json` subagent-ledger files (each independently timestamped, spanning the session's full 4-day life — proving heavy subagent turnover) and the session's own base ledger file currently holding only one topic despite 4 days of activity.
+
+Item 2 directly answers F-6's own flagged open question: *"A live question I have not measured: `poll_guide_rearm` runs immediately AFTER adoption, so a stamped subagent call adopts its own ledger and then has that ledger re-armed by the inbox. Benign on this evidence, unexamined in general."* It is not benign — it reproduces on demand.
+
+**Probable cause:** Generalized a *documented* sharing fact (the LSP) to a *different, undocumented* component (the MCP server process) by analogy, without checking either the process list or the rendezvous-file layout first.
+
+**Workaround:** None needed — the wrong hypothesis was explicitly framed as a hypothesis, tested via a forensic subagent, and retracted in the same turn once process/file evidence returned, before being reported to the user as settled fact.
+
+**Severity:** high — the wrong hypothesis, unchecked, would have been handed to the user as root cause of an actionable report; the two surfaced mechanisms are unfiled defects in load-bearing principal/ledger infrastructure that every subagent-dispatching session exercises.
+
+**Status:** open — mechanisms 2 and 3 are not yet filed as `docs/issues/` bug files; this entry is the session-log record, not the bug-tracker record. User has been asked how to proceed.
+
+**Valid:** dated 2026-09-24
+
+True of the `guide_ledger.rs` / `server.rs` / `guide_rearm.rs` shape at `HEAD` on branch `experiments` at investigation time; re-verify if those files change.
+
+**Rests on:** live reproduction in two independent sessions (`571eb3d6-c879-43f6-b3f9-5a51e744e1af` transcript analysis + this session's own tool-call trace); a forensic subagent's direct enumeration of `~/.local/state/codescout/servers/` and `~/.local/state/codescout/guide_hints/` (33 subagent ledger files under one session id); `GuideLedger::rekey`'s own doc comment and unit test, read directly rather than inferred.
+
+**Fix idea / Pointer:** File `docs/issues/` bug entries for mechanism 2 (`poll_guide_rearm` principal-scoping race) and mechanism 3 (`parked_ledgers` / `rekey()` not consulting on-disk history) — pending user decision on how to proceed, same conversation.
 
 ## Template for new entries
 
