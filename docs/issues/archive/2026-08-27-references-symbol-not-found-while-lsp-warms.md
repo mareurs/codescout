@@ -222,7 +222,14 @@ None needed after `e26da0b2`. On an older binary: re-run `references` once, or c
 
 ## Resume
 
-Nothing left. **The live check is owed to the next release rebuild**: after `./scripts/rb.sh` plus `/mcp`, dispatch several parallel subagents whose first calls are path-scoped `symbols` / `references`, so they land inside rust-analyzer's crate-graph swaps. There should be no `symbol not found` or bare `0 matches` for existing symbols. At worst there should be the new "answered … with null" error or `completeness_warning`, never a silent zero. The boundary probe used to find the cause is reproducible from the Root cause table's method: speak to rust-analyzer over stdio and poll `documentSymbol` during start-up.
+Nothing left. **Live check passed 2026-09-24** on a release binary built at 19:40:39 local from `9fb229d0` (which contains `e26da0b2`), followed by `/mcp`. rust-analyzer was not running beforehand, and the first verifier call spawned it at 16:43:02Z. Four parallel subagents then made 12 calls; most results arrived at 16:43:16.75–16.81Z, several seconds into the cold window.
+
+- 8/8 path-scoped `symbols` lookups resolved, including `adopt_request_conversation`, `poll_rendezvous`, `LedgerHandle`, `call_tool_inner` and `GuideLedger`, which were `0 matches` in this afternoon's run.
+- 4/4 `references` calls resolved their name: no `symbol not found`, and no "answered … with null" error either.
+
+**What it does NOT prove:** that the null retry itself fired. Nothing logs a retry, and rust-analyzer being slow to answer would give the same timeline. The deterministic proof stays the two scripted-peer tests.
+
+**Found by the same run and filed separately:** all four `references` returned `0 references` during warm-up. Three were correctly warned by `corroborate_zero_references`. The fourth, a symbol used only in its own file, was silent: `docs/issues/2026-09-24-references-silent-false-zero-for-file-local-symbols-while-warming.md` (`079f8b10a0d3e14a`).
 ## References
 - `docs/issues/archive/2026-06-09-references-false-zero-stale-graph.md` — same
   root-cause class, different symptom; its `corroborate_zero_references` guard

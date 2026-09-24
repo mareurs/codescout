@@ -622,7 +622,7 @@ Gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, 3515 pas
 
 **STANDING: the pre-09-24 project-scope observations are not re-derived.** The 2026-07-18 failures predate any capture of which branch ran. The project branch reads the same `document_symbols` (per-file for its matches, `resolve_range_via_document_symbols` for ranges), so the same `null` may explain them. That is inference, not measurement. That branch has self-diagnosed through `WalkAudit` since 08-07, and its Resume triage (read the `completeness_warning`) still applies if it recurs.
 
-**Live check owed to the next release rebuild:** as in `7bdeb054a5ab2f46` § *Resume*. Parallel subagents run path-scoped `symbols` immediately after `/mcp`. They should never see a bare `0 matches` for an existing symbol.
+**Live check passed 2026-09-24.** 8/8 path-scoped `symbols` lookups resolved against a rust-analyzer that the first call spawned (16:43:02Z). None returned `0 matches`, and no `completeness_warning` fired. Details, and what the run does not prove, are in `7bdeb054a5ab2f46` § *Resume*.
 
 ## Fix provenance
 
