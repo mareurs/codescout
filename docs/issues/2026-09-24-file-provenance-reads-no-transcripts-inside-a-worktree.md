@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-09-24
-closed:
+closed: 2026-09-24
 severity: medium
 owner: marius
 related: []
@@ -65,7 +65,7 @@ Two effects, not one: `fmt-mine` over-refuses (loud, recoverable), and `wip_auth
 Known blind spot, stated at the site: an MCP server restart resets the active project to the cwd
 and the transcript does not record it.
 
-Fix SHA / patch-id: _recorded at commit time_.
+Fix: `1f7c6e0c` on branch `fix/lessons-friction` · patch-id `e6df17c87ec6a3019446d094f6130a3a32c34ed2`.
 ## Tests added
 
 `tests/file-provenance.sh` § *a linked worktree finds its transcripts* — 11 assertions, run
