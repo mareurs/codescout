@@ -1,0 +1,8 @@
+n=40  collapsed raw agreement 0.925  kappa 0.859  (chance 0.469)
+marginals a: {'not-a-violation': 25, 'unsure': 1, 'violation': 8, 'not-a-pair': 6}  b: {'not-a-violation': 26, 'violation': 8, 'not-a-pair': 6}
+both call a violation: 7; same rule: 7
+
+disagreements (id: a | b):
+  74: unsure | not-a-violation  -- b: Editorial tightening of a description.
+  461: count_unit | not-a-violation  -- b: Member count updated 9 to 10; unit and population already named.
+  870: not-a-violation | question_asked  -- b: ldd was cited as answering linkage, but static linking means it could not measure that question.
