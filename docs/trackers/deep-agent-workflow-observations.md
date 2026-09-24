@@ -15,7 +15,7 @@ entry_prefix:
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
 entry_high_water_DWF: 10
-entry_high_water_DCS: 7
+entry_high_water_DCS: 8
 ---
 
 # Deep-agent workflow observations and session coverage
@@ -102,6 +102,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DWF-8 | 2026-09-24 | workflow | routine-first | 938e2953/gate-cache-disk |
 | DWF-9 | 2026-09-24 | workflow | routine-first | e4fbc7ef/high-severity-bug-reverify |
 | DWF-10 | 2026-09-24 | workflow | enrichment | 571eb3d6/review-model-vs-context |
+| DCS-8 | 2026-09-24 | coverage | session-receipt | 938e2953/gate-cache-disk |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -478,6 +479,22 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | Outcome / basis | `good`, `verified-complete` against its own registration. Registered reading: "not settled at this n". Context effect 0.015, model effect 0.015 pooled, but −0.13 on s1 and +0.39 on s2. Descriptive result: **the model decides which defects are found** (Claude: numeric recounts against the data; Codex: code and protocol holes). **A Claude+Codex pair covers 0.62–0.78 of the known set, a same-model pair 0.42–0.72**, and the union is 10 of 11. Priming with the author's summary changed nothing measurable. The authoring session found 0 of 11; a primed Claude reviewer found 13 of 33 |
 | Delegation candidate | A cross-model pair review (one Claude plus one Codex, cold, re-derive-every-number brief) before committing data artifacts. A proposal only: the observation window defers building it until 2026-10-02 |
 | Rests on / grouping / overhead | `docs/evals/review-model-vs-context-2026-09-24.md`, `docs/evals/data/2026-09-24-review-model-vs-context/`. Overhead about 2 h wall clock, mostly waiting for the reviewers. Limits: the known set is Codex's own findings; n = 3; one checker definition (O3) bundled a reason and produced 5 false negatives, reported both ways |
+
+## DCS-8 — Session 938e2953 — gate cache disk, the slot pool and its size and burst bounds, spanning one compaction
+
+**Valid:** dated 2026-09-24
+
+| field | value |
+|---|---|
+| Session / principal / collector | session `938e2953-de0e-4241-a543-9b761a70326a`, profile `~/.claude-sdd`. The operator is the principal via this coordinating session, which was also the collector. Model claude-opus-5.5 |
+| Observed interval (UTC) | 2026-09-24, about 14:00 to 20:25, approximate. It spans one compaction. The stretch before it is known to this receipt only through the compaction summary |
+| Workspace | `/home/marius/work/claude/codescout`, branch `experiments`, shared checkout. Peers ebf651ec, 571eb3d6, 774ba049 and system-cf interacted |
+| Coverage | `partial`. The post-compaction interval was observed directly; the pre-compaction interval was not |
+| DWF routine / enrichment | routine-first **DWF-8** (gate cache disk, per-session target dirs), recorded with its outcome. The later investigation (the pool's size bound, and the hand-reused path) was **not** captured as an enrichment. Its canonical records are bug files `b085022bc2f05c36` and `294ba0ae7ed8c7b1`, fixed in `9d755a16` |
+| DCX routine / enrichment | `unknown`. The compaction summary names no DCX selection, and this collector cannot verify one either way |
+| Native / delegated / unobserved gaps | No subagents were dispatched after compaction. All shell work went through `run_command`, so it appears in usage.db. The 26-mutation run was a background script, visible only as its log |
+| Collection overhead | This receipt: 1 append call, plus 2 reads of the ledger's recipe sections. Not measured in time |
+| Unresolved pending | none |
 
 ## Template for new entries
 
