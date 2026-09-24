@@ -57,8 +57,8 @@ scope is still exactly the caller's profile.
 What has moved since filing, stated at the grain it was checked: need (1) host-scoped discovery exists
 only as `/codescout-companion:reaching-peer-sessions` Step 1 — a mechanism for whoever runs it, not a
 change to `ListAgents`; need (3) is served by that table's `CWD` column, which
-`docs/issues/2026-09-09-cwd-answers-who-is-alive-and-is-read-as-who-is-working-where.md`
-(`d15c5651fa24c19a`) shows answers launch directory, not occupancy. Needs (2), (4) and (5) were **not**
+`docs/issues/archive/2026-09-09-cwd-answers-who-is-alive-and-is-read-as-who-is-working-where.md`
+(`b8adf790124afd40`) shows answers launch directory, not occupancy. Needs (2), (4) and (5) were **not**
 re-tested in this pass.
 
 ## What it cost, concretely

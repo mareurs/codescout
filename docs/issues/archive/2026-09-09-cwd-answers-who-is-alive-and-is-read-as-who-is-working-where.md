@@ -1,16 +1,14 @@
 ---
 kind: bug
-status: taken
+status: mitigated
 tags:
 - cluster/gate-keyed-on-unobservable-event
-claimed_at: 2026-09-24
-claimed_by: e4fbc7ef-27b7-4707-8469-ccdffa8e4e92
-closed: null
+closed: 2026-09-25
 opened: 2026-09-09
 owner: marius
 related: []
 severity: high
-unverified: 'Not live: committed at claude-plugins:91b3205 but codescout-companion is still 1.20.14 in every profile cache, so no session runs the relabel or Step 4 until a release. No test pins either.'
+unverified: 'RESOLVED 2026-09-25: live in all three profile caches at 1.20.15 (claude-plugins:60495ca), and pinned by claude-plugins:aa5efd7 with an observed red on the pre-fix bytes. Was: Not live: committed at claude-plugins:91b3205 but codescout-companion is still 1.20.14 in every profile cache, so no session runs the relabel or Step 4 until a release. No test pins either.'
 ---
 
 # BUG: the peer table's CWD column answers "who is alive" and is read as "who is working where"
@@ -218,6 +216,23 @@ Three unreleased hook commits by sessionId `774ba049-d97c-443a-b31d-f662a9cb6a1e
 `cc99a6f`) sit between the 1.20.14 bump and this commit, so a release ships their work too — left to
 the operator. **`mitigated`, not `fixed`, once live:** the root cause (occupancy is not observable
 without cooperation) stays; option 3 is still not in this repo's gift. No test pins the label or Step 4.
+
+### Live 2026-09-25 — released in 1.20.15, pinned by a test
+
+Released by another session as `claude-plugins:60495ca` (`chore: bump codescout-companion to 1.20.15`),
+which contains `91b3205`; `/reload-plugins` run by the operator. Verified in all three profiles: each
+`installed_plugins.json` records `1.20.15` with an `installPath` inside its own profile, and each cached
+`SKILL.md` carries the `LAUNCH-CWD` header and Step 4.
+
+Pinned by `claude-plugins:aa5efd7`, patch-id `b2b57c380fb776b66d25dfa6435483001f9a055e`:
+`tests/test-peer-table-launch-cwd.sh` checks the header token, the Step 4 heading and the socket question,
+and runs each check against a mutated copy that must fail. **Observed red against the real pre-fix bytes**
+(`PEER_SKILL_MD` pointed at `91b3205~1`'s `SKILL.md`): all three primary checks fail. 9/0 on HEAD;
+`run-all.sh` green.
+
+**`mitigated`, not `fixed`:** occupancy still cannot be read without the peer's cooperation — option 3
+(an active-project field in the registry row) is not in this repo's gift. What changed is that the column no
+longer claims to answer it, and the skill says to ask.
 
 ## Tests added
 
