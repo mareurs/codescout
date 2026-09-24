@@ -9480,7 +9480,7 @@ async fn references_on_an_unused_file_local_symbol_that_returns_its_declaration_
     };
     // `from_file_path`, never `format!("file://{}")`: on Windows that yields
     // `file://C:\…`, which `Uri` refuses, so the test panicked before reaching the code
-    // under test (868e689cccfe84b3).
+    // under test (fed1c5731a623c30).
     let declaration = lsp_types::Location {
         uri: url::Url::from_file_path(&file)
             .unwrap()
@@ -9516,7 +9516,7 @@ async fn references_on_an_unused_file_local_symbol_that_returns_its_declaration_
 /// names the symbol, "0 references outside the definition file" is suspicious and is
 /// flagged. On Windows the declaration's path (from a URI, `C:\…`) was compared against
 /// the canonical `\\?\C:\…` definition path, so it counted as an OUTSIDE reference and
-/// the cross-check never ran (868e689cccfe84b3). Only the wine and windows-latest lanes
+/// the cross-check never ran (fed1c5731a623c30). Only the wine and windows-latest lanes
 /// exercise that spelling; on Linux this pins the branch itself.
 #[tokio::test]
 async fn references_with_only_the_declaration_is_cross_checked_against_other_files() {

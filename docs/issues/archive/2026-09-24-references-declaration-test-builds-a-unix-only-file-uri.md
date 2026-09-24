@@ -1,7 +1,7 @@
 ---
-id: '868e689cccfe84b3'
+id: fed1c5731a623c30
 kind: bug
-status: fixed
+status: archived
 title: 'BUG: on Windows, references drops every project location (canonical \\?\ root vs URI path); its test also built a Unix-only file:// URI'
 owners:
 - marius
@@ -72,7 +72,9 @@ Library roots are stripped for the same reason as the project root, but no test 
   - M1 leaves the cross-check test green, and that is correct: with the scope filter broken, zero locations count as outside and the text scan still warns. Each site has its own test.
 - **Gate:** `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`. All three cross-platform tests ran in both test lanes.
 
-**Not yet observed:** CI's Windows lanes on this commit, and library roots (unmeasured, see Fix).
+**Observed on CI, 2026-09-24, run `36058985076` (head `87001799`, which contains `0ac67b35`).** `references_on_an_unused_file_local_symbol_that_returns_its_declaration_stays_bare`, `references_with_only_the_declaration_is_cross_checked_against_other_files` and the Windows-only `strip_verbatim_makes_a_canonical_root_contain_its_uri_spelling` all passed on native `Test (windows-latest / no-features)` (lib `3608 passed; 0 failed`), native `Test (windows-latest / local-embed)`, and `Windows-gnu cross (MinGW + wine)`. Those jobs are still red for other reasons: the wine lane on `c6cff39df3eed0c6`, and the native lanes on `the_hook_script_agrees_on_the_cluster_parsers` (`05959bffb7b4fd7d`, which this bug's lib failure had been hiding). The archive condition is met.
+
+**Still unmeasured:** library roots (see Fix).
 
 ## References
 
@@ -86,4 +88,4 @@ Library roots are stripped for the same reason as the project root, but no test 
 
 `fix(references): on Windows, compare locations against the root without its \\?\ marker, so project references are not all dropped`
 
-**Archive when:** a CI Windows lane (`Test (windows-latest / …)` or the wine lane) runs `0ac67b35` or later with these tests green. Archiving mints a new id, so re-point the `868e689cccfe84b3` citations in `src/fs/mod.rs`, `src/tools/symbol/references.rs`, `src/tools/symbol/tests.rs`, `src/util/fs.rs` and the archived wine bug in the same commit.
+**Archived 2026-09-25**, after CI run `36058985076` ran `0ac67b35` green on every Windows lane (see Resume). The id citations in `src/fs/mod.rs`, `src/tools/symbol/references.rs`, `src/tools/symbol/tests.rs`, `src/util/fs.rs` and the two related bug files were re-pointed in the same commit.

@@ -120,7 +120,7 @@ None needed after `87d90d8c`. On an older tree: re-running the job does not help
 
 **The job is still red, for reasons that are not this bug.** Its cross-test ran `5701 passed; 2 failed`. Those two failures are the first tests this lane has reached since it broke, so they are newly visible, not new regressions:
 - `librarian::catalog::augmentation::tests::a_ledger_re_declaring_its_own_prefix_is_not_a_conflict` (from `45d49a10`, filed as `c6cff39df3eed0c6`);
-- `tools::symbol::tests::references_on_an_unused_file_local_symbol_that_returns_its_declaration_stays_bare` (from `1ea1d36b`, filed as `868e689cccfe84b3`).
+- `tools::symbol::tests::references_on_an_unused_file_local_symbol_that_returns_its_declaration_stays_bare` (from `1ea1d36b`, filed as `fed1c5731a623c30`).
 
 Both also fail on native `Test (windows-latest / default)`. The earlier note here that the native Windows jobs were failing in `cargo test` is these same two tests. The `Audit Doc Refs` red on `51edbf86` is raw eval transcripts from `50113f61`, owned by that session.
 

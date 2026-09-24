@@ -225,7 +225,7 @@ pub fn drive_letter_prefix_len(s: &str) -> Option<usize> {
 /// `FileAddress::from_lsp_uri` yields is `C:\…`. `Path::starts_with` compares
 /// components, and the prefixes parse as `VerbatimDisk('C')` against `Disk('C')`, so
 /// no location a language server reports is ever under a canonical project root
-/// (`868e689cccfe84b3`). Verbatim disk and UNC prefixes are rewritten; every other
+/// (`fed1c5731a623c30`). Verbatim disk and UNC prefixes are rewritten; every other
 /// path, and every path on other platforms, is returned borrowed and unchanged.
 ///
 /// A `Path` operation rather than [`to_forward_slash`]-style string surgery, because

@@ -36,7 +36,7 @@ Native `windows-latest` CI lanes. It is not in the wine lane's results, because 
 ## History
 
 - Observed at `ea972b40` (run `36041448098`, 2026-09-24T18:28Z), where it was that job's only failure. So it predates `1ea1d36b`'s references test, and it is **not** caused by the roster edits in `0ac67b35`/`a13845ad`.
-- Between it and `87001799`, native `no-features` stopped earlier at the lib failure of `868e689cccfe84b3`, and `cargo test` does not run integration targets after a lib failure. So it was hidden rather than absent.
+- Between it and `87001799`, native `no-features` stopped earlier at the lib failure of `fed1c5731a623c30`, and `cargo test` does not run integration targets after a lib failure. So it was hidden rather than absent.
 - The job was last green at `baaafe0a` (2026-09-17). The red at `a31ed03a` (09-18) and `f918548c` (09-24) was a different lib test, `tools::core::tests::guard_worktree_write_hint_names_the_main_repo_not_an_arbitrary_worktree`, so this test's first failing commit is **not established**.
 
 ## Root cause

@@ -444,7 +444,7 @@ impl Tool for References {
         // `full_path` is canonical (`\\?\C:\…` on Windows) while a location's path
         // comes from a URI (`C:\…`), so compare against the marker-free spelling;
         // unequal spellings counted the declaration as an outside reference
-        // (868e689cccfe84b3).
+        // (fed1c5731a623c30).
         let full_path_plain = crate::util::fs::strip_verbatim(&full_path);
         let external_refs = refs
             .iter()

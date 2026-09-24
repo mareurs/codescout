@@ -153,7 +153,7 @@ pub(crate) fn format_library_path(lib_name: &str, lib_root: &Path, file_path: &P
 ///
 /// Every root is compared without its Windows verbatim marker: roots arrive
 /// canonicalized (`\\?\C:\…`) and reference paths arrive from `file://` URIs
-/// (`C:\…`), which never `starts_with` each other (`868e689cccfe84b3`).
+/// (`C:\…`), which never `starts_with` each other (`fed1c5731a623c30`).
 pub(crate) fn classify_reference_path(
     path: &Path,
     project_root: &Path,
