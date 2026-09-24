@@ -409,7 +409,7 @@ impl Tool for ProjectStatus {
             // `/mcp` reconnect (~49 KB re-delivered). Absent (hookless client, older
             // companion) or `compact`, the blunt clear runs exactly as before: this
             // degrades to over-serving, never to suppressing.
-            // docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md
+            // docs/issues/archive/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md
             let ledger = {
                 let mut led = ctx.guide_hints_emitted.lock();
                 let not_a_compaction = led.session_start_source().is_some_and(|s| s != "compact");

@@ -11,7 +11,7 @@ closed: 2026-09-24
 opened: 2026-09-24
 owner: marius
 related:
-- a5054d135acacbe3
+- f6a748bcbeee1652
 severity: high
 unverified: 'CLEARED 2026-09-24. Was: full ./scripts/gate.sh not observed fully green for 971ed73f -- one default-lane failure (librarian::catalog::rekey::tests::rekeying_one_prefix_leaves_the_ledgers_other_prefix_untouched) attributed by run_command''s provenance check to a peer''s in-flight edit. Re-run same day on a tree containing 971ed73f (HEAD 995c0879): FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0, GATE_EXIT=0. Also verified live end to end -- see Tests added.'
 ---
@@ -165,4 +165,4 @@ N/A — fixed (`971ed73f`), regression-tested, gate green, and verified live. Ar
 - `docs/adrs/2026-09-14-a-subagent-is-a-principal.md` — introduces the principal/park-restore model; does not address restart-across-process restoration
 - `docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md` § Decision #8 — the related-but-distinct, already-accepted race this bug is NOT
 - `docs/trackers/context-injection-session-log.md` F-13 (this repo) — the session-log record of the investigation that found this
-- Sibling, already-open bug: `a5054d135acacbe3` (`docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`) — a different mechanism reaching a similar symptom (over-broad ledger clearing)
+- Sibling, already-open bug: `f6a748bcbeee1652` (`docs/issues/archive/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`) — a different mechanism reaching a similar symptom (over-broad ledger clearing)

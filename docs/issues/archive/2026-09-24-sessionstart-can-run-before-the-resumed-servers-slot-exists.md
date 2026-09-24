@@ -1,15 +1,16 @@
 ---
-id: b586243d43574c1b
+id: '798f69a248d72298'
 kind: bug
-status: open
+status: archived
 title: 'BUG: SessionStart can run before the resumed session''s codescout server publishes its slot, so that SessionStart never stamps it'
 tags:
 - cluster/gate-keyed-on-unobservable-event
+closed: 2026-09-24
 opened: 2026-09-24
 owner: marius
 related:
-- a5054d135acacbe3
-- '54a1a8011bca0358'
+- f6a748bcbeee1652
+- '92deba12cd82aaf0'
 severity: high
 ---
 
@@ -19,7 +20,7 @@ severity: high
 
 The companion's `SessionStart` stamp assumes the new server's rendezvous slot already exists. The comment at `claude-plugins:codescout-companion/hooks/session-start.mjs:51-52` says "MCP initialize runs before SessionStart". On an interactive `--resume`, that assumption failed on **2 of 2** observed resumes: the slot was never stamped by the SessionStart that should have stamped it.
 
-The session id still arrives on resume, because the new server inherits it from its predecessor's slot. The **source** does not, so `a5054d135acacbe3`'s `"kept"` branch is likely unreachable after a resume.
+The session id still arrives on resume, because the new server inherits it from its predecessor's slot. The **source** does not, so `f6a748bcbeee1652`'s `"kept"` branch is likely unreachable after a resume.
 
 ## Symptom (Effect)
 
@@ -55,15 +56,52 @@ The split is consistent with interactive Claude Code (2.1.281 here) connecting M
 
 **Still not measured:** the hook's own scan time. Instrumenting it (log scan time and a no-slot result) is the step that turns this into a measurement.
 
+
+## Tests added
+
+In `claude-plugins:codescout-companion/hooks/session-start.test.sh`:
+
+- **The late-slot case.** An intermediate bash plays the Claude, identified by a registry row, and runs the hook while no slot of its own exists. Its server publishes only after the hook has returned.
+  - It must be stamped, with the session and the `startup` source. Observed RED (never stamped), then GREEN.
+  - A second late slot, owned by another pid, must stay unstamped. It is written FIRST, so a too-broad stamper would reach it in the same scan. The positive half is awaited first, so the negative half cannot pass merely because nothing has run yet.
+
+**Mutations, on scratch copies:**
+
+| mutation | result | caught by |
+|---|---|---|
+| never spawn | KILLED | the late-slot positive |
+| stamper accepts any `ppid` | KILLED | the other Claude's slot |
+| shared rule drops the source clause | KILLED | the existing compaction re-stamp test, so the refactor kept that coverage |
+| always spawn | SURVIVED | as predicted: inert, it costs a process, not correctness |
+
+**Suites:** all hook suites are green. `tests/run-all.sh` passed in a worktree with the change applied.
+
+**Verified live 2026-09-24, both paths:**
+
+- **Interactive startup.** Hook at +725 ms, slot published at +926 ms with `hook_at: None`. **Stamped at +984 ms** with session `ecf3eb7f…` and source `startup`. No stamper process remained afterwards: 0 node stampers (a `pgrep -f` hit was the query's own shell).
+- **Interactive `--resume`** of a seeded `claude -p` session `51912dc7…`. Its slot was published at +1000 ms, carrying the INHERITED source `startup`. It was **re-stamped `resume` at +1050 ms**, with `hook_source_at` 11:43:57.361Z. That is earlier than the slot's own publication (11:43:57.557Z), an ordering only the late stamper can produce.
+- Both runs left this session's own slot on `774ba049…`.
+
 ## Fix
 
-Not designed. Candidates:
-- Have the hook record session and source in a per-session file that the server reads when it adopts. This decouples them from slot timing.
-- Or have the server re-check for a late stamp.
+**Root cause measured 2026-09-24**, on a real interactive startup under a pseudo-terminal (`setsid -f script -qfec "timeout 30 claude"`, cwd = this repo), with 1 ms polling:
 
-First step: instrument the hook to log its scan time and whether it found no slot, then measure the rate over real resumes and startups.
+| t from launch | event |
+|---|---|
+| +710 ms | registry row for the Claude pid |
+| +763 ms | SessionStart hook runs (it writes `.codescout/cc_session_id` at its start) |
+| +982 ms | server publishes its slot, with `hook_at: null` |
+| +38 s | still unstamped |
+
+**Implemented 2026-09-24:** `claude-plugins:3a069d5dfcfc5128be4321e58f340459981311ac` (branch `main`, not pushed), patch-id `1eed0be6acbd9b020cb261e603fa10307813cf33`.
+
+- When `session-start.mjs`'s scan finds **no** slot of ours, it spawns `hooks/rendezvous-late-stamp.mjs` detached. The stamper is handed the Claude pid that the ancestry walk ended at (from `92deba12cd82aaf0`'s fix), because a detached process is reparented and cannot walk our ancestry.
+- The stamper polls every 100 ms, for at most 30 s, for a slot whose `ppid` is that pid. It stamps it and exits.
+- The per-slot rule moved into `lib.mjs` `stampSlotIfStale`, shared by the scan and the stamper, so the two cannot drift. That includes `a5054d13`'s source clause.
+- The stamp carries the SessionStart's own time, so `hook_source_at` still records when that start happened.
+- **Why not wait inside the hook:** interactive Claude Code may not start its MCP servers until SessionStart returns, so a synchronous wait could only delay startup.
 
 ## References
 
-- `a5054d135acacbe3`: its `"kept"` half depends on this (see its Resume, known limit).
-- `54a1a8011bca0358`: same stamping loop, different defect (it matched too much; this matches too early).
+- `f6a748bcbeee1652`: its `"kept"` half depends on this (see its Resume, known limit).
+- `92deba12cd82aaf0`: same stamping loop, different defect (it matched too much; this matches too early).

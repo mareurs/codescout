@@ -1,7 +1,7 @@
 ---
-id: c186c45e2ed2a038
+id: 6d671794cd4da970
 kind: bug
-status: fixed
+status: archived
 title: 'BUG: the companion''s SubagentStop restore strips the parent''s OWN guide marks from its on-disk ledger — under per-principal ledgers the next /mcp re-delivers them'
 tags:
 - cluster/gate-keyed-on-unobservable-event
@@ -121,7 +121,7 @@ None needed for correctness; the cost is one re-delivered guide body per strippe
 
 ## Resume
 
-Archive via `doc(action="move")`, re-pointing in the same pass: the two `claude-plugins` citations of this path (`hooks/agent-guide-restore.mjs`, `hooks/agent-guide-snapshot.test.sh`), `docs/issues/archive/2026-09-24-guide-rearm-request-is-consumed-by-whichever-principal-calls-next.md` § References, and `deep-agent-workflow-observations:DWF-6` / `DCS-4`'s citation of this id (the move mints a new one). Deferred to one pass with `a5054d135acacbe3`'s archive, after that bug's live check.
+**Archived 2026-09-24**, after `a5054d13`'s live check, in one pass with `f6a748bcbeee1652`, `92deba12cd82aaf0` and `798f69a248d72298`. Citations in both repos were re-pointed in the same pass.
 
 ## References
 

@@ -1,7 +1,7 @@
 ---
-id: a5054d135acacbe3
+id: f6a748bcbeee1652
 kind: bug
-status: fixed
+status: archived
 title: workspace(post_compact=true) clears the whole guide ledger without checking that a compaction happened — ~49 KB re-delivered on one mistaken call, and the flag name is what misleads
 tags:
 - cluster/gate-keyed-on-unobservable-event
@@ -141,16 +141,17 @@ The design in § *The one viable design*, plus one piece it missed. **The measur
 - **Kept half.** A headless `claude -p` (`~/.claude`, SessionStart `startup`, session `1e4fc97a-de21-438c-80f5-bb8e4e07f7ff`) called `status` and then `post_compact=true`. It got `"kept"` (3 turns, no error). This pairs with the result above: same binary, same hook, only the source differs.
   - It exercised the direct-stamp path (a fresh server whose own slot was stamped), not the inheritance path. The clearing half covers inheritance.
   - I didn't separately read the probe's ledger file. The observation is the response's `ledger` field.
-  - The same probe exposed `54a1a8011bca0358`: its SessionStart also stamped *my* server's slot. Its own verdict came from its own server, whose slot read `startup`.
+  - The same probe exposed `92deba12cd82aaf0`: its SessionStart also stamped *my* server's slot. Its own verdict came from its own server, whose slot read `startup`.
 
 **Known limit: startup race (raised by sessionId `09093108-1425-4f6d-9695-a9e3bb98ea0d`).**
 
 - **Mechanism.** On `startup`/`resume` the source only arrives if the new server's slot exists before SessionStart runs. The measured slot-to-stamp margins were 51 ms and 86 ms. That peer's resumed session holds a slot with no source; the cause isn't decided between no slot yet, an empty `source`, and old code loaded.
 - **Consequence.** Losing the race degrades to `"cleared"`, the pre-fix behaviour, which is the safe direction.
 - **Scope.** The measured case (a mistaken call after `/mcp`) is unaffected, because the source was stamped into the predecessor slot long before.
-- **Observed so far (a sample, not a rate):** interactive sessions were stamped on **0 of 3** starts (two `--resume`s in `~/.claude-sdd`, the second on companion 1.20.14, plus one fresh startup in `~/.claude` whose slot never got a stamp at all). `claude -p` startups were stamped on 5 of 5. The details and the startup case are in `b586243d43574c1b`.
+- **Observed so far (a sample, not a rate):** interactive sessions were stamped on **0 of 3** starts (two `--resume`s in `~/.claude-sdd`, the second on companion 1.20.14, plus one fresh startup in `~/.claude` whose slot never got a stamp at all). `claude -p` startups were stamped on 5 of 5. The details and the startup case are in `798f69a248d72298`.
+- **Addressed 2026-09-24 by `claude-plugins:3a069d5d`** (`b586243d`'s fix: a detached late stamper). Verified live: an interactive startup was stamped `startup` 58 ms after its slot appeared, and an interactive `--resume` re-stamped the inherited `startup` to `resume`. So `"kept"` is reachable after an interactive start or resume. The two bullets above describe the state before that fix.
   - At 11:16:51Z the server published its slot at .394Z, and the `SessionStart:resume` attachment was recorded at .499Z. The slot was never stamped; its next write was the liveness refresher.
   - The peer ruled out an empty `source` (it was `resume`) and old code (1.20.14's `session-start.mjs` has the stamping). "No slot yet at scan time" survives, but it isn't proven, because the hook's start time is not recorded.
-  - **So `"kept"` may be close to unreachable after a resume, rather than occasionally missed.** The measured `/mcp` case is unaffected. A remedy would decouple the source from slot timing, for example a per-session record the server reads at adoption: `b586243d43574c1b`.
+  - **So `"kept"` may be close to unreachable after a resume, rather than occasionally missed.** The measured `/mcp` case is unaffected. A remedy would decouple the source from slot timing, for example a per-session record the server reads at adoption: `798f69a248d72298`.
 
-Archive together with `c186c45e2ed2a038` in one pass (see its Resume for the citations to re-point).
+**Archived 2026-09-24**, in one pass with `6d671794cd4da970`, `92deba12cd82aaf0` and `798f69a248d72298`. Citations in both repos were re-pointed in the same pass.

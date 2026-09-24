@@ -1,7 +1,7 @@
 ---
-id: '54a1a8011bca0358'
+id: '92deba12cd82aaf0'
 kind: bug
-status: fixed
+status: archived
 title: 'BUG: a nested `claude` session''s SessionStart re-stamps its ancestor session''s codescout server, hijacking that server''s session identity'
 tags:
 - cluster/gate-keyed-on-unobservable-event
@@ -9,8 +9,8 @@ closed: 2026-09-24
 opened: 2026-09-24
 owner: marius
 related:
-- a5054d135acacbe3
-- c186c45e2ed2a038
+- f6a748bcbeee1652
+- '6d671794cd4da970'
 - '5201164f55ec16ff'
 severity: high
 ---
@@ -49,7 +49,7 @@ Measured 2026-09-24 in session `774ba049-d97c-443a-b31d-f662a9cb6a1e` (`~/.claud
 
 So the parent ran under a nested session's identity for at least that hour. Each switch is a rekey, and a rekey forgets every topic. From the parent's side, that looks like its guides arming again.
 
-**What this does not show.** It doesn't show that this explains every re-arm in `571eb3d6`. The 12:00–13:47 and 14:50–16:59 stretches have no rows under `571eb3d6` or these four ids. The two mechanisms fixed alongside (`5201164f55ec16ff`, `c186c45e2ed2a038`) were also present in that session.
+**What this does not show.** It doesn't show that this explains every re-arm in `571eb3d6`. The 12:00–13:47 and 14:50–16:59 stretches have no rows under `571eb3d6` or these four ids. The two mechanisms fixed alongside (`5201164f55ec16ff`, `6d671794cd4da970`) were also present in that session.
 
 ## Reproduction
 
@@ -141,15 +141,10 @@ All in `claude-plugins`. Each was observed RED against the unfixed hooks, with i
 
 ## Resume
 
-Fixed and verified live. Archive in one pass with `c186c45e2ed2a038` and `a5054d135acacbe3`. The move mints a new id, so re-point, in the same pass:
-
-- the four `claude-plugins` citations of this path: `hooks/lib.mjs`, `hooks/session-start.mjs`, `hooks/session-start.test.sh`, `hooks/cs-liveness.test.sh`;
-- this id in `issue-clusters/IC-2` Members.
-
-`~/.claude-kat` has not been probed, but all three profiles use the same directory marketplace.
+**Archived 2026-09-24**, in one pass with `6d671794cd4da970`, `f6a748bcbeee1652` and `798f69a248d72298`. Citations in both repos were re-pointed in the same pass. `~/.claude-kat` has not been probed, but all three profiles use the same directory marketplace.
 
 ## References
 
-- Same investigation: `5201164f55ec16ff` (re-arm consumed by the wrong principal, archived), `c186c45e2ed2a038` (SubagentStop restore), `a5054d135acacbe3` (post_compact source gate). This bug was found during `a5054d13`'s live check.
+- Same investigation: `5201164f55ec16ff` (re-arm consumed by the wrong principal, archived), `6d671794cd4da970` (SubagentStop restore), `f6a748bcbeee1652` (post_compact source gate). This bug was found during `a5054d13`'s live check.
 - `claude-plugins:codescout-companion/hooks/session-start.mjs`, `…/lib.mjs` (`ownAncestry`, `resolveOwnServerPids`, `refreshLivenessStamp`)
 - `src/tools/guide_ledger.rs` (`rekey`), `src/tools/rendezvous.rs` (`poll`)

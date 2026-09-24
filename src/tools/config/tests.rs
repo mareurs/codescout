@@ -1520,7 +1520,7 @@ async fn activate_project_unknown_id_with_no_slash_returns_error() {
 /// `post_compact=true` clears the ledger EVEN when the rendezvous is live, and this test
 /// exists because the opposite is the attractive answer.
 ///
-/// Bug `a5054d135acacbe3` observes that the adjacent branch in `ActivateProject::call`
+/// Bug `f6a748bcbeee1652` observes that the adjacent branch in `ActivateProject::call`
 /// skips its own blunt clear when `rendezvous_active()`, so converging the two looks like
 /// removing an asymmetry. It is not. That branch's event is a `/clear`, which the poll CAN
 /// see: `Rendezvous::poll` returns the new session id when it CHANGES. A compaction changes
@@ -1573,7 +1573,7 @@ async fn post_compact_clears_even_when_the_rendezvous_is_active() {
 
 /// The other half of the sandwich above: with no rendezvous to trust (hookless client,
 /// or the companion has never reported in), the historical blunt clear must still run —
-/// this is `docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`'s
+/// this is `docs/issues/archive/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`'s
 /// own "degrade to today's behaviour on absence" design, and the case the ledger being
 /// gated must not silently break.
 #[tokio::test]
@@ -1629,7 +1629,7 @@ async fn post_compact_ctx(
     }
 }
 
-/// Regression for `docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`:
+/// Regression for `docs/issues/archive/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`:
 /// a `post_compact=true` call made after a plain `/mcp` reconnect — no compaction — wiped
 /// the whole ledger (~49 KB re-delivered, measured). When the companion has recorded that
 /// the conversation's last `SessionStart` was NOT a compaction, the clear is skipped; the

@@ -11876,7 +11876,7 @@ mod guide_hint_tests {
         );
     }
 
-    /// The wiring for `docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`:
+    /// The wiring for `docs/issues/archive/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`:
     /// the session-start source the companion stamps into OUR slot must reach the ledger
     /// that `workspace(post_compact=true)` reads, through the real request funnel. The
     /// gate itself is pinned in `tools::config::tests`; this is what fails if

@@ -2058,7 +2058,7 @@ is the expensive direction, and it lands under an innocent session's name.
 
 **Valid:** conditional — closes when a mechanism links a cross-repo behavioural claim to the code that could falsify it
 
-**Rests on:** `docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`; comment corrected at `94164ebb`; measured 2026-08-31.
+**Rests on:** `docs/issues/archive/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`; comment corrected at `94164ebb`; measured 2026-08-31.
 
 **Class:** the inverse of OB-4. There, a *structural* marker was read as *liveness*. Here a
 **liveness marker is read as event history**, and the thing that licenses the misreading is a

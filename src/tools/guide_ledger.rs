@@ -108,7 +108,7 @@ pub struct GuideLedger {
     /// What `workspace(post_compact=true)` needs and `hook_at` cannot give: a
     /// liveness-refreshed stamp says nothing about compaction, while this says
     /// whether the last session start WAS one.
-    /// docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md
+    /// docs/issues/archive/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md
     session_start_source: Option<String>,
 }
 

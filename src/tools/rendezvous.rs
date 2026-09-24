@@ -39,7 +39,7 @@ pub struct Entry {
     /// is evidence about the event. Carried forward by [`Rendezvous::publish`] from
     /// a predecessor slot, like `hook_at`. `None` ⇒ unknown (no companion, or one
     /// predating the field) — and `serde(default)` keeps such a slot parsing.
-    /// docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md
+    /// docs/issues/archive/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hook_source: Option<String>,
     /// When that `SessionStart` stamped. Orders predecessors in `inherited_stamp`,
@@ -333,7 +333,7 @@ struct Inherited {
 /// The stale wording is recorded rather than merely deleted because it made a refuted
 /// design look sound: a `post_compact` guard keyed on `hook_at` age was proposed from
 /// this very comment, and `lib.mjs` had already refuted that idea by measurement. See
-/// `docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`.
+/// `docs/issues/archive/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`.
 ///
 /// **The session-start SOURCE is inherited too, and ordered by its own stamp.** What a
 /// `post_compact` guard does need is `hook_source` — written only by SessionStart — so
@@ -953,7 +953,7 @@ mod tests {
 
     /// No `SessionStart` fires on a `/mcp` reconnect, so the only way the new server can
     /// know whether the conversation's last session start was a compaction is to inherit
-    /// it. docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md
+    /// it. docs/issues/archive/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md
     #[test]
     fn publish_inherits_the_session_start_source_from_a_predecessor_slot() {
         let dir = tempfile::tempdir().unwrap();

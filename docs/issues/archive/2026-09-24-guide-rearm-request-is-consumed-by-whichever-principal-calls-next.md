@@ -1,5 +1,5 @@
 ---
-id: 5201164f55ec16ff
+id: '5201164f55ec16ff'
 kind: bug
 status: fixed
 title: 'BUG: poll_guide_rearm consumes a subagent''s re-arm request on ANY principal''s call — the parent''s next call after a dispatch or resume re-arms the parent''s entire ledger'
@@ -9,7 +9,7 @@ closed: 2026-09-24
 opened: 2026-09-24
 owner: marius
 related:
-- docs/issues/2026-09-24-subagent-stop-restore-strips-the-parents-own-guide-marks.md
+- docs/issues/archive/2026-09-24-subagent-stop-restore-strips-the-parents-own-guide-marks.md
 severity: high
 unverified: 'CLEARED 2026-09-24. Was: not verified live, because the serving MCP binary at fix time predated a126bf48. Verified live on PID 2968670 after rebuild -- see Tests added.'
 ---
@@ -78,7 +78,7 @@ Before (native `Read`): 11 topics, stamped 08:16–08:23Z. After the parent's ne
 
 Scope consumption to the principal the request names: a call stamped `<session>/<agent>` consumes only `<pid>-<shortHash(agent)>.json`; an unstamped (parent) call consumes nothing. The server already splits `asserted_agent` from the principal (`src/server.rs`, telemetry), and the hash must stay byte-identical to the companion's `shortHash`.
 
-Accepted cost, stated rather than left to be found: an **unstamped** subagent (stamp hook failed, server not named `codescout`) is indistinguishable from the parent, so it no longer receives the re-arm. That is the same fallback loss as `c186c45e2ed2a038`'s candidate fixes; the parent-wide reset it replaces is common and measured, the fallback it drops is rare. A request whose agent never calls again now waits until its server exits and the next server's dead-pid GC removes it.
+Accepted cost, stated rather than left to be found: an **unstamped** subagent (stamp hook failed, server not named `codescout`) is indistinguishable from the parent, so it no longer receives the re-arm. That is the same fallback loss as `6d671794cd4da970`'s candidate fixes; the parent-wide reset it replaces is common and measured, the fallback it drops is rare. A request whose agent never calls again now waits until its server exits and the next server's dead-pid GC removes it.
 
 Residual, not fixed here: a **resumed** stamped subagent still consumes its own request and has the parent's key set re-armed on *its* ledger — redundant for a subagent whose transcript already holds those guides, but bounded to that subagent.
 
@@ -126,4 +126,4 @@ N/A — fixed (`a126bf48`), regression-tested, mutation-checked, gate green, and
 - `src/server.rs` `poll_guide_rearm`; `src/tools/guide_rearm.rs` `GuideRearmInbox::poll`
 - `claude-plugins:codescout-companion/hooks/agent-guide-snapshot.mjs`; `…/lib.mjs` `guideRearmFile`, `shortHash`
 - `docs/adrs/2026-09-14-a-subagent-is-a-principal.md`
-- Sibling, same root (a shared-ledger-era companion mitigation outliving the ADR): `docs/issues/2026-09-24-subagent-stop-restore-strips-the-parents-own-guide-marks.md`
+- Sibling, same root (a shared-ledger-era companion mitigation outliving the ADR): `docs/issues/archive/2026-09-24-subagent-stop-restore-strips-the-parents-own-guide-marks.md`
