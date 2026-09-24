@@ -41,7 +41,10 @@ sys.path.insert(0, os.environ.get(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "prompt-engineering"))
     + "/src")
 import json as _json  # noqa: E402
+import hashlib  # noqa: E402
+import pathlib  # noqa: E402
 import subprocess  # noqa: E402
+import time  # noqa: E402
 
 TAIL = ("\n\nGo through the text and quote any sentence that bears on this. Then give "
         "your answer on a final line as ANSWER: YES or ANSWER: NO.")
@@ -225,6 +228,22 @@ def judge(question: str, text: str, retries: int = 3) -> str:
     raise ValueError(f"no ANSWER line after {retries} tries: {last!r}")
 
 
+def dirty_reasons(config_dir: str) -> list[str]:
+    """Why a judge profile is not the clean channel, or [] if it is.
+
+    The ~/.claude-kat judge loaded plugins, hooks and the user CLAUDE.md -- 2,778 input
+    tokens for "Say OK.", including "ALWAYS VERIFY" rules the judge then applied to the text
+    it was grading. A dir holding only the credentials symlink and
+    {"enabledPlugins":{},"hooks":{}} measured 249 tokens with no hook events."""
+    cfg = pathlib.Path(config_dir)
+    settings = json.loads((cfg / "settings.json").read_text()) if (cfg / "settings.json").exists() else {}
+    return [w for w, bad in [
+        ("CLAUDE.md present", (cfg / "CLAUDE.md").exists()),
+        ("plugins enabled", any(settings.get("enabledPlugins", {"?": True}).values())),
+        ("hooks configured", bool(settings.get("hooks", {"?": 1}))),
+    ] if bad]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rule", choices=sorted(RULES), required=True)
@@ -232,7 +251,20 @@ def main() -> int:
     ap.add_argument("--replays", required=True)
     ap.add_argument("--corrected", required=True, help="file holding the case's corrected text")
     ap.add_argument("--arms", help="comma-separated arms to score (default: all present)")
+    ap.add_argument("--out", required=True,
+                    help="JSONL: a header (rule, question hash, judge, input hash, gate) then one "
+                         "line per row with its three votes and outcome. Required: without it a "
+                         "checker change cannot be traced to the rows whose verdict it moved")
+    ap.add_argument("--allow-dirty-judge", action="store_true",
+                    help="run on a judge profile that loads plugins/hooks/CLAUDE.md "
+                         "(the pre-2026-09-24 channel) -- for reproducing old rows only")
     args = ap.parse_args()
+    dirty = dirty_reasons(_p.config_dir)
+    if dirty and not args.allow_dirty_judge:
+        sys.exit(f"judge config {_p.config_dir} is not clean ({', '.join(dirty)}): set "
+                 f"JUDGE_CONFIG_DIR to a dir with only .credentials.json and settings.json "
+                 f'{{"enabledPlugins":{{}},"hooks":{{}}}}, or pass --allow-dirty-judge to '
+                 f"reproduce the pre-2026-09-24 channel on purpose")
     rule = RULES[args.rule]
     q = rule["question"]
 
@@ -244,13 +276,26 @@ def main() -> int:
             ("unrelated", '{"body": "Renamed the helper `sum2` to `add` and updated its two call sites."}', "NO")]
     gate += rule.get("extra_gate", [])
     ok = True
+    gate_log = []
     print(f"=== CHECKER GATE for {args.rule} (3 runs each) ===")
     for name, text, want in gate:
         got = [judge(q, text) for _ in range(3)]
         hit = got.count(want)
         ok &= hit >= 2
+        gate_log.append({"fixture": name, "want": want, "got": got})
         print(f"  {name:<10} want {want}  got {got}  {'PASS' if hit >= 2 else 'FAIL'}")
+    out = open(args.out, "w")
+    out.write(json.dumps({"header": {
+        "rule": args.rule, "question_sha256": hashlib.sha256(q.encode()).hexdigest(),
+        "judge_model": _p.model, "judge_config_dir": _p.config_dir,
+        "judge_channel": "dirty: " + ", ".join(dirty) if dirty else "clean",
+        "replays": args.replays,
+        "replays_sha256": hashlib.sha256(pathlib.Path(args.replays).read_bytes()).hexdigest(),
+        "arms": args.arms, "gate": gate_log, "gate_passed": ok,
+        "started": time.strftime("%Y-%m-%dT%H:%M:%S%z")}}) + "\n")
+    out.flush()
     if not ok:
+        out.close()
         print("\nGATE FAILED — replays NOT scored.")
         return 1
 
@@ -260,14 +305,21 @@ def main() -> int:
         rows = [r for r in rows if r["arm"] in keep]
     by = collections.defaultdict(collections.Counter)
     for r in rows:
+        key = {"arm": r["arm"], "run": r.get("run")}
         if "error" in r:
             by[r["arm"]]["errored"] += 1
+            out.write(json.dumps({**key, "outcome": "errored", "votes": None}) + "\n")
             continue
         if not rule["observable"](r):
             by[r["arm"]]["not-observable"] += 1
+            out.write(json.dumps({**key, "outcome": "not-observable", "votes": None}) + "\n")
             continue
         votes = [judge(q, r["text"]) for _ in range(3)]
-        by[r["arm"]]["violation" if votes.count("YES") >= 2 else "compliant"] += 1
+        outcome = "violation" if votes.count("YES") >= 2 else "compliant"
+        by[r["arm"]][outcome] += 1
+        out.write(json.dumps({**key, "outcome": outcome, "votes": votes}) + "\n")
+        out.flush()
+    out.close()
     print(f"\n=== {args.rule} ===")
     print("arm   violation  compliant  not-observable  errored   violation rate (of observable)")
     for arm, c in sorted(by.items()):
