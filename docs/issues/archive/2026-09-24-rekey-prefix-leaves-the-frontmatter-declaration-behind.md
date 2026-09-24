@@ -1,14 +1,16 @@
 ---
-id: '1ed1bc1a845bd0c6'
+id: 495e14703de39dac
 kind: bug
-status: open
+status: fixed
 title: 'BUG: rekey_prefix moves the body and the catalog but leaves entry_prefix and entry_high_water_<PREFIX> behind, splitting the ledger'
 tags:
 - cluster/selector-narrower-than-its-population
+closed: 2026-09-24
 opened: 2026-09-24
 owner: marius
 related: []
 severity: medium
+unverified: Not exercised through the served binary, which predates c8d4e0d6 — the live ledger was repaired by hand instead. Discharge on the next real rekey_prefix after `cargo rb` + /mcp by reading the ledger's frontmatter afterwards.
 ---
 
 ## Summary
@@ -103,6 +105,15 @@ frontmatter-only change (a ledger with no entries yet). A new refusal, in `Previ
 ledger that already declares or records `to` — without it, `[F, W]` would become `[W, W]`.
 `RekeyReport` gains `frontmatter_lines_rewritten`.
 
+
+## Fix provenance
+
+- **Fixed in** `c8d4e0d6` (`experiments`), patch-id `1bbc603085e1198dcb740a5b8297094a21deda7d`
+  (shared with #59, whose rename surfaced it).
+- **Mutation-probed, one per site, 8/8 killed:** block-sequence tracking, the whole-token
+  boundary, the high-water key rename, the refusal, each half of its disjunction (declared vs
+  recorded), the frontmatter-only write gate, the line count, and the call site itself unwired.
+
 ## Tests added
 
 In `src/librarian/catalog/rekey.rs`:
@@ -118,10 +129,10 @@ entry_high_water_<OLD>: null}})`.
 
 ## Resume
 
-Fix lands with #59's allocator refusal; archive once committed with SHA + patch-id.
+Fixed and archived; nothing owed but the live check named in `unverified:`.
 
 ## References
 
-- `docs/issues/2026-09-21-a-four-letter-entry-prefix-allocates-but-cannot-be-cited.md` — the
+- `docs/issues/archive/2026-09-21-a-four-letter-entry-prefix-allocates-but-cannot-be-cited.md` — the
   rename that surfaced it
 - `docs/trackers/issue-clusters/IC-18-selector-narrower-than-its-population.md` — the class

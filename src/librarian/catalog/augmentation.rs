@@ -2886,7 +2886,7 @@ mod tests {
     /// three-letter alternative is offered.
     ///
     /// The `DCX` control is load-bearing: without it, a refusal of EVERY prefix passes.
-    /// docs/issues/2026-09-21-a-four-letter-entry-prefix-allocates-but-cannot-be-cited.md
+    /// docs/issues/archive/2026-09-21-a-four-letter-entry-prefix-allocates-but-cannot-be-cited.md
     #[test]
     fn a_prefix_the_token_grammar_cannot_express_is_refused_even_when_free() {
         let (tmp, cat) = repo_with(&[]);
@@ -4651,7 +4651,7 @@ mod tests {
             // UNCITABLE declarations — the population the thirteen fixtures above never
             // reached, so the length and case rules were exercised by nothing and
             // `DCTX` shipped as a live ledger both readers disagreed about
-            // (docs/issues/2026-09-21-a-four-letter-entry-prefix-allocates-but-cannot-be-cited.md).
+            // (docs/issues/archive/2026-09-21-a-four-letter-entry-prefix-allocates-but-cannot-be-cited.md).
             // Each value is one the entry-token grammar `[A-Z]{1,3}-\d+` cannot express;
             // shorten `DCTX` to three letters or uppercase `r` and the case stops
             // discriminating.

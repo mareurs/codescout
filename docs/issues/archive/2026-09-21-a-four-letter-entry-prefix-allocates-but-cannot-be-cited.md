@@ -1,15 +1,17 @@
 ---
-id: '219027f500266ee4'
+id: bebd6ffbb53e0506
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a four-letter entry prefix allocates cleanly and cannot be cited, and one is in active mandated use'
 tags:
 - cluster/addressing-without-an-escape-hatch
 topic: tracker-entry-identity
+closed: 2026-09-24
 opened: 2026-09-21
 owner: marius
 related: []
 severity: medium
+unverified: 'The refusal half is not live: the served binary predates c8d4e0d6, so create/update/rekey_prefix/append_entry still accept a four-letter prefix until `cargo rb` + /mcp. Discharge by calling append_entry with id_prefix="DCTX" on any params ledger after the rebuild and reading the refusal (nothing is allocated). The rename half IS verified live: link_scan(write=false) at c8d4e0d6 reports an edges_missing row 0ca7439866e8f2b6 -> 0cc578bbc332d699 that this file recorded as absent.'
 ---
 
 ## Summary
@@ -223,12 +225,34 @@ Whichever lands, **add a four-letter fixture to
 fixtures are the reason this shipped, and a fix that leaves that population unchanged is guarded by
 nothing.
 
+
+## Fix provenance
+
+- **Fixed in** `c8d4e0d6` (`experiments`), patch-id `1bbc603085e1198dcb740a5b8297094a21deda7d`.
+- **Both directions taken, in the order this section recommended.** Refuse-at-the-allocator through
+  ONE predicate, `crate::util::librarian_guard::is_citable_entry_prefix`, now read by the guard's
+  reader, the allocator's reader (`declared_prefixes_from_frontmatter`, which filters), the three
+  declaration paths via `refuse_taken_prefixes` (refused even when the prefix is FREE, naming
+  three-letter alternatives), and `append_entry` above its params/prose branch — the params
+  allocator checks no declaration, so that is the only place both paths reach. Then the live
+  ledger was rekeyed `DCTX` → `DCX`, which surfaced a second defect in `rekey_prefix` itself (it
+  left the frontmatter declaration behind), filed and fixed in the same commit:
+  `docs/issues/archive/2026-09-24-rekey-prefix-leaves-the-frontmatter-declaration-behind.md`.
+- **Mutation-probed, one per guarded site, 7/7 killed** — notably the length bound (`<= 4`) is
+  NOT caught by the parity test, correctly: with one shared predicate both readers agree on the
+  widened bound, so only the caller tests pin its VALUE.
+
 ## Tests added
 
-None — nothing was fixed. The regression test this needs is a red on
-`both_entry_prefix_readers_agree_on_every_yaml_form` with an `entry_prefix: DCTX` fixture, plus one
-asserting that a four-letter `id_prefix` is refused (or, if the grammar is widened instead, that
-`DCTX-1` produces a `Definition` and a `Citation`).
+- `both_entry_prefix_readers_agree_on_every_yaml_form` — three new fixtures (four letters,
+  four letters beside a citable member, lowercase); the four-letter one observed red first
+  (`left: ["DCTX"] right: []`).
+- `a_prefix_the_token_grammar_cannot_express_is_refused_even_when_free` (augmentation.rs)
+- `rekeying_onto_an_uncitable_prefix_is_refused` (rekey.rs)
+- `create_refuses_a_ledger_whose_prefix_cannot_be_cited` (create.rs)
+- `update_refuses_declaring_a_prefix_that_cannot_be_cited` (update.rs)
+- `append_refuses_an_id_prefix_that_cannot_be_cited` (append_entry.rs) — on the PARAMS path,
+  deliberately: on the prose path the allocator's own refusal shadows the new check.
 
 ## Workarounds
 

@@ -1,7 +1,7 @@
 ---
 id: d9d291b44775e50d
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: a push publishes every local commit, and nothing records that an author was withholding one pending their operator''s say-so'
 tags:
 - cluster/shared-resource-carries-no-owner
@@ -9,11 +9,12 @@ tags:
 - shared-checkout
 - git-workflow
 - authorisation
-closed: null
+closed: 2026-09-24
 last_observed: 2026-09-13
 opened: 2026-09-06
 owner: marius
 severity: high
+unverified: 'A policy, not a mechanism: a session that commits a change its operator said to hold is published by the next authorised push exactly as before, and nothing fires. The rule is reachable (CLAUDE.md is loaded into every session here) but not enforced.'
 verified_open: 2026-09-11 at HEAD 6c31ef0f — trailer census (10 kinds, none answers publishability), zero git-notes refs, remedy unadopted in both candidate surfaces
 ---
 
@@ -942,6 +943,20 @@ than declared unilaterally by one session.
 - **Weakest, and named so it is not mistaken for sufficient:** the pusher reads
   what it carries. It is worth doing anyway — it catches surprises of every other
   kind — but it is structurally incapable of catching this one.
+
+
+## Fix provenance
+
+- **Mitigated in** `a3dcff72` (`experiments`), patch-id `10592b9ddcc2570fab6ddf99aa389f8dfc029d36`
+  — the author-side convention this section proposed, adopted by the operator 2026-09-24 and
+  written into `CLAUDE.md` § *Git Workflow* (the surface this file's and its sibling's Resume
+  both named). It encodes the sibling's Resolution rather than this section's first bullet as
+  worded: ordinary unpushed work stays committable, because the pre-push guard (`ab735e4a`)
+  makes the operator decide with the foreign sessions named; only a change the operator said to
+  HOLD must stay uncommitted.
+- **Mechanism question: answered NO, deliberately.** A withheld-marker checked by a hook fails
+  open for any session that never installed or read it; the rule says so in its own text. The
+  pusher-side half needed nothing new (`docs/RELEASE.md` § *Concurrent-Work Rules*).
 
 ## Tests added
 

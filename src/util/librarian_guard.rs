@@ -352,7 +352,7 @@ fn clean_prefix(raw: &str) -> Option<String> {
 /// a prefix. It used to live only here, while the allocator accepted any string — so
 /// `DCTX` allocated, committed its high-water mark and wrote conformant headings under a
 /// namespace no citation could address and no scan reported
-/// (docs/issues/2026-09-21-a-four-letter-entry-prefix-allocates-but-cannot-be-cited.md).
+/// (docs/issues/archive/2026-09-21-a-four-letter-entry-prefix-allocates-but-cannot-be-cited.md).
 pub(crate) fn is_citable_entry_prefix(p: &str) -> bool {
     !p.is_empty() && p.len() <= 3 && p.bytes().all(|b| b.is_ascii_uppercase())
 }

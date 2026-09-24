@@ -1,16 +1,17 @@
 ---
 kind: bug
-status: open
+status: mitigated
 tags:
 - cluster/shared-resource-carries-no-owner
 - shared-checkout
 - git-workflow
 - multi-session
-closed: null
+closed: 2026-09-24
 opened: 2026-09-06
 owner: marius
 related: []
 severity: medium
+unverified: 'A policy, not a mechanism: nothing stops a session committing a held change, and a commit''s publishability is still unrecorded in git.'
 ---
 
 # BUG: a commit an author is deliberately withholding is byte-identical to one merely not pushed yet, so any peer's push publishes it
@@ -248,6 +249,18 @@ Directions if a mechanism is wanted, none free and none yet chosen:
   not spend the same ten minutes discovering the obvious answer is wrong.
 - **Do nothing, and document the two states.** Defensible: the observed cost was near zero, and
   the rule above is free.
+
+
+## Fix provenance
+
+- **Mitigated in** `a3dcff72` (`experiments`), patch-id `10592b9ddcc2570fab6ddf99aa389f8dfc029d36`
+  — the two-states rule, placed in `CLAUDE.md` § *Git Workflow* as § *Resume* asked, with the
+  operator's agreement (2026-09-24). It carries this file's Resolution forward: publication
+  *without a decision* is the failure, so unpushed work stays committable and only a HELD change
+  must stay uncommitted.
+- **The marker direction is declined, not deferred**, for the reason § *Resume* gave — a
+  fail-open hook nobody has installed reproduces the defect while reading as a fix. The
+  isolation direction is the rule itself.
 
 ## Tests added
 
