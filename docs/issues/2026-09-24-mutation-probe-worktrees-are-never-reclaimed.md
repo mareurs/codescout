@@ -12,7 +12,7 @@ opened: 2026-09-24
 related:
 - docs/issues/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md
 severity: medium
-unverified: 'The mutation-probe-tests CI job has not yet run cases 22-26: nothing is pushed. 7 legacy per-session worktrees (~30G) of LIVE sessions remain; nothing uses them after b8b7bf85, and removing them is an operator decision.'
+unverified: 'The mutation-probe-tests CI job has not yet run cases 22-26: nothing is pushed. Confirm its first CI run is green before archiving.'
 ---
 
 # BUG: mutation-probe.sh keys its isolated worktree on the session id and never removes it — 72G across 18 trees
@@ -89,6 +89,8 @@ After every mutation run I checked for survivors (hold processes, `/tmp` inodes)
 `git worktree remove --force <path>` for a tree whose session is known dead, then `git worktree prune`.
 
 **Applied 2026-09-24, with operator approval, to DEAD sessions only.** Liveness was taken from registry rows in every `~/.claude*/sessions/` plus `CLAUDE_CODE_SESSION_ID` in process environments: 29 live ids, and 0 unreadable rows for a live pid. I also checked that no process had its cwd or an open file inside any tree, and that none was `locked`. 11 trees (~42G) were removed and 7 live sessions' trees (~30G) kept. Once no probe runs from a pre-fix copy of the script, nothing uses those 7 either. Removing them is a further operator decision.
+
+**Removed later on 2026-09-24, on operator instruction and after checking that each was merged.** Commits: all 7 were detached HEADs already reachable from `experiments`, with 0 commits of their own. Uncommitted content: of 96 dirty or untracked files, 33 matched neither git history nor the main checkout. Most were old snapshots of peers' in-progress work, carried in by probe runs, but not all could be proved superseded. So each tree's full uncommitted state was saved before removal to `~/.cache/codescout-worktree-salvage/2026-09-24/<sessionId>/`: `HEAD`, `tracked.patch` (`git diff HEAD --binary`) and `untracked.tar.gz`, 2.8M in total. Each was verified by file count and by `git apply --check -R` against its own tree. To restore one: `git worktree add --detach <path> $(cat HEAD)`, `git apply tracked.patch`, `tar -xzf untracked.tar.gz`. Remaining worktrees: the main checkout, `check-codescout-integration` (a named branch, not a probe tree) and `mutation-slot-0`.
 
 ## Resume
 
