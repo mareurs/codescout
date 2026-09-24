@@ -1,0 +1,40 @@
+{"id": 74, "label": "unsure", "second_rule": null, "reason": "Drops a runtime consequence it attributes to .env.gpu; whether that misquotes the file or was never run cannot be told without the file."}
+{"id": 47, "label": "not-a-violation", "second_rule": null, "reason": "Clarifies the referent of 'this'; editorial."}
+{"id": 16, "label": "not-a-violation", "second_rule": null, "reason": "Adds that the granularity matches but the key value does not; a clarification, the original claim was not false."}
+{"id": 600, "label": "not-a-violation", "second_rule": null, "reason": "Reframes 'evidence' as an unmeasured reference; the original already asked for the measurement, so no result was claimed."}
+{"id": 234, "label": "not-a-violation", "second_rule": null, "reason": "Removes 'fully specified' after the plan proved infeasible; no rule-shaped breach visible in the sentence."}
+{"id": 870, "label": "not-a-violation", "second_rule": null, "reason": "Summary line rewritten after the ldd claim was corrected; the summary itself makes no rule-shaped claim."}
+{"id": 517, "label": "not-a-violation", "second_rule": null, "reason": "Status update from proposed to rejected."}
+{"id": 863, "label": "count_unit", "second_rule": "scope_instant", "reason": "A commits-behind count with no derivation and no instant, wrong; the fix adds the range and 'derived at that instant'."}
+{"id": 189, "label": "not-a-violation", "second_rule": null, "reason": "A to-do replaced by its completion."}
+{"id": 642, "label": "not-a-violation", "second_rule": null, "reason": "Recommendation replaced by the fact that it was implemented."}
+{"id": 36, "label": "not-a-violation", "second_rule": null, "reason": "Status update after the defaults were expanded."}
+{"id": 117, "label": "not-a-violation", "second_rule": null, "reason": "Drops a clause the fix made untrue; staleness, not a breach."}
+{"id": 380, "label": "count_unit", "second_rule": null, "reason": "A character count published as bytes; the fix names both units. The unit was wrong."}
+{"id": 507, "label": "lines_read", "second_rule": "open_artifact", "reason": "Describes what a budget governs from its module name, per the commit subject; the lines were not read."}
+{"id": 786, "label": "not-a-pair", "second_rule": null, "reason": "Different bullets of a deleted checkpoint; not one sentence and its correction."}
+{"id": 252, "label": "question_asked", "second_rule": null, "reason": "Readiness judged from a datapoint count instead of the promotion criterion; the fix names exactly that mismatch."}
+{"id": 874, "label": "not-a-pair", "second_rule": null, "reason": "The replacement is about a different option's cost."}
+{"id": 231, "label": "not-a-violation", "second_rule": null, "reason": "'Current' next action marked superseded; status update."}
+{"id": 131, "label": "not-a-violation", "second_rule": null, "reason": "Suggested scope replaced by its completion."}
+{"id": 705, "label": "not-a-violation", "second_rule": null, "reason": "Rewording; same numbers."}
+{"id": 766, "label": "question_asked", "second_rule": "run_tool", "reason": "Infers the real gate's behaviour from a form that 'looks most like' it; the fix drops it as unmeasured."}
+{"id": 418, "label": "not-a-violation", "second_rule": null, "reason": "Status update."}
+{"id": 719, "label": "not-a-violation", "second_rule": null, "reason": "A wrong plan instruction reversed; a reasoning error, not one of the 22 shapes."}
+{"id": 53, "label": "not-a-violation", "second_rule": null, "reason": "List extended with later reversals; update."}
+{"id": 737, "label": "not-a-pair", "second_rule": null, "reason": "The original is unchanged; the new side only appends a new member entry."}
+{"id": 317, "label": "not-a-violation", "second_rule": null, "reason": "Removes a false detail (the write was not pinned); factual correction."}
+{"id": 732, "label": "not-a-violation", "second_rule": null, "reason": "Citation path updated to the archive location."}
+{"id": 556, "label": "not-a-violation", "second_rule": null, "reason": "'the id' clarified to 'the sessionId'; it did not attribute by name."}
+{"id": 626, "label": "not-a-violation", "second_rule": null, "reason": "Slug rename annotated; editorial."}
+{"id": 865, "label": "cannot_happen", "second_rule": null, "reason": "'could not support it' generalised one build's result into an impossibility; the fix narrows it to 'did not establish'."}
+{"id": 205, "label": "not-a-pair", "second_rule": null, "reason": "The new side is a fragment that quotes the old one inside a status note."}
+{"id": 593, "label": "not-a-violation", "second_rule": null, "reason": "A trailing clause moved elsewhere; restructure."}
+{"id": 615, "label": "not-a-violation", "second_rule": null, "reason": "Environment line updated after the cause was found; no breach in the sentence."}
+{"id": 784, "label": "not-a-pair", "second_rule": null, "reason": "Different bullets of a deleted checkpoint."}
+{"id": 461, "label": "count_unit", "second_rule": null, "reason": "A partition count carried from a superseded tally, per the commit; cited, not re-derived."}
+{"id": 713, "label": "not-a-violation", "second_rule": null, "reason": "Present tense moved to past for a snapshot; staleness, true when written."}
+{"id": 167, "label": "selector_narrow", "second_rule": "closed_population", "reason": "'every id' in two directories from a capped grep, per the commit; a subset reported as the whole."}
+{"id": 197, "label": "not-a-violation", "second_rule": null, "reason": "Reproduction commit updated."}
+{"id": 894, "label": "not-a-pair", "second_rule": null, "reason": "Unrelated sentences."}
+{"id": 812, "label": "not-a-violation", "second_rule": null, "reason": "Citation expanded; editorial."}

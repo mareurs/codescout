@@ -460,3 +460,11 @@ A first build of the **mined correction pairs**, with no model call and nothing 
 
 - The labeller is a model of the family that will be tested, and the author of the specs. The operator sample is the only independent check, at n = 40.
 - Batched subagents may drift from one another; the fixed instruction and the committed hash are the only controls.
+
+## Deviation — the operator delegated the 40-row sample, 2026-09-24 (recorded before the comparison)
+
+**What happened.** Shown the sample, the operator asked the auditing session to label all 40 itself ("you choose for all. think carefully"). The main session did so, with fuller context per row and a reason for each: `docs/evals/data/2026-09-24-rule-tell/stage2/main-session-sample-labels.jsonl`. It had not seen the labelling subagents' labels for these rows. That file is committed **before** the two are compared.
+
+**What that makes the comparison.** Two labelling passes by the same model family, under the same instruction and specs. **It measures consistency, not independence.** The admission rule required an *independent* labeller, and **it cannot be applied as registered**: a κ between Claude and Claude is not evidence the labels are right. The model-vs-context experiment shows why this matters here. Claude and Codex found almost disjoint defect sets, so agreement within one family can hide a shared blind spot.
+
+**So the agent labels stay NOT admitted.** The comparison below is reported as a consistency figure. Admission waits for an independent labeller, which would be a new registration: the operator, or a different model family under the same instruction and blind sample.
