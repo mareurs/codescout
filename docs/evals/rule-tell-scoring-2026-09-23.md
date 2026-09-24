@@ -453,7 +453,7 @@ An arm out of fewer than 10 excludes the unobservable forks, the registered conv
 - **The ship rule's second clause (arm 2 − 1b ≥ 0.2) is not evaluated here.** The fork route never ran an arm 2, and the registration named only arm 0 against 1b plus the stripped arms. For RTD-8, the evidence that the content matters and not the interruption is still the API route's (arm 2 9/10). That route was judged on the Messages API, has not been re-scored under `rtd8c`, and belongs to the owed re-score (handoff item 4). *Resolved 2026-09-24: re-scored under `rtd8c` on the clean channel, arm 2 − 1b = 0.90, and RTD-8 ships on the API route. See § *API-route rows re-scored on the clean channel*.*
 - **Stripped-arm predictions:**
   - *s1b stays near 0*: 1/10, **holds**. The claim-bound reminder works without the rule in `CLAUDE.md`.
-  - *s0 is not below arm 0*: 7/8 against 9/10, and against the registered 8/10. **Holds.**
+  - *s0 is not below arm 0*: 7/8 (0.875) is **below** this run's arm 0 of 9/10 (0.90), so against this run it strictly fails; it holds only against the registered 8/10. The gap is a fraction of one row on 8 and 10 observable rows, so it means nothing either way. *Corrected 2026-09-24 after the Codex review: this line first read "Holds" against both.*
   - *s1a, the open question*: 7/9, so **the verbatim rule does not help.** The earlier lead ("s1a helps: 1/9") is withdrawn. s1a is the one arm whose reading reversed.
 
 **Why the rates moved, and what this run cannot separate.** Every arm rose. That fits the registration's diagnosis that `rtd8` scored an unrestricted claim NO whenever the text also named a reader. But the channel and the wording changed together. So this run cannot say how much of the shift each change caused, and in particular whether s1a's 1/9 came from the contamination or from the old clause. Which rows flipped was not broken out per row.
@@ -525,7 +525,7 @@ The question behind handoff item 2 was whether tightening or merging the neighbo
 | 2b | 3/17 | 3/17 |
 | 3 | 3/17 | **5/17**: RTD-4 and RTD-9 become hits; RTD-11's `closed_population` is not, since its gold is `question_asked` |
 
-**This is an upper bound, and a tailored one.** The family was drawn after seeing form 3's confusions, so no fairer grouping can do better on these rows. Even so it is 5/17, below the registered 0.5, and 10 of 17 positives stay silent. **So no spec-tightening registration was run.** Its ceiling cannot reach the bar, and the larger failure it would not touch is silence (§ *S0 form 3*).
+**This bounds regrouping the same outputs, not re-specifying the rules, and it is tailored.** The family was drawn after seeing form 3's confusions, so no fairer grouping of *these outputs* can do better. Even crediting every positive that fired anything (3 gold + 4 wrong-rule) gives 7/17 = 0.41, below the registered 0.5, and 10 of 17 positives stay silent. A run with changed specs produces new outputs, which this bound does not cover. **So no spec-tightening registration was run**, because the larger failure it would not touch is silence (§ *S0 form 3*), not because its ceiling provably cannot reach the bar. *Corrected 2026-09-24 after the Codex review: this paragraph first called 5/17 an upper bound and said the ceiling "cannot reach the bar", which holds only for regrouping.*
 
 ## Phase 1 — Stage 1, L0-frozen: JevK5 zero-shot fails its gate, registered
 
@@ -558,7 +558,7 @@ The gate and span-gate code is S0's own. The model is `alibiserikbay/JevK5` 0.2.
   - `cannot_happen` sits at 0.44–0.60 on every text and fires on 9 of 10.
   - `d_semicolon` sits near 0.2.
   - So one global threshold cannot serve all rules.
-- **The ranking carries signal that the threshold hides.** On four of the five violation texts, the gold rule ranks 1st or 2nd of 22 on its own text, and it scores above that rule's maximum over the five clean texts:
+- **The ranking carries signal that the threshold hides.** Two readings, each true on four of the five violation texts, but **not the same four**: the gold rule ranks 1st or 2nd of 22 on its own text (all but `contradiction`, at rank 12), and it scores strictly above that rule's maximum over the five clean texts (all but `cannot`, whose 0.600599 exactly ties clean-1). **Both hold on three: semicolon, sessionid and member.** The `cannot` tie means no threshold on `cannot_happen` alone can separate that positive from clean-1. *Corrected 2026-09-24 after the Codex review: this line first stated both readings together for "four of the five".*
 
 | text | gold p | same rule, clean max | margin |
 |---|---|---|---|
