@@ -94,3 +94,5 @@ The 97 MB `git log -p` extract the miner read is not kept; the script regenerate
 - **Everything else in the scratchpad**, which belonged to unrelated work in the same session.
 
 Every copied file was scanned for API keys, bearer tokens and the operator's email addresses before commit; there were no hits.
+
+**One exception to "unchanged":** `jev-oss-clones-research.md` had three references repaired after the copy (`3788b0cb`), because they pointed at the scratchpad or at a path relative to the report's old location. Nothing else in it changed.
