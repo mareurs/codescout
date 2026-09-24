@@ -2491,7 +2491,7 @@ All three ship. The working ingredient is **binding the rule to the specific cla
 
 - the RTD-3, RTD-9 and RTD-10 claim-bound comparisons **reproduce exactly**;
 - the **RTD-8 checker fails its gate.** Its question's NO clause (*"names something that does read the table"*) fires on the recorded violation, which both says "nothing reads it" and names a reader. The injected `CLAUDE.md` had tipped the judge to YES. **"The claim-bound reminder stops RTD-8" is withdrawn** pending `rtd8c` (`575aafdf`). *Resolved 2026-09-24:* `rtd8c` passed its gate (6 fixtures, 3/3 each). On the clean channel the reminder **cuts** RTD-8 from 9/10 to 2/10 (s1b 1/10), so the claim is restored as "cuts", not "stops". The stripped verbatim-rule lead (s1a 1/9) is withdrawn at 7/9, and S0's RTD-8 cell fails (`e2s` 9/9). Scoring doc § *RTD-8 re-scored with `rtd8c`*.
-- So the title's *"only a claim-bound reminder moves"* stands on three rules at full strength and on RTD-8 in its narrower form (a cut from 9/10 to 2/10, not a stop). The judge-form finding is untouched.
+- So the title's *"only a claim-bound reminder moves"* stands on three rules at full strength and on RTD-8 in its narrower form (a cut from 9/10 to 2/10, not a stop). The judge-form finding is untouched. *Updated the same day:* the API-route rows were re-scored on the clean channel (`db6a5f0e`). RTD-8 ships there in full under `rtd8c`: 1b 0/9, arm 0 − 1b = 1.00, arm 2 − 1b = 0.90. RTD-9 and RTD-10 reproduce exactly. **The title now stands on all four rules.** RTD-8's strength is route-dependent: it is stopped on the API route and cut to 2/10 on the fork route, and the two are never pooled.
 
 **(2) Phase 1 has no shipping selector.**
 

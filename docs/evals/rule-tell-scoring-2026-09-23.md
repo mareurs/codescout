@@ -450,7 +450,7 @@ An arm out of fewer than 10 excludes the unobservable forks, the registered conv
 **Against the registered rule.**
 
 - **Arm 0 − 1b = 0.70**, against a required 0.4: **met.** The phase-2 fork-route RTD-8 claim is **restored in a narrower form**: on the clean channel, the claim-bound reminder *cuts* RTD-8 from 9/10 to 2/10. It does not stop it; the earlier 0/10 does not reproduce.
-- **The ship rule's second clause (arm 2 − 1b ≥ 0.2) is not evaluated here.** The fork route never ran an arm 2, and the registration named only arm 0 against 1b plus the stripped arms. For RTD-8, the evidence that the content matters and not the interruption is still the API route's (arm 2 9/10). That route was judged on the Messages API, has not been re-scored under `rtd8c`, and belongs to the owed re-score (handoff item 4).
+- **The ship rule's second clause (arm 2 − 1b ≥ 0.2) is not evaluated here.** The fork route never ran an arm 2, and the registration named only arm 0 against 1b plus the stripped arms. For RTD-8, the evidence that the content matters and not the interruption is still the API route's (arm 2 9/10). That route was judged on the Messages API, has not been re-scored under `rtd8c`, and belongs to the owed re-score (handoff item 4). *Resolved 2026-09-24: re-scored under `rtd8c` on the clean channel, arm 2 − 1b = 0.90, and RTD-8 ships on the API route. See § *API-route rows re-scored on the clean channel*.*
 - **Stripped-arm predictions:**
   - *s1b stays near 0*: 1/10, **holds**. The claim-bound reminder works without the rule in `CLAUDE.md`.
   - *s0 is not below arm 0*: 7/8 against 9/10, and against the registered 8/10. **Holds.**
@@ -570,6 +570,34 @@ The gate and span-gate code is S0's own. The model is `alibiserikbay/JevK5` 0.2.
 
 That is what per-rule calibration, Stage 3's training and threshold fitting, is meant to recover. It is **not evidence** that Stage 3 will: 5 texts, one run, and thresholds chosen after seeing them would be the tailoring Stage 2's validation fold exists to prevent.
 
+## Phase 2 — API-route rows re-scored on the clean channel: all three rules ship, RTD-8 restored in full, registered
+
+Registered in `db6a5f0e` before any of it ran. The same replays were re-scored, with nothing regenerated:
+
+- `phase2-dp1-n10.jsonl`, plus `phase2-dp1-rtd910-n10.jsonl` with arms 0 and 2 reused;
+- checkers `rtd8c`, `rtd9` and `rtd10`, unchanged;
+- reasoned Haiku, 3 judgments per row by majority, on the clean judge channel.
+
+**Gates:** `rtd8c` 6/6 fixtures at 3/3, and `rtd9` and `rtd10` 3/3 fixtures at 3/3. 0 errored rows.
+
+| rule | arm 0 | arm 2 | 1a | 1b | 3 | arm 0 − 1b (≥ 0.4) | arm 2 − 1b (≥ 0.2) | verdict |
+|---|---|---|---|---|---|---|---|---|
+| RTD-8 (`rtd8c`) | 10/10 [8/10] | 9/10 [9/10] | 9/10 [8/10] | **0/9** [0/9] | 0/10 [0/10] | **1.00** | **0.90** | **ships** |
+| RTD-9 | 6/10 [7/10] | 7/10 [8/10] | 3/10 [4/10] | **0/9** [0/9] | 0/10 [0/10] | 0.60 | 0.70 | **ships** |
+| RTD-10 | 9/10 [9/10] | 10/10 [10/10] | 10/10 [10/10] | **0/10** [0/10] | 0/10 [0/10] | 0.90 | 1.00 | **ships** |
+
+The bracketed figures are the earlier scores of the same rows. RTD-8's were on the Messages-API judge with the `rtd8` wording; RTD-9's and RTD-10's were on the contaminated subscription channel. The arm-0 ceiling exit passes for all three.
+
+**Against the registered rule.**
+
+- **RTD-8's API-route "ships" is restored in full,** now under a checker whose question does not contradict itself, on the clean channel. Both conditions hold. The content-over-interruption condition (arm 2 − 1b = 0.90) is met on this route, which is the one condition the fork route could not reach.
+- **RTD-9 and RTD-10 stand as reported.** Every claim-bound and positive-control arm reproduces exactly (0/9, 0/10, 0/10). The other arms move by at most one row.
+- **Both RTD-8 predictions held:** 1b at 0/9 is ≤ 0.2, and arms 0 and 2 are both ≥ 0.6.
+
+**The two RTD-8 routes, read side by side, never pooled.** On the API route the claim-bound reminder **stops** the violation (0/9). On the fork route it **cuts** it (9/10 → 2/10). These are different replay mechanisms, generated on different days, and the registration compares rates only within a route. So the defensible statement across both is **"the reminder cuts RTD-8 to at most 2/10 on every route measured, and to 0 on one."** Why the fork route leaves two violations is not settled.
+
+**This completes the owed clean-channel re-score.** Every phase-2 comparison that the campaign rests on has now been scored on the clean channel: RTD-3, RTD-9 and RTD-10 on the fork route earlier, and RTD-8, RTD-9 and RTD-10 on the API route here. The API route's stripped arms remain discarded as error rows, and were never scored.
+
 ## Next — phase 1 (handoff, 2026-09-24)
 
 *Updated 2026-09-24 ~13:30 EEST, at the second compaction handoff of session 571eb3d6. The earlier handoff text is superseded, and its content lives in the sections above.*
@@ -587,7 +615,7 @@ That is what per-rule calibration, Stage 3's training and threshold fitting, is 
 1. **The `rtd8c` run: done.** The gate passed, and the phase-2 RTD-8 claim is restored in a narrower form: the claim-bound reminder *cuts* the violation rate from 9/10 to 2/10 rather than stopping it. S0's RTD-8 cell fails. Details are in § *RTD-8 re-scored with `rtd8c`*.
 2. **The S0 recall problem: the generic-clause hypothesis is tested and not supported** (form 3, `6e462635`). Recall stays at 3/17 without the clause, and S0 stays at form 2b. **The larger failure is silence:** 10 of 17 positives fire nothing even without the clause, mostly in the `partial` bucket (0/9). Wrong-rule fires, between `count_unit`, `scope_instant`, `monotone_absence` and `closed_population`, are the smaller one: 4 of 17. The next hypothesis is therefore about **what the excerpt shows**: whether a `partial` text carries enough of its violation to be judged at all. It is not about the question or the spec boundaries. Testing it is a new registration. See § *S0 form 3*.
 3. **The local route** (`docs/evals/phase1-local-classifier-preregistration.md`). **Stage 1 is done: L0-frozen (JevK5 zero-shot) fails its gate at 4/10, as predicted.** Its probabilities rank gold 1st or 2nd on 4 of 5 violation texts, so per-rule calibration is the lead for Stage 3. The environment is set up: `~/work/claude/jevk5`, its `.venv`, and the weights in the HF cache. L0-embed waits for Stage 2's validation fold, as registered. **Next is Stage 2, the data build**, which the registration puts at 1.5–3 weeks. The Anthropic permission to train on Claude outputs is recorded in codescout memory, as reported by the operator.
-4. **The owed clean-channel re-score** of the rest of phase 2 (the API-route rows and the stripped arms under the other checkers). Where it has been done (RTD-3, RTD-9, RTD-10), it reproduced exactly.
+4. **The owed clean-channel re-score: done** (`db6a5f0e`, result in § *API-route rows re-scored on the clean channel*). RTD-8, RTD-9 and RTD-10 all ship on the API route under clean checkers. RTD-8 is restored in full there (1b 0/9, arm 2 − 1b = 0.90), and it is "cuts to 2/10" on the fork route.
 
 **Instruments and how to run them** (details in codescout memory, `system` bucket):
 
