@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: taken
+status: investigating
 tags:
 - cluster/blast-radius-exceeds-visibility
 - multi-account
@@ -8,8 +8,6 @@ tags:
 - peer-discovery
 - concurrency
 - shared-checkout
-claimed_at: 2026-09-24
-claimed_by: e4fbc7ef-27b7-4707-8469-ccdffa8e4e92
 opened: 2026-08-31
 owner: marius
 related: []
