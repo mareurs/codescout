@@ -72,7 +72,7 @@ A candidate build, not frozen data; see the pre-registration's § *Stage 2 statu
 | file | what |
 |---|---|
 | `stage2/mine_pairs.py` | the miner: correction-marker list and its reasons in the docstring, incident and document grouping, the held-out shingle filter |
-| `stage2/mined-candidates.jsonl` | 946 candidate pairs, each `rule: null` with a keyword `rule_hint` for a labeller |
+| `stage2/mined-candidates.jsonl` | 940 candidate pairs, each `rule: null` with a keyword `rule_hint` for a labeller, and both `context_before` (the positive's own side) and `context_after` |
 | `stage2/summary.txt` | the run's counts, drops by reason, hint distribution and a 10-row sample |
 
 The 97 MB `git log -p` extract the miner read is not kept; the script regenerates it.
