@@ -285,3 +285,42 @@ Nothing in Stages 2–4 has run, so these are corrections to the plan, not to an
 - **Stage 4's completeness check now also refuses missing whole texts** and texts not in the corpus (`138bdb60`, regression test `tests/test_phase1_span_selector_report.py`). A T report must read `N of N texts`, with N stated at freeze.
 
 **Unchanged:** the ship rule, the stopping rules, the gate, and the held-out list.
+
+## Amendment — the `partial` excerpt audit, 2026-09-24 (registered before any positive excerpt was read for it)
+
+**Question.** S0 fires the gold rule on 0 of the 9 `text_detectable: partial` positives, under both form 2b and form 3, and fires nothing at all on most of them. Is that because the excerpt does not show the violation, which would make it a corpus artefact, or because the excerpt shows it and the selector misses it? No model call is made.
+
+**Population:** the 9 `partial` positives, RTD-1, 2, 4, 5, 7, 11, 12, 16 and 19, as parsed by `load_cases` from `docs/evals/rule-tell-detection.md`.
+
+**Criterion: each case's own `tell` field**, written into the corpus before any selector existed, not a question written for this audit. Each tell is split into two parts before the excerpts are read:
+
+- **(a) the text predicate:** what the sentence itself must do (assert present-tense existence, give a bare count, make an unhedged absolute, and so on);
+- **(b) any outside condition:** what the tell also requires that may not be in the excerpt. Seven cases have one: RTD-2 (window endpoints), RTD-4 and RTD-19 (a derivation tool exists), RTD-5 (neighbouring clauses carry citations), RTD-7 (the two code paths differ), RTD-11 (the evidence is of a different signal type), and RTD-12 (a caveat in the same output). RTD-1 and RTD-16 have none.
+
+**Per case, one of three verdicts on the positive excerpt alone:**
+
+| verdict | meaning |
+|---|---|
+| **V**, visible | (a) holds, quoted verbatim, and (b) is absent or also shown in the excerpt |
+| **S**, surface only | (a) holds, quoted verbatim, but (b) needs something the excerpt does not contain |
+| **N**, not visible | (a) does not hold in the excerpt |
+
+**Two mechanical checks, run with the audit:**
+
+- The quote for (a) must be found verbatim in the positive excerpt, with the selector's own `_norm` and `verify_span`.
+- The quote must be **absent** from that case's negative excerpt, otherwise it sits in a sentence the correction left alone. RTD-16 is the known exception: its corpus note says the corrected sentence violates the same law. A quote failing either check makes the verdict N.
+
+**Prediction.** From the corpus notes, which call several of these tells "on the surface": **V + S ≥ 7 of 9, and V ≤ 3 of 9.** In words: most excerpts show the shape of the violation, and few show enough to prove it.
+
+**Decision rule, fixed now:**
+
+- **V + S ≥ 6:** the silence is not explained by what the excerpts show. The next selector registration targets what the judge is asked (how a surface-shape tell should be treated), not the corpus. The S cases are also a live question for the ship rule, since a reminder on a surface tell costs little if it is wrong.
+- **N ≥ 4:** those cases are reported separately as not judgeable from the excerpt, and are excluded from the recall denominator of later registrations. The corpus, not the selector, is repaired first.
+- **Otherwise:** mixed. Reported per case, and neither follow-up is started from this audit alone.
+
+**Blinding and its limit.** The auditor, this session, wrote the S0 specs, has read the corpus before, and knows the gold rules. Seen before this registration: each case's `tell` and `text_detectable` fields, the excerpt lengths (97–512 characters) and the fact that no positive equals its negative. To bound that:
+
+- The verdicts are written down, with their quotes, before being compared with S0's rows.
+- **Three cases, drawn with `random.Random(20260924).sample(ids, 3)` from the 9 ids in numeric order, are given to the operator blind:** RTD-1, RTD-4 and RTD-7. The operator sees only the positive excerpt and its tell question, not the auditor's verdict. Agreement is reported as k of 3, and every disagreement is shown.
+
+**Limits, stated now.** A tell is written by someone who knew the violation, so it is a generous criterion: an S or V verdict says the excerpt is judgeable *given the tell*, not that a rule-level judge could find it. Nine cases, one auditor plus a three-case check, no interval claimed.
