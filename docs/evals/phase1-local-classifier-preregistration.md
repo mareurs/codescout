@@ -741,4 +741,4 @@ If condition 1 fails, the agent labels are not admitted and Stage 2's mined rout
 
 - **Every synthetic label derives from the specs**, written by the agent that designed this. The cross-family audit is the one check that does not share that view.
 - **Real-draft performance is still untested per rule.** T-syn measures the constructed shape.
-- **Codex output is used as test and audit data.** Whether OpenAI's terms permit that use is recorded as the operator's to confirm. Using it as training input is ruled out here.
+- **Codex output is used as test and audit data.** **Permission recorded, 2026-09-25:** the operator reports asking OpenAI and being told this use is fine, because codescout is open source. The agent has not seen the grant text. This amendment's scope is unchanged: Codex output stays out of training input unless a later amendment, on the operator's word, widens it. Each Codex-generated row carries `generator` and `claude_generated: false`.
