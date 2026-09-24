@@ -32,6 +32,14 @@ local ONNX embedder, so the status must name it, got: String("remote-http")
 A spurious red in the default lane — the lane every session reads as "did my change break
 something" — on a diff that cannot reach embedder resolution.
 
+
+**Recurrence 2026-09-25, recorded by session `09093108` (not claimed).** This is the second observed flip, so the title's "once" is now a lower bound.
+
+- The run was `./scripts/gate.sh`'s DEFAULT lane in a leased slot, at HEAD `87001799` plus one uncommitted edit to an unrelated test in `src/retrieval/index_state.rs`.
+- The assertion at `src/tools/config/tests.rs:788` got `String("remote-http")`. The lane's other 5,821 tests passed.
+- An immediate re-run of `tools::config::tests` (85 tests, default features) passed 85/85.
+- The test was not skipped, so no ambient embedder URL was set when its guards ran. `#[serial_test::serial]` serializes it only against other `serial` tests, so a NON-serial test setting `CODESCOUT_EMBED(DER)_URL` between the guard and the `ProjectStatus` call would produce exactly this. That is a hypothesis, not measured.
+
 ## Reproduction
 
 Not reproduced deterministically. Observed once in a full `cargo test --workspace` (5801 tests,
