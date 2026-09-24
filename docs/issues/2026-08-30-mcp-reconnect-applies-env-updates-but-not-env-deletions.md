@@ -1,7 +1,7 @@
 ---
 id: '1c5e106ee122f582'
 kind: bug
-status: open
+status: taken
 title: 'BUG: /mcp reconnect applies a CHANGED env var from settings.json but not a REMOVED one — and the change that lands falsely confirms the one that did not'
 tags:
 - cluster/config-propagation-is-additive
@@ -11,6 +11,8 @@ tags:
 - stale-env
 - false-confirmation
 - not-codescout-source
+claimed_at: 2026-09-24
+claimed_by: e4fbc7ef-27b7-4707-8469-ccdffa8e4e92
 opened: 2026-08-30
 owner: marius
 severity: high
@@ -146,6 +148,29 @@ did eventually land there. But if it was verified by reconnect rather than by a 
 restart, the verification at the time proved nothing, and the month-long survival of
 the same setting in a third profile went unnoticed alongside it. **Suspected, not
 established** — no record survives of how that check was run.
+
+## Re-checked 2026-09-24 — not reproducible passively, and the edit surface differs by profile
+
+**No reproduction was possible from inside a session.** It needs a key deleted from config *during* a
+Claude process's lifetime followed by `/mcp`, which only the operator can type. The checking session's
+`claude` process started 2026-09-24T19:13:53Z; nothing was deleted since.
+
+**New fact, and it changes the Reproduction recipe:** on `~/.claude-sdd` the MCP server's env does not
+come from `settings.json` at all. The live server (spawned 19:17:50Z) carries **13** `CODESCOUT_*` keys;
+`~/.claude-sdd/settings.json` § `env` defines **0** of them, and the parent `claude` process's own environ
+holds **0** (so not shell inheritance). They come from `~/.claude-sdd/.claude.json` →
+`mcpServers.codescout.env` (16 keys). `~/.claude-kat/.claude.json` carries 15; `~/.claude/.claude.json`
+carries 0, and there `settings.json` is the surface. So step 1 (*"in `<profile>/settings.json` § `env`"*)
+holds for `~/.claude` only, and **whether the `.claude.json` layer has the same update/delete asymmetry is
+untested**.
+
+For the record, the `.claude-sdd` server's `CODESCOUT_QUERY_PREFIX` is the non-empty
+`Represent this query for searching relevant code: ` and `CODESCOUT_BM25_BOOST` is `3.0`. Whether that is
+the intended retrieval config is not this bug's question.
+
+Still owed: the operator-run experiment (delete a key → `/mcp` → read `/proc/<server>/environ`, once per
+layer), or an upstream report — the mechanism is not in this repo. Checked by sessionId
+`e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`.
 
 ## Workarounds
 

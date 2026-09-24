@@ -1,8 +1,10 @@
 ---
 kind: bug
-status: open
+status: taken
 tags:
 - cluster/gate-keyed-on-unobservable-event
+claimed_at: 2026-09-24
+claimed_by: e4fbc7ef-27b7-4707-8469-ccdffa8e4e92
 closed: null
 opened: 2026-09-09
 owner: marius
@@ -183,6 +185,21 @@ Options:
 
 **Before any worktree removal, occupancy must be established by (2) regardless** — the
 other two are documentation.
+
+### Re-verified 2026-09-24 — none of the three options is applied
+
+- **Option 1 not applied.** `claude-plugins/codescout-companion/skills/reaching-peer-sessions/SKILL.md`
+  still prints `PID PROFILE NAME STATUS CWD` from `readlink /proc/<pid>/cwd` (`:53`, `:56`); the file's
+  last change is `claude-plugins:43cc1e0` (09-15, the `$N` substitution fix), which did not touch the column.
+- **Option 3 not available.** A live registry row (`$CLAUDE_CONFIG_DIR/sessions/<pid>.json`) carries 18 keys
+  — `cwd entrypoint kind messagingSocketPath name nameSince nameSource peerFeatures peerProtocol pid
+  pidDomain procStart sessionId startedAt status statusUpdatedAt updatedAt version` — and a scan of every
+  row in the three named profiles found **no** key containing `project` or `workspace`.
+- **The column is right in one case, measured the same minute:** the two `claude-cfg` sessions report a
+  `codescout.worktrees/rmvc-*` cwd because they were *launched* there. It misleads only when
+  `workspace(action="activate")` moves a session after launch — which is the case this file records.
+
+Decision between options 1–3 still owed. Checked by sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`.
 
 ## Tests added
 

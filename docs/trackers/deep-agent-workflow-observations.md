@@ -14,7 +14,7 @@ entry_prefix:
 - DWF
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
-entry_high_water_DWF: 8
+entry_high_water_DWF: 9
 entry_high_water_DCS: 7
 ---
 
@@ -100,6 +100,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DCS-6 | 2026-09-24 | coverage | session-receipt | sebf651ec-open-bug-verify-sweep |
 | DCS-7 | 2026-09-24 | coverage | session-receipt | 571eb3d6/post-compaction-3-2026-09-24 |
 | DWF-8 | 2026-09-24 | workflow | routine-first | 938e2953/gate-cache-disk |
+| DWF-9 | 2026-09-24 | workflow | routine-first | e4fbc7ef/high-severity-bug-reverify |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -425,6 +426,23 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
   - A second defect in my own test was caught only by mutation M2, which first SURVIVED: case D killed a wrapper subshell, not the gate.
 - **What the checks establish:** the lease, reuse, isolation, orphan-worker and flock-failure behaviours of `gate.sh`, driven through stubs. They say nothing about behaviour under real concurrent cargo load beyond the one real gate run.
 - **Delegation candidate (a proposal only):** a deterministic post-mutation survivor check, meaning processes carrying the suite's env marker plus growth in its temp root. The mutation verdict line cannot show either.
+
+## DWF-9 — Re-verify the six high-severity open bugs before choosing any fix — pre-action packet
+
+**Status:** observed
+**Valid:** dated 2026-09-24
+
+| Field | Record |
+|---|---|
+| Sampling / capture mode | `routine-first`, `prospective` |
+| Identity / key / times | session `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`, principal: coordinating host agent (Opus 5.5), collector same; start ~2026-09-24T19:05Z, capture 2026-09-24T19:22Z, finish unknown |
+| Task / authority / substrate | Operator: "lets check open issues", then "take important/high ones". Authority as instructed: work the six `severity: high` open bug files; no push authorised. Main checkout, branch `experiments`, HEAD `6a79fde5` (was `202a1615` at session start — peers committing); dirty: two peer-modified files + two untracked, none mine. MCP server respawned 19:17:50Z after a peer `cargo rb` at 19:15:29Z, dropping this session's activation (write guard refused once; re-activated) |
+| Pre-action evidence | Catalog `find kind=bug` over open/taken/investigating/zombie = 101 rows, matched by an on-disk frontmatter grep (101 live files; 2 archive hits are code-block quotes). The six highs: two-correct-pre-commit-guards (investigating; owed a choice between fix directions 1 and 2), sdd-ledger-and-catalog-rows-vanished (zombie; `find` hint shows `unindexed_files=8`), mcp-reconnect env deletions (`1c5e106ee122f582`; harness, not codescout source), cross-account-agents (ListAgents discovery gap), cwd-answers-who-is-alive (fix lives in claude-plugins), deliberately-red commit (DWF-7 today: instance gone, class open). Read: Summary/Fix/Resume of each. Uncertainty: which are still live; four look decision-gated or external |
+| Initial next action / completion check | Next: per-bug verification — (a) ListAgents vs socket enumeration; (b) current skill text + registry row fields for the CWD column; (c) the 8 unindexed files + `audit_log` deletes against the zombie's re-open trigger; (d) running MCP server env vs settings.json; (e) the two pre-commit guards' current code for the empty intersection. Check: each bug gets a dated verdict (still live / narrowed / closable / decision-owed) backed by a command output, not by its file's prose |
+| Trajectory | 1. `ListAgents` + reaching-peer-sessions Step 1 in the same minute (19:20:49Z): 10 vs 28 sessions / 4 profiles. 2. Skill file grep + registry-row key scan: `CWD` column unchanged since `claude-plugins:43cc1e0`; 18 registry keys, none project-shaped. 3. `audit_log(tbl=artifact, op=delete, since=09-18)`: 85 rows; a python pass over the buffer checked every non-move delete's path on disk (31, all absent) and every verb-null delete's archive twin (22, all present). 4. `/proc/<server>/environ` vs each profile's `settings.json` / `.claude.json`: 13 keys, 0 from `.claude-sdd/settings.json`. 5. `git log` over the three hook scripts since 09-07 (26 commits) + read `pre-commit-foreign-index.sh:250-358` for the ack scope. 6. `scripts/gate.sh` grep: no `--no-fail-fast`. Friction: a peer `cargo rb` at 19:15:29Z respawned the MCP server at 19:17:50Z, dropping activation (one write refused) and every pre-restart `@tool_*` buffer (one re-query) |
+
+**Outcome 2026-09-24 (verification phase).** `good` / `verified-complete` for the stated check — each bug got a dated verdict backed by command output, written into its own file through the catalog (6 files, +119/−5): cross-account **still live** (17 of 27 peers invisible, a 4th profile appeared); cwd-column **still live**, no option applied; zombie trigger **not met** over the whole window (first use of `audit_log` for it); mcp-reconnect **not reproducible from a session** — and on `.claude-sdd`/`.claude-kat` the env surface is `.claude.json`, not `settings.json`; pre-commit guards **still structurally live**, the 09-16 ack excludes its shape by construction — **code-read, not a live reproduction**; deliberately-red: DWF-7's verdict stands, `gate.sh` still fail-fast. Five claimed `taken`; zombie left `zombie`. What the check did NOT establish: any fix. Four of six are gated on an operator decision or an operator-typed `/mcp`, which is the delegation-relevant finding: a bounded re-verify workflow completes autonomously, and the next step does not. |
+| Rests on / grouping / overhead | Canonical records: the six `docs/issues/` files named above; related DWF-7 (earlier open-bug sweep today). Capture ~5 min |
 
 ## Template for new entries
 

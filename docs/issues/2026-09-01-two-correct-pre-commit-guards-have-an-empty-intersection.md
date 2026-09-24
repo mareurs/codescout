@@ -1,13 +1,15 @@
 ---
 id: '1efc6488cb2b8946'
 kind: bug
-status: investigating
+status: taken
 title: Two correct pre-commit guards have an empty intersection on an entangled index
 owners:
 - marius
 tags:
 - cluster/shared-resource-carries-no-owner
 topic: shared-checkout commit coordination
+claimed_at: 2026-09-24
+claimed_by: e4fbc7ef-27b7-4707-8469-ccdffa8e4e92
 closed: null
 opened: 2026-09-01
 owner: marius
@@ -492,6 +494,24 @@ the same"* — no longer applies, and it is now the cheap direction rather than 
 **What is still owed** is narrower than this section used to ask: decide between direction 1 (an
 owner field on the index) and direction 2 (teach the guard the pathspec index), knowing that 2 is
 no longer trading against a correctness hole. Direction 3 stays falsified — see the block above.
+
+### Re-read 2026-09-24 — the `CODESCOUT_INDEX_ACK` escape does not reach this shape
+
+26 commits touched `pre-commit-foreign-index.sh`, `pre-commit-ledger-counts.py` or `pre-commit-run.sh`
+since the 2026-09-07 probe. The one that reads like a path between the two guards is the index ack
+(`fc1ad175`, `96d839c3`, `b37b888a`). **It is not one, by construction.** `scripts/pre-commit-foreign-index.sh`
+honours `CODESCOUT_INDEX_ACK` (`:359`) only when `joint` (every contested path is half of a rename whose
+other half is yours) or `all_contested` (a pathspec commit where `mine` is empty). The entangled-ledger
+commit always has `mine` non-empty — the committer's own bug file — and no rename pairing, so it takes
+the ordinary refusal.
+
+The script's own argument for scoping the ack is the premise this bug falsifies: *"Under bare a narrower
+route always exists and the guard prints it — `git commit -- <your paths>`"*. For a coupled file carrying a
+peer's hunk, the pathspec form takes the whole worktree file, so that narrower route is refused too
+(`93b30111`: *a pathspec commit DOES capture*). **Code-read verdict, not a live reproduction** — the
+scratch-clone repro is the natural first red for whichever direction is chosen. Decision between
+directions 1 and 2 still owed. Checked by sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`.
+
 ## References
 
 - `docs/issues/archive/2026-09-02-foreign-index-prescribes-a-remedy-git-refuses.md`

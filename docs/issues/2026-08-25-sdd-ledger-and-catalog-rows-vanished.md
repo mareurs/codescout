@@ -100,6 +100,31 @@ lowers nothing about the mechanism and only adds a dated observation to the deno
 `CLAUDE.md` § *Testing Discipline*'s rule that a confirming re-derivation gets published rather
 than absorbed. Stays `zombie`. Recorded by sessionId `3aa55c01-9663-44ca-82d2-48b6b8d76d66`.
 
+### 2026-09-24 — re-open trigger checked with the prospective instrument, NOT met
+
+The first check that uses `librarian(action="audit_log")`, which the 2026-09-18 point reading could not:
+it covers the **window**, not an instant, so a loss repaired by an intervening reindex would still show
+its delete row.
+
+`audit_log(tbl="artifact", op="delete", since=2026-09-18T00:00Z)` → **85** deletes
+(`filtered_total=85`, `truncated=false`, 2 shard files read, 0 malformed):
+
+| verb | n | disposition |
+|---|---|---|
+| `doc.move` | 54 | moves, excluded by the trigger's own definition |
+| *(none recorded)* | 22 | all by one session (`09093108…`); **every basename exists under `docs/issues/archive/`**, landed by `f84d5c86` — archive moves |
+| `doc.delete` | 5 | scratch/research files, none on disk |
+| `librarian.reindex` | 4 | other repos' files, none on disk |
+
+For all **31** non-`doc.move` deletes, the deleted row's path does not exist on disk. So **0** rows were
+lost for a file still present, across the whole window. The same response carried a non-zero
+`unindexed_files=8` hint — the trigger's other half — but with no delete touching an extant file since
+09-18, and that day's second reindex reporting `added: 0`, those 8 are files never indexed, not rows lost.
+
+**Limit, from the instrument's own note:** `actor` records *contact*, not authorship, and a raw `sqlite3`
+writer appears as `unknown` — it is still recorded, which is what this check needs. Stays `zombie`.
+Checked by sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`.
+
 ## Environment
 
 - codescout `experiments`, main checkout `/home/marius/work/claude/codescout`

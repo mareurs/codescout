@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: taken
 tags:
 - cluster/blast-radius-exceeds-visibility
 - multi-account
@@ -8,6 +8,8 @@ tags:
 - peer-discovery
 - concurrency
 - shared-checkout
+claimed_at: 2026-09-24
+claimed_by: e4fbc7ef-27b7-4707-8469-ccdffa8e4e92
 opened: 2026-08-31
 owner: marius
 related: []
@@ -35,6 +37,31 @@ Discovery is scoped to `CLAUDE_CONFIG_DIR`.
 Method: every socket in `/run/user/1000/cc-socks/` is named for its owning pid, so
 liveness is `kill -0`, and the owning profile is `CLAUDE_CONFIG_DIR` in
 `/proc/<pid>/environ`. 22 sockets, 15 live, 7 stale.
+
+## Re-measured 2026-09-24 19:20Z — still live, and the population grew a profile
+
+Same method (socket enumeration, `kill -0` via `/proc/<pid>`, profile from `CLAUDE_CONFIG_DIR`), run by
+sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92` from a `~/.claude-sdd` session, with `ListAgents` called
+in the same minute.
+
+| quantity | value |
+|---|---|
+| live sessions | **28** (27 peers plus me) across **4** profiles: `.claude` 11, `.claude-sdd` 11, `.claude-kat` 4, `claude-cfg` 2 |
+| peers `ListAgents` reported | **10**, every one `.claude-sdd` (= that profile's 11 minus me) |
+| live peers it did not report | **17** |
+| sessions with cwd = this checkout | **7** (6 peers plus me) across 2 profiles; the 2 `.claude-kat` ones are invisible to `ListAgents` |
+| sessions with cwd in a `codescout.worktrees/` tree | 2, profile `claude-cfg` — also invisible |
+
+**`claude-cfg` is a fourth config dir that did not exist in the 2026-08-31 measurement**, so the
+shortfall is not a fixed offset a reader can correct for. `ListAgents` itself is unchanged: its
+scope is still exactly the caller's profile.
+
+What has moved since filing, stated at the grain it was checked: need (1) host-scoped discovery exists
+only as `/codescout-companion:reaching-peer-sessions` Step 1 — a mechanism for whoever runs it, not a
+change to `ListAgents`; need (3) is served by that table's `CWD` column, which
+`docs/issues/2026-09-09-cwd-answers-who-is-alive-and-is-read-as-who-is-working-where.md`
+(`d15c5651fa24c19a`) shows answers launch directory, not occupancy. Needs (2), (4) and (5) were **not**
+re-tested in this pass.
 
 ## What it cost, concretely
 
