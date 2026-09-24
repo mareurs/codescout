@@ -1,19 +1,19 @@
 ---
 id: '37b251b33adb37eb'
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: gate.sh''s per-session target dirs are never reclaimed — 323G across 17 trees filled /home to 97%'
 owners:
 - marius
 tags:
 - cluster/unclassified
-claimed_at: 2026-09-24
-claimed_by: 938e2953-de0e-4241-a543-9b761a70326a
+closed: 2026-09-24
 opened: 2026-09-24
 related:
 - docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md
 - docs/issues/archive/2026-09-17-a-full-disk-truncates-a-live-sessions-registry-row-so-provenance-reports-it-dead.md
 severity: high
+unverified: 'tests/gate-slot.sh runs in no CI job yet; wiring it (its own job, like rb-guard-tests) is pending the operator''s decision, so the regression test currently runs only when someone runs it. Also outstanding: the 6 legacy per-session trees (~125G) and the snapper snapshots pinning them — operator decisions, not code.'
 ---
 
 # BUG: gate.sh's per-session target dirs are never reclaimed — 323G across 17 trees filled /home to 97%
@@ -97,7 +97,10 @@ N/A.
 
 ## Fix
 
-Not started. The design has moved twice. Read `bug-fix-session-log:F-173` before acting.
+**Fixed:** `3591f2ca` on `experiments`, 2026-09-24.
+**patch-id:** `f5b86133d4433ef7bd18c17876359340983564ae`
+
+The design below is what shipped: a slot pool leased with a kernel lock, without `-o`. It moved twice before landing; read `bug-fix-session-log:F-173` for why. The migration cost is in `F-174`, and the incident the suite itself caused is in `F-175`.
 
 **Leading candidate: a slot pool leased by a kernel lock.** `gate.sh` takes the first free
 `~/.cache/codescout-gate/slot-N` with a non-blocking `flock` for the duration of **one run**. If
