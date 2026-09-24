@@ -165,16 +165,45 @@ log="$git_dir/session-stage-log"
 # SURVIVED — "untested" — was wrong; it is inert for the verdict because a sibling path
 # covers its domain, which is CLAUDE.md's third reading.
 #
-# Whether the structural fail-open is RIGHT is unresolved and deliberately left so.
-# `install-hooks.sh`'s seeding comment states the principle "prefer the noisy wrong answer
-# when the quiet one is unobservable", which argues against it. Measured against that: 12 of
-# 13 `git_dir`s on this checkout carry a seeded log, and the one without is a linked
-# worktree whose index is private to it, so no peer's staged work exists there to capture.
+# WHETHER THE STRUCTURAL FAIL-OPEN IS RIGHT was left open here until 2026-09-24, and the
+# answer turned out to be already half-written. `install-hooks.sh`'s seeding comment states
+# this file's principle as "prefer the noisy wrong answer when the quiet one is
+# unobservable", which argues against a silent exit. Measured against that: 12 of 13
+# `git_dir`s on this checkout carry a seeded log, and the one without is a linked worktree
+# whose index is private to it, so no peer's staged work exists there to capture.
 #
-# tests/hooks-discrimination.sh § 7b pins both halves separately — the silence as an
-# OVER-DETERMINED outcome that survives this line's deletion, and the absence of the awk
-# fatal as the one assertion that reds when it goes.
-[ -s "$log" ] || exit 0
+# REFUSING here was already ruled out, on measurement, and not by this session.
+# docs/issues/archive/2026-09-01-an-absent-stage-log-makes-the-foreign-index-guard-pass.md
+# carries the decision table: P1, "`-` whenever the log is cold", is recorded REJECTED as
+# "the version that gets the guard switched off" — a guard that refuses your own routine
+# commits teaches `--no-verify`, which disarms the quiet one that works. P2 shipped instead
+# (`fa9b3aff`) and closed the COLD-log route: any index write rebuilds the log, unattributable
+# rows record `-`, and `-` reads as foreign. What that fix does not reach, and says so, is the
+# window while the log is STILL MISSING — this line.
+#
+# So the remaining move is neither P1 nor P0: keep the verdict, change the OUTPUT. The table
+# had no column for that, because all three of its policies decide an owner. An EXIT 0 that
+# says nothing is byte-identical to "I checked and nothing foreign was staged"; the notice
+# below makes "could not check" distinguishable from "checked and clear" at no false-alarm
+# cost, since it refuses nothing. Its remedy is the one this file's own header already names
+# as depending on none of this machinery, so the reader can act on it unaided.
+#
+# COST, stated because it is real and recurring: this prints on EVERY commit from a git_dir
+# with no seeded log. Rare across git_dirs (1 of 13), constant within that one. If it ever
+# becomes noise, scope it to git_dirs with more than one live session — more logic, and more
+# that can be wrong.
+#
+# tests/hooks-discrimination.sh § 7b pins three things separately — the silence as an
+# OVER-DETERMINED outcome that survives this block's deletion, the absence of the awk fatal
+# as the assertion that reds when the early exit goes, and the notice naming the artifact it
+# could not read. The EXIT=0 assertion sits ABOVE the notice assertion on purpose, so a
+# notice that ever starts refusing reds as a verdict change rather than as a text change.
+if [ ! -s "$log" ]; then
+    printf 'pre-commit: foreign-index guard did NOT run — no session-stage-log at %s\n' "$git_dir" >&2
+    printf '  So this exit 0 means "could not check", not "nothing foreign is staged".\n' >&2
+    printf '  Read it yourself before committing:  git diff --cached --name-only\n' >&2
+    exit 0
+fi
 
 # Resolve a session id to a LIVE session, printing "<pid>|<name>" or nothing.
 #

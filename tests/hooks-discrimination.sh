@@ -837,6 +837,28 @@ has "log ABSENT -> guard is silent" "$(guard "$A")" "EXIT=0"
 # difference is that `owner_of` was guarded at the read while this one is only MASKED by an
 # early exit, so the fatal is one deleted line away rather than absent.
 eq "log ABSENT -> no awk fatal reaches the caller" "$(guard "$A" | grep -c 'awk: fatal')" "0"
+# THE STAND-DOWN IS NOW LOUD, and this is the assertion that pins it.
+#
+# The three above characterise a guard that returns EXIT=0 and says NOTHING — output
+# byte-identical to "I checked and nothing foreign was staged". That is the unobservable
+# silence `install-hooks.sh`'s seeding comment states this file's own principle against:
+# "prefer the noisy wrong answer when the quiet one is unobservable". A reader cannot tell
+# "the guard cleared you" from "the guard could not run", and both look like success.
+#
+# WHAT THE NOTICE DOES NOT CHANGE: the verdict. `log ABSENT -> guard is silent` above still
+# asserts EXIT=0 and is deliberately left ABOVE this line, so a notice that ever started
+# refusing reds there rather than here. P1 ("refuse whenever the log is cold") was measured
+# and REJECTED on 2026-09-01 — it refuses your own routine commits, which is the version
+# that gets the guard switched off — see the decision table in
+# docs/issues/archive/2026-09-01-an-absent-stage-log-makes-the-foreign-index-guard-pass.md.
+# This is not P1: it changes the OUTPUT on a path whose verdict is already settled, which is
+# an axis that table never had a column for.
+#
+# Asserted on the ENTITY the notice must name, not on its prose. CLAUDE.md § Testing
+# Discipline: pinning a sentence reds on every rewording and is rightly avoided, while
+# asserting the message still names the thing it is about is cheap and reds exactly on the
+# deletion. Reworded freely, this holds; deleted, it reds.
+has "log ABSENT -> the guard names what it could not read" "$(guard "$A")" "session-stage-log"
 rm -rf "$T"
 
 # ---------------------------------------------------------------------------
