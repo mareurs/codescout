@@ -2484,3 +2484,19 @@ All three ship. The working ingredient is **binding the rule to the specific cla
 **What it does not establish.** This is one decision point, and 10 samples measure one moment's variance, not ten independent violations. The judge channel moved arm-0 rates on identical replays (API 4/10 and 5/10, subscription 7/10 and 9/10), so rates compare only within a channel. **Phase 1 as it exists does not supply the binding:** Jev's `choice` over the rule menu picked `none` on all 10 real fork-route drafts, with the gold rules at ranks 4–18 (p 0.01–0.06). The claim-bound reminder that works is one no current selector produces. RTD-3 (~570k context) and the stripped-`CLAUDE.md` arms are pending.
 
 **Addendum — 2026-09-24.** Both items A-40 left pending are now settled, on the subscription fork route (`scripts/phase2-fork.py`). (1) **Stripped `CLAUDE.md` (DP1):** removing the rules did not raise the violation rate (RTD-8 5/10 → 5/8). The claim-bound reminder worked without them (0/10), and even the verbatim rule helped once `CLAUDE.md` was absent (1/9). (2) **RTD-3 at ~570k tokens**, re-registered with a reply-text observable (`36999188`): arm 0 8/10, unrelated rule 8/10, rule verbatim 9/10, **claim-bound reminder 0/10**, positive control 0/10. It ships. The finding generalises across four rules and two decision points: binding the rule to the claim is the ingredient, and the rule's wording alone is not.
+
+**Addendum 2 — 2026-09-24, and it narrows this entry's title.** Two results bear on the findings above (full account: `docs/evals/rule-tell-scoring-2026-09-23.md`).
+
+**(1) The judge channel was contaminated.** Every subscription-judge verdict this entry relies on ran through `claude -p` on a profile that still loaded 5 plugins, SessionStart hooks and the user `CLAUDE.md`: 2,778 input tokens for "Say OK.", against 249 on a clean config dir. On the clean channel:
+
+- the RTD-3, RTD-9 and RTD-10 claim-bound comparisons **reproduce exactly**;
+- the **RTD-8 checker fails its gate.** Its question's NO clause (*"names something that does read the table"*) fires on the recorded violation, which both says "nothing reads it" and names a reader. The injected `CLAUDE.md` had tipped the judge to YES. **"The claim-bound reminder stops RTD-8" is withdrawn** pending `rtd8c` (`575aafdf`).
+- So the title's *"only a claim-bound reminder moves"* stands on three rules, not four. The judge-form finding is untouched.
+
+**(2) Phase 1 has no shipping selector.**
+
+- Jev `choice`: `none` on 10/10 drafts.
+- Haiku per-rule judge: fails its gate 4/6 and 4/8 on precision, on both channels.
+- Sonnet (S0, per-rule violation specs): passes its gate 10/10, but Score A recall is 3/17 and Score B fails at RTD-9 and RTD-3.
+
+**The prompt lesson for this log:** one-line rule slogans have no boundary. A per-rule YES/NO question needs a violation *shape* plus explicit NO clauses. Those clauses bought precision on the gate at a measured cost in recall.

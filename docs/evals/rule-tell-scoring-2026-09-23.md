@@ -425,27 +425,28 @@ Registered in `622459bf`. S0 (Sonnet 5, form 2b) built each fork's injection fro
 
 ## Next — phase 1 (handoff, 2026-09-24)
 
-**Where phase 2 left it.** At both decision points and for all four rules (RTD-3, 8, 9, 10), a reminder that **names the specific claim and the rule governing it** stops the violation (0/9–0/10). The rule's text alone does not do so reliably, and an unrelated injection never does. Removing the rules from `CLAUDE.md` did not raise violation rates. **So the whole value sits in phase 1 producing that binding:** find the claim in the draft, and pick the rule. Today's selector does neither. Jev's `choice` over the rule menu said `none` on 10/10 real drafts, with the gold rules at ranks 4–18. Phase 1A's corpus top-1 was 24%.
+*Updated 2026-09-24 ~13:30 EEST, at the second compaction handoff of session 571eb3d6. The earlier handoff text is superseded, and its content lives in the sections above.*
 
-**What phase 1 must output, fixed by phase 2's evidence.** A claim span plus a rule, rendered like the 1b arms: *"The output you are about to produce contains <claim>. The rule '<rule>' governs that claim."* A rule label without the claim is the end-to-end arm, and there is no evidence it works.
+**State of phase 1.**
 
-**Inputs already on disk (session scratchpad; the transcript is the durable source).**
+- **The selector's shape is fixed:** a per-rule span judge (`scripts/phase1-span-selector.py`). One call per (draft, rule) over the 22-rule menu; YES only with a quote found verbatim in the draft; rendered as *"The output you are about to produce contains this claim: "<claim>" The rule "<rule>" governs that claim."*
+- **The only selector to pass its gate is S0**, Sonnet 5 with form 2b, on the clean channel: gate 10/10, span gate 3/3.
+  - **Score A:** precise but low recall. Recall is 3/17 (prediction failed), and 2/21 negatives fire (prediction held).
+  - **Score B:** **does not ship**. RTD-9 fails, RTD-3 fails the claim-bound condition, RTD-10 passes only under the unobservable exclusion, and RTD-8 was not scorable.
+- **Haiku fails the gate** on both channels (4/8, 4/8). Jev failed earlier (`none` on 10/10).
 
-- Real drafts: the fork-route arm-0 rows, `fork-dp1-n10.jsonl` (DP1) and `fork-rtd3r.jsonl` (RTD-3).
-- The phase-1A corpus: `docs/evals/rule-tell-detection.md`, with the menu and gold in `scripts/phase1-rule-selection.py`.
+**Open at handoff, in order:**
 
-**Instruments that exist.**
+1. **The `rtd8c` run.** The re-worded RTD-8 checker was mid-run (gate plus clean re-score of every DP1 arm) at handoff; its output goes to `scratchpad/rtd8c-score.txt`. Registered in `575aafdf`. **If its gate passes,** read the arms under the parent pre-registration's rule and fill S0's RTD-8 cell. The phase-2 RTD-8 claim is restored only if the rows meet the rule. **If it fails,** RTD-8 stays withdrawn.
+2. **The S0 recall problem.** The leading hypothesis is the generic *"a plain statement of fact … does not break a rule by that alone"* clause. Removing it is a new registration, and it has to re-pass the 10-text gate.
+3. **The local route** (`docs/evals/phase1-local-classifier-preregistration.md`). Registered with S0 as baseline; Stage 1 (JevK5 zero-shot) has not started. It needs a Python env with `flash-linear-attention` and about 9 GB of weights. The Anthropic permission to train on Claude outputs is recorded in codescout memory, as reported by the operator.
+4. **The owed clean-channel re-score** of the rest of phase 2 (the API-route rows and the stripped arms under the other checkers). Where it has been done (RTD-3, RTD-9, RTD-10), it reproduced exactly.
 
-- `scripts/phase2-fork.py`: the replay route on the subscription.
-- `scripts/phase2-score-dp1.py`: gated checkers `rtd3`, `rtd3r`, `rtd8`, `rtd9`, `rtd10`.
-- `scripts/phase2-e2e-build.py`: turns a selector's output into per-run injections. Its template must gain the claim span.
-- `scripts/phase1-rule-selection.py`: Jev and Haiku selectors, with a `--gate`.
+**Instruments and how to run them** (details in codescout memory, `system` bucket):
 
-**Standing constraints.**
+- **Judge channel:** `JUDGE_CONFIG_DIR=<scratchpad>/judge-config-main`. That dir holds only a symlink to `~/.claude/.credentials.json` and `{"enabledPlugins":{},"hooks":{}}`. The selector refuses a dirty channel; `phase2-score-dp1.py` does **not** check, so set the env var every time. The scratchpad is session-local, so a new session must rebuild the dir.
+- **Interpreter:** run forks and scoring with `prompt-engineering/.venv/bin/python`. The system python lacks `anthropic`.
+- **Forks:** on another profile, `--resume` needs a transcript prefix in `$CLAUDE_CONFIG_DIR/projects/<slug>/`. See `scratchpad/score-b-s0.sh` for the whole pipeline, including the guard that refuses to score partial fork output.
+- **Accounts:** `~/.claude-kat` hit its session limit on 2026-09-24. Judging and forks moved to `~/.claude` at the operator's direction.
 
-- Model calls go through the **subscription** (`claude -p`, `apiKeySource: 'none'`), never the paid API.
-- The Jev key lives in `prompt-engineering/.env` and is never printed.
-- Register before running.
-- Arms are compared within one route and one judge channel only.
-
-The open design question is whether phase 1 should be a claim *extractor* followed by a rule matcher, or a single judge asked per rule whether this draft makes this rule's claim-shape. The detector prompts of phase 0 are the second shape.
+**Standing constraints:** subscription only, never the paid API; register before running; compare only within one route and one judge channel; never print the Jev key; commit only my own paths, each by pathspec; do not push unless asked.
