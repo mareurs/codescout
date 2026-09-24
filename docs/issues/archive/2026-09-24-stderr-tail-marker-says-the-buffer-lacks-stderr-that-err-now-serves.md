@@ -1,12 +1,13 @@
 ---
-id: '3c8e811ae778d074'
+id: dd14e009ae2a3417
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the stderr tail marker says the buffer lacks the stderr that .err now serves'
 owners:
 - marius
 tags:
 - cluster/doc-contradicted-by-code
+closed: 2026-09-24
 opened: 2026-09-24
 related: []
 severity: medium
@@ -61,15 +62,15 @@ N/A.
 
 ## Fix
 
-In the working tree, uncommitted as of 2026-09-24 (session 3b4fae98), pending the user's commit:
+**FIXED 2026-09-24** in `176015f2`, patch-id `c6389996c860499ac888b6fe09d74468fca8b012`, on `experiments`.
 
 - `summarize_stderr` removes cargo progress lines (shared predicate
   `libtest_compact::is_cargo_progress_line`) before taking the tail, and announces
   `N cargo progress line(s) omitted`. A progress-only stderr is omitted like an empty one.
-- The remedy becomes `Full stderr: read_file("<output_id>.err")`. `rebuild_buffered_summary` fills
+- The remedy is now `Full stderr: read_file("<output_id>.err")`. `rebuild_buffered_summary` fills
   in the real handle, since it is the one place that holds the id.
 
-Record the SHA and patch-id here once committed.
+The fix shipped with the inline libtest compaction in the same commit.
 
 ## Tests added
 
@@ -78,7 +79,10 @@ Record the SHA and patch-id here once committed.
 - `run_command::tests::a_cut_stderr_tail_names_the_err_handle_that_holds_the_rest`: asserts the
   real handle is named, the false claim is gone, and the named handle really holds the stderr.
 
-All three were observed red before the fix.
+All three were observed red before the fix. Mutation run (scripts/mutation-probe.sh, isolated
+worktree), one mutation per new site: 6 of 6 KILLED. These were the progress filter, the
+progress-only omission, the verbatim-path guard, the omission note, the remedy text and the
+handle fill-in. Gate: CLIPPY=0 LEAN=0 DEFAULT=0, all three read by name in both lanes.
 
 ## Workarounds
 
@@ -86,7 +90,7 @@ Ignore the marker's claim and read `<output_id>.err`.
 
 ## Resume
 
-Commit, record SHA and patch-id, then archive.
+Closed. Nothing owed.
 
 ## References
 

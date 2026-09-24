@@ -57,4 +57,5 @@ stdin, so stored outputs can be replayed offline), `discover`, `recall <hash>`.
   present, ≥1 KB, ≥30% saving.
 - `summarize_stderr` (buffered test/build envelopes) drops cargo progress before taking its
   20-line tail, and its remedy now names the real `<output_id>.err` handle. The old text,
-  "stderr is NOT in the buffer", was stale after `.err` shipped. Bug `3c8e811ae778d074`.
+  "stderr is NOT in the buffer", was stale after `.err` shipped. Bug `dd14e009ae2a3417` (archived),
+  fixed in `176015f2`, patch-id `c6389996c860499ac888b6fe09d74468fca8b012`.
