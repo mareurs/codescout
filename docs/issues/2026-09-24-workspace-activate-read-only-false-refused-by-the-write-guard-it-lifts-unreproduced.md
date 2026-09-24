@@ -13,6 +13,12 @@ tags:
 
 After a `/mcp` reconnect on 2026-09-24, `create_file` in the home checkout was refused with the `WriteBlockCause::ActivatedReadOnly` message (`src/util/path_security.rs:677`). That message names two remedies: pass `workspace=<abs path>`, or call `workspace(action='activate', path=…, read_only: false)`. **The second remedy was itself refused with the byte-identical write-refusal text.** Minutes later the same call, with the same arguments, succeeded.
 
+**Classification checked 2026-09-25 — stays `cluster/unclassified` until reproduced.** A class tag is a
+claim about the mechanism, and the mechanism is unknown. The nearest candidate is `IC-12` (transient shared
+state lies to readers — the refusal came minutes after a `/mcp` respawn, which is known to drop a session's
+activation), but tagging it would assert a cause nobody has observed. Checked by sessionId
+`e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`.
+
 ## Symptom (Effect)
 
 The refusal points the reader at a call that the same guard refuses. A reader who follows the error's own instruction gets the error again, with nothing to indicate why. This is the "remedy text sends you somewhere useless" failure (`CLAUDE.md` § Testing Discipline, loudness bullet), and here the remedy is not only useless but refused.

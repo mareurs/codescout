@@ -19,6 +19,12 @@ severity: low
 
 For a command whose last pipe stage is a filter (`… | head`, `… | grep`), `run_command` splices in `tee /tmp/codescout-unfiltered-XXXX` so the unfiltered stream can be offered as a bonus `@cmd_*` buffer. It creates that temp file first, and a failure propagates with `?` — so when `/tmp` is full, the **command itself is refused**, not just the bonus buffer. With native `Bash` denied on this machine since 2026-09-20, that leaves a session with no working shell at the moment it most needs one to diagnose the full disk.
 
+**Classification checked 2026-09-25 — stays `cluster/unclassified`, deliberately.** The shape is *an
+optional side channel's failure aborts the primary operation*, and none of the 24 IC claims states it:
+`IC-7` (warm-up billed to the first caller) and `IC-15` (a parameter silently dropped) are the nearest and
+both are about a different failure direction. Recorded so a census reads this as judged, not unexamined.
+Checked by sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`.
+
 ## Symptom (Effect)
 
 Measured 2026-09-24 ~15:18Z. `/tmp` is a 63 G tmpfs mounted with `nr_inodes=1048576`, and it was out of space. Most likely it ran out of **inodes**, not bytes (see *Evidence*). Two consecutive calls:

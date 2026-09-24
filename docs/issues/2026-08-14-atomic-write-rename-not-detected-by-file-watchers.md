@@ -2,7 +2,7 @@
 kind: bug
 status: open
 tags:
-- cluster/unclassified
+- cluster/gate-keyed-on-unobservable-event
 - fs
 - windows
 - edit-tools

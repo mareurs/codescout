@@ -28,6 +28,10 @@ closed outright, because the original report was specific and detailed
 rule out an environment/version/timing difference between that session and
 this one.
 
+**Classification checked 2026-09-25 — stays `cluster/unclassified` while `zombie`.** Observed once, not
+reproduced, cause unconfirmed: a class tag would assert a mechanism nobody has seen. Re-classify if it
+recurs with evidence. Checked by sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`.
+
 ## Symptom (Effect)
 
 Original report (relayed, not independently witnessed by this session):

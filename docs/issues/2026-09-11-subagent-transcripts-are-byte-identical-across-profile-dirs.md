@@ -4,7 +4,7 @@ kind: bug
 status: open
 title: '228 subagent transcripts exist as byte-identical copies across 2-3 of this machine''s three CC profile dirs, origin unestablished'
 tags:
-- cluster/unclassified
+- cluster/value-correct-in-a-frame-its-name-does-not-state
 - subagents
 - transcripts
 - cross-profile
