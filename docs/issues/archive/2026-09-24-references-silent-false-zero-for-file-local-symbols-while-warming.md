@@ -96,7 +96,12 @@ None needed after `1ea1d36b`. On an older binary: corroborate a `references` zer
 
 ## Resume
 
-Nothing left. **Live check owed to the next release rebuild.** Right after `/mcp`, while rust-analyzer is cold, call `references` on a file-local symbol (e.g. `CodeScoutServer/live_ledger` in `src/server.rs`). It should either wait out the warm-up and return the real locations, or return `0` WITH the new no-declaration warning. It should never return a bare zero.
+Nothing left. **Live check passed 2026-09-24.** The release binary was built at 22:15:29 local from `457447cb` (contains `1ea1d36b`; the new warning text is in the binary), then `/mcp`. No rust-analyzer was running at 19:16:38Z. Two `references` calls spawned one at 19:16:46Z, and both returned within ~20 s of that start:
+
+- `references(CodeScoutServer/live_ledger, src/server.rs)` (file-local): **`src/server.rs (4)`**, lines 197, 582, 714, 1260. The same call in the 16:43Z run on the older binary gave a bare `0 references`.
+- `references(GuideLedger/adopt, src/tools/guide_ledger.rs)`: **2 references in 2 files**.
+
+The boundary probe puts rust-analyzer's first correct `references` answer at ~10.5 s, after `[]`, `null` and `-32801`. So the calls waited the not-ready window out instead of reporting it as a zero. **Not proven:** which retry did the waiting (`request`'s `-32801` retry or the new `[]`/`null` re-ask), since neither logs. The deterministic proof is the scripted-peer tests.
 
 ## References
 
