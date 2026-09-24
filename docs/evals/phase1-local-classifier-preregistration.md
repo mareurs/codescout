@@ -233,3 +233,24 @@ Both can hold at once, if the clause trades recall for precision. This registrat
 3. **Score B is not part of this registration.** It costs 20 Opus forks, one decision point of them at ~570k tokens, and would be registered separately against Score A's result.
 
 **Tailoring, disclosed.** The ablation was chosen after seeing form 2b's Score A, and the author of the specs has read the corpus. Score A under form 3 is therefore no more blind than under 2b, and is labelled the same way. No diagnostic run was made on the corpus to pick the change. The Score A rows keep verdicts only, so the judge's reasons for the 14 missed positives were never read.
+
+
+## Amendment — Stage 1 execution: L0-frozen on JevK5, 2026-09-24 (registered before its gate ran)
+
+**Implementation.** `scripts/phase1-local-l0.py` loads `scripts/phase1-span-selector.py` and replaces **only** its `judge_rule`. So the gate texts, the span gate, the pass criteria, the span check and the claim-on-target check are the same code that scored S0, not a copy of it. Per (text, rule):
+
+1. **`noul`.** The instruction is the rule's slogan and its violation-shape spec, then *"Does the text itself break this rule in the way described?"*: S0's question core, without form 2b's two NO clauses. It fires when p(true) ≥ **0.5**, a threshold fixed here and not tuned.
+2. **`choice`** over the text's sentences, with no `none` option. The splitter is on `.!?` plus whitespace, and on newlines. Candidates shorter than `MIN_SPAN` (12 characters) are dropped, because the span check refuses them. JevK5 0.2.2 reads more than 16 options in groups of 16 plus a final, which is the registered windowing. The argmax sentence is the claim, verbatim.
+
+**Setup facts, measured.**
+
+- **Model:** `alibiserikbay/JevK5`, code at `allebee/jevk5` 0.2.2, in a separate `uv` venv: torch 2.14 with CUDA, `flash-linear-attention` installed. `causal_conv1d` is absent, which costs speed only.
+- **Determinism:** run twice over all 22 rules on a neutral text that is in no gate, corpus or held-out set, the drift was **max |Δp| = 0.00e+00**. So **runs = 1**, and the "≥ 2 of 3 runs" criterion reads 1/1.
+- **Disk:** `/home` free is now **79 GB**, not the 183 GB in the footprint table.
+
+**Deviations, disclosed.**
+
+- **The gate is the current 10 texts,** not the 8 this file's Stage 1 names. It grew under form 2b, and the same set S0 passed is the fair comparison.
+- **L0-embed does not run in Stage 1.** Its threshold is registered to be *"fixed on the validation fold (Stage 2)"*, which does not exist yet. It runs once Stage 2 is frozen.
+
+**Prediction.** The gate fails, at ≤ 6/10, mostly on precision. This is JevK5 zero-shot on a task it was never trained for, and its sealed JevBench accuracy is near chance. As registered, the outcome is **diagnostic only**: a failure does not stop Stage 3, and a pass registers L0-frozen for Score B directly. The gate and span-gate output, plus every row's `noul` probability (`--log`), are kept for the write-up.
