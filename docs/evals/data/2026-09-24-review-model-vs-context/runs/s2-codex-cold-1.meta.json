@@ -1,0 +1,15 @@
+{
+ "stim": "s2",
+ "model": "codex",
+ "context": "cold",
+ "rep": 1,
+ "id": "s2-codex-cold-1",
+ "exit": 0,
+ "seconds": 749,
+ "model_seen": [
+  "gpt-5.6-sol"
+ ],
+ "is_error": null,
+ "review_chars": 5961,
+ "checkout_dirty": ""
+}

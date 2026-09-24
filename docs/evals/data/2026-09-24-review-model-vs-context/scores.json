@@ -1,0 +1,1322 @@
+[
+ {
+  "id": "s1-claude-cold-0",
+  "defect": "D1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-0",
+  "defect": "D2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-0",
+  "defect": "D3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-0",
+  "defect": "D4",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-0",
+  "defect": "D5",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-0",
+  "defect": "O1",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-0",
+  "defect": "O2",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-0",
+  "defect": "O3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-1",
+  "defect": "D1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-1",
+  "defect": "D2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-1",
+  "defect": "D3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-1",
+  "defect": "D4",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-1",
+  "defect": "D5",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-1",
+  "defect": "O1",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-1",
+  "defect": "O2",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-1",
+  "defect": "O3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-2",
+  "defect": "D1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-2",
+  "defect": "D2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-2",
+  "defect": "D3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-2",
+  "defect": "D4",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-2",
+  "defect": "D5",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-2",
+  "defect": "O1",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-2",
+  "defect": "O2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-cold-2",
+  "defect": "O3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-0",
+  "defect": "D1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-0",
+  "defect": "D2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-0",
+  "defect": "D3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-0",
+  "defect": "D4",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-0",
+  "defect": "D5",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-0",
+  "defect": "O1",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-0",
+  "defect": "O2",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-0",
+  "defect": "O3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-1",
+  "defect": "D1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-1",
+  "defect": "D2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-1",
+  "defect": "D3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-1",
+  "defect": "D4",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-1",
+  "defect": "D5",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-1",
+  "defect": "O1",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-1",
+  "defect": "O2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-1",
+  "defect": "O3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-2",
+  "defect": "D1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-2",
+  "defect": "D2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-2",
+  "defect": "D3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-2",
+  "defect": "D4",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-2",
+  "defect": "D5",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-2",
+  "defect": "O1",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-2",
+  "defect": "O2",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-claude-primed-2",
+  "defect": "O3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-0",
+  "defect": "D1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-0",
+  "defect": "D2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-0",
+  "defect": "D3",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-0",
+  "defect": "D4",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-0",
+  "defect": "D5",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-0",
+  "defect": "O1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-0",
+  "defect": "O2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-0",
+  "defect": "O3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-1",
+  "defect": "D1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-1",
+  "defect": "D2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-1",
+  "defect": "D3",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-1",
+  "defect": "D4",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-1",
+  "defect": "D5",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-1",
+  "defect": "O1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-1",
+  "defect": "O2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-1",
+  "defect": "O3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-2",
+  "defect": "D1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-2",
+  "defect": "D2",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-2",
+  "defect": "D3",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-2",
+  "defect": "D4",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-2",
+  "defect": "D5",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-2",
+  "defect": "O1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-2",
+  "defect": "O2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-cold-2",
+  "defect": "O3",
+  "found": false,
+  "votes": [
+   "NO",
+   "YES",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-0",
+  "defect": "D1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-0",
+  "defect": "D2",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-0",
+  "defect": "D3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-0",
+  "defect": "D4",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-0",
+  "defect": "D5",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-0",
+  "defect": "O1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-0",
+  "defect": "O2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-0",
+  "defect": "O3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-1",
+  "defect": "D1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-1",
+  "defect": "D2",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-1",
+  "defect": "D3",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-1",
+  "defect": "D4",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-1",
+  "defect": "D5",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-1",
+  "defect": "O1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-1",
+  "defect": "O2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-1",
+  "defect": "O3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-2",
+  "defect": "D1",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-2",
+  "defect": "D2",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-2",
+  "defect": "D3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-2",
+  "defect": "D4",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-2",
+  "defect": "D5",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-2",
+  "defect": "O1",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-2",
+  "defect": "O2",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s1-codex-primed-2",
+  "defect": "O3",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-claude-cold-0",
+  "defect": "Ma",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-claude-cold-0",
+  "defect": "Mb",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-claude-cold-0",
+  "defect": "Mc",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-claude-cold-1",
+  "defect": "Ma",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-claude-cold-1",
+  "defect": "Mb",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-claude-cold-1",
+  "defect": "Mc",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-claude-cold-2",
+  "defect": "Ma",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-claude-cold-2",
+  "defect": "Mb",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-claude-cold-2",
+  "defect": "Mc",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-claude-primed-0",
+  "defect": "Ma",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-claude-primed-0",
+  "defect": "Mb",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-claude-primed-0",
+  "defect": "Mc",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-claude-primed-1",
+  "defect": "Ma",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-claude-primed-1",
+  "defect": "Mb",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-claude-primed-1",
+  "defect": "Mc",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-claude-primed-2",
+  "defect": "Ma",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-claude-primed-2",
+  "defect": "Mb",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-claude-primed-2",
+  "defect": "Mc",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-codex-cold-0",
+  "defect": "Ma",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-codex-cold-0",
+  "defect": "Mb",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-codex-cold-0",
+  "defect": "Mc",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-codex-cold-1",
+  "defect": "Ma",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-codex-cold-1",
+  "defect": "Mb",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-codex-cold-1",
+  "defect": "Mc",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-codex-cold-2",
+  "defect": "Ma",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-codex-cold-2",
+  "defect": "Mb",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-codex-cold-2",
+  "defect": "Mc",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-codex-primed-0",
+  "defect": "Ma",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-codex-primed-0",
+  "defect": "Mb",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-codex-primed-0",
+  "defect": "Mc",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-codex-primed-1",
+  "defect": "Ma",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-codex-primed-1",
+  "defect": "Mb",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-codex-primed-1",
+  "defect": "Mc",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-codex-primed-2",
+  "defect": "Ma",
+  "found": false,
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ]
+ },
+ {
+  "id": "s2-codex-primed-2",
+  "defect": "Mb",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ },
+ {
+  "id": "s2-codex-primed-2",
+  "defect": "Mc",
+  "found": true,
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ]
+ }
+]

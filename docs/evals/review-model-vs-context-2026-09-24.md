@@ -69,3 +69,73 @@ Both reviewers get the **same clean channel**: no user-level instructions (no `~
 - **Stimulus reuse:** both stimuli were chosen after the fact.
 - **PRIMED approximates the author's state; it is not the author.** The author was building, not reviewing.
 - **The optional WARM arm (a true fork of the authoring session) is dropped:** it cannot be matched for Codex, and a cross-profile resume of a 1M-token session is not a clean channel.
+
+## Results — appended 2026-09-24, after every run and score
+
+**Runs:** 24 of 24 completed with exit 0. Every run reported its pinned model (`claude-opus-5-5`, `gpt-5.6-sol`), left its checkout clean, and ran 4–14 minutes. **Checker gate: 22/22**, and every fixture's 3 votes were unanimous. Over the 132 scored (review, defect) pairs, 131 of the vote triples were unanimous.
+
+**Recall** (defects found / known defects × 3 reviews):
+
+| cell | s1 (of 24) | s2 (of 9) | pooled (of 33) |
+|---|---|---|---|
+| Claude, COLD | 11 | 4 | 15 = 0.45 |
+| Claude, PRIMED | 10 | 3 | 13 = 0.39 |
+| Codex, COLD | 7 | 7 | 14 = 0.42 |
+| Codex, PRIMED | 8 | 7 | 15 = 0.45 |
+
+**Per defect** (found in how many of 3 reviews; Claude cold / primed · Codex cold / primed):
+
+| defect | Claude | Codex |
+|---|---|---|
+| D1 C1 chosen on T | 0 / 0 | 0 / 1 |
+| D2 negatives over-claimed / no incident split | 0 / 0 | 1 / 3 |
+| D3 Score A accepts missing texts | 0 / 0 | 3 / 1 |
+| D4 phase-2 scorer, no per-row votes | 3 / 2 | 3 / 3 |
+| D5 `cannot_happen` tie | 3 / 3 | 0 / 0 |
+| O1 "four of five" conjunction | 3 / 3 | 0 / 0 |
+| O2 7/8 against 9/10 | 2 / 2 | 0 / 0 |
+| O3 "upper bound" | 0 / 0 (see binding) | 0 / 0 |
+| Ma post-correction context | 0 / 0 | 1 / 1 |
+| Mb 20 pairs against 25 | 1 / 0 | 3 / 3 |
+| Mc "no rule reaches 50" | 3 / 3 | 3 / 3 |
+
+**Effects:**
+
+- **Context effect = 0.015**; per stimulus, s1 0.00 and s2 +0.06.
+- **Model effect = 0.015**, but in opposite directions per stimulus: s1 −0.13 (Claude ahead), s2 +0.39 (Codex ahead).
+
+**Against the predictions:**
+
+- **P1 (model effect < 0.10): held pooled**, but only because the two stimuli cancel. It is not a null.
+- **P2 (context effect ≥ 0.20): failed.** Priming changed nothing measurable. **Mc, the claim the primed s2 text repeats, was found by all 12 s2 reviews**, primed ones included.
+- **P3 (COLD-Claude ≥ 0.50): failed**, at 0.45.
+
+**Registered reading: "not settled at this n."** Both effects are below 0.10, but no cell reaches the 0.50 that the "review role" reading requires.
+
+**What the data do show, beyond the registered reading. Descriptive only, n = 3 per cell.**
+
+1. **The model decides which defects are found, not how many.** Claude reliably finds the **numeric claims recounted against the data** (D5, O1, O2: 16 of 18 Claude reviews on s1, 0 of 18 Codex). Codex reliably finds the **code and protocol holes** (D3, D2, Mb, Ma: Codex 16 of 24 review-defect pairs, Claude 1 of 24). Pooled, the two cancel.
+2. **So mixing models is what adds coverage.** Averaged over all pairings, **a Claude review plus a Codex review covers 0.62–0.78 of the known set, against 0.42–0.72 for two reviews by the same model**: s1 cold 0.62 against 0.42; s1 primed 0.67 against 0.46; s2 cold 0.78 against 0.72; s2 primed 0.78 against 0.61. **Every cell's reviews combined** reach 6 of 11 defects for Claude, 7 of 11 for Codex, and **10 of 11 together**.
+3. **The author's own framing did not blind a reviewer.** PRIMED is within one review of COLD in all 11 Claude defect rows and in 9 of the 11 Codex rows. The two exceptions, Codex on D2 (1 → 3) and D3 (3 → 1), move in opposite directions.
+4. **The review role is the largest difference observed, though it is not a registered cell.** The authoring session, Opus 5.5, found **0 of 11**. The PRIMED Claude reviewer, the same model given the author's own summary, found **13 of 33**. Neither factor tested accounts for that gap. What differs is being asked to review rather than to build.
+
+**Binding: every miss was read against the review text.**
+
+- **O3 is a checker false negative, by definition, in 5 reviews:** Claude cold-0, cold-1, primed-0, primed-1, and Codex cold-2. Each reports that the 5/17 "upper bound" is not one, with a different valid reason (a regrouping of the same outputs reaches 7/17). The registered definition required Codex's reason (a re-run with changed specs), so they score NO. **With O3 counted by substance:** Claude s1 13 and 12 of 24, Codex s1 8 and 8. This widens the s1 gap in Claude's favour, and no reading changes.
+- **Ma, near-miss:** one Claude s2 review observed "the new-side paragraph no longer contains the removed hedge" in a held-out-filter finding, but did not report the label leak. Scored NO, and kept NO.
+- **D3, genuine Claude miss:** two Claude reviews explicitly cleared `report_corpus` as working.
+
+**Precision: a seeded sample of 10 of the 206 numbered findings** (`precision-sample.json`). 2 are known defects (O2, Mb). **8 are other findings that hold up when checked**, including:
+
+- a document group that merges two different `bug-tracker.md` files (verified);
+- "RTD-11 still fires" in the form-4q write-up when that row was carried, not re-judged;
+- the miner not regenerating its own input, as its README says it does;
+- a fold rule that moves incidents where the amendment requires whole documents to move.
+
+**0 are invalid.** Claude produces more findings per review (s1 74 against Codex 51; s2 46 against 35), so neither model's extra output is noise in this sample.
+
+**Limits carried from the registration, plus two found in running:**
+
+- **The known set is Codex's own findings, and Claude still led on s1.** So the s1 direction runs *against* the tailoring's bias.
+- **The O3 definition bundled a reason with the defect.** One concept per rubric would have avoided it.
+- n = 3 per cell; two stimuli, both chosen after the fact. The Codex cells ran without the global `AGENTS.md` and the codescout MCP server that the real reviews had.

@@ -1,0 +1,1032 @@
+[
+ [
+  "s1-claude-cold-0",
+  "1",
+  "The \"12 of 12 runs\" evidence behind the form-2b ruling is false.**"
+ ],
+ [
+  "s1-claude-cold-0",
+  "2",
+  "The L0 \"calibration lead\" for Stage 3 does not hold on the logged probabilities.**"
+ ],
+ [
+  "s1-claude-cold-0",
+  "3",
+  "\"The claim-bound arms reproduce exactly\" is false for RTD-9.**"
+ ],
+ [
+  "s1-claude-cold-0",
+  "4",
+  "The stripped-arm prediction \"s0 is not below arm 0 \u2026 for all three rules\" fails under either reading.**"
+ ],
+ [
+  "s1-claude-cold-0",
+  "5",
+  "The RTD-10 \"judge channel moves rates\" example has a second cause.**"
+ ],
+ [
+  "s1-claude-cold-0",
+  "6",
+  "The local route's planned Stage-4 Score B names a checker that failed its gate and compares against superseded rows.**"
+ ],
+ [
+  "s1-claude-cold-0",
+  "7",
+  "The RTD-8 observable is not \"the doc write\", although the doc presents it as the same as RTD-9/10's.**"
+ ],
+ [
+  "s1-claude-cold-0",
+  "8",
+  "Several reported results have no committed evidence, and one log is mislabelled.**"
+ ],
+ [
+  "s1-claude-cold-0",
+  "9",
+  "The RTD-3 \"a sentence then a `grep`\" counts are really counts of any non-doc tool call.**"
+ ],
+ [
+  "s1-claude-cold-0",
+  "10",
+  "The family-recall \"upper bound\" is not an upper bound.**"
+ ],
+ [
+  "s1-claude-cold-0",
+  "11",
+  "The scorer silently defaults to the contaminated profile.**"
+ ],
+ [
+  "s1-claude-cold-0",
+  "12",
+  "S0 did find RTD-9's claim in Score B; it assigned the wrong rule.**"
+ ],
+ [
+  "s1-claude-cold-0",
+  "13",
+  "Small count drift in the gate tables (low).**"
+ ],
+ [
+  "s1-claude-cold-1",
+  "1",
+  "The L0 \"gold ranks 1st or 2nd on 4 of 5 violation texts\" claim is false. It is 3 of 5, and the handoff builds Stage 3's lead on it.**"
+ ],
+ [
+  "s1-claude-cold-1",
+  "2",
+  "JevK5's `noul` outputs sit on a coarse grid, and the 0.5 threshold is one of its points, so several L0 results are tie artefacts.**"
+ ],
+ [
+  "s1-claude-cold-1",
+  "3",
+  "\"clean-2 fires `member_vs_population` on every run of both models on both channels, 12 of 12 runs\" is false.**"
+ ],
+ [
+  "s1-claude-cold-1",
+  "4",
+  "\"The claim-bound arms reproduce on the clean channel exactly for RTD-9, RTD-10 and RTD-3\" is false for RTD-9.**"
+ ],
+ [
+  "s1-claude-cold-1",
+  "5",
+  "The local route's Stage 4 Score B, which is the planned next step, is registered with a checker that cannot run and with superseded comparison rows.**"
+ ],
+ [
+  "s1-claude-cold-1",
+  "6",
+  "Several reported numbers have no committed evidence, and the README mislabels one file.**"
+ ],
+ [
+  "s1-claude-cold-1",
+  "7",
+  "\"The judge channel moves rates on identical replays\" is confounded for RTD-10.**"
+ ],
+ [
+  "s1-claude-cold-1",
+  "8",
+  "\"At RTD-3, S0's reminder halves the violation rate\" credits the reminder with a pipeline-level difference.**"
+ ],
+ [
+  "s1-claude-cold-1",
+  "9",
+  "RTD-10's \"fragile pass\" bound mis-describes the unobservable forks, and the observable is asymmetric within the same arm.**"
+ ],
+ [
+  "s1-claude-cold-1",
+  "10",
+  "\"s0 is not below arm 0\" is reported as holding where the data show it slightly below.**"
+ ],
+ [
+  "s1-claude-cold-1",
+  "11",
+  "The family-recall \"upper bound\" of 5/17 is not an upper bound.**"
+ ],
+ [
+  "s1-claude-cold-1",
+  "12",
+  "`scripts/phase2-score-dp1.py` defaults to the known-contaminated judge channel and has no refusal.**"
+ ],
+ [
+  "s1-claude-cold-1",
+  "13",
+  "`l0-gate.jsonl` rows carry no text or case id.**"
+ ],
+ [
+  "s1-claude-cold-1",
+  "14",
+  "Minor count slips in the phase-1 tables.** Each is checked against the committed logs:"
+ ],
+ [
+  "s1-claude-cold-2",
+  "1",
+  "The failed H2 prediction is never reported.**"
+ ],
+ [
+  "s1-claude-cold-2",
+  "2",
+  "\"The claim-bound arms reproduce on the clean channel exactly\" is false for RTD-9, and a later prediction was built on it.**"
+ ],
+ [
+  "s1-claude-cold-2",
+  "3",
+  "The \"12 of 12 runs\" behind the clean-2 ruling is contradicted by the logs.**"
+ ],
+ [
+  "s1-claude-cold-2",
+  "4",
+  "The L0 \"ranking carries signal\" reading, which is handoff item 3's lead for Stage 3, overstates the data.**"
+ ],
+ [
+  "s1-claude-cold-2",
+  "5",
+  "The Score B sensitivity analysis is one-sided.**"
+ ],
+ [
+  "s1-claude-cold-2",
+  "6",
+  "RTD-8's observable differs from the other checkers', but the doc describes one convention for all of them.**"
+ ],
+ [
+  "s1-claude-cold-2",
+  "7",
+  "The next steps in the phase-1 local pre-registration are stale.**"
+ ],
+ [
+  "s1-claude-cold-2",
+  "8",
+  "\"The judge channel moves rates on identical replays\" is confounded for RTD-10, and has no committed evidence.**"
+ ],
+ [
+  "s1-claude-cold-2",
+  "9",
+  "The default channel of `phase2-score-dp1.py` is the contaminated one.**"
+ ],
+ [
+  "s1-claude-cold-2",
+  "10",
+  "The README's \"this directory is the evidence\" is incomplete.**"
+ ],
+ [
+  "s1-claude-cold-2",
+  "11",
+  "Several small miscounts in the gate tables.**"
+ ],
+ [
+  "s1-claude-cold-2",
+  "12",
+  "The DP1 limits paragraph cherry-picks one Jev run.**"
+ ],
+ [
+  "s1-claude-cold-2",
+  "13",
+  "Stale text in the scoring doc.**"
+ ],
+ [
+  "s1-claude-cold-2",
+  "14",
+  "The `rtd3r` registration contradicts itself.**"
+ ],
+ [
+  "s1-claude-primed-0",
+  "1",
+  "Phase-0 precision results are published even though the corpus's own stop rule was triggered.**"
+ ],
+ [
+  "s1-claude-primed-0",
+  "2",
+  "A registered prediction that was met is reported as not supported.**"
+ ],
+ [
+  "s1-claude-primed-0",
+  "3",
+  "The L0 \"ranking carries signal\" claim, which the doc and handoff name as the lead for Stage 3, is not true of the logged rows.**"
+ ],
+ [
+  "s1-claude-primed-0",
+  "4",
+  "The local-route pre-registration still points Stage 4 and its comparators at superseded instruments and numbers.**"
+ ],
+ [
+  "s1-claude-primed-0",
+  "5",
+  "The \"12 of 12 runs\" figure behind the form-2b re-registration is false.**"
+ ],
+ [
+  "s1-claude-primed-0",
+  "6",
+  "\"The claim-bound arms reproduce on the clean channel exactly\" is false for RTD-9.**"
+ ],
+ [
+  "s1-claude-primed-0",
+  "7",
+  "The \"s0 is not below arm 0 \u2014 holds\" statements are false by the registered comparator.**"
+ ],
+ [
+  "s1-claude-primed-0",
+  "8",
+  "The rtd9, rtd10 and rtd3 observable counts any `doc` call as the doc write.**"
+ ],
+ [
+  "s1-claude-primed-0",
+  "9",
+  "The rtd8/rtd8c observable counts turns that never reached the decision.**"
+ ],
+ [
+  "s1-claude-primed-0",
+  "10",
+  "For the scorer runs, the \"clean channel\" label cannot be checked from the committed evidence, and the scorer defaults to the dirty profile.**"
+ ],
+ [
+  "s1-claude-primed-0",
+  "11",
+  "The author summary uses the wrong form's number for S0.**"
+ ],
+ [
+  "s1-claude-primed-0",
+  "12",
+  "The family-recall \"upper bound\" is not an upper bound.**"
+ ],
+ [
+  "s1-claude-primed-0",
+  "13",
+  "The README misdescribes a file, and some reported results have no file behind them.**"
+ ],
+ [
+  "s1-claude-primed-0",
+  "14",
+  "Transcription slips (low impact).**"
+ ],
+ [
+  "s1-claude-primed-1",
+  "1",
+  "RTD-3's \"ships\" verdict and the claim that \"the owed clean-channel re-score is complete\" both rest on arms that were never re-scored on the clean channel.**"
+ ],
+ [
+  "s1-claude-primed-1",
+  "2",
+  "The L0 (JevK5) \"ranking carries signal on 4 of 5 violation texts\" claim is false against `l0-gate.jsonl`. It holds on 3 of 5.**"
+ ],
+ [
+  "s1-claude-primed-1",
+  "3",
+  "The recommended next step (a check of the 9 `partial` texts) uses silence counts from the wrong form. On the adopted form, the `partial` question cannot explain"
+ ],
+ [
+  "s1-claude-primed-1",
+  "4",
+  "The reason given for running the `partial` check before Stage 2 misstates the registration.**"
+ ],
+ [
+  "s1-claude-primed-1",
+  "5",
+  "The local-route pre-registration's Stage 4 Score B is still wired to the failed checker and to superseded baselines.**"
+ ],
+ [
+  "s1-claude-primed-1",
+  "6",
+  "\"The claim-bound arms reproduce on the clean channel exactly for RTD-9, RTD-10 and RTD-3\" is false for RTD-9.**"
+ ],
+ [
+  "s1-claude-primed-1",
+  "7",
+  "The family-recall \"upper bound\" is not an upper bound.**"
+ ],
+ [
+  "s1-claude-primed-1",
+  "8",
+  "Some reported numbers have no backing in the committed data, and the README misdescribes one file.**"
+ ],
+ [
+  "s1-claude-primed-1",
+  "9",
+  "The clean-channel claim for every `phase2-score-dp1.py` result cannot be verified from its logs, and the script's default is the contaminated channel.**"
+ ],
+ [
+  "s1-claude-primed-1",
+  "10",
+  "The handoff points at a path that no longer exists (minor).**"
+ ],
+ [
+  "s1-claude-primed-2",
+  "1",
+  "The reason given for \"check the 9 `partial` texts before Stage 2\" contradicts the local-route pre-registration, and the silence figure it rests on is off.**"
+ ],
+ [
+  "s1-claude-primed-2",
+  "2",
+  "Stage 4 of the local route (the next planned scoring step) still names the `rtd8` checker and superseded comparison rates.**"
+ ],
+ [
+  "s1-claude-primed-2",
+  "3",
+  "\"The claim-bound arms reproduce on the clean channel exactly\" is false for RTD-9.**"
+ ],
+ [
+  "s1-claude-primed-2",
+  "4",
+  "The \"12 of 12 runs\" figure behind the form-2b ruling is wrong.**"
+ ],
+ [
+  "s1-claude-primed-2",
+  "5",
+  "The L0 \"ranking carries signal\" claim, the stated lead for Stage 3, does not hold as written.**"
+ ],
+ [
+  "s1-claude-primed-2",
+  "6",
+  "Several results have no backing file, although the README says the directory is the evidence for every reported result.**"
+ ],
+ [
+  "s1-claude-primed-2",
+  "7",
+  "The \"grep-first\" description of the RTD-3 forks is wrong.**"
+ ],
+ [
+  "s1-claude-primed-2",
+  "8",
+  "The stripped-arm prediction \"s0 is not below arm 0\" is marked \"Holds\" against the wrong comparison number.**"
+ ],
+ [
+  "s1-claude-primed-2",
+  "9",
+  "A single-run pick is cited as Jev's answer.**"
+ ],
+ [
+  "s1-codex-cold-0",
+  "1",
+  "The campaign does not apply its preregistered falsification rule to H2\u2019s predictor.**"
+ ],
+ [
+  "s1-codex-cold-0",
+  "2",
+  "The local-classifier plan still directs future Score B runs to the invalid `rtd8` checker and stale contaminated-channel baselines.**"
+ ],
+ [
+  "s1-codex-cold-0",
+  "3",
+  "Stage 2 claims that diffs supply rule labels, but a correction diff identifies changed text, not which of the 22 semantic rules it violated.**"
+ ],
+ [
+  "s1-codex-cold-0",
+  "4",
+  "The committed archive is insufficient to independently derive two important result classes despite claiming to contain raw rows/logs for every result.**"
+ ],
+ [
+  "s1-codex-cold-0",
+  "5",
+  "`phase2-score-dp1.py` silently succeeds when a requested arm is wholly absent, and similarly excludes error rows without failing.**"
+ ],
+ [
+  "s1-codex-cold-0",
+  "6",
+  "Score A\u2019s advertised completeness check does not detect a wholly missing text.**"
+ ],
+ [
+  "s1-codex-cold-0",
+  "7",
+  "The claim-span validator accepts exact multi-sentence excerpts although the protocol requires one sentence and says joined sentences are refused.**"
+ ],
+ [
+  "s1-codex-cold-0",
+  "8",
+  "The scoring document falsely says all three clean-channel claim-bound arms reproduced exactly.**"
+ ],
+ [
+  "s1-codex-cold-0",
+  "9",
+  "The local preregistration has two incompatible Stage-4 gate populations.**"
+ ],
+ [
+  "s1-codex-cold-1",
+  "1",
+  "(a) The reported \u201c1 of 8 near-miss controls\u201d precision result improperly includes RTD-9 even though that detector failed its own positive gate 0/10\u2014the same alw"
+ ],
+ [
+  "s1-codex-cold-1",
+  "2",
+  "(a) The campaign never records that its central H2 partition was falsified: RTD-9 and RTD-10 were predicted to resist rule binding, but both bindings reduced vi"
+ ],
+ [
+  "s1-codex-cold-1",
+  "3",
+  "(a) The next local-selector evaluation still names the invalid `rtd8` checker and stale contaminated-channel baselines instead of `rtd8c` and the clean scores.*"
+ ],
+ [
+  "s1-codex-cold-1",
+  "4",
+  "(a) The Stage-2 holdout and Stage-4 gate still specify eight gate texts although the executable/current gate contains ten.**"
+ ],
+ [
+  "s1-codex-cold-1",
+  "5",
+  "(a) Score A\u2019s \u201cpartial sweeps are refused\u201d guard does not detect a wholly absent text.**"
+ ],
+ [
+  "s1-codex-cold-1",
+  "6",
+  "(a) The phase-2 scorer accepts incomplete arm populations and exits successfully even when replay rows contain errors.**"
+ ],
+ [
+  "s1-codex-cold-1",
+  "7",
+  "(a) `phase2-score-dp1.py` neither enforces nor records the clean judge channel and defaults to the known-contaminated profile.**"
+ ],
+ [
+  "s1-codex-cold-1",
+  "8",
+  "(a) The claim that committed raw rows/logs cover every result is false.**"
+ ],
+ [
+  "s1-codex-cold-2",
+  "1",
+  "Defect:** Stage 2\u2019s proposed training labels are not valid multilabel ground truth: a correction diff identifies changed text but not which rule it violates, wh"
+ ],
+ [
+  "s1-codex-cold-2",
+  "2",
+  "Defect:** `report_corpus` is neither population-complete nor a valid implementation of the planned T \u201cclaim on target\u201d metric."
+ ],
+ [
+  "s1-codex-cold-2",
+  "3",
+  "Defect:** The active Stage 4 protocol still specifies two superseded instruments: the old 8-text gate and the known-invalid `rtd8` checker."
+ ],
+ [
+  "s1-codex-cold-2",
+  "4",
+  "Defect:** `phase2-score-dp1.py` can silently run on the contaminated default judge profile and records neither judge configuration nor per-replay votes."
+ ],
+ [
+  "s1-codex-cold-2",
+  "5",
+  "Defect:** The committed evidence omits the mutation-gate rows on which the Phase 0 corpus conclusions depend."
+ ],
+ [
+  "s1-codex-cold-2",
+  "6",
+  "Defect:** The published \u201cchance on this menu is 1/23 (4%)\u201d baseline is too low because the scorer accepts multiple gold options for some cases."
+ ],
+ [
+  "s1-codex-cold-2",
+  "7",
+  "Defect:** The reported 5/17 family recall is not an upper bound, despite being presented as one."
+ ],
+ [
+  "s1-codex-cold-2",
+  "8",
+  "Defect:** The timing preregistration\u2019s headline status falsely says nothing has run and every number is a pre-sample commitment."
+ ],
+ [
+  "s1-codex-primed-0",
+  "1",
+  "The phase-0 report treats RTD-9\u2019s near-miss results as precision evidence even though RTD-9 failed its positive gate 0/10.**"
+ ],
+ [
+  "s1-codex-primed-0",
+  "2",
+  "RTD-16\u2019s \u201cnegative\u201d is a known positive for the same `count_unit` rule, but both selectors score it as clean.**"
+ ],
+ [
+  "s1-codex-primed-0",
+  "3",
+  "RTD-17 is included in recall even though the corpus says its scoring policy is undecided and it must be scored separately.**"
+ ],
+ [
+  "s1-codex-primed-0",
+  "4",
+  "RTD-9 credits `contradiction` although the text passed to the selector omits the paragraph containing the contradiction.**"
+ ],
+ [
+  "s1-codex-primed-0",
+  "5",
+  "The planned local route still specifies the superseded eight-text gate, form-2 verifier, and invalid `rtd8` checker.**"
+ ],
+ [
+  "s1-codex-primed-0",
+  "6",
+  "The results never record that H2\u2019s registered rule-shape predictor was falsified by RTD-9 and RTD-10.**"
+ ],
+ [
+  "s1-codex-primed-0",
+  "7",
+  "The end-to-end and phase-2 scorers still accept incomplete, duplicated, missing-arm, or errored populations as successful results.**"
+ ],
+ [
+  "s1-codex-primed-0",
+  "8",
+  "The committed archive does not contain enough observations to independently reconstruct every reported result.**"
+ ],
+ [
+  "s1-codex-primed-1",
+  "1",
+  "The evaluation labels one identical excerpt both clean and violating."
+ ],
+ [
+  "s1-codex-primed-1",
+  "2",
+  "The active local-route plan still specifies the invalid `rtd8` checker and stale contaminated-channel baselines."
+ ],
+ [
+  "s1-codex-primed-1",
+  "3",
+  "Score A\u2019s \u201ccompleteness\u201d guard accepts a corpus missing entire texts."
+ ],
+ [
+  "s1-codex-primed-1",
+  "4",
+  "The committed data cannot substantiate that the decisive phase-2 re-scores were made on the clean channel or reproduce their row verdicts."
+ ],
+ [
+  "s1-codex-primed-1",
+  "5",
+  "The phase-2 scorer has no completeness or uniqueness check for arms and runs."
+ ],
+ [
+  "s1-codex-primed-1",
+  "6",
+  "Stage 2 does not require correction/synthetic twins to remain in the same train, validation, or calibration fold."
+ ],
+ [
+  "s1-codex-primed-1",
+  "7",
+  "The author summary understates adopted S0\u2019s silence by conflating it with the rejected form-3 ablation."
+ ],
+ [
+  "s1-codex-primed-2",
+  "1",
+  "The planned C1 evaluation selects its base arm on the supposedly held-out test set T.**"
+ ],
+ [
+  "s1-codex-primed-2",
+  "2",
+  "Stage 2\u2019s claim that labels \u201ccome from construction\u201d is unsupported for both proposed data sources.**"
+ ],
+ [
+  "s1-codex-primed-2",
+  "3",
+  "The Stage-2 holdout and Stage-4 gate still name eight gate texts even though the executable gate now has ten.**"
+ ],
+ [
+  "s1-codex-primed-2",
+  "4",
+  "The trained-arm Score B plan still prescribes the invalid `rtd8` checker.**"
+ ],
+ [
+  "s1-codex-primed-2",
+  "5",
+  "The published 3/17 \u201crecall\u201d denominator includes authored positives that the implemented selector question explicitly defines as NO.**"
+ ],
+ [
+  "s1-codex-primed-2",
+  "6",
+  "RTD-9\u2019s asserted \u201c30-day retained source\u201d premise is factually wrong for the records being counted.**"
+ ],
+ [
+  "s1-codex-primed-2",
+  "7",
+  "The phase-2 scorer can silently score the contaminated judge channel again.**"
+ ],
+ [
+  "s1-codex-primed-2",
+  "8",
+  "The phase-2 scorer accepts incomplete, duplicated, and errored replay batches as successful results.**"
+ ],
+ [
+  "s1-codex-primed-2",
+  "9",
+  "The committed evidence does not substantiate the claim that raw rows behind every result were saved.**"
+ ],
+ [
+  "s1-codex-primed-2",
+  "10",
+  "The stated 30% RTD-3 doc-write observability belongs to the superseded sample, not the fresh shipping sample.**"
+ ],
+ [
+  "s1-codex-primed-2",
+  "11",
+  "The phase-1 chance comparator is slightly understated.**"
+ ],
+ [
+  "s2-claude-cold-0",
+  "1",
+  "The Stage 2 stopping-rule verdict contradicts its own arithmetic.**"
+ ],
+ [
+  "s2-claude-cold-0",
+  "2",
+  "\"About 30\u201340% genuine\" is a point estimate from 10 rows, given without an interval.**"
+ ],
+ [
+  "s2-claude-cold-0",
+  "3",
+  "The held-out filter does not cover the Score A cases' own source documents and incidents, and one leaked candidate survives.**"
+ ],
+ [
+  "s2-claude-cold-0",
+  "4",
+  "The form 4 write-up leaves out form 3's baseline on clean-4.**"
+ ],
+ [
+  "s2-claude-cold-0",
+  "5",
+  "RTD-12 \"quoted on the audit's own sentence\" mixes up the audit's two quotes.**"
+ ],
+ [
+  "s2-claude-cold-0",
+  "6",
+  "The scorer's `question_sha256` does not cover the whole checker.**"
+ ],
+ [
+  "s2-claude-cold-0",
+  "7",
+  "The committed analysis scripts read the main checkout by absolute path, not the committed tree.**"
+ ],
+ [
+  "s2-claude-cold-1",
+  "1",
+  "The Stage 2 stopping-rule reading misnames the rule nearest the \u2265 50 bar.**"
+ ],
+ [
+  "s2-claude-cold-1",
+  "2",
+  "The recommended \"stricter subset\" (marker in the corrected sentence, 230 rows) is not stricter for about 43% of its rows.**"
+ ],
+ [
+  "s2-claude-cold-1",
+  "3",
+  "The miner lets a Score A incident into the training candidates.**"
+ ],
+ [
+  "s2-claude-cold-1",
+  "4",
+  "Form 4q's widened `question_asked` fires on the surface shape \"verified at `file:line`\", and the gate cannot see that.**"
+ ],
+ [
+  "s2-claude-cold-1",
+  "5",
+  "The form 4 write-up misattributes `scope_instant`'s clean-4 fire.**"
+ ],
+ [
+  "s2-claude-cold-1",
+  "6",
+  "About 24% of mined candidates have an incident key that doesn't identify the incident.**"
+ ],
+ [
+  "s2-claude-cold-1",
+  "7",
+  "Three committed analysis scripts read a different working tree, not the commit they're in.**"
+ ],
+ [
+  "s2-claude-cold-1",
+  "8",
+  "Minor: form 4/4q wiring is untested, and rows don't record model or form.**"
+ ],
+ [
+  "s2-claude-cold-2",
+  "1",
+  "(a)** The Stage 2 stopping-rule sentence contradicts the note's own figures. By the note's method, `closed_population` reaches the \u226550 bar, and `count_unit` is "
+ ],
+ [
+  "s2-claude-cold-2",
+  "2",
+  "(a)** The \"About 30\u201340% genuine\" figure is 3 genuine plus 1 weak out of 10 rows, published without an interval. The real uncertainty is several times wider than"
+ ],
+ [
+  "s2-claude-cold-2",
+  "3",
+  "(a)** The miner's input is not pinned, and the README says something false about it. The script does not regenerate the git-log extract: it only reads `gitlog.p"
+ ],
+ [
+  "s2-claude-cold-2",
+  "4",
+  "(a)** The cross-document collision preview undercounts. `owner.setdefault` only records a pair against the first document that owned a shingle, and the check le"
+ ],
+ [
+  "s2-claude-cold-2",
+  "5",
+  "(a)** Deduplication only matches exact (positive, twin) pairs, and incidents are keyed by path. As a result, identical positives land in different document grou"
+ ],
+ [
+  "s2-claude-cold-2",
+  "6",
+  "(a)** The form 4q section presents RTD-11's `closed_population` fire as a new observation. It was not re-judged."
+ ],
+ [
+  "s2-claude-cold-2",
+  "7",
+  "(a)** `mine_pairs.py`, `form4q-readout.py` and `partial-audit-check.py` hardcode `ROOT = /home/marius/work/claude/codescout`. They read the selector, the corpus"
+ ],
+ [
+  "s2-claude-primed-0",
+  "1",
+  "The Stage 2 held-out filter keeps a candidate from the same commit and document as two Score A cases.**"
+ ],
+ [
+  "s2-claude-primed-0",
+  "2",
+  "A candidate from this campaign's own documents survived the \"campaign documents\" filter.**"
+ ],
+ [
+  "s2-claude-primed-0",
+  "3",
+  "The \"no rule reaches 50\" argument ignores the rule with the most hints.**"
+ ],
+ [
+  "s2-claude-primed-0",
+  "4",
+  "RTD-12's hit is not on the audit's sentence.**"
+ ],
+ [
+  "s2-claude-primed-0",
+  "5",
+  "The widened `question_asked` fires on `file:line` citations as such, and the per-text metric hides it.**"
+ ],
+ [
+  "s2-claude-primed-0",
+  "6",
+  "The form 4 gate write-up credits the widening for clean-4, but clean-4 was already borderline under form 3.**"
+ ],
+ [
+  "s2-claude-primed-0",
+  "7",
+  "Reproducibility defects in the committed data scripts.**"
+ ],
+ [
+  "s2-claude-primed-1",
+  "1",
+  "The Stage 2 claim that no rule reaches 50 positives, and that `count_unit` is nearest, is wrong on its own numbers and not derived.**"
+ ],
+ [
+  "s2-claude-primed-1",
+  "2",
+  "The held-out filter lets through a candidate from the same commit and document as Score A cases, and one from this campaign's own tracker. The note says both ki"
+ ],
+ [
+  "s2-claude-primed-1",
+  "3",
+  "The form 4q write-up says RTD-12 was \"quoted on the audit's own sentence\". It was not.**"
+ ],
+ [
+  "s2-claude-primed-1",
+  "4",
+  "The form 4 reading blames the widening for the clean-4 fires without the form 3 baseline, which already fired on clean-4.**"
+ ],
+ [
+  "s2-claude-primed-1",
+  "5",
+  "The README says the miner regenerates its git-log input. It does not, and the input can't be rebuilt reliably.**"
+ ],
+ [
+  "s2-claude-primed-1",
+  "6",
+  "Two committed scripts read from the main checkout's path, not from the committed tree beside them.**"
+ ],
+ [
+  "s2-claude-primed-1",
+  "7",
+  "The new `--out` header can't trace every checker change, as the handoff claims.**"
+ ],
+ [
+  "s2-claude-primed-1",
+  "8",
+  "Form 4q's \"no new false-positive text\" rests on a narrower check than it reads, and the new gate path is untested.**"
+ ],
+ [
+  "s2-claude-primed-1",
+  "9",
+  "(Plausible, not proven) The plan doesn't reserve T's sources before the mined candidates are read or labelled.**"
+ ],
+ [
+  "s2-claude-primed-2",
+  "1",
+  "\"No new false-positive text\" hides half of the widened `question_asked`'s fires being wrong.**"
+ ],
+ [
+  "s2-claude-primed-2",
+  "2",
+  "Form 4's `clean-4` failure is blamed on widening, but form 3's unwidened specs already fired both rules on `clean-4`.**"
+ ],
+ [
+  "s2-claude-primed-2",
+  "3",
+  "The Stage 2 \"no rule reaches 50\" estimate is internally inconsistent.**"
+ ],
+ [
+  "s2-claude-primed-2",
+  "4",
+  "The held-out filter only matches overlapping text, so a candidate from RTD-12/13's own correction commit survived.**"
+ ],
+ [
+  "s2-claude-primed-2",
+  "5",
+  "The planned next step, \"spec breadth tested on T\", is not in the registration.**"
+ ],
+ [
+  "s2-claude-primed-2",
+  "6",
+  "Neither the miner nor the readout script can be reproduced from this commit.**"
+ ],
+ [
+  "s2-claude-primed-2",
+  "7",
+  "The proposed fold-by-document rule already breaks one-incident-one-fold, and the filename merge is real, not theoretical.**"
+ ],
+ [
+  "s2-claude-primed-2",
+  "8",
+  "Small inaccuracies.**"
+ ],
+ [
+  "s2-codex-cold-0",
+  "1",
+  "The conclusion that mined pairs cannot get any rule to 50 positives is unsupported because no candidate has a rule label and the sampled \u201cgenuine-pair\u201d rate is "
+ ],
+ [
+  "s2-codex-cold-0",
+  "2",
+  "The candidate build is not reproducible from the committed checkout: the miner requires an omitted `gitlog.patch`, reads a hard-coded different checkout, and te"
+ ],
+ [
+  "s2-codex-cold-0",
+  "3",
+  "The published cross-document shingle-collision count is 20, but the committed candidates contain 25 colliding document-group pairs."
+ ],
+ [
+  "s2-codex-cold-0",
+  "4",
+  "The advertised 946 \u201ccandidate pairs\u201d include nine singleton correction-note rows with no corrected twin."
+ ],
+ [
+  "s2-codex-cold-0",
+  "5",
+  "`phase2-score-dp1.py` exits successfully for an empty arm selection and for input error rows, so a partial or vacuous score can appear successful."
+ ],
+ [
+  "s2-codex-cold-1",
+  "1",
+  "Defect:** The claim that no mined rule can reach the 50-positive threshold is unsupported by the unlabeled candidates."
+ ],
+ [
+  "s2-codex-cold-1",
+  "2",
+  "Defect:** The published \u201c20 document pairs sharing an 8-token shingle\u201d count is an undercount; the committed candidates contain 25 such pairs."
+ ],
+ [
+  "s2-codex-cold-1",
+  "3",
+  "Defect:** `phase2-score-dp1.py` still treats a missing requested arm as a successful, complete score."
+ ],
+ [
+  "s2-codex-cold-1",
+  "4",
+  "Defect:** The Stage 2 build is not reproducible using the committed script as the data README claims."
+ ],
+ [
+  "s2-codex-cold-2",
+  "1",
+  "(a) Defect:** The miner stores each removed \u201cpositive\u201d sentence beside context built from the corrected/new side of the diff, leaking the correction into prospe"
+ ],
+ [
+  "s2-codex-cold-2",
+  "2",
+  "(a) Defect:** The published \u201c20 document pairs share a shingle\u201d count is an undercount; the committed candidates contain 25 such pairs."
+ ],
+ [
+  "s2-codex-cold-2",
+  "3",
+  "(a) Defect:** The conclusion that mined pairs cannot bring any rule to the 50-positive threshold is not supported by either the sample or the keyword hints."
+ ],
+ [
+  "s2-codex-primed-0",
+  "1",
+  "The mined candidates store post-correction context as `paragraph`, not the context containing the alleged positive sentence.**"
+ ],
+ [
+  "s2-codex-primed-0",
+  "2",
+  "The published cross-document shingle count is wrong: 25 document pairs overlap, not 20.**"
+ ],
+ [
+  "s2-codex-primed-0",
+  "3",
+  "The conclusion that no rule can reach 50 mined positives is not supported by the unlabelled candidate data.**"
+ ],
+ [
+  "s2-codex-primed-0",
+  "4",
+  "The Stage 2 build is not reproducible from the committed checkout despite the README saying the script regenerates its input.**"
+ ],
+ [
+  "s2-codex-primed-0",
+  "5",
+  "The claim that the \u201cderive it\u201d rule cannot be expressed as a sentence-level shape is an unsupported impossibility conclusion.**"
+ ],
+ [
+  "s2-codex-primed-0",
+  "6",
+  "The filename-only document grouping already merges distinct source documents; it is not merely a hypothetical risk.**"
+ ],
+ [
+  "s2-codex-primed-0",
+  "7",
+  "Score A report mode can falsely attribute an existing corpus to any selected model/form because the JSONL has no provenance header.**"
+ ],
+ [
+  "s2-codex-primed-1",
+  "1",
+  "The conclusion that mined pairs cannot get any rule to 50 positives is unsupported because every candidate has `rule: null`, while the 10-row sample measures pa"
+ ],
+ [
+  "s2-codex-primed-1",
+  "2",
+  "The proposed next build incorrectly replaces incident grouping with document grouping, although the controlling amendment requires both and the committed candid"
+ ],
+ [
+  "s2-codex-primed-1",
+  "3",
+  "\u201c946 candidate pairs\u201d is the wrong unit: nine committed candidates have no corrected twin."
+ ],
+ [
+  "s2-codex-primed-1",
+  "4",
+  "The published cross-document shingle count is 20, but the committed candidates contain 25 document-group pairs sharing an 8-token shingle."
+ ],
+ [
+  "s2-codex-primed-1",
+  "5",
+  "Incident origins are not computed \u201cper path\u201d as claimed; `first_seen` is keyed only by sentence text."
+ ],
+ [
+  "s2-codex-primed-1",
+  "6",
+  "The miner is not reproducible from the committed checkout and does not regenerate the omitted patch as the README claims."
+ ],
+ [
+  "s2-codex-primed-1",
+  "7",
+  "Form 4 establishes that this particular `count_unit` wording lacks precision, not that the law is impossible to express at sentence level."
+ ],
+ [
+  "s2-codex-primed-1",
+  "8",
+  "`--report` can falsely relabel an existing Score A file with the current default model, form, and judge channel."
+ ],
+ [
+  "s2-codex-primed-2",
+  "1",
+  "Score A\u2019s \u201cnegative\u201d side is not a valid global precision population.**"
+ ],
+ [
+  "s2-codex-primed-2",
+  "2",
+  "The conclusion that no rule can reach 50 mined positives is inferred from hints that the document itself says are not labels, and it contradicts the committed h"
+ ],
+ [
+  "s2-codex-primed-2",
+  "3",
+  "The published cross-document shingle-collision count is low because the miner compares every shingle only with its first owner.**"
+ ],
+ [
+  "s2-codex-primed-2",
+  "4",
+  "The registered collision remedy can violate the stronger source-document fold constraint.**"
+ ],
+ [
+  "s2-codex-primed-2",
+  "5",
+  "Nine of the reported 946 \u201ccandidate correction pairs\u201d are not pairs and cannot provide the registered corrected-twin negative.**"
+ ],
+ [
+  "s2-codex-primed-2",
+  "6",
+  "The partial-audit conclusion conflates \u201csurface cue present\u201d with \u201cviolation visible.\u201d**"
+ ],
+ [
+  "s2-codex-primed-2",
+  "7",
+  "Form 4 establishes that one widened `count_unit` wording failed this gate, not that the rule is inherently inexpressible as a sentence-level shape.**"
+ ],
+ [
+  "s2-codex-primed-2",
+  "8",
+  "The Stage 2 build is not reproducible from the committed script because its history ref moves and its corpus root is a different hard-coded checkout.**"
+ ]
+]

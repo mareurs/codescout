@@ -1,0 +1,9 @@
+You are reviewing work in this repository, a git checkout at commit a8835d06.
+
+Review scope: the rule-tell evaluation campaign: docs/evals/rule-tell-scoring-2026-09-23.md, docs/evals/phase1-local-classifier-preregistration.md, docs/evals/rule-injection-timing-preregistration.md, scripts/phase1-span-selector.py, scripts/phase1-local-l0.py, scripts/phase1-rule-selection.py, scripts/phase2-score-dp1.py, and the committed data in docs/evals/data/2026-09-24-rule-tell/.
+
+Your job: find defects -- in the code, in the data files, and in any claim the documents make -- that would make a published number, a conclusion, or a planned next step wrong. Check claims against the committed data yourself; do not rely on the documents' own summaries.
+
+Rules: do not edit, create or delete files inside this checkout, and do not run git commands that change it; write scratch files only under /tmp/rv-s1-claude-cold-1/. Make no calls to any language model, network API or web service. Do not run cargo or the Rust test suite.
+
+When you are done, give your review as your final message: a numbered list of findings, each with (a) the defect in one sentence, (b) the evidence -- file:line, and/or the command you ran and what it returned, (c) its impact. Then list the checks you ran that came out clean. Stop when the scope is reviewed.

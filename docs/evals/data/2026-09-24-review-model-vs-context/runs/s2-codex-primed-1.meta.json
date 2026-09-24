@@ -1,0 +1,15 @@
+{
+ "stim": "s2",
+ "model": "codex",
+ "context": "primed",
+ "rep": 1,
+ "id": "s2-codex-primed-1",
+ "exit": 0,
+ "seconds": 649,
+ "model_seen": [
+  "gpt-5.6-sol"
+ ],
+ "is_error": null,
+ "review_chars": 9254,
+ "checkout_dirty": ""
+}

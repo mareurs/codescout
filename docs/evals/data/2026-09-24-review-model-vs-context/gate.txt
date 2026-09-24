@@ -1,0 +1,24 @@
+  s1 D1  positive want YES votes ['YES', 'YES', 'YES'] PASS
+  s1 D1  negative want NO  votes ['NO', 'NO', 'NO'] PASS
+  s1 D2  positive want YES votes ['YES', 'YES', 'YES'] PASS
+  s1 D2  negative want NO  votes ['NO', 'NO', 'NO'] PASS
+  s1 D3  positive want YES votes ['YES', 'YES', 'YES'] PASS
+  s1 D3  negative want NO  votes ['NO', 'NO', 'NO'] PASS
+  s1 D4  positive want YES votes ['YES', 'YES', 'YES'] PASS
+  s1 D4  negative want NO  votes ['NO', 'NO', 'NO'] PASS
+  s1 D5  positive want YES votes ['YES', 'YES', 'YES'] PASS
+  s1 D5  negative want NO  votes ['NO', 'NO', 'NO'] PASS
+  s1 O1  positive want YES votes ['YES', 'YES', 'YES'] PASS
+  s1 O1  negative want NO  votes ['NO', 'NO', 'NO'] PASS
+  s1 O2  positive want YES votes ['YES', 'YES', 'YES'] PASS
+  s1 O2  negative want NO  votes ['NO', 'NO', 'NO'] PASS
+  s1 O3  positive want YES votes ['YES', 'YES', 'YES'] PASS
+  s1 O3  negative want NO  votes ['NO', 'NO', 'NO'] PASS
+  s2 Ma  positive want YES votes ['YES', 'YES', 'YES'] PASS
+  s2 Ma  negative want NO  votes ['NO', 'NO', 'NO'] PASS
+  s2 Mb  positive want YES votes ['YES', 'YES', 'YES'] PASS
+  s2 Mb  negative want NO  votes ['NO', 'NO', 'NO'] PASS
+  s2 Mc  positive want YES votes ['YES', 'YES', 'YES'] PASS
+  s2 Mc  negative want NO  votes ['NO', 'NO', 'NO'] PASS
+GATE PASSED: 22/22
+exit=0

@@ -1,0 +1,266 @@
+[
+ {
+  "stim": "s1",
+  "defect": "D1",
+  "fixture": "positive",
+  "want": "YES",
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s1",
+  "defect": "D1",
+  "fixture": "negative",
+  "want": "NO",
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s1",
+  "defect": "D2",
+  "fixture": "positive",
+  "want": "YES",
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s1",
+  "defect": "D2",
+  "fixture": "negative",
+  "want": "NO",
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s1",
+  "defect": "D3",
+  "fixture": "positive",
+  "want": "YES",
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s1",
+  "defect": "D3",
+  "fixture": "negative",
+  "want": "NO",
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s1",
+  "defect": "D4",
+  "fixture": "positive",
+  "want": "YES",
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s1",
+  "defect": "D4",
+  "fixture": "negative",
+  "want": "NO",
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s1",
+  "defect": "D5",
+  "fixture": "positive",
+  "want": "YES",
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s1",
+  "defect": "D5",
+  "fixture": "negative",
+  "want": "NO",
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s1",
+  "defect": "O1",
+  "fixture": "positive",
+  "want": "YES",
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s1",
+  "defect": "O1",
+  "fixture": "negative",
+  "want": "NO",
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s1",
+  "defect": "O2",
+  "fixture": "positive",
+  "want": "YES",
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s1",
+  "defect": "O2",
+  "fixture": "negative",
+  "want": "NO",
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s1",
+  "defect": "O3",
+  "fixture": "positive",
+  "want": "YES",
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s1",
+  "defect": "O3",
+  "fixture": "negative",
+  "want": "NO",
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s2",
+  "defect": "Ma",
+  "fixture": "positive",
+  "want": "YES",
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s2",
+  "defect": "Ma",
+  "fixture": "negative",
+  "want": "NO",
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s2",
+  "defect": "Mb",
+  "fixture": "positive",
+  "want": "YES",
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s2",
+  "defect": "Mb",
+  "fixture": "negative",
+  "want": "NO",
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s2",
+  "defect": "Mc",
+  "fixture": "positive",
+  "want": "YES",
+  "votes": [
+   "YES",
+   "YES",
+   "YES"
+  ],
+  "pass": true
+ },
+ {
+  "stim": "s2",
+  "defect": "Mc",
+  "fixture": "negative",
+  "want": "NO",
+  "votes": [
+   "NO",
+   "NO",
+   "NO"
+  ],
+  "pass": true
+ }
+]

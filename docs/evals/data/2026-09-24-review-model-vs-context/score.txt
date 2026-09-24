@@ -1,0 +1,9 @@
+('s1', 'claude', 'cold') 11/24
+('s1', 'claude', 'primed') 10/24
+('s1', 'codex', 'cold') 7/24
+('s1', 'codex', 'primed') 8/24
+('s2', 'claude', 'cold') 4/9
+('s2', 'claude', 'primed') 3/9
+('s2', 'codex', 'cold') 7/9
+('s2', 'codex', 'primed') 7/9
+exit=0

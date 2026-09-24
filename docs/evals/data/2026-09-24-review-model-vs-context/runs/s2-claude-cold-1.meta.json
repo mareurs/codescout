@@ -1,0 +1,15 @@
+{
+ "stim": "s2",
+ "model": "claude",
+ "context": "cold",
+ "rep": 1,
+ "id": "s2-claude-cold-1",
+ "exit": 0,
+ "seconds": 246,
+ "model_seen": [
+  "claude-opus-5-5"
+ ],
+ "is_error": false,
+ "review_chars": 9874,
+ "checkout_dirty": ""
+}

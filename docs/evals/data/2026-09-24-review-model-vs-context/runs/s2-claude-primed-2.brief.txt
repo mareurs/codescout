@@ -1,0 +1,44 @@
+You are reviewing work in this repository, a git checkout at commit 898d3ea3.
+
+Review scope: the most recent work on the rule-tell evaluation campaign, committed since 9c0d2505: the S0 form 4 and form 4q results and the Stage 2 mined-pair candidate build. Files: docs/evals/rule-tell-scoring-2026-09-23.md, docs/evals/phase1-local-classifier-preregistration.md, scripts/phase1-span-selector.py, scripts/phase2-score-dp1.py, tests/, and docs/evals/data/2026-09-24-rule-tell/ (including its stage2/ directory).
+
+Your job: find defects -- in the code, in the data files, and in any claim the documents make -- that would make a published number, a conclusion, or a planned next step wrong. Check claims against the committed data yourself; do not rely on the documents' own summaries.
+
+Below is the author's own summary of this work, as they reported it to the operator before this review:
+
+<author_summary>
+All three are done and committed; nothing is pushed. The selector work partly worked: widening the specs made S0 fire on the texts it had missed, but only for one of the three rules. Stage 2 is blocked on a labelling decision that's yours to make.
+
+**1. Scorer bugs archived** (`938e6d0c`). Both bug files are moved to `docs/issues/archive/` with their history kept. Every file that cited the old paths is updated in the same commit, and both test files still pass.
+
+**2. Next selector registration: two diagnostic runs.** I rewrote the specs for three rules to name the violation shapes the audit found. That wording was written after reading those cases, so these runs show whether S0 *can* fire, not that the wording would work on new texts.
+
+- **Form 4, all three rules widened** (`15c37237`, `f828134a`):
+  - The gate failed at 6 of 8, so Score A was not run, as registered.
+  - The widened `count_unit` flagged ordinary counts in clean text ("the three tests", "the 12 rows"), and `scope_instant` flagged one of them too.
+  - The underlying rule for counts, "derive it, don't cite it", can't be written as a sentence pattern without catching harmless counts.
+- **Form 4q, only `question_asked` widened** (`6aa61dff`, `e60426a9`). I chose this arm after seeing form 4's gate, and the registration says so.
+  - The gate passed 6 of 6.
+  - S0 now finds the violation in RTD-1 and RTD-12, the two cases the audit had found fully visible for this rule.
+  - No clean text newly fires. Recall goes from 3 of 17 to 5 of 17, still well below the 0.5 target.
+  - **One cost I hadn't predicted:** `question_asked` also fires on RTD-8, next to that text's correct rule.
+- **Conclusion:** for `question_asked`, S0 was silent because of the spec's wording. For the other two rules, naming the shape costs too much precision. Whether any of this wording works on unseen texts can only be tested on the future test set T, since I've read all of these ones.
+
+**3. Stage 2 started** (`f828134a`). A miner that makes no model calls pulled 946 candidate correction pairs from the repo's history. It dropped 92 that overlapped held-out texts or came from this campaign's own documents. The candidates are not usable as training data yet:
+- **Quality:** in a 10-pair sample, only about 30–40% are real before-and-after corrections. The rest pair two unrelated sentences, or are fragments.
+- **Volume:** no rule gets near the 50 examples needed to train it from these pairs alone.
+- **Labels:** a correction shows which sentence changed, not which of the 22 rules it broke, and the plan doesn't say who assigns that.
+
+**Decision needed from you before Stage 2 can go further:** who labels the mined pairs? Either:
+- **(a) A named labeller** labels every pair against the specs, with a second labeller checking a sample and agreement published, or
+- **(b) Synthetic pairs first.** Generated examples carry their rule from the start, and the mined pairs become a smaller, checked source.
+
+Both options are written into the pre-registration's Stage 2 status section.
+
+The miner, its candidates and every run's rows and logs are in `docs/evals/data/2026-09-24-rule-tell/`, and codescout memory has the current state.
+
+</author_summary>
+
+Rules: do not edit, create or delete files inside this checkout, and do not run git commands that change it; write scratch files only under /tmp/rv-s2-claude-primed-2/. Make no calls to any language model, network API or web service. Do not run cargo or the Rust test suite.
+
+When you are done, give your review as your final message: a numbered list of findings, each with (a) the defect in one sentence, (b) the evidence -- file:line, and/or the command you ran and what it returned, (c) its impact. Then list the checks you ran that came out clean. Stop when the scope is reviewed.

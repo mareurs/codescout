@@ -1,0 +1,15 @@
+{
+ "stim": "s1",
+ "model": "claude",
+ "context": "primed",
+ "rep": 0,
+ "id": "s1-claude-primed-0",
+ "exit": 0,
+ "seconds": 346,
+ "model_seen": [
+  "claude-opus-5-5"
+ ],
+ "is_error": false,
+ "review_chars": 11589,
+ "checkout_dirty": ""
+}

@@ -1,0 +1,51 @@
+1. **The phase-0 report treats RTD-9’s near-miss results as precision evidence even though RTD-9 failed its positive gate 0/10.**
+
+   - **Evidence:** The report itself explains that a judge which answers NO to its positives passes precision trivially ([rule-tell-scoring-2026-09-23.md:28](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/rule-tell-scoring-2026-09-23.md:28)), then records RTD-9’s positive at 0.00 ([line 57](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/rule-tell-scoring-2026-09-23.md:57)) but still reports RTD-9 precision as 1/4 and pools it into “1 of 8” ([lines 69–73](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/rule-tell-scoring-2026-09-23.md:69)). Running the committed analyser returned `GATE: FAIL` and RTD-9 `near-miss 0.25 (1/4)`.
+   - **Impact:** RTD-9 has no interpretable precision result under the campaign’s own gate rule. The published 1/8 headline and registered RTD-9 precision split must be withdrawn; only RTD-8 and RTD-10’s four near-misses are gated, at 0/4 firing.
+
+2. **RTD-16’s “negative” is a known positive for the same `count_unit` rule, but both selectors score it as clean.**
+
+   - **Evidence:** The corpus explicitly says RTD-16’s negative is RTD-19’s positive and “scoring must not treat RTD-16’s negative as a clean sample” ([rule-tell-detection.md:892](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/rule-tell-detection.md:892)). Nevertheless, `phase1-span-selector.py` assigns every negative an empty gold set ([phase1-span-selector.py:320](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/scripts/phase1-span-selector.py:320)), and the committed row labels RTD-16’s negative with `gold: []` even for `count_unit` ([p1s-S0b-corpus.jsonl:684](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/data/2026-09-24-rule-tell/p1s-S0b-corpus.jsonl:684)). Recalculation after excluding it changes Jev’s corrected-text figure from 30/63 to 30/60, S0 form 2b from 2/21 to 2/20, and form 3 from 5/21 to 5/20.
+   - **Impact:** The published precision denominators are wrong. More importantly, Stage 2’s premise that a correction twin is automatically a hard negative ([phase1-local-classifier-preregistration.md:55](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/phase1-local-classifier-preregistration.md:55)) is already falsified by the campaign’s own corpus, so construction alone cannot supply training labels.
+
+3. **RTD-17 is included in recall even though the corpus says its scoring policy is undecided and it must be scored separately.**
+
+   - **Evidence:** RTD-17’s claim was true but unstamped ([rule-tell-detection.md:919](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/rule-tell-detection.md:919)); the run instructions say a fire is “neither a hit nor a false positive” until policy is decided ([line 1138](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/rule-tell-detection.md:1138)). Both scorers nevertheless aggregate every `yes`/`partial` positive without an RTD-17 exception ([phase1-rule-selection.py:225](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/scripts/phase1-rule-selection.py:225), [phase1-span-selector.py:370](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/scripts/phase1-span-selector.py:370)).
+   - **Impact:** The published 3/17 Score-A recall should be 3/16 unless a policy is first registered; Jev and Haiku’s text-detectable denominators similarly fall from 51 to 48 and 85 to 80.
+
+4. **RTD-9 credits `contradiction` although the text passed to the selector omits the paragraph containing the contradiction.**
+
+   - **Evidence:** The corpus says RTD-9 is detectable because “the next paragraph” describes retention ([rule-tell-detection.md:704](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/rule-tell-detection.md:704)), but its positive fixture contains only the lifetime-count paragraph ([line 690](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/rule-tell-detection.md:690)). The loader supplies only fenced positive blocks, while `GOLD` accepts both `count_unit` and `contradiction` ([phase1-rule-selection.py:82](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/scripts/phase1-rule-selection.py:82)). Haiku run 2 was therefore credited a top-1 hit for `contradiction` on text containing no contradiction ([phase1-haiku.jsonl:101](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/data/2026-09-24-rule-tell/phase1-haiku.jsonl:101)).
+   - **Impact:** Haiku’s published top-1 count is 11/85, not 12/85 from this defect alone—or 11/80 after also applying RTD-17’s required exclusion. It also shows the proposed check of only the nine `partial` positives is too narrow: this broken evidence/gold alignment is labelled `yes`.
+
+5. **The planned local route still specifies the superseded eight-text gate, form-2 verifier, and invalid `rtd8` checker.**
+
+   - **Evidence:** Stage 4 names an eight-text gate ([phase1-local-classifier-preregistration.md:88](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/phase1-local-classifier-preregistration.md:88)), C1 uses form 2 ([line 98](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/phase1-local-classifier-preregistration.md:98)), and Score B uses `rtd8` ([line 99](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/phase1-local-classifier-preregistration.md:99)). The campaign subsequently adopted a ten-text form-2b gate ([rule-tell-scoring-2026-09-23.md:343](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/rule-tell-scoring-2026-09-23.md:343)), and `rtd8` failed clean-channel gating ([line 402](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/rule-tell-scoring-2026-09-23.md:402)) before being replaced by `rtd8c`.
+   - **Impact:** Following the preregistration literally would evaluate weeks of Stage-2/3 work against a weaker, non-comparable gate and a checker already known invalid. The local-route preregistration needs amendment before data building/training proceeds.
+
+6. **The results never record that H2’s registered rule-shape predictor was falsified by RTD-9 and RTD-10.**
+
+   - **Evidence:** The preregistration predicts injection failure for RTD-9 and RTD-10 and says a scrambled partition makes the predictor “dead” ([rule-injection-timing-preregistration.md:50](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/rule-injection-timing-preregistration.md:50)). Clean scoring instead gives both claim-bound arms zero violations and ships both rules ([rule-tell-scoring-2026-09-23.md:583](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/rule-tell-scoring-2026-09-23.md:583)). The report only says H2 held for RTD-8 ([line 130](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/rule-tell-scoring-2026-09-23.md:130)).
+   - **Impact:** The intervention results still stand, but the campaign’s promised classifier of future rule shapes does not. Future rules cannot be triaged by the registered “compliance cost” predictor without new evidence.
+
+7. **The end-to-end and phase-2 scorers still accept incomplete, duplicated, missing-arm, or errored populations as successful results.**
+
+   - **Evidence:** `build_e2e` requires only one usable draft and never checks expected runs or uniqueness ([phase1-span-selector.py:398](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/scripts/phase1-span-selector.py:398)). `phase2-score-dp1.py` counts errors, scores whatever rows remain, omits absent arms, and always returns 0 after a passing checker gate ([phase2-score-dp1.py:257](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/scripts/phase2-score-dp1.py:257)).
+   - **Impact:** A capped or truncated future Score-B run can yield a publishable-looking rate and successful exit despite violating registered `n=10`. The current principal replay files were complete, so this does not alter their rates, but it remains a defect in the planned Stage-4 path.
+
+8. **The committed archive does not contain enough observations to independently reconstruct every reported result.**
+
+   - **Evidence:** The README calls the directory the evidence behind each reported result ([README.md:3](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/docs/evals/data/2026-09-24-rule-tell/README.md:3)), but the clean phase-2 logs retain only aggregate counts, while the scorer discards all three per-row votes after incrementing a counter ([phase2-score-dp1.py:269](/home/marius/work/claude/codescout.worktrees/rmvc-s1-codex-primed-0/scripts/phase2-score-dp1.py:269)). A search across all committed artifacts found no hosted-Jev `noul` gate rows behind the 3/5 result and no saved ten-draft Jev choices behind “none on all 10.”
+   - **Impact:** Those exact published numbers cannot be audited from the commit without making fresh stochastic model calls; a rerun would be a new observation, not verification of the reported one.
+
+Checks that came out clean:
+
+- HEAD is `a8835d06b41dd6901943a796ad2b18aa8abad933`; the worktree remained clean.
+- All four scoped Python files parse successfully.
+- All 25 JSONL files parse successfully.
+- Both Score-A files contain the complete 42-text × 22-rule grid: 924 unique rows, zero errors.
+- The principal API and fork replay files each contain every registered arm with unique runs 0–9.
+- Under the current—but defective—labels, the published Jev/Haiku and S0/form-3 arithmetic reproduces exactly.
+- The L0 log reproduces the reported 4/10 gate, 3/3 span gate, probability range, and all five rank/margin statements.
+- Phase-2 arm/run populations, observability counts, and the arithmetic printed in the committed score logs agree with the scoring document.
+- No network, model, API, Cargo, or Rust-test commands were run.

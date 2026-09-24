@@ -1,0 +1,52 @@
+[
+ [
+  "s1-claude-cold-0",
+  "4",
+  "The stripped-arm prediction \"s0 is not below arm 0 \u2026 for all three rules\" fails under either reading.**"
+ ],
+ [
+  "s2-claude-primed-2",
+  "7",
+  "The proposed fold-by-document rule already breaks one-incident-one-fold, and the filename merge is real, not theoretical.**"
+ ],
+ [
+  "s2-claude-cold-1",
+  "8",
+  "Minor: form 4/4q wiring is untested, and rows don't record model or form.**"
+ ],
+ [
+  "s2-claude-primed-1",
+  "8",
+  "Form 4q's \"no new false-positive text\" rests on a narrower check than it reads, and the new gate path is untested.**"
+ ],
+ [
+  "s2-codex-cold-1",
+  "4",
+  "Defect:** The Stage 2 build is not reproducible using the committed script as the data README claims."
+ ],
+ [
+  "s1-claude-cold-2",
+  "11",
+  "Several small miscounts in the gate tables.**"
+ ],
+ [
+  "s2-claude-cold-2",
+  "4",
+  "(a)** The cross-document collision preview undercounts. `owner.setdefault` only records a pair against the first document that owned a shingle, and the check le"
+ ],
+ [
+  "s2-claude-cold-2",
+  "6",
+  "(a)** The form 4q section presents RTD-11's `closed_population` fire as a new observation. It was not re-judged."
+ ],
+ [
+  "s2-codex-primed-2",
+  "4",
+  "The registered collision remedy can violate the stronger source-document fold constraint.**"
+ ],
+ [
+  "s2-codex-primed-0",
+  "4",
+  "The Stage 2 build is not reproducible from the committed checkout despite the README saying the script regenerates its input.**"
+ ]
+]
