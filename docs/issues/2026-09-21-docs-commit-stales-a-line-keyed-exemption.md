@@ -122,6 +122,27 @@ and the discriminating check (is `PROBES.md` dirty? if clean, worktree == HEAD, 
 pre-existing) is not one the failure output suggests. `git stash` is the reflex here and is
 **wrong on this checkout**: a peer's uncommitted work would go with it.
 
+## Denominator 2026-09-24 — all four valid, and both falsifications hit the same one
+
+**Measured at HEAD `0fd2e244`, all four cited files clean in the worktree: 4 of 4 exemptions still find their token at their named line.** Recorded as a denominator rather than dropped as a non-event — § *Testing Discipline* asks that a confirming re-derivation be published, because a population that reports only its catches looks self-correcting.
+
+| exemption | named line | token found at | valid |
+|---|---|---|---|
+| `docs/TAXONOMY.md`, `for` | 41 | 41 | yes |
+| `CONTRIBUTING.md`, `cfg` | 167 | 167 | yes |
+| `docs/PROBES.md`, `sorted` | 203 | 203 | yes |
+| `src/prompts/guides/tracker-conventions.md`, `find` | 89 | 89 | yes |
+
+**The finding is the DISTRIBUTION, not the total.** § *Fix* says *"the other three carry the same fragility"* — true of the mechanism, and not yet true of the observations. `git log -S` on each exact tuple text returns **one** commit for each of the three non-`PROBES` entries: `89d2ca06`, the one that introduced them. None has been re-pointed since. `docs/PROBES.md` was re-pointed **twice in the same five days** (`70e6c1ad`, `ce9aa15f`).
+
+**That concentration is predictable, which is what makes it useful.** `docs/PROBES.md` is by its own first line a one-page **index of every measurement instrument** — a registry, whose growth mode is inserting rows into a table. The other three citations sit in stable prose, where an edit above them is an ordinary rewrite rather than a scheduled event. So line-keying is fragile in proportion to how often lines are inserted **above** the cited one, and that rate is a property of the containing document's *purpose*, not of the exemption or of the care taken by whoever edits it. (Mechanism inferred from the documents' shape; the two counts above are measured.)
+
+**What it buys whoever prices the § *Fix* remedies:** the observed exposure is concentrated in one entry, so a remedy scoped to registry-shaped documents reaches **both** recorded instances at a fraction of a general ignore-marker mechanism. It is **not** an argument against the general remedy — scope does nothing for the silent direction, and any prose entry can still drift without warning.
+
+**What this check does NOT establish, stated because the gap is the interesting half.** It asks only whether each entry still finds its *own* token, so it is blind to the silent direction named in § *Root cause*: an exemption standing ready to exempt a *future* genuine stale-tool citation that comes to occupy its coordinate. That failure emits nothing, is invisible to this check and to the gate, and nobody has measured it. A clean sweep here is evidence about false positives only.
+
+*(Measured by sessionId `3aa55c01-9663-44ca-82d2-48b6b8d76d66`, who did not author this file, is not holding this bug, and changed no code for it.)*
+
 ## Environment
 
 Shared codescout checkout, branch `experiments`. Observed at HEAD `a832ae89` during a gate run; cause at `ffeada30`; instance fixed at `70e6c1ad`.
@@ -202,5 +223,5 @@ Open on the class. The table-row question decides whether a marker can replace t
 ## References
 
 - `docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md` (`5394e9b7bdd83069`, open, `cluster/guard-narrower-than-its-name`) — a guard named for a rebase-durable anchor discharges on the half that dies at rebase. Different mechanism and class, same family: *a check keyed to something that moves, with nothing watching the thing that moves it.*
-- `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md` (`05fceb5783a0290e`) — same reader experience, a shared-build red nobody can attribute.
+- `docs/issues/archive/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md` (`2e0135b426faa7dd`, archived, `cluster/authorship-unrecoverable-after-the-fact`) — same reader experience, a shared-build red nobody can attribute.
 - CLAUDE.md § *Development Commands* — the `cli_doc` case: a failure that reads as a regression in whatever you just committed.
