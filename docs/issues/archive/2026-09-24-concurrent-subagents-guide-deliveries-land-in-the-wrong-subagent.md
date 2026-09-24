@@ -86,7 +86,24 @@ None for affected subagents. A subagent that suspects it was starved can call `g
 
 ## Resume
 
-Nothing left for the fix. Live check, when the binary is rebuilt: dispatch several subagents in parallel whose first calls are LSP-backed (`symbols`, `references`). Compare each subagent's `~/.local/state/codescout/guide_hints/<sid>_<agent>.json` against the `auto-injected get_guide(...)` blocks in its own transcript. Each ledger stamp should now match a delivery in that same subagent.
+Nothing left. **Live check passed 2026-09-24 on the rebuilt binary.** `./scripts/rb.sh` built the release binary at 14:47:13Z from HEAD `a8835d06`, which contains `69e89228`, and was followed by an `/mcp` reconnect. Four read-only subagents were then dispatched in parallel, each with three LSP-backed first calls.
+
+| subagent | ledger stamp → delivery in its **own** transcript (`project-activation-bootstrap`) | same for `symbol-navigation` |
+|---|---|---|
+| `afe2fc6cf4ed9dfd7` | 14:49:16.284 → 16.576 | 16.983 → 17.273 |
+| `a12d8bd42cc779c7c` | 17.228 → 17.543 | 17.843 → 18.140 |
+| `a4771bc3e6c7100bc` | 17.541 → 17.828 | 18.407 → 18.687 |
+| `a1c80f2dcf82c75ab` | 18.040 → 18.332 | 18.669 → 18.960 |
+
+There were 8 stamps and 8 deliveries. Every stamp is followed about 0.3 s later by a `tool_result` carrying the matching injection in the same subagent's transcript. No subagent went without a guide, and none got a duplicate. Adoption switched principals repeatedly inside the 2.7 s window: the stamps from the four subagents interleave.
+
+**How this was counted, and two readings it corrects.** Injections were counted in each subagent's transcript from `tool_result` lines only. One transcript had two lines naming the marker. The second was that subagent's own hand-back quoting the marker (`type: assistant`, `SubagentHandback`), not a second delivery. Separately, one subagent's self-report said it received no bootstrap guide, while its transcript holds exactly one. So self-reports are not evidence for this check in either direction. The ledger-versus-transcript comparison is.
+
+**What this does NOT prove.** It shows correct routing under real interleaved adoption. It cannot show that a call was in flight across a sibling's adoption, which is the window the original failure needed. That window is what `concurrent_principals_each_receive_their_own_first_call_guide` forces deterministically, and it stays the regression guard.
+
+**Incidental findings from the same run, recorded where they belong:**
+- Six path-scoped `symbols` zeros and two `references` `symbol not found` errors against a 0–3 s old rust-analyzer. Recorded in `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md` and `docs/issues/2026-08-27-references-symbol-not-found-while-lsp-warms.md`.
+- On the **pre-fix** binary, the post-compact `workspace(post_compact=true)` call at about 14:45Z auto-injected `project-activation-bootstrap` into the main session. That stamp reached no ledger file on disk: the main ledger's entry is the new binary's re-delivery at 14:47:55Z, and no ledger file for this session was written between 14:43:00Z and 14:47:30Z (the one file written in that window, at 14:43:13Z, belongs to an unrelated CLI session, `7469d02d`, and records its own legitimate delivery). **Unexplained.** The process that did it has been replaced, so it is recorded here and not chased. If a single-principal session is ever seen receiving a guide its ledger does not record, reopen this with that evidence.
 
 ## References
 

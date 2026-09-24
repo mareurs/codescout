@@ -7,15 +7,14 @@ tags:
 - lsp
 - cold-start
 - misleading-error
-- unreproduced
 - refuted-mechanism
 closed: null
-last_observed: 2026-08-27
+last_observed: 2026-09-24
 opened: 2026-08-27
 owner: marius
 related: []
 severity: low
-unverified: Symptom observed exactly once and never reproduced. The originally-filed mechanism (a warming LSP yielding a resolution error the false-zero guard cannot see) is REFUTED by deliberate cold-start probes, which produce the guarded false-zero instead. No mechanism identified; kept as zombie with a re-open trigger rather than closed.
+unverified: 'Recurred 2026-09-24 (twice, at a 1-2 s old rust-analyzer, under 4 parallel subagents): see Reproduction § 2026-09-24. Derived from code: the error comes from document_symbols returning an Ok empty list (null, [], or unparseable response), not from a request error. Which of the three, and why rust-analyzer answered empty, is unknown because none is logged. The 19 s cold-start refutation stands for that age only.'
 ---
 
 # BUG: `references` answers a warming LSP with `symbol not found` — a resolution error, which the false-zero guard cannot see
@@ -28,8 +27,7 @@ call. **Filed 2026-08-27 with a root cause that has since been refuted.** The
 entry originally claimed this was the warming-LSP class with a symptom the
 false-zero guard cannot reach; a deliberate cold-start reproduction shows the
 opposite — the cold-start path produces the GUARDED false-zero, and its guard
-fires correctly. The original observation remains unreproduced with no identified
-mechanism.
+fires correctly. The original observation had no identified mechanism until **2026-09-24, when it recurred twice** (see Reproduction § 2026-09-24). That run narrows it to `document_symbols` returning an empty `Ok` list.
 ## Symptom (Effect)
 First call, immediately after `workspace(action="activate")` on the home project:
 
@@ -106,6 +104,26 @@ false-zero, not this record's hard resolution error. So a single cold call canno
 defect is gone" from "the defect was never cold-start in the first place", which is the standing
 position. It moves the denominator and nothing else. Stays `zombie`. Recorded by sessionId
 `3aa55c01-9663-44ca-82d2-48b6b8d76d66`.
+### 2026-09-24 — RECURRENCE: the re-open trigger fired twice at a 1–2 s old rust-analyzer
+
+This recurred for the first time since filing. Two `references` calls from parallel subagents returned the bare error (no "did you mean"), for symbols that `symbols(name=…)` resolves at the same path:
+
+| time (Z) | call | result |
+|---|---|---|
+| 14:49:18.197 | `references(symbol="GuideLedger/adopt", path="src/tools/guide_ledger.rs")` | `symbol not found: GuideLedger/adopt` |
+| 14:49:18.432 | `references(symbol="CodeScoutServer/live_ledger", path="src/server.rs")` | `symbol not found: CodeScoutServer/live_ledger` |
+
+These are the three captures this file's Resume asks for:
+
+1. **Process age.** `ps -o etime,lstart -C rust-analyzer` showed one rust-analyzer, **started 14:49:16Z**, which is the same second as the first subagent call after an `/mcp` reconnect. So both failures hit a **1–2 s old** process. The 2026-08-27 probes that refuted cold start ran at **19 s**. They covered a later part of warm-up, not this one.
+2. **The arguments resolve.** At 14:50:44Z the identical `references(GuideLedger/adopt, …)` returned 2 references (`src/server.rs:1284`, `src/tools/guide_ledger.rs:341`), and `symbols(name=…)` found `adopt_request_conversation` and `LedgerHandle` in `src/server.rs`.
+3. **Call sequence.** Four subagents dispatched in parallel, three LSP calls each. Their first calls landed 14:49:16.3–18.3Z against the just-spawned process. There was no edit to either file.
+
+**What is now narrowed, and how it was derived, not guessed.** `References::call` (`src/tools/symbol/references.rs:311-312`) runs `c.document_symbols(&p, &l).await?` and then `find_unique_symbol_by_name_path`. A **request error** would propagate through `?` as a different message, so these two errors came from an `Ok` list with no matching symbol. The bare message (no suggestions) means the leaf search also found nothing. `live_ledger` is a field **and** a method in `server.rs`, so any real symbol list for that file would have produced a suggestion. The list was empty. `LspClient::document_symbols` (`src/lsp/client.rs:1156-1231`) returns `Ok(vec![])` in three cases: rust-analyzer answered `null`, rust-analyzer answered `[]`, or neither response shape parsed. Which of the three fired is **not recoverable**, because none of them is logged.
+
+**Two facts that argue against a plain "too young" reading.** In the same window, a subagent's path-scoped `symbols` call on `src/server.rs` **succeeded** at 14:49:17.34 and an overview of `guide_ledger.rs` succeeded at 17.585. After that, every path-scoped lookup on those files failed from 17.83 to 18.96. So the failures are **not monotone in process age**. The same run's `symbols` zeros are recorded in `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`, which this now very likely shares a site with: `document_symbols`' empty-on-failure return. The mechanism behind rust-analyzer's empty answer is still unknown. The next step is to make `document_symbols` say which of its three empty paths it took, rather than to guess.
+
+Recorded by sessionId `ebf651ec-5ab7-42d9-a526-dcf9758692e1`.
 ## Environment
 - Project: codescout (Rust, rust-analyzer), branch `experiments`
 - Transport: MCP stdio, Claude Code

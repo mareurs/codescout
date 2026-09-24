@@ -358,6 +358,12 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 
 **Recording effort:** three ledger appends and three updates, about 6 tool calls of roughly 250 in the interval. No task was displaced.
 
+**Update 2026-09-24, interval extended to about 14:55Z.** After the sweep, the same session fixed the race (`69e89228`, archived as `c161cc27ddff5672` in `8e2a40ae`). It then went through one `/compact` (between 14:41Z and 14:45Z), rebuilt the release binary, and ran a live check after `/mcp`. **Selection is unchanged.** Those episodes are later substantive work and were not first-eligible, so no new DWF or DCX was opened. Their evidence lives in `c161cc27ddff5672` § *Resume*.
+- **Delegates added:** 4 read-only live-check subagents, on Sonnet. Principals are observable only as CC agent ids, and all four are named in that table.
+- **Capture gap, declared:** one subagent's self-report omitted a delivery its transcript holds. The collector counted from transcripts, but the task-file transcripts are process-local and are not retained. The durable evidence is the timestamped stamp-to-delivery table.
+- **Enrichment, linked rather than duplicated:** the same run recurred `d25aa6db7b4e6367`'s trigger and `523233935cc53bc4`'s Bug B. The evidence is written into those two files.
+- **Recording effort for the extension:** four bug-file updates and this one, about 5 of roughly 45 tool calls.
+
 ## DCS-7 — Session 571eb3d6 — rtd8c, the form-3 ablation, JevK5 Stage 1 and the API-route clean re-score, third post-compaction interval
 
 **Valid:** dated 2026-09-24

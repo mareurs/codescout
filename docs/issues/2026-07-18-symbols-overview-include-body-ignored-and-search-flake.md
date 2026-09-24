@@ -382,6 +382,22 @@ generic, is to honor it.
 **Bug B:** Still not proposed — but **narrowed substantially by reading the search path**
 (2026-08-06), without needing the harness first.
 
+
+**Same day, afternoon: six more silent path-scoped zeros, and the Resume's third outcome.** Four parallel subagents ran right after an `/mcp` reconnect, against a rust-analyzer started at **14:49:16Z**. Every `symbols(name=…, path=…)` below returned a bare `0 matches` **with no warning at all**, for a symbol that exists. All six resolve on re-query with the identical arguments: `adopt_request_conversation` and `LedgerHandle` at 14:50:44Z, and the other four a few minutes later.
+
+| time (Z) | name | path |
+|---|---|---|
+| 14:49:17.828 | `poll_rendezvous` | `src/server.rs` |
+| 14:49:18.140 | `LedgerHandle` | `src/server.rs` |
+| 14:49:18.332 | `adopt_request_conversation` | `src/server.rs` |
+| 14:49:18.687 | `call_tool_inner` | `src/server.rs` |
+| 14:49:18.817 | `concurrent_principals_each_receive_their_own_first_call_guide` | `src/server.rs` |
+| 14:49:18.960 | `GuideLedger` | `src/tools/guide_ledger.rs` |
+
+**Not monotone in process age.** In the same window, `symbols(name="poll_guide_rearm", path="src/server.rs")` **succeeded** at 14:49:17.34, and an overview `symbols(path="src/tools/guide_ledger.rs")` returned 32 symbols at 17.585. After that, every path-scoped name search on those files failed. **This is the Resume's "no warning at all" outcome.** Per the bullet above, that outcome is expected on the path-scoped branch: `search_files_restricted` never builds the audit, so no warning *could* fire. It does not yet discriminate between the walk-truncation and root-race hypotheses, which the project-scope branch's warning would. The same run's `references` calls hit `symbol not found` on the same files at 18.197 and 18.432. `docs/issues/2026-08-27-references-symbol-not-found-while-lsp-warms.md` derives that those came from `LspClient::document_symbols` returning an empty `Ok` list (`src/lsp/client.rs:1156-1231`: `null`, `[]`, or unparseable). So the "second silent path" lead above is now **the likely shared site**. It is not yet established that the `symbols` zeros took that path rather than a `continue`-dropped `Err`, because the branch discards both.
+
+**Next step, sharpened.** One change would answer both files' open questions: make `document_symbols` report which empty path it took, and make `search_files_restricted` record the `Err`s it `continue`s past. Recorded by sessionId `ebf651ec-5ab7-42d9-a526-dcf9758692e1`.
+
 ### Three silent-degradation paths, all confirmed in code
 
 `search_project_symbols` (`src/tools/symbol/symbols.rs`) wraps each language in an 8 s
