@@ -1,7 +1,7 @@
 ---
 id: '1c5e106ee122f582'
 kind: bug
-status: taken
+status: investigating
 title: 'BUG: /mcp reconnect applies a CHANGED env var from settings.json but not a REMOVED one — and the change that lands falsely confirms the one that did not'
 tags:
 - cluster/config-propagation-is-additive
@@ -11,12 +11,10 @@ tags:
 - stale-env
 - false-confirmation
 - not-codescout-source
-claimed_at: 2026-09-24
-claimed_by: e4fbc7ef-27b7-4707-8469-ccdffa8e4e92
 opened: 2026-08-30
 owner: marius
 severity: high
-unverified: 'Narrowed 2026-09-24 on Claude Code 2.1.282: on the .claude.json mcpServers.env layer a mixed edit applied BOTH halves on /mcp, with an in-phase control, so merge-over-replace is not the harness''s general behaviour. Still untested: whether the settings.json § env asymmetry observed 2026-08-30 on an older build reproduces at 2.1.282, and whether a full restart clears a deleted key. The mechanism was never read from source — Claude Code is not in this repo.'
+unverified: 'Reproduced 2026-09-24 on Claude Code 2.1.282, but LAYER-SPECIFIC: settings.json § env drops a deletion on /mcp (in-phase control observed), while .claude.json mcpServers.<name>.env applies one. The process.env-merge mechanism is a hypothesis the data fits and does not test — no non-codescout child spawned after a phase-1 load was read. Whether a full restart clears the stale key is untested. Claude Code''s source is not in this repo.'
 ---
 
 # BUG: `/mcp` reconnect applies a CHANGED env var from `settings.json` but not a REMOVED one
@@ -197,6 +195,43 @@ today. It does NOT show the 08-30 observation was wrong, and does not re-test it
 `~/.claude/settings.json` § `env` layer, on an older build. Two readings remain and this data cannot
 separate them — the asymmetry is specific to the `settings.json` layer, or it was fixed between that
 build and 2.1.282. The discriminating run is the same two phases against `settings.json` § `env`.
+
+## Reproduced 2026-09-24 on Claude Code 2.1.282 — the `settings.json` layer drops a deletion; `.claude.json` does not
+
+The discriminating run the section above named: the same two phases against `~/.claude-sdd/settings.json`
+§ `env`, same `claude` process (pid 2834158) throughout, every reading a `/mcp` reconnect.
+
+**Precondition, checked first:** this layer reaches the MCP spawn env at all. `PUPPETEER_EXECUTABLE_PATH`
+is defined only in that `env` block, and it is present in the codescout server's environ and absent from
+both the parent `claude` process's environ and `.claude.json`. Without that, an absent key would mean nothing.
+
+| phase | edit to `settings.json` § `env` | new server (pid, start UTC) | `PROBE` | `CONTROL` |
+|---|---|---|---|---|
+| baseline | none (after the `.claude.json` restore) | 3190735, 21:00:06 | absent | absent |
+| 1 | add `ZZ_MCP_ENV_PROBE=phase1` | 3474525, 21:02:32 | `phase1` | absent |
+| 2 | ONE write: delete `PROBE`, add `ZZ_MCP_ENV_CONTROL=phase2` | 4080390, 21:07:52 | **`phase1` — stale** | `phase2` |
+
+**The asymmetry reproduces, isolated on one layer with its own in-phase control:** the update in the
+same write landed, so the file was re-read, and the deleted key survived. Beside the `.claude.json` run
+above, where the identical edit shape applied both halves, the defect is now **layer-specific** rather
+than general: `settings.json` § `env` drops deletions on `/mcp`; `mcpServers.<name>.env` does not.
+
+**The baseline row is load-bearing.** The key names were reused from the `.claude.json` run, so a stale
+`phase1` could in principle have come from there. The baseline server, read after that layer's restore and
+before any `settings.json` edit, carried no `ZZ_` key, and nothing but `settings.json` changed after it.
+
+**Mechanism — a hypothesis this data fits and does not test.** `settings.json` § `env` is process-wide,
+so the harness plausibly assigns it into its own `process.env` (inherited by every child) and never deletes
+a removed key there; a server's `.claude.json` env is passed explicitly per spawn and so is replaced. That
+would also explain the 2026-08-30 note that the parent's `/proc/<pid>/environ` held neither variable: that
+file shows the exec-time block, not later `process.env` writes. **Test it by** reading any NON-codescout
+child spawned after a phase-1 load (e.g. reconnect a second MCP server): under this hypothesis it carries the
+stale key too. Not run — the only other child (the researcher MCP, pid 2835488) predates every probe.
+
+**Restored:** `settings.json` byte-identical to the pre-experiment backup (`cmp`), after checking nothing but
+the `ZZ_` keys had changed meanwhile. If the defect is as measured, the RUNNING `claude` process still
+carries both `ZZ_` keys into every codescout spawn until a full restart — inert, and a free replicate on the
+next reconnect. Run by sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`; the operator typed each `/mcp`.
 
 ## Workarounds
 
