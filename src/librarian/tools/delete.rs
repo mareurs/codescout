@@ -442,7 +442,7 @@ mod tests {
     /// relations and omitted this one. The half that matters: a write-mode `link_scan`
     /// re-derives `origin='scan'` rows from prose, and NOTHING rebuilds `origin='write'`
     /// rows (`append_entry(cites=…)`), so those are the preview's truly irreversible part.
-    /// docs/issues/2026-09-21-the-delete-preview-omits-the-entry-cite-rows-its-cascade-destroys.md
+    /// docs/issues/archive/2026-09-21-the-delete-preview-omits-the-entry-cite-rows-its-cascade-destroys.md
     ///
     /// Load-bearing fixture details:
     ///   * ONE row of each origin. An all-`write` fixture cannot tell the total from the

@@ -1,10 +1,11 @@
 ---
-id: '0e18a4933944a359'
+id: 3ec5507468427653
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the delete dry-run preview omits the entry_cite rows its own cascade destroys'
 tags:
 - cluster/selector-narrower-than-its-population
+closed: 2026-09-24
 opened: 2026-09-21
 owner: marius
 related:
@@ -162,30 +163,31 @@ does not discriminate. `entry_cite::incoming` would preview it.
 
 ## Fix
 
-Not fixed. The change is to add `entry_cite` to the enumeration at
-`src/librarian/tools/delete.rs:96-102` — `entry_cite_out: entry_cite::outgoing(&cat, &slug)?.len()`
-and `entry_cite_in: entry_cite::incoming(&cat, …)?.len()` — and to extend the `recoverable`
-sentence to distinguish `origin='scan'` rows (re-derivable by a write-mode `link_scan`) from
-`origin='write'` rows (not re-derivable by anything).
+**FIXED 2026-09-24 at `5103f818`.** The dry-run `cascades` object now carries `entry_cite_out`
+(outgoing rows the delete destroys) and `entry_cite_out_unrebuildable` (those whose `origin` is not
+`scan`, which a write-mode `link_scan` cannot re-derive), and the `recoverable` sentence says so.
 
-Note the keying difference that makes this slightly more than a copy of the `links` lines:
-`artifact_link` is keyed by artifact **id**, `entry_cite.src_slug` by the artifact's **slug**,
-which is nullable. An artifact with a NULL slug holds no outgoing rows and the FK never bites
-— so a correct preview reads the slug first rather than the id.
+**One deliberate departure from the sketch above: no `entry_cite_in`.** Only `src_slug` carries
+`ON DELETE CASCADE`; `dst_ref` is plain text with no FK, so rows citing the deleted artifact SURVIVE
+it. Counting them would report casualties the delete does not cause. Keyed by slug, read straight
+from the column, because `ensure_slug` MINTS one and a dry run must not write. The two comments
+asserting the augmentation was "the only irreversible part" are corrected in the same change.
 
-The deeper repair is to stop hand-enumerating: derive the `cascades` keys from the set of
-relations declared `ON DELETE CASCADE` against `artifact`, so the next table added is
-previewed by construction.
+The deeper repair named above, deriving `cascades` from the set of `ON DELETE CASCADE` relations so
+the next table is previewed by construction, is **not** done and stays open as a design item.
 
 ## Tests added
 
-None — status is `open`. A regression test must **not** be a second aggregate: per
-`CLAUDE.md` § *Testing Discipline*, assert the named member (`cascades.entry_cite_out == 1`
-on a fixture holding exactly one `origin='write'` row) and observe the red before the fix,
-not a `cascades.len()` bound. The existing
-`delete_without_force_is_a_dry_run_and_destroys_nothing`
-(`src/librarian/tools/delete.rs:376`) and its *"the only irreversible part"* comment both need
-correcting in the same change, or the suite keeps asserting the false uniqueness.
+`delete_preview_names_the_outgoing_entry_citations_the_cascade_destroys`
+(`src/librarian/tools/delete.rs`): one row of each origin, so the total and the unrebuildable count
+cannot be the same number; a slug that differs from the id; and an incoming row that must not be
+counted. Observed red first (key absent). Mutation via `scripts/mutation-probe.sh`, all KILLED:
+query by id instead of slug; drop the origin filter; read incoming instead of outgoing.
+
+## Fix provenance
+
+- **SHA:** `5103f818` (`experiments`)
+- **patch-id:** `5e40431f6afc7878a683a01c33d653a3077f8ffc`
 
 ## Workarounds
 

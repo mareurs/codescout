@@ -8,7 +8,7 @@ tags:
 opened: 2026-09-21
 owner: marius
 related:
-- docs/issues/2026-09-21-the-delete-preview-omits-the-entry-cite-rows-its-cascade-destroys.md
+- docs/issues/archive/2026-09-21-the-delete-preview-omits-the-entry-cite-rows-its-cascade-destroys.md
 severity: medium
 ---
 
@@ -193,7 +193,7 @@ into a real git repo, or annotate it as unable to discriminate.
 - `src/librarian/tools/delete.rs` — the literal (:103-104), the design rationale it was
   composed from (:78-84), the test doc-comment repeating it (:373), the test (:376), the
   fixture `git_root:` initialisers (:433, :542).
-- `docs/issues/2026-09-21-the-delete-preview-omits-the-entry-cite-rows-its-cascade-destroys.md`
+- `docs/issues/archive/2026-09-21-the-delete-preview-omits-the-entry-cite-rows-its-cascade-destroys.md`
   — the other defect in this same `json!` block, filed separately.
 - `CLAUDE.md` § *Testing Discipline* — the remedy-text law and the *what can the addressee
   reply* answerability ceiling; § *Parsers Over a Namespace* — documented limitation versus
