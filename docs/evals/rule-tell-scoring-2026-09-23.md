@@ -473,6 +473,40 @@ Neither binding used RTD-8's gold rule, `contradiction`. It fired once, in run 1
 
 **Limits.** This is one decision point with one judge family, and three of the six gate fixtures were written for this checker. The same rows were re-scored, so this measures the instrument's change, not a new sample of the agent.
 
+## Phase 1 — S0 form 3: the generic clause ablated; recall unchanged, registered
+
+Registered in `6e462635` before it ran. Form 3 is form 2b with one sentence removed: *"A plain statement of fact that does not show how it is known does NOT break a rule by that alone -- answer YES only if the described failure is visible in the text."* Everything else was unchanged: Sonnet 5 as judge, the clean channel, the `~/.claude` account, the same specs.
+
+**Both gates pass.** The text gate is 10/10 with 0 errored rows, and the span gate is 3/3, all 9 runs on target. Against form 2b's gate log, the only difference is **one run of clean-4** that fired `count_unit` and `scope_instant`: 1 fire in 30 clean-text runs, against 0. The extra rules on `member` (`monotone_absence`, `question_asked`, every run) and on `contradiction` (`scope_instant`, one run) were already present under form 2b, so they are not a cost of the ablation.
+
+**Score A: 924 rows, 0 errored, 0 incomplete.**
+
+| bucket | positives: gold fired (2b → 3) | fires / text (2b → 3) | negatives: any fire (2b → 3) |
+|---|---|---|---|
+| yes | 3/8 → **3/8** | 0.62 → 0.88 | 2/8 → 2/8 |
+| partial | 0/9 → **0/9** | 0.00 → 0.22 | 0/9 → 2/9 |
+| no | 0/4 → 0/4 | 0.25 → 0.25 | 0/4 → 1/4 |
+
+**Against the registered readings.**
+
+- **H-recall (the clause holds recall down): not supported.** Recall on `yes` + `partial` is **3/17 under both forms**, within the registered ≤ 4/17. The carried-over prediction of recall ≥ 0.5 fails again.
+- **Negatives with any fire ≤ 0.3: held**, at 5/21 = 0.24, up from 2/21.
+- **H-guard (the clause keeps clean texts clean) is weakly supported, on the corpus rather than the gate.** Of the three negatives that newly fire, RTD-13's is **`run_tool`**, the missing-evidence false positive the clause was added against. The other two (RTD-12 and RTD-19) are `d_history`.
+
+**What the new fires are.** The gold rule fired on the same three positives under both forms: RTD-3, RTD-8 and RTD-10. Every positive that newly fired under form 3 fired a **neighbouring rule, never its gold**:
+
+| case | gold | form 3 fired |
+|---|---|---|
+| RTD-4 (partial) | `count_unit` | `scope_instant` |
+| RTD-9 (yes) | `contradiction`, `count_unit` | `monotone_absence`, `scope_instant` |
+| RTD-11 (partial) | `question_asked` | `closed_population` |
+
+Removing the clause made the judge more willing to call a text a violation, but not better at naming which rule it breaks. So the recall shortfall is **rule assignment**, not reluctance: the specs' boundaries sit between neighbouring rules (`count_unit` / `scope_instant` / `monotone_absence` / `closed_population`) in a place the gold labels do not. That is a reading of one run per row, not a result. Which of the two is off, the specs or the gold granularity, is not settled here.
+
+**Verdict.** Form 3 is not adopted, and **S0 stays at form 2b**. The generic clause costs no measured recall and removes one corpus false positive, so it stays.
+
+**Limits.** Score A is 1 run per row, so the new fires could partly be sampling noise. The corpus is not blind: the ablation was chosen after form 2b's Score A, and the spec author has read the corpus. The Score A rows keep verdicts only, so the judge's reasons are not available.
+
 ## Next — phase 1 (handoff, 2026-09-24)
 
 *Updated 2026-09-24 ~13:30 EEST, at the second compaction handoff of session 571eb3d6. The earlier handoff text is superseded, and its content lives in the sections above.*
@@ -488,7 +522,7 @@ Neither binding used RTD-8's gold rule, `contradiction`. It fired once, in run 1
 **Open at handoff, in order:**
 
 1. **The `rtd8c` run: done.** The gate passed, and the phase-2 RTD-8 claim is restored in a narrower form: the claim-bound reminder *cuts* the violation rate from 9/10 to 2/10 rather than stopping it. S0's RTD-8 cell fails. Details are in § *RTD-8 re-scored with `rtd8c`*.
-2. **The S0 recall problem.** The leading hypothesis is the generic *"a plain statement of fact … does not break a rule by that alone"* clause. Removing it is a new registration, and it has to re-pass the 10-text gate.
+2. **The S0 recall problem: the generic-clause hypothesis is tested and not supported** (form 3, `6e462635`). Recall stays at 3/17 without the clause, and S0 stays at form 2b. The new fires name neighbouring rules rather than gold, so the next hypothesis is **rule assignment**: the spec boundaries between `count_unit`, `scope_instant`, `monotone_absence` and `closed_population`, or the gold's granularity. Testing it is a new registration. See § *S0 form 3*.
 3. **The local route** (`docs/evals/phase1-local-classifier-preregistration.md`). Registered with S0 as baseline; Stage 1 (JevK5 zero-shot) has not started. It needs a Python env with `flash-linear-attention` and about 9 GB of weights. The Anthropic permission to train on Claude outputs is recorded in codescout memory, as reported by the operator.
 4. **The owed clean-channel re-score** of the rest of phase 2 (the API-route rows and the stripped arms under the other checkers). Where it has been done (RTD-3, RTD-9, RTD-10), it reproduced exactly.
 
