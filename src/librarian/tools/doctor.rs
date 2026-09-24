@@ -5912,7 +5912,11 @@ fn scan_frontmatter_id_mismatches(conn: &rusqlite::Connection) -> Result<Vec<Vio
 /// check and pass green — so the discrimination is pinned separately by
 /// `the_discharge_marker_parser_discriminates`, over a fixture whose answers are known.
 fn caveat_is_discharged(caveat: &str) -> bool {
-    const MARKERS: [&str; 4] = ["CLEARED", "REFUTED", "RESOLVED", "WITHDRAWN"];
+    // `STANDING` is the one marker that settles nothing: the doubt is PERMANENT (no test can
+    // observe it, no action is planned), so it is not work, and this check is a worklist.
+    // Deliberately a separate word from the four verbs, so a reader of the record can tell a
+    // limit that was resolved from one that never can be.
+    const MARKERS: [&str; 5] = ["CLEARED", "REFUTED", "RESOLVED", "WITHDRAWN", "STANDING"];
     // The FIRST word only. `split_whitespace` rather than a regex because the rule is
     // POSITIONAL, not shaped: whatever follows the token — a date, a colon, a quoted former
     // value — is the author's prose and none of this function's business.
@@ -5924,6 +5928,31 @@ fn caveat_is_discharged(caveat: &str) -> bool {
     // and does not match.
     let token = first.trim_matches(|c: char| !c.is_ascii_alphabetic());
     MARKERS.contains(&token)
+}
+
+/// The home a `TRACKED` caveat routes its residual to: `None` when the caveat is not a
+/// `TRACKED` one, `Some(None)` when it is but names no usable artifact id, `Some(Some(id))`
+/// for a 16-hex id (quotes and trailing punctuation trimmed).
+///
+/// **Why a routing rather than a fifth discharge verb.** Most permanent caveats record
+/// unshipped WORK — a second half, a guard not built — and silencing them with a marker would
+/// delete the only surface still reporting it. `TRACKED` moves the work to an artifact whose
+/// own status is queryable, and the scan stays silent only while that home is open: close or
+/// archive it (a move re-keys the id, and the dead-artifact-id pre-commit check then forces
+/// the citation to follow) and this record reports again.
+fn tracked_home(caveat: &str) -> Option<Option<&str>> {
+    let mut words = caveat.split_whitespace();
+    let first = words
+        .next()?
+        .trim_matches(|c: char| !c.is_ascii_alphabetic());
+    if first != "TRACKED" {
+        return None;
+    }
+    let id = words
+        .next()
+        .map(|w| w.trim_matches(|c: char| !c.is_ascii_alphanumeric()))
+        .filter(|w| w.len() == 16 && w.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+    Some(id)
 }
 
 /// `terminal_status_with_caveat`: a bug file whose `status` is terminal *and* whose
@@ -5953,6 +5982,10 @@ fn caveat_is_discharged(caveat: &str) -> bool {
 /// the default picks. That is a worse report than an undifferentiated one. The check is
 /// report-only (open decision 1), so the cost of an over-broad list is a line in a scan
 /// nobody is gated on.
+///
+/// **Superseded in part since:** the corpus did grow a marker convention, now read by
+/// [`caveat_is_discharged`] (four settled verbs plus `STANDING`), and remaining work can be
+/// routed to an open artifact with [`tracked_home`] — silent only while that home is open.
 ///
 /// Reports only; there is no `fix=`. Discharging a caveat means establishing the thing it
 /// says was never established, which is work, not repair.
@@ -6014,6 +6047,46 @@ fn scan_terminal_status_with_caveat(
             continue;
         }
 
+        // A routed residual (`tracked_home`): silent while its home is open, reported with its
+        // own message once the home is closed, gone, or unnamed. Resolved before `scope.admit`
+        // for the same reason as a discharge — an open home silences in every scope.
+        let lost_home = match tracked_home(&caveat) {
+            None => None,
+            Some(None) => Some(
+                "its caveat opens with `TRACKED` but names no 16-hex artifact id, so the residual \
+                 it routes has no home"
+                    .to_string(),
+            ),
+            Some(Some(home)) => {
+                // Terminal for a HOME: the bug vocabulary's three plus the lifecycle states a
+                // tracker or plan ends in. An archived home has stopped carrying the work.
+                const CLOSED: [&str; 6] = [
+                    "fixed",
+                    "mitigated",
+                    "wontfix",
+                    "archived",
+                    "done",
+                    "superseded",
+                ];
+                let home_status: Option<Option<String>> = conn
+                    .query_row("SELECT status FROM artifact WHERE id = ?1", [home], |r| {
+                        r.get(0)
+                    })
+                    .optional()?;
+                match home_status {
+                    None => Some(format!(
+                        "its residual is `TRACKED` to `{home}`, which resolves to no artifact — \
+                         the home was moved or deleted, so the work lost it"
+                    )),
+                    Some(Some(s)) if CLOSED.contains(&s.as_str()) => Some(format!(
+                        "its residual is `TRACKED` to `{home}`, whose status is `{s}` — the \
+                         home closed, so the work lost it"
+                    )),
+                    _ => continue,
+                }
+            }
+        };
+
         if !scope.admit("terminal_status_with_caveat", id, abs_path) {
             continue;
         }
@@ -6031,13 +6104,24 @@ fn scan_terminal_status_with_caveat(
             "terminal_status_with_caveat",
             Some(id.clone()),
             abs_path.clone(),
-            format!(
-                "status is `{status}` (terminal) but `unverified:` is set, so the canonical \
-                 triage query — kind=\"bug\" with status in open/taken/investigating — cannot \
-                 reach this record. The caveat says: \"{shown}\". Either discharge it and \
-                 clear the field, or leave both: the record stays honest AND findable, which \
-                 is the whole point of the field. See get_guide(\"tracker-conventions\") § Bug files."
-            ),
+            match lost_home {
+                Some(problem) => format!(
+                    "status is `{status}` (terminal) and {problem}. Re-home it — `TRACKED \
+                     <id>` of an OPEN artifact carrying the work — or, if the work is done or \
+                     can never be, discharge the caveat with a leading CLEARED / REFUTED / \
+                     RESOLVED / WITHDRAWN, or STANDING. See get_guide(\"tracker-conventions\") \
+                     § Bug files."
+                ),
+                None => format!(
+                    "status is `{status}` (terminal) but `unverified:` is set, so the canonical \
+                     triage query — kind=\"bug\" with status in open/taken/investigating — cannot \
+                     reach this record. The caveat says: \"{shown}\". Either discharge it and \
+                     clear the field, or leave both: the record stays honest AND findable, which \
+                     is the whole point of the field. Remaining WORK can be routed with a leading \
+                     `TRACKED <id>` of an open artifact carrying it; a limit no action can settle \
+                     takes a leading STANDING. See get_guide(\"tracker-conventions\") § Bug files."
+                ),
+            },
         ));
     }
     Ok(out)
@@ -9784,6 +9868,174 @@ mod tests {
                 caveat_is_discharged(caveat),
                 expected,
                 "{why} — caveat: {caveat:?}"
+            );
+        }
+    }
+
+    /// `STANDING` joins the discharge verbs, and it is a different KIND of discharge: the
+    /// doubt was not settled, it is permanent — no test can observe it, no action is planned —
+    /// so it is not work, and this check is a worklist. The rows beside it pin that `TRACKED`
+    /// is NOT a plain discharge: it silences only through the home lookup in the scan, so the
+    /// bare parser must answer `false` for it.
+    #[test]
+    fn standing_discharges_and_tracked_does_not_on_its_own() {
+        for (caveat, expected, why) in [
+            (
+                "STANDING — flock(2) ignores access mode, so no Linux test can express it",
+                true,
+                "a permanent limit is not work",
+            ),
+            (
+                "TRACKED 0123456789abcdef — the second half",
+                false,
+                "a routed residual is silenced by its HOME, never by the word alone",
+            ),
+            (
+                "Standing caveat: no test",
+                false,
+                "lowercase is prose, not a declaration",
+            ),
+        ] {
+            assert_eq!(caveat_is_discharged(caveat), expected, "{why} — {caveat:?}");
+        }
+    }
+
+    /// What `TRACKED` names. Three answers, because the scan treats them differently: not a
+    /// TRACKED caveat at all; TRACKED with nothing usable after it (reported as malformed);
+    /// and TRACKED with a 16-hex artifact id, quoting and trailing punctuation trimmed.
+    #[test]
+    fn the_tracked_home_parser_discriminates() {
+        for (caveat, expected, why) in [
+            (
+                "TRACKED 0123456789abcdef — rest",
+                Some(Some("0123456789abcdef")),
+                "bare id",
+            ),
+            (
+                "TRACKED `0123456789abcdef`: rest",
+                Some(Some("0123456789abcdef")),
+                "quoted id",
+            ),
+            (
+                "TRACKED the work queue",
+                Some(None),
+                "no id is a malformed routing",
+            ),
+            ("TRACKED", Some(None), "nothing after the marker"),
+            (
+                "TRACKED 0123456789ABCDEF",
+                Some(None),
+                "ids are lowercase hex",
+            ),
+            (
+                "TRACKED 0123456789abcde",
+                Some(None),
+                "fifteen hex characters is not an id",
+            ),
+            ("No regression test.", None, "not a TRACKED caveat"),
+            ("Work TRACKED 0123456789abcdef", None, "not leading"),
+        ] {
+            assert_eq!(tracked_home(caveat), expected, "{why} — {caveat:?}");
+        }
+    }
+
+    /// A `TRACKED` caveat is silent only while its home exists and is not terminal — the
+    /// routed residual stays reachable from the home's own status, and the moment the home
+    /// closes or vanishes the residual has lost it and this record reports again.
+    ///
+    /// Four records, one per outcome, so each branch is exercised by an input every other
+    /// branch admits: an open home (silent), a closed home, a missing home, a malformed
+    /// routing (all three reported). `standing` is the control that the new plain marker
+    /// silences through the same scan.
+    #[tokio::test]
+    async fn terminal_status_with_caveat_honours_a_tracked_home_only_while_it_is_open() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        // Homes. Their ids are their names — seed_bug keys the row on `name`.
+        seed_bug(&cat, tmp.path(), "aaaaaaaaaaaaaaaa", "open", None);
+        seed_bug(&cat, tmp.path(), "bbbbbbbbbbbbbbbb", "fixed", None);
+        seed_bug(
+            &cat,
+            tmp.path(),
+            "r-open-home",
+            "fixed",
+            Some("TRACKED aaaaaaaaaaaaaaaa — the progress surface"),
+        );
+        seed_bug(
+            &cat,
+            tmp.path(),
+            "r-closed-home",
+            "fixed",
+            Some("TRACKED bbbbbbbbbbbbbbbb — the second half"),
+        );
+        seed_bug(
+            &cat,
+            tmp.path(),
+            "r-no-home",
+            "fixed",
+            Some("TRACKED cccccccccccccccc — nowhere"),
+        );
+        seed_bug(
+            &cat,
+            tmp.path(),
+            "r-malformed",
+            "fixed",
+            Some("TRACKED in the work queue"),
+        );
+        seed_bug(
+            &cat,
+            tmp.path(),
+            "r-standing",
+            "fixed",
+            Some("STANDING — no test can observe it"),
+        );
+
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_terminal_status_with_caveat(&mut ds, &cat.conn).unwrap();
+        let reported: Vec<&str> = v
+            .iter()
+            .map(|x| {
+                std::path::Path::new(&x.path)
+                    .file_stem()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(
+            reported,
+            vec!["r-closed-home", "r-malformed", "r-no-home"],
+            "only the routings whose home is gone, closed or unnamed report: {v:#?}"
+        );
+        let msg = |stem: &str| {
+            v.iter()
+                .find(|x| x.path.contains(stem))
+                .map(|x| x.detail.clone())
+                .unwrap()
+        };
+        assert!(
+            msg("r-closed-home").contains("bbbbbbbbbbbbbbbb")
+                && msg("r-closed-home").contains("fixed"),
+            "a closed home is named with its status: {}",
+            msg("r-closed-home")
+        );
+        assert!(
+            msg("r-no-home").contains("cccccccccccccccc"),
+            "a missing home is named: {}",
+            msg("r-no-home")
+        );
+        // The remedy, as SHAPE: a lost home must send the reader somewhere they can act —
+        // re-home it, or discharge it — not merely say it is lost.
+        for stem in ["r-closed-home", "r-no-home", "r-malformed"] {
+            let m = msg(stem);
+            assert!(
+                m.contains("Re-home") && m.contains("STANDING"),
+                "{stem}: the message must name both next moves: {m}"
             );
         }
     }

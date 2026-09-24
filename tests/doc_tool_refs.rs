@@ -838,7 +838,9 @@ fn a_documented_tool_parameter_exists_on_that_tool() {
 /// Surfaced 2026-09-19 when `stale_tool_call_findings` stopped skipping every single-word
 /// (no-underscore) citation — see `docs/issues/2026-09-02-both-doc-citation-guards-skip-
 /// half-the-corpus-without-saying-so.md` § Fix: *"decide what to do with the unrecognised
-/// bucket… its size is unknown until measured."* Measured here: 4, all verified by hand.
+/// bucket… its size is unknown until measured."* Measured here: 4, all verified by hand; 3
+/// remain, since the tracker-conventions `find(…)` mention was rewritten into a real
+/// `doc(action="find", …)` call on 2026-09-24 rather than re-keyed to its moved line.
 const ANCHOR_FALSE_POSITIVES: &[(&str, usize, &str)] = &[
     // `for(i=3;i<=n;i++) if(a[i]~/^[A-Z]+$/) print a[i]` — an awk one-liner quoted verbatim
     // as a worked example. `for` is awk syntax, not a codescout tool.
@@ -857,10 +859,6 @@ const ANCHOR_FALSE_POSITIVES: &[(&str, usize, &str)] = &[
     // docs/issues/2026-09-21-docs-commit-stales-a-line-keyed-exemption.md; until that ships,
     // any PROBES.md row inserted above line 203 re-arms this.
     ("docs/PROBES.md", 203, "sorted"),
-    // "`find(kind=\"bug\", status=\"open\")` — the triage query" — prose shorthand for
-    // `doc(action="find", …)`, using the ACTION name as if it were the tool name. No tool
-    // is named "find".
-    ("src/prompts/guides/tracker-conventions.md", 89, "find"),
 ];
 
 /// Findings for [`a_documented_call_names_a_live_tool`], deduplicated by `(file, line, tool)` —

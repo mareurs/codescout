@@ -84,9 +84,19 @@ use a marker to record an ESCALATION** — a caveat that got worse must keep rep
 is why `MEASURED` is deliberately not one. An unmarked caveat behaves exactly as it always
 has, so nothing written before this convention changes meaning.
 
+**Two more first words, and they are opposites.** `STANDING` marks a limit NO action can
+settle — a property no test can observe, a cause that will never be established — and
+silences the record like the four verbs: this check is a worklist, and a permanent limit is
+not work. `TRACKED <16-hex id>` is for remaining WORK — a second half, a guard not built:
+move the work into an artifact whose own status a query reads (usually an open bug file) and
+cite it, `unverified: 'TRACKED <id of the open bug> — the progress surface.'` `doctor` stays
+silent only while that artifact exists and is not terminal; when it closes, or a move re-keys
+it, the record reports again, saying the work lost its home. **Never write `STANDING` over
+work** — it deletes the only surface still reporting it.
+
 Why it exists, measured 2026-08-19: of 16 terminal-but-unarchived bug files, **14 stated
 their blocker in prose** and none of it was reachable by a query. That is how
-`find(kind="bug", status="open")` — the triage query this guide and the activation
+`doc(action="find", kind="bug", status="open")` — the triage query this guide and the activation
 bootstrap both prescribe — came to hide a `fixed` record whose own body read *"Tests
 added: None, and this is the gap worth naming rather than excusing"* and *"does not
 prevent recurrence"*, for a defect class CLAUDE.md describes as redirecting every

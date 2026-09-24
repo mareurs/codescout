@@ -94,6 +94,12 @@ Optional `unverified:` — the caveat, made queryable:
   the lock" is prose, not a declaration), and a marker is for a discharge
   only — a caveat that got WORSE must keep reporting, which is why
   MEASURED is not a marker. An unmarked caveat behaves exactly as before.
+  Two more first words, and they are opposites: STANDING for a limit no
+  action can settle (silenced — it is not work), and TRACKED <16-hex id>
+  for remaining WORK moved into an open artifact, e.g.
+    unverified: 'TRACKED <id of the open bug> — the progress surface.'
+  which stays silent only while that artifact is open. Never write
+  STANDING over work.
   Why it exists: measured 2026-08-19, 14 of 16 terminal-but-unarchived bug
   files stated their blocker in prose, where no query reads. That is how
   find(kind="bug", status="open") came to miss a `fixed` record whose own
