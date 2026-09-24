@@ -86,8 +86,20 @@ entry_high_water_W: 3
 
 ## Promotion status
 
-**Audited:** <YYYY-MM-DD>, against the target surface itself — opened and read,
+**Audited:** 2026-09-23, against the target surface itself — opened and read,
 not recalled.
+
+- **FIRED, and applied 2026-09-23** — the `run_command`-vs-native-`Bash` eval
+  that `CLAUDE.md` § Companion Plugin: codescout-companion called "in flight"
+  (framing this file's `F-1` first surfaced) concluded **2026-09-20**. Decision:
+  add `Bash`, `Write`, `Edit` to `permissions.deny` in `settings.json` for all
+  three Claude Code profiles (`~/.claude`, `~/.claude-sdd`, `~/.claude-kat`),
+  implemented in `claude-plugins` — a harness-level, unconditional deny
+  upstream of and independent from `pre-tool-guard.mjs`. `CLAUDE.md` § Companion
+  Plugin: codescout-companion was rewritten in the same change that added this
+  line, to state the verdict in place of "an eval ... is in flight" — quote and
+  location: the paragraph beginning "**Shell — historical note, superseded
+  below.**", `CLAUDE.md` § *Companion Plugin: codescout-companion*.
 
 One line per `W-N` (and any `F-N` with a `Fix idea` bound for a permanent
 surface). Check the **target**, not the entry: a `Promote-when` that fired is
