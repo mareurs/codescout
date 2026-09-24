@@ -298,11 +298,11 @@ impl Tool for Artifact {
                 },
                 "to": {
                     "type": "string",
-                    "description": "rekey_prefix: the new prefix, e.g. 'SRI'. Must be free — check link_scan's prefix_conflicts. Max 3 uppercase ASCII: the token grammar is [A-Z]{1,3}-\\d+, so a longer prefix is honoured by the allocator but INVISIBLE to the citation scanner."
+                    "description": "rekey_prefix: the new prefix, e.g. 'SRI'. Must be free and 1-3 uppercase letters (the token grammar is [A-Z]{1,3}-\\d+); either failure is refused."
                 },
                 "id_prefix": {
                     "type": "string",
-                    "description": "append_entry: id prefix — the assigned id is `<id_prefix>-<next integer>`, computed from the live max across both existing params entries and ids the markdown body already claims (headings / index rows), so a body that ran ahead of params cannot be reissued. Response carries a `warning` when params lags the body."
+                    "description": "append_entry: id prefix — the assigned id is `<id_prefix>-<next integer>`, computed from the live max across both existing params entries and ids the markdown body already claims (headings / index rows), so a body that ran ahead of params cannot be reissued. 1-3 uppercase letters, else refused. Response carries a `warning` when params lags the body."
                 },
                 "entry": {
                     "type": "object",

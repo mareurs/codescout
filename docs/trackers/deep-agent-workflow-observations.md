@@ -42,7 +42,7 @@ One case may appear in both ledgers; link it and treat it as one grouped inciden
 | Task / authority / substrate | Objective; allowed work as actually instructed; workspace, base revision and dirty/worktree state; target paths |
 | Pre-action evidence | Source spans/revisions or sanitized observations available then; constraints and uncertainty; later outcome kept separate |
 | Initial next action / completion check | Intended next action and the independently observable check needed for this task; do not invent a detailed plan after execution |
-| Trajectory | Ordered actual tools/actions with safe args or references, raw result slices/exit states; failed attempts and guidance; linked DCTX context timing; gaps explicitly marked |
+| Trajectory | Ordered actual tools/actions with safe args or references, raw result slices/exit states; failed attempts and guidance; linked DCX context timing; gaps explicitly marked |
 | Effects / recovery | Diff or artifact revisions, test/probe command and observed result, retries, intervention, cancellation/concurrency, rollback attempted/result or not needed |
 | Outcome / basis | `good`, `bad`, `mixed`, or `unknown`; `verified-complete`, `partial`, `blocked`, `abandoned`, or `unknown`; name what the check actually established |
 | Delegation candidate | Candidate bounded workflow, deterministic alternative, missing inputs/checks; proposal only, never a measured autonomous success |
@@ -56,7 +56,7 @@ Freeze pre-action facts and append dated outcome/correction paragraphs. Do not o
 
 DCS entries are **coverage records, not workflow episodes**. At session end/handoff, the coordinating collector writes one receipt, including a zero/unknown receipt when there was no selected episode. A resumed session updates the same receipt/capture key rather than counting another session.
 
-Record: session/principal/collector identity (or unknown); UTC observed start/end; workspace; coverage `complete-observed-session` or `partial`; DCTX routine/enrichment IDs and DWF routine/enrichment IDs; for each missing routine sample, `none-observed`, `missed-capture`, or `unknown`; native/delegated/unobserved gaps; collection overhead and how measured; unresolved pending entries. `complete-observed-session` means the collector covered its stated session interval, not all machine activity. Do not invent an eligible-opportunity total without a contemporaneous tally. No DCS receipt is unknown participation, not zero failures. usage.db session IDs are a separate recorded population and cannot establish complete coverage of host-native activity.
+Record: session/principal/collector identity (or unknown); UTC observed start/end; workspace; coverage `complete-observed-session` or `partial`; DCX routine/enrichment IDs and DWF routine/enrichment IDs; for each missing routine sample, `none-observed`, `missed-capture`, or `unknown`; native/delegated/unobserved gaps; collection overhead and how measured; unresolved pending entries. `complete-observed-session` means the collector covered its stated session interval, not all machine activity. Do not invent an eligible-opportunity total without a contemporaneous tally. No DCS receipt is unknown participation, not zero failures. usage.db session IDs are a separate recorded population and cannot establish complete coverage of host-native activity.
 
 These receipts make sampling compliance inspectable. Day-7/day-14 analysis reports participation/missingness first and never treats DCS rows as good/bad workflow cases.
 
@@ -79,7 +79,7 @@ For a session receipt use the same call with `id_prefix="DCS"`, a title identify
 
 ## Review at day 7 and day 14
 
-Use the frozen baseline query and declared UTC bounds for new usage aggregates; report schema/build/workload changes and retention limits. Then enumerate actual DWF/DCTX episodes and DCS receipts by record type, sampling mode, capture mode and missingness. Adjudicate routine and enriched cases separately against their recorded checks. Inspect ordinary completions, unnecessary intervention, failed checks, effective recovery, and incomplete outcomes. Group linked records before any evaluation split. Identify a concrete workflow with usable initial evidence and a completion check; if those are absent, improve capture or extend deliberately. Do not start training or implementation merely because two weeks elapsed.
+Use the frozen baseline query and declared UTC bounds for new usage aggregates; report schema/build/workload changes and retention limits. Then enumerate actual DWF/DCX episodes and DCS receipts by record type, sampling mode, capture mode and missingness. Adjudicate routine and enriched cases separately against their recorded checks. Inspect ordinary completions, unnecessary intervention, failed checks, effective recovery, and incomplete outcomes. Group linked records before any evaluation split. Identify a concrete workflow with usable initial evidence and a completion check; if those are absent, improve capture or extend deliberately. Do not start training or implementation merely because two weeks elapsed.
 
 ## Index
 
@@ -121,7 +121,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 
 **Routine workflow sample:** unknown — no contemporaneous selection under this protocol before setup.
 
-**Historical seeds only:** DCTX-1 and DWF-1; excluded from routine denominators.
+**Historical seeds only:** DCX-1 and DWF-1; excluded from routine denominators.
 
 **Observed work:** reproduced frozen usage aggregates and created collection ledgers and project rules. See [baseline](../research/2026-09-18-deep-agent-observation-baseline.md).
 
@@ -146,7 +146,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 
 **Initial next action / completion check:** next action — receive five hand-backs and integrate. Independently observable check, fixed **before** the outcome: (1) `./scripts/gate.sh` green at the integrated tree, read as its four printed exit codes rather than as an absence of output — the `;`-chained form ends in `echo`, so its shell status is 0 whatever happened; (2) each agent's claimed new test present **by name** in the DEFAULT lane's output, since `--no-default-features` compiles no librarian code and a lean green there is silence, not a pass; (3) `git show --stat <sha>` per commit showing only that agent's declared paths — a clean `git status --short` is explicitly **not** accepted as evidence of exclusion, being equally what inclusion produces.
 
-**Trajectory:** five concurrent `Agent` dispatches issued in one turn after the scouting above. Ordered per-agent trajectories not yet observed; to be appended on hand-back. Gaps marked rather than inferred. No linked DCTX entry — no separate context-timing decision was selected for this episode.
+**Trajectory:** five concurrent `Agent` dispatches issued in one turn after the scouting above. Ordered per-agent trajectories not yet observed; to be appended on hand-back. Gaps marked rather than inferred. No linked DCX entry — no separate context-timing decision was selected for this episode.
 
 **Effects / recovery:** none observed at capture. Five bug files moved `open` → `taken` with `claimed_by` set to this session id, **verified at the bytes** by grepping the written frontmatter rather than trusting five `updated: true` responses — an earlier call in this same session returned `updated: true` for eleven files while writing a wrong deletion sentinel into all of them.
 

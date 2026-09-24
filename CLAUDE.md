@@ -420,7 +420,7 @@ harness does what you asked in a way that reads as something else, and the failu
 
 **Until 2026-10-02 00:00 UTC (review 25 September), capture evidence before implementation.**
 In each coordinating session, select the first eligible context decision in
-[DCTX](docs/trackers/deep-agent-context-observations.md) and the first substantive
+[DCX](docs/trackers/deep-agent-context-observations.md) and the first substantive
 multi-step investigation, test, or fix in
 [DWF](docs/trackers/deep-agent-workflow-observations.md), regardless of outcome.
 Use their atomic `doc(action="append_entry")` recipes. Before the dependent action,

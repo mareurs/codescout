@@ -58,9 +58,10 @@ WHAT EACH PREDICATE LITERALLY COUNTS
     - `def_re` — what `link_scan` will treat as a DEFINITION of the token, and therefore
       what a citation of it can resolve to: a fence-aware ATX heading whose raw text
       matches `^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+` (`link_scan/extract.rs:319-322`).
-      `[A-Z]{1,3}` is literal: a FOUR-letter prefix such as `DCTX` is invisible to this
+      `[A-Z]{1,3}` is literal: a FOUR-letter prefix is invisible to this
       column by construction, always, and reads as total loss
-      (filed: `219027f500266ee4`). A heading with no dash-and-title
+      (filed: `219027f500266ee4`; every write path refuses one since 2026-09-24,
+      so only a hand-written declaration can still produce it). A heading with no dash-and-title
       (`## A-9 Addendum`) defines nothing. A bold- or link-wrapped token
       (`## **F-3** — a`) does not match either, because `def_re` is applied to the
       heading's raw text.

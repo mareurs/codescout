@@ -2229,6 +2229,49 @@ text
         .expect("the owner re-declaring its own prefix must pass");
     }
 
+    /// `doc(update)` refuses a patch declaring a prefix the token grammar cannot express —
+    /// its own SITE, since a mutation at `create` says nothing about this call. Free prefix,
+    /// so the ownership refusal cannot be what fires.
+    #[tokio::test]
+    async fn update_refuses_declaring_a_prefix_that_cannot_be_cited() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let made = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "l.md", "kind": "tracker", "title": "T", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = made["id"].as_str().unwrap().to_string();
+        let abs = artifact::get(&ctx.catalog.lock(), &id)
+            .unwrap()
+            .unwrap()
+            .abs_path;
+        let before = std::fs::read_to_string(&abs).unwrap();
+
+        let err = call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"extra": {"entry_prefix": "DCTX"}}}),
+        )
+        .await
+        .expect_err("an uncitable prefix must be refused at update");
+        assert!(err.to_string().contains("cannot be cited"), "got: {err}");
+        assert_eq!(
+            std::fs::read_to_string(&abs).unwrap(),
+            before,
+            "refused before any write"
+        );
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"extra": {"entry_prefix": "DCX"}}}),
+        )
+        .await
+        .expect("a free three-letter prefix must be accepted");
+    }
+
     /// The second guarded SITE, and it gets its own test for the reason CLAUDE.md
     /// § *Testing Discipline* gives: a mutation answers a question about one line, so
     /// `create`'s kill says nothing about this call. Measured before the guard existed

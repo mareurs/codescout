@@ -335,15 +335,26 @@ pub(crate) fn declared_entry_prefixes(text: &str) -> Vec<String> {
 }
 
 /// One declared prefix, unquoted and validated. `None` for anything that is not a
-/// usable namespace — empty after trimming, or carrying characters the entry-token
-/// grammar (`\b[A-Z]{1,3}-\d+\b`) cannot represent.
+/// usable namespace — empty after trimming, or failing [`is_citable_entry_prefix`].
 ///
 /// The validation is load-bearing rather than defensive: an empty prefix would make
 /// every numbered heading in the file read as an entry.
 fn clean_prefix(raw: &str) -> Option<String> {
     let p = strip_matching_quotes(raw.trim()).trim();
-    let ok = !p.is_empty() && p.len() <= 3 && p.bytes().all(|b| b.is_ascii_uppercase());
-    ok.then(|| p.to_string())
+    is_citable_entry_prefix(p).then(|| p.to_string())
+}
+
+/// `true` for a prefix the entry-token grammar (`\b[A-Z]{1,3}-\d+\b`) can express: one to
+/// three ASCII uppercase letters.
+///
+/// The ONE definition of that bound outside the regexes themselves, shared by this guard's
+/// reader, the allocator's reader, and every write path that can declare or allocate under
+/// a prefix. It used to live only here, while the allocator accepted any string — so
+/// `DCTX` allocated, committed its high-water mark and wrote conformant headings under a
+/// namespace no citation could address and no scan reported
+/// (docs/issues/2026-09-21-a-four-letter-entry-prefix-allocates-but-cannot-be-cited.md).
+pub(crate) fn is_citable_entry_prefix(p: &str) -> bool {
+    !p.is_empty() && p.len() <= 3 && p.bytes().all(|b| b.is_ascii_uppercase())
 }
 
 /// `true` for a librarian id — exactly 16 lowercase hex characters — accepting

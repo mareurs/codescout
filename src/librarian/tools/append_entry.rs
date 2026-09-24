@@ -63,6 +63,27 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "append_entry: `entry` must be a JSON object",
         ));
     }
+    // Above the branch, so the params path and the prose path refuse alike: the params
+    // allocator checks no declaration at all, so this is the only place both reach. A
+    // ledger can still carry such a prefix — hand-written, or declared before the write
+    // paths refused it — and allocating under it is exactly the uncitable-id defect.
+    if !crate::util::librarian_guard::is_citable_entry_prefix(&a.id_prefix) {
+        return Err(LibrarianRecoverableError::with_hint(
+            format!(
+                "append_entry: `{}` cannot be cited — an entry token is `[A-Z]{{1,3}}-<n>`, so \
+                 an id under it would be written but no citation could address it",
+                a.id_prefix
+            ),
+            format!(
+                "Use one to three uppercase letters. If this ledger already declares `{p}`, \
+                 move the whole namespace first: doc(action=\"rekey_prefix\", id=\"{id}\", \
+                 from=\"{p}\", to=\"<one to three letters>\") — a dry run unless force=true. \
+                 Nothing has been allocated.",
+                p = a.id_prefix,
+                id = a.id
+            ),
+        ));
+    }
     // SECTION CONSTRUCTION, HOISTED ABOVE THE BRANCH — and the hoist is the fix, not a
     // tidy-up. These three steps used to live INSIDE the prose branch, which is this
     // defect stated as code: the routine that honours `title`/`body`/`anchor_heading`/
@@ -587,6 +608,43 @@ mod tests {
             "F-4 was already adrift and F-5 was just created; F-1..F-3 are rendered"
         );
         assert!(result["snapshot_hint"].as_str().unwrap().contains("git"));
+    }
+
+    /// `append_entry` refuses an `id_prefix` the token grammar cannot express. The PARAMS
+    /// path is the load-bearing one: its allocator checks no declaration at all, so nothing
+    /// but this refusal stands between `DCTX` and a committed uncitable id. On the prose path
+    /// the allocator's own "not declared" refusal would shadow it, and a test there would
+    /// stay green with this check deleted.
+    ///
+    /// The `DCX` control proves the fixture is otherwise admissible, so the refusal is the
+    /// prefix's and not the ledger's.
+    #[tokio::test]
+    async fn append_refuses_an_id_prefix_that_cannot_be_cited() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        seed_with_body(&ctx, "art1", &path, "# Q\n", &[]);
+
+        let err = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "DCTX", "entry": {"status": "fail"}}),
+        )
+        .await
+        .expect_err("an uncitable id_prefix must be refused on the params path");
+        assert!(err.to_string().contains("cannot be cited"), "got: {err}");
+
+        let ok = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "DCX", "entry": {"status": "fail"}}),
+        )
+        .await
+        .expect("a three-letter prefix on the same ledger must allocate");
+        assert_eq!(
+            ok["id"], "DCX-1",
+            "and nothing was allocated under the refused one"
+        );
     }
 
     /// docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md

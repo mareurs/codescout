@@ -81,6 +81,11 @@ pub struct RekeyReport {
     /// not: `link_scan` binds a citable token to a `## <ID> — <title>` heading, and everything
     /// else on the page is a citation of it.
     pub body_lines_rewritten: usize,
+    /// Frontmatter lines rewritten: this ledger's own member of `entry_prefix`, and the key of
+    /// its committed `entry_high_water_<PREFIX>`. Both are the allocator's inputs, so a rekey
+    /// that moved the body without them left the ledger declaring the old prefix under
+    /// headings that define the new one.
+    pub frontmatter_lines_rewritten: usize,
     /// Whether the COMMITTED sidecar under `docs/augmentations/` was republished. `false` is
     /// the normal case for a ledger that declares none — but `false` on a ledger that DOES
     /// declare one means the two halves have parted, which is why the apply path refuses
@@ -391,6 +396,26 @@ fn rekey_body(
 
     let (frontmatter, body) = crate::librarian::frontmatter::parse(&text)?;
 
+    // Refused in `Preview` as well — the check precedes the mode test below. The catalog
+    // reservation refusal cannot see this case on a fresh clone, which holds no reservation.
+    if let Some(fm) = frontmatter.as_ref() {
+        let declares_target = augmentation::raw_declared_prefixes(Some(fm))
+            .iter()
+            .any(|p| p == to_prefix)
+            || fm
+                .extra
+                .contains_key(&augmentation::entry_high_water_key(to_prefix));
+        if declares_target {
+            return Err(LibrarianRecoverableError::with_hint(
+                format!("rekey_prefix: `{abs_path}` already declares `{to_prefix}`"),
+                "Moving its declaration onto a prefix it already lists would name the prefix \
+                 twice and merge two counters into one. Pick a target this ledger does not \
+                 declare. Nothing has been written."
+                    .to_string(),
+            ));
+        }
+    }
+
     if !crate::util::markdown_fence::fences_balanced(body.lines()) {
         return Err(LibrarianRecoverableError::with_hint(
             format!("rekey_prefix: `{abs_path}` leaves a code fence unclosed"),
@@ -422,14 +447,18 @@ fn rekey_body(
         out.pop();
     }
 
-    if report.body_lines_rewritten == 0 || mode == RekeyMode::Preview {
+    let (with_frontmatter, fm_changed) = rekey_frontmatter(&text, from_prefix, to_prefix);
+    report.frontmatter_lines_rewritten = fm_changed;
+
+    if (report.body_lines_rewritten == 0 && fm_changed == 0) || mode == RekeyMode::Preview {
         return Ok(());
     }
 
-    // `replace_body` preserves the frontmatter block byte-for-byte and returns `None` when
-    // there is none to preserve — in which case the body IS the document.
+    // `replace_body` preserves the frontmatter block byte-for-byte — here the block
+    // `rekey_frontmatter` just rewrote — and returns `None` when there is none to preserve,
+    // in which case the body IS the document.
     let new_doc = if frontmatter.is_some() {
-        crate::librarian::frontmatter::replace_body(&text, &out).ok_or_else(|| {
+        crate::librarian::frontmatter::replace_body(&with_frontmatter, &out).ok_or_else(|| {
             LibrarianRecoverableError::new(format!(
                 "rekey_prefix: `{abs_path}` parsed as having frontmatter but its block could \
                  not be preserved"
@@ -440,6 +469,80 @@ fn rekey_body(
     };
     std::fs::write(&abs_path, new_doc)?;
     Ok(())
+}
+
+/// `doc` with `from` moved to `to` in its frontmatter: the member of `entry_prefix`, and the
+/// key of `entry_high_water_<from>`. Returns the document and how many lines changed.
+///
+/// These are the allocator's two committed inputs, and the body pass cannot reach them —
+/// before this, a rekey left a ledger declaring `DCTX` under headings defining `DCX-1`, so
+/// the allocator issued the old prefix and refused the new one.
+///
+/// Line-surgical rather than a serde round-trip for BL-34's reason: re-emitting the block
+/// reformats a hand-authored file. A block sequence ends at the first line that is not a
+/// `- ` item, the same rule the guard's reader uses
+/// (`crate::util::librarian_guard::declared_entry_prefixes`), so a sibling key after the
+/// list is never read as a member.
+fn rekey_frontmatter(doc: &str, from: &str, to: &str) -> (String, usize) {
+    let Some(rest) = doc
+        .strip_prefix("---\n")
+        .or_else(|| doc.strip_prefix("---\r\n"))
+    else {
+        return (doc.to_string(), 0);
+    };
+    let hw_from = format!("{}:", augmentation::entry_high_water_key(from));
+    let hw_to = format!("{}:", augmentation::entry_high_water_key(to));
+    let mut out = String::with_capacity(doc.len());
+    out.push_str(&doc[..doc.len() - rest.len()]);
+    let mut changed = 0;
+    let mut in_sequence = false;
+    let mut closed = false;
+    for line in rest.split_inclusive('\n') {
+        let bare = line.trim_end_matches(['\n', '\r']);
+        if closed || bare == "---" {
+            closed = true;
+            out.push_str(line);
+            continue;
+        }
+        let new = if let Some(val) = bare.strip_prefix("entry_prefix:") {
+            in_sequence = val.trim().is_empty();
+            format!("entry_prefix:{}", replace_token(val, from, to))
+        } else if in_sequence && bare.trim_start().starts_with("- ") {
+            replace_token(bare, from, to)
+        } else {
+            in_sequence = false;
+            match bare.strip_prefix(hw_from.as_str()) {
+                Some(value) => format!("{hw_to}{value}"),
+                None => bare.to_string(),
+            }
+        };
+        if new != bare {
+            changed += 1;
+        }
+        out.push_str(&new);
+        out.push_str(&line[bare.len()..]);
+    }
+    (out, changed)
+}
+
+/// `s` with every whole-token occurrence of `from` replaced by `to`, a token being a maximal
+/// run of ASCII alphanumerics and `_` — so renaming `T` never touches `TX`, and quotes,
+/// brackets and commas around a member survive as written.
+fn replace_token(s: &str, from: &str, to: &str) -> String {
+    let is_word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let mut out = String::with_capacity(s.len());
+    let mut word = String::new();
+    for c in s.chars() {
+        if is_word(c) {
+            word.push(c);
+            continue;
+        }
+        out.push_str(if word == from { to } else { &word });
+        word.clear();
+        out.push(c);
+    }
+    out.push_str(if word == from { to } else { &word });
+    out
 }
 
 /// Move every `<from_prefix>-N` entry id owned by `artifact_id` to `<to_prefix>-N`, across the
@@ -962,13 +1065,13 @@ mod tests {
         cite(&cat, "session-log", "F-9", "abcdef0123456789", "write");
         cite(&cat, "session-log", "W-4", "abcdef0123456789", "write");
 
-        let report = rekey_prefix_rows(&mut cat, "led", "F", "FRIC", RekeyMode::Apply).unwrap();
+        let report = rekey_prefix_rows(&mut cat, "led", "F", "FRX", RekeyMode::Apply).unwrap();
 
         assert!(report.reservation_moved);
         assert_eq!(report.durable_outbound_repointed, 1, "only the F row moves");
         assert_eq!(
             locals(&cat, "session-log"),
-            vec!["FRIC-9".to_string(), "W-4".to_string()]
+            vec!["FRX-9".to_string(), "W-4".to_string()]
         );
         let w: i64 = cat
             .conn
@@ -982,7 +1085,7 @@ mod tests {
         let f: i64 = cat
             .conn
             .query_row(
-                "SELECT max_allocated FROM entry_reservation WHERE artifact_id='led' AND prefix='FRIC'",
+                "SELECT max_allocated FROM entry_reservation WHERE artifact_id='led' AND prefix='FRX'",
                 [],
                 |r| r.get(0),
             )
@@ -1037,6 +1140,32 @@ mod tests {
                 .contains("## T-1 — mine"),
             "refused means the ledger's headings did not move"
         );
+    }
+
+    /// `rekey_prefix` onto a prefix the token grammar cannot express is refused, in `Preview`
+    /// too — the rename that REPAIRS an uncitable ledger must not be able to create one. The
+    /// target is free here, so the ownership refusal above cannot be what fires.
+    #[test]
+    fn rekeying_onto_an_uncitable_prefix_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let ledger = tmp.path().join("ledger.md");
+        std::fs::write(&ledger, "---\nentry_prefix: T\n---\n\n## T-1 — mine\n").unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "led", ledger.to_str().unwrap(), "my-ledger");
+
+        for mode in [RekeyMode::Preview, RekeyMode::Apply] {
+            let err = rekey_prefix_rows(&mut cat, "led", "T", "DCTX", mode).unwrap_err();
+            assert!(err.to_string().contains("cannot be cited"), "got: {err}");
+        }
+        assert!(
+            std::fs::read_to_string(&ledger)
+                .unwrap()
+                .contains("## T-1 — mine"),
+            "refused means the ledger's headings did not move"
+        );
+        rekey_prefix_rows(&mut cat, "led", "T", "DCX", RekeyMode::Preview)
+            .expect("a free three-letter target must preview cleanly");
     }
 
     /// A rekey onto a prefix this ledger already reserves would discard one of the two
@@ -1575,6 +1704,125 @@ mod tests {
             locals(&cat, "my-ledger"),
             vec!["T-1".to_string()],
             "and so must the citations"
+        );
+    }
+
+    /// The declaration and the committed high-water mark live in FRONTMATTER, which the body
+    /// pass cannot reach — and moving the body without them split a live ledger: its heading
+    /// read `DCX-1` while `entry_prefix` still read `DCTX`, so the allocator issued the OLD
+    /// prefix to the next caller and refused the new one (measured 2026-09-24 on
+    /// `docs/trackers/deep-agent-context-observations.md`).
+    ///
+    /// Every YAML form, because the declaration's form is an accident of whichever writer
+    /// last emitted the file. The `[T, TX]` case is load-bearing: `T` is a leading substring
+    /// of its sibling and of the sibling's high-water key, so a substring replace passes the
+    /// other three cases and corrupts this one.
+    #[test]
+    fn the_declaration_and_high_water_mark_move_with_the_body() {
+        for (label, from, to, decl, want_decl, untouched) in [
+            (
+                "block sequence",
+                "DCTX",
+                "DCX",
+                "entry_prefix:\n- DCTX\n",
+                "entry_prefix:\n- DCX\n",
+                "",
+            ),
+            (
+                "quoted scalar",
+                "DCTX",
+                "DCX",
+                "entry_prefix: 'DCTX'\n",
+                "entry_prefix: 'DCX'\n",
+                "",
+            ),
+            (
+                "flow list beside a sibling that is a longer prefix",
+                "T",
+                "SRI",
+                "entry_prefix: [T, TX]\nentry_high_water_TX: 5\n",
+                "entry_prefix: [SRI, TX]\n",
+                "entry_high_water_TX: 5\n",
+            ),
+        ] {
+            let mut cat = Catalog::open_in_memory().unwrap();
+            let doc = format!(
+                "---\nkind: tracker\n{decl}entry_high_water_{from}: 1\n---\n\n## {from}-1 — first\n"
+            );
+            let l = led(&cat, "led", "my-ledger", &doc);
+
+            rekey_prefix_rows(&mut cat, "led", from, to, RekeyMode::Apply).unwrap();
+
+            let out = std::fs::read_to_string(&l.path).unwrap();
+            let report = rekey_prefix_rows(&mut cat, "led", to, "ZQ", RekeyMode::Preview).unwrap();
+            assert_eq!(
+                report.frontmatter_lines_rewritten, 2,
+                "{label}: the moved declaration and high-water key are what a further rekey \
+                 finds to move — counted, not only written"
+            );
+            assert!(
+                out.contains(want_decl),
+                "{label}: declaration must move:\n{out}"
+            );
+            assert!(
+                out.contains(&format!("entry_high_water_{to}: 1\n")),
+                "{label}: the high-water key must move:\n{out}"
+            );
+            assert!(
+                !out.contains(&format!("entry_high_water_{from}:")),
+                "{label}: the old high-water key must not survive:\n{out}"
+            );
+            assert!(
+                out.contains(untouched),
+                "{label}: a sibling must be left alone:\n{out}"
+            );
+        }
+    }
+
+    /// A rekey onto a prefix this ledger already DECLARES is refused, in `Preview` too.
+    /// Rewriting the declaration would otherwise turn `[F, W]` into `[W, W]` and merge two
+    /// counters. The catalog-reservation refusal cannot see this case — a fresh clone holds no
+    /// reservation — which is why these fixtures have none.
+    ///
+    /// Second fixture: the target is RECORDED (a high-water key) but not declared — a rename
+    /// would write the same key twice, which is invalid YAML. It exercises the other half of
+    /// the refusal's disjunction; the first fixture never reaches it.
+    #[test]
+    fn rekeying_onto_a_prefix_this_ledger_already_declares_is_refused() {
+        for doc in [
+            "---\nentry_prefix: [F, W]\n---\n\n## F-1 — a\n\n## W-1 — b\n",
+            "---\nentry_prefix: F\nentry_high_water_W: 3\n---\n\n## F-1 — a\n",
+        ] {
+            let mut cat = Catalog::open_in_memory().unwrap();
+            let l = led(&cat, "led", "session-log", doc);
+            for mode in [RekeyMode::Preview, RekeyMode::Apply] {
+                let err = rekey_prefix_rows(&mut cat, "led", "F", "W", mode).unwrap_err();
+                assert!(err.to_string().contains("already declares"), "got: {err}");
+            }
+            assert_eq!(
+                std::fs::read_to_string(&l.path).unwrap(),
+                doc,
+                "nothing written"
+            );
+        }
+    }
+
+    /// A ledger with NO entries yet has no body line to rewrite, and the write used to be
+    /// gated on body lines alone — so the only lines that needed to move were silently
+    /// skipped. Load-bearing: the body carries no `T-N` token at all.
+    #[test]
+    fn a_ledger_with_no_entries_yet_still_moves_its_declaration() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let l = led(
+            &cat,
+            "led",
+            "fresh",
+            "---\nentry_prefix: T\nentry_high_water_T: 0\n---\n\n# Empty ledger\n",
+        );
+        rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&l.path).unwrap(),
+            "---\nentry_prefix: SRI\nentry_high_water_SRI: 0\n---\n\n# Empty ledger\n"
         );
     }
 

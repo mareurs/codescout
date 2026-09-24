@@ -10,10 +10,10 @@ tags:
 - context
 topic: deep-agent-observation
 time_scope: '2026-09-18_to_2026-10-02'
+entry_high_water_DCX: 1
 entry_prefix:
-- DCTX
+- DCX
 snapshot_anchor: '| ID | Date UTC | Sampling | Capture key | Observation |'
-entry_high_water_DCTX: 1
 ---
 
 # Deep-agent context timing observations
@@ -36,7 +36,7 @@ At session handoff/end, write one DCS coverage receipt in the companion ledger e
 
 ## Episode fields
 
-Use these labels in each DCTX entry. Short facts and durable citations are enough; do not copy an entire transcript or private reasoning.
+Use these labels in each DCX entry. Short facts and durable citations are enough; do not copy an entire transcript or private reasoning.
 
 | Field | Record |
 |---|---|
@@ -58,16 +58,16 @@ Do not edit pre-action fields after seeing the result. Add an `Outcome update �
 
 ## Append and outcome update
 
-This is a prose ledger with prefix DCTX; `params` holds collection settings only. Do not create a second observation array. The server allocates IDs. Read this section once, then use the actual returned ID.
+This is a prose ledger with prefix DCX; `params` holds collection settings only. Do not create a second observation array. The server allocates IDs. Read this section once, then use the actual returned ID.
 
 ```python
-doc(action="append_entry", id="0cc578bbc332d699", id_prefix="DCTX",
+doc(action="append_entry", id="0cc578bbc332d699", id_prefix="DCX",
     anchor_heading="## Template for new entries", title="<decision and observation>",
     body="**Status:** pending-outcome\n**Valid:** dated YYYY-MM-DD\n\n<fields above>",
     index_row="| {id} | YYYY-MM-DD | routine-first | <capture key> | <short title> |")
 ```
 
-`snapshot_anchor` places the index row at the table tail atomically with the section; do not hand-allocate IDs or run a separate index write. For outcome updates, use `doc(action="update", id=..., patch={"body_edits":[{"heading":"<returned DCTX heading>","action":"edit","old_string":"<unique pending text>","new_string":"<updated disposition and dated outcome>"}]})`. Keep the index static: it describes the sample, not mutable outcome status. On resume, find your existing capture key and update it rather than append a duplicate.
+`snapshot_anchor` places the index row at the table tail atomically with the section; do not hand-allocate IDs or run a separate index write. For outcome updates, use `doc(action="update", id=..., patch={"body_edits":[{"heading":"<returned DCX heading>","action":"edit","old_string":"<unique pending text>","new_string":"<updated disposition and dated outcome>"}]})`. Keep the index static: it describes the sample, not mutable outcome status. On resume, find your existing capture key and update it rather than append a duplicate.
 
 ## Historical examples, excluded from prospective counts
 
@@ -81,9 +81,9 @@ Group by canonical incident, session/task and source lineage. First report cover
 
 | ID | Date UTC | Sampling | Capture key | Observation |
 |---|---|---|---|---|
-| DCTX-1 | 2026-09-18 | historical-seed | seed-context-injection-W3 | Recipient-specific guide delivery |
+| DCX-1 | 2026-09-18 | historical-seed | seed-context-injection-W3 | Recipient-specific guide delivery |
 
-## DCTX-1 — Historical seed — recipient-specific guide delivery
+## DCX-1 — Historical seed — recipient-specific guide delivery
 
 **Status:** needs-adjudication
 **Valid:** dated 2026-09-14

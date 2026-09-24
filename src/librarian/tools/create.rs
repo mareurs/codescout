@@ -1047,6 +1047,34 @@ mod tests {
         );
     }
 
+    /// `doc(create)` refuses a ledger declaring a prefix the token grammar cannot express —
+    /// the wiring half at this site; `refuse_taken_prefixes`' own tests pin the policy. The
+    /// prefix is free, so only the citability refusal can fire, and the effect is asserted:
+    /// a refused create that still wrote the file would leave the uncitable ledger on disk.
+    #[tokio::test]
+    async fn create_refuses_a_ledger_whose_prefix_cannot_be_cited() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let ledger = |rel: &str, prefix: &str| {
+            json!({
+                "repo": "r", "rel_path": rel, "kind": "tracker", "title": "Ledger", "body": "",
+                "extra": {"entry_prefix": prefix}
+            })
+        };
+        let err = call(&ctx, ledger("trackers/ctx.md", "DCTX"))
+            .await
+            .expect_err("an uncitable prefix must be refused at create");
+        assert!(err.to_string().contains("cannot be cited"), "got: {err}");
+        assert!(
+            !tmp.path().join("trackers/ctx.md").exists(),
+            "refused means nothing written"
+        );
+        call(&ctx, ledger("trackers/cx.md", "DCX"))
+            .await
+            .expect("a free three-letter prefix must be accepted");
+    }
+
     #[tokio::test]
     async fn create_rejects_an_extra_key_that_names_a_frontmatter_field() {
         // `kind` is the one a caller reaches for by reflex — a bug file carries

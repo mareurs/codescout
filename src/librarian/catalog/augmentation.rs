@@ -1206,7 +1206,24 @@ pub struct PendingSection {
 /// frictions and W-N wins), so `entry_prefix: [F, W]` must be as valid as
 /// `entry_prefix: R`. Reservations are keyed per (artifact, prefix), so the
 /// counters stay independent either way.
+///
+/// Only CITABLE prefixes count ([`crate::util::librarian_guard::is_citable_entry_prefix`]):
+/// a declaration the token grammar cannot express declares nothing, here exactly as in the
+/// guard. Every write path refuses to create one ([`refuse_taken_prefixes`] reads the raw
+/// value for that), so a surviving one was hand-written, and `append_entry` names the bound
+/// when it meets it.
 pub(crate) fn declared_prefixes_from_frontmatter(
+    fm: Option<&crate::librarian::frontmatter::Frontmatter>,
+) -> Vec<String> {
+    raw_declared_prefixes(fm)
+        .into_iter()
+        .filter(|p| crate::util::librarian_guard::is_citable_entry_prefix(p))
+        .collect()
+}
+
+/// Every non-empty `entry_prefix` value as written, citable or not — what a declaration
+/// SAYS, for the paths that must see a bad one in order to refuse or report it.
+pub(crate) fn raw_declared_prefixes(
     fm: Option<&crate::librarian::frontmatter::Frontmatter>,
 ) -> Vec<String> {
     match fm.and_then(|f| f.extra.get(ENTRY_PREFIX_KEY)) {
@@ -1267,12 +1284,15 @@ pub const SHARED_ENTRY_PREFIXES: &[&str] = &["F", "W"];
 /// keys alike. The single definition of "a claim", shared by [`prefix_owners_under`] (reading
 /// files) and the write paths (reading a caller's `extra` before anything is written), so the
 /// guard and the scan it consults cannot disagree about what a declaration says.
+///
+/// RAW `entry_prefix` values, uncitable ones included: a claim of `DCTX` must reach
+/// [`refuse_taken_prefixes`] to be refused, and filtering it here would wave it through.
 pub(crate) fn claimed_prefixes(extra: &std::collections::BTreeMap<String, Value>) -> Vec<String> {
     let fm = crate::librarian::frontmatter::Frontmatter {
         extra: extra.clone(),
         ..Default::default()
     };
-    declared_prefixes_from_frontmatter(Some(&fm))
+    raw_declared_prefixes(Some(&fm))
         .into_iter()
         .chain(
             declared_external_prefixes(Some(&fm))
@@ -1344,10 +1364,16 @@ pub(crate) fn refuse_taken_prefixes(
     declaring: &std::path::Path,
     prefixes: &[String],
 ) -> Result<()> {
+    let uncitable: Vec<&String> = prefixes
+        .iter()
+        .filter(|p| !crate::util::librarian_guard::is_citable_entry_prefix(p))
+        .collect();
     let claimed: Vec<&String> = prefixes
         .iter()
         .filter(|p| !SHARED_ENTRY_PREFIXES.contains(&p.as_str()))
         .collect();
+    // `claimed` only drops the shared family, which is citable, so an empty `claimed` already
+    // means an empty `uncitable` — one test covers both.
     if claimed.is_empty() {
         return Ok(());
     }
@@ -1356,6 +1382,50 @@ pub(crate) fn refuse_taken_prefixes(
         .unwrap_or_else(|| dir.to_path_buf());
     let owners = prefix_owners_under(conn, &root)?;
     let me = declaring.to_string_lossy();
+
+    // Refused before ownership, because a free-but-uncitable prefix is the worse outcome: a
+    // taken one at least collides where a scan can see it, while this one allocates, commits
+    // and is invisible to every citation reader in both directions.
+    if !uncitable.is_empty() {
+        let described = uncitable
+            .iter()
+            .map(|p| format!("`{p}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let suggestions = uncitable
+            .iter()
+            .map(|p| {
+                let letters: String = p
+                    .chars()
+                    .filter(char::is_ascii_alphabetic)
+                    .map(|c| c.to_ascii_uppercase())
+                    .collect();
+                let free = free_prefix_suggestions(&letters, &owners);
+                format!(
+                    "instead of `{p}`: {}",
+                    free.iter()
+                        .map(|s| format!("`{s}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(
+            crate::librarian::tools::LibrarianRecoverableError::with_hint(
+                format!(
+                    "entry prefix {described} cannot be cited — an entry token is \
+                     `[A-Z]{{1,3}}-<n>`, so an id under a longer or non-uppercase prefix \
+                     allocates and is written, but no citation can address it and no scan \
+                     reports it missing."
+                ),
+                format!(
+                    "Pick one to three uppercase letters — {suggestions} (all free in this \
+                     repository). Nothing has been written."
+                ),
+            ),
+        );
+    }
 
     let taken: Vec<(&String, Vec<&String>)> = claimed
         .into_iter()
@@ -2808,6 +2878,42 @@ mod tests {
             hint.contains("`RB`"),
             "the next free one should be offered: {hint}"
         );
+    }
+
+    /// A prefix the entry-token grammar cannot express is refused even when FREE — the
+    /// ownership refusal above never fires here, since no other ledger holds `DCTX`, which is
+    /// exactly how the live `DCTX` ledger was born. The remedy is asserted as SHAPE: a
+    /// three-letter alternative is offered.
+    ///
+    /// The `DCX` control is load-bearing: without it, a refusal of EVERY prefix passes.
+    /// docs/issues/2026-09-21-a-four-letter-entry-prefix-allocates-but-cannot-be-cited.md
+    #[test]
+    fn a_prefix_the_token_grammar_cannot_express_is_refused_even_when_free() {
+        let (tmp, cat) = repo_with(&[]);
+        let new = tmp.path().join("docs/trackers/new.md");
+        for bad in ["DCTX", "r"] {
+            let err = refuse_taken_prefixes(&cat.conn, &new, &prefixes(&[bad])).unwrap_err();
+            let rec = err
+                .downcast_ref::<crate::librarian::tools::LibrarianRecoverableError>()
+                .expect("a refusal the caller can act on must stay recoverable");
+            let hint = rec.hint.clone().unwrap_or_default();
+            assert!(
+                rec.message.contains(bad),
+                "must name `{bad}`: {}",
+                rec.message
+            );
+            if bad == "DCTX" {
+                assert!(
+                    hint.contains("`DCA`"),
+                    "must offer a citable alternative: {hint}"
+                );
+            } else {
+                // Uppercased before suggesting: `rA` would be a second uncitable prefix.
+                assert!(hint.contains("`RA`"), "must suggest uppercase: {hint}");
+            }
+        }
+        refuse_taken_prefixes(&cat.conn, &new, &prefixes(&["DCX"]))
+            .expect("a free three-letter prefix is citable and must pass");
     }
 
     /// Re-declaring your OWN prefix is not a conflict — `doc(update)` rewrites the whole
@@ -4542,6 +4648,27 @@ mod tests {
                 "---\nkind: tracker\nentry_prefix: []\n---\n\n# L\n",
             ),
             ("no frontmatter at all", "# L\n\nentry_prefix: R\n"),
+            // UNCITABLE declarations — the population the thirteen fixtures above never
+            // reached, so the length and case rules were exercised by nothing and
+            // `DCTX` shipped as a live ledger both readers disagreed about
+            // (docs/issues/2026-09-21-a-four-letter-entry-prefix-allocates-but-cannot-be-cited.md).
+            // Each value is one the entry-token grammar `[A-Z]{1,3}-\d+` cannot express;
+            // shorten `DCTX` to three letters or uppercase `r` and the case stops
+            // discriminating.
+            (
+                "four letters",
+                "---\nkind: tracker\nentry_prefix: DCTX\n---\n\n# L\n",
+            ),
+            // Mixed list: the citable member must survive, so a reader that drops the
+            // whole list on one bad member is caught too.
+            (
+                "four letters beside a citable one",
+                "---\nkind: tracker\nentry_prefix: [DCTX, DWF]\n---\n\n# L\n",
+            ),
+            (
+                "lowercase",
+                "---\nkind: tracker\nentry_prefix: r\n---\n\n# L\n",
+            ),
         ] {
             let (fm, _body) = crate::librarian::frontmatter::parse(doc).unwrap();
             let librarian_side = declared_prefixes_from_frontmatter(fm.as_ref());

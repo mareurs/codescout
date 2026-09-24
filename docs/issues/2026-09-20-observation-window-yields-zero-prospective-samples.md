@@ -25,7 +25,7 @@ $ git grep -c '^## DWF-'  HEAD -- docs/trackers/deep-agent-workflow-observations
 HEAD:docs/trackers/deep-agent-workflow-observations.md:1
 $ git grep -c '^## DCS-'  HEAD -- docs/trackers/deep-agent-workflow-observations.md
 HEAD:docs/trackers/deep-agent-workflow-observations.md:1
-$ git grep -c '^## DCTX-' HEAD -- docs/trackers/deep-agent-context-observations.md
+$ git grep -c '^## DCX-' HEAD -- docs/trackers/deep-agent-context-observations.md
 HEAD:docs/trackers/deep-agent-context-observations.md:1
 ```
 
@@ -33,7 +33,7 @@ Unit: **entry sections per ledger**, counted at that instant against that tree. 
 
 | Entry | Heading | Self-declared sampling mode |
 |---|---|---|
-| DCTX-1 | Historical seed — recipient-specific guide delivery | `historical-seed / retrospective; excluded from prospective collection counts` |
+| DCX-1 | Historical seed — recipient-specific guide delivery | `historical-seed / retrospective; excluded from prospective collection counts` |
 | DWF-1 | Historical seed — discriminate an edit-miss hypothesis | `historical-seed / retrospective; excluded from prospective collection counts` |
 | DCS-1 | Collection setup — partial-session coverage | setup |
 
@@ -46,7 +46,7 @@ For scale, over the same checkout `CLAUDE.md` § *Reaching a Peer Session* descr
 ```
 git rev-parse HEAD
 date -u +"%Y-%m-%dT%H:%M:%SZ"
-git grep -c '^## DCTX-' HEAD -- docs/trackers/deep-agent-context-observations.md
+git grep -c '^## DCX-' HEAD -- docs/trackers/deep-agent-context-observations.md
 git grep -c '^## DWF-'  HEAD -- docs/trackers/deep-agent-workflow-observations.md
 git grep -c '^## DCS-'  HEAD -- docs/trackers/deep-agent-workflow-observations.md
 ```
@@ -92,7 +92,7 @@ Recorded here as corroboration that the class is live in two places at once. **N
 ## Hypotheses tried
 
 1. **Hypothesis:** the window simply has not had time to collect. **Test:** compare elapsed window time against the sampling rule — the rule is *first eligible decision per coordinating session*, not per week, so any session at all should have produced an entry. **Verdict:** rejected. Two days at roughly six concurrent sessions is many sessions, and the rule fires per session.
-2. **Hypothesis:** entries exist but live somewhere else (params rather than body). **Test:** both ledgers declare themselves prose ledgers with `body_is_canonical: true` and `entry_collection: null`; the context ledger states *"This is a prose ledger with prefix DCTX; `params` holds collection settings only. Do not create a second observation array."* **Verdict:** rejected — the body is the canonical store and it holds three entries.
+2. **Hypothesis:** entries exist but live somewhere else (params rather than body). **Test:** both ledgers declare themselves prose ledgers with `body_is_canonical: true` and `entry_collection: null`; the context ledger states *"This is a prose ledger with prefix DCX; `params` holds collection settings only. Do not create a second observation array."* **Verdict:** rejected — the body is the canonical store and it holds three entries.
 3. **Hypothesis:** an existing bug file already covers this. **Test:** `doc(action="find", kind="bug", filter={"status": {"in": ["open","taken","investigating","zombie"]}})` at 60 open records, scanned for observation/ledger/window/sampling terms. **Verdict:** rejected — no existing record covers the window's yield. Ledger checked.
 
 ## Fix
@@ -101,7 +101,7 @@ Recorded here as corroboration that the class is live in two places at once. **N
 
 The window's *question* — when does context help, arrive too late, mislead, or add nothing — is sound and worth keeping. Its *instrument* is the defect. Two directions, neither costed:
 
-1. **Derive rather than collect.** Reconstruct per-session call sequences from the existing `usage.db` capture, which already holds arguments and results on 97.63% of calls and requires no one to remember. Hand-written DCTX/DWF entries then stop being the dataset and become adjudication labels for cases the query surfaces — far fewer entries, each worth more.
+1. **Derive rather than collect.** Reconstruct per-session call sequences from the existing `usage.db` capture, which already holds arguments and results on 97.63% of calls and requires no one to remember. Hand-written DCX/DWF entries then stop being the dataset and become adjudication labels for cases the query surfaces — far fewer entries, each worth more.
 2. **Give the protocol a call site.** A hook or gate that performs (or refuses to proceed without) the capture, so compliance is the default path rather than an act of memory.
 
 **The bound on direction 1, stated because it is the thing that makes it partial rather than a replacement:** `usage.db` records **MCP calls only**. Native `Bash`, `Read` and `Edit`, the host's own prompts and reasoning, and task outcomes are all invisible to it. A zero there is evidence about the instrumentation, not about work performed — the baseline's own § *Interpretation limits* says so. So a derived corpus answers the retrieval and timing questions far better than the current instrument and still cannot answer the outcome question without something else supplying it.
@@ -123,7 +123,7 @@ Before the 2026-09-25 review: re-derive the three counts with the commands in §
 ## References
 
 - `CLAUDE.md` § *Deep-agent observation window* — the declaration
-- `docs/trackers/deep-agent-context-observations.md` — DCTX ledger
+- `docs/trackers/deep-agent-context-observations.md` — DCX ledger
 - `docs/trackers/deep-agent-workflow-observations.md` — DWF / DCS ledger
 - `docs/research/2026-09-18-deep-agent-observation-baseline.md` — the 26,052-call baseline and its interpretation limits
 - `docs/trackers/local-semantic-evaluator-design.md` — the design this window gates
