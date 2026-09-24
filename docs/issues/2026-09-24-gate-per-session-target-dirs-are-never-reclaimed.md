@@ -130,6 +130,10 @@ so the `c23d86eb` hazard cannot arise.
 **Orthogonal and per-machine:** make the cache a nested btrfs subvolume so snapper stops
 capturing it. Unprivileged `btrfs subvolume create` has not been verified here.
 
+**Applied on this machine, 2026-09-24, by session `system-cf` using root.** The steps were: create a subvolume, rsync the live `slot-0/1/2` into it, swap it in with an atomic `mv`, and remove the old directory. Verified by this session afterwards: `stat -c %i ~/.cache/codescout-gate` returns `256`, `sudo btrfs subvolume show` names it `@home/marius/.cache/codescout-gate`, and `/home` has 618G free with `snapper -c home list` down to `#0`, because all 18 then-current snapshots were deleted to release the pinned trees. The unprivileged path remains unverified.
+
+**One-time hazard of the swap, not re-checkable afterwards:** the swap replaced every `slot-N.lock` with a new inode. A gate run holding a slot across the swap would have locked the OLD file while a later run could lock the NEW one, so slot exclusion was void for any run that straddled it. Whether one did was not established. The hazard ended when any such run finished.
+
 ## Tests added
 
 `tests/gate-slot.sh` drives the real `scripts/gate.sh`. It uses a stub `cargo` on `PATH` that records the `CARGO_TARGET_DIR` each lane saw, a stub `scripts/fmt-mine.sh` in a fake checkout, and a temp `HOME` plus `CODESCOUT_GATE_POOL`, so no run can touch the real cache. There are 14 assertions in six cases:
