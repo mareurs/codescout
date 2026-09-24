@@ -23,6 +23,7 @@ These are raw rows and run logs behind `docs/evals/rule-tell-scoring-2026-09-23.
 | `p1s-S0b-corpus.{txt,jsonl}` | S0 form 2b Score A, 924 rows |
 | `form3-gate.txt`, `form3-span.txt`, `p1s-S0f3-corpus.{txt,jsonl}` | S0 form 3, the generic clause ablated: gates and Score A |
 | `form4-gate.txt` | S0 form 4, three widened specs, judged alone: the gate that failed 6/8, so no Score A exists |
+| `form4q-gate.txt`, `p1s-S0f4q-corpus.{txt,jsonl}`, `form4q-readout.{py,txt}` | S0 form 4q, `question_asked` widened alone: gate 6/6, Score A (the other 21 rules' rows carry `carried_from`, taken from form 3), and the registered readout |
 | `l0-gate.{txt,jsonl}`, `l0-span.{txt,jsonl}` | local Stage 1, L0-frozen (JevK5 zero-shot); the `.jsonl` holds every rule's `noul` probability |
 
 ## Phase 2: API route (Messages-API replays)

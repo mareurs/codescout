@@ -1,0 +1,17 @@
+Q1 -- question_asked positives:
+  RTD-1   form 3   fired=[]
+  RTD-1   form 4q  fired=[('question_asked', 'An exact shared-ID join now exists.')]
+  RTD-11  form 3   fired=[('closed_population', 'The surface that answers all three today is the T-N ledger**, `docs/tr')]
+  RTD-11  form 4q  fired=[('closed_population', 'The surface that answers all three today is the T-N ledger**, `docs/tr')]
+  RTD-12  form 3   fired=[]
+  RTD-12  form 4q  fired=[('question_asked', "The allocator's durability was verified at `append_entry.rs:294-324`; ")]
+
+Q2 -- negatives with any fire:
+  form 3   5/21  [('RTD-12', ['d_history']), ('RTD-13', ['run_tool']), ('RTD-17', ['d_history']), ('RTD-19', ['d_history']), ('RTD-20', ['selector_narrow'])]
+  form 4q  5/21  [('RTD-12', ['d_history']), ('RTD-13', ['run_tool', 'question_asked']), ('RTD-17', ['d_history']), ('RTD-19', ['d_history']), ('RTD-20', ['selector_narrow'])]
+
+question_asked fires anywhere under 4q:
+  ('RTD-1', 'positive')  gold=['question_asked']  'An exact shared-ID join now exists.'
+  ('RTD-12', 'positive')  gold=['question_asked']  "The allocator's durability was verified at `append_entry.rs:294-324`; the citation resolut"
+  ('RTD-13', 'negative')  gold=[]  'cites` is refused on a prose ledger (`append_entry.rs:194-201`), and reversing the arrow f'
+  ('RTD-8', 'positive')  gold=['contradiction']  "And yet — verified at `src/usage/db.rs:323-339` — codescout's 30-day retention sweep has *"
