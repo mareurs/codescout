@@ -109,7 +109,7 @@ Code — verify at the bytes rather than from this list:
 | `5909c464` | narrowed the overclaimed prose in the probe, research artifact, handoff and `PROBES.md` |
 | `70e6c1ad` | unrelated: re-pointed a line-keyed test exemption that a docs row insertion had shifted |
 
-Bug files: `e75093da225ba1ce` and `90d32f37ef2d8fc8` (both fixed, archived); `a8f384cc0052d7b9` (investigating); `82973a1e83aa069f`, `1fc9a6192a3f31b3` (`run_command` overrides `is_write` nowhere), `0ca7439866e8f2b6` (the observation window's zero yield) — all open.
+Bug files: `e75093da225ba1ce` and `90d32f37ef2d8fc8` (both fixed, archived); `a8f384cc0052d7b9` (investigating); `82973a1e83aa069f`, `3cee1969ae4e9d57` (`run_command` overrides `is_write` nowhere), `0ca7439866e8f2b6` (the observation window's zero yield) — all open.
 
 Design: [the deep-agent design](local-semantic-evaluator-design.md) (`d16552e9981f521e`) was amended in `a1055e47`.
 

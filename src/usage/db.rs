@@ -170,7 +170,7 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
     // AND for every row older than this column — the same NULL ambiguity `read_output_ids`
     // states above, separable only by `called_at`. A DECLARATION, not an observation: it says
     // what the caller claimed, never what the command did.
-    // docs/issues/2026-09-20-run-command-never-overrides-is-write.md
+    // docs/issues/archive/2026-09-20-run-command-never-overrides-is-write.md
     let has_effect_class: bool = conn
         .prepare("SELECT effect_class FROM tool_calls LIMIT 0")
         .is_ok();

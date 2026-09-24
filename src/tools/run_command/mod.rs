@@ -94,7 +94,7 @@ fn parse_timeout_input(input: &Value) -> (u64, Option<String>) {
 /// **Absent means write.** Nothing can derive a shell command's effect from its string — that
 /// is the halting problem wearing a costume — so the safe reading of silence is the mutating
 /// one: a command is a write unless its caller says otherwise
-/// (`docs/issues/2026-09-20-run-command-never-overrides-is-write.md`).
+/// (`docs/issues/archive/2026-09-20-run-command-never-overrides-is-write.md`).
 ///
 /// **Recorded, never enforced.** The value lands in `usage.db`'s `effect_class` so telemetry
 /// can separate `ls` from `git reset --hard`; it does NOT take the write lock — see
@@ -185,7 +185,7 @@ impl Tool for RunCommand {
     /// refused edits. The declared effect is recorded instead ([`declared_effect`], usage.db
     /// `effect_class`); shell writes stay unserialized against the edit tools, exactly as
     /// before. Pinned by `run_command_never_takes_the_write_lock_whatever_it_declares`.
-    /// docs/issues/2026-09-20-run-command-never-overrides-is-write.md
+    /// docs/issues/archive/2026-09-20-run-command-never-overrides-is-write.md
     fn is_write(&self, _input: &Value) -> bool {
         false
     }
@@ -415,7 +415,7 @@ mod effect_tests {
 
     /// `effect` is the caller's declaration of what the command does to files. Absent means
     /// WRITE — a shell command is a write unless someone says otherwise, because nothing can
-    /// derive it from the command string (`docs/issues/2026-09-20-run-command-never-overrides-is-write.md`).
+    /// derive it from the command string (`docs/issues/archive/2026-09-20-run-command-never-overrides-is-write.md`).
     /// `None` for anything else, so `call` can refuse it and the recorder records no class
     /// rather than guessing one.
     #[test]

@@ -1,7 +1,7 @@
 ---
-id: '1fc9a6192a3f31b3'
+id: 3cee1969ae4e9d57
 kind: bug
-status: open
+status: fixed
 title: 'BUG: run_command never overrides is_write, so every shell command is classified as a read'
 owners:
 - marius
@@ -12,9 +12,10 @@ tags:
 - telemetry
 - concurrency
 topic: write guard coverage and shell effect classification
-closed: ''
+closed: 2026-09-24
 opened: 2026-09-20
 severity: high
+unverified: Only the DECLARED effect class is recorded. The OBSERVED one (what a command actually did to the tree) is not, and the Fix section asks for both because only the observation survives a wrong declaration.
 ---
 
 # BUG: `run_command` never overrides `is_write`, so every shell command is classified as a read
@@ -133,24 +134,44 @@ does not get that one either.
 
 ## Fix
 
-Not implemented, and the right answer is a **decision**, not a patch — which is why this is filed
-rather than fixed:
+**FIXED 2026-09-24 at `399f2a63`, by operator ruling "Declare + record, no lock"** — taken after
+a measurement changed the question. The server holds the cross-process write lock for the WHOLE
+call and refuses waiters after `write_lock_timeout_secs` (5), while `run_command`'s p95 is 43 s, so
+the first two options below would have turned one session's foreground `cargo test` into every
+peer's refused edits — not the per-`ls` latency they were first priced at.
+
+Shipped: an `effect` parameter (`"read"` | `"write"`, default `"write"`), one definition
+(`run_command::declared_effect`) read by the tool (refuses anything else) and by the usage
+recorder, which writes it to a new `usage.db` column `effect_class` — the declared class for
+`run_command`, NULL for every other tool. `RunCommand::is_write` is now an explicit `false` with
+the ruling in its doc comment, so consequence 1 above (the lock never engages for shell work) is
+a **decision**, pinned by `run_command_never_takes_the_write_lock_whatever_it_declares`, rather
+than an omission. Consequence 2 (telemetry cannot separate mutating from non-mutating shell work)
+is closed for the DECLARED class.
+
+Not done, and recorded in `unverified:`: the OBSERVED effect class this section asks for.
+
+The options as originally filed, kept for the record:
 
 - **Declare it always-write.** One line, `true`. Correct and safe; costs every `run_command "ls"`
-  the cross-process write lock, on the highest-volume tool in the registry. The latency table
-  above is the input to that trade.
-- **Classify the command string.** A conservative parse — deny-list of mutating verbs, default to
-  write on anything unrecognised. More precise, and a new parser over an open namespace, which
-  `CLAUDE.md` § *Parsers Over a Namespace* says owes an escape and a disambiguator. The four
-  separate heredoc misparses named there were all in shell-command scanners in this repo.
+  the cross-process write lock, on the highest-volume tool in the registry.
+- **Classify the command string.** A conservative parse — a new parser over an open namespace.
 - **Add a caller-declared effect class** — an explicit parameter, defaulting to write.
-
-Whichever is chosen, telemetry wants the *observed* effect class recorded as well as the declared
-one; the two answer different questions and only the first survives a wrong declaration.
 
 ## Tests added
 
-None — not fixed.
+In `src/tools/run_command/mod.rs` (`effect_tests`), `src/server.rs` and `src/usage/mod.rs`:
+`declared_effect_defaults_to_write_and_accepts_only_read_or_write`,
+`run_command_refuses_an_effect_it_does_not_know`,
+`run_command_never_takes_the_write_lock_whatever_it_declares` (the ruling pin — inert for a red
+on the fixing commit by design), and
+`record_content_stores_run_commands_declared_effect_and_nothing_for_other_tools`. Mutation via
+`scripts/mutation-probe.sh`, 7/7 KILLED.
+
+## Fix provenance
+
+- **SHA:** `399f2a63` (`experiments`)
+- **patch-id:** `d19a1d941edf55d79bed099cf7d9d1df3a510aa1`
 
 ## Workarounds
 
@@ -160,12 +181,7 @@ peers by hand (`CLAUDE.md` § *Reaching a Peer Session*), not by trusting the lo
 
 ## Resume
 
-`docs/trackers/local-semantic-evaluator-design.md` names this as a precondition for any autonomous
-execution rung, in terms this file should not soften: "In inspected source, `RunCommand` accepts a
-shell command without its own `is_write` override; a shell command classified as a read may still
-modify files or launch processes." That paragraph's conclusion — "A model, local or hosted, cannot
-turn a command into a safe read by naming it one" — is why the fix is a decision about defaults
-rather than a classifier.
+N/A for what was ruled. The observed-effect half is open work, not an obligation of this fix; see `unverified:`.
 
 ## References
 
