@@ -742,3 +742,72 @@ If condition 1 fails, the agent labels are not admitted and Stage 2's mined rout
 - **Every synthetic label derives from the specs**, written by the agent that designed this. The cross-family audit is the one check that does not share that view.
 - **Real-draft performance is still untested per rule.** T-syn measures the constructed shape.
 - **Codex output is used as test and audit data.** **Permission recorded, 2026-09-25:** the operator reports asking OpenAI and being told this use is fine, because codescout is open source. The agent has not seen the grant text. This amendment's scope is unchanged: Codex output stays out of training input unless a later amendment, on the operator's word, widens it. Each Codex-generated row carries `generator` and `claude_generated: false`.
+
+### Corrections after a cold Codex review, 2026-09-25 (before any pair is generated; these win over the text above)
+
+**The review:** Codex `gpt-6-astra` at `medium`, a fresh home, a read-only sandbox in the repository, at `7b16d8c6`, saved as `docs/research/2026-09-25-codex-synthetic-registration-review.md`. It raised 10 findings. **All 10 were checked and all 10 hold.** Finding 3's numbers reproduced exactly: 51 rest rows, admitted positives 70, 298, 383 and 580. The pilot's "22 pairs" contradicted the 5-seeds-per-call shape, and the shortcut prediction named the wrong set. Nothing has been generated, so these are corrections to the plan.
+
+1. **Audits are split, so test audits cannot shape training.**
+   - Audit cells are (generator, side, rule), where the side is *training* (train, validation and calibration) or *T-syn*.
+   - **Only training-side audits decide training admission:** a source drop, a (source, rule) drop, and the unknown-cell admission of amendment 2.
+   - A T-syn audit decides only which T-syn pairs are scored. It is fixed before any arm is scored.
+   - Every audited cell keeps its fold, and no T-syn cell ever enters training.
+2. **The leakage filter names every held-out input.**
+   - **The check runs at freeze:** every training-side input is compared by 8-token shingle against every held-out input.
+     - Training-side inputs are the four fields of each mined row, and both the positive and the substituted paragraph of each synthetic pair.
+     - Held-out inputs are Stage 2's list, the four fields of each mined T row, both paragraphs of every T-syn-in and T-syn-cross pair, and every S seed.
+   - **A collision drops the training-side item.** Held-out material is never moved into training, and amendment 3's "move the smaller group" applies only between training folds.
+3. **Mined rows are checked on their contexts.** T's components were built from positives and twins only, so 51 rest rows share a shingle with T through their contexts, among them 4 admitted positives. Correction 2 drops them at freeze. **T's committed assignment is unchanged.** The count dropped is published.
+4. **Campaign material is excluded from seeds whole.** A file is ineligible as a seed source in two cases:
+   - its path matches the miner's `HELD_OUT_DOC_RE` (`mine_pairs.py:55–57`), or matches `review-model-vs-context`;
+   - its content contains `rule-tell`, `rule_tell`, `phase1-local-classifier` or `phase1-span-selector`.
+
+   The content test catches documents that discuss the campaign, such as this repository's roadmap and reviews, without sharing an exact 8-token run with a held-out text.
+5. **Seeds come from a committed manifest, not a procedure applied later.**
+   - Before the pilot, a deterministic seed extractor and its output manifest are committed. The manifest holds every eligible paragraph with an id, its fold or side, every draw, and the pilot reservation. Generation reads only the manifest.
+   - **The extractor's rules:**
+     - tracked files at this amendment's commit;
+     - blank-line paragraphs;
+     - frontmatter, fenced blocks, headings, tables and HTML comments removed;
+     - at least 60 whitespace words;
+     - rules in sorted key order;
+     - seeds drawn by `random.Random(20260931).sample` over the manifest's ordered ids;
+     - scaling (§ sizes) rounds down.
+   - **The pilot is 22 calls of 5 seeds, 110 pairs**, the same call shape as generation. All 110 are retired.
+   - **A failed call** (an error, or output that is not JSON) is retried once with the same seeds. If it fails again, its seeds count as construction failures, and **no replacement seed is drawn.**
+6. **The audit is fixed in number and form.**
+   - Per (generator, side, rule), n = min(N, max(⌈0.1 N⌉, 8)), where N is the number of pairs surviving construction checks.
+   - A **source is a generator.** Its rate pools the disagreements over its training-side audited pairs, unweighted.
+   - The audit prompt and output schema are committed with the extractor, before the pilot.
+   - An invalid audit answer is retried once, then **counted as a disagreement**.
+7. **The shared-cue risk, and a narrower claim.**
+   - **The prompt is revised before the pilot**, and this is not the one post-pilot revision:
+     - fixes replace words rather than add a hedge, and stay about the original length;
+     - at least one other sentence per paragraph is a confident, unhedged, well-founded claim;
+     - the violating sentence may itself be hedged where the law allows.
+   - **Reported per generator:** fixed-to-violating length ratios, and hedge-word rates in positives, fixes and other sentences.
+   - **The generator-transfer claim is narrowed** to transfer between these two generators under this prompt.
+8. **Labels are sentence-level by the training segmenter.**
+   - The Stage 3 segmenter is committed before the pilot.
+   - A pair is discarded unless its violating and fixed sentences are each exactly one unit under it.
+   - The auditor sees the target sentence marked and **both complete paragraphs**. It judges (b) in the substituted paragraph's context, which matters for context rules such as `contradiction`.
+9. **The generator gap is measured on paired survivors.**
+   - T-syn-in against T-syn-cross is compared **only on seed ids surviving in both**.
+   - Attrition is published per generator and rule.
+   - The comparison is described as one between two generation-and-audit pipelines, since the generator and the auditor's family are coupled.
+10. **The shortcut probe is frozen.**
+    - Features: TF-IDF over word 1–2-grams and character 1–4-grams, which keep punctuation, so `&&` against `;` survives; plus sentence length in words.
+    - Model: `LogisticRegression(C=1.0, class_weight="balanced", solver="liblinear")`.
+    - "Surface-separable" is marked separately for T-syn-in and T-syn-cross, each at AUC ≥ 0.9.
+    - **The prediction is restated:** at least a third of rules are surface-separable on T-syn-in, and fewer on T-syn-cross.
+
+**Also found sound by the review, and recorded here:**
+
+- the T draw reproduces, all 944 rows;
+- the seed supply suffices under its extraction rule: 12,400 eligible paragraphs, 9,500 training-side and 2,900 on S, against the 1,870 training-side and 330 S seeds this needs;
+- `menu.json` exports the stated rules and specs;
+- negatives are twin-only;
+- T-syn has the fewer-than-10 withholding rule;
+- Codex output is kept out of training.
+
+**The seed counts will be re-derived by the committed extractor, not taken from the review.**
