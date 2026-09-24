@@ -254,3 +254,34 @@ Both can hold at once, if the clause trades recall for precision. This registrat
 - **L0-embed does not run in Stage 1.** Its threshold is registered to be *"fixed on the validation fold (Stage 2)"*, which does not exist yet. It runs once Stage 2 is frozen.
 
 **Prediction.** The gate fails, at ≤ 6/10, mostly on precision. This is JevK5 zero-shot on a task it was never trained for, and its sealed JevBench accuracy is near chance. As registered, the outcome is **diagnostic only**: a failure does not stop Stage 3, and a pass registers L0-frozen for Score B directly. The gate and span-gate output, plus every row's `noul` probability (`--log`), are kept for the write-up.
+
+## Amendment — Stages 2–4 corrected after the Codex review, 2026-09-24 (registered before Stage 2 starts)
+
+Nothing in Stages 2–4 has run, so these are corrections to the plan, not to any result. Found by the Codex review (`docs/research/2026-09-24-codex-rule-tell-review.md`) and verified against this file by a separate reader. Where this amendment and the stage text above disagree, this amendment wins.
+
+**1. C1 is no longer chosen on T.** Stage 3 says T is never read during selection, but Stage 4 picks C1 as "the best L-arm by T any-fire rate", which uses T to select. Replaced:
+
+- C1's first-stage arm is the gate-passing L-arm with the lowest **validation-fold** any-fire rate at its recall-0.9 threshold. Ties go to the lower validation loss.
+- Score B's "best standalone L-arm" is chosen the same way, on the validation fold.
+- **T is read only after every choice is fixed** (arms, thresholds, temperatures and C1). Each arm's T scores are computed once and reported whatever they show.
+
+**2. A construction labels only what it is evidence for.** "Every other sentence in a paragraph is a negative for every rule" is withdrawn: a correction fixes one failure and shows nothing about the rest of the paragraph. Replaced:
+
+- **Mined pair:** the violating sentence is a positive for its rule, and its corrected twin is a negative **for that rule only**.
+- **Synthetic pair:** the generated sentence is a positive for its rule, and its fix is a negative for that rule only.
+- **Every other (sentence, rule) cell is `unknown`** and is masked out of the loss.
+- **Unknown-cell audit, at freeze:** per source, a random sample of at least 200 unknown cells is labelled against the specs, and the rate that turn out positive is published with its Wilson 95% interval. **If the interval's upper bound is ≤ 5%, that source's unknown cells are admitted as negatives.** Otherwise they stay masked, and that source contributes only its twin negatives plus the audited cells.
+- The existing 10% label audit and its 20% drop rule are unchanged, and apply to the positives and twin negatives.
+- The negative count per rule is published at freeze beside the positive count.
+
+**3. Folds are split by incident, not only T.** Every example derived from one incident goes into **one fold**: the original text, its correction, each synthetic variant seeded from it, and the other paragraphs of the same source document. This covers train, validation and calibration as well as T; T's split by source document is kept and is the stricter rule where the two differ.
+
+- The 8-token shingle filter now also runs **across folds**: train against validation, and train against calibration.
+- A collision is resolved by moving the smaller incident group into the larger group's fold, and the number moved is reported.
+
+**4. Brought in line with results since registration.**
+
+- **Score B's RTD-8 checker is `rtd8c`**, which supersedes `rtd8` (scoring doc, § *RTD-8 re-scored with `rtd8c`*).
+- **Stage 4's completeness check now also refuses missing whole texts** and texts not in the corpus (`138bdb60`, regression test `tests/test_phase1_span_selector_report.py`). A T report must read `N of N texts`, with N stated at freeze.
+
+**Unchanged:** the ship rule, the stopping rules, the gate, and the held-out list.
