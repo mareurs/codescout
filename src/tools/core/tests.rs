@@ -946,6 +946,17 @@ async fn guard_worktree_write_hint_names_the_main_repo_not_an_arbitrary_worktree
     // a prefix of it and the two assertions below would stop being independent.
     let wt = seed_linked_worktree(&root, "feat");
     let ctx = rooted_ctx(&root).await;
+    // Compare against the CANONICAL form, which is the form the hint is built from:
+    // on Windows the project root is held verbatim (`\\?\C:\...`), so the raw tempdir
+    // path is never a substring of a correct hint. That redded all three windows-latest
+    // lanes at f918548c. It also made the NEGATIVE assertion below vacuous there — a
+    // raw `wt` can never appear in a verbatim-form hint, so it passed on any hint at
+    // all. Canonicalizing both keeps the pair discriminating on every platform — the
+    // house rule at `src/agent/build_check.rs` (`canonical`): canonicalize BOTH sides
+    // before comparing, never one. macOS was green only by accident: its raw `/var/...`
+    // tempdir is a substring of the canonical `/private/var/...` the hint carries.
+    let root = std::fs::canonicalize(&root).unwrap();
+    let wt = std::fs::canonicalize(&wt).unwrap();
 
     let err = guard_worktree_write(&ctx).await.unwrap_err();
     let rec = err

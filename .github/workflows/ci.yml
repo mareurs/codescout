@@ -503,7 +503,19 @@ jobs:
         with:
           key: ubuntu-latest-feature-check
       - run: cargo test --features dashboard --all-targets
-      - run: cargo check --features local-embed-dynamic --all-targets
+      # `--no-default-features --features local-embed-dynamic`, never the bare
+      # `--features local-embed-dynamic`. The two ONNX backends are mutually exclusive
+      # (crates/codescout-embed/src/lib.rs `compile_error!`), and `local-embed` joined
+      # `default` on 2026-09-17 — so from then on the bare form enabled BOTH and could not
+      # compile at all. It redded this job on every push from a31ed03a onward, with a
+      # compile_error! that read as a backend regression rather than a lane misconfiguration.
+      # Dropping the rest of `default` costs nothing here: every root-crate site gated on
+      # this feature (retrieval/client.rs, hardware.rs, server.rs, tools/config) compiles
+      # without `librarian`, which is what the lean lane already proves. Do NOT restore the
+      # default set by listing it: naming `librarian` in a `--features` flag trips
+      # tests/feature_lanes.rs `the_guard_is_not_vacuous`, whose canary is precisely that
+      # `librarian` is reached through `default` and never through a flag.
+      - run: cargo check --no-default-features --features local-embed-dynamic --all-targets
       # `retrieval-e2e` is EXEMPT (tests/feature_lanes.rs) from *running* — it needs a
       # live Qdrant + TEI/Ollama stack no CI runner has. That justifies not running
       # tests/retrieval_e2e.rs, not skipping compilation of it: a `cargo check` here
