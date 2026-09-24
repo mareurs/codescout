@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-09-24
-closed:
+closed: 2026-09-24
 severity: low
 owner: marius
 related: [docs/issues/2026-09-24-source-gate-refusal-discards-the-clauses-it-did-not-block.md]
@@ -51,7 +51,7 @@ source gate's head check, and its remedy picker (which chose the `cat` remedy fo
 clause). `command` stays a wrapper as upstream decided, so `command -v cargo | head` is
 over-refused — stated at the site.
 
-Fix SHA / patch-id: _recorded at commit time_.
+Fix: `fae5f447` on branch `fix/lessons-friction` · patch-id `e0bf356dfae93ca97e5fdf42df91158030332fb5`.
 ## Tests added
 
 `source_gate_sees_through_keyword_group_and_assignment_prefixes` (10 shapes),

@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-09-24
-closed:
+closed: 2026-09-24
 severity: low
 owner: marius
 related: []
@@ -51,7 +51,7 @@ would not be sound, a `No rerun offered: <reason>.` line naming why:
 
 A stage inside a pipeline takes its whole run with it. The refuse-in-full contract is unchanged.
 
-Fix SHA / patch-id: _recorded at commit time_.
+Fix: `fae5f447` on branch `fix/lessons-friction` · patch-id `e0bf356dfae93ca97e5fdf42df91158030332fb5`.
 ## Tests added
 
 Eight `source_gate_*` tests in `src/util/path_security.rs`, one per row of the rewrite table,

@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-09-24
-closed:
+closed: 2026-09-24
 severity: medium
 owner: marius
 related: []
@@ -66,7 +66,7 @@ ranges are both corrected:
 - Called from `with_python_ranges` in both branches of `LspClient::document_symbols`, and from
   `with_python_ranges_by_file` in `LspClient::workspace_symbols` (in place, order preserved).
 
-Fix SHA / patch-id: _recorded at commit time_.
+Fix: `fae5f447` on branch `fix/lessons-friction` · patch-id `e0bf356dfae93ca97e5fdf42df91158030332fb5`.
 ## Tests added
 
 - 11 unit tests, `src/ast/python_ranges.rs` `tests` — every load-bearing site was mutated and
