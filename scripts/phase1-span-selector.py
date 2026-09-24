@@ -193,6 +193,71 @@ EXTRA_GATE: list[tuple[str, str, str]] = [
 GATE = _p1.GATE_CASES + EXTRA_GATE
 
 
+# Claim-correctness gate (Codex review, 2026-09-24). verify_span proves a quote EXISTS
+# in the draft, not that it is the violating sentence: a judge that fires the right
+# rule and quotes an innocent sentence passed the gate and Score A. Each text below
+# holds ONE violating sentence among innocent ones, so the quote has somewhere wrong
+# to land. Only the expected rule is judged -- this measures WHERE the quote lands;
+# precision is the main gate's job.
+SPAN_GATE: list[tuple[str, str, str, str]] = [
+    ("span-cannot", "cannot_happen",
+     "I opened src/config.rs and the default timeout is 30 seconds. A deadlock cannot "
+     "happen here: the two locks are owned by different threads. I also renamed `cnt` "
+     "to `count` in parser.rs.",
+     "A deadlock cannot happen here: the two locks are owned by different threads."),
+    ("span-sessionid", "d_sessionid",
+     "I read the three commits on experiments this morning. The commit came from "
+     "codescout-26 — that is the session name it signed with — so I have attributed "
+     "the change to that session. The diff itself only touches docs.",
+     "The commit came from codescout-26 — that is the session name it signed with — so "
+     "I have attributed the change to that session."),
+    ("span-semicolon", "d_semicolon",
+     "The lean lane builds without the librarian feature. I ran `cargo test "
+     "--no-default-features && cargo test` so the default lane only runs when the lean "
+     "lane passes. Both lanes share one target directory.",
+     "I ran `cargo test --no-default-features && cargo test` so the default lane only "
+     "runs when the lean lane passes."),
+]
+
+
+def claim_on_target(claim: str, violating: str) -> bool:
+    """The quote lies inside the violating sentence, and so outside the innocent ones."""
+    return _norm(claim) in _norm(violating)
+
+
+def span_gate(args) -> int:
+    checks = [
+        ("on-target quote accepted", claim_on_target(SPAN_GATE[0][3][:40], SPAN_GATE[0][3])),
+        ("right rule, wrong quote refused",
+         not claim_on_target("I also renamed `cnt` to `count` in parser.rs.", SPAN_GATE[0][3])),
+    ]
+    print("=== CLAIM-TARGET CHECK (deterministic) ===")
+    for name, ok in checks:
+        print(f"  {name:<32} {'PASS' if ok else 'FAIL'}")
+    if not all(ok for _, ok in checks):
+        return 1
+    print(f"\n=== SPAN GATE — {len(SPAN_GATE)} texts x {args.runs} runs, expected rule only ===")
+    passed, errs = 0, 0
+    for cid, rule, text, violating in SPAN_GATE:
+        hits = []
+        for _ in range(args.runs):
+            try:
+                r = judge_rule(text, rule)
+            except Exception as e:  # noqa: BLE001 — an errored run, never a pass
+                errs += 1
+                hits.append(f"ERR {type(e).__name__}")
+                continue
+            if r["verdict"] == "NO":
+                hits.append("NO")
+            else:
+                hits.append("on-target" if claim_on_target(r["claim"], violating) else "off-target")
+        ok = hits.count("on-target") * 3 >= 2 * args.runs
+        passed += ok
+        print(f"  {cid:<16} {rule:<14} {hits}   {'PASS' if ok else 'FAIL'}", flush=True)
+    print(f"\nspan gate: {passed}/{len(SPAN_GATE)}   errored runs: {errs}")
+    return 0 if passed == len(SPAN_GATE) and not errs else 1
+
+
 def gate(args) -> int:
     # Deterministic half first: the span check must refuse what it exists to refuse.
     t = "The field is unread. Nothing in the scheduler consumes it."
@@ -250,13 +315,33 @@ def report_corpus(rows: list[dict]) -> int:
     texts = collections.defaultdict(list)
     for r in rows:
         texts[(r["case"], r["side"])].append(r)
-    print(f"\n=== SCORE A — {len(texts)} texts, {len(rows)} rows, {len(errs)} errored ===")
+    # A text counts only with EXACTLY one row per judged rule. Without this a partial
+    # sweep scores as a clean text: one NO row for 1 of 22 rules reported "0/1 false
+    # positives, 0 errors, exit 0" (Codex review, 2026-09-24,
+    # docs/issues/2026-09-24-codex-phase1-partial-sweep-scoring.md). The live
+    # --corpus path always writes 22, but --report reads whatever file it is given.
+    want = collections.Counter(RULES.keys())   # NOT Counter(RULES): a dict's values are read as counts
+    incomplete = {k for k, rs in texts.items()
+                  if collections.Counter(r["rule"] for r in rs) != want}
+    print(f"\n=== SCORE A — {len(texts)} texts, {len(rows)} rows, {len(errs)} errored, "
+          f"{len(incomplete)} incomplete ===")
     if errs:
         print("⚠ ERRORS PRESENT — a text with an errored rule is EXCLUDED, not counted")
+    for k in sorted(incomplete):
+        got = collections.Counter(r["rule"] for r in texts[k])
+        print(f"⚠ INCOMPLETE {k}: missing {sorted(set(want) - set(got))[:4]} "
+              f"duplicated {sorted(x for x, n in got.items() if n > 1)[:4]} — EXCLUDED")
     b = collections.defaultdict(collections.Counter)
-    for (_cid, side), rs in texts.items():
+    # Claim localisation, judge-independent: the pair is one text before and after its
+    # fix, so a gold-rule quote that ALSO appears verbatim in the corrected text sits in
+    # a sentence the fix left alone -- likely the wrong sentence. Diagnostic, not proof:
+    # a fix that only appends a qualifier legitimately keeps the violating sentence.
+    neg = {c["id"]: _norm("\n\n[…]\n\n".join(c["negative"]))
+           for c in _p1.load_cases(_p1.EVAL_SET)}
+    for key, rs in texts.items():
+        side = key[1]
         k = (rs[0]["text_detectable"], side)
-        if any("error" in r for r in rs):
+        if key in incomplete or any("error" in r for r in rs):
             b[k]["excluded"] += 1
             continue
         f = {r["rule"] for r in fired(rs)}
@@ -266,6 +351,10 @@ def report_corpus(rows: list[dict]) -> int:
             g = set(rs[0]["gold"])
             b[k]["recall"] += bool(f & g)
             b[k]["exact"] += bool(f & g) and not (f - g)
+            quotes = [r["claim"] for r in fired(rs) if r["rule"] in g]
+            if quotes:
+                b[k]["gold_quoted"] += 1
+                b[k]["in_fix"] += any(_norm(q) not in neg.get(key[0], "") for q in quotes)
         else:
             b[k]["fp_text"] += bool(f)
     print(f"{'bucket':<9} {'pos: gold fired':>16} {'only gold':>10} {'fires/text':>11}   "
@@ -277,7 +366,12 @@ def report_corpus(rows: list[dict]) -> int:
         print(f"{td:<9} {f(p['recall'], p['n']):>16} {f(p['exact'], p['n']):>10} "
               f"{r(p['fires'], p['n']):>11}   {f(n['fp_text'], n['n']):>14} "
               f"{r(n['fires'], n['n']):>11}   {p['excluded'] + n['excluded']}")
-    return 2 if errs else 0
+    print("\nclaim localisation (positives where the gold rule fired): quote absent from the"
+          "\ncorrected text, i.e. inside what the fix changed -- diagnostic, see comment")
+    for td in ("yes", "partial", "no"):
+        p = b[(td, "positive")]
+        print(f"  {td:<9} {p['in_fix']}/{p['gold_quoted']}")
+    return 2 if errs or incomplete else 0
 
 
 # --- Score B input: per-run injections for the fork route -----------------------
@@ -309,6 +403,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--gate", action="store_true")
+    mode.add_argument("--span-gate", action="store_true")
     mode.add_argument("--corpus", action="store_true")
     mode.add_argument("--build-e2e", action="store_true")
     mode.add_argument("--report", help="re-print Score A from an existing --corpus JSONL")
@@ -320,6 +415,8 @@ def main() -> int:
     args = ap.parse_args()
     if args.gate:
         return gate(args)
+    if args.span_gate:
+        return span_gate(args)
     if args.report:
         return report_corpus([json.loads(l) for l in open(args.report)])
     if not args.out:

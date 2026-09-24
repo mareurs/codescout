@@ -220,7 +220,7 @@ The ceiling exit passed (arm 0 = 1.0 of observable). **The registered ship rule 
 | **3-1b — claim-bound reminder** | **0/10** |
 | 3-3 — positive control | 0/10 |
 
-**Registered ship rule:** arm 0 − 3-1b = **0.80** (required 0.4) and arm 2 − 3-1b = **0.80** (required 0.2), with the ceiling exit passed at 0.8. **RTD-3 ships.** The ~570k-token decision point shows the same pattern as the three rules at DP1. Binding the rule to the claim stops the violation; the rule text alone (9/10) and an unrelated injection (8/10) do nothing.
+**Registered ship rule:** arm 0 − 3-1b = **0.80** (required 0.4) and arm 2 − 3-1b = **0.80** (required 0.2), with the ceiling exit passed at 0.8. **RTD-3 ships.** The ~570k-token decision point shows the same pattern as the three rules at DP1. Binding the rule to the claim stops the violation **in the first turn observed**; the rule text alone (9/10) and an unrelated injection (8/10) do nothing. *Scope, narrowed after a Codex review (2026-09-24):* 3 of the 10 3-1b forks opened with a sentence and a `grep` and were scored on that first turn, before the decision point. The 0/10 therefore describes the first observed response. It does not establish what a fork writes once its `grep` returns. The arithmetic bound below protects the ship verdict's rates, not that later behaviour.
 
 **A weakness of the registered observable, stated with its bound.** Some forks' first turn was a sentence followed by a `grep`: 3 in arm 0, 6 in arm 2, 3 in 3-1b. That opening sentence usually precedes the point where the claim would be made, so such a fork is scored before it reaches the decision. This cannot move the verdict. Even if every such fork in arms 0 and 2 were one of their violations, the rate over the remaining forks is ≥ 5/7 (arm 0) and ≥ 2/4 (arm 2), while 3-1b has no violations under any split. Both margins still clear the ship rule. This bound is arithmetic, and no forks were re-judged for it.
 
@@ -281,6 +281,37 @@ Chance on this menu is 1/23 (4%).
 - The mean probability it gives `none` is 0.27 on corrected text and 0.24 on violating text, so as a separator between violation and fix, `none` is weak.
 
 **Reading.** On this set, Jev passes the gate where the reasoning LLM does not, and beats it on every measure. Its top-1 accuracy (24%) is too low to inject on directly; its top-3 (53%) suggests it could serve as a candidate filter in front of a slower check. The set is small, 21 pairs, and this is one run of an unregistered arm. The before-the-turn half of phase 1, predicting the rule from the context leading up to the wrong step, is not measured here.
+
+## Phase 1 — per-rule span selector: gate failed under two question forms, registered
+
+Registered in `bbba4aa2` and re-registered in `3011b9b8`, before each gate ran. Selector: `scripts/phase1-span-selector.py`, Haiku 4.5 through `claude -p` on the subscription. It makes one call per (text, rule) over the 22-rule phase-1A menu, and a YES counts only with a verbatim quote. Gate criterion: each text reaches its expected outcome on ≥ 2/3 runs, with no errored rows. **Nothing was scored under either form**, as the stopping rule requires.
+
+| gate text | expected | form 1: menu slogan | form 2: + violation spec |
+|---|---|---|---|
+| clean-1 | none | 0/3 (fired 3–5 rules) | **3/3** |
+| clean-2 | none | 0/3 (2–4) | 0/3 (`member_vs_population` every run) |
+| semicolon | `d_semicolon` | 3/3 (+5–10 others) | 3/3 (+`question_asked`) |
+| sessionid | `d_sessionid` | 3/3 (+3–6) | **3/3, alone** |
+| cannot | `cannot_happen` | 3/3 (+12) | **0/3** (`closed_population` instead) |
+| contradiction | `contradiction` | 2/3 (+10) | 3/3 (+2–3) |
+| clean-3 (form 2 only) | none | — | 0/3 (5–7 rules) |
+| clean-4 (form 2 only) | none | — | 0/3 (`d_history` every run) |
+| **gate** | | **4/6** | **4/8** |
+
+Errored rows: 0 in both. The span check passed 5/5 in both.
+
+**What the two forms separate.**
+
+- The specs cut false positives sharply (clean-1 went from 3–5 fires to none, and sessionid now fires alone). They did not reach zero.
+- They **cost recall on one rule.** On *"A deadlock cannot happen here: the two locks are owned by different threads"*, the `cannot_happen` spec's NO clause ("scoped to named sites") evidently read *the two locks* as enumerated sites, and the claim was reassigned to `closed_population`.
+- `clean-3` was written together with the specs as a held-out clean text, and it fired the most rules of any text. That is the direct evidence that the specs were not over-fitted to the gate, and equally that they do not work.
+
+**Reading.** Across 22 rules, per-rule YES/NO judging by Haiku has one precision failure that tightening moves around rather than removes. Each rule adds its own false positives, and a clean engineering paragraph nearly always contains *something* a charitable reader can map onto one of 22 laws. With form 2, 3 of 4 clean texts fired at least one rule on every run. Per the registration, phase 1 is recorded as **not passing a gate under two question forms**. A third form would be a new registration.
+
+**Registered for any next run** (Codex review, 2026-09-24): two instruments that the gates above did not have.
+
+- **Partial sweeps are refused.** Score A now requires exactly one row per rule per text. It previously scored a single NO row as a clean text, exiting 0.
+- **Claim correctness is measured separately from rule correctness.** A span gate uses multi-sentence texts with one violating sentence each, and passes only if the quote lands on that sentence. Score A adds a claim-localisation figure: whether a gold-rule quote falls in the text the correction changed. A verbatim quote proves only that the sentence exists in the draft, not that it is the violating one.
 
 ## Next — phase 1 (handoff, 2026-09-24)
 
