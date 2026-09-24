@@ -38,22 +38,52 @@ formatted; run `./scripts/gate.sh`.
 `ls -d ~/.claude*/projects/*fix-lessons-friction*` → nothing; the session's transcripts are under
 `~/.claude-mar/projects/-home-scurtuecaterina-Documents-Project-Codescout`.
 
+**A second defect on the same line**, found by the fix's own fixture: the slug replaced only
+`/`, but Claude Code replaces every non-alphanumeric byte (measured 2026-09-24: 11 project dirs
+across all profiles, none holding a character outside `[A-Za-z0-9-]`). So a session STARTED in
+`.worktrees/x` — or any cwd with a dot, such as a `mktemp` dir — was missed as well.
+
+**And the reverse error, pre-existing:** a relative write is ambiguous once two trees share a
+transcript dir. Run from the main checkout, the script credited a session's WORKTREE writes to
+the main checkout's same-named files, because `src/x.rs` matched either.
+
 Two effects, not one: `fmt-mine` over-refuses (loud, recoverable), and `wip_authors` under-reports
 (silent — it reads as "nobody wrote this").
 
 ## Fix
-Also scan the main checkout's slug (`git rev-parse --git-common-dir`'s parent) when the toplevel
-is a linked worktree, and keep matching by repo-relative path.
 
+`scripts/file-provenance.py`:
+
+- `claude_slug` — Claude's rule, `[^A-Za-z0-9]` → `-`.
+- `main_checkout` + `transcript_roots` — in a linked worktree, also read the main checkout's
+  transcript dirs (`git rev-parse --path-format=absolute --git-common-dir`).
+- `scan` tracks, per transcript file, the tree a relative path names: the record's `cwd`, moved by
+  `workspace(action="activate")` (`activated_tree`); `write_base` resolves codescout tools
+  (`run_command` included) against the active tree unless `workspace=` pins the call, and native
+  `Bash` against `cwd`. `normalize` takes that base. Records without `cwd` keep the old reading.
+
+Known blind spot, stated at the site: an MCP server restart resets the active project to the cwd
+and the transcript does not record it.
+
+Fix SHA / patch-id: _recorded at commit time_.
 ## Tests added
-_pending_
 
+`tests/file-provenance.sh` § *a linked worktree finds its transcripts* — 11 assertions, run
+without `FILE_PROVENANCE_ROOTS` (every older case pins it, so none exercised discovery): a real
+repo + worktree and a fake `HOME`. Each positive has a control for the opposite mis-filing. 6/6
+mutations killed (old slug, no main scan, base ignored, `workspace=` ignored, activation ignored,
+`Bash` resolved as active). Dependent suites green: `tests/fmt-mine.sh`, `tests/attribute-red.sh`
+(41), `tests/pre-commit-ledger-divergence.sh`.
+
+On real transcripts, 2026-09-24: from the worktree, `scripts/file-provenance.py` and
+`tests/file-provenance.sh` → `MINE ... written by THIS session`; the same paths from the main
+checkout (`REPO_ROOT=` main) → `UNKNOWN`, correctly — that copy was never edited.
 ## Workarounds
 `cargo fmt --all` in the worktree after confirming with `--check -l` that it names only your own
 files — safe when the worktree is private to the session.
 
 ## Resume
-Not started.
 
+N/A once committed. Tag through the catalog after merge.
 ## References
 - Found running the final gate on branch `fix/lessons-friction`.

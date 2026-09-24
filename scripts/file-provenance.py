@@ -288,16 +288,54 @@ def profile_dirs(leaf: str) -> list[Path]:
             and (p / leaf).is_dir()]
 
 
+def claude_slug(path: Path) -> str:
+    """The directory name Claude Code gives a cwd under `<profile>/projects/`.
+
+    Every non-alphanumeric byte becomes `-`, not only `/`: `.worktrees/x` becomes
+    `-worktrees-x`. Measured 2026-09-24: 11 project dirs across every profile on this
+    machine, none holding a character outside [A-Za-z0-9-], and every live session's
+    registry `cwd` slugged this way named an existing dir. Replacing `/` alone missed
+    any cwd containing a dot -- a worktree under `.worktrees/`, or a `mktemp` dir.
+    """
+    return re.sub(r"[^A-Za-z0-9]", "-", str(path))
+
+
+def main_checkout(root: Path) -> Path | None:
+    """The main checkout's root when `root` is a linked worktree, else None."""
+    out = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        capture_output=True, text=True)
+    common = Path(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else None
+    if common is None or common.name != ".git":
+        return None
+    main = common.parent.resolve()
+    return main if main != root.resolve() else None
+
+
 def transcript_roots(root: Path) -> list[Path]:
-    """Every profile's transcript directory for this project.
+    """Every profile's transcript directory that can hold writes to this checkout.
 
     One profile's directory is a SUBSET and looks complete; see BL-58.
+
+    Transcripts are filed under a session's CWD, not under the tree it edits. In a linked
+    worktree the sessions doing the work usually sit in the MAIN checkout and reach the
+    worktree by activating it, so its transcript dir is read too; `scan()` then decides,
+    write by write, which tree a relative path named.
+    docs/issues/2026-09-24-file-provenance-reads-no-transcripts-inside-a-worktree.md
     """
     env = os.environ.get("FILE_PROVENANCE_ROOTS")
     if env:
         return [Path(p) for p in re.split(r"[:,]", env) if p]
-    slug = "-" + str(root).lstrip("/").replace("/", "-")
-    return profile_dirs(f"projects/{slug}")
+    checkouts = [root]
+    main = main_checkout(root)
+    if main is not None:
+        checkouts.append(main)
+    dirs: list[Path] = []
+    for checkout in checkouts:
+        for d in profile_dirs(f"projects/{claude_slug(checkout)}"):
+            if d not in dirs:
+                dirs.append(d)
+    return dirs
 
 
 def registry_roots() -> list[Path]:
@@ -441,11 +479,19 @@ def address_lines(sid: str, live: dict[str, list[dict]], indent: str) -> tuple[s
     return ("  [LIVE]", out)
 
 
-def normalize(p: str, root: Path) -> str | None:
-    """Repo-relative form, or None if the path lies outside this checkout."""
+def normalize(p: str, root: Path, base: Path | None = None) -> str | None:
+    """Repo-relative form, or None if the path lies outside this checkout.
+
+    `base` is the directory a RELATIVE `p` was written against, when the transcript says
+    (see `scan()`). Without it a relative path is taken to name this checkout, which is
+    only right while every transcript read belongs to it -- false once a linked worktree
+    also reads the main checkout's transcripts.
+    """
     if not p:
         return None
     q = Path(p)
+    if not q.is_absolute() and base is not None:
+        q = base / q
     if q.is_absolute():
         try:
             return str(q.resolve().relative_to(root))
@@ -495,6 +541,37 @@ def write_targets(name: str, inp: dict, root: Path):
             yield from python_write_targets(cmd)
 
 
+def write_base(name, inp, active: Path | None, cwd: Path | None) -> Path | None:
+    """The directory a relative path in this tool call was written against.
+
+    codescout tools resolve against the ACTIVE project -- `run_command` included, since it
+    runs in the project root -- unless the call pins one with `workspace=`. Native `Bash`
+    runs in the session's cwd. Native Write/Edit take absolute paths, so the base is moot.
+    """
+    if isinstance(name, str) and name.startswith("mcp__codescout__"):
+        if isinstance(inp, dict) and isinstance(inp.get("workspace"), str):
+            return Path(inp["workspace"])
+        return active
+    return cwd
+
+
+def activated_tree(name, inp, active: Path | None) -> Path | None:
+    """`active` after this call: a `workspace(action="activate", path=...)` moves it.
+
+    Read from the REQUEST; a refused activation would be misread as a move. Accepted:
+    activation is rarely refused, and a wrong base only ever mis-files a relative path
+    between two trees -- it never invents a write.
+    """
+    if name != "mcp__codescout__workspace" or not isinstance(inp, dict):
+        return active
+    if inp.get("action") != "activate" or not isinstance(inp.get("path"), str):
+        return active
+    target = Path(inp["path"])
+    if not target.is_absolute() and active is not None:
+        target = active / target
+    return target
+
+
 def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
     """path (repo-relative) -> [(session id, ISO timestamp or None), ...].
 
@@ -532,6 +609,13 @@ def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
                 fh = open(f, errors="replace")
             except OSError:
                 continue
+            # The tree a RELATIVE codescout path names: the session's cwd until a
+            # `workspace(action="activate")` moves it. Per file, because each transcript
+            # is one session (or one subagent) with its own history. None until a record
+            # carries `cwd`, which keeps cwd-less fixtures on the old "relative means this
+            # checkout" reading. Blind spot: an MCP server restart silently resets the
+            # active project to the cwd, and the transcript does not record it.
+            active: Path | None = None
             with fh:
                 for line in fh:
                     if '"tool_use"' not in line:
@@ -562,13 +646,19 @@ def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
                     # docs/issues/archive/2026-09-10-subagent-writes-leave-no-transcript-record-so-provenance-and-fmt-mine-refuse-them.md
                     who = rec.get("sessionId") or rec.get("session_id") or sid
                     when = rec.get("timestamp")
+                    cwd = Path(rec["cwd"]) if isinstance(rec.get("cwd"), str) else None
+                    if active is None:
+                        active = cwd
                     for b in content:
                         if not isinstance(b, dict) or b.get("type") != "tool_use":
                             continue
-                        for raw in write_targets(b.get("name"), b.get("input"), root):
-                            rel = normalize(raw, root)
+                        name, inp = b.get("name"), b.get("input")
+                        base = write_base(name, inp, active, cwd)
+                        for raw in write_targets(name, inp, root):
+                            rel = normalize(raw, root, base)
                             if rel:
                                 owners.setdefault(rel, []).append((who, when))
+                        active = activated_tree(name, inp, active)
     return owners
 
 
