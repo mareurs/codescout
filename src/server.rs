@@ -5089,8 +5089,17 @@ mod tests {
     /// into frontmatter"* — a caller cannot act on it and the consequence that matters is
     /// kept: it is honoured by the allocator and INVISIBLE to the citation scanner, which is
     /// the silent half.
+    ///
+    /// **Ratcheted UP 2026-09-24, 56_817 → 56_972 (+155), for `run_command`'s `effect`
+    /// property (#56).** Measured, not estimated: `tool_surface_report_lengths` before
+    /// reports TOTAL 56_817 with `run_command` schema 970; after, 56_972 and 1_125.
+    /// **`run_command` is the only row that moves, and 970 + 155 = 1_125**, so the whole delta
+    /// is this property. What the bytes buy: the one field that lets telemetry tell
+    /// `run_command "ls"` from `run_command "git reset --hard"`, plus the four words *"takes
+    /// no lock"* — the operator ruling a caller would otherwise read the property as
+    /// contradicting.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_817;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_972;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
@@ -9486,6 +9495,32 @@ mod tests {
         assert!(!server.is_write_call("library", &json!({"action": "list"})));
         assert!(!server.is_write_call("read_file", &json!({})));
         assert!(!server.is_write_call("symbols", &json!({})));
+    }
+
+    /// #56, operator ruling 2026-09-24: `run_command` DECLARES an effect (recorded in
+    /// usage.db) but NEVER takes the cross-process write lock, whatever it declares. The lock
+    /// is held for the whole call and waiters are refused after `write_lock_timeout_secs`
+    /// (5), so a default-write lock would turn one session's foreground `cargo test`
+    /// (run_command p95 43 s) into every peer's refused edits.
+    ///
+    /// INERT for a red on the fixing commit — `is_write` returned false before it too. It
+    /// guards the other direction: someone later "fixing" the missing override by returning
+    /// the declared effect, which is the natural reading of the bug file's title. That change
+    /// reds here and points at the ruling.
+    #[tokio::test]
+    async fn run_command_never_takes_the_write_lock_whatever_it_declares() {
+        use serde_json::json;
+        let (_dir, server) = make_server().await;
+        for input in [
+            json!({"command": "rm -rf target"}),
+            json!({"command": "x", "effect": "write"}),
+            json!({"command": "x", "effect": "read"}),
+        ] {
+            assert!(
+                !server.is_write_call("run_command", &input),
+                "run_command must not take the write lock (ruling on #56): {input}"
+            );
+        }
     }
 
     /// Every librarian action outside a **declared read set** classifies as a write.

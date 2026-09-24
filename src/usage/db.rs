@@ -163,6 +163,21 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         )?;
     }
 
+    // Migration: the effect a `run_command` caller DECLARED (#56) — `read` or `write`, the
+    // latter when it said nothing. The only column that can tell `run_command "ls"` from
+    // `run_command "git reset --hard"`; before it, both recorded identically. NULL for every
+    // other tool (their effect is fixed by `is_write`, derivable from `tool_name` + `action`)
+    // AND for every row older than this column — the same NULL ambiguity `read_output_ids`
+    // states above, separable only by `called_at`. A DECLARATION, not an observation: it says
+    // what the caller claimed, never what the command did.
+    // docs/issues/2026-09-20-run-command-never-overrides-is-write.md
+    let has_effect_class: bool = conn
+        .prepare("SELECT effect_class FROM tool_calls LIMIT 0")
+        .is_ok();
+    if !has_effect_class {
+        conn.execute_batch("ALTER TABLE tool_calls ADD COLUMN effect_class TEXT;")?;
+    }
+
     backfill_legacy_rows(&conn, &project_root.to_string_lossy())?;
 
     Ok(conn)
@@ -274,6 +289,7 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
     started_at: Option<&str>,
     agent_id: Option<&str>,
     linkage: BufferLinkage<'_>,
+    effect_class: Option<&str>,
 ) -> Result<()> {
     // Taken by value so the sha and its dirty bit cannot be separated at the call site.
     // They were separable before BL-24, and the flag was the half that got dropped.
@@ -287,8 +303,8 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
         // lexicographic compare against a `datetime()`-shaped literal, and the shared
         // prefix is fixed-width, so a `.SSS` suffix always sorts after the same second
         // and before the next one.
-        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id, emitted_output_id, read_output_ids)
-             VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id, emitted_output_id, read_output_ids, effect_class)
+                 VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
         params![
             tool_name,
             latency_ms,
@@ -310,7 +326,8 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
             agent_id,
             linkage.emitted,
             linkage.reads,
-        ],
+            effect_class,
+            ],
     )?;
     // `pika_observations` is not codescout's table (a buddy-plugin skill creates it,
     // zero references in this crate), but usage.db is opened without
@@ -1244,6 +1261,7 @@ mod tests {
             None,
             None,
             Default::default(),
+            None,
         )
         .unwrap();
         let ts: String = conn
@@ -1286,6 +1304,7 @@ mod tests {
                 None,
                 None,
                 Default::default(),
+                None,
             )
             .unwrap();
         }
@@ -1339,6 +1358,7 @@ mod tests {
             Some(started),
             None,
             Default::default(),
+            None,
         )
         .unwrap();
         let (start, done): (Option<String>, String) = conn
@@ -1381,6 +1401,7 @@ mod tests {
                 None,
                 agent,
                 Default::default(),
+                None,
             )
             .unwrap();
         }
@@ -1478,6 +1499,7 @@ mod tests {
             None,
             None,
             Default::default(),
+            None,
         )
         .unwrap();
         let count: i64 = conn
@@ -1509,6 +1531,7 @@ mod tests {
             None,
             None,
             Default::default(),
+            None,
         )
         .unwrap();
         let (name, latency, outcome, overflowed, msg): (String, i64, String, i64, Option<String>) =
@@ -1548,6 +1571,7 @@ mod tests {
             None,
             None,
             Default::default(),
+            None,
         )
         .unwrap();
         let overflowed: i64 = conn
@@ -1592,6 +1616,7 @@ mod tests {
             None,
             None,
             Default::default(),
+            None,
         )
         .unwrap();
         let after: i64 = conn
@@ -1665,6 +1690,7 @@ mod tests {
             None,
             None,
             Default::default(),
+            None,
         )
         .unwrap();
 
@@ -1798,6 +1824,7 @@ mod tests {
             None,
             None,
             Default::default(),
+            None,
         )
         .unwrap();
         write_record(
@@ -1820,6 +1847,7 @@ mod tests {
             None,
             None,
             Default::default(),
+            None,
         )
         .unwrap();
         write_record(
@@ -1842,6 +1870,7 @@ mod tests {
             None,
             None,
             Default::default(),
+            None,
         )
         .unwrap();
 
@@ -1876,6 +1905,7 @@ mod tests {
                 None,
                 None,
                 Default::default(),
+                None,
             )
             .unwrap();
         }
@@ -2151,6 +2181,7 @@ mod tests {
             None,
             None,
             Default::default(),
+            None,
         )
         .unwrap();
         let (cs, ps, sid, inp, out): (String, String, String, String, String) = conn
@@ -2190,6 +2221,7 @@ mod tests {
             None,
             None,
             Default::default(),
+            None,
         )
         .unwrap();
         let (ps, inp, out): (Option<String>, Option<String>, Option<String>) = conn
@@ -2227,6 +2259,7 @@ mod tests {
             None,
             None,
             Default::default(),
+            None,
         )
         .unwrap();
         let (ft, tok, ef, pr): (Option<String>, Option<i64>, Option<String>, Option<String>) = conn
@@ -2273,6 +2306,7 @@ mod tests {
                 None,
                 None,
                 Default::default(),
+                None,
             )
             .unwrap();
             let (sha, got): (String, Option<i64>) = conn
@@ -2327,6 +2361,7 @@ mod tests {
                     emitted: Some(id),
                     reads: None,
                 },
+                None,
             )
             .unwrap();
         };
@@ -2354,6 +2389,7 @@ mod tests {
                     emitted: None,
                     reads,
                 },
+                None,
             )
             .unwrap();
         };
@@ -2415,6 +2451,7 @@ mod tests {
                 emitted: Some("@tool_aaa111"),
                 reads: None,
             },
+            None,
         )
         .unwrap();
         write_record(
@@ -2440,6 +2477,7 @@ mod tests {
                 emitted: None,
                 reads: Some(r#"["@cmd_zzz999"]"#),
             },
+            None,
         )
         .unwrap();
 

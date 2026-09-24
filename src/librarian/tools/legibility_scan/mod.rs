@@ -661,6 +661,7 @@ mod tests {
             None,
             None,
             Default::default(),
+            None,
         )
         .unwrap();
         drop(conn);

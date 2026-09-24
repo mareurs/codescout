@@ -88,6 +88,27 @@ fn parse_timeout_input(input: &Value) -> (u64, Option<String>) {
     (30, None)
 }
 
+/// The effect a `run_command` caller DECLARES for its command: `"write"` (the default) or
+/// `"read"`, or `None` when `effect` is present but is neither.
+///
+/// **Absent means write.** Nothing can derive a shell command's effect from its string — that
+/// is the halting problem wearing a costume — so the safe reading of silence is the mutating
+/// one: a command is a write unless its caller says otherwise
+/// (`docs/issues/2026-09-20-run-command-never-overrides-is-write.md`).
+///
+/// **Recorded, never enforced.** The value lands in `usage.db`'s `effect_class` so telemetry
+/// can separate `ls` from `git reset --hard`; it does NOT take the write lock — see
+/// [`RunCommand`]'s `is_write`. One definition, read by `call` (which refuses `None`) and by
+/// the usage recorder (which then records no class rather than guessing one).
+pub(crate) fn declared_effect(input: &Value) -> Option<&'static str> {
+    match input.get("effect") {
+        None | Some(Value::Null) => Some("write"),
+        Some(Value::String(s)) if s == "write" => Some("write"),
+        Some(Value::String(s)) if s == "read" => Some("read"),
+        Some(_) => None,
+    }
+}
+
 #[async_trait::async_trait]
 impl Tool for RunCommand {
     fn name(&self) -> &str {
@@ -118,6 +139,8 @@ impl Tool for RunCommand {
              - `timeout_secs`: default 30; raise for long builds.\n\
              - `run_in_background=true`: detach and return immediately.\n\
              - `interactive=true`: spawn with stdin/stdout for REPLs.\n\
+             - `effect`: `\"read\"` or `\"write\"` (default) — what the command does to files. \
+             Recorded in telemetry so reads and writes are separable; it takes no lock.\n\
              - `acknowledge_risk=true`: bypass the dangerous-command gate (use the `@ack_*` \
              handle from the rejection response instead).\n\
              \n\
@@ -147,14 +170,38 @@ impl Tool for RunCommand {
                 "cwd": { "type": "string", "description": "Subdirectory relative to project root." },
                 "acknowledge_risk": { "type": "boolean", "description": "Bypass dangerous-command check. Prefer @ack_* handle from the rejected response." },
                 "run_in_background": { "type": "boolean", "description": "Detach and return immediately. Use for long-running or backgrounded (&) commands." },
-                "interactive": { "type": "boolean", "description": "Spawn process with interactive stdin/stdout. Elicits input after each output chunk. Use for REPLs, prompts, and interactive CLIs." }
+                "interactive": { "type": "boolean", "description": "Spawn process with interactive stdin/stdout. Elicits input after each output chunk. Use for REPLs, prompts, and interactive CLIs." },
+                "effect": { "type": "string", "enum": ["read", "write"], "default": "write", "description": "What the command does to files. Recorded in telemetry; takes no lock." }
             }
         })
     }
+
+    /// **Deliberately `false` for every input, including `effect: "write"` — an operator
+    /// ruling (2026-09-24), not an omission.** `run_command` was the one tool with no
+    /// override, and the natural repair is to return the declared effect. It was measured and
+    /// rejected: the server holds the cross-process write lock for the WHOLE call and refuses
+    /// waiters after `write_lock_timeout_secs` (5), while `run_command`'s p95 is 43 s — so a
+    /// default-write lock turns one session's foreground `cargo test` into every peer's
+    /// refused edits. The declared effect is recorded instead ([`declared_effect`], usage.db
+    /// `effect_class`); shell writes stay unserialized against the edit tools, exactly as
+    /// before. Pinned by `run_command_never_takes_the_write_lock_whatever_it_declares`.
+    /// docs/issues/2026-09-20-run-command-never-overrides-is-write.md
+    fn is_write(&self, _input: &Value) -> bool {
+        false
+    }
+
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         use super::output_buffer::OutputBuffer;
 
         let command = super::require_str_param(&input, "command")?;
+        if declared_effect(&input).is_none() {
+            return Err(super::RecoverableError::with_hint(
+                format!("unknown `effect`: {}", input["effect"]),
+                "`effect` is \"read\" or \"write\" (the default when omitted). It is recorded in \
+                 telemetry and takes no lock, so declare what the command does to files.",
+            )
+            .into());
+        }
         let (timeout_secs, timeout_hint) = parse_timeout_input(&input);
         let acknowledge_risk = parse_bool_param(&input["acknowledge_risk"]);
         let run_in_background = parse_bool_param(&input["run_in_background"]);
@@ -331,3 +378,89 @@ impl Tool for RunCommand {
 
 #[cfg(test)]
 mod tests;
+
+/// #56 lives here rather than in `tests.rs` on purpose: that file carries a live peer's
+/// uncommitted work, and a path commit takes the whole working-tree file.
+#[cfg(test)]
+mod effect_tests {
+    use super::*;
+    use crate::tools::Tool;
+
+    async fn ctx() -> (tempfile::TempDir, ToolContext) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        (
+            dir,
+            ToolContext {
+                agent,
+                lsp: crate::lsp::LspManager::new_arc(),
+                output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(
+                    20,
+                )),
+                progress: None,
+                peer: None,
+                section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                    crate::tools::section_coverage::SectionCoverage::new(),
+                )),
+                guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(
+                    Default::default(),
+                )),
+                workspace_override: None,
+            },
+        )
+    }
+
+    /// `effect` is the caller's declaration of what the command does to files. Absent means
+    /// WRITE — a shell command is a write unless someone says otherwise, because nothing can
+    /// derive it from the command string (`docs/issues/2026-09-20-run-command-never-overrides-is-write.md`).
+    /// `None` for anything else, so `call` can refuse it and the recorder records no class
+    /// rather than guessing one.
+    #[test]
+    fn declared_effect_defaults_to_write_and_accepts_only_read_or_write() {
+        assert_eq!(
+            declared_effect(&json!({"command": "ls"})),
+            Some("write"),
+            "absent must mean write"
+        );
+        assert_eq!(
+            declared_effect(&json!({"command": "ls", "effect": "read"})),
+            Some("read")
+        );
+        assert_eq!(
+            declared_effect(&json!({"command": "ls", "effect": "write"})),
+            Some("write")
+        );
+        assert_eq!(
+            declared_effect(&json!({"command": "ls", "effect": "delete"})),
+            None
+        );
+        assert_eq!(
+            declared_effect(&json!({"command": "ls", "effect": true})),
+            None
+        );
+    }
+
+    /// An `effect` outside the two classes is refused before anything runs, naming both valid
+    /// values — silently treating `"delete"` as a write would record a class nobody declared.
+    /// Load-bearing: `echo` succeeds when the refusal is missing, so a pass here cannot be the
+    /// command failing for some other reason.
+    #[tokio::test]
+    async fn run_command_refuses_an_effect_it_does_not_know() {
+        let (_dir, ctx) = ctx().await;
+        let err = RunCommand
+            .call(json!({"command": "echo hi", "effect": "delete"}), &ctx)
+            .await
+            .expect_err("an unknown effect must be refused, not run");
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("recoverable, so sibling calls survive");
+        let text = format!("{} {}", rec.message, rec.hint().unwrap_or_default());
+        assert!(
+            text.contains("\"read\"") && text.contains("\"write\""),
+            "must name both valid values: {text}"
+        );
+    }
+}

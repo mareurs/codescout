@@ -202,6 +202,12 @@ impl UsageRecorder {
                 emitted: emitted_output_id.as_deref(),
                 reads: read_output_ids.as_deref(),
             },
+            // Keyed on the TOOL, not on the presence of an `effect` key: another tool's
+            // input carrying one declares nothing. Shares `declared_effect` with the tool's
+            // own validation, so the recorder and the refusal agree on what a class is.
+            (tool_name == "run_command")
+                .then(|| crate::tools::run_command::declared_effect(input))
+                .flatten(),
         )?;
         Ok(())
     }
@@ -885,6 +891,57 @@ mod content_tests {
         assert!(out.unwrap().contains("found it"));
         assert_eq!(sid, "test-session");
         assert!(!cs.is_empty(), "codescout_sha should be set");
+    }
+
+    /// #56: `effect_class` records what a `run_command` caller DECLARED — `write` when it said
+    /// nothing — and is NULL for every other tool, whose effect is fixed by its own `is_write`
+    /// and derivable from `tool_name` + `action`. It is the only column that can tell
+    /// `run_command "ls"` from `run_command "git reset --hard"`.
+    ///
+    /// Load-bearing: the `symbols` row passes `"effect": "read"` too. A recorder keyed on the
+    /// presence of an `effect` key instead of on the tool would write it for that row.
+    #[tokio::test]
+    async fn record_content_stores_run_commands_declared_effect_and_nothing_for_other_tools() {
+        use serde_json::json;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let recorder = UsageRecorder::new(
+            agent,
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+            None,
+        );
+        for (tool, input) in [
+            ("run_command", json!({"command": "ls"})),
+            ("run_command", json!({"command": "ls", "effect": "read"})),
+            ("symbols", json!({"name": "x", "effect": "read"})),
+        ] {
+            let _ = recorder
+                .record_content(tool, &input, None, || async {
+                    Ok(vec![Content::text("ok")])
+                })
+                .await;
+        }
+
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        let mut stmt = conn
+            .prepare("SELECT effect_class FROM tool_calls ORDER BY id")
+            .unwrap();
+        let got: Vec<Option<String>> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            got,
+            vec![Some("write".to_string()), Some("read".to_string()), None],
+            "run_command: declared (default write); every other tool: NULL"
+        );
     }
 
     #[tokio::test]
