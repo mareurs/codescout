@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 172
-entry_high_water_W: 144
+entry_high_water_W: 145
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -16965,6 +16965,18 @@ window is the remedy for the other; neither substitutes.
 **Cited in qualified form deliberately.** `## F-9` exists in **14** ledgers under
 `docs/trackers/` — verified by `grep -rln '^## F-9 '` — so a bare `F-9` is `IC-6`'s
 no-disambiguator half, and the pusher who raised it to me cited it bare.
+
+## W-145 — A fix's own sentence would have broken /clear: the parked-ledger map must never hold the live ledger
+
+**Valid:** dated 2026-09-24
+
+**Context:** a scout before fixing `c161cc27ddff5672` (fixed in `69e89228`) (concurrent subagents' guide deliveries land in the wrong subagent). The bug file's own Fix section proposed "a map of `principal -> Arc<Mutex<GuideLedger>>` looked up at adoption".
+
+**What the scout found:** read literally, that map would hold the *live* ledger as well. `poll_rendezvous` (`src/server.rs:1105`) rekeys the live ledger **in place** on `/clear` (`GuideLedger::rekey` rewrites `key` and `path`). With the live ledger also in the map under its old key, the entry would then point at a ledger keyed to the new conversation, and a later adoption of the old key would restore the wrong conversation's history. The existing `parked_ledgers` design avoids this only because the live ledger is never in the map. So the fix must keep that invariant: **the map holds only non-current ledgers**, and adoption moves `Arc`s between the slot and the map (take the target out, file the outgoing one under its key) instead of cloning contents. In-flight calls keep their own principal's `Arc`, so a sibling's adoption cannot redirect them.
+
+**Counterfactual:** implementing the bug file's sentence as written would have fixed the concurrent case and silently broken `/clear` for any principal served earlier in the process. No existing test combines a rekey with a later re-adoption of the pre-rekey key, so the suite would have stayed green.
+
+**Rests on:** `src/server.rs:182-207` (the `parked_ledgers` docs), `:1105-1123` (`poll_rendezvous`), `:1204-1240` (`adopt_request_conversation`); `src/tools/guide_ledger.rs:290-356` (`rekey`, `adopt`).
 
 ## Template for new entries
 

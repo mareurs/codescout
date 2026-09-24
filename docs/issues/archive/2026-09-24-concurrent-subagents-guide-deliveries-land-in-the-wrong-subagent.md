@@ -1,12 +1,13 @@
 ---
-id: e76556484627a41a
+id: c161cc27ddff5672
 kind: bug
-status: open
+status: fixed
 title: 'BUG: concurrent subagents'' guide deliveries land in the wrong subagent — adoption swaps one shared ledger slot mid-call'
 owners:
 - marius
 tags:
 - cluster/transient-shared-state-lies-to-readers
+closed: 2026-09-24
 opened: 2026-09-24
 severity: medium
 ---
@@ -58,11 +59,26 @@ The ledger files and per-transcript injection counts are above. Timestamps line 
 
 ## Fix
 
-Not started. Direction: resolve the ledger **once**, at adoption, and carry that principal's ledger (or its key) in the `ToolContext` for the whole call, instead of an `Arc` to the process-wide slot. Parked ledgers already exist per principal, so a map of `principal -> Arc<Mutex<GuideLedger>>` looked up at adoption would remove the shared read-after-swap window. Persisting and parking then act on that per-principal entry.
+**FIXED in `69e89228` (2026-09-24). Adoption now moves ledger handles instead of swapping contents, and each call keeps the handle it resolved.**
+
+- The slot holds a handle: `live_ledger: Arc<Mutex<LedgerHandle>>`, where `LedgerHandle = Arc<Mutex<GuideLedger>>`. `adopt_request_conversation` takes the slot lock for the whole decision. It moves the target's handle out of `parked_ledgers` (or builds one exactly as before: clone the outgoing ledger, then `GuideLedger::adopt`), files the outgoing handle under its key, and **returns the resolved handle**.
+- `call_tool_inner` uses that handle for `set_session_start_source`, for `poll_guide_rearm` (now a parameter), and for the `ToolContext`. `build_context` takes the handle as a parameter, so nothing can take a snapshot of the slot after a sibling's adoption.
+- **One refinement over this file's original direction** ("a map of `principal -> Arc<Mutex<GuideLedger>>`"): the map must still **never hold the live ledger**. `poll_rendezvous` rekeys the live ledger in place on `/clear`, so filing it under its old key would later restore the wrong conversation's history (`bug-fix-session-log:W-145`). The live handle therefore stays out of the map, as it did before.
+
+The live MCP binary picks this up only after a release rebuild (`./scripts/rb.sh`) and `/mcp` reconnect. Until then, running sessions still have the old behaviour.
 
 ## Tests added
 
-None yet. The regression test needs two principals interleaved with a barrier inside the first call's tool body. A sequential test cannot reach this path. That is probably why the existing `guide_hint_tests`, which all run calls one after another, are green.
+- `server::guide_hint_tests::concurrent_principals_each_receive_their_own_first_call_guide`: two real overlapping `call_tool_inner` calls. X runs `sleep 0.8; echo x`, Y's call starts 250 ms in, and both pass `effect: "read"` so the write guard cannot serialize them. **Observed RED before the fix**: X's first call got no opener, and Y's control assertion passed. Green after.
+- `server::guide_hint_tests::a_parent_keeps_its_one_shot_notices_across_a_subagent_hop`: covers the parked path. It closes a coverage gap the pre-fix code shared: dropping `parked.insert` SURVIVED all 57 existing `guide_hint_tests`, because topics write through to disk and re-adoption silently reloads them from the principal's file. Only the in-memory `notices` need the parked handle. The mutation is KILLED by this test.
+
+**Mutation record** (`scripts/mutation-probe.sh`, isolated worktree, one mutation per site):
+
+| site | mutation | verdict | reading |
+|---|---|---|---|
+| `call_tool_inner` | drop `ctx.guide_hints_emitted = ledger` | SURVIVED | unreachable: the adoption-to-`build_context` stretch has no `.await`, so only another worker thread can adopt inside it, and no test can place it there. **Repaired by removing the window** (`build_context` takes the handle) rather than keeping an untestable line. |
+| `adopt_request_conversation` | drop `parked.insert(key, outgoing)` | KILLED | by the notices test above |
+| `poll_guide_rearm` | re-read the slot instead of `ledger` | SURVIVED | same no-await window. Guarded by the parameter's shape, **not by a test**; stated as a limit. |
 
 ## Workarounds
 
@@ -70,7 +86,7 @@ None for affected subagents. A subagent that suspects it was starved can call `g
 
 ## Resume
 
-Write the barrier test first and watch it fail at HEAD, then scope the ledger per call. Check whether section-level (`librarian#…`) deliveries share the same path; they use the same ledger.
+Nothing left for the fix. Live check, when the binary is rebuilt: dispatch several subagents in parallel whose first calls are LSP-backed (`symbols`, `references`). Compare each subagent's `~/.local/state/codescout/guide_hints/<sid>_<agent>.json` against the `auto-injected get_guide(...)` blocks in its own transcript. Each ledger stamp should now match a delivery in that same subagent.
 
 ## References
 
@@ -78,3 +94,10 @@ Write the barrier test first and watch it fail at HEAD, then scope the ledger pe
 - `docs/adrs/2026-09-14-a-subagent-is-a-principal.md`: the design this defect undermines.
 - `a126bf48`, `971ed73f`: today's ledger fixes. Both are correct for sequential calls; this is the concurrent case.
 - Workflow context: `deep-agent-workflow-observations:DWF-7`.
+
+## Fix provenance
+
+- **SHA:** `69e89228` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `3cafc22d19afe0209e0f48c352ddc3c007177e9c` — content hash of the diff; survives rebase and cherry-pick.
+
+`fix(guide-ledger): each call keeps its own principal's ledger; adoption moves handles instead of swapping contents`

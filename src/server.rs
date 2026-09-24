@@ -191,7 +191,7 @@ pub struct CodeScoutServer {
     /// swap contents under one shared `Arc`, a slow call decided its guide delivery
     /// against whichever principal adopted last: measured 2026-09-24 as 2 of 4 parallel
     /// subagents denied a first-call guide while a third got it three times
-    /// (docs/issues/2026-09-24-concurrent-subagents-guide-deliveries-land-in-the-wrong-subagent.md).
+    /// (docs/issues/archive/2026-09-24-concurrent-subagents-guide-deliveries-land-in-the-wrong-subagent.md).
     /// Read it through [`live_ledger`](Self::live_ledger); inside a call, use
     /// `ctx.guide_hints_emitted`, never the slot.
     live_ledger: Arc<parking_lot::Mutex<LedgerHandle>>,
@@ -685,7 +685,7 @@ impl CodeScoutServer {
     /// `ledger` is the handle adoption resolved for this call. It is a parameter,
     /// not a read of the slot, so a sibling principal's concurrent adoption has no
     /// window in which to hand this call the sibling's ledger
-    /// (docs/issues/2026-09-24-concurrent-subagents-guide-deliveries-land-in-the-wrong-subagent.md).
+    /// (docs/issues/archive/2026-09-24-concurrent-subagents-guide-deliveries-land-in-the-wrong-subagent.md).
     fn build_context(
         &self,
         progress: Option<Arc<progress::ProgressReporter>>,
@@ -1165,7 +1165,7 @@ impl CodeScoutServer {
     ///
     /// `ledger` is the handle adoption resolved for THIS call, never the slot, which
     /// a concurrent adoption may already have repointed at a sibling
-    /// (docs/issues/2026-09-24-concurrent-subagents-guide-deliveries-land-in-the-wrong-subagent.md).
+    /// (docs/issues/archive/2026-09-24-concurrent-subagents-guide-deliveries-land-in-the-wrong-subagent.md).
     ///
     /// `agent` is `None` for a parent (unstamped) call, which consumes nothing.
     /// Consuming on whichever principal called next re-armed the PARENT's whole
@@ -1198,7 +1198,7 @@ impl CodeScoutServer {
     /// `ToolContext` guide delivery reads — takes this handle and never re-reads the
     /// slot. Swapping ledger CONTENTS under one shared `Arc` is what let a slow call
     /// decide delivery against the last principal to adopt
-    /// (docs/issues/2026-09-24-concurrent-subagents-guide-deliveries-land-in-the-wrong-subagent.md).
+    /// (docs/issues/archive/2026-09-24-concurrent-subagents-guide-deliveries-land-in-the-wrong-subagent.md).
     /// The slot lock is held for the whole decision, so two concurrent adoptions
     /// cannot interleave their park and restore. Lock order: slot, then
     /// `parked_ledgers`, then a ledger's own lock, each briefly. No tool holds a
@@ -12215,7 +12215,7 @@ mod guide_hint_tests {
     }
 
     /// Regression for
-    /// docs/issues/2026-09-24-concurrent-subagents-guide-deliveries-land-in-the-wrong-subagent.md.
+    /// docs/issues/archive/2026-09-24-concurrent-subagents-guide-deliveries-land-in-the-wrong-subagent.md.
     /// Adoption used to swap the CONTENTS of one process-wide ledger slot, and every
     /// call's `ToolContext` held that same slot. So a slow call adopted as X, still
     /// running when Y's call adopted Y, decided its guide delivery against Y's
