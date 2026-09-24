@@ -630,3 +630,115 @@ If condition 1 fails, the agent labels are not admitted and Stage 2's mined rout
 - **The agent labels on T's 27 positives carry the admission's limit:** Codex confirmed 10 of 16 agent violation calls on the two samples.
 
 **What this leaves.** The mined route cannot supply a per-rule held-out test at this corpus size. A claim pooled over rules ("any violation", 27 T positives) is not registered, so none is made here. That, synthetic pairs, or a larger mined corpus would each be a new registration.
+
+## Amendment — synthetic contrastive pairs: generation, audit and a generator-disjoint test, 2026-09-25 (registered before any pair is generated)
+
+**Operator decision, 2026-09-25:** after T came out with no rule at 10 positives, register the synthetic source that Stage 2 already names. This amendment makes it runnable: seeds, sizes, channels, checks, audit, and what its test sets may claim. **Where it and the Stage 2 text disagree, this wins.** Amendments 2 and 3 of the Stages 2–4 correction (twin-only negatives, unknown cells masked, folds by incident) apply unchanged.
+
+**Two generators, with split roles, and the reason is policy before design:**
+
+- **Claude Sonnet 5** (`claude-sonnet-5`, `claude -p` on the subscription, the clean judge channel under `dirty_reasons`, no tools). **Its pairs are the only synthetic training input.** They are covered by the recorded permission (§ *Permission*), and each carries `source: synthetic`, `generator`, `claude_generated: true`.
+- **Codex `gpt-6-astra` at `medium`** (`codex exec` on the ChatGPT subscription, a fresh `CODEX_HOME`, run outside the repository). **Its output is never training input**: no permission covering it is on record. It generates the cross-generator test set and audits Claude's pairs.
+- **So the synthetic test is generator-disjoint.** An arm trained on Claude's pairs and scored on Codex's shows whether it learned the rule or the generator's style.
+- **Deviation from Stage 2:** the local open-weight generator is not used. Its quality is unmeasured, and adding it later needs an amendment, under this audit.
+
+**The prompt:** `docs/evals/data/2026-09-24-rule-tell/stage2/synthetic-generation-prompt.md`. Each call receives one rule's law and form-2b spec (`RULES` and `SPECS` in `scripts/phase1-span-selector.py`, the entries `make_label_batches.py` writes to `menu.json`) and 5 seed paragraphs. It returns, per seed:
+
+- a new 60–200-word paragraph with exactly one violating sentence;
+- that sentence verbatim;
+- a minimally edited fixed sentence;
+- a short reason.
+
+**Seeds** are prose paragraphs of at least 60 words from tracked `docs/**/*.md` at this amendment's commit. **Excluded:**
+
+- every held-out text in Stage 2's list;
+- every file whose basename is one of T's 75 doc groups;
+- any paragraph sharing an 8-token shingle with a held-out text or a T row.
+
+**Seed doc groups** are basenames, like the mined ones. They are split with `random.Random(20260929)`, iterated alphabetically:
+
+- **A group with no mined rows** goes to the synthetic test side, **S**, with p = 0.3.
+- **Every other eligible group** is training-side.
+- **Folds are fixed now, label-blind:** the non-T mined components, plus training-side seed groups with no mined rows as singleton components, each go to validation with p = 0.15 and calibration with p = 0.15, else to train, under `random.Random(20260930)`, iterated alphabetically. A synthetic pair takes the fold of its seed's group.
+
+**Sizes per rule, all 22 rules:**
+
+| set | generator | seeds from | pairs per rule |
+|---|---|---|---|
+| training pool (train / val / cal by seed fold) | Claude | training side | 80 |
+| **T-syn-in** | Claude | S | 15 |
+| **T-syn-cross** | Codex | S, **the same seeds as T-syn-in** | 15 |
+
+- Seeds per rule are drawn with `random.Random(20260931)`, without reuse across rules.
+- T-syn-in and T-syn-cross share their seeds pair for pair, so the two differ only in the generator.
+- That is 440 Claude calls (352 for training, 66 for T-syn-in, 22 for the pilot) and 66 Codex calls, before audit.
+- **If the eligible seeds fall short** of these sizes on either side, every rule's count on that side is scaled down by the same factor, and the shortfall is reported. No seed is reused to fill a gap.
+
+**Pilot, then freeze of the prompt:**
+
+- One Claude call per rule on training-side seeds (22 pairs). The author reads it only to catch prompt defects.
+- **Pilot pairs and their seeds are retired**, never used in any set.
+- The prompt may be revised **once** after the pilot, and the revision is committed before generation. Otherwise it is used as committed here.
+
+**Construction checks, mechanical.** A failing pair is discarded and counted per (generator, rule):
+
+- valid JSON with every field;
+- `violating_sentence` occurs exactly once in `paragraph`;
+- `fixed_sentence` differs from it;
+- 60–200 words;
+- none of the prompt's banned words;
+- no 8-token shingle shared with its seed, a held-out text, or a T row;
+- the shingle filter across folds, per amendment 3.
+
+**Labels, by construction:**
+
+- The violating sentence is a positive for its rule.
+- The fixed sentence, in the substituted paragraph, is a negative **for that rule only**.
+- Every other cell is `unknown` and masked, unless the unknown-cell audit (at least 200 cells per source, amendment 2) admits them.
+
+**The audit, cross-family.** Codex audits Claude's pairs, and Claude Opus 5.5 (the clean channel) audits Codex's.
+
+- **Sample:** per (generator, rule), max(10%, 8) pairs, drawn with `random.Random(20260932)`.
+- **The auditor sees** the paragraph, the fixed sentence, and the rule's law and spec. It answers three questions:
+  - (a) Does the violating sentence break the rule, by its law?
+  - (b) Does the fixed sentence no longer break it?
+  - (c) Does another sentence in the paragraph break it?
+- **A disagreement** is "no" to (a) or (b), or "yes" to (c).
+- **Drop rules:**
+  - **Per source above 20%:** the source is dropped (Stage 2's rule).
+  - **Per (source, rule) above 20%:** that rule's pairs from that source are dropped.
+  - Nothing is relabelled.
+- **Published:** every disagreement rate, with its Wilson 95% interval.
+
+**Trainable rules:** unchanged, at least 50 positive training sentences at freeze (mined plus audited synthetic, train fold).
+
+**What T-syn may claim, and when it is read:**
+
+- **Metrics, per rule, reported for T-syn-in and T-syn-cross separately:**
+  - recall on the violating sentence;
+  - fire rate on the fixed sentence in its paragraph;
+  - claim on target;
+  - Wilson 95% intervals throughout.
+- **They are read only after every choice is fixed**, per amendment 1. Nothing is selected on them.
+- **A rule with fewer than 10 surviving pairs** in a T-syn set, after checks and audit, has its claims on that set withheld, as on T.
+- **They support a claim of shape separation and generator transfer, and nothing about real drafts.** Mined T's per-rule claims stay withheld. The ship rule stays on Score B.
+
+**A shortcut probe, reported, not gating:**
+
+- Per rule, a TF-IDF logistic regression separating training positives from their twins.
+- Its AUC is reported on T-syn-in and T-syn-cross.
+- A rule where the probe reaches AUC ≥ 0.9 on T-syn-cross is marked **surface-separable**: its synthetic pairs differ in wording a bag of words can see, and a trained arm's score on it says less.
+
+**Predictions:**
+
+- Construction checks discard at most 15% of pairs per source.
+- Both sources pass the audit.
+- At least 15 of the 22 rules reach 50 training positives.
+- The trained arms' recall is lower on T-syn-cross than on T-syn-in for most trainable rules: a generator gap exists.
+- The probe marks at least a third of rules surface-separable on T-syn-in.
+
+**Limits.**
+
+- **Every synthetic label derives from the specs**, written by the agent that designed this. The cross-family audit is the one check that does not share that view.
+- **Real-draft performance is still untested per rule.** T-syn measures the constructed shape.
+- **Codex output is used as test and audit data.** Whether OpenAI's terms permit that use is recorded as the operator's to confirm. Using it as training input is ruled out here.
