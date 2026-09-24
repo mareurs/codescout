@@ -107,7 +107,7 @@ There were 8 stamps and 8 deliveries. Every stamp is followed about 0.3 s later 
 
 ## References
 
-- `docs/issues/2026-09-24-residual-in-session-subagent-guide-starvation.md`: the starvation residual. That one is about parent vs subagent through a shared `session_id`; this one is about sibling vs sibling under correct per-principal stamps.
+- `docs/issues/archive/2026-09-24-residual-in-session-subagent-guide-starvation.md`: the starvation residual. That one is about parent vs subagent through a shared `session_id`; this one is about sibling vs sibling under correct per-principal stamps.
 - `docs/adrs/2026-09-14-a-subagent-is-a-principal.md`: the design this defect undermines.
 - `a126bf48`, `971ed73f`: today's ledger fixes. Both are correct for sequential calls; this is the concurrent case.
 - Workflow context: `deep-agent-workflow-observations:DWF-7`.

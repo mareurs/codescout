@@ -1,11 +1,11 @@
 ---
-id: '98311e8c2c64bab8'
+id: 1503dca6c81fc3d4
 kind: bug
-status: open
+status: fixed
 title: 'RESIDUAL: Fix in-session guide starvation of subagents (ledger suppression by shared session_id); the named agent_type lever does not reach the in-memory ledger'
 tags:
 - cluster/gate-keyed-on-unobservable-event
-closed: null
+closed: 2026-09-24
 opened: 2026-09-24
 owner: marius
 related:
@@ -27,7 +27,26 @@ Remaining work split out of `docs/issues/archive/2026-08-31-subagents-receive-gu
 
 ## Fix
 
-Not started. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
+**Fixed — verified live 2026-09-24, no new commit.** The caveat this file was routed from was written on 2026-09-11 ahead of the parent's own § *Fix — 2026-09-11*, which shipped the live re-arm the caveat called unknown. Its remaining blocker — *"no MCP client sends per-request caller identity"* — was retired on 2026-09-14 by the principal stamp (`docs/adrs/2026-09-14-a-subagent-is-a-principal.md`): a subagent's calls carry `<session_id>/<agent_id>`, and `adopt_request_conversation` (`src/server.rs:1255-1298`) serves each principal its own ledger.
+
+**Live probe, 2026-09-24, session `774ba049-d97c-443a-b31d-f662a9cb6a1e`.** The parent held `project-activation-bootstrap`, `symbol-navigation`, `progressive-disclosure` and `tracker-conventions`. A fresh `general-purpose` Sonnet child made three `symbols(path=…)` calls. Read from the child's own transcript, not its report: call 1 carried `project-activation-bootstrap`, call 2 **`symbol-navigation` — a topic the parent held** — and call 3 nothing. The child's principal ledger (`guide_hints/774ba049-…_<agent>.json`) holds exactly those two. Not starved.
+
+**Two mechanisms each suffice, and this probe does not separate them.** The child's principal ledger started empty (adoption), and the snapshot hook's re-arm request — `guide_rearm/3393665-aec45ce254028293.json`, carrying the parent's four topics, created 15:06:44.97Z — was consumed by the child's own first call (gone 15:06:49.25Z). Both are cited under § *Fix provenance*. Separating them would take a mutation of one with the other in place.
+
+**The opposite direction is not this file's work and has its own home.** The same probe's `fork` arm was re-served both guides it had inherited: `docs/issues/2026-09-24-a-fork-child-is-re-served-every-guide-it-inherited.md`. The parent caveat's other loose end, the cross-profile transcript duplication, is `docs/issues/2026-09-11-subagent-transcripts-are-byte-identical-across-profile-dirs.md`.
+
+**Regression tests in place:** `guide_hint_tests::a_principal_stamped_into_the_arguments_rearms_the_ledger_once` (`src/server.rs:10686`), step 3 — *"a newly asserted principal must be re-armed"* — with steps 1–2 as its positive control; and the `GuideRearmInbox` unit tests in `src/tools/guide_rearm.rs`.
+
+## Fix provenance
+
+- **SHA:** `5e51e72f` (`experiments`)
+- **patch-id:** `25b71040d3ddfbd47d2b07a3104755c8e1655674`
+- **SHA:** `claude-plugins:de7d16a`
+- **patch-id:** `3d651075ea8daa4901b31c425467d47960992989`
+- **SHA:** `5a260862` (`experiments`)
+- **patch-id:** `da6856c700fc24bf182625eda246448cbe0d9b67`
+- **SHA:** `claude-plugins:9398e3a`
+- **patch-id:** `374a9ec583412cf189aea7b115c9725977036712`
 
 ## References
 
