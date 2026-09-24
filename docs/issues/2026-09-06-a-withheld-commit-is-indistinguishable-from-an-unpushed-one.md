@@ -11,7 +11,7 @@ opened: 2026-09-06
 owner: marius
 related: []
 severity: medium
-unverified: 'A policy, not a mechanism: nothing stops a session committing a held change, and a commit''s publishability is still unrecorded in git.'
+unverified: 'STANDING — A policy, not a mechanism: nothing stops a session committing a held change, and a commit''s publishability is still unrecorded in git.'
 ---
 
 # BUG: a commit an author is deliberately withholding is byte-identical to one merely not pushed yet, so any peer's push publishes it

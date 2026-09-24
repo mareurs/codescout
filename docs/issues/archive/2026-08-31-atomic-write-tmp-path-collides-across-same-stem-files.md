@@ -15,7 +15,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-08-28-atomic-write-leaks-its-temp-file-on-failure.md
 severity: high
-unverified: NO OBSERVED INSTANCE. The mechanism is measured (with_extension verified by running it; 7 collision groups enumerated from git ls-files) but no corruption has been seen in the wild, and no test yet demonstrates the interleaving. Severity high is a judgement about the consequence, not an observation of frequency.
+unverified: STANDING — NO OBSERVED INSTANCE. The mechanism is measured (with_extension verified by running it; 7 collision groups enumerated from git ls-files) but no corruption has been seen in the wild, and no test yet demonstrates the interleaving. Severity high is a judgement about the consequence, not an observation of frequency.
 ---
 
 # BUG: `atomic_write`'s tmp path REPLACES the extension, so same-stem files share one tmp path — concurrent writes corrupt across files

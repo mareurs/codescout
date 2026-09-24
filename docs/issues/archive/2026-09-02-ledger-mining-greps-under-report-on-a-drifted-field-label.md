@@ -8,7 +8,7 @@ opened: 2026-09-02
 owner: marius
 related: []
 severity: medium
-unverified: No regression test — nothing gates the field-label form, so the corpus can drift back the same way tomorrow. Four fields remain genuinely ABSENT (OB-12 Status; OB-13 Plausible-answer property, Vigilance, Status) and were deliberately not authored. The 6 repaired labels were verified by re-running the documented grep; the absent four were not repaired at all.
+unverified: TRACKED 7879e82a542864d3 — No regression test — nothing gates the field-label form, so the corpus can drift back the same way tomorrow. Four fields remain genuinely ABSENT (OB-12 Status; OB-13 Plausible-answer property, Vigilance, Status) and were deliberately not authored. The 6 repaired labels were verified by re-running the documented grep; the absent four were not repaired at all.
 ---
 
 # BUG: the observer-blindness ledger's own mining greps under-report on a drifted field label

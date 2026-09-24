@@ -8,7 +8,7 @@ opened: 2026-09-09
 owner: marius
 related: []
 severity: high
-unverified: 'the -- <path> non-scoping is measured via `cargo fmt --check -v` target enumeration, not by observing an actual cross-session rewrite; no damage occurred in the observed instance because no .rs file was dirty at that moment. RE-DERIVED INDEPENDENTLY 2026-09-10 at bf0a5241 by a second session that had not seen the first measurement: same 36 entry points both ways, and the re-run found the claim slightly UNDERSTATED (scoped = bare + 1 argument, not equal). Published as a denominator per CLAUDE.md''s instrument-the-doubt law, not absorbed as a catch.'
+unverified: 'STANDING — the -- <path> non-scoping is measured via `cargo fmt --check -v` target enumeration, not by observing an actual cross-session rewrite; no damage occurred in the observed instance because no .rs file was dirty at that moment. RE-DERIVED INDEPENDENTLY 2026-09-10 at bf0a5241 by a second session that had not seen the first measurement: same 36 entry points both ways, and the re-run found the claim slightly UNDERSTATED (scoped = bare + 1 argument, not equal). Published as a denominator per CLAUDE.md''s instrument-the-doubt law, not absorbed as a catch.'
 ---
 
 # BUG: the documented gate's first command rewrites every peer's uncommitted Rust

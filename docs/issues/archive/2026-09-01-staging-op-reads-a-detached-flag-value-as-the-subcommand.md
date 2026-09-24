@@ -12,7 +12,7 @@ opened: 2026-09-01
 owner: marius
 related: []
 severity: medium
-unverified: 'Fix and mechanism are measured and pinned (7278508e, 5 regression cases, 3 confirmed RED first). What was never counted is the IMPACT: no production false refusal was ever observed or tallied, so the cost claim stays inferential. Peer codescout-cc confirmed continuous live use of the `git -C <abs>` form during the defect''s lifetime, which establishes exposure, not incidents.'
+unverified: 'STANDING — Fix and mechanism are measured and pinned (7278508e, 5 regression cases, 3 confirmed RED first). What was never counted is the IMPACT: no production false refusal was ever observed or tallied, so the cost claim stays inferential. Peer codescout-cc confirmed continuous live use of the `git -C <abs>` form during the defect''s lifetime, which establishes exposure, not incidents.'
 ---
 
 ## Summary

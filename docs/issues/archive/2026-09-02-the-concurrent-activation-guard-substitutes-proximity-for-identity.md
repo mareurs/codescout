@@ -10,7 +10,7 @@ tags:
 closed: 2026-09-07
 opened: 2026-09-02
 severity: low
-unverified: Only the FALSE-POSITIVE half is fixed. § Root cause names a second and worse consequence of the same gap — the warning is attached to the response of the call that PERFORMED the switch, so it reaches the switcher, while the party harmed is whoever resolves against the wrong workspace afterwards and receives nothing. fd985218 does not touch routing. The guard is now accurate and still speaks to the wrong party.
+unverified: TRACKED b663dd5102ecb992 — Only the FALSE-POSITIVE half is fixed. § Root cause names a second and worse consequence of the same gap — the warning is attached to the response of the call that PERFORMED the switch, so it reaches the switcher, while the party harmed is whoever resolves against the wrong workspace afterwards and receives nothing. fd985218 does not touch routing. The guard is now accurate and still speaks to the wrong party.
 ---
 
 ## Summary

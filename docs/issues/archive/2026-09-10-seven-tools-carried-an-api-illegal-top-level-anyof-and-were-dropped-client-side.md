@@ -8,7 +8,7 @@ opened: 2026-09-10
 owner: marius
 related: []
 severity: high
-unverified: the client-side drop was never observed directly — it is established from the documented API rejection plus the fact that this session's client demonstrably rewrites the construct rather than forwarding it; no run against a forwarding (non-sanitizing) client was available
+unverified: STANDING — the client-side drop was never observed directly — it is established from the documented API rejection plus the fact that this session's client demonstrably rewrites the construct rather than forwarding it; no run against a forwarding (non-sanitizing) client was available
 ---
 
 # BUG: seven tools carried an API-illegal top-level `anyOf` and were dropped client-side, invisibly

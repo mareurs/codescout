@@ -8,7 +8,7 @@ opened: 2026-09-02
 owner: marius
 related: []
 severity: medium
-unverified: The serialization is REDUCED, not eliminated. What `1b3ac36b` removes is the stored count and therefore the concurrency-invalidation this file reproduces — a peer's commit can no longer stale your number between deriving it and committing it, because there is no number. What REMAINS is that a filer documenting a new member still edits `docs/trackers/issue-clusters.md`, so two sessions filing bugs for different classes still contend on one file. That residue is the per-class split this file proposed and which was deliberately not taken; it is a separate design item, not debt this fix owes.
+unverified: STANDING — The serialization is REDUCED, not eliminated. What `1b3ac36b` removes is the stored count and therefore the concurrency-invalidation this file reproduces — a peer's commit can no longer stale your number between deriving it and committing it, because there is no number. What REMAINS is that a filer documenting a new member still edits `docs/trackers/issue-clusters.md`, so two sessions filing bugs for different classes still contend on one file. That residue is the per-class split this file proposed and which was deliberately not taken; it is a separate design item, not debt this fix owes.
 ---
 
 # BUG: one ledger file serializes every class edit, so textually disjoint edits block each other

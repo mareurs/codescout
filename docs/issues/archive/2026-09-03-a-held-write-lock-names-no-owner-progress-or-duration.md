@@ -10,7 +10,7 @@ tags:
 closed: 2026-09-07
 opened: 2026-09-03
 severity: medium
-unverified: No progress surface. This file's § Fix named three remedies; bullets 1 (name the holder) and 3 (stop asserting a false duration) shipped at d1b6146d, bullet 2 (emit progress, or a starting estimate, for long-running write calls) did NOT. A refused party can now identify and message the holder, which is the operational harm closed; they still cannot see how far along a 12-minute reindex is. Separately, the named-holder path has unit coverage only — tests/cross_process_write_lock.rs takes a raw flock from the test process, so it exercises the anonymous fallback branch, not the named one.
+unverified: TRACKED c7f81780e767ee79 — No progress surface. This file's § Fix named three remedies; bullets 1 (name the holder) and 3 (stop asserting a false duration) shipped at d1b6146d, bullet 2 (emit progress, or a starting estimate, for long-running write calls) did NOT. A refused party can now identify and message the holder, which is the operational harm closed; they still cannot see how far along a 12-minute reindex is. Separately, the named-holder path has unit coverage only — tests/cross_process_write_lock.rs takes a raw flock from the test process, so it exercises the anonymous fallback branch, not the named one.
 ---
 
 # BUG: a held project write lock names no owner, no progress and no expected duration, so a refused party cannot tell a 12-minute reindex from a leak

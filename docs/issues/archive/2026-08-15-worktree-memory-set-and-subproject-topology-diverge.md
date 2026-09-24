@@ -12,7 +12,7 @@ tags:
 - sub-projects
 - silent-divergence
 - gitignore
-unverified: only the topology half is closed (1869adcb); the memory half is unfixed and is a decision rather than an implementation — a worktree activation still serves that commit's memories, so the memory set silently diverges from the main checkout. See section 'Still open — the semantic question'.
+unverified: TRACKED b259645d3d2c9214 — only the topology half is closed (1869adcb); the memory half is unfixed and is a decision rather than an implementation — a worktree activation still serves that commit's memories, so the memory set silently diverges from the main checkout. See section 'Still open — the semantic question'.
 ---
 
 ## Summary

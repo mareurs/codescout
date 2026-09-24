@@ -12,7 +12,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md
 severity: low
-unverified: both reported blockers are working-as-designed with documented remedies — the only defect here is the undocumented migration cost. The CodeRankEmbed-on-ONNX request is a feature, not a bug, and is recorded here only because it has no tracker home yet.
+unverified: STANDING — both reported blockers are working-as-designed with documented remedies — the only defect here is the undocumented migration cost. The CodeRankEmbed-on-ONNX request is a feature, not a bug, and is recorded here only because it has no tracker home yet.
 ---
 
 # BUG: the ONNX local-embed path is recommended as an escape from #15 without documenting that it forces a model change, a full reindex, and dense-only

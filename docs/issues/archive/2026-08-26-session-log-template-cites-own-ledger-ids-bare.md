@@ -16,7 +16,7 @@ owner: marius
 related:
 - e7eebd21a5c0cd99
 severity: medium
-unverified: Only one downstream repo was measured (claude-plugins). The wrong-resolution of `R-1` was confirmed there by elimination from link_scan's edge list, not by a direct per-token resolver dump. Other consuming repos were not surveyed.
+unverified: STANDING — Only one downstream repo was measured (claude-plugins). The wrong-resolution of `R-1` was confirmed there by elimination from link_scan's edge list, not by a direct per-token resolver dump. Other consuming repos were not surveyed.
 ---
 
 # BUG: session-log template imports its own repo's citations into every copy

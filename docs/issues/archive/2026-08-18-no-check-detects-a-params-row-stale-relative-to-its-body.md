@@ -11,7 +11,7 @@ tags:
 topic: tracker-entry-identity
 closed: 2026-08-30
 no_fix_commit: true
-unverified: 'The check is a HEURISTIC and its limits are measured, not estimated: sensitivity 91.4% over 536 simulated drifts, so ~1 real disagreement in 12 is silent; it covers 4 of 9 params-backed ledgers here, the other 5 declaring no `status` enum and therefore having no closed vocabulary to compare against; and a status region whose prose merely mentions another enum word is reported despite being correct. All three are stated on the scan and in its violation message. A clean run is evidence, not proof.'
+unverified: 'STANDING — The check is a HEURISTIC and its limits are measured, not estimated: sensitivity 91.4% over 536 simulated drifts, so ~1 real disagreement in 12 is silent; it covers 4 of 9 params-backed ledgers here, the other 5 declaring no `status` enum and therefore having no closed vocabulary to compare against; and a status region whose prose merely mentions another enum word is reported despite being correct. All three are stated on the scan and in its violation message. A clean run is evidence, not proof.'
 ---
 
 ## Summary

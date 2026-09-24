@@ -20,7 +20,7 @@ related:
 - docs/issues/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md
 - docs/issues/archive/2026-09-04-librarian-embeds-stored-artifacts-through-the-query-seam.md
 severity: high
-unverified: 'MEASURED 2026-09-05 AND WORSE THAN THIS RECORD FIRST STATED: Claude Code sends no `_meta` on CallToolRequest, so no progressToken, so `ctx.progress` is always None for this client and the fix emits nothing here. The code is correct and a client that requests progress gets it; the specific claim that this makes a long reindex survivable *in Claude Code* is false. See the Correction section.'
+unverified: 'STANDING — MEASURED 2026-09-05 AND WORSE THAN THIS RECORD FIRST STATED: Claude Code sends no `_meta` on CallToolRequest, so no progressToken, so `ctx.progress` is always None for this client and the fix emits nothing here. The code is correct and a client that requests progress gets it; the specific claim that this makes a long reindex survivable *in Claude Code* is false. See the Correction section.'
 ---
 
 ## Summary

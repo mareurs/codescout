@@ -8,7 +8,7 @@ opened: 2026-09-02
 owner: marius
 related: []
 severity: high
-unverified: The original Resume's prediction that scripts/run-artifact-bench.py would show a non-zero hits@5 after this fix was NOT re-run at archive time, and the suite's number has since moved for unrelated reasons (63fae4ea, 6f032dbd), so a reading taken now would not isolate this change. The consumer enumeration that discharged the previous caveat covers src/**/*.rs only -- not raw SQL built elsewhere, nor out-of-tree readers of the catalog file.
+unverified: STANDING — The original Resume's prediction that scripts/run-artifact-bench.py would show a non-zero hits@5 after this fix was NOT re-run at archive time, and the suite's number has since moved for unrelated reasons (63fae4ea, 6f032dbd), so a reading taken now would not isolate this change. The consumer enumeration that discharged the previous caveat covers src/**/*.rs only -- not raw SQL built elsewhere, nor out-of-tree readers of the catalog file.
 ---
 
 # BUG: chunk line ranges are body-relative but published as file lines, so every span points N lines short

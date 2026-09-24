@@ -17,7 +17,7 @@ opened: 2026-09-02
 owner: marius
 related: []
 severity: high
-unverified: 'The author-facing half is not fixed and is not claimed: nothing can annotate a `git add -u` an operator types in their own shell, so the remedy reaches the tool surface only. `IC-18`''s `**Mechanism status:**` is unchanged by this fix.'
+unverified: 'STANDING — The author-facing half is not fixed and is not claimed: nothing can annotate a `git add -u` an operator types in their own shell, so the remedy reaches the tool surface only. `IC-18`''s `**Mechanism status:**` is unchanged by this fix.'
 ---
 
 ## Summary

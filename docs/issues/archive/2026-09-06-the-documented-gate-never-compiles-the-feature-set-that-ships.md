@@ -10,7 +10,7 @@ opened: 2026-09-06
 owner: marius
 related: []
 severity: high
-unverified: No count of how much code this hides. `qdrant-client`-gated modules were not enumerated; the one measured consequence is a single four-day-red CI job.
+unverified: STANDING — No count of how much code this hides. `qdrant-client`-gated modules were not enumerated; the one measured consequence is a single four-day-red CI job.
 ---
 
 # BUG: the documented gate never compiles the feature set that ships

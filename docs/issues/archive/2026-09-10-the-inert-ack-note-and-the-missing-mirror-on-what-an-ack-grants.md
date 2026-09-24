@@ -8,7 +8,7 @@ opened: 2026-09-10
 owner: marius
 related: []
 severity: low
-unverified: 'residual 3 is NOT closed and cannot be: nothing binds the ack''s sid list to what the operator was actually told. Only the false assurance was removed, per the bug''s own prescribed reachable move. Residuals 1 and 2 are genuinely fixed with regression tests.'
+unverified: 'STANDING — residual 3 is NOT closed and cannot be: nothing binds the ack''s sid list to what the operator was actually told. Only the false assurance was removed, per the bug''s own prescribed reachable move. Residuals 1 and 2 are genuinely fixed with regression tests.'
 ---
 
 # BUG: the inert-ack note cannot say *nothing was examined*, and nothing states that an ack grants only on the pusher's behalf

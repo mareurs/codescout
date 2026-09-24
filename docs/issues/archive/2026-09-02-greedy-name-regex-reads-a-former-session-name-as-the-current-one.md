@@ -8,7 +8,7 @@ owners:
 tags:
 - cluster/addressing-without-an-escape-hatch
 closed: 2026-09-03
-unverified: 'The regression test covers the name read only. The self-identification half of the same commit is verified by hand, not by test — see the sibling bug file. The test is newly reachable: `tests/run-all.sh` globbed hooks only until 2026-09-03, so a skill-colocated test was discovered by nothing; the glob was widened in the same commit and has not yet run in CI, which invokes two named targets rather than the runner.'
+unverified: 'TRACKED 5cbaa87d92772a51 — The regression test covers the name read only. The self-identification half of the same commit is verified by hand, not by test — see the sibling bug file. The test is newly reachable: `tests/run-all.sh` globbed hooks only until 2026-09-03, so a skill-colocated test was discovered by nothing; the glob was widened in the same commit and has not yet run in CI, which invokes two named targets rather than the runner.'
 ---
 
 ## Summary

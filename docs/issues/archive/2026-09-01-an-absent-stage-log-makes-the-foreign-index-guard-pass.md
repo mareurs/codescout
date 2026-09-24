@@ -12,7 +12,7 @@ opened: 2026-09-01
 owner: marius
 related: []
 severity: high
-unverified: 'Fix, mechanism and decision table are all measured and pinned (fa9b3aff, 6 regression cases, 5 confirmed RED first, verified live on the shared checkout). What is NOT established is production incidence: no real capture was ever observed via this path, only constructed. The 3a422b31 capture that started this work reached the same end state by the ATTRIBUTION-decay route a987df96 fixed, not by this cold-log route — so this closes a demonstrated hole, not a counted one. Also unmeasured: how often the new `-` over-refusal fires in practice, i.e. the cost side of P2. M4 bounds it at <=24.7% of staging calls (the blanket forms), but that is an upper bound on exposure, not a rate of refusals.'
+unverified: 'STANDING — Fix, mechanism and decision table are all measured and pinned (fa9b3aff, 6 regression cases, 5 confirmed RED first, verified live on the shared checkout). What is NOT established is production incidence: no real capture was ever observed via this path, only constructed. The 3a422b31 capture that started this work reached the same end state by the ATTRIBUTION-decay route a987df96 fixed, not by this cold-log route — so this closes a demonstrated hole, not a counted one. Also unmeasured: how often the new `-` over-refusal fires in practice, i.e. the cost side of P2. M4 bounds it at <=24.7% of staging calls (the blanket forms), but that is an upper bound on exposure, not a rate of refusals.'
 ---
 
 ## Summary

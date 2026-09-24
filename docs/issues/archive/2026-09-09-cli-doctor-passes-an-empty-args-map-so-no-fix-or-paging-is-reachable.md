@@ -14,7 +14,7 @@ owner: marius
 related:
 - d4b61746950b86b7
 severity: low
-unverified: Seven of the scanner's eight params are wired; `--scope` is deliberately omitted (declared in SCANNER_PARAMS_THE_CLI_OMITS) because its selector is still broken — d4b61746950b86b7. Tests are librarian-gated, so they do not run in the lean lane.
+unverified: TRACKED b161f5ed9b7bfbd9 — Seven of the scanner's eight params are wired; `--scope` is deliberately omitted (declared in SCANNER_PARAMS_THE_CLI_OMITS) because its selector is still broken — d4b61746950b86b7. Tests are librarian-gated, so they do not run in the lean lane.
 ---
 
 > **Cluster:** `cluster/doc-contradicted-by-code` (`IC-11`, n=32, verdict *clears both

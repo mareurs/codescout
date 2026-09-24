@@ -10,7 +10,7 @@ opened: 2026-08-18
 owner: marius
 related: []
 severity: medium
-unverified: 'the second defect named in the title is NOT fixed in general: the hidden-paths completeness warning still asserts its remedy without checking that hidden pruning could explain the zero. The reported misattribution can no longer occur, because the glob case now errors before any walk runs, but the narrowing candidate in Fix remains unimplemented.'
+unverified: 'TRACKED 9278fa8a4e651b43 — the second defect named in the title is NOT fixed in general: the hidden-paths completeness warning still asserts its remedy without checking that hidden pruning could explain the zero. The reported misattribution can no longer occur, because the glob case now errors before any walk runs, but the narrowing candidate in Fix remains unimplemented.'
 ---
 
 # BUG: `grep(glob=<absolute path outside the project>)` returns a silent zero, and the warning names the wrong cause

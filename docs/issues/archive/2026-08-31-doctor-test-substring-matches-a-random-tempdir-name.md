@@ -14,7 +14,7 @@ closed: 2026-08-31
 opened: 2026-08-31
 owner: marius
 severity: medium
-unverified: 'Fixed by construction rather than by observation: a backticked `QQ-N` cannot occur in a filesystem path, so the coupling is gone. But the FLAKE itself was never reproduced locally — at ~1-in-800 that would need thousands of runs, and the local suite passed every attempt including a full `cargo test --features server-stack`. Evidence is the CI triple (failed in 33404896131, passed in 33402647396 and 33393947281 either side) plus the detail-construction code. A green CI after this does NOT discriminate the fix from the flake simply not firing.'
+unverified: 'STANDING — Fixed by construction rather than by observation: a backticked `QQ-N` cannot occur in a filesystem path, so the coupling is gone. But the FLAKE itself was never reproduced locally — at ~1-in-800 that would need thousands of runs, and the local suite passed every attempt including a full `cargo test --features server-stack`. Evidence is the CI triple (failed in 33404896131, passed in 33402647396 and 33393947281 either side) plus the detail-construction code. A green CI after this does NOT discriminate the fix from the flake simply not firing.'
 ---
 
 

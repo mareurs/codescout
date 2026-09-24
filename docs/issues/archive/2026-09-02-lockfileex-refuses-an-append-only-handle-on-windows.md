@@ -11,7 +11,7 @@ opened: 2026-09-02
 owner: marius
 related: []
 severity: high
-unverified: 'No regression test, and one is not obviously writable: the property — "the handle passed to lock_exclusive carries read or write access" — is not observable from a `File`, and flock(2) ignores access mode so no Linux test can express the failure. NOT ARCHIVED for that reason; the documented archive trigger requires one. The call-site comment naming what breaks and why the line looks redundant is the interim guard. Separately: 2 of the original 21 failures REMAIN after this fix and are a DIFFERENT defect, unfiled as of this closure — see the section ''What remains, and it is not this bug''.'
+unverified: 'STANDING — No regression test, and one is not obviously writable: the property — "the handle passed to lock_exclusive carries read or write access" — is not observable from a `File`, and flock(2) ignores access mode so no Linux test can express the failure. NOT ARCHIVED for that reason; the documented archive trigger requires one. The call-site comment naming what breaks and why the line looks redundant is the interim guard. Separately: 2 of the original 21 failures REMAIN after this fix and are a DIFFERENT defect, unfiled as of this closure — see the section ''What remains, and it is not this bug''.'
 ---
 
 ## Summary

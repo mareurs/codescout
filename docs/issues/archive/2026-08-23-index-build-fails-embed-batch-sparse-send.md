@@ -16,7 +16,7 @@ opened: 2026-08-23
 owner: marius
 related: []
 severity: medium
-unverified: 'Fixed by a machine-local config change (a symlink), not a repo commit, so there is no SHA/patch-id to cite and no regression test is possible — nothing in this repo''s source caused the failure. The reindex half of this caveat is now DISCHARGED: measured 2026-08-26, index(action="status") reports git_sync.behind_commits: 0 with last_indexed_commit == head_commit (fcb86c16) and chunks_without_vectors: 0, so the 943-commit catch-up did reach HEAD. (index(action="verify") separately returns verdict: incomplete over one eligible file — a newly-created, still-untracked tracker that postdates this bug and is unrelated to the sparse failure.)'
+unverified: 'STANDING — Fixed by a machine-local config change (a symlink), not a repo commit, so there is no SHA/patch-id to cite and no regression test is possible — nothing in this repo''s source caused the failure. The reindex half of this caveat is now DISCHARGED: measured 2026-08-26, index(action="status") reports git_sync.behind_commits: 0 with last_indexed_commit == head_commit (fcb86c16) and chunks_without_vectors: 0, so the 943-commit catch-up did reach HEAD. (index(action="verify") separately returns verdict: incomplete over one eligible file — a newly-created, still-untracked tracker that postdates this bug and is unrelated to the sparse failure.)'
 ---
 
 # BUG: semantic code index build fails with "embed_batch sparse send" on this machine, leaving the index permanently behind HEAD

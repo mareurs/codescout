@@ -10,7 +10,7 @@ opened: 2026-08-20
 owner: marius
 related: []
 severity: high
-unverified: 'No automated test exists — the claude-traces skill in llm-proxy has no test suite. Verification is two manual reproductions matching pre-computed values to the cent, re-runnable from the Reproduction section. Separately: figures published by this script before 2026-08-20 remain wrong and CANNOT be corrected by scaling, since the inflation factor varies per session (2.55x and 2.26x measured). And cc.py still reads only ~/.claude — filed in llm-proxy, not fixed here.'
+unverified: 'STANDING — No automated test exists — the claude-traces skill in llm-proxy has no test suite. Verification is two manual reproductions matching pre-computed values to the cent, re-runnable from the Reproduction section. Separately: figures published by this script before 2026-08-20 remain wrong and CANNOT be corrected by scaling, since the inflation factor varies per session (2.55x and 2.26x measured). And cc.py still reads only ~/.claude — filed in llm-proxy, not fixed here.'
 ---
 
 # BUG: cc.py sums message.usage per JSONL line, so every cost and token figure it reports is inflated 2.1–2.6×

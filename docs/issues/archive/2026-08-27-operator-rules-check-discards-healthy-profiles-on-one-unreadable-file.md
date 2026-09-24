@@ -13,7 +13,7 @@ opened: 2026-08-27
 owner: marius
 related: []
 severity: low
-unverified: 'Not live-verified through the MCP server, and deliberately so: both defects are on the CLI surface (`codescout operator-rules check|compile`), which the reproduction exercises directly against a synthetic $HOME. The success path was already correct and is untouched.'
+unverified: 'STANDING — Not live-verified through the MCP server, and deliberately so: both defects are on the CLI surface (`codescout operator-rules check|compile`), which the reproduction exercises directly against a synthetic $HOME. The success path was already correct and is untouched.'
 ---
 
 # BUG: `operator-rules check` reports nothing about the healthy profiles when any one profile file is missing, and its compile errors lead with the least useful line

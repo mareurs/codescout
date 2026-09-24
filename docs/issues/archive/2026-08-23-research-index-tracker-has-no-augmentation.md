@@ -11,7 +11,7 @@ opened: 2026-08-23
 owner: marius
 related: []
 severity: medium
-unverified: 'The index is catalog-only state — augmentation has no on-disk form, so a fresh clone or a rebuilt catalog starts without it, and no automated gate asserts its existence. Mitigated by construction rather than by test: every entry is a projection of its file''s own frontmatter, so the whole array is regenerable from disk by the procedure in the augmentation prompt. Separately NOT established, and now moot: which catalog the 2026-08-23 session read.'
+unverified: 'STANDING — The index is catalog-only state — augmentation has no on-disk form, so a fresh clone or a rebuilt catalog starts without it, and no automated gate asserts its existence. Mitigated by construction rather than by test: every entry is a projection of its file''s own frontmatter, so the whole array is regenerable from disk by the procedure in the augmentation prompt. Separately NOT established, and now moot: which catalog the 2026-08-23 session read.'
 ---
 
 # BUG: Research Index tracker documents a [LIVE] table and a params refresh, but has no augmentation

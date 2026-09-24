@@ -12,7 +12,7 @@ opened: 2026-08-29
 owner: marius
 related: []
 severity: high
-unverified: 'NON-REPRODUCTION is measured; the CAUSAL ATTRIBUTION to fd638c76 is inference. This file''s own reproduction (`cargo test --lib tools::memory::tests:: -- --test-threads=1`) now runs 77 passed, 0 failed, no hang -- run on the merge of this branch into experiments, 2026-08-30. What is NOT established is that fd638c76 is what closed it: no one bisected, and the branch this file arrived on sat 103 commits behind, so any of those commits could in principle be the closer. fd638c76 is named because its subject is exactly this mechanism and two of the tests listed here are among the five fixtures it isolated -- strong, not proven. Re-open if a hang is seen again, and bisect rather than re-attributing.'
+unverified: 'STANDING — NON-REPRODUCTION is measured; the CAUSAL ATTRIBUTION to fd638c76 is inference. This file''s own reproduction (`cargo test --lib tools::memory::tests:: -- --test-threads=1`) now runs 77 passed, 0 failed, no hang -- run on the merge of this branch into experiments, 2026-08-30. What is NOT established is that fd638c76 is what closed it: no one bisected, and the branch this file arrived on sat 103 commits behind, so any of those commits could in principle be the closer. fd638c76 is named because its subject is exactly this mechanism and two of the tests listed here are among the five fixtures it isolated -- strong, not proven. Re-open if a hang is seen again, and bisect rather than re-attributing.'
 ---
 
 # `tools::memory::tests::*` deadlock on a futex, reproducibly, even in total isolation

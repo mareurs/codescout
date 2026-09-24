@@ -6,7 +6,7 @@ title: 'BUG: param_probe reads only the first slash token of a shared label, so 
 tags:
 - cluster/guard-narrower-than-its-name
 closed: 2026-09-09
-unverified: 'The prescribed second half (emit `checked N of M labelled pairs`) was judged obviated by the parser fix rather than implemented — reasoning in the Fix section. Residue: keys skipped for `accepts_any_json` or for carrying no `<action>:` label remain uncounted anywhere.'
+unverified: 'TRACKED 7c8a5ba864bc8398 — The prescribed second half (emit `checked N of M labelled pairs`) was judged obviated by the parser fix rather than implemented — reasoning in the Fix section. Residue: keys skipped for `accepts_any_json` or for carrying no `<action>:` label remain uncounted anywhere.'
 ---
 
 ## Summary

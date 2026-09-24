@@ -11,7 +11,7 @@ opened: 2026-08-21
 owner: marius
 related: []
 severity: low
-unverified: 'The downstream harm is still INFERRED, not measured: no session has been observed mis-resolving a project-relative path against its own cwd. The mechanism, the reproduction and the fix are all measured; the consequence that motivated the filing is not, and in most sessions cwd IS the project root, which is why severity stayed low.'
+unverified: 'STANDING — The downstream harm is still INFERRED, not measured: no session has been observed mis-resolving a project-relative path against its own cwd. The mechanism, the reproduction and the fix are all measured; the consequence that motivated the filing is not, and in most sessions cwd IS the project root, which is why severity stayed low.'
 ---
 
 # BUG: the path-relative banner is not re-armed after compaction, so an agent loses the note that response paths are project-relative

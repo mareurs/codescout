@@ -15,7 +15,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md
 severity: medium
-unverified: 'Fix step 4 (the file-relative vs body-relative line-number frame in the ambiguity error) was deliberately NOT done and remains open. A second, unrelated defect is left unrepaired by choice: open-issue-work-queue.md defines ### BL-43 twice, and choosing the authoritative copy is a content judgement about another work stream.'
+unverified: 'TRACKED ecd68ef1c5354365 — Fix step 4 (the file-relative vs body-relative line-number frame in the ambiguity error) was deliberately NOT done and remains open. A second, unrelated defect is left unrepaired by choice: open-issue-work-queue.md defines ### BL-43 twice, and choosing the authoritative copy is a content judgement about another work stream.'
 ---
 
 # BUG: two byte-identical headings make both sections permanently unaddressable

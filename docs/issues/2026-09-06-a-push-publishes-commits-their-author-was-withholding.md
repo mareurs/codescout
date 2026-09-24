@@ -14,7 +14,7 @@ last_observed: 2026-09-13
 opened: 2026-09-06
 owner: marius
 severity: high
-unverified: 'A policy, not a mechanism: a session that commits a change its operator said to hold is published by the next authorised push exactly as before, and nothing fires. The rule is reachable (CLAUDE.md is loaded into every session here) but not enforced.'
+unverified: 'STANDING — A policy, not a mechanism: a session that commits a change its operator said to hold is published by the next authorised push exactly as before, and nothing fires. The rule is reachable (CLAUDE.md is loaded into every session here) but not enforced.'
 verified_open: 2026-09-11 at HEAD 6c31ef0f — trailer census (10 kinds, none answers publishability), zero git-notes refs, remedy unadopted in both candidate surfaces
 ---
 

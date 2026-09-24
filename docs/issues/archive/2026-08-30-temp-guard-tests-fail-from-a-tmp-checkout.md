@@ -12,7 +12,7 @@ opened: 2026-08-30
 owner: marius
 related: []
 severity: medium
-unverified: 'No CI lane runs from a cwd under the OS temp dir, so nothing would catch a REGRESSION of this fix by re-deriving the premise from current_dir(). The protection is structural rather than tested: TempGuardEnv has no default, so every construction site must state its temp root and the compiler enumerates any that do not. A deliberate revert would still pass CI.'
+unverified: 'STANDING — No CI lane runs from a cwd under the OS temp dir, so nothing would catch a REGRESSION of this fix by re-deriving the premise from current_dir(). The protection is structural rather than tested: TempGuardEnv has no default, so every construction site must state its temp root and the compiler enumerates any that do not. A deliberate revert would still pass CI.'
 ---
 
 # BUG: three temp-guard tests fail from any checkout under `/tmp`, and blame the guard for it

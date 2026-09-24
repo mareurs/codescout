@@ -16,7 +16,7 @@ owner: marius
 related:
 - '64d5aa926c9e2f32'
 severity: low
-unverified: the symbols-parameter half is fixed but unrun; the get_symbols_overview half is not fixed at all
+unverified: TRACKED 7f97ee751bf72bc4 — the symbols-parameter half is fixed but unrun; the get_symbols_overview half is not fixed at all
 ---
 
 # BUG: the MCP smoke scripts call `symbols` with a parameter it does not have, and `get_symbols_overview`, a tool that no longer exists

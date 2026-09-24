@@ -13,7 +13,7 @@ closed: 2026-09-01
 opened: 2026-09-01
 owner: marius
 severity: low
-unverified: 'No regression test for the vacuity itself. `tests/tool_reachability.rs` closes the enabling condition (an unregistered `impl Tool`) but not the shape — an assertion naming a string no tool produces is vacuous by the same mechanism with no unregistered type involved. The positive form (each listed name IS produced by a registered tool, then is absent from `pinnable`) is not built. The fix was also incidental: the subject was deleted, nothing diagnosed the vacuity.'
+unverified: 'TRACKED 60ac58939c731ae3 — No regression test for the vacuity itself. `tests/tool_reachability.rs` closes the enabling condition (an unregistered `impl Tool`) but not the shape — an assertion naming a string no tool produces is vacuous by the same mechanism with no unregistered type involved. The positive form (each listed name IS produced by a registered tool, then is absent from `pinnable`) is not built. The fix was also incidental: the subject was deleted, nothing diagnosed the vacuity.'
 ---
 
 ## Summary

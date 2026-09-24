@@ -7,7 +7,7 @@ owner: marius
 related: [docs/issues/archive/2026-08-08-gitignore-projects-rule-premise-false-on-a-real-host.md, docs/issues/archive/2026-08-08-memory-dir-for-project-materializes-any-id.md]
 tags: [workspace, memory, config, windows]
 kind: bug
-unverified: no regression test for the config state itself; recurrence is now DETECTABLE but not prevented (doctor's declared_root_missing reports; c0bdeec7 still validates ids against this same file); all three fix actions were on a gitignored file, so the repair half is not verifiable on experiments
+unverified: STANDING — no regression test for the config state itself; recurrence is now DETECTABLE but not prevented (doctor's declared_root_missing reports; c0bdeec7 still validates ids against this same file); all three fix actions were on a gitignored file, so the repair half is not verifiable on experiments
 ---
 
 # BUG: a mis-rooted `.codescout/workspace.toml` declared eight sibling repos as projects of this workspace — the second cause behind the eight VDI directories, and one `c0bdeec7` does not cover

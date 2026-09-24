@@ -8,7 +8,7 @@ owners:
 tags:
 - cluster/selector-narrower-than-its-population
 closed: 2026-09-03
-unverified: NO REGRESSION TEST, and this is the half that has none. The walk reads `/proc` and `/run/user/<uid>/cc-socks` by hardcoded absolute path, so it cannot be pointed at a fixture without editing the skill, and a source-text assertion ("the block contains no comm test") is a proxy for the behaviour rather than the behaviour. Verified by hand against one live version-pinned process; that verification is not repeatable and the population is transient — 3 such sessions existed on 2026-09-02, 1 on 2026-09-03.
+unverified: STANDING — NO REGRESSION TEST, and this is the half that has none. The walk reads `/proc` and `/run/user/<uid>/cc-socks` by hardcoded absolute path, so it cannot be pointed at a fixture without editing the skill, and a source-text assertion ("the block contains no comm test") is a proxy for the behaviour rather than the behaviour. Verified by hand against one live version-pinned process; that verification is not repeatable and the population is transient — 3 such sessions existed on 2026-09-02, 1 on 2026-09-03.
 ---
 
 ## Summary

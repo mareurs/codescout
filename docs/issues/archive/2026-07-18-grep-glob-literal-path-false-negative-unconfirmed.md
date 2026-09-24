@@ -16,7 +16,7 @@ owner: marius
 related: []
 reopened: 2026-07-18
 severity: medium
-unverified: What is NOT established, and never can be, is whether the original Mercury BOM report hit this mechanism — that session's path/workspace_override state was never captured and is unrecoverable. The mechanism itself is confirmed, fixed, gate-green, and verified live against a rebuilt binary on 2026-08-27; only the attribution of the original sighting stays open.
+unverified: STANDING — What is NOT established, and never can be, is whether the original Mercury BOM report hit this mechanism — that session's path/workspace_override state was never captured and is unrecoverable. The mechanism itself is confirmed, fixed, gate-green, and verified live against a rebuilt binary on 2026-08-27; only the attribution of the original sighting stays open.
 ---
 
 # BUG: `grep`'s `glob` param reported to miss real matches on literal (non-wildcard) file paths — not reproducible on immediate re-test

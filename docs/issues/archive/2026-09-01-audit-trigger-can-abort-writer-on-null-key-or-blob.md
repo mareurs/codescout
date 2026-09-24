@@ -8,7 +8,7 @@ opened: 2026-09-01
 owner: marius
 related: []
 severity: low
-unverified: 'NULL-row-id half is closed by documenting the limitation, not by a guard: no audited table permits a NULL key today, so nothing can reach or test one. A schema change making a key column nullable reopens this.'
+unverified: 'STANDING — NULL-row-id half is closed by documenting the limitation, not by a guard: no audited table permits a NULL key today, so nothing can reach or test one. A schema change making a key column nullable reopens this.'
 ---
 
 # BUG: an audit trigger can abort the writer's mutation on two measured paths, against the module doc's "never blocks" invariant

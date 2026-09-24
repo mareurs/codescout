@@ -15,7 +15,7 @@ owner: marius
 related:
 - docs/adrs/2026-08-27-negative-results-name-their-scope.md
 severity: medium
-unverified: 'Out of scope and deliberately not done: the 8 already-adequate sites name their action but carry no `with_hint` corrected call, so they satisfy clause 2 only partly. The 9 repaired sites are live-verified (2026-08-28) — see § Tests.'
+unverified: 'TRACKED 36a0d5c7cb3fd4db — Out of scope and deliberately not done: the 8 already-adequate sites name their action but carry no `with_hint` corrected call, so they satisfy clause 2 only partly. The 9 repaired sites are live-verified (2026-08-28) — see § Tests.'
 ---
 
 ## Summary

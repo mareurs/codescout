@@ -12,7 +12,7 @@ opened: 2026-08-31
 owner: marius
 related: []
 severity: medium
-unverified: 'Cost, not correctness. The fix is confirmed LIVE 2026-08-31 11:59Z against the rebuilt binary on a discriminating case (54000 chunks, 3 commits behind — the pre-fix code would have said up_to_date). What remains is structural: the call site in ProjectStatus/call has no automated guard, because reaching it needs a populated Qdrant behind an uninjectable RetrievalClient::from_env. A re-hardcode would be caught only by another live check, never by the suite. See § Tests added.'
+unverified: 'STANDING — Cost, not correctness. The fix is confirmed LIVE 2026-08-31 11:59Z against the rebuilt binary on a discriminating case (54000 chunks, 3 commits behind — the pre-fix code would have said up_to_date). What remains is structural: the call site in ProjectStatus/call has no automated guard, because reaching it needs a populated Qdrant behind an uninjectable RetrievalClient::from_env. A re-hardcode would be caught only by another live check, never by the suite. See § Tests added.'
 ---
 
 # BUG: workspace(status) reports index.status "up_to_date" on chunks > 0 alone, never consulting git_sync

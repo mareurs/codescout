@@ -10,7 +10,7 @@ tags:
 closed: 2026-09-02
 opened: 2026-09-02
 severity: low
-unverified: 'No regression test covers the corrected row, and none is proposed — see § Fix. Recurrence is unguarded: nothing compares a field reference against the enforcement that reads that field, so a fourth divergence in this ledger would be found the same way this one was, by accident, while doing something else.'
+unverified: 'STANDING — No regression test covers the corrected row, and none is proposed — see § Fix. Recurrence is unguarded: nothing compares a field reference against the enforcement that reads that field, so a fourth divergence in this ledger would be found the same way this one was, by accident, while doing something else.'
 ---
 
 ## Summary

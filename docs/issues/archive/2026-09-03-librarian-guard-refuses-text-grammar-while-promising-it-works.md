@@ -8,7 +8,7 @@ opened: 2026-09-03
 owner: marius
 related: []
 severity: medium
-unverified: which commit narrowed the allowance is inferred from history, not measured by running the pre-fold code
+unverified: STANDING — which commit narrowed the allowance is inferred from history, not measured by running the pre-fold code
 ---
 
 # BUG: the librarian guard refuses `edit_file`'s text grammar on a stamped artifact while its own hint promises that call works

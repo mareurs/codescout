@@ -7,7 +7,7 @@ owner: marius
 related: [docs/issues/2026-08-26-onnx-local-path-lacks-coderankembed.md]
 tags: [embeddings, memory, silent-failure, retrieval]
 kind: bug
-unverified: "Two residues, both deliberate: Fix step 3 (a startup probe of the effective per-request embed ceiling) is still ABSENT, so a misconfigured backend is still discovered at first oversized write rather than at connect. And the 8 already-lost memories are now DETECTED but not yet re-written — the repair is named in the verify hint, not performed."
+unverified: "TRACKED 9e6043f4db849185 — Two residues, both deliberate: Fix step 3 (a startup probe of the effective per-request embed ceiling) is still ABSENT, so a misconfigured backend is still discovered at first oversized write rather than at connect. And the 8 already-lost memories are now DETECTED but not yet re-written — the repair is named in the verify hint, not performed."
 ---
 
 # BUG: oversized dense-embed payloads are dropped silently — memory writes report `ok` with no vector

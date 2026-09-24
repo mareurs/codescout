@@ -13,7 +13,7 @@ closed: 2026-08-27
 opened: 2026-08-27
 owner: marius
 severity: med
-unverified: 'Still open and deliberately out of scope: whether `grep` reaching a librarian-guarded artifact is intended or a gap in that guard. It is now only a convenience — the anchor is reachable from `artifact(get)`''s `last_heading` and named outright in the failure hint.'
+unverified: 'STANDING — Still open and deliberately out of scope: whether `grep` reaching a librarian-guarded artifact is intended or a gap in that guard. It is now only a convenience — the anchor is reachable from `artifact(get)`''s `last_heading` and named outright in the failure hint.'
 ---
 
 ## Summary

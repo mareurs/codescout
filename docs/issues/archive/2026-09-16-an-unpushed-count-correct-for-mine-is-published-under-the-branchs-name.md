@@ -5,7 +5,7 @@ status: mitigated
 title: 'BUG: an unpushed count correct for my commits is published under the name of the branch''s'
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
-unverified: No mechanism exists. The mitigation is a PROBES.md row -- a read surface a reporter must think to consult -- and both instances were produced by sessions that had read the class, one of them 3.5h after editing its axis list. So nothing fires when a session writes "all mine", and the remedy is a policy, not the check-that-runs-when-nobody-is-worried that OB position 3 asks for.
+unverified: STANDING — No mechanism exists. The mitigation is a PROBES.md row -- a read surface a reporter must think to consult -- and both instances were produced by sessions that had read the class, one of them 3.5h after editing its axis list. So nothing fires when a session writes "all mine", and the remedy is a policy, not the check-that-runs-when-nobody-is-worried that OB position 3 asks for.
 ---
 
 # BUG: an unpushed count correct for *my* commits is published under the name of *the branch's*

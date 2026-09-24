@@ -15,7 +15,7 @@ closed: 2026-08-19
 opened: 2026-08-19
 owner: marius
 severity: medium
-unverified: fix itself is fully verified live (inheritance + surgical activate, 2026-08-19); the standing caveat is that it WIDENS the open latch bug 52a9448b312dbbf6 by voiding its /mcp workaround — trade recorded under Known cost
+unverified: STANDING — fix itself is fully verified live (inheritance + surgical activate, 2026-08-19); the standing caveat is that it WIDENS the open latch bug 52a9448b312dbbf6 by voiding its /mcp workaround — trade recorded under Known cost
 ---
 
 # BUG: a `/mcp` reconnect makes the rendezvous inactive forever, and the next `activate` wipes the guide ledger

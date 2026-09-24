@@ -12,7 +12,7 @@ opened: 2026-09-03
 owner: marius
 related: []
 severity: low
-unverified: Not established that the burn is unintended rather than by-design; no maintainer ruling. Reproduced once, from a real accident, not from a minimal script.
+unverified: STANDING — Not established that the burn is unintended rather than by-design; no maintainer ruling. Reproduced once, from a real accident, not from a minimal script.
 ---
 
 # BUG: reverting a guarded ledger burns an entry id, and the success response never says so

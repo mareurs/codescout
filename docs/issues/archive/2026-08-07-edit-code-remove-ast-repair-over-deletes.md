@@ -10,7 +10,7 @@ tags:
 - lsp
 - data-integrity
 closed: 2026-08-08
-unverified: The original over-deletion trigger is still UNREDUCED and has no regression test of its own (§ Resume). What the two tests cover is the guard added in response — post-edit syntax verification, which catches the CLASS. A recurrence of the exact 2-line over-delete would now be detected and rolled back, not prevented.
+unverified: STANDING — The original over-deletion trigger is still UNREDUCED and has no regression test of its own (§ Resume). What the two tests cover is the guard added in response — post-edit syntax verification, which catches the CLASS. A recurrence of the exact 2-line over-delete would now be detected and rolled back, not prevented.
 ---
 
 # BUG: `edit_code action=remove` over-deleted by 2 lines when repairing a truncated LSP range

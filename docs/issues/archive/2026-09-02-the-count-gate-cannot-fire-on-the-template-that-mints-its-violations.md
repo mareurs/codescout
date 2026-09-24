@@ -8,7 +8,7 @@ opened: 2026-09-02
 owner: marius
 related: []
 severity: medium
-unverified: 'No regression test. The assertion would have to detect a PLACEHOLDER prescribing a policy — `n=<count>` — which means teaching the gate a second grammar (template syntax) on top of the one it has, in the same file whose two-namespace parsing problems are already an IC-6 member. Mitigated instead: the template line now names the check and says why it cannot enforce itself there, so the next author reads the limitation at the point of copying.'
+unverified: 'STANDING — No regression test. The assertion would have to detect a PLACEHOLDER prescribing a policy — `n=<count>` — which means teaching the gate a second grammar (template syntax) on top of the one it has, in the same file whose two-namespace parsing problems are already an IC-6 member. Mitigated instead: the template line now names the check and says why it cannot enforce itself there, so the next author reads the limitation at the point of copying.'
 ---
 
 # `no_class_field_states_a_bare_n` cannot fire on the template, which is the one surface guaranteed to mint violations

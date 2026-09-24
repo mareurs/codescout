@@ -13,7 +13,7 @@ opened: 2026-09-01
 owner: marius
 related: []
 severity: medium
-unverified: the exact CrowdStrike detection rule/verdict name is not confirmed (no Falcon console access from this session) — the WIN-18 vs WIN-35 mechanism attribution IS confirmed (file-deletion signature plus direct process confirmation of both CSFalconService and CyberArk EPM's vf_agent running on this host)
+unverified: STANDING — the exact CrowdStrike detection rule/verdict name is not confirmed (no Falcon console access from this session) — the WIN-18 vs WIN-35 mechanism attribution IS confirmed (file-deletion signature plus direct process confirmation of both CSFalconService and CyberArk EPM's vf_agent running on this host)
 ---
 
 # BUG: on this VDI, 6 specific freshly-linked `cargo test` binaries are deleted/quarantined before `cargo test` can execute them — reproducible across repeated runs, unrelated to their content passing or failing

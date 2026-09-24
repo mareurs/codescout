@@ -11,7 +11,7 @@ opened: 2026-09-04
 owner: marius
 related: []
 severity: high
-unverified: 'The 7 artifacts are still vectorless on disk: the code no longer produces the failure, but repairing the existing rows needs `cargo rb` plus a reindex, which has not been run. And the second half this file asks for -- a wrapping form for the `**Members:**` line -- is NOT done; it is now a vector-quality concern (a 26 KB line pools to one blurry vector) rather than the data-loss one it was.'
+unverified: 'TRACKED 8c86203711a9520d — The 7 artifacts are still vectorless on disk: the code no longer produces the failure, but repairing the existing rows needs `cargo rb` plus a reindex, which has not been run. And the second half this file asks for -- a wrapping form for the `**Members:**` line -- is NOT done; it is now a vector-quality concern (a 26 KB line pools to one blurry vector) rather than the data-loss one it was.'
 ---
 
 # BUG: the chunker's 2,048-char budget is not a bound — an unbreakable single line exceeds it by 12x, and the cluster ledger is falling out of semantic search line by line

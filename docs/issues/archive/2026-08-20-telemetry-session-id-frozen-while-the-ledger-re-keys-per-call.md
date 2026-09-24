@@ -13,7 +13,7 @@ tags:
   - telemetry
   - session-identity
 kind: bug
-unverified: historical rows (30.9% at filing) were left as-is by deliberate choice, no schema marker; and when CODESCOUT_SESSION_ID is explicitly pinned, calls before the first rendezvous re-key of a process's life record the pinned ledger key rather than the true CLAUDE_CODE_SESSION_ID -- see Fix
+unverified: STANDING — historical rows (30.9% at filing) were left as-is by deliberate choice, no schema marker; and when CODESCOUT_SESSION_ID is explicitly pinned, calls before the first rendezvous re-key of a process's life record the pinned ledger key rather than the true CLAUDE_CODE_SESSION_ID -- see Fix
 ---
 
 # BUG: usage.db's session id is frozen at construction while the guide ledger re-keys per call, so 31% of rows may name the wrong conversation

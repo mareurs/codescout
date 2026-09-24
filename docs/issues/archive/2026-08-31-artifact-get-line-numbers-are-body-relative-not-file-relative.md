@@ -14,7 +14,7 @@ owner: marius
 related:
 - bug-fix-session-log:F-128
 severity: med
-unverified: start_line/end_line composability with grep/link_scan remains unfixed (deliberately, per F-128) — only headings/occurrences are file-relative now
+unverified: TRACKED d003063b9086c779 — start_line/end_line composability with grep/link_scan remains unfixed (deliberately, per F-128) — only headings/occurrences are file-relative now
 ---
 
 ## Summary

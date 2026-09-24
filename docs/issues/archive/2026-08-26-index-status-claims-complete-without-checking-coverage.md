@@ -15,7 +15,7 @@ related:
 - docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md
 - docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
 severity: high
-unverified: the originally reported symptom (docs/ = 0 indexed files) is NOT reproducible at d5ed4d6f — docs/ is now fully indexed. The live, verified defect is the status-completeness gap; the original drop mechanism remains unidentified.
+unverified: STANDING — the originally reported symptom (docs/ = 0 indexed files) is NOT reproducible at d5ed4d6f — docs/ is now fully indexed. The live, verified defect is the status-completeness gap; the original drop mechanism remains unidentified.
 ---
 
 # BUG: `index(action="status")` reports `indexed: true, queryable: true` off a single chunk — it never checks coverage

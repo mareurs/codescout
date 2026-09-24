@@ -12,7 +12,7 @@ opened: 2026-08-23
 owner: marius
 related: []
 severity: high
-unverified: Root cause (global mutable default_workspace_root, no per-caller identity) is NOT addressed — options 2/3 in Fix remain open. This closes the specific incident trigger (a Workflow script briefed to call activate) by strengthening the existing, already-correct-but-underweighted guidance; a subagent that ignores the briefing can still reproduce the original failure.
+unverified: TRACKED 3b4fce62b0289f20 — Root cause (global mutable default_workspace_root, no per-caller identity) is NOT addressed — options 2/3 in Fix remain open. This closes the specific incident trigger (a Workflow script briefed to call activate) by strengthening the existing, already-correct-but-underweighted guidance; a subagent that ignores the briefing can still reproduce the original failure.
 ---
 
 # BUG: a background subagent's workspace(activate) mutates the PARENT session's active project, breaking the parent's writes mid-turn

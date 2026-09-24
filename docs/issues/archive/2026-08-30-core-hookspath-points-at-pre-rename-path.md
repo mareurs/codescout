@@ -14,7 +14,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path.md
 severity: medium
-unverified: The stale pointer is genuinely unset (measured 2026-08-31 23:47 — the 2026-08-30 closure recorded a fix that had not been applied; see the Correction section). The fix is an untracked-config change with NO commit, so there is no SHA or patch-id to cite and no regression test is possible — re-measure with `git config --get core.hooksPath` rather than trusting this field. What this field USED to add — that hooks still do not run, that `.git/hooks` holds only `.sample` files, and that pre-commit is not installed on this machine — was true when written and is false since `4e5f060e`; see Resume.
+unverified: STANDING — The stale pointer is genuinely unset (measured 2026-08-31 23:47 — the 2026-08-30 closure recorded a fix that had not been applied; see the Correction section). The fix is an untracked-config change with NO commit, so there is no SHA or patch-id to cite and no regression test is possible — re-measure with `git config --get core.hooksPath` rather than trusting this field. What this field USED to add — that hooks still do not run, that `.git/hooks` holds only `.sample` files, and that pre-commit is not installed on this machine — was true when written and is false since `4e5f060e`; see Resume.
 ---
 
 # BUG: `core.hooksPath` points at the pre-rename repo path, so no git hook runs in this checkout

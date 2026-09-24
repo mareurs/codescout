@@ -13,7 +13,7 @@ owner: marius
 related:
 - docs/issues/2026-08-26-index-status-model-fields-dropped-but-still-documented.md
 severity: high
-unverified: 'Directions 2 and 3 of the Fix are STILL OPEN - stated in this file''s own Fix section and invisible to every query, because this record is both status=fixed and archived. Only direction 1 shipped. Direction 3 (let a response declare the build it came from) re-measured 2026-09-12: 14 of 21 live codescout servers on this host execute deleted inodes, and no response field distinguishes them.'
+unverified: 'TRACKED 0db9597a451ba41e — Directions 2 and 3 of the Fix are STILL OPEN - stated in this file''s own Fix section and invisible to every query, because this record is both status=fixed and archived. Only direction 1 shipped. Direction 3 (let a response declare the build it came from) re-measured 2026-09-12: 14 of 21 live codescout servers on this host execute deleted inodes, and no response field distinguishes them.'
 ---
 
 # BUG: server processes on deleted binaries write their stale config into the live project sidecar

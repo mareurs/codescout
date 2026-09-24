@@ -10,7 +10,7 @@ opened: 2026-09-03
 owner: marius
 related: []
 severity: medium
-unverified: 'No regression test. `scripts/` has no test harness in this repo, so nothing gates `MECHANISM_TOOLS` against the next rename — the same defect can recur exactly as it did here, and the fix''s evidence is an observed before/after rather than a guard. The union is also unbounded in principle: a THIRD name would go undetected the same way, and the durable remedy named in the Fix section (derive the list from the served registry) is NOT implemented. Separately, the documented `"doc"` substring greediness is recorded at the site but not enforced — a future `mcp__codescout__docs_*` tool would be silently counted as mechanism operation, and only a reader of the comment would know.'
+unverified: 'TRACKED b36761478b125b35 — No regression test. `scripts/` has no test harness in this repo, so nothing gates `MECHANISM_TOOLS` against the next rename — the same defect can recur exactly as it did here, and the fix''s evidence is an observed before/after rather than a guard. The union is also unbounded in principle: a THIRD name would go undetected the same way, and the durable remedy named in the Fix section (derive the list from the served registry) is NOT implemented. Separately, the documented `"doc"` substring greediness is recorded at the site but not enforced — a future `mcp__codescout__docs_*` tool would be silently counted as mechanism operation, and only a reader of the comment would know.'
 ---
 
 # BUG: `MECHANISM_TOOLS` omits `doc`, so the section-use probe goes blind as the rename propagates

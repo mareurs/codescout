@@ -14,7 +14,7 @@ opened: 2026-08-29
 owner: marius
 related: []
 severity: medium
-unverified: fix is to a gitignored .env file — no commit/SHA/patch-id exists for it; only the code-adjacent class of the bug (docker-compose reads an un-validated, git-ignored .env for a bind-mount path) is undocumented anywhere else
+unverified: STANDING — fix is to a gitignored .env file — no commit/SHA/patch-id exists for it; only the code-adjacent class of the bug (docker-compose reads an un-validated, git-ignored .env for a bind-mount path) is undocumented anywhere else
 ---
 
 # BUG: project-root `.env` carried multiple stale desktop-machine values, silently masked by ambient shell/MCP env

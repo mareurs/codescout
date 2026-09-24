@@ -14,7 +14,7 @@ closed: 2026-08-30
 opened: 2026-08-30
 owner: marius
 severity: high
-unverified: Root cause is now MEASURED (registry files on disk, n=7, both cells) but still UNFIXED and unfixable here — the profile-scoped registry is a harness defect. Only the local mitigation shipped (scripts/peer-sessions.sh + PROBES.md row). Nothing prevents a session from trusting ListAgents' count instead of running the probe; the placement makes it reachable, not mandatory. Re-open if the harness changes, or if a seventh misattribution occurs despite the probe existing — that would mean placement was not enough and the count needs to be wrong LOUDLY rather than quietly.
+unverified: STANDING — Root cause is now MEASURED (registry files on disk, n=7, both cells) but still UNFIXED and unfixable here — the profile-scoped registry is a harness defect. Only the local mitigation shipped (scripts/peer-sessions.sh + PROBES.md row). Nothing prevents a session from trusting ListAgents' count instead of running the probe; the placement makes it reachable, not mandatory. Re-open if the harness changes, or if a seventh misattribution occurs despite the probe existing — that would mean placement was not enough and the count needs to be wrong LOUDLY rather than quietly.
 ---
 
 > **Not a codescout bug.** `ListAgents` is a Claude Code harness tool; its source

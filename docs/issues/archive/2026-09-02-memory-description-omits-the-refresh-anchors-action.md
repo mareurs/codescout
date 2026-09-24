@@ -9,7 +9,7 @@ related:
 tags:
   - cluster/doc-contradicted-by-code
 kind: bug
-unverified: the long_docs() half has no regression test — the gate reads description() only, so a future long_docs drift is uncaught
+unverified: TRACKED a230df10e15016de — the long_docs() half has no regression test — the gate reads description() only, so a future long_docs drift is uncaught
 ---
 
 # BUG: `memory`'s description enumerates seven actions; the enum, the dispatcher and 35 calls have eight

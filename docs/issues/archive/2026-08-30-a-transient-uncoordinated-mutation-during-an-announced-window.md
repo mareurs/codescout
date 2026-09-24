@@ -15,7 +15,7 @@ no_fix_commit: 'The mitigation is a practice change only — announce WHAT you a
 opened: 2026-08-30
 owner: marius
 severity: medium
-unverified: Cause is identified and verified, but NOTHING PREVENTS RECURRENCE. The mechanism is a doc comment naming its own acceptance mutation, which is good practice and should not be removed; no tooling coordinates two sessions performing the same named mutation on the same lines. The mitigation is a practice change only.
+unverified: STANDING — Cause is identified and verified, but NOTHING PREVENTS RECURRENCE. The mechanism is a doc comment naming its own acceptance mutation, which is good practice and should not be removed; no tooling coordinates two sessions performing the same named mutation on the same lines. The mitigation is a practice change only.
 ---
 
 # BUG: the working tree briefly held a mutation nobody applied, during the window announcing that exact mutation

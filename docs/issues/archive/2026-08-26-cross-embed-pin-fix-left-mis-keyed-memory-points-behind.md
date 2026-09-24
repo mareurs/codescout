@@ -17,7 +17,7 @@ related:
 - docs/issues/archive/2026-07-10-memory-cross-embed-ignores-workspace-pin.md
 - docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
 severity: medium
-unverified: Resolved by measurement, not by a fix from this session — the back-fill that repaired it (points stamped 2026-08-26) is not attributable to a commit, and no regression test guards the DATA half of this class. What is guarded is the code defect, by `cross_embed_memory_stores_under_pinned_project_not_session_default`. The general shape — a code fix shipping without the cleanup of what it already wrote — remains unguarded by anything.
+unverified: STANDING — Resolved by measurement, not by a fix from this session — the back-fill that repaired it (points stamped 2026-08-26) is not attributable to a commit, and no regression test guards the DATA half of this class. What is guarded is the code defect, by `cross_embed_memory_stores_under_pinned_project_not_session_default`. The general shape — a code fix shipping without the cleanup of what it already wrote — remains unguarded by anything.
 ---
 
 ## Summary

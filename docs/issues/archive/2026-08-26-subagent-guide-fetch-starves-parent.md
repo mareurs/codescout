@@ -16,7 +16,7 @@ owner: marius
 related:
 - c752708c2757e139
 severity: medium
-unverified: Which specific subagent consumed the topic is NOT established — several were dispatched into prompt-engineering and all were briefed about workspace pinning, so any of them is a candidate. I also did not exhaustively rule out that some parent-side tool call carries a workspace-state hint that fired without a visible auto-inject block. What IS established is that the topic was marked delivered after the post-compact clear while the parent never received it, and that the ledger was not wholesale-stale.
+unverified: STANDING — Which specific subagent consumed the topic is NOT established — several were dispatched into prompt-engineering and all were briefed about workspace pinning, so any of them is a candidate. I also did not exhaustively rule out that some parent-side tool call carries a workspace-state hint that fired without a visible auto-inject block. What IS established is that the topic was marked delivered after the post-compact clear while the parent never received it, and that the ledger was not wholesale-stale.
 ---
 
 ## Summary

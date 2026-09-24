@@ -7,7 +7,7 @@ owner: marius
 related: [2026-06-11-mux-failure-masks-rocksdb-lock-collision]
 tags: [lsp, mux, telemetry, usage-db, observability]
 kind: bug
-unverified: the three get_or_start Err-arm branches (index contention, kotlin lock held, refuse-fallback) have no automated test driving a genuine failure through the full mux dispatch -- see Tests added
+unverified: STANDING — the three get_or_start Err-arm branches (index contention, kotlin lock held, refuse-fallback) have no automated test driving a genuine failure through the full mux dispatch -- see Tests added
 ---
 
 # BUG: mux-managed LSP cold starts (kotlin, rust) are never recorded to `lsp_events`

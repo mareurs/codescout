@@ -13,7 +13,7 @@ opened: 2026-09-03
 owner: marius
 related: []
 severity: medium
-unverified: No race observed; the mechanism is read from the code, not measured at runtime. Fix shape is undecided.
+unverified: STANDING — No race observed; the mechanism is read from the code, not measured at runtime. Fix shape is undecided.
 ---
 
 # BUG: `workspace(action="activate")` writes `libraries.json` while `is_write` reports false, so the write lock never fires

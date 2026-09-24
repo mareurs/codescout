@@ -12,7 +12,7 @@ opened: 2026-08-20
 owner: marius
 related: []
 severity: medium
-unverified: Historical rows keep their NULL friction_target — no backfill was run, so every figure computed over rows written before db76f69a still understates attribution. The `command`-addressed population (438 rows) remains target-less BY DECISION, not by defect.
+unverified: TRACKED 14fb3387e1c6d0c6 — Historical rows keep their NULL friction_target — no backfill was run, so every figure computed over rows written before db76f69a still understates attribution. The `command`-addressed population (438 rows) remains target-less BY DECISION, not by defect.
 ---
 
 # BUG: friction_target's key list omits `command` and `file_path`, so 38% of errors — including both largest families — are unattributable

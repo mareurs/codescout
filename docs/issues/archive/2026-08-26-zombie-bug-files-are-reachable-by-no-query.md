@@ -14,7 +14,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md
 severity: medium
-unverified: Measured which fix option was right (checked the 3 live zombie records for staleness before choosing), but did not implement a regression test -- there is no code path to test for a doc-only guidance change; verification is that the query text now includes zombie in the three prescriptive surfaces, checked by hand.
+unverified: STANDING — Measured which fix option was right (checked the 3 live zombie records for staleness before choosing), but did not implement a regression test -- there is no code path to test for a doc-only guidance change; verification is that the query text now includes zombie in the three prescriptive surfaces, checked by hand.
 ---
 
 # BUG: `status: zombie` bug files are reachable by no standard query

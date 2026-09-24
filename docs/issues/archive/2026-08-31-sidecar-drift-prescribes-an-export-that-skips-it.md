@@ -13,7 +13,7 @@ opened: 2026-08-31
 owner: marius
 related: []
 severity: medium
-unverified: 'The MECHANISM half is confirmed live 2026-08-31 (skipped[] with 9 rows, totals.skipped 9, the all-skipped hint) against server e25850d6. The PROSE half — the corrected sidecar_shape_drift remedy — is test-guarded but was not observed live, because there is no drift left to trigger it: this session''s fix took sidecar_shape_drift to 0. Absence of a live observation here is a consequence of the repair, not a gap in it.'
+unverified: 'STANDING — The MECHANISM half is confirmed live 2026-08-31 (skipped[] with 9 rows, totals.skipped 9, the all-skipped hint) against server e25850d6. The PROSE half — the corrected sidecar_shape_drift remedy — is test-guarded but was not observed live, because there is no drift left to trigger it: this session''s fix took sidecar_shape_drift to 0. Absence of a live observation here is a consequence of the repair, not a gap in it.'
 ---
 
 # BUG: sidecar_shape_drift prescribes `fix="export_augmentations"`, which by construction skips every artifact that check can fire on

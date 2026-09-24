@@ -10,7 +10,7 @@ tags:
 - silent-corruption
 topic: edit_code write fidelity
 closed: 2026-07-28
-unverified: the original +4 shift was never reproduced, so this fix is not known to address the reported symptom; the two hazards it does close were verified independently of the unconfirmed mechanism
+unverified: STANDING — the original +4 shift was never reproduced, so this fix is not known to address the reported symptom; the two hazards it does close were verified independently of the unconfirmed mechanism
 ---
 
 # BUG: edit_code derives the insert indentation from an unrepaired LSP line index

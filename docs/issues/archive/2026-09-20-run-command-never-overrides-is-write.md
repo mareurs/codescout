@@ -15,7 +15,7 @@ topic: write guard coverage and shell effect classification
 closed: 2026-09-24
 opened: 2026-09-20
 severity: high
-unverified: Only the DECLARED effect class is recorded. The OBSERVED one (what a command actually did to the tree) is not, and the Fix section asks for both because only the observation survives a wrong declaration.
+unverified: TRACKED 4d23f609590dea62 — Only the DECLARED effect class is recorded. The OBSERVED one (what a command actually did to the tree) is not, and the Fix section asks for both because only the observation survives a wrong declaration.
 ---
 
 # BUG: `run_command` never overrides `is_write`, so every shell command is classified as a read

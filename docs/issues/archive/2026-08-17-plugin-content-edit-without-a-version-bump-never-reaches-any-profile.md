@@ -12,7 +12,7 @@ opened: 2026-08-17
 owner: marius
 related: []
 severity: medium
-unverified: Only this instance was repaired (codescout-companion bumped to 1.16.8, all three profiles re-synced and verified). Nothing gates the NEXT content edit without a version bump — durable options a/b/c in § Fix are all unshipped — and § Root cause records that remembering failed one commit after succeeding.
+unverified: TRACKED 3870c801cf7bdf57 — Only this instance was repaired (codescout-companion bumped to 1.16.8, all three profiles re-synced and verified). Nothing gates the NEXT content edit without a version bump — durable options a/b/c in § Fix are all unshipped — and § Root cause records that remembering failed one commit after succeeding.
 ---
 
 # BUG: a plugin content edit without a version bump is committed, correct, and live nowhere

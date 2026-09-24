@@ -13,7 +13,7 @@ opened: 2026-08-31
 owner: marius
 related: []
 severity: medium
-unverified: root cause is inferred from the absence of any VC++ install (vswhere) — not confirmed by IT/asset records for this VDI; no fix applied, only a workaround
+unverified: STANDING — root cause is inferred from the absence of any VC++ install (vswhere) — not confirmed by IT/asset records for this VDI; no fix applied, only a workaround
 ---
 
 # BUG: This VDI has no MSVC C++ Build Tools installed — `cargo build`/`test`/`clippy` against the default `x86_64-pc-windows-msvc` target fail with a garbled linker error instead of a clear "linker not found"

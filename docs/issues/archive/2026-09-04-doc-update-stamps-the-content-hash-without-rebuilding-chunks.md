@@ -11,7 +11,7 @@ owner: marius
 related:
 - '6ae552cfc223cd6d'
 severity: high
-unverified: 'No regression test guards THIS file''s entrance into the trap state. fdad1a99''s guard (index_repo_sync_embeds_content_stamped_by_a_run_that_did_not_embed_it) enters via a non-embedding RUN; doc(update) enters via a STAMP. Both produce file_sha256==disk && embedded_sha256!=disk so the same escape releases both, but that is an argument and only one entrance is observed. The 2026-09-06 reproduction covers the other, and a reproduction is not a guard: making update.rs also stamp embedded_sha256 would restore this bug with the suite green.'
+unverified: 'TRACKED 7bef7d26b56bce3c — No regression test guards THIS file''s entrance into the trap state. fdad1a99''s guard (index_repo_sync_embeds_content_stamped_by_a_run_that_did_not_embed_it) enters via a non-embedding RUN; doc(update) enters via a STAMP. Both produce file_sha256==disk && embedded_sha256!=disk so the same escape releases both, but that is an argument and only one entrance is observed. The 2026-09-06 reproduction covers the other, and a reproduction is not a guard: making update.rs also stamp embedded_sha256 would restore this bug with the suite green.'
 ---
 
 # BUG: `doc(action="update")` stamps the content hash without rebuilding chunks, so every later reindex correctly skips the file forever

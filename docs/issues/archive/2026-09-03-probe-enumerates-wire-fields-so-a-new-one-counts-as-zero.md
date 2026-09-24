@@ -14,7 +14,7 @@ topic: measurement instruments
 closed: 2026-09-03
 opened: 2026-09-03
 severity: medium
-unverified: 'no CI-level guard: the unmodelled-field alarm fires only on a probe run, never in the test lane'
+unverified: 'TRACKED a11cf095b81c1c5d — no CI-level guard: the unmodelled-field alarm fires only on a probe run, never in the test lane'
 ---
 
 ## Summary

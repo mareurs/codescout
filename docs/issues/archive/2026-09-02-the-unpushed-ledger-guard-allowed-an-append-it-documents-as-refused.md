@@ -10,7 +10,7 @@ opened: 2026-09-02
 owner: marius
 related: []
 severity: medium
-unverified: 'Mechanism NOT established. Seven candidate causes were ruled out at the bytes (below); the surviving ones are untested. Reproduced ONCE, on one ledger, on a checkout with a linked worktree — n=1, and no second ledger was probed because every probe mutates a high-water mark. Do not read this as ''the guard is dead'': `unpushed_is_per_file_not_per_branch` and `allocation_is_refused_while_the_ledger_unpushed_commits` both pass, so it demonstrably fires in a fixture.'
+unverified: 'STANDING — Mechanism NOT established. Seven candidate causes were ruled out at the bytes (below); the surviving ones are untested. Reproduced ONCE, on one ledger, on a checkout with a linked worktree — n=1, and no second ledger was probed because every probe mutates a high-water mark. Do not read this as ''the guard is dead'': `unpushed_is_per_file_not_per_branch` and `allocation_is_refused_while_the_ledger_unpushed_commits` both pass, so it demonstrably fires in a fixture.'
 ---
 
 # `append_entry` allocated an id on a ledger with three unpushed commits, which is the state the guard refuses

@@ -11,7 +11,7 @@ owner: marius
 related:
 - '689fb62e40557480'
 severity: medium
-unverified: 'Live-probed against rebuilt server 179ba3d7 and found NOTHING TO OBSERVE, which is the correct outcome: sidecar_shape_drift reads 0, so no unauthored-field disagreement exists for the refusal to fire on. Observing it live would mean manufacturing the exact hazard the fix prevents — deliberately drifting a committed sidecar on a real tracker — so the guard stays the test pair, which drives ArtifactAugment.call() rather than the internal function. Not a coverage gap; a case with no safe live trigger.'
+unverified: 'STANDING — Live-probed against rebuilt server 179ba3d7 and found NOTHING TO OBSERVE, which is the correct outcome: sidecar_shape_drift reads 0, so no unauthored-field disagreement exists for the refusal to fire on. Observing it live would mean manufacturing the exact hazard the fix prevents — deliberately drifting a committed sidecar on a real tracker — so the guard stays the test pair, which drives ArtifactAugment.call() rather than the internal function. Not a coverage gap; a case with no safe live trigger.'
 ---
 
 # BUG: `artifact_augment`'s sidecar write-through republishes the entire row, not the field you patched

@@ -9,7 +9,7 @@ closed: 2026-09-02
 opened: 2026-09-02
 owner: marius
 severity: low
-unverified: the landed fix matches a STRING, so a reword of the injector's marker would silently disarm it; the typed GuideDeliveryShape::Preamble is unreachable from the test's vantage.
+unverified: STANDING — the landed fix matches a STRING, so a reword of the injector's marker would silently disarm it; the typed GuideDeliveryShape::Preamble is unreachable from the test's vantage.
 ---
 
 # BUG: a byte-ceiling test cannot see a member stop delivering, and neither remedy that suggests itself works

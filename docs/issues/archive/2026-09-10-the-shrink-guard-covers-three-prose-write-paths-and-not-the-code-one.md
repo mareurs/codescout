@@ -7,7 +7,7 @@ owners:
 - marius
 tags:
 - cluster/guard-narrower-than-its-name
-unverified: 'Advisory only - edit_code(action=replace) WARNS and does not refuse, so a caller who ignores the warning still loses the code. src/tools/create_file.rs (overwrite: true) remains unguarded, now recorded in the class gate''s EXEMPT list with its reason rather than silently. The class gate proves each surface''s module CONTAINS a guard call, not that the call runs on the right operands.'
+unverified: 'TRACKED 8ba3a7dcbaac9777 — Advisory only - edit_code(action=replace) WARNS and does not refuse, so a caller who ignores the warning still loses the code. src/tools/create_file.rs (overwrite: true) remains unguarded, now recorded in the class gate''s EXEMPT list with its reason rather than silently. The class gate proves each surface''s module CONTAINS a guard call, not that the call runs on the right operands.'
 ---
 
 # BUG: the shrink guard covers three prose write paths and not the code one
