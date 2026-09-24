@@ -136,3 +136,33 @@ C1 additionally needs ≤ 11 Haiku calls per draft on average (≥ 50% fewer tha
 3. Long-input degradation (reflex rejected its adapters for this).
 4. Calibration does not transfer across distributions, so per-rule refits are needed on any model, prompt or precision change.
 5. Eval reuse. Score A is already twice-used, which is why T is primary.
+
+## Amendment — Sonnet baseline arm S0, 2026-09-24 (registered before it ran)
+
+At the operator's direction, **S0** is added: the per-rule span judge (`scripts/phase1-span-selector.py`) with **form 2 unchanged** (the per-rule violation specs, the generic unevidenced-fact clause, verbatim span), run on **Sonnet 5** (`claude-sonnet-5`, `--model`). It goes through the same `SubscriptionJudge`: `claude -p` on the subscription, with the API key stripped. S0 answers two questions: whether the precision failure was Haiku's or the task's, and whether a passing selector exists for the local arms to beat.
+
+- **Gate:** the 8-text gate and the 3-text span gate, 3 runs each, ≥ 2/3 per text, 0 errored rows. These are the same criteria Haiku failed at 4/8; Haiku never ran the span gate, because it did not exist yet. No question wording changes for S0: a Sonnet-specific revision would be a new registration.
+- **If S0 passes both gates:** it becomes the **baseline** for every comparison in Stage 4 (T, Score A and Score B, reported side by side with each local arm), and a phase-1 ship candidate under the same ship rule. It also becomes an eligible second stage for C1 alongside Haiku. The cost line reports Sonnet calls per draft, since a full sweep is 22.
+- **If S0 fails:** it is recorded next to the two Haiku gates, the route keeps having no passing baseline, and the comparisons stay against the fork-route rows as registered above.
+- **S0 needs no local infrastructure,** so it runs before Stage 1.
+
+## Amendment — the judge channel was contaminated; S0 and a Haiku control run clean, 2026-09-24 (registered before either ran)
+
+**Found while probing S0's model id.** Asked only to reply `ANSWER: YES`, Sonnet refused, describing its context as holding *"Claude Code personal settings, skill-invocation mandates, environment info"*. Measured with `--output-format stream-json --verbose --include-hook-events`, the `SubscriptionJudge` invocation on the `~/.claude-kat` profile (`--system-prompt` replaced, `--tools ""`, `--strict-mcp-config`, cwd `/tmp`) still did all of the following:
+
+- loaded **5 plugins** (superpowers, codescout-companion, buddy, agents-md, telemetry);
+- ran **3 SessionStart hooks**, whose responses total about 12 KB, the largest being the superpowers skill mandate;
+- ran 2 UserPromptSubmit hooks and a Stop hook;
+- loaded the user `CLAUDE.md` through `memory_paths`.
+
+All of that cost **2,778 input tokens for "Say OK."**. That `CLAUDE.md` includes *"Do not hypothesise but ALWAYS VERIFY"*. It is **not established, only plausible**, that this pushed the judge toward the missing-evidence false positives both Haiku gates showed.
+
+**The clean channel:** a config dir holding only a symlink to the profile's `.credentials.json`, plus `settings.json` = `{"enabledPlugins":{},"hooks":{}}`. It measured **249 input tokens, no hook events, `apiKeySource: none`** (still the subscription). `agents-md` and `telemetry` still list as plugins, with no hook events fired. `scripts/phase1-span-selector.py` now **refuses** a judge config dir that has a `CLAUDE.md`, enabled plugins or hooks. `--allow-dirty-judge` reproduces the old channel on purpose.
+
+**What the two runs are:**
+
+- **S0**, as registered above, runs on the clean channel.
+- **H0-clean** is added as a control: Haiku, form 2 unchanged, the same 8-text gate and 3-text span gate, on the clean channel. It separates the two explanations for the 4/8: **model** (Haiku fails on a clean channel too) or **channel** (Haiku passes clean).
+- If H0-clean passes, the Haiku per-rule judge becomes a baseline candidate as well. Both gate outcomes are published whatever they are.
+
+**Consequence for completed work, stated here and in the scoring doc.** Every subscription-judge result in this campaign ran on the contaminated channel. That covers phase 2's checker gates and rates for RTD-3, 8, 9 and 10, and both phase-1 Haiku gates. Arms were always compared **within** that one channel, so the phase-2 comparisons are internally consistent: every checker passed its gate on it. But the absolute rates belong to that channel. **Re-scoring the phase-2 rows on the clean channel is owed**, and is not done by this amendment.

@@ -412,7 +412,34 @@ def main() -> int:
     ap.add_argument("--arm", default="0")
     ap.add_argument("--out")
     ap.add_argument("--pool", type=int, default=8)
+    ap.add_argument("--allow-dirty-judge", action="store_true",
+                    help="run on a judge profile that loads plugins/hooks/CLAUDE.md "
+                         "(the pre-2026-09-24 channel) -- for reproducing old rows only")
+    ap.add_argument("--model", default="claude-haiku-4-5-20251001",
+                    help="judge model, always via `claude -p` on the subscription")
     args = ap.parse_args()
+    # Refuse a CONTAMINATED judge channel. Measured 2026-09-24: `claude -p --system-prompt`
+    # on a normal profile still loads that profile's plugins, SessionStart/UserPromptSubmit
+    # hooks and user CLAUDE.md -- 2,778 input tokens for "Say OK.", including a
+    # skill-invocation mandate and "ALWAYS VERIFY" rules the judge then applied to the text
+    # it was grading. A config dir holding only the credentials symlink and
+    # {"enabledPlugins":{},"hooks":{}} measured 249 tokens with no hook events.
+    cfg = pathlib.Path(_sc._p.config_dir)
+    settings = json.loads((cfg / "settings.json").read_text()) if (cfg / "settings.json").exists() else {}
+    dirty = [w for w, bad in [
+        ("CLAUDE.md present", (cfg / "CLAUDE.md").exists()),
+        ("plugins enabled", any(settings.get("enabledPlugins", {"?": True}).values())),
+        ("hooks configured", bool(settings.get("hooks", {"?": 1}))),
+    ] if bad]
+    if dirty and not args.allow_dirty_judge:
+        sys.exit(f"judge config {cfg} is not clean ({', '.join(dirty)}): set JUDGE_CONFIG_DIR "
+                 f"to a dir with only .credentials.json and settings.json "
+                 f'{{"enabledPlugins":{{}},"hooks":{{}}}}, or pass --allow-dirty-judge to '
+                 f"reproduce the pre-2026-09-24 channel on purpose")
+    if args.model != _sc._p.model:
+        # Same SubscriptionJudge (API key stripped, subscription profile), another model.
+        _sc._p = _sc.SubscriptionJudge(args.model, _sc._p.config_dir)
+    print(f"judge: {_sc._p.model} via claude -p, config {_sc._p.config_dir}", flush=True)
     if args.gate:
         return gate(args)
     if args.span_gate:

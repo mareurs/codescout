@@ -169,6 +169,8 @@ One 9-1b replay took a different first action, so that arm is out of 9. That rep
 
 ## Phase 2 — fork route on the subscription: stripped `CLAUDE.md`, end-to-end, RTD-3, registered
 
+> **Judge-channel caveat, added 2026-09-24. Read before using any absolute rate below.** Every subscription-judge score in this document ran on a **contaminated channel**. `claude -p --system-prompt` on the `~/.claude-kat` profile still loaded 5 plugins, about 12 KB of SessionStart hook output (including a skill-invocation mandate) and the user `CLAUDE.md`: 2,778 input tokens for "Say OK.". A clean config dir measures 249 tokens with no hook events. Arms were always compared within that one channel, and every checker passed its gate on it, so **the comparisons stand**. The absolute rates belong to that channel, and a clean-channel re-score is owed. Measurement and remedy: `docs/evals/phase1-local-classifier-preregistration.md` § *the judge channel was contaminated*.
+
 The replays below were regenerated through Claude Code itself (`scripts/phase2-fork.py`: `claude -p --resume --fork-session`, subscription auth) instead of the paid Messages API. The route, its fidelity controls and every arm were registered before they ran (`a044ac8d`, `d8f465e1`, `084f98b1`). One launch was aborted after 3 forks exposed a date-change contamination; those rows are discarded, not scored. All scoring used the subscription judge, and every checker passed its gate at 3/3 on the recorded, corrected and unrelated fixtures. **Rates here are compared only with each other, never with the API route's.**
 
 **Route validity** (registered: fork arm 0 on RTD-8 must be ≥ 0.3): **5/10**, passes. All 10 arm-0 forks went straight to the same doc write as the original turn.
