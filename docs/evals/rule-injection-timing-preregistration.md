@@ -359,3 +359,32 @@ Each pins one side of the boundary the rewording moves.
 - S0's RTD-8 cell in Score B is filled by the same run: arm 0 − `e2s` ≥ 0.4 and `e2s` − 1b ≤ 0.2.
 
 **If the gate fails,** RTD-8 stays withdrawn, and a third checker form is a new registration.
+
+
+*API-route rows re-scored on the clean judge channel, 2026-09-24. Registered before any of it ran.* This is the re-score owed since the judge-channel contamination was found (`docs/evals/phase1-local-classifier-preregistration.md` § *the judge channel was contaminated*). It also answers the one RTD-8 condition the `rtd8c` fork-route run could not reach: the fork route has no arm 2.
+
+**Rows: the existing replays, unchanged, with no new generation.**
+
+- DP1 RTD-8 arms 0, 1a, 1b, 2 and 3 come from `phase2-dp1-n10.jsonl`.
+- The RTD-9 and RTD-10 arms (9-1a, 9-1b, 9-3, 10-1a, 10-1b, 10-3) come from `phase2-dp1-rtd910-n10.jsonl`. Arms 0 and 2 are reused from the first file, as originally registered.
+- The API route's stripped arms (`phase2-dp1-stripped-n10.jsonl`) stay discarded, as registered: 17 of their 30 rows are error rows from the usage cap.
+
+**Checkers:**
+
+- `rtd8c` on arms 0, 1a, 1b, 2 and 3;
+- `rtd9` on arms 0, 2, 9-1a, 9-1b and 9-3;
+- `rtd10` on arms 0, 2, 10-1a, 10-1b and 10-3.
+
+The checkers are unchanged, and each re-gates on the clean channel in the same run before scoring. The judge is reasoned Haiku through `scripts/phase2-score-dp1.py`, 3 judgments per row, by majority, with `JUDGE_CONFIG_DIR` set to the clean dir. A failed gate stops that rule's re-score, and the rule's API-route claim is then recorded as not re-established.
+
+**Rule: the registered ship rule, unchanged.** arm 0 − 1b ≥ 0.4, **and** arm 2 − 1b ≥ 0.2, with the arm-0 ceiling exit at 0.3.
+
+- **RTD-8.** The API route's *"RTD-8 ships"* (0.80 and 0.90) was judged on the Messages API by the `rtd8` wording, which `575aafdf` showed contradicts itself on its own positive case. It is **restored under `rtd8c` only if both conditions hold.** If only the first holds, RTD-8 stands as it does on the fork route: the reminder cuts the rate, but content-over-interruption is unshown.
+- **RTD-9 and RTD-10** were judged on the contaminated subscription channel. They **stand if both conditions still hold** on the clean channel, and are otherwise withdrawn to what the clean rows support.
+
+**Predictions:**
+
+- RTD-9 and RTD-10 reproduce, since their fork-route rows reproduced exactly on the clean channel.
+- For RTD-8, arm 1b is ≤ 0.2 (the fork route gave 2/10), and arms 0 and 2 are both ≥ 0.6.
+
+The comparison is within this route and this channel only. It is never compared with the fork route's rates.
