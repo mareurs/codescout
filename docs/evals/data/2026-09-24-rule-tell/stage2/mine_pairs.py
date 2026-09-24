@@ -28,6 +28,7 @@ import collections
 import difflib
 import hashlib
 import importlib.util
+import itertools
 import json
 import pathlib
 import random
@@ -149,7 +150,14 @@ def commits(path: pathlib.Path):
 
 
 def change_blocks(hunk: list[str]):
-    """(removed lines, added lines, the hunk's new-side paragraph) per contiguous change."""
+    """(removed lines, added lines, old-side paragraph, new-side paragraph) per change.
+
+    BOTH sides, deliberately: a positive is a REMOVED sentence, so its context is the OLD
+    side. Carrying only the new side put the correction beside the sentence it corrects --
+    the positive sat inside its own `paragraph` in 30 of 946 rows and the twin in 605
+    (Codex follow-up review, 2026-09-24), so a model given that context could read the
+    answer off it."""
+    old_side = [l[1:] for l in hunk if l[:1] in " -"]
     new_side = [l[1:] for l in hunk if l[:1] in " +"]
     i = 0
     while i < len(hunk):
@@ -158,7 +166,7 @@ def change_blocks(hunk: list[str]):
             while i < len(hunk) and hunk[i][:1] in "+-":
                 (rem if hunk[i][0] == "-" else add).append(hunk[i][1:])
                 i += 1
-            yield rem, add, new_side
+            yield rem, add, old_side, new_side
         else:
             i += 1
 
@@ -171,7 +179,7 @@ def mine(log: pathlib.Path):
         subj_marker = MARKER_RE.search(c["subject"])
         for f in c["files"]:
             for hunk in f["hunks"]:
-                for rem, add, new_side in change_blocks(hunk):
+                for rem, add, old_side, new_side in change_blocks(hunk):
                     R, A = sentences(rem), sentences(add)
                     for s in A:
                         first_seen.setdefault(hashlib.sha1(s.encode()).hexdigest(), c["sha"])
@@ -180,7 +188,8 @@ def mine(log: pathlib.Path):
                     add_text = " ".join(add)
                     add_marker = MARKER_RE.search(add_text)
                     rem_marker = MARKER_RE.search(" ".join(rem))
-                    para = norm(" ".join(l for l in new_side if prose_line(l)))[:1500]
+                    before = norm(" ".join(l for l in old_side if prose_line(l)))[:1500]
+                    after = norm(" ".join(l for l in new_side if prose_line(l)))[:1500]
                     Aset = set(A)
                     # rewrite pairs
                     for r in R:
@@ -201,7 +210,8 @@ def mine(log: pathlib.Path):
                               "added-block" if (add_marker and not rem_marker) else "subject"
                         rows.append(dict(kind="rewrite", sha=c["sha"], date=c["date"],
                                          subject=c["subject"], path=f["path"], positive=r,
-                                         twin=best, ratio=round(ratio, 2), paragraph=para,
+                                         twin=best, ratio=round(ratio, 2),
+                                         context_before=before, context_after=after,
                                          marker=m.group(0), marker_source=src))
                     # appended correction notes after a kept sentence
                     for j, a in enumerate(A):
@@ -209,7 +219,8 @@ def mine(log: pathlib.Path):
                             rows.append(dict(kind="note", sha=c["sha"], date=c["date"],
                                              subject=c["subject"], path=f["path"],
                                              positive=A[j - 1], twin=None, ratio=None,
-                                             paragraph=para, marker=NOTE_RE.match(a).group(1),
+                                             context_before=before, context_after=after,
+                                             marker=NOTE_RE.match(a).group(1),
                                              marker_source="note", note=a[:300]))
     return rows, first_seen, len(all_commits)
 
@@ -250,7 +261,8 @@ def main() -> int:
         if HELD_OUT_DOC_RE.search(r["path"]):
             dropped["held-out source doc"] += 1
             continue
-        sh = shingles(r["positive"]) | shingles(r["twin"] or "") | shingles(r["paragraph"])
+        sh = (shingles(r["positive"]) | shingles(r["twin"] or "")
+              | shingles(r["context_before"]) | shingles(r["context_after"]))
         hit = [name for name, s in ho.items() if sh & s]
         if hit:
             for name in hit:
@@ -291,13 +303,16 @@ def main() -> int:
     by_group = collections.defaultdict(set)
     for r in kept:
         by_group[r["doc_group"]] |= shingles(r["positive"]) | shingles(r["twin"] or "")
-    owner = {}
-    collide = set()
+    # EVERY pair of groups sharing a shingle. Keeping one owner per shingle recorded A-B and
+    # A-C for a shingle held by A, B and C and never B-C: 20 star edges published as 25
+    # pairs (docs/issues/2026-09-24-codex-miner-shingle-pair-undercount.md). The star edges
+    # do preserve connected components, so the fold build can use either; this counts pairs.
+    owners = collections.defaultdict(set)
     for g, ss in by_group.items():
         for s in ss:
-            if s in owner and owner[s] != g:
-                collide.add(tuple(sorted((owner[s], g))))
-            owner.setdefault(s, g)
+            owners[s].add(g)
+    collide = {p for gs in owners.values() if len(gs) > 1
+               for p in itertools.combinations(sorted(gs), 2)}
 
     out = HERE / "mined-candidates.jsonl"
     with out.open("w") as fh:
