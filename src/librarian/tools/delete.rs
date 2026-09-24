@@ -112,11 +112,29 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 .iter()
                 .filter(|c| c.origin != entry_cite::ORIGIN_SCAN)
                 .count();
+            // The FILE half of `recoverable` is measured, not asserted — see `file_git_state`.
+            let git_state = file_git_state(&abs_path);
+            let file_half = match git_state {
+                "committed_clean" => "the file is committed and git can restore it exactly",
+                "committed_with_uncommitted_edits" => {
+                    "the file is committed but has UNCOMMITTED edits: git restores the last \
+                     commit and those edits are lost"
+                }
+                "not_committed" => {
+                    "the file was NEVER COMMITTED (untracked, ignored or only staged): git \
+                     cannot restore it, and this delete destroys the only copy"
+                }
+                _ => {
+                    "git could not be asked about this file, so whether it can be restored \
+                      is UNKNOWN — check `git status` before authorising"
+                }
+            };
             return Ok(json!({
                 "dry_run": true,
                 "deleted": false,
                 "id": a.id,
                 "would_delete_abs_path": abs_path.display().to_string(),
+                "file_git_state": git_state,
                 "cascades": {
                     "augmentation": augmentation::get(&cat, &a.id)?.is_some(),
                     "links_out": links::outgoing(&cat, &a.id)?.len(),
@@ -126,11 +144,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     "entry_cite_out": cites_out.len(),
                     "entry_cite_out_unrebuildable": cites_unrebuildable,
                 },
-                "recoverable": "the file is git-tracked and restorable; the augmentation, \
-                                events, links and observations are catalog-only and are not. \
-                                Of the outgoing entry citations, origin='scan' rows are \
-                                re-derived by a write-mode link_scan; the \
-                                entry_cite_out_unrebuildable ones are rebuilt by nothing",
+                "recoverable": format!(
+                    "{file_half}; the augmentation, events, links and observations are \
+                     catalog-only and are not recoverable. Of the outgoing entry citations, \
+                     origin='scan' rows are re-derived by a write-mode link_scan; the \
+                     entry_cite_out_unrebuildable ones are rebuilt by nothing"
+                ),
                 "hint": format!("re-run with force=true to apply: doc(action=\"delete\", id=\"{}\", force=true)", a.id),
             }));
         }
@@ -181,6 +200,48 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "deleted": existed,
         "vectors_deleted": vectors_deleted,
     }))
+}
+
+/// What git can restore of `path` if it is deleted: `committed_clean` (all of it),
+/// `committed_with_uncommitted_edits` (the last commit — the edits are gone), `not_committed`
+/// (nothing: untracked, ignored, or added but never committed), or `unknown` (git could not be
+/// asked — no repository, no git binary). One `git status --porcelain --ignored` call.
+///
+/// Exists because the dry run's `recoverable` sentence used to be an unconditional literal —
+/// *"the file is git-tracked and restorable"* — composed from the gate's design rationale
+/// rather than from the file's state. For a scratch artifact that was never committed, which is
+/// the modal caller of `delete`, it was false, and the force-delete that followed destroyed the
+/// only copy. docs/issues/2026-09-21-the-delete-preview-calls-an-untracked-file-git-restorable.md
+///
+/// Synchronous on purpose: the dry run calls this while holding the catalog's
+/// `parking_lot::MutexGuard` (see `call`), which must not cross an `.await`.
+fn file_git_state(path: &std::path::Path) -> &'static str {
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        return "unknown";
+    };
+    let Ok(out) = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["status", "--porcelain=v1", "--ignored", "--"])
+        .arg(name)
+        .output()
+    else {
+        return "unknown";
+    };
+    if !out.status.success() {
+        return "unknown";
+    }
+    let status = String::from_utf8_lossy(&out.stdout);
+    let Some(xy) = status.lines().next().and_then(|l| l.get(..2)) else {
+        // Nothing to report: the path is tracked and identical to HEAD.
+        return "committed_clean";
+    };
+    match xy {
+        "??" | "!!" => "not_committed",
+        // Added to the index, never committed: HEAD holds no copy to restore.
+        x if x.starts_with('A') => "not_committed",
+        _ => "committed_with_uncommitted_edits",
+    }
 }
 
 #[cfg(test)]
@@ -399,9 +460,9 @@ mod tests {
     /// weaker half.
     ///
     /// The preview must also report the augmentation, because `reindex` cannot rebuild
-    /// it — the file is git-tracked and restorable; an augmentation's params are
-    /// catalog-only and are not. It is not the ONLY such casualty: outgoing
-    /// `origin='write'` entry citations are another, covered separately below.
+    /// it — whether the FILE is restorable depends on its git state (`file_git_state`), but an
+    /// augmentation's params are catalog-only and never are. It is not the ONLY such casualty:
+    /// outgoing `origin='write'` entry citations are another, covered separately below.
     #[tokio::test]
     async fn delete_without_force_is_a_dry_run_and_destroys_nothing() {
         let tmp = tempfile::tempdir().unwrap();
@@ -514,6 +575,86 @@ mod tests {
             entry_cite::outgoing(&cat, "doomed-slug").unwrap().len(),
             2,
             "a dry run must not cascade-delete the citations it previews"
+        );
+    }
+
+    /// A temp git repository with one file in the requested state. `-c` identities because a
+    /// CI runner has no global git user and `commit` would refuse.
+    fn repo_with_file(state: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .arg("-C")
+                .arg(tmp.path())
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        let f = tmp.path().join("doomed.md");
+        std::fs::write(&f, "v1\n").unwrap();
+        if state != "untracked" {
+            git(&["add", "doomed.md"]);
+            if state != "staged" {
+                git(&["commit", "-q", "-m", "v1"]);
+            }
+        }
+        if state == "dirty" {
+            std::fs::write(&f, "v2 — never committed\n").unwrap();
+        }
+        (tmp, f)
+    }
+
+    /// The three states the dry run must tell apart, because the old sentence — "the file is
+    /// git-tracked and restorable" — was an unconditional literal, true only of the middle one.
+    /// Load-bearing: `dirty` is committed AND modified, the state where "restorable" is half
+    /// true — git restores the last commit and the uncommitted edit is gone.
+    /// docs/issues/2026-09-21-the-delete-preview-calls-an-untracked-file-git-restorable.md
+    #[test]
+    fn file_git_state_separates_untracked_committed_and_dirty() {
+        for (state, want) in [
+            ("untracked", "not_committed"),
+            // Added to the index, never committed: HEAD holds no copy, so still not restorable.
+            ("staged", "not_committed"),
+            ("clean", "committed_clean"),
+            ("dirty", "committed_with_uncommitted_edits"),
+        ] {
+            let (_tmp, f) = repo_with_file(state);
+            assert_eq!(super::file_git_state(&f), want, "{state}");
+        }
+        let outside = tempfile::tempdir().unwrap();
+        let f = outside.path().join("loose.md");
+        std::fs::write(&f, "x\n").unwrap();
+        assert_eq!(
+            super::file_git_state(&f),
+            "unknown",
+            "outside any repository git cannot answer, and the preview must not guess"
+        );
+    }
+
+    /// The reported case end to end: an artifact never committed must NOT be called restorable
+    /// by the dry run. `mk_ctx`'s tempdir is not a repository, so this builds one and seeds the
+    /// artifact inside it. Asserted on the wire field AND on the sentence's claim, since the
+    /// sentence is what a caller reads before authorising.
+    #[tokio::test]
+    async fn delete_preview_does_not_call_a_never_committed_file_restorable() {
+        let (tmp, _f) = repo_with_file("untracked");
+        let ctx = mk_ctx(tmp.path());
+        let doomed = tmp.path().join("docs/trackers/doomed.md");
+        assert!(doomed.exists(), "mk_ctx writes the artifact file");
+
+        let v = delete::call(&ctx, serde_json::json!({"id": ID}))
+            .await
+            .unwrap();
+        assert_eq!(v["file_git_state"], "not_committed", "{v}");
+        let rec = v["recoverable"].as_str().unwrap();
+        assert!(
+            rec.contains("NEVER COMMITTED") && !rec.contains("restore it exactly"),
+            "must not reassure about a file git holds no copy of: {rec}"
         );
     }
 
