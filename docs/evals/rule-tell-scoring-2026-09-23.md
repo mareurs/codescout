@@ -598,6 +598,44 @@ The bracketed figures are the earlier scores of the same rows. RTD-8's were on t
 
 **This completes the owed clean-channel re-score.** Every phase-2 comparison that the campaign rests on has now been scored on the clean channel: RTD-3, RTD-9 and RTD-10 on the fork route earlier, and RTD-8, RTD-9 and RTD-10 on the API route here. The API route's stripped arms remain discarded as error rows, and were never scored.
 
+## Phase 1 — the `partial` excerpt audit: every excerpt shows its tell, registered
+
+Registered in `eb48fe28` before any positive excerpt was read for it. No model call. The verdicts were committed in `0b475d42` before they were compared with S0's rows; the rows, script and output are in `docs/evals/data/2026-09-24-rule-tell/partial-audit-*`.
+
+**Question.** S0 fires the gold rule on 0 of 9 `partial` positives under both forms. Is the violation absent from the excerpt, or present and missed?
+
+**Method.** Each case's own corpus `tell` is split into (a) a text predicate and (b) any outside condition. Verdicts: **V** (a holds and b is absent or shown), **S** (a holds, b needs what the excerpt lacks), **N** (a does not hold). The quote for (a) must pass `verify_span` against the positive and be absent from the negative.
+
+| case | gold | verdict | quote for (a) | (b), what the excerpt lacks | S0 fired (2b / 3) |
+|---|---|---|---|---|---|
+| RTD-1 | `question_asked` | **V** | "An exact shared-ID join now exists." | — | — / — |
+| RTD-2 | `scope_instant` | S* | "The Kat window contains the Codex window and is four times longer" | the window endpoints | — / — |
+| RTD-4 | `count_unit` | S | "seven times, in one scan" | that a machine-readable source exists | — / `scope_instant`, same sentence |
+| RTD-5 | `open_artifact` | S | "a leftover of the L-01 split that moved the live cache…" | the neighbouring clauses and their citations | — / — |
+| RTD-7 | `run_tool` | S | "…emit byte-identical scan output" | that the two paths' outputs differ (`mod.rs:303`) | — / — |
+| RTD-11 | `question_asked` | S | "The surface that answers all three today is the T-N ledger" | the signal type under discussion | — / `closed_population`, same sentence |
+| RTD-12 | `question_asked` | **V** | "So **id allocation already survives a catalog loss**…", against the caveat "**not exercised end-to-end…**" in the same excerpt | — | — / — |
+| RTD-16 | `count_unit` | **V** | "**15 of 31 augmented trackers**…" | — | — / — |
+| RTD-19 | `count_unit` | S | "The ledger population is **68 prefix pairs across 54 artifacts**…" | that a deriving instrument exists | — / — |
+
+**Both mechanical checks pass on all 10 quotes** (RTD-12 has two). **V = 3, S = 6, N = 0.**
+
+**Against the registered readings.**
+
+- **Prediction V + S ≥ 7 of 9: held, at 9 of 9.**
+- **Prediction V ≤ 3 of 9: held under the registered split, at 3.** *Deviation, stated rather than absorbed:* the registration listed RTD-2's outside condition as "window endpoints", but its tell asks only that the endpoints are **not stated**, which the excerpt shows. Read by the tell's own text, RTD-2 is V, V = 4, and this prediction **fails**. Neither reading changes the decision.
+- **Decision rule: V + S ≥ 6, so the silence is not explained by what the excerpts show.** The next selector registration targets what the judge is asked, not the corpus. The `partial` cases stay in the recall denominator.
+
+**What the S0 rows add.**
+
+- **S0 is silent on all three V cases under both forms**, where nothing outside the excerpt is needed. Those misses belong to the selector alone.
+- **On the two cases where form 3 fired, it quoted the audit's sentence and named a neighbouring rule.** It found the claim and mis-assigned the rule, which is the same pattern as § *S0 form 3*.
+- **The six S cases are a question for the design, not a defect:** the excerpt shows the shape of the violation and not the proof. Whether a reminder should fire on a surface shape is a ship-rule question, since a wrong reminder costs little. Form 2b's generic clause ("YES only if the described failure is visible") tells the judge to stay silent on exactly these; form 3 removed it and they stayed silent anyway.
+
+**The operator blind check was not performed.** The registered check gave RTD-1, RTD-4 and RTD-7 to the operator blind; the operator chose to continue without answering. **So these verdicts rest on one non-blind auditor**, who wrote the S0 specs and knew the gold rules. The decision is robust to that one limit: turning all three check cases to N would give N = 3, below the rule's 4, and V + S = 6, still at its threshold.
+
+**Limits.** A tell was written by someone who knew the violation, so V and S say an excerpt is judgeable *given the tell*, not that a rule-level judge could find it. Nine cases, one auditor, no interval claimed.
+
 ## Next — phase 1 (handoff, 2026-09-24)
 
 *Updated 2026-09-24 ~18:00 EEST, at the end of session 571eb3d6. Items 1, 3 (Stage 1) and 4 below are done, and item 2 is bounded and re-pointed. The raw rows and logs for every result in this document are in `docs/evals/data/2026-09-24-rule-tell/` (README manifest).*
@@ -613,7 +651,7 @@ The bracketed figures are the earlier scores of the same rows. RTD-8's were on t
 **Open at handoff, in order:**
 
 1. **The `rtd8c` run: done.** The gate passed, and the phase-2 RTD-8 claim is restored in a narrower form: the claim-bound reminder *cuts* the violation rate from 9/10 to 2/10 rather than stopping it. S0's RTD-8 cell fails. Details are in § *RTD-8 re-scored with `rtd8c`*.
-2. **The S0 recall problem: the generic-clause hypothesis is tested and not supported** (form 3, `6e462635`). Recall stays at 3/17 without the clause, and S0 stays at form 2b. **The larger failure is silence:** 10 of 17 positives fire nothing even without the clause, mostly in the `partial` bucket (0/9). Wrong-rule fires, between `count_unit`, `scope_instant`, `monotone_absence` and `closed_population`, are the smaller one: 4 of 17. The next hypothesis is therefore about **what the excerpt shows**: whether a `partial` text carries enough of its violation to be judged at all. It is not about the question or the spec boundaries. Testing it is a new registration. See § *S0 form 3*.
+2. **The S0 recall problem: the generic-clause hypothesis is tested and not supported** (form 3, `6e462635`). Recall stays at 3/17 without the clause, and S0 stays at form 2b. **The larger failure is silence:** 10 of 17 positives fire nothing even without the clause, mostly in the `partial` bucket (0/9). Wrong-rule fires, between `count_unit`, `scope_instant`, `monotone_absence` and `closed_population`, are the smaller one: 4 of 17. The next hypothesis is therefore about **what the excerpt shows**: whether a `partial` text carries enough of its violation to be judged at all. It is not about the question or the spec boundaries. Testing it is a new registration. See § *S0 form 3*. **Tested the same day (`eb48fe28`), and the corpus is not the cause:** every `partial` excerpt shows its tell (V 3, S 6, N 0), and S0 is silent even on the three that need nothing outside the excerpt. So the next registration is about **what the judge is asked**, including how a surface-shape tell (the six S cases) should be treated. See § *the `partial` excerpt audit*. The operator blind check was not performed, and that section says what that costs.
 3. **The local route** (`docs/evals/phase1-local-classifier-preregistration.md`). **Stage 1 is done: L0-frozen (JevK5 zero-shot) fails its gate at 4/10, as predicted.** Its probabilities rank gold 1st or 2nd on 4 of 5 violation texts, so per-rule calibration is the lead for Stage 3. The environment is set up: `~/work/claude/jevk5`, its `.venv`, and the weights in the HF cache. L0-embed waits for Stage 2's validation fold, as registered. **Next is Stage 2, the data build**, which the registration puts at 1.5–3 weeks. The Anthropic permission to train on Claude outputs is recorded in codescout memory, as reported by the operator.
 4. **The owed clean-channel re-score: done** (`db6a5f0e`, result in § *API-route rows re-scored on the clean channel*). RTD-8, RTD-9 and RTD-10 all ship on the API route under clean checkers. RTD-8 is restored in full there (1b 0/9, arm 2 − 1b = 0.90), and it is "cuts to 2/10" on the fork route.
 
