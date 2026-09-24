@@ -14,8 +14,8 @@ entry_prefix:
 - DWF
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
-entry_high_water_DWF: 6
-entry_high_water_DCS: 4
+entry_high_water_DWF: 7
+entry_high_water_DCS: 5
 ---
 
 # Deep-agent workflow observations and session coverage
@@ -89,10 +89,14 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DCS-1 | 2026-09-18 | coverage | setup / partial | setup-2026-09-18-root |
 | DWF-2 | 2026-09-20 | workflow | enrichment | s48d1f0c8-round3-fixer-dispatch |
 | DWF-3 | 2026-09-23 | workflow | enrichment | 571eb3d6/fork-route |
+| DWF-4 | 2026-09-24 | workflow | routine-first (retrospective) | 3b4fae98/rtk-eval |
 | DWF-5 | 2026-09-24 | workflow | enrichment | 09093108:prefix-uniqueness |
+| DCS-2 | 2026-09-24 | coverage | session-receipt | 571eb3d6/post-compaction-2026-09-23 |
 | DCS-3 | 2026-09-24 | coverage | session-receipt | 09093108/whole-session |
 | DWF-6 | 2026-09-24 | workflow | routine-first | 774ba049/guide-rearm-debug |
 | DCS-4 | 2026-09-24 | coverage | session-receipt | 774ba049/post-compaction |
+| DCS-5 | 2026-09-24 | coverage | session-receipt | 571eb3d6/post-compaction-2026-09-24 |
+| DWF-7 | 2026-09-24 | workflow | routine-first | sebf651ec-open-bug-verify-sweep |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -185,6 +189,24 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 
 **Outcome — 2026-09-23 (pre-action fields above unchanged):** `observed`, `mixed`, `partial`. The registered route-validity check PASSED: fork arm 0 reached RTD-8 **5/10** (criterion ≥ 0.3), with 10/10 forks going straight to the doc write. It was not the fifth probe that ended the trajectory, though: a **sixth** contamination surfaced after this entry's capture. The first registered launch opened 3/3 forks by auditing the git tree. The cause was the resume's *"The date has changed"* notice (transcript day 2026-09-21, fork day 2026-09-23). It was fixed by setting the seed's last `date` attachment to the fork's day (`d8f465e1`), and those 3 rows were discarded, not scored. Killing that launch also left orphaned forks writing into the shared projects directory. Six own files were identified by content and removed, and a peer's file was left untouched. The driver now cleans up on SIGTERM, verified with 0 forks and 0 owned files left. Results are recorded in `docs/evals/rule-tell-scoring-2026-09-23.md` § *Phase 2 — fork route on the subscription*. **What the check established:** the route reproduces the decision point's action and a violation rate above the floor, on one decision point. **What it did not:** that fork-route rates equal API-route rates. They are compared only within the route.
 
+## DWF-4 — rtk evaluation for codescout run_command — corpus replay plus live guard probes; verdict do-not-adopt
+
+**Status:** observed
+**Valid:** dated 2026-09-24
+
+| Field | Record |
+|---|---|
+| Sampling / capture mode | `routine-first`; **retrospective**. Written after the measurements, so the pre-action row below is reconstructed from the opening request, not frozen before it |
+| Identity / key / times | session 3b4fae98-500a-4fa9-8127-b16642a8c23d, profile ~/.claude-sdd, model claude-opus-5-5; collector = same session; ~06:50–07:25 UTC 2026-09-24 |
+| Task / authority / substrate | User: "research and measure if rtk-ai/rtk would help codescout and how". Research only, no code changes. Workspace `experiments` @36999188, dirty tree (peer edits); rtk v0.49.0 binary + fixture crate in session scratchpad only |
+| Pre-action evidence | rtk README: it hooks only the Bash tool. CLAUDE.md: native Bash denied since 2026-09-20. codescout run_command already buffers anything over ~10 KB behind a summary |
+| Initial next action / completion check | Replay the recorded run_command corpus (usage.db) through `rtk rewrite` and `rtk pipe -f`; check: bytes before/after on real outputs plus live fidelity probes |
+| Trajectory | README fetch → download + sha256 verify → corpus family table → offline replay (7m41s; 23,641 calls) → 14 live raw-vs-rtk pairs → fixture crate for cargo test/clippy → two pipe-mode outliers re-checked live (they turned out to be pipe-mode artifacts, so those figures are upper bounds) → guard probes |
+| Effects / recovery | No repo writes except codescout memory `research/rtk-evaluation` and this entry. One IL-3 block on my own grep pipe; reran with a redirect |
+| Outcome / basis | `good` / `verified-complete` for the question asked. Inline savings upper bound 0.63% of codescout tool output; `empty_test_selection_diagnostic` silenced and an IL-3 bypass that masks exit codes, both observed live. Recommendation: do not adopt |
+| Delegation candidate | Corpus replay against usage.db is deterministic and scriptable. Judging fidelity needed live probes the replay could not substitute for |
+| Rests on / grouping / overhead | memory `research/rtk-evaluation`; capture effort ~3 min |
+
 ## DWF-5 — Ledger prefix uniqueness enforced at declaration — pre-action packet
 
 **Status:** observed
@@ -202,6 +224,22 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 **Outcome 2026-09-24:** `good` / `verified-complete` for the stated completion check. Committed `45d49a10`. What the check established, separately: (1) each refusal observed RED before its fix -- 12 tests; (2) 17 guarded sites mutated via `scripts/mutation-probe.sh`, all KILLED at the end, with FOUR surviving on the first pass (alternatives-free, rival-excludes-self, repo grouping, per-artifact dedupe), each read as `untested` and closed by a fixture detail; (3) gate `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, the 12 test names read out of the default lane; (4) live corpus: the new doctor check reports 0, agreeing with an independent `git ls-files` scan (only `F`/`W` shared), so no existing ledger is refused. NOT established: the write-time guard is not live in any running MCP server until a rebuild; the unindexed-sibling and linked-worktree cases are false accepts by design, covered only by doctor after reindex/merge.
 
 **Trajectory notes worth keeping:** one mid-task compile break reached the shared tree (a replaced stub left a duplicate definition for ~2 minutes; the tool's own compile check reported it and it was removed before any peer build was observed). A gate run exited 1 on `fmt-mine` refusing a LIVE peer's uncommitted files -- the guard working, not a defect of this change. A fixture edit silently failed to apply because `fmt-mine` had reformatted the bytes between read and write, leaving two new assertions checking rows that did not exist -- caught only because the corresponding mutations still SURVIVED. Mid-task a peer (sessionId `3b4fae98-500a-4fa9-8127-b16642a8c23d`) independently hit the same side-bug this session filed and handed over its IC-6 member entry.
+
+## DCS-2 — Session 571eb3d6 — rule-tell eval campaign, post-compaction interval
+
+**Valid:** dated 2026-09-24
+
+| Field | Record |
+|---|---|
+| Session / principal / collector | session `571eb3d6-c879-43f6-b3f9-5a51e744e1af`; the operator via this coordinating session; collector = same; model claude-opus-5.5 |
+| Observed interval (UTC) | this receipt covers the post-compaction stretch 2026-09-23 ~14:30 to 2026-09-24 ~08:30, approximate. Earlier parts of the session, before compaction, are not covered here |
+| Workspace | `/home/marius/work/claude/codescout`, branch `experiments`, shared checkout with 5+ peer sessions |
+| Coverage | `partial`. The collector covered this interval only, and captured retrospectively |
+| DCTX routine / enrichment | none recorded. Routine sample: `missed-capture`. Several context choices were made (the injection channel, stripping CLAUDE.md, a date-attachment rewrite), but none was snapshotted before action |
+| DWF routine / enrichment | DWF-3 (enrichment, retrospective). Routine sample: `missed-capture`. The first substantive multi-step episode of this interval (moving the judge to the subscription) was not snapshotted before action |
+| Native / delegated / unobserved gaps | no subagents. Subscription `claude -p` forks and judge calls do not appear in `usage.db`: about 150 Opus forks and about 1,000 Haiku judge calls ran outside the MCP recorder |
+| Unresolved pending entries | none of this session's. DWF-3 carries a dated outcome |
+| Collection overhead | about 15 min across DWF-3, its outcome, and this receipt; estimated, not measured |
 
 ## DCS-3 — Session 09093108 — prefix uniqueness, #59 and the DCX rekey, the withheld-commit rule, caveat markers
 
@@ -266,6 +304,39 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 
 **Capture gap:** no new DWF entry was opened for this second half. This receipt covers it.
 
+## DCS-5 — Session 571eb3d6 — phase-1 selector gates, Score A/B, the judge-channel contamination, second post-compaction interval
+
+**Valid:** dated 2026-09-24
+
+| Field | Record |
+|---|---|
+| Session / principal / collector | session `571eb3d6-c879-43f6-b3f9-5a51e744e1af`; the operator via this coordinating session; collector = same; model claude-opus-5.5. The session moved from profile `~/.claude-kat` to `~/.claude-sdd` on resume |
+| Observed interval (UTC) | second post-compaction stretch, 2026-09-24 ~06:45 to ~10:30, approximate. DCS-2 covers the stretch before it |
+| Workspace | `/home/marius/work/claude/codescout`, branch `experiments`, shared checkout; peers 09093108 and 3aa55c01 interacted |
+| Coverage | `partial`, retrospective |
+| DCTX routine / enrichment | none recorded. Routine sample: `missed-capture`. Context choices made without a pre-action snapshot: the judge's config dir (clean channel), the move of the judge account to `~/.claude`, and the selection of injections |
+| DWF routine / enrichment | none recorded. Routine sample: `missed-capture`. The first substantive multi-step episode (the per-rule selector's registration and gate) was not snapshotted before action. Outcomes are recorded in the eval docs, commits `bbba4aa2`…`575aafdf` |
+| Native / delegated / unobserved gaps | two background research subagents (general-purpose, web and docs only). Every `claude -p` judge call (about 3,000 Haiku and Sonnet calls) and the 20 Opus forks ran outside `usage.db` |
+| Notable, for the review | the `claude -p` judge channel loaded 5 plugins, SessionStart hooks and the user CLAUDE.md, at 2,778 tokens for "Say OK." (clean: 249). On the clean channel the `rtd8` checker failed its gate, and phase 2's RTD-8 claim was withdrawn; the other three checkers reproduced exactly |
+| Unresolved pending entries | none. `rtd8c` (the re-worded RTD-8 checker) was scoring at handoff; its outcome goes to the scoring doc, not here |
+| Collection overhead | about 10 min for this receipt; estimated |
+
+## DWF-7 — Open-bug verify sweep: four read-only verifier batches over the 34 bugs older than 14 days — pre-action packet
+
+**Status:** pending-outcome
+**Valid:** dated 2026-09-24
+
+**Sampling / capture mode:** routine-first / prospective for the dispatch below. The session's first substantive multi-step work, closing `2fc50a3d` (now `863b801018a947e4`), completed before this capture. It is summarised here as retrospective context and is not claimed as a prospective sample.
+
+**Identity / key / times:** collector and coordinating principal = session `ebf651ec-5ab7-42d9-a526-dcf9758692e1`, profile `~/.claude`, model Opus 5.5 (1M). Four delegated general-purpose subagents (Opus), not independently attributable beyond agent id. Capture key `sebf651ec-open-bug-verify-sweep`. Capture 2026-09-24T11:40Z; finish unknown at capture.
+
+**Task / authority / substrate:** the user asked "lets check open issues" and then chose options 1 and 2. Option 1: close `2fc50a3d` as fixed. Option 2: run `librarian(doctor)` and verify the open bugs older than 14 days against current code. Delegates are authorised read-only (no edits, no git index/HEAD changes, no lean-lane builds). Workspace `/home/marius/work/claude/codescout`, HEAD `436a8ff6`, tree dirty with peers' files plus this session's uncommitted archive of `2fc50a3d` and re-pointed citations.
+
+**Pre-action evidence:** (a) At about 11:30Z, `doc(find, kind=bug, status in open/taken/investigating/zombie)` returned 110 rows, and the disk had 111; the one-row gap was `b586243d`, committed after the query. 44 of those 110 are `RESIDUAL:` rows routed today by `cb54d062`. (b) `doctor` at `436a8ff6` returned 81 violations, including 5 `open_bug_cited_from_source` (`523233935`, `7579b32b`, `e421be68`, `f47274c1`, `bfdfeebd`). (c) The population is the 33 non-RESIDUAL active bugs filed on or before 2026-09-10, plus `bfdfeebd`: 34 files. (d) Part 1 retrospective: `2fc50a3d` looked like an unclosed duplicate. Reading it showed two failure modes, closed by `2caf55c5` + `02a86104` (mode 1) and `074b749e` (mode 2). Patch-ids were re-derived, and the two already recorded elsewhere matched.
+
+**Initial next action / completion check:** dispatch four read-only verifier batches, each returning a per-bug verdict (FIXED with SHA+patch-id / PARTIAL / STILL-OPEN / EXTERNAL / CANNOT-DETERMINE) backed by lines read. The check: this collector spot-verifies every FIXED verdict before changing any status, and the user decides on closures.
+
+**Outcome update — 2026-09-24T12:30Z.** Four verifiers returned 34 verdicts: 2 FIXED, 1 probably fixed, 9 partial or mitigated, 6 external/not-a-code-defect, 3 not recurred, 12 still open, 1 cannot-determine, and 1 zombie that came back. The per-batch totals reconcile to 34; the 12 still-open includes the design-limit and structural cases. The collector re-derived the spot checks before any status change: `05fceb57`'s two anchors (reachable, non-merge, patch-ids matched), and the zombie `d25aa6db`'s two recurrences (`usage.db` rows 79110 and 126947; `git grep` at each row's `project_sha` confirmed both symbols existed). Status changes were not applied; they were handed to the user. **Unplanned finding (enrichment):** the dispatch itself exposed a concurrent guide-ledger race, filed as `e76556484627a41a`. Batch B reported three injections of one topic; the collector counted each ledger's stamps against each transcript's injections and traced it to `src/server.rs:679`/`:1204`. A side effect: one verifier activated the project read-only, which blocked the coordinator's reindex until it was re-run with `workspace=` pinned. **Outcome:** good / partial. The investigation is complete as verdicts; closures await the user.
 
 ## Template for new entries
 
