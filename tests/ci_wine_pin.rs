@@ -10,7 +10,7 @@
 //! "held broken packages") the moment the next release appeared. That was both red
 //! streaks, 09-05..08 at 11.16 and from 09-19 at 11.17. Reproduced 2026-09-24 in a
 //! clean ubuntu:24.04, red on the metapackage-only step and green with the family
-//! pin. `docs/issues/2026-09-24-wine-lane-dies-at-apt-setup-with-the-pin-published.md`.
+//! pin. `docs/issues/archive/2026-09-24-wine-lane-dies-at-apt-setup-with-the-pin-published.md`.
 //!
 //! **What this test is, and is not.** It is a SHAPE test over `ci.yml`'s text. It
 //! cannot show that apt resolves, since only a runner or that container can. What it

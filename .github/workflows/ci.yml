@@ -590,7 +590,7 @@ jobs:
         # native-arch packages and leaves `wine-devel-i386` at its candidate, which was
         # measured to fail the same way. Bumping the pin to the newest release only hides
         # this until the next release.
-        # docs/issues/2026-09-24-wine-lane-dies-at-apt-setup-with-the-pin-published.md
+        # docs/issues/archive/2026-09-24-wine-lane-dies-at-apt-setup-with-the-pin-published.md
         #
         # The codename is READ FROM THE RUNNER, never hardcoded — `ubuntu-latest` moves, and a
         # baked-in `noble` would decay silently into an apt 404 blamed on WineHQ. The VERSION

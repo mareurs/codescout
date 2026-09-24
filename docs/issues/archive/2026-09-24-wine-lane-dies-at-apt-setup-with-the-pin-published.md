@@ -1,7 +1,7 @@
 ---
-id: '23e78edc1a6d1e46'
+id: c318a9960bc52f54
 kind: bug
-status: fixed
+status: archived
 title: 'BUG: the wine lane dies at setup on winehq-devel''s unmet wine-devel dependency, with the pin published and the index stable'
 owners:
 - marius
@@ -10,7 +10,6 @@ tags:
 closed: 2026-09-24
 opened: 2026-09-24
 severity: medium
-unverified: 'Not yet observed on a GitHub runner. Proven in a clean ubuntu:24.04: HEAD''s step red (exit 100, the CI error), the fixed step green (exit 0, wine-11.17). The next pushed windows-gnu run settles it.'
 ---
 
 # BUG: the wine lane dies at setup on `winehq-devel : Depends: wine-devel (= 11.17~noble-1)`, with the pin published and the index stable
@@ -117,9 +116,13 @@ None needed after `87d90d8c`. On an older tree: re-running the job does not help
 
 ## Resume
 
-**Owed: the first GitHub runner execution of the new step.** It happens on the next push that runs CI (a push is the operator's decision). Pass: the `Windows-gnu cross (MinGW + wine)` job gets past `Install MinGW + wine` and logs `>>> wine pinned to: wine-11.17`. Then archive this file. If it fails at setup anyway, the clean-container reproduction no longer matches the runner, which would put the runner-state hypothesis back in play. Start from the job's log, not from a pin bump.
+**Verified on a GitHub runner, 2026-09-24.** Run `36054775540` (head `51edbf86`, which contains `87d90d8c`), job `107818878761`: `Install MinGW + wine` succeeded and logged `>>> wine pinned to: wine-11.17`. `Cross-build` and `Cross-clippy` then succeeded, and the job reached `Cross-test under wine (lib only)` for the first time since 09-19. That meets the pass condition this section named, so the file is archived.
 
-**Separate, not this bug:** the same runs show the native `Test (windows-latest / …)` jobs failing in `cargo test`, and `Audit Doc Refs` failed once (`ea972b40`).
+**The job is still red, for reasons that are not this bug.** Its cross-test ran `5701 passed; 2 failed`. Those two failures are the first tests this lane has reached since it broke, so they are newly visible, not new regressions:
+- `librarian::catalog::augmentation::tests::a_ledger_re_declaring_its_own_prefix_is_not_a_conflict` (from `45d49a10`, filed as `c6cff39df3eed0c6`);
+- `tools::symbol::tests::references_on_an_unused_file_local_symbol_that_returns_its_declaration_stays_bare` (from `1ea1d36b`, filed as `868e689cccfe84b3`).
+
+Both also fail on native `Test (windows-latest / default)`. The earlier note here that the native Windows jobs were failing in `cargo test` is these same two tests. The `Audit Doc Refs` red on `51edbf86` is raw eval transcripts from `50113f61`, owned by that session.
 
 ## References
 
