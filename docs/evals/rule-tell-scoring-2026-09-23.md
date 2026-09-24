@@ -516,6 +516,60 @@ Removing the clause turned 3 silent positives into wrong-rule fires, and 10 stay
 
 **Limits.** Score A is 1 run per row, so the new fires could partly be sampling noise. The corpus is not blind: the ablation was chosen after form 2b's Score A, and the spec author has read the corpus. The Score A rows keep verdicts only, so the judge's reasons are not available.
 
+## Phase 1 — rule assignment, bounded from existing rows (no new calls)
+
+The question behind handoff item 2 was whether tightening or merging the neighbouring rules would raise recall. It is answered here by re-reading the form-2b and form-3 Score A rows **at family level**, with no model call. The family is `count_unit`, `scope_instant`, `monotone_absence` and `closed_population`, and a positive counts as a hit when any family member fires on a family gold.
+
+| form | per-rule recall | family recall |
+|---|---|---|
+| 2b | 3/17 | 3/17 |
+| 3 | 3/17 | **5/17**: RTD-4 and RTD-9 become hits; RTD-11's `closed_population` is not, since its gold is `question_asked` |
+
+**This is an upper bound, and a tailored one.** The family was drawn after seeing form 3's confusions, so no fairer grouping can do better on these rows. Even so it is 5/17, below the registered 0.5, and 10 of 17 positives stay silent. **So no spec-tightening registration was run.** Its ceiling cannot reach the bar, and the larger failure it would not touch is silence (§ *S0 form 3*).
+
+## Phase 1 — Stage 1, L0-frozen: JevK5 zero-shot fails its gate, registered
+
+Registered in `d494330f` before its gate ran. `scripts/phase1-local-l0.py` swaps only the selector's `judge_rule`:
+
+- a per-rule JevK5 `noul`, firing at p ≥ 0.5;
+- then a `choice` over sentences for the claim.
+
+The gate and span-gate code is S0's own. The model is `alibiserikbay/JevK5` 0.2.2 on the local RTX A5000, measured deterministic, so runs = 1.
+
+| gate text | expected | fired | |
+|---|---|---|---|
+| clean-1 | none | `cannot_happen` | FAIL |
+| clean-2 | none | `cannot_happen`, `question_asked` | FAIL |
+| semicolon | `d_semicolon` | + 3 others | pass |
+| sessionid | `d_sessionid` | + 4 others | pass |
+| cannot | `cannot_happen` | only it | pass |
+| contradiction | `contradiction` | 5+ others, not it | FAIL |
+| clean-3 … clean-5 | none | 2–3 rules each | FAIL ×3 |
+| member | `member_vs_population` | + others | pass |
+| **gate** | | | **4/10**, 0 errored |
+
+**Span gate: 3/3 on target.** Given the right rule, the sentence `choice` picks the violating sentence.
+
+**Against the registered prediction:** a gate failure at ≤ 6/10, mostly on precision. **It held**: all five clean texts fail. As registered, this is **diagnostic only** and does not stop Stage 3.
+
+**What the probabilities show. This is an exploratory reading of the logged rows, not a registered measure.**
+
+- **All 220 `noul` values lie between 0.09 and 0.86**, and each rule has its own baseline.
+  - `cannot_happen` sits at 0.44–0.60 on every text and fires on 9 of 10.
+  - `d_semicolon` sits near 0.2.
+  - So one global threshold cannot serve all rules.
+- **The ranking carries signal that the threshold hides.** On four of the five violation texts, the gold rule ranks 1st or 2nd of 22 on its own text, and it scores above that rule's maximum over the five clean texts:
+
+| text | gold p | same rule, clean max | margin |
+|---|---|---|---|
+| semicolon | 0.71 | 0.20 | +0.51 |
+| sessionid | 0.50 | 0.18 | +0.32 |
+| member | 0.64 | 0.44 | +0.20 |
+| cannot | 0.60 | 0.60 | +0.00 |
+| contradiction | 0.36 (rank 12) | 0.26 | +0.10 |
+
+That is what per-rule calibration, Stage 3's training and threshold fitting, is meant to recover. It is **not evidence** that Stage 3 will: 5 texts, one run, and thresholds chosen after seeing them would be the tailoring Stage 2's validation fold exists to prevent.
+
 ## Next — phase 1 (handoff, 2026-09-24)
 
 *Updated 2026-09-24 ~13:30 EEST, at the second compaction handoff of session 571eb3d6. The earlier handoff text is superseded, and its content lives in the sections above.*
@@ -532,7 +586,7 @@ Removing the clause turned 3 silent positives into wrong-rule fires, and 10 stay
 
 1. **The `rtd8c` run: done.** The gate passed, and the phase-2 RTD-8 claim is restored in a narrower form: the claim-bound reminder *cuts* the violation rate from 9/10 to 2/10 rather than stopping it. S0's RTD-8 cell fails. Details are in § *RTD-8 re-scored with `rtd8c`*.
 2. **The S0 recall problem: the generic-clause hypothesis is tested and not supported** (form 3, `6e462635`). Recall stays at 3/17 without the clause, and S0 stays at form 2b. **The larger failure is silence:** 10 of 17 positives fire nothing even without the clause, mostly in the `partial` bucket (0/9). Wrong-rule fires, between `count_unit`, `scope_instant`, `monotone_absence` and `closed_population`, are the smaller one: 4 of 17. The next hypothesis is therefore about **what the excerpt shows**: whether a `partial` text carries enough of its violation to be judged at all. It is not about the question or the spec boundaries. Testing it is a new registration. See § *S0 form 3*.
-3. **The local route** (`docs/evals/phase1-local-classifier-preregistration.md`). Registered with S0 as baseline; Stage 1 (JevK5 zero-shot) has not started. It needs a Python env with `flash-linear-attention` and about 9 GB of weights. The Anthropic permission to train on Claude outputs is recorded in codescout memory, as reported by the operator.
+3. **The local route** (`docs/evals/phase1-local-classifier-preregistration.md`). **Stage 1 is done: L0-frozen (JevK5 zero-shot) fails its gate at 4/10, as predicted.** Its probabilities rank gold 1st or 2nd on 4 of 5 violation texts, so per-rule calibration is the lead for Stage 3. The environment is set up: `~/work/claude/jevk5`, its `.venv`, and the weights in the HF cache. L0-embed waits for Stage 2's validation fold, as registered. **Next is Stage 2, the data build**, which the registration puts at 1.5–3 weeks. The Anthropic permission to train on Claude outputs is recorded in codescout memory, as reported by the operator.
 4. **The owed clean-channel re-score** of the rest of phase 2 (the API-route rows and the stripped arms under the other checkers). Where it has been done (RTD-3, RTD-9, RTD-10), it reproduced exactly.
 
 **Instruments and how to run them** (details in codescout memory, `system` bucket):
