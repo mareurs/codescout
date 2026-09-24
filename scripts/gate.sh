@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run the four-command gate against a PER-SESSION `target/`, so the lane cannot be
-# corrupted by — or corrupt — another session sharing this checkout.
+# Run the four-command gate in a `target/` LEASED for this run from a small pool, so the
+# lane cannot be corrupted by — or corrupt — another session sharing this checkout.
 #
 # WHY THIS EXISTS, and why ordering the lanes correctly is not enough.
 # `docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md`
@@ -21,11 +21,15 @@
 # live MCP binary would go permanently stale for every session on every profile. The
 # gate lanes are isolated; the release loop stays shared and keeps working.
 #
-# COST, so it is a decision rather than a surprise. A per-session target dir is a fresh
-# build tree: the first run is cold. `sccache` is already the `rustc-wrapper` in
-# `.cargo/config.toml`, so the compile work is largely cache hits across sessions, but
-# the DISK is per session and not shared. This script prints the size of your tree when
-# it finishes, every time, rather than documenting a number that would decay.
+# THE POOL, and why a lease rather than a directory per session. The race above lasts one
+# RUN, so a slot is held for one run and reused by the next, whichever session starts it.
+# The pool therefore grows with peak concurrent gate runs, not with sessions ever started:
+# keying on the session id left 323G in 17 trees on 2026-09-24 (bug 37b251b33adb37eb).
+# The lock sits on an fd every child inherits, deliberately WITHOUT `flock -o`: with `-o`,
+# SIGKILLing this script frees the slot while its cargo is still writing into it, which
+# reopens the race; without it, a daemon started mid-run (sccache, measured) pins one slot,
+# which costs disk and never correctness (bug-fix-session-log:F-173). This script prints
+# the slot's size and the pool's total when it finishes.
 #
 # NOT MANDATORY, and that is a real limitation rather than modesty: a session that types
 # the four commands directly still shares `target/`, so this is a mechanism for whoever
@@ -37,12 +41,10 @@ set -u
 
 if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ]; then
     cat >&2 <<'EOF'
-gate.sh: CLAUDE_CODE_SESSION_ID is unset, so there is no per-session identity to key a
-target directory on — and keying it on the PID or the clock would hand you a fresh cold
-build every invocation while isolating nothing that matters.
-
-Outside a Claude session you are almost certainly the only writer to this checkout, which
-is the case the shared `target/` is already correct for. Run the four commands directly:
+gate.sh: CLAUDE_CODE_SESSION_ID is unset. Step 1, `fmt-mine.sh`, needs it to tell your
+files from a peer's, and outside a Claude session you are almost certainly the only writer
+to this checkout, which is the case the shared `target/` is already correct for. Run the
+four commands directly:
 
   ./scripts/fmt-mine.sh ; \
   cargo clippy --workspace --all-targets --features local-embed -- -D warnings ; \
@@ -58,7 +60,21 @@ fi
 
 # Outside the repo on purpose: nothing here needs gitignoring, a peer's `git clean`
 # cannot reach it, and no tool that walks the worktree will scan it.
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/codescout-gate/$CLAUDE_CODE_SESSION_ID}"
+POOL="${CODESCOUT_GATE_POOL:-$HOME/.cache/codescout-gate}"
+if [ -z "${CARGO_TARGET_DIR:-}" ]; then
+    mkdir -p "$POOL" || exit 2
+    SLOT=0
+    while :; do
+        exec {SLOT_FD}>"$POOL/slot-$SLOT.lock" || exit 2
+        flock -n "$SLOT_FD"; rc=$?
+        [ "$rc" -eq 0 ] && break
+        exec {SLOT_FD}>&-
+        # Exit 1 means held; anything else (flock missing, say) would loop forever.
+        [ "$rc" -eq 1 ] || { echo "gate.sh: flock failed with exit $rc" >&2; exit 2; }
+        SLOT=$((SLOT + 1))
+    done
+    export CARGO_TARGET_DIR="$POOL/slot-$SLOT"
+fi
 mkdir -p "$CARGO_TARGET_DIR" || exit 2
 
 echo "gate.sh: CARGO_TARGET_DIR=$CARGO_TARGET_DIR"
@@ -105,6 +121,7 @@ DEFAULT=$?
 
 echo
 echo "gate.sh: tree size $(du -sh "$CARGO_TARGET_DIR" 2>/dev/null | cut -f1) at $CARGO_TARGET_DIR"
+[ -n "${SLOT_FD:-}" ] && echo "gate.sh: pool total $(du -sh "$POOL" 2>/dev/null | cut -f1) at $POOL"
 echo "GATE EXITS -> FMT=$FMT CLIPPY=$CLIPPY LEAN=$LEAN DEFAULT=$DEFAULT"
 
 # FMT is the one ambiguous code, and the ambiguity is routine rather than rare on a shared

@@ -2590,7 +2590,7 @@ mod tests {
             eprintln!("Skipping: kotlin-lsp not installed");
             return;
         }
-        // Honour CARGO_TARGET_DIR. `scripts/gate.sh` points it at a per-session tree, and a
+        // Honour CARGO_TARGET_DIR. `scripts/gate.sh` points it at a leased pool slot, and a
         // hardcoded `target/` here would make this test skip SILENTLY under it — a green that
         // never ran, which is the exact defect
         // `docs/issues/archive/2026-08-27-cross-process-write-lock-test-passes-when-it-does-not-run.md`

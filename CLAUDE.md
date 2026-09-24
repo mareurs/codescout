@@ -6,7 +6,7 @@ You are a proficient Rust developer. You follow all known good/scalable patterns
 
 ## Development Commands
 
-**Run `./scripts/gate.sh`, which runs `./scripts/fmt-mine.sh`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test --workspace` in a per-session `target/`, before completing any task.** **The lean lane runs THIRD and the default one LAST, and the order is load-bearing.** Typing the four directly is still correct, and they remain the canonical statement of *what* runs and in *what order* — the script just keeps them out of the shared `target/`, which is the only thing that stops a correctly-followed gate arming the window for someone else. **That is why the script leads this line rather than sitting in a bullet below it:** the remedy has to be on the surface that creates the need for it, or compliance with the first thing a reader does still leaves the trap armed (§ *Observer Blindness*, position 3). Outside a Claude session the script exits 2 and tells you to run the four directly, which is correct for a solo checkout.
+**Run `./scripts/gate.sh`, which runs `./scripts/fmt-mine.sh`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test --workspace` in a `target/` leased for that run from a pool, before completing any task.** **The lean lane runs THIRD and the default one LAST, and the order is load-bearing.** Typing the four directly is still correct, and they remain the canonical statement of *what* runs and in *what order* — the script just keeps them out of the shared `target/`, which is the only thing that stops a correctly-followed gate arming the window for someone else. **That is why the script leads this line rather than sitting in a bullet below it:** the remedy has to be on the surface that creates the need for it, or compliance with the first thing a reader does still leaves the trap armed (§ *Observer Blindness*, position 3). Outside a Claude session the script exits 2 and tells you to run the four directly, which is correct for a solo checkout.
 
 Why each part, one line each. Every measurement, date and superseded form →
 [`docs/conventions/gate-ordering.md`](docs/conventions/gate-ordering.md).
@@ -29,31 +29,36 @@ Why each part, one line each. Every measurement, date and superseded form →
   else's outage as your bug. **So when `cli_doc` reds on a diff that cannot have touched feature
   gating, re-run it before reading your own diff:** the window is minutes, a second run is the
   cheapest discriminator available, and it is also the repair. Full account and the two remedies
-  that would *close* this rather than document it (per-session `CARGO_TARGET_DIR`; `cli_doc`
+  that would *close* this rather than document it (an isolated `CARGO_TARGET_DIR` per gate run; `cli_doc`
   asserting the binary advertises `doc`) →
   [`docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md`](docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md).
   The superseded *"reds 10 of 11"* figure is deliberately **not** restated with a fresh number:
   re-deriving it means arming the shared trap on purpose while other sessions are building against
   the same `target/`. Verified 2026-09-05 — the target is `cli_doc`, it holds **15** tests, and all
   15 pass against a librarian-bearing binary.
-- **`./scripts/gate.sh` runs those four in a PER-SESSION `target/`, and is the only form that
+- **`./scripts/gate.sh` runs those four in a `target/` LEASED FOR THE RUN, and is the only form that
   closes the window above.** The bullet above says no ordering discipline can help, and that is
   now measured rather than argued: cargo holds `target/debug/.cargo-lock` through the BUILD phase
   and **releases it before running tests** (holder pid observed on four consecutive samples during
   a build; none during a `cli_doc` run with three test processes alive — the control is what makes
   the empty reading a measurement). So a peer's lean-lane build lands inside *your own* lane's run
   phase, and a peer following the gate perfectly still writes a librarian-less binary to the shared
-  path once, mid-sequence. The script keys `CARGO_TARGET_DIR` on `$CLAUDE_CODE_SESSION_ID`, prints
-  the four exit codes, and **exits non-zero if any lane failed** — which the `;`-chained form
-  cannot, because it ends in `echo`. **It deliberately does NOT touch `cargo rb`:** that builds
+  path once, mid-sequence. The script leases `CARGO_TARGET_DIR` from a pool of slots under
+  `~/.cache/codescout-gate/`, holding a `flock` for one run and freeing the slot for the next run,
+  whichever session starts it. It prints the four exit codes, and **exits non-zero if any lane
+  failed** — which the `;`-chained form cannot, because it ends in `echo`. **It deliberately does
+  NOT touch `cargo rb`:** that builds
   `--release`, and `~/.cargo/bin/codescout` is a symlink into `target/release/`, so isolating that
   profile too would point the live MCP binary at a path nothing rebuilds, for every session on
   every profile. Outside a Claude session it exits 2 and tells you to run the four directly, which
   is correct for a solo checkout. **Its limit, stated because it is real:** a session that types
   the four commands by hand still shares `target/`, so this is a mechanism for whoever runs it and
   a policy for everyone else — the four commands above stay the canonical statement of *what* runs
-  and in *what order*. Cost is per-session disk, not shared: the script prints its tree size on
-  every run rather than quoting a number here that would decay.
+  and in *what order*. Cost is one tree per CONCURRENT gate run, not per session. Keying on the
+  session id left 323G in 17 trees behind
+  ([`docs/issues/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md`](docs/issues/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md)).
+  The script prints its slot's size and the pool's total on every run, rather than this file
+  quoting a number that would decay.
 - **Chain the two test lanes with `;`, never `&&`.** The guarantee above is conditional on the
   default lane running, and `&&` withdraws it *exactly when something is wrong*. Worse than a
   skipped repair: `cargo test` **builds, then runs**, so a failing lean lane has already

@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 172
+entry_high_water_F: 175
 entry_high_water_W: 145
 ---
 
@@ -65,6 +65,9 @@ entry_high_water_W: 145
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-175 | 2026-09-24 | high | self-friction | open | **A killed mutant kept running: a looping M4 mutant of `gate.sh` survived its suite and filled the machine's `/tmp` (tmpfs) with about 867K lock files.** Case F killed `$!` of a backgrounded function, a wrapper subshell (the bug fixed in case D minutes earlier, not swept to the other site). The mutation verdict (KILLED) was correct and said nothing about the survivor. It stopped only on inode exhaustion. My kill and my delete were both refused by the classifier; escalated to the operator. |
+| F-174 | 2026-09-24 | high | cross-session | mitigated | **Saving a script that every session runs from the working tree IS publishing it.** My uncommitted `gate.sh` pool change was picked up by 2 peers within about two minutes. Each started a COLD build in a new slot while its warm legacy tree sat unused, on a disk at 97%. I stopped my own run by pgid, deleted my slot under its own lock, and watched disk with `fuser` (a read-only check; `flock` would perturb leasing). |
+| F-173 | 2026-09-24 | high | self-friction | mitigated | **Recommended `flock -o` as strictly safer before running it; the two lock modes fail in opposite directions, and `-o` fails toward the race it was meant to prevent.** With `-o`, SIGKILLing the holder frees the slot while cargo keeps running in it, a correctness failure. Without `-o`, a daemon (sccache, measured) pins a slot for its lifetime, a disk-only failure. Choose the mode that fails toward disk. Plan revised before any code. |
 | F-172 | 2026-09-16 | med | measurement | open | **A derived count published under the label of a different scope** — correct command, wrong noun; twice in one session, the second inside the message declining a peer's count for being unspecifiable |
 | F-171 | 2026-09-16 | med | cross-session | open | **Read a STAGER off an instrument that answers WRITER, and was right by luck** - the correct-answer variant emits no signal; surfaced only because a peer disclosed their wrong one |
 | F-170 | 2026-09-16 | med | self-friction | open | **Hand-rolled a probe PROBES.md already ships, and reproduced the exact unit error it was fixed for** — servers and muxes counted as one population; 19+3=22 reconciles and means something different |
@@ -16977,6 +16980,67 @@ no-disambiguator half, and the pusher who raised it to me cited it bare.
 **Counterfactual:** implementing the bug file's sentence as written would have fixed the concurrent case and silently broken `/clear` for any principal served earlier in the process. No existing test combines a rekey with a later re-adoption of the pre-rekey key, so the suite would have stayed green.
 
 **Rests on:** `src/server.rs:182-207` (the `parked_ledgers` docs), `:1105-1123` (`poll_rendezvous`), `:1204-1240` (`adopt_request_conversation`); `src/tools/guide_ledger.rs:290-356` (`rekey`, `adopt`).
+
+## F-173 — Recommended `flock -o` as strictly safer before running it; the two lock modes fail in opposite directions
+
+**Valid:** dated 2026-09-24
+
+**Observed:** Before this scout, my ADR for bug `37b251b33adb37eb` recommended leasing a gate slot with `flock -n -o`. It said `-o` rules out a daemon inheriting the lock "regardless", and that "a crashed run frees its slot automatically". I had run neither claim. On 2026-09-24 a self-cleaning probe in the session scratchpad measured both lock modes:
+
+- **no `-o`, control:** a background child that outlives the command keeps the lock **HELD**. The lock frees only when that child is killed by pid.
+- **`-o`, same child:** the lock is FREE. It is held for the command's duration and freed afterwards.
+- **`-o`, holder SIGKILLed mid-run:** the lock is **FREE while the worker it launched is still running**. `kill -0 <worker>` succeeded after `kill -9 <flock>`.
+- **no `-o`, a real `sccache --start-server` on a private port (4299) under the lock:** the daemon kept **1 fd** on the lock file, and the lock stayed HELD until `--stop-server`. The shared server was untouched.
+
+The daemon path is live, not hypothetical. The shared sccache (pid 1116) was auto-started by a cargo client at 17:46 that day (`SCCACHE_START_SERVER=1`) and reparented to `systemd --user`.
+
+**Plan said vs reality:** The plan said `-o` is strictly safer. In reality the two modes **fail in opposite directions**:
+
+- With `-o`, the failure is **correctness**: a peer can lease a slot that an orphaned cargo is still writing into. That is the 2026-09-14 race, back on the crash path.
+- Without `-o`, the failure is **disk**: a daemon pins one slot, and the next run takes another.
+
+**Cost if unscouted:** high. The design would have shipped a lock whose failure mode is the race the per-session dir exists to close, on an abnormal path no test exercises. The ADR's `Confidence: medium-high` rested on a claim I had not run.
+
+**Resolution:** I revised the plan before any code: **no `-o`**, and every uncertainty resolves toward a new slot, never a shared one. If there is one sccache server per port, at most one slot is pinned at a time. That bound is inferred from sccache's server model, not measured.
+
+**Secondary, from the same scout:**
+
+- The first probe used `pkill -f 'sleep 20'`, which matched the probe script's own command line and killed it (`exit -1`). On a machine with 25 sessions, a full-cmdline match can also reach a peer's process. I re-ran it with pid-file kills only.
+- `claude_md_gate_lists_its_four_commands_in_the_load_bearing_order` pins the opening `**Run \`./scripts/gate.sh\``, the closing `before completing any task.**` and the order of the four commands. It does **not** pin "per-session `target/`", so CLAUDE.md's "pinned byte-for-byte" says more than the test checks. When the pool lands, CLAUDE.md lines 9, 39, 46 and 55 must be updated by hand, and no test goes red if they are not.
+
+## F-174 — Saving a script every session runs from the working tree IS publishing it; the pool change went live for 2 peers on a 97%-full disk
+
+**Valid:** dated 2026-09-24
+
+**Observed:** I edited `scripts/gate.sh` in the shared working tree to replace per-session target dirs with a leased slot pool (bug `37b251b33adb37eb`). I then started my own verification gate. Its first line read `CARGO_TARGET_DIR=…/codescout-gate/slot-2`. `slot-0` and `slot-1` already existed, created at 18:15 and 18:16 local time, within about two minutes of my edit. `fuser` on the lock files named their holders by environment: session `ebf651ec` held `slot-0` and session `774ba049` held `slot-1`. Every session runs `./scripts/gate.sh` from the working tree, so an **uncommitted** edit became live for every session the moment it was saved.
+
+**Why it mattered:** Each peer's first run under the pool is a **cold** build in a new slot. Their old per-session trees (warm, 20–21G each) are no longer used by anyone. `/home` was at 97% with 65G free. Three concurrent cold builds of roughly 20–25G each could exhaust that, and a full disk is the condition in which `c23d86eb` saw live sessions' registry rows truncated. On top of that, snapper's hourly `@home` snapshots pin every new tree from the next snapshot onward.
+
+**What I did:**
+
+1. Stopped my own gate by process group: `kill -TERM -<pgid>`, 7 members, then 0.
+2. Deleted my partial `slot-2` tree *under its own lock*, with `flock -n slot-2.lock rm -rf slot-2`, so no run could lease it mid-delete. It was not yet in any snapshot, so the space is really freed.
+3. Armed a read-only watch on free space and slot holders. It uses `fuser`, not `flock`: a probe that takes a slot's lock, however briefly, can push a peer into creating a new slot.
+
+At that point `df` showed 64G free, and no process was still building into a legacy per-session dir, so no run was caught mid-way by the file changing.
+
+**The miss, named precisely:** I sized the change's blast radius as *"sessions that run the gate after this commit"*. On this checkout it is *"sessions that run the gate after this save"*. That is CLAUDE.md § *Git Workflow*'s *committing IS publishing*, one level earlier: for a script executed from the working tree, **saving is publishing**. The migration cost, one cold build per concurrent first run with legacy trees left behind, was never priced against the disk the bug itself says is 97% full.
+
+**What would have avoided it:** (a) develop the script under a different name or in a worktree, and swap it in only once the migration is ready. Or (b) have the first pool run adopt a legacy tree that no live process is building into, renaming it to `slot-N`, so the first contact is warm rather than cold.
+
+## F-175 — A killed mutant kept running: an M4 gate.sh mutant outlived its suite and exhausted /tmp inodes machine-wide
+
+**Valid:** dated 2026-09-24
+
+**Observed:** At about 18:20 local on 2026-09-24, every write to `/tmp` on the machine began failing with ENOSPC. `/tmp` is a tmpfs with `nr_inodes=1048576`, and session `ebf651ec` measured 11 inodes free. The cause was two directories created by my new suite `tests/gate-slot.sh`: `/tmp/gate-slot-dMKUrQ/pool` with about 526K entries and `/tmp/gate-slot-cJPmtz/pool` with about 341K, all flat `slot-N.lock` files up to `slot-530313.lock`. The creation times, 18:13:14 and 18:15:10, match my two mutation-probe batches. The effects reached every session on the machine: codescout's `run_command` could not create its output buffer, and a peer's default lane reported 1984 of 1988 failures as ENOSPC.
+
+**Mechanism:** Mutation **M4** removed the guard `[ "$rc" -eq 1 ] || { …; exit 2; }`. Case F's stub `flock` exits 127, so the mutated gate never leased a slot and minted `slot-N+1` on every iteration. On timeout, case F ran `kill "$PI"`, where `$PI` is the `$!` of a backgrounded shell **function**, which is only a wrapper subshell. That is the defect I had fixed in case D minutes earlier, and I did not look for it at the other `$!` site. The gate survived the suite and the probe's revert. It stopped only when the tmpfs ran out of inodes: `exec {fd}>lockfile || exit 2` fails on ENOSPC, so the gate's own error path ended the loop, at 18:18:49 per the peer's reading.
+
+**Why no check caught it:** Case F passes on correct code, where the gate exits promptly. The leak exists only in a MUTANT, and the mutation runs read nothing but the suite's summary line: `13 passed, 1 failed`, which is a correct KILLED verdict. So the report said "M4 KILLED" while the killed mutant kept writing. **A mutation run's verdict says nothing about what the mutant left running.**
+
+**Recovery:** My kill attempt was refused by the permission classifier as `Interfere With Workloads`. My deletion of my own temp dirs was refused as `Shared Scratch Sweep`. I did not ask the peer to delete them, because routing a refused action through another session is permission laundering; I escalated to the operator instead. The test is fixed: `run_gate` records the gate's own pid (`$BASHPID` before `exec`), and both case F's timeout and the EXIT trap `kill -9` that pid before removing anything. That fix has not been re-run while `/tmp` is full.
+
+**Rule for next time:** after fixing a `$!`-means-a-wrapper bug at one site, grep every other `$!` in the file. And after any mutation run whose mutant can loop, check for survivors: processes carrying the suite's env marker, and growth in its temp root. The summary line cannot show either.
 
 ## Template for new entries
 
