@@ -555,8 +555,25 @@ jobs:
         #
         # `winehq-devel` and NOT `winehq-staging`: staging carries extra out-of-tree patches,
         # and the local box runs vanilla wine (Arch `wine 11.16-1`), so devel is the build
-        # that actually matches. `winehq-devel` Depends on `wine-devel (= <exact>)`, so
-        # pinning the metapackage cascades and no sub-package needs naming.
+        # that actually matches.
+        #
+        # THE PIN COVERS THE WHOLE `wine-devel` FAMILY, via /etc/apt/preferences.d, and the
+        # metapackage pin alone is NOT enough. The chain is exact at every level:
+        # `winehq-devel` Depends `wine-devel (= V)`, which Depends `wine-devel-amd64 (= V)`
+        # and `wine-devel-i386 (= V)`. apt's resolver fills every level it was not told
+        # about with that package's CANDIDATE, i.e. the newest published version. So
+        # pinning only the metapackage works exactly while V is WineHQ's newest release,
+        # and dies at setup the moment the next one is published: `winehq-devel : Depends:
+        # wine-devel (= V)` / "held broken packages", exit 100. Reproduced 2026-09-24 in a
+        # CLEAN ubuntu:24.04 with the pin at 11.17 and 11.18 published: apt said it outright
+        # one level down, `Depends: wine-devel-amd64 (= 11.17~noble-1) but 11.18~noble-1 is
+        # to be installed`. That is both red streaks, not runner state: 11.16 went red once
+        # 11.17 was out (09-05..09-08), and 11.17 went red once 11.18 was (from 09-19). The
+        # `wine-devel*:i386` term is load-bearing: a bare `wine-devel*` glob matches only
+        # native-arch packages and leaves `wine-devel-i386` at its candidate, which was
+        # measured to fail the same way. Bumping the pin to the newest release only hides
+        # this until the next release.
+        # docs/issues/2026-09-24-wine-lane-dies-at-apt-setup-with-the-pin-published.md
         #
         # The codename is READ FROM THE RUNNER, never hardcoded — `ubuntu-latest` moves, and a
         # baked-in `noble` would decay silently into an apt 404 blamed on WineHQ. The VERSION
@@ -567,17 +584,6 @@ jobs:
         # run so a local and a lane log are directly comparable.
         #   Matched to local `wine-11.17` (Arch, 2026-09-08). Was `11.16` (2026-09-02).
         #   Available for this dist as `winehq-devel=11.17~<codename>-1`.
-        #
-        #   WHY IT MOVED, stated precisely because the obvious reading is wrong: local wine
-        #   went 11.16 -> 11.17, which is the documented trigger for this bump on its own.
-        #   The lane ALSO failed at `d2900ecb` with `winehq-devel : Depends: wine-devel
-        #   (= 11.16~noble-1)` / "held broken packages", exit 100 at setup — but that failure
-        #   was NOT reproducible from outside the runner. Queried the same indices by hand
-        #   2026-09-08: winehq-devel, wine-devel, wine-devel-amd64 and wine-devel-i386 all
-        #   carry 11.16~noble-1 in BOTH binary-amd64 and binary-i386. So the bump is justified
-        #   by the matching rule above, NOT by a diagnosed unavailability, and if the lane is
-        #   still red at 11.17 the cause was never the pin — look at runner apt state or a
-        #   half-published WineHQ update instead of bumping again.
         env:
           WINE_PIN: "11.17"
         run: |
@@ -588,6 +594,9 @@ jobs:
           sudo wget -qO /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
           sudo wget -qNP /etc/apt/sources.list.d/ \
             "https://dl.winehq.org/wine-builds/ubuntu/dists/${UBUNTU_CODENAME}/winehq-${UBUNTU_CODENAME}.sources"
+          # Pin the whole family, including the i386 sub-package by arch; see the comment above.
+          printf 'Package: winehq-devel wine-devel* wine-devel*:i386\nPin: version %s\nPin-Priority: 1001\n' \
+            "${WINE_PIN}~${UBUNTU_CODENAME}-1" | sudo tee /etc/apt/preferences.d/winehq-pin >/dev/null
           sudo apt-get update
           sudo apt-get install -y gcc-mingw-w64-x86-64 p7zip-full
           sudo apt-get install -y --install-recommends \
