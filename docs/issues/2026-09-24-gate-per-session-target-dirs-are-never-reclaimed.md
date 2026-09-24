@@ -13,7 +13,7 @@ related:
 - docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md
 - docs/issues/archive/2026-09-17-a-full-disk-truncates-a-live-sessions-registry-row-so-provenance-reports-it-dead.md
 severity: high
-unverified: 'tests/gate-slot.sh runs in no CI job yet; wiring it (its own job, like rb-guard-tests) is pending the operator''s decision, so the regression test currently runs only when someone runs it. Also outstanding: the 6 legacy per-session trees (~125G) and the snapper snapshots pinning them — operator decisions, not code.'
+unverified: 'tests/gate-slot.sh is wired as CI job `gate-slot-tests` (appended to .github/workflows/ci.yml) but has never run on CI: nothing is pushed. Confirm its first CI run is green before archiving.'
 ---
 
 # BUG: gate.sh's per-session target dirs are never reclaimed — 323G across 17 trees filled /home to 97%
@@ -160,6 +160,8 @@ capturing it. Unprivileged `btrfs subvolume create` has not been verified here.
 Manual reclaim using the liveness check in § Evidence. Snapshots must age out, or be deleted by root (`sudo snapper -c home delete …`), before `df` reflects the reclaim.
 
 **Migration cost (`bug-fix-session-log:F-174`).** The script is executed from the working tree, so the uncommitted change went live for every session on save. Two peers picked it up within about two minutes and began cold builds in new slots, while their old per-session trees, about 125G across 6 live sessions, sat unused. No process was still building into a legacy dir at 18:19 local. Nothing reuses those trees any more: the old script is the only thing that ever keyed a dir on a session id. They can be deleted, but because snapper pins them, deleting frees nothing until the snapshots roll off.
+
+**Resolved later on 2026-09-24, not by this session:** when the operator approved deleting the legacy trees, they were already gone. `~/.cache/codescout-gate` held only `slot-0`, `slot-1` and `slot-2`, 61G in total, all free, and `/home` read 68% used with 604G free, so snapshots had been cleared as well. Who performed either step was not established here.
 
 ## Resume
 

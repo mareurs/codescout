@@ -886,3 +886,24 @@ jobs:
       # reintroduction fails the build.
       - name: Audit markdown for stale code references
         run: ./target/release/codescout audit-doc-refs --no-emit-tracker --fail-on high --json --project .
+
+  # ITS OWN JOB, for the same reason as `rb-guard-tests` above: `shell-tests` is the known-
+  # flaky lane, and this suite's assertions are meant to read as verdicts. Appended at the
+  # END of the file on purpose, so no existing `ci.yml:<line>` citation shifts.
+  #
+  # WHY IT IS WIRED AT ALL. `scripts/gate.sh` leases each run's CARGO_TARGET_DIR from a slot
+  # pool, replacing per-session trees that nothing reclaimed (323G across 17 trees,
+  # docs/issues/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md). The
+  # properties that matter are all ones a green gate cannot show: a held slot is never
+  # shared, a SIGKILLed gate does not free a slot its cargo still writes
+  # (bug-fix-session-log:F-173), and a later session reuses a freed slot instead of minting
+  # a new tree. The suite drives the REAL script through a stub `cargo` and a stub
+  # `fmt-mine.sh`, with HOME and the pool under `mktemp -d`, so it needs no Rust toolchain
+  # and never touches a real cache. Needs bash and `flock` (util-linux), both on
+  # ubuntu-latest.
+  gate-slot-tests:
+    name: gate.sh slot pool
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/gate-slot.sh
