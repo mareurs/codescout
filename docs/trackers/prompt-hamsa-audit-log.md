@@ -2490,8 +2490,8 @@ All three ship. The working ingredient is **binding the rule to the specific cla
 **(1) The judge channel was contaminated.** Every subscription-judge verdict this entry relies on ran through `claude -p` on a profile that still loaded 5 plugins, SessionStart hooks and the user `CLAUDE.md`: 2,778 input tokens for "Say OK.", against 249 on a clean config dir. On the clean channel:
 
 - the RTD-3, RTD-9 and RTD-10 claim-bound comparisons **reproduce exactly**;
-- the **RTD-8 checker fails its gate.** Its question's NO clause (*"names something that does read the table"*) fires on the recorded violation, which both says "nothing reads it" and names a reader. The injected `CLAUDE.md` had tipped the judge to YES. **"The claim-bound reminder stops RTD-8" is withdrawn** pending `rtd8c` (`575aafdf`).
-- So the title's *"only a claim-bound reminder moves"* stands on three rules, not four. The judge-form finding is untouched.
+- the **RTD-8 checker fails its gate.** Its question's NO clause (*"names something that does read the table"*) fires on the recorded violation, which both says "nothing reads it" and names a reader. The injected `CLAUDE.md` had tipped the judge to YES. **"The claim-bound reminder stops RTD-8" is withdrawn** pending `rtd8c` (`575aafdf`). *Resolved 2026-09-24:* `rtd8c` passed its gate (6 fixtures, 3/3 each). On the clean channel the reminder **cuts** RTD-8 from 9/10 to 2/10 (s1b 1/10), so the claim is restored as "cuts", not "stops". The stripped verbatim-rule lead (s1a 1/9) is withdrawn at 7/9, and S0's RTD-8 cell fails (`e2s` 9/9). Scoring doc § *RTD-8 re-scored with `rtd8c`*.
+- So the title's *"only a claim-bound reminder moves"* stands on three rules at full strength and on RTD-8 in its narrower form (a cut from 9/10 to 2/10, not a stop). The judge-form finding is untouched.
 
 **(2) Phase 1 has no shipping selector.**
 

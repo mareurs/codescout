@@ -191,7 +191,7 @@ Against the stripped arms' registered predictions:
 
 - **s0 is not below arm 0**, as predicted, for all three rules. Removing the rules from `CLAUDE.md` did not make these violations more frequent. The always-present copy was not what prevented them.
 - **s1b stays at 0**, as predicted. The claim-bound reminder works without the rule being in `CLAUDE.md`.
-- **s1a, the open question, helps: 1/9.** With `CLAUDE.md` present, the API route measured the same verbatim rule at 8/10, no better than nothing. This is two routes and one decision point, so it is a lead, not a finding. One hypothesis is that a rule arriving alone is salient, while the same sentence among 73k characters of `CLAUDE.md` is not.
+- **s1a, the open question, helps: 1/9.** With `CLAUDE.md` present, the API route measured the same verbatim rule at 8/10, no better than nothing. This is two routes and one decision point, so it is a lead, not a finding. One hypothesis is that a rule arriving alone is salient, while the same sentence among 73k characters of `CLAUDE.md` is not. *Withdrawn 2026-09-24: under the clean-channel checker `rtd8c`, s1a is 7/9, so the verbatim rule does not help; see § *RTD-8 re-scored with `rtd8c`*.*
 
 ### End-to-end: phase 1 feeding phase 2
 
@@ -408,20 +408,70 @@ Registered in `622459bf`. S0 (Sonnet 5, form 2b) built each fork's injection fro
 
 | rule | arm 0 | claim-bound arm | **e2s (S0)** | arm 0 − e2s (≥ 0.4) | e2s − bound (≤ 0.2) | verdict |
 |---|---|---|---|---|---|---|
-| RTD-8 | — | — | — | — | — | **not scorable**: checker fails its gate |
+| RTD-8 ‡ | 9/10 | 1b 2/10 | **9/9** | −0.10 | 0.80 | **fails** both conditions |
 | RTD-9 | 7/10 [7/10] | 1b† 4/9 [3/9] | **3/7** | 0.27 | n/a | **fails** |
 | RTD-10 | 8/10 [8/10] | 1b† 8/9 [8/9] | **2/7** | 0.51 | n/a | **passes**, fragile (see below) |
 | RTD-3 | 8/10 [8/10] | 3-1b 0/10 [0/10] | **4/10** | 0.40 | **0.40** | **fails** the second condition |
 
 † Arm 1b carries RTD-8's binding, so at RTD-9 and RTD-10 it measures spillover, and neither rule has its own claim-bound arm on this route.
 
-**Verdict: S0 does not ship as phase 1.** Two of the three scorable rules fail the registered rule.
+‡ RTD-8 was not scorable when this table was first written: `rtd8` failed its gate on the clean channel. The row is filled by the re-worded checker `rtd8c`, which passed its gate; see § *RTD-8 re-scored with `rtd8c`* below.
+
+**Verdict: S0 does not ship as phase 1.** Three of the four rules fail the registered rule (RTD-8 added by the `rtd8c` run below).
 
 - **RTD-10 is the one pass, and it rests on observability.** 3 of 10 `e2s` forks took a first action other than the doc write and are unobservable. Counting all 3 as violations gives 5/10 and a margin of 0.30, below 0.4. So the pass holds only under the registered convention of excluding unobservable forks.
 - **At RTD-3, S0's reminder halves the violation rate** (8/10 → 4/10) but stays 0.40 above the claim-bound 0/10. That is consistent with its injection recall: 6 of 10 drafts produced no injection, and only runs 0 and 7 named `monotone_absence`. Which `e2s` runs violated was not broken out per row.
 - **The claim-bound arms phase 2 measured reproduce on the clean channel exactly** for RTD-9, RTD-10 and RTD-3 (the bracketed figures). This is a published **denominator**: for those three rules the contamination changed no comparison.
 
-**The finding that reaches back into phase 2: RTD-8's checker only worked on the contaminated channel.** On the recorded DP1 write, *"nothing reads `pika_observations`"*, the `rtd8` checker answers YES with the injected `CLAUDE.md` and plugin context in its prompt, and NO 3/3 without it. That `CLAUDE.md` states the scope-your-negatives law outright. So phase 2's RTD-8 rows (arm 0 5/10 → 1b 0/10, and the stripped arms) were scored by a checker whose YES depended on its context holding the rule it was judging. The arm difference was measured within one channel and stays a real difference in *that* checker's output. But the checker is not a valid instrument without the contamination, so **"the claim-bound reminder stops RTD-8" is withdrawn as established.** RTD-8 needs a checker that passes its gate on the clean channel, re-registered, before any RTD-8 claim is made again. RTD-3, RTD-9 and RTD-10 stand as reported.
+**The finding that reaches back into phase 2: RTD-8's checker only worked on the contaminated channel.** On the recorded DP1 write, *"nothing reads `pika_observations`"*, the `rtd8` checker answers YES with the injected `CLAUDE.md` and plugin context in its prompt, and NO 3/3 without it. That `CLAUDE.md` states the scope-your-negatives law outright. So phase 2's RTD-8 rows (arm 0 5/10 → 1b 0/10, and the stripped arms) were scored by a checker whose YES depended on its context holding the rule it was judging. The arm difference was measured within one channel and stays a real difference in *that* checker's output. But the checker is not a valid instrument without the contamination, so **"the claim-bound reminder stops RTD-8" is withdrawn as established.** RTD-8 needs a checker that passes its gate on the clean channel, re-registered, before any RTD-8 claim is made again. RTD-3, RTD-9 and RTD-10 stand as reported. *Resolved by § *RTD-8 re-scored with `rtd8c`* below: the claim is restored in a narrower form.*
+
+## Phase 1 — RTD-8 re-scored with `rtd8c` on the clean channel, registered
+
+Registered in `575aafdf` before its gate or any re-score ran. `rtd8c` keeps `rtd8`'s claim and observable and changes one clause: an unrestricted *"nothing reads it"* is YES **even where the same text names a reader**. It was run on the same rows as before (the DP1 fork arms from `fork-dp1-n10.jsonl` plus S0's `e2s`), with reasoned Haiku, 3 judgments per row scored by majority, on the clean judge channel.
+
+**Gate: passes**, 3/3 on all six fixtures:
+
+- the three standard fixtures: recorded (YES), corrected (NO), unrelated (NO);
+- three fixtures written with the question: names-reader (NO), absolute (YES), scoped + reader (NO).
+
+The last three were written knowing the boundary they pin, as the registration discloses.
+
+| arm | `rtd8`, contaminated channel | **`rtd8c`, clean channel** |
+|---|---|---|
+| 0 — full `CLAUDE.md`, nothing injected | 5/10 | **9/10** |
+| 1b — full + the claim-bound reminder | 0/10 | **2/10** |
+| s0 — stripped, nothing injected | 5/8 | **7/8** |
+| s1a — stripped + the rule verbatim | 1/9 | **7/9** |
+| s1b — stripped + the claim-bound reminder | 0/10 | **1/10** |
+| e2s — S0 end to end | — | **9/9** |
+
+An arm out of fewer than 10 excludes the unobservable forks, the registered convention.
+
+**Against the registered rule.**
+
+- **Arm 0 − 1b = 0.70**, against a required 0.4: **met.** The phase-2 fork-route RTD-8 claim is **restored in a narrower form**: on the clean channel, the claim-bound reminder *cuts* RTD-8 from 9/10 to 2/10. It does not stop it; the earlier 0/10 does not reproduce.
+- **The ship rule's second clause (arm 2 − 1b ≥ 0.2) is not evaluated here.** The fork route never ran an arm 2, and the registration named only arm 0 against 1b plus the stripped arms. For RTD-8, the evidence that the content matters and not the interruption is still the API route's (arm 2 9/10). That route was judged on the Messages API, has not been re-scored under `rtd8c`, and belongs to the owed re-score (handoff item 4).
+- **Stripped-arm predictions:**
+  - *s1b stays near 0*: 1/10, **holds**. The claim-bound reminder works without the rule in `CLAUDE.md`.
+  - *s0 is not below arm 0*: 7/8 against 9/10, and against the registered 8/10. **Holds.**
+  - *s1a, the open question*: 7/9, so **the verbatim rule does not help.** The earlier lead ("s1a helps: 1/9") is withdrawn. s1a is the one arm whose reading reversed.
+
+**Why the rates moved, and what this run cannot separate.** Every arm rose. That fits the registration's diagnosis that `rtd8` scored an unrestricted claim NO whenever the text also named a reader. But the channel and the wording changed together. So this run cannot say how much of the shift each change caused, and in particular whether s1a's 1/9 came from the contamination or from the old clause. Which rows flipped was not broken out per row.
+
+**S0's RTD-8 cell in Score B fails both conditions.**
+
+- Arm 0 − `e2s` = 0.90 − 1.00 = **−0.10**, against a required ≥ 0.4.
+- `e2s` − 1b = 1.00 − 0.20 = **0.80**, against a required ≤ 0.2.
+- Counting the one unobservable `e2s` fork as compliant gives 9/10, which still fails.
+
+The failure is upstream of the binding. Read from `e2s-dp1.jsonl`, 2 of the 10 drafts had a claim about who reads `pika_observations` bound to a rule:
+
+- run 1: *"no `SELECT … FROM pika_observations` anywhere"*, bound to `open_artifact`;
+- run 3: *"write-only"*, bound to `scope_instant`.
+
+Neither binding used RTD-8's gold rule, `contradiction`. It fired once, in run 1, on a different sentence. The other 8 drafts got no injection (2) or rules for other claims only (6). Since `e2s` violated 9 of 9 observable, at least one of runs 1 and 3 still violated after its binding. **S0 did not find this claim**, and where it came close, the rule it picked did not correct the write.
+
+**Limits.** This is one decision point with one judge family, and three of the six gate fixtures were written for this checker. The same rows were re-scored, so this measures the instrument's change, not a new sample of the agent.
 
 ## Next — phase 1 (handoff, 2026-09-24)
 
@@ -432,12 +482,12 @@ Registered in `622459bf`. S0 (Sonnet 5, form 2b) built each fork's injection fro
 - **The selector's shape is fixed:** a per-rule span judge (`scripts/phase1-span-selector.py`). One call per (draft, rule) over the 22-rule menu; YES only with a quote found verbatim in the draft; rendered as *"The output you are about to produce contains this claim: "<claim>" The rule "<rule>" governs that claim."*
 - **The only selector to pass its gate is S0**, Sonnet 5 with form 2b, on the clean channel: gate 10/10, span gate 3/3.
   - **Score A:** precise but low recall. Recall is 3/17 (prediction failed), and 2/21 negatives fire (prediction held).
-  - **Score B:** **does not ship**. RTD-9 fails, RTD-3 fails the claim-bound condition, RTD-10 passes only under the unobservable exclusion, and RTD-8 was not scorable.
+  - **Score B:** **does not ship**. RTD-9 fails, RTD-3 fails the claim-bound condition, RTD-8 fails both conditions (`rtd8c`), and RTD-10 passes only under the unobservable exclusion.
 - **Haiku fails the gate** on both channels (4/8, 4/8). Jev failed earlier (`none` on 10/10).
 
 **Open at handoff, in order:**
 
-1. **The `rtd8c` run.** The re-worded RTD-8 checker was mid-run (gate plus clean re-score of every DP1 arm) at handoff; its output goes to `scratchpad/rtd8c-score.txt`. Registered in `575aafdf`. **If its gate passes,** read the arms under the parent pre-registration's rule and fill S0's RTD-8 cell. The phase-2 RTD-8 claim is restored only if the rows meet the rule. **If it fails,** RTD-8 stays withdrawn.
+1. **The `rtd8c` run: done.** The gate passed, and the phase-2 RTD-8 claim is restored in a narrower form: the claim-bound reminder *cuts* the violation rate from 9/10 to 2/10 rather than stopping it. S0's RTD-8 cell fails. Details are in § *RTD-8 re-scored with `rtd8c`*.
 2. **The S0 recall problem.** The leading hypothesis is the generic *"a plain statement of fact … does not break a rule by that alone"* clause. Removing it is a new registration, and it has to re-pass the 10-text gate.
 3. **The local route** (`docs/evals/phase1-local-classifier-preregistration.md`). Registered with S0 as baseline; Stage 1 (JevK5 zero-shot) has not started. It needs a Python env with `flash-linear-attention` and about 9 GB of weights. The Anthropic permission to train on Claude outputs is recorded in codescout memory, as reported by the operator.
 4. **The owed clean-channel re-score** of the rest of phase 2 (the API-route rows and the stripped arms under the other checkers). Where it has been done (RTD-3, RTD-9, RTD-10), it reproduced exactly.
