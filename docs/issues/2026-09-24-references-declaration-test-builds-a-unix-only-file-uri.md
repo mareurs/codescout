@@ -78,3 +78,12 @@ Library roots are stripped for the same reason as the project root, but no test 
 
 - `docs/issues/2026-09-24-prefix-owner-check-compares-path-spellings-as-text.md` (`c6cff39df3eed0c6`): the same shape, two spellings of one Windows path compared as different, in the librarian. Candidate shared class.
 - `docs/issues/archive/2026-09-24-references-silent-false-zero-for-file-local-symbols-while-warming.md`: the fix whose test this is.
+
+## Fix provenance
+
+- **SHA:** `0ac67b35` (on `experiments`). Positional, so it does not survive a rebase of `experiments`.
+- **patch-id:** `af669ed4c26caed2d439ee0b411006130e682a61`. A content hash of the diff, so it survives rebase and cherry-pick.
+
+`fix(references): on Windows, compare locations against the root without its \\?\ marker, so project references are not all dropped`
+
+**Archive when:** a CI Windows lane (`Test (windows-latest / …)` or the wine lane) runs `0ac67b35` or later with these tests green. Archiving mints a new id, so re-point the `868e689cccfe84b3` citations in `src/fs/mod.rs`, `src/tools/symbol/references.rs`, `src/tools/symbol/tests.rs`, `src/util/fs.rs` and the archived wine bug in the same commit.
