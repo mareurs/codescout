@@ -98,6 +98,18 @@ pub struct GuideLedger {
     /// every call and re-deliver every guide forever.
     key: Option<String>,
     rendezvous_active: bool,
+    /// The `source` of this conversation's most recent `SessionStart`
+    /// (`startup` / `resume` / `clear` / `compact`), as the companion stamped it
+    /// into the rendezvous slot — carried across `/mcp` by `inherited_stamp`.
+    /// Copied in by `call_tool_inner` on every request, AFTER principal adoption,
+    /// so it is right for whichever ledger is live. `None` ⇒ unknown (no
+    /// companion, or one predating the field).
+    ///
+    /// What `workspace(post_compact=true)` needs and `hook_at` cannot give: a
+    /// liveness-refreshed stamp says nothing about compaction, while this says
+    /// whether the last session start WAS one.
+    /// docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md
+    session_start_source: Option<String>,
 }
 
 /// Accepts both on-disk shapes. `untagged` is unambiguous here because a JSON
@@ -128,6 +140,7 @@ impl GuideLedger {
             idle_ttl: None,
             key: Some(session_id.to_string()),
             rendezvous_active: false,
+            session_start_source: None,
         }
     }
 
@@ -141,6 +154,7 @@ impl GuideLedger {
             idle_ttl,
             key: None,
             rendezvous_active: false,
+            session_start_source: None,
         }
     }
 
@@ -198,6 +212,17 @@ impl GuideLedger {
     /// Is it safe to re-arm surgically rather than bluntly? See the field's docs.
     pub fn rendezvous_active(&self) -> bool {
         self.rendezvous_active
+    }
+
+    /// Record the source of this conversation's latest `SessionStart`. See the
+    /// field's docs.
+    pub fn set_session_start_source(&mut self, source: Option<String>) {
+        self.session_start_source = source;
+    }
+
+    /// The source of this conversation's latest `SessionStart`, if known.
+    pub fn session_start_source(&self) -> Option<&str> {
+        self.session_start_source.as_deref()
     }
 
     /// A ledger that behaves as if the session has already opened.

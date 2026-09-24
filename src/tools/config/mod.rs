@@ -396,29 +396,50 @@ impl Tool for ProjectStatus {
             // Compaction clears everything. See
             // docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md.
             //
-            // NOT gated on `rendezvous_active()`, and the attempt is recorded here
-            // because it looks obviously right and is not:
-            // docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md.
-            // `ActivateProject::call`'s guarded branch above may skip the blunt clear
-            // because the event it cares about is a `/clear`, which IS visible here —
-            // `Rendezvous::poll` returns the new session id when it CHANGES. A
-            // compaction changes nothing it can see: the session id is identical
-            // across one ("a repeated stamp of the SAME session must be silent"), and
-            // the companion writes only `hook_at`, never the source. So liveness is
-            // not evidence about compaction, and gating on it would mean a genuine
-            // compaction never re-arms the ledger for any session with a live
-            // companion — which is every session in this repo. Clearing
-            // unconditionally over-serves guides on a mistaken call; gating
-            // under-serves them on every real one.
-            ctx.guide_hints_emitted.lock().clear();
-            tracing::info!("PostCompact: flushed all LSP clients; they will restart lazily.");
-            return Ok(json!({
+            // NOT gated on `rendezvous_active()` — that attempt was reverted, and the
+            // reason still holds: liveness says nothing about compaction, so gating on
+            // it would mean a genuine compaction never re-arms the ledger for any
+            // session with a live companion.
+            //
+            // Gated instead on the EVENT: the companion's SessionStart hook records
+            // its `source` in the rendezvous slot (`hook_source`), `inherited_stamp`
+            // carries it across `/mcp`, and `call_tool_inner` copies it onto the live
+            // ledger. Only a POSITIVE "the last session start was not a compaction"
+            // skips the clear — the measured case, a mistaken call after a plain
+            // `/mcp` reconnect (~49 KB re-delivered). Absent (hookless client, older
+            // companion) or `compact`, the blunt clear runs exactly as before: this
+            // degrades to over-serving, never to suppressing.
+            // docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md
+            let ledger = {
+                let mut led = ctx.guide_hints_emitted.lock();
+                let not_a_compaction = led.session_start_source().is_some_and(|s| s != "compact");
+                if not_a_compaction {
+                    "kept"
+                } else {
+                    led.clear();
+                    "cleared"
+                }
+            };
+            tracing::info!(
+                ledger,
+                "PostCompact: flushed all LSP clients; they will restart lazily."
+            );
+            let mut out = json!({
                 "flushed": true,
+                "ledger": ledger,
                 "hint": "LSP position caches cleared. Clients restart on the next navigation call \
                          (symbol_at, references), which pays the language-server start unless another \
                          session in this workspace is already holding it warm — the server is shared \
                          per workspace, not per session. If that first call stalls or times out, re-run it."
-            }));
+            });
+            if ledger == "kept" {
+                out["ledger_note"] = json!(
+                    "Guide ledger kept: this conversation's last session start was not a compaction, \
+                     so no guide was summarized out of context. After a real /compact the companion \
+                     records it and this call clears the ledger."
+                );
+            }
+            return Ok(out);
         }
 
         // --- Essential config + library section ---

@@ -1608,6 +1608,80 @@ async fn post_compact_still_clears_when_rendezvous_is_unverifiable() {
     );
 }
 
+async fn post_compact_ctx(
+    led: crate::tools::guide_ledger::GuideLedger,
+    dir: &std::path::Path,
+) -> ToolContext {
+    ToolContext {
+        agent: Agent::new(Some(dir.to_path_buf())).await.unwrap(),
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(led)),
+        workspace_override: None,
+    }
+}
+
+/// Regression for `docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`:
+/// a `post_compact=true` call made after a plain `/mcp` reconnect — no compaction — wiped
+/// the whole ledger (~49 KB re-delivered, measured). When the companion has recorded that
+/// the conversation's last `SessionStart` was NOT a compaction, the clear is skipped; the
+/// LSP flush still runs, since it is cheap and idempotent. Unlike the reverted gate the
+/// test above pins, this keys on the event itself (`hook_source`), not on liveness.
+#[tokio::test]
+async fn post_compact_keeps_the_ledger_when_the_last_session_start_was_not_a_compaction() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let mut led = crate::tools::guide_ledger::GuideLedger::default();
+    led.insert("librarian".to_string());
+    led.set_rendezvous_active(true);
+    led.set_session_start_source(Some("resume".to_string()));
+    let ctx = post_compact_ctx(led, dir.path()).await;
+
+    let result = ProjectStatus
+        .call(json!({"post_compact": true}), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["flushed"], json!(true), "the LSP flush still runs");
+    assert!(
+        ctx.guide_hints_emitted.lock().contains("librarian"),
+        "no compaction since the last session start ⇒ nothing was summarized out of context, \
+         so the ledger must survive a mistaken post_compact call"
+    );
+    assert_eq!(
+        result["ledger"],
+        json!("kept"),
+        "the response must say the clear was skipped"
+    );
+}
+
+/// The sandwich's other half for the new gate: a genuine compaction still clears. Without
+/// it, a gate that never clears would pass the test above.
+#[tokio::test]
+async fn post_compact_clears_when_the_last_session_start_was_a_compaction() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let mut led = crate::tools::guide_ledger::GuideLedger::default();
+    led.insert("librarian".to_string());
+    led.set_rendezvous_active(true);
+    led.set_session_start_source(Some("compact".to_string()));
+    let ctx = post_compact_ctx(led, dir.path()).await;
+
+    let result = ProjectStatus
+        .call(json!({"post_compact": true}), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["ledger"], json!("cleared"));
+    assert!(
+        !ctx.guide_hints_emitted.lock().contains("librarian"),
+        "a real compaction summarized the guides out of context, so they must re-arm"
+    );
+}
+
 #[tokio::test]
 async fn post_compact_flushes_lsp_clients_and_returns_flushed() {
     let dir = tempdir().unwrap();

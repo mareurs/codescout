@@ -1388,6 +1388,18 @@ impl CodeScoutServer {
                 rendezvous_session.clone(),
             )
             .or(rendezvous_session);
+        // After adoption, so it lands on whichever ledger is now live — a copy made
+        // before `adopt_request_conversation` swapped ledgers would sit on the parked
+        // one. Two locks in sequence, never held together. See
+        // `GuideLedger::session_start_source`.
+        let session_start = self
+            .rendezvous
+            .lock()
+            .session_start_source()
+            .map(str::to_string);
+        self.guide_hints_emitted
+            .lock()
+            .set_session_start_source(session_start);
         self.poll_guide_rearm(asserted_agent.as_deref());
 
         let mut ctx = self.build_context(progress, peer);
@@ -11863,6 +11875,66 @@ mod guide_hint_tests {
             "a tool call must poll the rendezvous and re-arm for the new conversation"
         );
     }
+
+    /// The wiring for `docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`:
+    /// the session-start source the companion stamps into OUR slot must reach the ledger
+    /// that `workspace(post_compact=true)` reads, through the real request funnel. The
+    /// gate itself is pinned in `tools::config::tests`; this is what fails if
+    /// `call_tool_inner` stops copying the source, or copies it before adoption swaps
+    /// the live ledger.
+    #[tokio::test]
+    async fn post_compact_after_a_plain_session_start_keeps_the_ledger_end_to_end() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let servers = tempfile::tempdir().unwrap();
+
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            servers_dir: Some(servers.path().to_path_buf()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+        server
+            .guide_hints_emitted
+            .lock()
+            .insert("librarian".to_string());
+
+        // As the SessionStart hook leaves the slot after a plain (non-compaction) start
+        // of THIS conversation: same session id, a stamp, and the source.
+        let slot = servers.path().join(format!("{}.json", std::process::id()));
+        let mut entry: crate::tools::rendezvous::Entry =
+            serde_json::from_str(&std::fs::read_to_string(&slot).unwrap()).unwrap();
+        entry.session = Some("conv-A".to_string());
+        entry.hook_at = Some(chrono::Utc::now());
+        entry.hook_source = Some("resume".to_string());
+        entry.hook_source_at = entry.hook_at;
+        std::fs::write(&slot, serde_json::to_string(&entry).unwrap()).unwrap();
+        filetime::set_file_mtime(&slot, filetime::FileTime::from_unix_time(2_000_000_000, 0))
+            .unwrap();
+
+        let result = server
+            .call_tool_by_name("workspace", json!({ "post_compact": true }))
+            .await
+            .expect("dispatch ok");
+        assert!(
+            result.is_error.is_none_or(|e| !e),
+            "post_compact should succeed"
+        );
+
+        assert!(
+            server.guide_hints_emitted.lock().contains("librarian"),
+            "the last session start was a resume, not a compaction — the ledger must survive"
+        );
+    }
+
     #[tokio::test]
     /// The wiring itself: a request file addressed to this server's own pid AND to
     /// the calling subagent must be consumed by that subagent's ordinary tool call,

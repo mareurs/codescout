@@ -33,6 +33,19 @@ pub struct Entry {
     /// `/mcp` reconnect. See
     /// docs/issues/archive/2026-08-19-mcp-reconnect-leaves-rendezvous-inactive-so-activate-clears-the-ledger.md
     pub hook_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The `source` of the most recent `SessionStart` for this conversation
+    /// (`startup` / `resume` / `clear` / `compact`). Written ONLY by the companion's
+    /// SessionStart hook — never by its liveness refresher — so unlike `hook_at` it
+    /// is evidence about the event. Carried forward by [`Rendezvous::publish`] from
+    /// a predecessor slot, like `hook_at`. `None` ⇒ unknown (no companion, or one
+    /// predating the field) — and `serde(default)` keeps such a slot parsing.
+    /// docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hook_source: Option<String>,
+    /// When that `SessionStart` stamped. Orders predecessors in `inherited_stamp`,
+    /// which `hook_at` cannot: the liveness refresher keeps moving it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hook_source_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// The companion's own write cadence for this slot's `hook_at`, not invented here:
@@ -69,6 +82,8 @@ pub struct Rendezvous {
     current: Option<String>,
     /// Set once a hook has written here.
     active: bool,
+    /// `hook_source` as last read from our slot or inherited at publish.
+    session_start_source: Option<String>,
 }
 
 impl Rendezvous {
@@ -90,6 +105,7 @@ impl Rendezvous {
             last_mtime: None,
             current: None,
             active: false,
+            session_start_source: None,
         };
         let Some(dir) = dir else {
             return inert();
@@ -111,7 +127,9 @@ impl Rendezvous {
                 .map(|p| p.display().to_string())
                 .unwrap_or_default(),
             session: session.map(str::to_string),
-            hook_at: inherited,
+            hook_at: inherited.hook_at,
+            hook_source: inherited.source.as_ref().map(|(s, _)| s.clone()),
+            hook_source_at: inherited.source.as_ref().map(|(_, at)| *at),
         };
         let path = dir.join(format!("{pid}.json"));
         match serde_json::to_string(&entry) {
@@ -120,7 +138,8 @@ impl Rendezvous {
                     path: Some(path),
                     last_mtime: None,
                     current: entry.session,
-                    active: inherited.is_some(),
+                    active: inherited.hook_at.is_some(),
+                    session_start_source: entry.hook_source,
                 },
                 Err(e) => {
                     tracing::debug!("rendezvous publish failed ({}): {e}", path.display());
@@ -183,6 +202,13 @@ impl Rendezvous {
         self.current.as_deref()
     }
 
+    /// The `source` of this conversation's most recent `SessionStart`, as last read
+    /// from our slot by [`poll`](Self::poll) or inherited at [`publish`](Self::publish).
+    /// See [`Entry::hook_source`].
+    pub fn session_start_source(&self) -> Option<&str> {
+        self.session_start_source.as_deref()
+    }
+
     /// Returns the new session id ONLY when it changed.
     ///
     /// Called on every guide-eligible request, so the unchanged path must stay
@@ -210,6 +236,9 @@ impl Rendezvous {
         if entry.hook_at.is_some() {
             self.active = true;
         }
+        // Taken BEFORE the same-session early return below: a compaction re-stamps
+        // the source while the session id stays put, which is exactly that path.
+        self.session_start_source = entry.hook_source;
         let session = entry.session?;
         // A repeated stamp of the SAME session must be silent: every
         // `SessionStart` stamps, `resume` included, and re-arming there would
@@ -272,6 +301,16 @@ pub(crate) fn parent_pid() -> u32 {
     ppid
 }
 
+/// What a new slot carries forward from its conversation's predecessor slots. See
+/// [`inherited_stamp`].
+#[derive(Debug, Default)]
+struct Inherited {
+    /// The newest `hook_at` — presence is what matters, see `inherited_stamp`.
+    hook_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// `(hook_source, hook_source_at)` of the LATEST session start.
+    source: Option<(String, chrono::DateTime<chrono::Utc>)>,
+}
+
 /// The newest stamp any slot for `session` carries.
 ///
 /// This is what makes a `/mcp` reconnect survivable. The server publishes a fresh
@@ -296,6 +335,12 @@ pub(crate) fn parent_pid() -> u32 {
 /// this very comment, and `lib.mjs` had already refuted that idea by measurement. See
 /// `docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`.
 ///
+/// **The session-start SOURCE is inherited too, and ordered by its own stamp.** What a
+/// `post_compact` guard does need is `hook_source` — written only by SessionStart — so
+/// a reconnect must carry it forward exactly as it carries `hook_at`. Across several
+/// predecessors the LATEST session start wins, by `hook_source_at`; ordering by
+/// `hook_at` would pick whichever slot's liveness refresher ran last.
+///
 /// Matched on the SESSION id, never on pid or cwd: a pid is useless as durable
 /// identity (see this module's own doc) and cwd would wrongly inherit between two
 /// conversations in one repo — the 2026-08-16 attribution bug, in a new place.
@@ -307,10 +352,15 @@ pub(crate) fn parent_pid() -> u32 {
 /// starvation.
 ///
 /// docs/issues/archive/2026-08-19-mcp-reconnect-leaves-rendezvous-inactive-so-activate-clears-the-ledger.md
-fn inherited_stamp(dir: &Path, session: Option<&str>) -> Option<chrono::DateTime<chrono::Utc>> {
-    let session = session?;
-    let mut newest: Option<chrono::DateTime<chrono::Utc>> = None;
-    for entry in std::fs::read_dir(dir).ok()?.filter_map(|e| e.ok()) {
+fn inherited_stamp(dir: &Path, session: Option<&str>) -> Inherited {
+    let mut out = Inherited::default();
+    let Some(session) = session else {
+        return out;
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.filter_map(|e| e.ok()) {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
@@ -327,10 +377,19 @@ fn inherited_stamp(dir: &Path, session: Option<&str>) -> Option<chrono::DateTime
             continue;
         }
         if let Some(at) = e.hook_at {
-            newest = Some(newest.map_or(at, |n: chrono::DateTime<chrono::Utc>| n.max(at)));
+            out.hook_at = Some(out.hook_at.map_or(at, |n| n.max(at)));
+        }
+        if let (Some(source), Some(source_at)) = (e.hook_source, e.hook_source_at) {
+            if out
+                .source
+                .as_ref()
+                .is_none_or(|(_, newest)| source_at > *newest)
+            {
+                out.source = Some((source, source_at));
+            }
         }
     }
-    newest
+    out
 }
 
 /// Remove slots whose process is gone. Marked cleanup, not discovery — see
@@ -765,6 +824,8 @@ mod tests {
             cwd: String::new(),
             session: Some("newer".to_string()),
             hook_at: Some(chrono::Utc::now()),
+            hook_source: None,
+            hook_source_at: None,
         };
         std::fs::write(r.path().unwrap(), serde_json::to_string(&repaired).unwrap()).unwrap();
         filetime::set_file_mtime(
@@ -829,6 +890,8 @@ mod tests {
             cwd: "/tmp".to_string(),
             session: Some(session.to_string()),
             hook_at: stamped.then(chrono::Utc::now),
+            hook_source: None,
+            hook_source_at: None,
         };
         std::fs::write(
             dir.join(format!("{pid}.json")),
@@ -860,6 +923,100 @@ mod tests {
             "the predecessor is still collected — the scan must run BEFORE gc, not \
              instead of it"
         );
+    }
+
+    /// A predecessor slot as the companion's SessionStart hook leaves it: stamped, with
+    /// the source of that session start.
+    fn seed_predecessor_with_source(
+        dir: &std::path::Path,
+        pid: u32,
+        session: &str,
+        source: &str,
+        at: chrono::DateTime<chrono::Utc>,
+    ) {
+        let e = Entry {
+            pid,
+            ppid: 1,
+            started_at: at,
+            cwd: "/tmp".to_string(),
+            session: Some(session.to_string()),
+            hook_at: Some(at),
+            hook_source: Some(source.to_string()),
+            hook_source_at: Some(at),
+        };
+        std::fs::write(
+            dir.join(format!("{pid}.json")),
+            serde_json::to_string(&e).unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// No `SessionStart` fires on a `/mcp` reconnect, so the only way the new server can
+    /// know whether the conversation's last session start was a compaction is to inherit
+    /// it. docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md
+    #[test]
+    fn publish_inherits_the_session_start_source_from_a_predecessor_slot() {
+        let dir = tempfile::tempdir().unwrap();
+        seed_predecessor_with_source(
+            dir.path(),
+            a_dead_pid(),
+            "sess-1",
+            "resume",
+            chrono::Utc::now(),
+        );
+
+        let r = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("sess-1"));
+
+        assert_eq!(r.session_start_source(), Some("resume"));
+        let mine = entry_at(dir.path(), std::process::id()).unwrap();
+        assert_eq!(
+            mine.hook_source.as_deref(),
+            Some("resume"),
+            "written into the new slot, so a SECOND reconnect inherits it too"
+        );
+    }
+
+    /// Two predecessors for one conversation: the LATER session start's source wins,
+    /// ordered by `hook_source_at` — never by `hook_at`, which the liveness refresher
+    /// keeps moving. The older slot here carries the newer `hook_at` on purpose, so a
+    /// selection keyed on `hook_at` picks the wrong source and reds.
+    #[test]
+    fn publish_inherits_the_newest_session_start_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let t0 = chrono::Utc::now() - chrono::Duration::hours(2);
+        let t1 = chrono::Utc::now() - chrono::Duration::hours(1);
+        seed_predecessor_with_source(dir.path(), a_dead_pid(), "sess-1", "compact", t1);
+        let older = a_dead_pid();
+        seed_predecessor_with_source(dir.path(), older, "sess-1", "startup", t0);
+        // Load-bearing: the OLDER session start's slot gets the NEWEST liveness stamp.
+        let mut e = entry_at(dir.path(), older).unwrap();
+        e.hook_at = Some(chrono::Utc::now());
+        std::fs::write(
+            dir.path().join(format!("{older}.json")),
+            serde_json::to_string(&e).unwrap(),
+        )
+        .unwrap();
+
+        let r = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("sess-1"));
+
+        assert_eq!(r.session_start_source(), Some("compact"));
+    }
+
+    /// The same-server compaction: the hook re-stamps OUR slot with `compact` while the
+    /// session id stays the same. `poll` stays silent about the session (a repeated
+    /// stamp of the same session must not re-arm) but must still take the source.
+    #[test]
+    fn poll_reports_the_session_start_source_the_hook_wrote() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut r = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("sess-1"));
+        let mut e = entry_at(dir.path(), std::process::id()).unwrap();
+        e.hook_at = Some(chrono::Utc::now());
+        e.hook_source = Some("compact".to_string());
+        e.hook_source_at = e.hook_at;
+        std::fs::write(r.path().unwrap(), serde_json::to_string(&e).unwrap()).unwrap();
+
+        assert_eq!(r.poll(), None, "the session did not change");
+        assert_eq!(r.session_start_source(), Some("compact"));
     }
 
     #[test]
