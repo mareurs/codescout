@@ -14,8 +14,8 @@ entry_prefix:
 - DWF
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
-entry_high_water_DWF: 3
-entry_high_water_DCS: 1
+entry_high_water_DWF: 5
+entry_high_water_DCS: 3
 ---
 
 # Deep-agent workflow observations and session coverage
@@ -89,6 +89,8 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DCS-1 | 2026-09-18 | coverage | setup / partial | setup-2026-09-18-root |
 | DWF-2 | 2026-09-20 | workflow | enrichment | s48d1f0c8-round3-fixer-dispatch |
 | DWF-3 | 2026-09-23 | workflow | enrichment | 571eb3d6/fork-route |
+| DWF-5 | 2026-09-24 | workflow | enrichment | 09093108:prefix-uniqueness |
+| DCS-3 | 2026-09-24 | coverage | session-receipt | 09093108/whole-session |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -142,7 +144,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 
 **Task / authority / substrate:** objective — fix five filed bugs drawn from the open ledger, one agent each. Authority as actually instructed: the user's standing *"continue autonomously; when in doubt, check trackers and/or measure first"*, under CLAUDE.md's constraints (no push absent an explicit ask; never `git add -A`; `experiments` only). Workspace `/home/marius/work/claude/codescout`, base revision `170eac15`, tree carrying one modified file owned by another session (`.codescout/audit/ripper-65e654-202609.jsonl`, untouched). Target paths declared disjoint per agent: `scripts/probe_augmentation_restore.py`; `scripts/install-hooks.sh` + `tests/hooks-discrimination.sh`; `src/librarian/tools/audit_doc_refs/**`; `src/prompts/README.md` + `src/prompts/mod.rs`; `src/librarian/tools/doctor.rs`.
 
-**Pre-action evidence:** (a) `doc(find, kind="bug", status in open/taken/investigating/zombie)` returned **62 rows** at dispatch. (b) Ten candidates' own `## Fix` sections read before any brief was written, and **five ruled a fixer OUT** and were not dispatched: `1fc9a6192a3f31b3` (*"the right answer is a decision, not a patch"*), `f47274c162774e8e` (*"not choosing between them here"*), `863fb5cf6bf011ef` (irreversible host-local `DELETE` wanting an operator decision), `c04e0d83106045d7` (the fix lives in a different repo), and `aa1110786cd2a8a4` / `1a0a6887f5998777` (both *"not designed"*). (c) `./scripts/gate.sh` observed green at `170eac15` **before** dispatch — `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0` — so no agent would be handed a peer's red as its own. (d) File-ownership overlap **measured, not assumed**: `grep mode="files"` returned `src/librarian/tools/doctor.rs` for both `fix_anchor` (63 matches) and `docs/augmentations` (8), and `src/prompts/mod.rs` in three separate searches; `ls src/librarian/tools/` then established `audit_doc_refs` is a separate directory module, which is what made two of the five safe to run concurrently. Constraint and uncertainty held at capture: whether briefs built from each file's own `## Fix` section reduce the prior round's defect rate (4 of 11 briefs there prescribed remedies the bug files explicitly ruled out) is the open question; n is far too small to answer it and this episode is not designed to.
+**Pre-action evidence:** (a) `doc(find, kind="bug", status in open/taken/investigating/zombie)` returned **62 rows** at dispatch. (b) Ten candidates' own `## Fix` sections read before any brief was written, and **five ruled a fixer OUT** and were not dispatched: `3cee1969ae4e9d57` (*"the right answer is a decision, not a patch"*), `f47274c162774e8e` (*"not choosing between them here"*), `863fb5cf6bf011ef` (irreversible host-local `DELETE` wanting an operator decision), `c04e0d83106045d7` (the fix lives in a different repo), and `aa1110786cd2a8a4` / `1a0a6887f5998777` (both *"not designed"*). (c) `./scripts/gate.sh` observed green at `170eac15` **before** dispatch — `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0` — so no agent would be handed a peer's red as its own. (d) File-ownership overlap **measured, not assumed**: `grep mode="files"` returned `src/librarian/tools/doctor.rs` for both `fix_anchor` (63 matches) and `docs/augmentations` (8), and `src/prompts/mod.rs` in three separate searches; `ls src/librarian/tools/` then established `audit_doc_refs` is a separate directory module, which is what made two of the five safe to run concurrently. Constraint and uncertainty held at capture: whether briefs built from each file's own `## Fix` section reduce the prior round's defect rate (4 of 11 briefs there prescribed remedies the bug files explicitly ruled out) is the open question; n is far too small to answer it and this episode is not designed to.
 
 **Initial next action / completion check:** next action — receive five hand-backs and integrate. Independently observable check, fixed **before** the outcome: (1) `./scripts/gate.sh` green at the integrated tree, read as its four printed exit codes rather than as an absence of output — the `;`-chained form ends in `echo`, so its shell status is 0 whatever happened; (2) each agent's claimed new test present **by name** in the DEFAULT lane's output, since `--no-default-features` compiles no librarian code and a lean green there is silence, not a pass; (3) `git show --stat <sha>` per commit showing only that agent's declared paths — a clean `git status --short` is explicitly **not** accepted as evidence of exclusion, being equally what inclusion produces.
 
@@ -180,6 +182,41 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | Rests on / overhead | `docs/evals/rule-injection-timing-preregistration.md` § Amendments (fork route); capture ~10 min, estimated |
 
 **Outcome — 2026-09-23 (pre-action fields above unchanged):** `observed`, `mixed`, `partial`. The registered route-validity check PASSED: fork arm 0 reached RTD-8 **5/10** (criterion ≥ 0.3), with 10/10 forks going straight to the doc write. It was not the fifth probe that ended the trajectory, though: a **sixth** contamination surfaced after this entry's capture. The first registered launch opened 3/3 forks by auditing the git tree. The cause was the resume's *"The date has changed"* notice (transcript day 2026-09-21, fork day 2026-09-23). It was fixed by setting the seed's last `date` attachment to the fork's day (`d8f465e1`), and those 3 rows were discarded, not scored. Killing that launch also left orphaned forks writing into the shared projects directory. Six own files were identified by content and removed, and a peer's file was left untouched. The driver now cleans up on SIGTERM, verified with 0 forks and 0 owned files left. Results are recorded in `docs/evals/rule-tell-scoring-2026-09-23.md` § *Phase 2 — fork route on the subscription*. **What the check established:** the route reproduces the decision point's action and a violation rate above the floor, on one decision point. **What it did not:** that fork-route rates equal API-route rates. They are compared only within the route.
+
+## DWF-5 — Ledger prefix uniqueness enforced at declaration — pre-action packet
+
+**Status:** observed
+**Valid:** dated 2026-09-24
+
+| Field | Record |
+|---|---|
+| Sampling / capture mode | `enrichment`, `prospective`. This session's routine-first sample (the `external_prefix` fix, commit `7513f2de`) was NOT snapshotted before action; it is `missed-capture` in this session's DCS receipt, not back-filled here. |
+| Identity / key / times | session `09093108-1425-4f6d-9695-a9e3bb98ea0d`, collector = same session (Opus 5.5, main loop); capture key `09093108:prefix-uniqueness`; captured 2026-09-24 before implementation; finish unknown |
+| Task / authority / substrate | Operator instruction, verbatim: "uniqueness is what I'm after so librarian should be able to validate if an index exists and deny a new ledger with conflicting names. it should also be part of the guide". Base `5103f818` on `experiments`, shared checkout, peer-dirty files present (this ledger among them — this entry is appended, not committed with their hunk). |
+| Pre-action evidence | Measured 2026-09-24 over tracked markdown: 49 ledgers declare `entry_prefix`, 37 distinct prefixes; only `F`/`W` are multiply declared (x15 each, the session-log template). Four write paths can declare a prefix: `create.rs:384` and `update.rs:552` (both already validate `extra` at the boundary), `catalog/rekey.rs` (`rekey_prefix_rows` refuses only a prefix the SAME ledger reserves), and hand-edited frontmatter (no write-time hook exists). `link_scan`'s `prefix_conflicts` already DETECTS a declared prefix with >1 active definer after the fact; nothing PREVENTS it. |
+| Initial next action / completion check | Next: a shared helper in `catalog/augmentation.rs` that reads every declaration under the declaring file's git root (both `entry_prefix` and `external_prefix` count as owners; `F`/`W` exempt as the one shared family), refusing at create / update / rekey; then a `doctor` check for the hand-edit path; then the guide. Completion check: each refusal observed RED before the fix, one mutation per refusal site killed, gate green, and the live corpus still passes (no false refusal on today's 49 ledgers). |
+| Uncertainty at capture | Whether `F`/`W` should stay exempt was stated to the operator as an assumption, not ruled. Repo scope (not catalog-wide) is a design choice, not measured against cross-repo citation practice. |
+
+**Outcome 2026-09-24:** `good` / `verified-complete` for the stated completion check. Committed `45d49a10`. What the check established, separately: (1) each refusal observed RED before its fix -- 12 tests; (2) 17 guarded sites mutated via `scripts/mutation-probe.sh`, all KILLED at the end, with FOUR surviving on the first pass (alternatives-free, rival-excludes-self, repo grouping, per-artifact dedupe), each read as `untested` and closed by a fixture detail; (3) gate `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, the 12 test names read out of the default lane; (4) live corpus: the new doctor check reports 0, agreeing with an independent `git ls-files` scan (only `F`/`W` shared), so no existing ledger is refused. NOT established: the write-time guard is not live in any running MCP server until a rebuild; the unindexed-sibling and linked-worktree cases are false accepts by design, covered only by doctor after reindex/merge.
+
+**Trajectory notes worth keeping:** one mid-task compile break reached the shared tree (a replaced stub left a duplicate definition for ~2 minutes; the tool's own compile check reported it and it was removed before any peer build was observed). A gate run exited 1 on `fmt-mine` refusing a LIVE peer's uncommitted files -- the guard working, not a defect of this change. A fixture edit silently failed to apply because `fmt-mine` had reformatted the bytes between read and write, leaving two new assertions checking rows that did not exist -- caught only because the corresponding mutations still SURVIVED. Mid-task a peer (sessionId `3b4fae98-500a-4fa9-8127-b16642a8c23d`) independently hit the same side-bug this session filed and handed over its IC-6 member entry.
+
+## DCS-3 — Session 09093108 — prefix uniqueness, #59 and the DCX rekey, the withheld-commit rule, caveat markers
+
+**Valid:** dated 2026-09-24
+
+| Field | Record |
+|---|---|
+| Session / principal / collector | session `09093108-1425-4f6d-9695-a9e3bb98ea0d`; the operator via this coordinating session; collector = same (Opus 5.5, main loop) |
+| Observed interval (UTC) | 2026-09-24, the whole session across one compaction; start and end times were not recorded, so no interval is claimed |
+| Workspace | `/home/marius/work/claude/codescout`, branch `experiments`, shared checkout; peers observed committing or staging during the interval: `3b4fae98` (codescout-64), `774ba049` (codescout-88), `571eb3d6` (codescout-0e) |
+| Coverage | `partial` — pre-compaction work is covered only through DWF-5 and its own account; the rest was captured retrospectively here |
+| DCX routine / enrichment | none recorded. Routine sample: `missed-capture` — context choices were made without a pre-action snapshot (which records to load into a delegated classifier, which guide sections to read before each edit) |
+| DWF routine / enrichment | DWF-5 (enrichment, prospective, outcome recorded). Routine sample: `missed-capture` — the `external_prefix` fix (`7513f2de`), as DWF-5 records. Post-compaction episodes were not snapshotted: #59's allocator refusal plus the `DCTX` → `DCX` rekey (`c8d4e0d6`), the withheld-commit rule (`a3dcff72`), the `STANDING` / `TRACKED` caveat markers |
+| Native / delegated / unobserved gaps | one delegated subagent (Opus; read-only caveat classification; about 10 min, 74 tool uses) — its MCP calls land in `usage.db`, and it activated the project read-only process-wide as a side effect, observed as a refused write here. Gate, `mutation-probe` and `cargo` child processes are outside `usage.db` |
+| Noteworthy, not separately sampled | `rekey_prefix` moved the body but left the frontmatter declaration behind (filed and fixed in `c8d4e0d6`); a temporary-index commit raced a peer's commit between `read-tree` and `commit`, and the foreign-index guard refused it before it could silently revert their file; a guide edit moved a line-keyed test exemption and redded the gate |
+| Unresolved pending entries | none of this session's; DWF-5 carries its outcome |
+| Collection overhead | about 10 min for DWF-5's outcome and this receipt; estimated, not measured |
 
 ## Template for new entries
 
