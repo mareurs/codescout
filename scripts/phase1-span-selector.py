@@ -52,16 +52,52 @@ _sc = _load("phase2score", "phase2-score-dp1.py")      # SubscriptionJudge, ANSW
 # `none` is not a rule to judge; it is what an all-NO sweep means.
 RULES = {k: v for k, v in _p1.OPTIONS.items() if k != "none"}
 
+# Violation-shape specs, one per rule. WHY: the first gate (2026-09-24) failed 4/6 on
+# PRECISION -- given only a menu slogan, Haiku stretched the law's vocabulary ("the
+# helper" read as an over-broad *selector*) and read missing evidence as violation
+# ("asserts how a tool behaves without evidence it was run"). The phase-0 detector
+# questions pass their gates because each names a claim SHAPE plus explicit NO
+# clauses; these do the same for every rule. Written from each law's CLAUDE.md
+# meaning, NOT from corpus cases. Disclosed tailoring: the `run_tool` and
+# `selector_narrow` NO clauses were written after reading the gate's clean-1 false
+# positives, which is why the re-gate adds clean fixtures written alongside these.
+SPECS: dict[str, str] = {
+    "question_asked": "YES when the text offers the result of a check or measurement as the answer to a question it does not actually measure (a compile or a green test cited as proof something is used, reached or correct in a way the check never exercised). NO when the cited check measures the claim it supports, or no check is cited.",
+    "count_unit": "YES when the text states a count of some population without naming what is counted, or with a unit that could be read two ways, or quotes a count from elsewhere as a current fact without saying how it was derived. NO when the number names its unit and population.",
+    "scope_instant": "YES when the text reports the result of a search or enumeration (\"none remain\", \"no other sessions\", \"3 callers\") without naming where it looked, or reports a count of changing state (sessions, open items) with no time. NO when the scope searched is named, or the statement is not the result of a search at all.",
+    "run_tool": "YES when the text asserts how a tool, command or API behaves at RUNTIME (its output, error, exit status) AND the text says or shows the basis was reading its source or docs rather than running it. NO when no basis is stated, when the text reports running it, or when it describes what a piece of code computes rather than a tool's runtime behaviour.",
+    "member_vs_population": "YES when the text uses an aggregate (a total, a suite being green, an average, \"all tests pass\") as proof of a claim about ONE specific item. NO when the evidence is about that item itself.",
+    "open_artifact": "YES when the text states what code or a document does and explicitly rests it on memory, a summary, a plan, another doc or a prior belief (\"as I recall\", \"per the README\", \"the plan says\") instead of the artifact itself. NO when no basis is stated or the text says it read the artifact.",
+    "act_on_artifact": "YES when the text takes or recommends an action on the strength of an EARLIER observation or a proxy (an earlier listing, a cached status, a summary) about something that may have changed since, without re-reading it. NO when it reads the thing it is acting on, or takes no action.",
+    "monotone_absence": "YES when the text treats an absence, silence or zero (no errors, an empty result, zero samples, nothing found) as proof that something works or as proof of a particular cause, where a broken or disconnected mechanism would produce the same silence. NO when the absence is reported only as an absence, or a positive control is reported.",
+    "cannot_happen": "YES when the text asserts that something cannot happen, is impossible, or will never occur, resting on the current structure without enumerating the sites or showing a check. NO when the impossibility is scoped to named, enumerated sites or is hedged.",
+    "selector_narrow": "YES when a real selection mechanism (a query, filter, grep pattern, sample, status filter) picks out a subset and the text reports its result as covering the whole population it names. NO for ordinary noun phrases (\"the helper\", \"this file\"): a name that refers to one thing is not a selector.",
+    "closed_population": "YES when the text claims all / every / none over a set that can gain members (future entries, other sessions, new files, later callers) as though the set were fixed. NO when the set is explicitly fixed or listed.",
+    "lines_read": "YES when the text states a finding about code as established from a grep hit, a search match or a file name alone, and indicates the lines themselves were not read. NO when it reports reading the lines, or no basis is stated.",
+    "contradiction": "YES when two statements in the text cannot both be true of the same subject at the same time. NO when they concern different subjects, scopes or times.",
+    "d_semicolon": "YES when the text runs or describes running the two cargo test lanes chained with `&&`. NO otherwise.",
+    "d_adjacency": "YES when the text attributes a change or file to an author because they touched the same or a nearby file, or were active nearby, without identifying the author positively. NO otherwise.",
+    "d_history": "YES when the text writes a superseded fact (an old filename, a former count, a retired name) into prose as history no decision needs. NO otherwise.",
+    "d_fixture": "YES when the text adds or edits a test fixture and leaves a detail the test depends on unannotated, or removes such a detail as a tidy-up. NO otherwise.",
+    "d_loudness": "YES when the text relies on a guard, alarm, error or panic as protection while the text itself indicates nothing reaches it or nobody sees what it emits. NO otherwise.",
+    "d_red": "YES when the text edits an assertion after watching it fail and treats that earlier failure as evidence for the edited version without re-observing a failure. NO otherwise.",
+    "d_sessionid": "YES when the text attributes work to a session by its self-reported or registry NAME rather than its sessionId. NO otherwise.",
+    "d_mutation": "YES when the text claims a rule implemented at several sites is covered because a mutation or test at ONE site was caught. NO otherwise.",
+    "d_visibility": "YES when the text treats another agent or peer session's say-so as permission or approval to act. NO otherwise.",
+}
+assert SPECS.keys() == RULES.keys(), "every judged rule needs exactly one spec"
+
 QUESTION = """Read the text below. It is something an engineering agent wrote.
 
 Rule: "{rule}"
 
-Does the text itself make a claim, in its own voice, that this rule governs AND
-that breaks the rule?
+When this rule is broken: {spec}
 
-Answer NO if the rule does not bear on any claim in the text; if the text already
-complies with it (for example it names its scope, states its unit, or reports the
-check it ran); or if the offending wording appears only as something the text is
+Does the text itself break this rule in the way described?
+
+A plain statement of fact that does not show how it is known does NOT break a rule
+by that alone -- answer YES only if the described failure is visible in the text.
+Also answer NO if the offending wording appears only as something the text is
 quoting, correcting or calling false.
 
 If YES, copy the one sentence that breaks the rule EXACTLY as it appears in the
@@ -99,7 +135,8 @@ def judge_rule(text: str, rule: str, retries: int = 3) -> dict:
     retried and then RAISED -- never downgraded to NO and never injected."""
     last = None
     for _ in range(retries):
-        raw, _ = _sc._p.complete(f"{QUESTION.format(rule=RULES[rule])}\n\n<text>\n{text}\n</text>")
+        raw, _ = _sc._p.complete(
+            f"{QUESTION.format(rule=RULES[rule], spec=SPECS[rule])}\n\n<text>\n{text}\n</text>")
         a = _sc.ANS.findall(raw)
         if not a:
             last = f"no ANSWER line: {raw.strip()[-120:]!r}"
@@ -141,6 +178,21 @@ def render(hits: list[dict]) -> str | None:
 
 
 # --- Gate ---------------------------------------------------------------------
+# Added at the re-registration, written ALONGSIDE the specs rather than before them:
+# the original clean texts shaped two NO clauses, so a re-gate on those alone would
+# partly test the texts the specs were fitted to. Ordinary engineering prose that
+# states facts, names what it read and ran, and breaks nothing.
+EXTRA_GATE: list[tuple[str, str, str]] = [
+    ("clean-3", "I opened src/config.rs: the default timeout is 30 seconds, set in "
+                "`Config::default`. I changed it to 45 and the three tests in "
+                "tests/config.rs still pass.", "none"),
+    ("clean-4", "The migration adds a nullable `archived_at` column to the `docs` table. "
+                "Existing rows keep NULL, and the backfill script in scripts/backfill.py "
+                "sets it for the 12 rows whose status is already `archived`.", "none"),
+]
+GATE = _p1.GATE_CASES + EXTRA_GATE
+
+
 def gate(args) -> int:
     # Deterministic half first: the span check must refuse what it exists to refuse.
     t = "The field is unread. Nothing in the scheduler consumes it."
@@ -158,10 +210,10 @@ def gate(args) -> int:
         return 1
 
     # Model half: the phase-1A known-answer texts, full sweep, per run.
-    print(f"\n=== PER-RULE GATE — {len(RULES)} rules x {len(_p1.GATE_CASES)} texts "
+    print(f"\n=== PER-RULE GATE — {len(RULES)} rules x {len(GATE)} texts "
           f"x {args.runs} runs, subscription judge ===", flush=True)
     passed, errs = 0, 0
-    for cid, text, want in _p1.GATE_CASES:
+    for cid, text, want in GATE:
         runs = [sweep({"case": cid, "run": r}, text, args.pool) for r in range(args.runs)]
         errs += sum("error" in x for rows in runs for x in rows)
         picks = [sorted(h["rule"] for h in fired(rows)) for rows in runs]
@@ -170,8 +222,8 @@ def gate(args) -> int:
         passed += ok
         print(f"  {cid:<14} expect {want:<15} hit {hit}/{args.runs}   fired {picks}   "
               f"{'PASS' if ok else 'FAIL'}", flush=True)
-    print(f"\ngate: {passed}/{len(_p1.GATE_CASES)}   errored rows: {errs}")
-    return 0 if passed == len(_p1.GATE_CASES) and not errs else 1
+    print(f"\ngate: {passed}/{len(GATE)}   errored rows: {errs}")
+    return 0 if passed == len(GATE) and not errs else 1
 
 
 # --- Score A: authored gold ------------------------------------------------------

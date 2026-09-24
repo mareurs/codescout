@@ -310,3 +310,26 @@ Jev's pick distribution is reported with the rates.
 4. **Scoring.** The existing gated checkers, unchanged: `rtd8`, `rtd9`, `rtd10` on DP1, and `rtd3r` on RTD-3, majority of 3 per observable row. The comparison arms are the registered fork-route rows already scored on the same channel: DP1 arm 0 5/10, 7/10, 8/10 and arm 1b (RTD-8) 0/10; RTD-3 arm 0 8/10 and 3-1b 0/10. The fork rewrites the date to the day it runs, so the one difference between `e2s` and those rows is the day. It is disclosed, not controlled.
 
 **Ship rule for phase 1, per rule:** arm 0 − `e2s` **≥ 0.4**, and, where a claim-bound arm exists on this route (RTD-8, RTD-3), `e2s` − 1b **≤ 0.2**. RTD-9 and RTD-10 have no own 1b on the fork route, so only the first condition applies to them. Also reported: which rules fired per run, the quoted claims, and how many distractor rules fired in the injections.
+
+*Phase 1 re-registered after its gate failed, 2026-09-24. Registered before the re-gate ran.*
+
+**The registered gate failed at 4 of 6**, with 0 errored rows. The span check passed 5/5. **Every violation text fired its own rule** (`d_semicolon` 3/3, `d_sessionid` 3/3, `cannot_happen` 3/3, `contradiction` 2/3). Both clean texts failed at 0/3, firing 2–5 rules per run, and the violation texts also fired 4–13 unrelated rules each. It is a pure precision failure. By the stopping rule, nothing was scored.
+
+**Diagnosis, from the judge's own reasoning on three gate texts** (hand-written, so reading them contaminates nothing):
+
+- On *"The helper returns the sum of its two integer arguments."*, `selector_narrow` fired because "the helper" was read as an over-broad **selector**: the law's vocabulary stretched to fit any noun phrase.
+- `run_tool` fired because the sentence "asserts how a tool behaves without evidence the call was run": **missing evidence read as a violation**.
+- `scope_instant` on clean-2 correctly said NO.
+
+The menu entries are one-line slogans written for a ranking picker. Turned into independent yes/no decisions, they have no outer boundary.
+
+**Revision.** Each of the 22 rules gets a **violation-shape spec** (`SPECS` in `scripts/phase1-span-selector.py`), the same form as the phase-0 detector questions that pass their gates: what the offending claim looks like, plus explicit NO clauses. The question gains one generic clause: *a plain statement of fact that does not show how it is known does not break a rule by that alone.* The span requirement, output template, channel, menu and rule slogans are unchanged.
+
+**Tailoring, disclosed.**
+
+- The specs are written from each law's meaning in `CLAUDE.md`, not from corpus cases.
+- However, the `run_tool` and `selector_narrow` NO clauses were written **after** reading clean-1's false positives.
+- So the re-gate adds two clean fixtures written together with the specs (`EXTRA_GATE`: clean-3, clean-4), and the gate is now **8 texts**.
+- The author of the specs has read the phase-1A corpus earlier in this campaign. Score A is therefore authored gold scored by a selector whose author has seen that gold, not a blind held-out set. Its figures are reported with that label.
+
+**Unchanged:** the gate criteria (each text ≥ 2/3 runs, no errored rows, a gate failure stops everything), Score A and its predictions, Score B, the ship rule, and the order. If the re-gate fails, phase 1 is recorded as not passing a gate under two question forms, and the next revision is a new registration.
