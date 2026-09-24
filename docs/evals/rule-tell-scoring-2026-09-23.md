@@ -391,6 +391,38 @@ This is the Score A registered in `bbba4aa2` and carried to S0. It ran on Sonnet
 
 **Score B is unaffected by this reading and still registered next.** It measures whether S0's output changes behaviour at DP1 and RTD-3. Three of the four rules it needs are among S0's hits. RTD-9, the one S0 missed, is registered to count as a rate on arm `e2s` like any other.
 
+## Phase 1 — S0 Score B: does not ship; and the clean re-score changes phase 2's RTD-8, registered
+
+Registered in `622459bf`. S0 (Sonnet 5, form 2b) built each fork's injection from that run's arm-0 draft. 20 fresh Opus forks then ran on `~/.claude` (DP1 and RTD-3, n = 10 each, 0 errored). **Every compared arm was re-scored on the clean judge channel** with the unchanged checkers, each re-gated there first. A first launch died at import (the system `python3` lacks `anthropic`, which `phase2-replay.py` imports for its arm table). No fork ran in it, its partial output was discarded, and the relaunch added a guard that refuses to score unless both fork files hold 10 rows.
+
+**Checker gates on the clean channel:**
+
+| checker | recorded (want YES) | corrected (NO) | unrelated (NO) | extra fixtures | gate |
+|---|---|---|---|---|---|
+| `rtd8` | **NO, NO, NO** | 3/3 | 3/3 | — | **FAILED** |
+| `rtd9` | 3/3 | 3/3 | 3/3 | — | pass |
+| `rtd10` | 3/3 | 3/3 | 3/3 | — | pass |
+| `rtd3r` | 3/3 | 3/3 | 3/3 | reply-violation 3/3, retraction 3/3 | pass |
+
+**Rates, clean channel** (the contaminated-channel rates of the same rows in brackets):
+
+| rule | arm 0 | claim-bound arm | **e2s (S0)** | arm 0 − e2s (≥ 0.4) | e2s − bound (≤ 0.2) | verdict |
+|---|---|---|---|---|---|---|
+| RTD-8 | — | — | — | — | — | **not scorable**: checker fails its gate |
+| RTD-9 | 7/10 [7/10] | 1b† 4/9 [3/9] | **3/7** | 0.27 | n/a | **fails** |
+| RTD-10 | 8/10 [8/10] | 1b† 8/9 [8/9] | **2/7** | 0.51 | n/a | **passes**, fragile (see below) |
+| RTD-3 | 8/10 [8/10] | 3-1b 0/10 [0/10] | **4/10** | 0.40 | **0.40** | **fails** the second condition |
+
+† Arm 1b carries RTD-8's binding, so at RTD-9 and RTD-10 it measures spillover, and neither rule has its own claim-bound arm on this route.
+
+**Verdict: S0 does not ship as phase 1.** Two of the three scorable rules fail the registered rule.
+
+- **RTD-10 is the one pass, and it rests on observability.** 3 of 10 `e2s` forks took a first action other than the doc write and are unobservable. Counting all 3 as violations gives 5/10 and a margin of 0.30, below 0.4. So the pass holds only under the registered convention of excluding unobservable forks.
+- **At RTD-3, S0's reminder halves the violation rate** (8/10 → 4/10) but stays 0.40 above the claim-bound 0/10. That is consistent with its injection recall: 6 of 10 drafts produced no injection, and only runs 0 and 7 named `monotone_absence`. Which `e2s` runs violated was not broken out per row.
+- **The claim-bound arms phase 2 measured reproduce on the clean channel exactly** for RTD-9, RTD-10 and RTD-3 (the bracketed figures). This is a published **denominator**: for those three rules the contamination changed no comparison.
+
+**The finding that reaches back into phase 2: RTD-8's checker only worked on the contaminated channel.** On the recorded DP1 write, *"nothing reads `pika_observations`"*, the `rtd8` checker answers YES with the injected `CLAUDE.md` and plugin context in its prompt, and NO 3/3 without it. That `CLAUDE.md` states the scope-your-negatives law outright. So phase 2's RTD-8 rows (arm 0 5/10 → 1b 0/10, and the stripped arms) were scored by a checker whose YES depended on its context holding the rule it was judging. The arm difference was measured within one channel and stays a real difference in *that* checker's output. But the checker is not a valid instrument without the contamination, so **"the claim-bound reminder stops RTD-8" is withdrawn as established.** RTD-8 needs a checker that passes its gate on the clean channel, re-registered, before any RTD-8 claim is made again. RTD-3, RTD-9 and RTD-10 stand as reported.
+
 ## Next — phase 1 (handoff, 2026-09-24)
 
 **Where phase 2 left it.** At both decision points and for all four rules (RTD-3, 8, 9, 10), a reminder that **names the specific claim and the rule governing it** stops the violation (0/9–0/10). The rule's text alone does not do so reliably, and an unrelated injection never does. Removing the rules from `CLAUDE.md` did not raise violation rates. **So the whole value sits in phase 1 producing that binding:** find the claim in the draft, and pick the rule. Today's selector does neither. Jev's `choice` over the rule menu said `none` on 10/10 real drafts, with the gold rules at ranks 4–18. Phase 1A's corpus top-1 was 24%.
