@@ -41,6 +41,7 @@ pub fn diff(
     existing_cites: &[LinkRow],
     desired: &BTreeSet<(String, String)>,
     prunable_src: &HashSet<String>,
+    resolvable_dst: &BTreeSet<String>,
 ) -> LinkDiff {
     let existing: BTreeSet<(String, String)> = existing_cites
         .iter()
@@ -54,8 +55,20 @@ pub fn diff(
             d.to_add.push(pair.clone());
         }
     }
+    // BOTH ends bound the prune, because both ends bound `desired`. The source bound keeps a
+    // scoped run off edges owned by artifacts it never read. The destination bound is its twin,
+    // missing until 2026-09-24: the resolver's corpus is only the scanned rows, so a citation
+    // whose destination fell outside a `limit`ed or narrow scan resolves to nothing and is
+    // absent from `desired` because it was never LOOKED AT — not because it went away.
+    // Measured: `link_scan(limit=10)` reported 53 edges stale against 2 for the full scan.
+    // Failing this way leaves a genuinely dead edge to an unscanned destination in place until
+    // a scan wide enough to see both ends — an extra edge rather than a lost one.
+    // docs/issues/2026-09-21-a-narrowed-link-scan-prunes-edges-whose-destination-it-never-looked-at.md
     for pair in &existing {
-        if !desired.contains(pair) && prunable_src.contains(pair.0.as_str()) {
+        if !desired.contains(pair)
+            && prunable_src.contains(pair.0.as_str())
+            && resolvable_dst.contains(pair.1.as_str())
+        {
             d.stale.push(pair.clone());
         }
     }
@@ -107,7 +120,9 @@ mod tests {
         ]
         .into();
         let prunable: HashSet<String> = ["a".to_string()].into();
-        let d = diff(&existing, &desired, &prunable);
+        // Every destination resolvable, so this case isolates the SOURCE bound.
+        let resolvable: BTreeSet<String> = ["x", "y", "z", "w"].map(String::from).into();
+        let d = diff(&existing, &desired, &prunable, &resolvable);
         assert_eq!(d.unchanged, 1);
         assert_eq!(d.to_add, vec![("c".into(), "w".into())]);
         // a→y stale (src scanned); b→z NOT stale (src outside scanned set).
@@ -119,7 +134,32 @@ mod tests {
         let existing = vec![row("unreadable-doc", "x")];
         let desired = BTreeSet::new();
         let prunable = HashSet::new(); // unreadable → excluded from prunable
-        let d = diff(&existing, &desired, &prunable);
+        let resolvable: BTreeSet<String> = ["x".to_string()].into();
+        let d = diff(&existing, &desired, &prunable, &resolvable);
         assert!(d.stale.is_empty());
+    }
+
+    /// The DESTINATION bound. `desired` can only hold a pair whose destination the resolver
+    /// could resolve to — its corpus, which a `limit`ed or narrowly-scoped scan truncates — so
+    /// an existing edge to an unscanned destination is absent from `desired` because it was
+    /// never LOOKED AT, not because its citation went away. Measured 2026-09-24:
+    /// `link_scan(limit=10)` reported 53 such edges stale against 2 for the full scan, and
+    /// `write=true` would have deleted them.
+    /// docs/issues/2026-09-21-a-narrowed-link-scan-prunes-edges-whose-destination-it-never-looked-at.md
+    ///
+    /// Load-bearing: `a→x` has BOTH ends scanned and must still be pruned — without it this is
+    /// monotone under "prune nothing", which would pass by disabling the prune entirely.
+    #[test]
+    fn an_edge_to_an_unscanned_destination_is_never_pruned() {
+        let existing = vec![row("a", "x"), row("a", "outside")];
+        let desired = BTreeSet::new();
+        let prunable: HashSet<String> = ["a".to_string()].into();
+        let resolvable: BTreeSet<String> = ["a", "x"].map(String::from).into();
+        let d = diff(&existing, &desired, &prunable, &resolvable);
+        assert_eq!(
+            d.stale,
+            vec![("a".into(), "x".into())],
+            "a→x (both ends scanned) is genuinely stale; a→outside was never resolvable here"
+        );
     }
 }

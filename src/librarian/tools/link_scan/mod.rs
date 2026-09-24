@@ -788,7 +788,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         .map(|(i, _, _)| rows[*i].id.clone())
         .collect();
     let existing = links::by_rel(&cat, diff::CITES_REL)?;
-    let d = diff::diff(&existing, &desired, &prunable);
+    let d = diff::diff(&existing, &desired, &prunable, &corpus.ids);
     let (added, pruned) = if args.write {
         diff::apply(&cat, &d)?;
         (d.to_add.len(), d.stale.len())
@@ -996,7 +996,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "prefix_conflicts": prefix_conflicts,
         "unreadable": unreadable,
         "hint": if args.write {
-            "edges written as rel=\"cites\" (scanner-owned). Re-run any time — idempotent."
+            "edges written as rel=\"cites\" (scanner-owned). Re-running with the SAME scope and \
+             limit adds nothing new; a wider run can add and prune more, since both ends of an \
+             edge must be scanned for it to be judged."
         } else {
             "report only — pass write=true to materialize/prune the cites edges above."
         },
@@ -2137,6 +2139,54 @@ mod tests {
             json!(0),
             "neither may silently resolve, even though the inner `target:F-2` form \
              would on its own: {out:#?}"
+        );
+    }
+
+    /// The prune still works end to end: an existing `cites` edge whose BOTH ends are scanned
+    /// and which no prose supports is reported stale. Pins the call-site wiring of the
+    /// destination bound — `call` passes the resolver corpus's ids to `diff::diff`, and passing
+    /// an empty set instead would disable every prune silently, a change no other test in this
+    /// module could see: none asserts that anything is ever pruned. The destination bound's own
+    /// predicate is pinned in `diff::tests::an_edge_to_an_unscanned_destination_is_never_pruned`.
+    #[tokio::test]
+    async fn an_unsupported_edge_between_two_scanned_artifacts_is_reported_stale() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let a = tmp.path().join("a.md");
+        let b = tmp.path().join("b.md");
+        std::fs::write(&a, "No citations here.\n").unwrap();
+        std::fs::write(&b, "Nor here.\n").unwrap();
+        seed_scan_artifact(&cat, "aaaaaaaaaaaaaaaa", &a, "a");
+        seed_scan_artifact(&cat, "bbbbbbbbbbbbbbbb", &b, "b");
+        links::insert_with(
+            &cat.conn,
+            &links::LinkRow {
+                src_id: "aaaaaaaaaaaaaaaa".into(),
+                dst_id: "bbbbbbbbbbbbbbbb".into(),
+                rel: diff::CITES_REL.into(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+
+        let root = tmp.path().to_path_buf();
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        let out = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(
+            out["counts"]["edges_stale"],
+            json!(1),
+            "both ends scanned, no prose supports it: genuinely stale: {out:#?}"
         );
     }
 
