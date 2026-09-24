@@ -501,7 +501,16 @@ Registered in `6e462635` before it ran. Form 3 is form 2b with one sentence remo
 | RTD-9 (yes) | `contradiction`, `count_unit` | `monotone_absence`, `scope_instant` |
 | RTD-11 (partial) | `question_asked` | `closed_population` |
 
-Removing the clause made the judge more willing to call a text a violation, but not better at naming which rule it breaks. So the recall shortfall is **rule assignment**, not reluctance: the specs' boundaries sit between neighbouring rules (`count_unit` / `scope_instant` / `monotone_absence` / `closed_population`) in a place the gold labels do not. That is a reading of one run per row, not a result. Which of the two is off, the specs or the gold granularity, is not settled here.
+Removing the clause made the judge more willing to call a text a violation, but not better at naming which rule it breaks.
+
+**But mis-assignment is the smaller failure; silence is the larger.** Classified per positive on `yes` + `partial` (17):
+
+| form | gold fired | wrong rule only | nothing fired |
+|---|---|---|---|
+| 2b | 3 | 1 | **13** |
+| 3 | 3 | 4 | **10** |
+
+Removing the clause turned 3 silent positives into wrong-rule fires, and 10 stay silent. Most of the silence is the `partial` bucket, 0/9 under both forms: texts whose violation the corpus labels only partly visible in the excerpt. *Corrected 2026-09-24, same day: this section first concluded that "the recall shortfall is rule assignment, not reluctance". The table shows assignment explains at most 4 of 14 misses under form 3.* Whether the silent `partial` texts carry enough in the excerpt to be judged at all is a question about the corpus, not the selector, and is not settled here. It is one run per row, a reading and not a result.
 
 **Verdict.** Form 3 is not adopted, and **S0 stays at form 2b**. The generic clause costs no measured recall and removes one corpus false positive, so it stays.
 
@@ -522,7 +531,7 @@ Removing the clause made the judge more willing to call a text a violation, but 
 **Open at handoff, in order:**
 
 1. **The `rtd8c` run: done.** The gate passed, and the phase-2 RTD-8 claim is restored in a narrower form: the claim-bound reminder *cuts* the violation rate from 9/10 to 2/10 rather than stopping it. S0's RTD-8 cell fails. Details are in § *RTD-8 re-scored with `rtd8c`*.
-2. **The S0 recall problem: the generic-clause hypothesis is tested and not supported** (form 3, `6e462635`). Recall stays at 3/17 without the clause, and S0 stays at form 2b. The new fires name neighbouring rules rather than gold, so the next hypothesis is **rule assignment**: the spec boundaries between `count_unit`, `scope_instant`, `monotone_absence` and `closed_population`, or the gold's granularity. Testing it is a new registration. See § *S0 form 3*.
+2. **The S0 recall problem: the generic-clause hypothesis is tested and not supported** (form 3, `6e462635`). Recall stays at 3/17 without the clause, and S0 stays at form 2b. **The larger failure is silence:** 10 of 17 positives fire nothing even without the clause, mostly in the `partial` bucket (0/9). Wrong-rule fires, between `count_unit`, `scope_instant`, `monotone_absence` and `closed_population`, are the smaller one: 4 of 17. The next hypothesis is therefore about **what the excerpt shows**: whether a `partial` text carries enough of its violation to be judged at all. It is not about the question or the spec boundaries. Testing it is a new registration. See § *S0 form 3*.
 3. **The local route** (`docs/evals/phase1-local-classifier-preregistration.md`). Registered with S0 as baseline; Stage 1 (JevK5 zero-shot) has not started. It needs a Python env with `flash-linear-attention` and about 9 GB of weights. The Anthropic permission to train on Claude outputs is recorded in codescout memory, as reported by the operator.
 4. **The owed clean-channel re-score** of the rest of phase 2 (the API-route rows and the stripped arms under the other checkers). Where it has been done (RTD-3, RTD-9, RTD-10), it reproduced exactly.
 
