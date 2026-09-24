@@ -11,7 +11,6 @@ tags:
 - affordance
 - doc-vs-code
 closed: 2026-09-24
-unverified: 'codescout half not verified live: the serving binary predates ba3a787e. Verified by RED-first tests, four isolated mutations, and gate GATE_EXIT=0; the companion half is live. Live check spelled out in Resume.'
 ---
 
 ## Symptom
@@ -132,11 +131,23 @@ The design in § *The one viable design*, plus one piece it missed. **The measur
 
 ## Resume
 
-Live check after `cargo rb` — and it needs a `SessionStart` that ran the NEW hook (`cf5ea29c`). **The fixing session cannot supply one:** its only SessionStart was a compaction that predated the hook change, so its slot carries no `hook_source` (verified 2026-09-24: PID 2968670's slot has no such field), and a check there correctly degrades to `"ledger": "cleared"` — which would read as a failed fix. Recipe:
+**Verified live 2026-09-24, both halves**, on release binary built 10:48:41Z (contains `ba3a787e`) with `claude-plugins` working tree at `cf5ea29c`:
 
-1. Start a session, or `claude --resume` one (SessionStart `source=startup`/`resume` stamps `hook_source`). Confirm with `cat ~/.local/state/codescout/servers/<pid>.json` → `hook_source` present.
-2. `/mcp` (no compaction) — the new server inherits the source.
-3. `workspace(post_compact=true)` → expect `"ledger": "kept"` and the ledger file unchanged apart from the reconnect's bootstrap re-arm.
-4. Clearing half: `/compact`, then the call → `"ledger": "cleared"`.
+- **Clearing half, through the `/mcp` inheritance path.** Session `774ba049-d97c-443a-b31d-f662a9cb6a1e` (`~/.claude`):
+  - `/compact` fired SessionStart(`compact`) at 10:48:37.803Z.
+  - `/mcp` then started server 3393665 at 10:49:02.787Z. Its slot carried `"hook_source":"compact"` with `hook_source_at` 10:48:37.803Z. That's **25 s before the server existed**, so the value was inherited; no SessionStart runs on `/mcp`.
+  - The liveness refresh at 10:49:47Z preserved both fields.
+  - `workspace(post_compact=true)` returned `"ledger": "cleared"`, and the ledger file went from 14 entries to 1: `project-activation-bootstrap`, re-emitted by the same call.
+- **Kept half.** A headless `claude -p` (`~/.claude`, SessionStart `startup`, session `1e4fc97a-de21-438c-80f5-bb8e4e07f7ff`) called `status` and then `post_compact=true`. It got `"kept"` (3 turns, no error). This pairs with the result above: same binary, same hook, only the source differs.
+  - It exercised the direct-stamp path (a fresh server whose own slot was stamped), not the inheritance path. The clearing half covers inheritance.
+  - I didn't separately read the probe's ledger file. The observation is the response's `ledger` field.
+  - The same probe exposed `54a1a8011bca0358`: its SessionStart also stamped *my* server's slot. Its own verdict came from its own server, whose slot read `startup`.
 
-Then archive with `c186c45e2ed2a038` in one pass (see its Resume for the citations to re-point).
+**Known limit: startup race (raised by sessionId `09093108-1425-4f6d-9695-a9e3bb98ea0d`).**
+
+- **Mechanism.** On `startup`/`resume` the source only arrives if the new server's slot exists before SessionStart runs. The measured slot-to-stamp margins were 51 ms and 86 ms. That peer's resumed session holds a slot with no source; the cause isn't decided between no slot yet, an empty `source`, and old code loaded.
+- **Consequence.** Losing the race degrades to `"cleared"`, the pre-fix behaviour, which is the safe direction.
+- **Scope.** The measured case (a mistaken call after `/mcp`) is unaffected, because the source was stamped into the predecessor slot long before.
+- **Not measured:** how often the race is lost.
+
+Archive together with `c186c45e2ed2a038` in one pass (see its Resume for the citations to re-point).
