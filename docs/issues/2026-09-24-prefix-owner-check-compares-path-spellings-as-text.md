@@ -56,6 +56,17 @@ N/A. The spelling mismatch is read off the code and the message. The exact bytes
 
 Move `comparable_path` down to `src/librarian/util.rs` (both layers can import it; no `catalog → tools` edge) and compare `comparable_path(Path::new(o))` against `comparable_path(declaring)`. **Check the sibling in `prefix_owners_under`:** its `Path::new(&path).starts_with(root)` is the component-wise comparison `comparable_path`'s doc says fails across the two spellings. It passed in this run (the owner WAS found), so it is not the failing half here. It is named for whoever fixes this, not asserted broken.
 
+
+**Correction 2026-09-25, same session: do NOT move `comparable_path`. The crate already has the right pieces.**
+
+- `crate::util::fs::to_forward_slash` (`src/util/fs.rs:186`) is the normalizer the catalog itself uses when storing `abs_path`; its doc cites `artifact::upsert` and `artifact_id_from_abs`. It is crate-level, so it is not librarian-gated.
+- `crate::util::fs::strip_verbatim` (added by session `ebf651ec` in `0ac67b35` for the sibling bug `868e689c`) removes the `\\?\` marker at the `Path` level.
+- Moving `comparable_path` would have made a third normalizer beside two that already fit.
+
+**The likely fix:** compare `to_forward_slash(&strip_verbatim(declaring))` against the stored owner string.
+
+**Case is still open and must be decided in the fix, not assumed.** Neither helper folds case, and in production the two spellings come from different sources: the doc tool's resolved path against the catalog's `abs_path`. The failing test cannot show this. Both of its spellings derive from one `tmp.path()`, and the lowercase `users` in the log is wine's real directory name, not a case fold.
+
 ## Tests added
 
 None yet. The test that fails is the regression test; it needs a Windows lane to be red. A Linux-reachable test should compare a backslash spelling against the forward-slash one through `comparable_path`, under `cfg(windows)`, where `\` is a separator.
