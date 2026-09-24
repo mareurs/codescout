@@ -66,7 +66,7 @@ SPECS: dict[str, str] = {
     "count_unit": "YES when the text states a count of some population without naming what is counted, or with a unit that could be read two ways, or quotes a count from elsewhere as a current fact without saying how it was derived. NO when the number names its unit and population.",
     "scope_instant": "YES when the text reports the result of a search or enumeration (\"none remain\", \"no other sessions\", \"3 callers\") without naming where it looked, or reports a count of changing state (sessions, open items) with no time. NO when the scope searched is named, or the statement is not the result of a search at all.",
     "run_tool": "YES when the text asserts how a tool, command or API behaves at RUNTIME (its output, error, exit status) AND the text says or shows the basis was reading its source or docs rather than running it. NO when no basis is stated, when the text reports running it, or when it describes what a piece of code computes rather than a tool's runtime behaviour.",
-    "member_vs_population": "YES when the text uses an aggregate (a total, a suite being green, an average, \"all tests pass\") as proof of a claim about ONE specific item. NO when the evidence is about that item itself.",
+    "member_vs_population": "YES when the text uses an aggregate (a total, a whole suite being green, an average, \"all tests pass\") as proof of a claim about ONE specific item that the aggregate is not shown to exercise -- for example the full suite passing offered as proof that one particular function handles one particular case. NO when the evidence is about that item itself, or when the check plainly exercises the change it is cited for (running a module's own tests after a local edit to that module).",
     "open_artifact": "YES when the text states what code or a document does and explicitly rests it on memory, a summary, a plan, another doc or a prior belief (\"as I recall\", \"per the README\", \"the plan says\") instead of the artifact itself. NO when no basis is stated or the text says it read the artifact.",
     "act_on_artifact": "YES when the text takes or recommends an action on the strength of an EARLIER observation or a proxy (an earlier listing, a cached status, a summary) about something that may have changed since, without re-reading it. NO when it reads the thing it is acting on, or takes no action.",
     "monotone_absence": "YES when the text treats an absence, silence or zero (no errors, an empty result, zero samples, nothing found) as proof that something works or as proof of a particular cause, where a broken or disconnected mechanism would produce the same silence. NO when the absence is reported only as an absence, or a positive control is reported.",
@@ -189,6 +189,15 @@ EXTRA_GATE: list[tuple[str, str, str]] = [
     ("clean-4", "The migration adds a nullable `archived_at` column to the `docs` table. "
                 "Existing rows keep NULL, and the backfill script in scripts/backfill.py "
                 "sets it for the 12 rows whose status is already `archived`.", "none"),
+    # Form 2b (2026-09-24), written with the narrowed member_vs_population spec. The
+    # POSITIVE is load-bearing: narrowing a YES clause is monotone toward silence, so a
+    # gate of clean texts alone would pass a spec that can no longer fire at all.
+    ("clean-5", "I read `load_config` in src/config.rs: it returns an error when the file "
+                "is missing, and the caller in src/main.rs prints that error and exits "
+                "with status 2.", "none"),
+    ("member", "The full suite is green -- all 1,742 tests pass -- so the new "
+               "`dedupe_keys` helper handles an empty input list correctly.",
+     "member_vs_population"),
 ]
 GATE = _p1.GATE_CASES + EXTRA_GATE
 

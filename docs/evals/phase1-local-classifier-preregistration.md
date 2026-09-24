@@ -166,3 +166,25 @@ All of that cost **2,778 input tokens for "Say OK."**. That `CLAUDE.md` includes
 - If H0-clean passes, the Haiku per-rule judge becomes a baseline candidate as well. Both gate outcomes are published whatever they are.
 
 **Consequence for completed work, stated here and in the scoring doc.** Every subscription-judge result in this campaign ran on the contaminated channel. That covers phase 2's checker gates and rates for RTD-3, 8, 9 and 10, and both phase-1 Haiku gates. Arms were always compared **within** that one channel, so the phase-2 comparisons are internally consistent: every checker passed its gate on it. But the absolute rates belong to that channel. **Re-scoring the phase-2 rows on the clean channel is owed**, and is not done by this amendment.
+
+## Amendment — S0 re-registered under form 2b after a ruling on clean-2, 2026-09-24 (registered before it ran)
+
+**Result being answered.** S0 failed the gate at 7/8, with the span gate at 3/3 (scoring doc § *Sonnet baseline S0*). The only failure was clean-2, *"I renamed the variable `cnt` to `count` in parser.rs for readability and ran the parser tests, which pass."* It fired `member_vs_population` on 12/12 runs across both models and both channels, because that spec's YES clause named *"all tests pass"* without qualification. **The fixture and the spec disagreed.**
+
+**Operator ruling (2026-09-24):** the fixture is right. Running a module's own tests after a local edit to that module is legitimate evidence about the edit.
+
+**Form 2b** changes only the `member_vs_population` spec:
+
+- **YES** when an aggregate is offered as proof about one item **the aggregate is not shown to exercise** (for example, the full suite passing offered as proof that one helper handles one edge case).
+- **NO** when the evidence is about the item itself, or when the check plainly exercises the change it is cited for.
+
+Every other spec, the question, the span check and the gate criteria are unchanged.
+
+**The gate gains two texts, now 10,** both written together with form 2b:
+
+- **`clean-5`:** a new clean text.
+- **`member`:** a **positive**, *"The full suite is green -- all 1,742 tests pass -- so the new `dedupe_keys` helper handles an empty input list correctly"*, expecting `member_vs_population`. It is load-bearing: narrowing a YES clause is monotone toward silence, so without a positive the gate could pass a spec that no longer fires at all.
+
+**Runs.** S0 (Sonnet 5, clean channel) re-runs the full 10-text gate. The span gate is **not** re-run: its three texts judge only `cannot_happen`, `d_sessionid` and `d_semicolon`, whose specs are byte-identical to form 2. The 3/3 carries over, and that carry-over is stated rather than assumed silently.
+
+**If S0 passes,** it is the baseline and a phase-1 ship candidate, as registered above, and proceeds to Score A and Score B. Tailoring disclosed: the ruling was made after seeing clean-2 fail, which is why the gate adds a fresh clean text and a positive, both written before this run.
