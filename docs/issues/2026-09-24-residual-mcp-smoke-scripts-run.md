@@ -2,7 +2,7 @@
 id: '7f97ee751bf72bc4'
 kind: bug
 status: open
-title: 'RESIDUAL: Fix the MCP smoke script''s get_symbols_overview call (nonexistent tool) and run the smoke scripts once'
+title: 'RESIDUAL: Run the MCP smoke scripts once (their get_symbols_overview call was already removed in 9406f3c4)'
 tags:
 - cluster/accepted-parameter-silently-dropped
 closed: null
@@ -27,7 +27,9 @@ Remaining work split out of `docs/issues/archive/2026-09-11-mcp-smoke-scripts-ca
 
 ## Fix
 
-Not started. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
+**Half of this was already done before this file was opened.** Re-checked 2026-09-24 against HEAD `ea972b40`: `9406f3c4` (2026-09-11, `fix(tests): repair stale tool names/params in the MCP smoke scripts, add a static gate`, on origin) removed `get_symbols_overview` from both `tests/mcp-smoke-rust.sh` and `tests/mcp-smoke-kotlin.sh` (0 occurrences in each), and added `tests/mcp_smoke_scripts_reference_real_tools.rs` to keep it out. The parent caveat quoted above was stale when this residual was split out on the same day: the splitting session (09093108) copied it without the re-check this file tells readers to do.
+
+**What remains:** run both smoke scripts once against a live server and record the result. That is the only unverified half. It needs a live LSP (rust-analyzer; a Kotlin LSP for the second script), so it is a manual run, not a code change.
 
 ## References
 
