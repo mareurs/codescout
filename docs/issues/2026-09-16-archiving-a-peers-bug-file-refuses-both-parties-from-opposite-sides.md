@@ -30,8 +30,8 @@ the guard accepts today. What survives is narrower and sharper — the refusal n
 that route.
 
 **This is not the already-filed empty intersection.**
-`docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
-(`1efc6488cb2b8946`) is **two different guards** — `foreign-index` × `ledger-counts` —
+`docs/issues/archive/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
+(`cecd0bb43d082406`) is **two different guards** — `foreign-index` × `ledger-counts` —
 whose acceptance sets do not overlap. This is **one guard** refusing both parties. Same
 cluster, different mechanism.
 ## Symptom (Effect)

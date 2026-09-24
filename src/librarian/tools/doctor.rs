@@ -10754,7 +10754,7 @@ mod tests {
     /// **The regression test for the defect this grammar exists to close.** A record that CITES
     /// a neighbour's patch-id — in prose, as a reference — was read as declaring its own fix
     /// anchor, because both uses are the same 40-hex token and the namespace had no escape for
-    /// *mention*. `docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
+    /// *mention*. `docs/issues/archive/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
     /// was reported as fixed-but-mislabelled on every clause while being correctly open, and the
     /// only available silence was an `unverified:` asserting something untrue.
     /// docs/issues/archive/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md

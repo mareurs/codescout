@@ -109,7 +109,7 @@ jobs:
 
   # ITS OWN JOB, for the reason `push-guard-tests` gives above: `shell-tests` is the known-flaky
   # lane, and this suite's value is that R1-R3 are readable as the reproduction of
-  # docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md
+  # docs/issues/archive/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md
   # and F1-F9 as the contract of scripts/commit-mine.sh -- a red here must read as a verdict.
   # Throwaway repos under mktemp -d; needs git and python3.
   commit-mine-tests:

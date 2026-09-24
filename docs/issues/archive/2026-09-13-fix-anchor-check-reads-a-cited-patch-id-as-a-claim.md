@@ -22,7 +22,7 @@ a 40-hex token in prose.
 
 ## Symptom (Effect)
 
-Measured 2026-09-13. `docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
+Measured 2026-09-13. `docs/issues/archive/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
 is reported as:
 
 > status is `open` but the body declares 1 patch-id(s) — `0e7feedf232c5ed9e22fd975c6fe36baa109e1d2` —

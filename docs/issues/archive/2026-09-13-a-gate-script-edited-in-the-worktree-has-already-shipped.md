@@ -200,7 +200,7 @@ Nothing in flight. The remedy text (candidate 3) shipped with the rule; candidat
   surfaced it in one command at filing time. A peer filing on the same day proposed a fix that
   would have reintroduced a defect closed 48 hours earlier, for want of the same one command
   (`fc7ff085`, withdrawn). *"Already documented" is checkable* — check it before filing, not after.
-- `docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md` — the same
+- `docs/issues/archive/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md` — the same
   shape at a different pair of guards; reported as its third instance of the day by the session
   this refusal landed on.
 - Reported from the receiving end by sessionId `9403d62d-116b-46ea-ac9b-004acff2b1cb`, who

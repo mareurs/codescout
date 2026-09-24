@@ -104,7 +104,7 @@ will reject.
 ## Hypotheses tried
 
 1. **Hypothesis (reporter's):** per-session worktrees dissolve this, per
-   `docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
+   `docs/issues/archive/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
    § *Fix* direction 3.
    **Verdict: rejected, and this bug is the counter-example.** The deadlock occurred
    inside a private linked worktree, by a different route than the entangled-ledger case

@@ -127,7 +127,7 @@ content without comment.
 
 ### Recurrence 2026-09-01 — still live at `30b6fc41`, and the author knew the bug
 
-Session `codescout-b7` filed `docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
+Session `codescout-b7` filed `docs/issues/archive/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
 via `artifact(action="create")` with a body copied from `docs/issues/_TEMPLATE.md` — which
 begins with a frontmatter block, because the template is a bug file. Result, verified in the
 bytes immediately after the call:

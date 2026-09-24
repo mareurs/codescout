@@ -5,7 +5,7 @@
 #
 # On a shared index, a session whose own staged change is COUPLED to a file a peer is
 # also editing had no compliant commit
-# (`docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`):
+# (`docs/issues/archive/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`):
 #
 #   R1  bare `git commit`            -> foreign-index refuses: the index holds a peer's path
 #   R2  `git commit -- <both files>` -> unreviewed-content refuses: a pathspec commit takes

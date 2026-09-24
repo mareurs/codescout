@@ -186,5 +186,5 @@ one tagged file and assert the gate reports the index count.
 - `tests/issue_clusters.rs` — module header, `tracked_all_bug_files`, `actual_counts`,
   `declared_counts`.
 - `scripts/pre-commit-ledger-counts.py` — the sibling that reads the index and says so.
-- `docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md` — the other
+- `docs/issues/archive/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md` — the other
   half of this checkout's gate/shared-state friction.

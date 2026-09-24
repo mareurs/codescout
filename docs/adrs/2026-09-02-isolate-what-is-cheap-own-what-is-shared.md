@@ -133,7 +133,7 @@ This is the current de-facto trajectory, and one evening exhausted it:
 - `foreign-index` accepts only a pathspec commit; `ledger-counts` accepts only a commit carrying
   a count with its member — which on an entangled index is only the bare one. **The
   intersection is empty**, and no ordering of correct steps escapes it
-  (`docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`).
+  (`docs/issues/archive/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`).
 - `unreviewed-content`'s condition — *no unstaged content at the committed paths* — is
   **satisfied by the `git add` its own remedy prescribes**, which is what erased the difference
   it would have caught.
@@ -281,7 +281,7 @@ stay flat or rise. If writes fall instead, the spool has added friction rather t
 
 - `docs/conventions/shared-checkout-commit-sequence.md` — the six steps and their measurements
 - `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` — Instance 7
-- `docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
+- `docs/issues/archive/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
 - `docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`
 - `docs/issues/archive/2026-09-02-one-ledger-file-serializes-every-class-edit.md`
 - `docs/issues/archive/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md`

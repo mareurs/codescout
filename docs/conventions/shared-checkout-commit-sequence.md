@@ -253,7 +253,7 @@ entangled index, is only the **bare** one. **The intersection is empty**, and no
 correct steps escapes it.
 
 That is a defect, filed separately at
-`docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`, with
+`docs/issues/archive/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`, with
 the mechanism re-derived from the hooks' source. This page cannot solve it; a sequence
 teaches the choreography and does not remove the need for one.
 
@@ -302,7 +302,7 @@ per-session worktree does that, which is what
 - `scripts/commit-sequence-tail.txt` — the emitted copy
 - `scripts/pre-commit-foreign-index.sh`, `scripts/pre-commit-unreviewed-content.sh`,
   `scripts/pre-commit-ledger-counts.py` — the three that print it
-- `docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
+- `docs/issues/archive/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
 - `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md`
 - `docs/trackers/response-envelope-session-log.md` — `F-2`, `F-3`, `F-4`, `F-5`
 - `CLAUDE.md` § *Reaching a Peer Session*

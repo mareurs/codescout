@@ -11,7 +11,7 @@
 # the peer's paths; a pathspec commit is refused because it takes the whole WORKING-TREE file,
 # peer's unstaged hunk included; committing the bug file alone is refused because the class
 # gained a member its ledger line does not name. Each guard is right, and their intersection
-# was empty (docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md).
+# was empty (docs/issues/archive/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md).
 #
 # HOW
 #
