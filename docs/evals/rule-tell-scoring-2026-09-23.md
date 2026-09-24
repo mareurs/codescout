@@ -315,6 +315,31 @@ Errored rows: 0 in both. The span check passed 5/5 in both.
 - **Partial sweeps are refused.** Score A now requires exactly one row per rule per text. It previously scored a single NO row as a clean text, exiting 0.
 - **Claim correctness is measured separately from rule correctness.** A span gate uses multi-sentence texts with one violating sentence each, and passes only if the quote lands on that sentence. Score A adds a claim-localisation figure: whether a gold-rule quote falls in the text the correction changed. A verbatim quote proves only that the sentence exists in the draft, not that it is the violating one.
 
+## Phase 1 — Sonnet baseline S0 and clean-channel Haiku H0-clean, registered
+
+Registered in `938799d0` before either ran. Both use form 2 unchanged (per-rule violation specs), on the **clean** judge channel (a config dir with only the credentials symlink and no plugins or hooks; 249 input tokens for "Say OK."). The gate is the 8 texts, then the 3-text span gate, 3 runs, ≥ 2/3 per text, 0 errored rows.
+
+| gate text | expected | H0 (Haiku, dirty) | **H0-clean (Haiku)** | **S0 (Sonnet 5)** |
+|---|---|---|---|---|
+| clean-1 | none | 3/3 | 3/3 | 3/3 |
+| clean-2 | none | 0/3 | 0/3 | **0/3** (`member_vs_population` all 3 runs) |
+| semicolon | `d_semicolon` | 3/3 (+`question_asked`) | 3/3 (+`d_sessionid`) | 3/3, alone |
+| sessionid | `d_sessionid` | 3/3 | 3/3 | 3/3, alone |
+| cannot | `cannot_happen` | 0/3 | 0/3 | 3/3 (+`closed_population` in 2) |
+| contradiction | `contradiction` | 3/3 (+2–3) | 3/3 (+2–3) | 3/3 (+0–4) |
+| clean-3 | none | 0/3 (5–7 rules) | 0/3 (3–4) | 3/3 |
+| clean-4 | none | 0/3 | 0/3 | 3/3 |
+| **gate** | | **4/8** | **4/8** | **7/8** |
+| span gate | quote on the violating sentence | not run | **2/3** (`span-cannot` 1/3) | **3/3**, 9/9 on-target |
+
+Errored rows: 0 in every run.
+
+**What this separates.**
+
+- **The channel was not what made Haiku fail.** H0-clean scores exactly H0's 4/8, with the same failing texts and a similar spread of stray fires. The hypothesis that the injected "ALWAYS VERIFY" `CLAUDE.md` drove the missing-evidence false positives is **refuted** for this gate. The within-channel phase-2 comparisons are unaffected by this either way.
+- **The model largely was.** Sonnet clears every text Haiku failed except one. It cleared both clean texts written alongside the specs (clean-3 and clean-4 at 3/3). It recovers `cannot_happen` (0/3 → 3/3), fires `d_semicolon` and `d_sessionid` alone, and lands every quote on the violating sentence (9/9).
+- **S0 still fails the registered gate, at 7/8,** and is recorded as failing. The single failure is **clean-2**: *"I renamed the variable `cnt` to `count` in parser.rs for readability and ran the parser tests, which pass."* It fires `member_vs_population` on every run of both models on both channels, 12 of 12 runs. That spec's YES clause names *"all tests pass"* as an aggregate used as proof about one item. On that wording, a suite passing offered as evidence that one rename is safe **is** the pattern, so clean-2's `none` label and the spec disagree. The disagreement is between two things this campaign wrote, not a judge error. **Neither is changed here after seeing the result.** Relabelling the fixture or narrowing the spec is a new registration, with the reason stated before the run.
+
 ## Next — phase 1 (handoff, 2026-09-24)
 
 **Where phase 2 left it.** At both decision points and for all four rules (RTD-3, 8, 9, 10), a reminder that **names the specific claim and the rule governing it** stops the violation (0/9–0/10). The rule's text alone does not do so reliably, and an unrelated injection never does. Removing the rules from `CLAUDE.md` did not raise violation rates. **So the whole value sits in phase 1 producing that binding:** find the claim in the draft, and pick the rule. Today's selector does neither. Jev's `choice` over the rule menu said `none` on 10/10 real drafts, with the gold rules at ranks 4–18. Phase 1A's corpus top-1 was 24%.
