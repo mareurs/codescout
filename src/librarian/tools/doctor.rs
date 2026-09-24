@@ -4935,6 +4935,68 @@ fn scan_undefined_entries(
     Ok(out)
 }
 
+/// The `external_prefix` declarations in a file's frontmatter, as `(prefix, authority)` pairs,
+/// where `authority` is a path relative to the declaring file's git root.
+///
+/// ```yaml
+/// external_prefix:
+///   TC: scripts/tc-suites/legacy-natural.json
+/// ```
+///
+/// Declares that a cited `PREFIX-N` namespace is **owned outside the markdown corpus** — a
+/// benchmark suite, a JSON fixture, a code constant — which is the third state
+/// [`scan_cited_prefix_with_no_definer`] could not represent. Both of its older remedies damage
+/// such a namespace: defining headings hands allocation to the librarian and turns silent
+/// citations dangling (measured −1 finding, +6), and `entry_prefix` locks id allocation to the
+/// librarian's allocator. docs/issues/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md
+///
+/// **A map rather than a set, because the authority is what makes silence earned.** A bare
+/// `external_prefix: TC` would mute the check forever, including after the suite it names is
+/// deleted; naming the file lets the check re-verify the claim on every run.
+///
+/// **Read here and nowhere else, deliberately.** It is not added to
+/// [`crate::librarian::tools::link_scan::extract::DocExtract`]: the resolver must keep treating
+/// these tokens as prose, and a prefix it learned about would start reporting every citation
+/// dangling — the exact damage this declaration exists to avoid. Nor does it need the
+/// hand-rolled `--no-default-features` reader `entry_prefix` has, because it does not make a
+/// file a ledger and so the guard never asks. Malformed frontmatter or a non-map value yields
+/// nothing, which leaves the finding firing: the safe direction.
+fn declared_external_prefixes(text: &str) -> Vec<(String, String)> {
+    let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(text) else {
+        return Vec::new();
+    };
+    let Some(serde_json::Value::Object(map)) = fm.extra.get("external_prefix") else {
+        return Vec::new();
+    };
+    map.iter()
+        .filter_map(|(prefix, v)| Some((prefix.trim().to_string(), v.as_str()?.trim().to_string())))
+        .filter(|(p, a)| !p.is_empty() && !a.is_empty())
+        .collect()
+}
+
+/// Why an `external_prefix` declaration does NOT hold, or `None` when it does: the authority
+/// exists under the declaring file's git root and contains at least one `PREFIX-<digits>` id.
+///
+/// Two bounds, each with its own test, and the second is not implied by the first — a suite
+/// rewritten under another id scheme still exists. Id-SHAPED on purpose: a bare substring test
+/// for the prefix would accept a file mentioning `"suite": "TC"` and holding no case at all.
+/// Falls back to the declaring file's directory only when it is not inside a repo.
+fn external_authority_problem(prefix: &str, declaring: &Path, authority: &str) -> Option<String> {
+    let dir = declaring.parent().unwrap_or(Path::new("."));
+    let root = crate::librarian::current_project::lookup_git_root(dir)
+        .unwrap_or_else(|| dir.to_path_buf());
+    let Ok(text) = std::fs::read_to_string(root.join(authority)) else {
+        return Some(format!("`{authority}` does not exist or cannot be read"));
+    };
+    let id = regex::Regex::new(&format!(r"\b{}-\d+\b", regex::escape(prefix)))
+        .expect("an escaped prefix is a valid pattern");
+    if id.is_match(&text) {
+        None
+    } else {
+        Some(format!("`{authority}` holds no `{prefix}-<n>` id"))
+    }
+}
+
 /// `cited_prefix_with_no_definer`: a prefix appears in ≥1 citation but has zero definers
 /// — no `## <ID> — <title>` heading anywhere in the corpus, and no artifact declares it via
 /// `entry_prefix` either. Neither `link_scan` nor `scan_undefined_entries` reaches this state:
@@ -5033,6 +5095,10 @@ fn scan_cited_prefix_with_no_definer(
     > = std::collections::BTreeMap::new();
     // The citers inside the active scope — the reported population.
     let mut in_project: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // prefix -> every (declaring path, authority) claiming it is owned outside the corpus.
+    // Corpus-wide for the same reason definers are: ownership is a property of the corpus.
+    let mut external: std::collections::BTreeMap<String, Vec<(String, String)>> =
+        std::collections::BTreeMap::new();
 
     for path in &paths {
         let Ok(text) = std::fs::read_to_string(path) else {
@@ -5046,6 +5112,12 @@ fn scan_cited_prefix_with_no_definer(
             }
         }
         known_prefixes.extend(ex.declared_prefixes.iter().cloned());
+        for (prefix, authority) in declared_external_prefixes(&text) {
+            external
+                .entry(prefix)
+                .or_default()
+                .push((path.clone(), authority));
+        }
 
         if scope.contains(Path::new(path)) {
             in_project.insert(path.clone());
@@ -5073,6 +5145,26 @@ fn scan_cited_prefix_with_no_definer(
         if known_prefixes.contains(&prefix) {
             continue;
         }
+        // Declared external: silent while ANY declaration's authority still holds the prefix,
+        // otherwise every declaration's reason is carried into the finding below — a stale
+        // declaration must not keep muting the check, and must not be reported with the
+        // generic remedies either, which are the two that damage an external namespace.
+        let broken_declarations: Option<Vec<String>> = match external.get(&prefix) {
+            None => None,
+            Some(decls) => {
+                let verdicts: Vec<Option<String>> = decls
+                    .iter()
+                    .map(|(declaring, authority)| {
+                        external_authority_problem(&prefix, Path::new(declaring), authority)
+                            .map(|why| format!("{declaring} → {why}"))
+                    })
+                    .collect();
+                if verdicts.iter().any(Option::is_none) {
+                    continue;
+                }
+                Some(verdicts.into_iter().flatten().collect())
+            }
+        };
         // The METRIC: is this a real, unowned namespace anywhere this catalog can see?
         let total: usize = by_file.values().sum();
         if total < MIN_CITATIONS || by_file.len() < MIN_FILES {
@@ -5150,25 +5242,44 @@ fn scan_cited_prefix_with_no_definer(
             String::new()
         };
 
-        out.push(Violation::new(
-            "cited_prefix_with_no_definer",
-            None,
-            files[0].clone(),
-            format!(
+        let citing = files
+            .iter()
+            .map(|f| f.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let detail = match broken_declarations {
+            Some(problems) => format!(
+                "`{prefix}-N` is cited {scoped_total} times across {} files and is declared \
+                 owned outside the corpus via `external_prefix`, but no declaration holds any \
+                 more: {}. The declaration was what kept this check silent, so it no longer \
+                 can. Citing files: {citing}.{elsewhere} Repoint `external_prefix` at the file \
+                 that now owns these ids, or drop it if the namespace is gone — do NOT add \
+                 `## {prefix}-N` headings for an externally-owned namespace, which hands its \
+                 allocation to the librarian and turns these citations dangling.",
+                files.len(),
+                problems.join("; ")
+            ),
+            None => format!(
                 "`{prefix}-N` is cited {scoped_total} times across {} files, but no `## {prefix}-N — \
                  <title>` heading exists anywhere in the corpus and no artifact declares \
                  `entry_prefix: {prefix}`. These citations are neither resolved nor reported \
                  dangling — link_scan's resolver treats a wholly-unknown prefix as prose noise \
                  (the same gate that keeps `UTF-8`/`SHA-256` silent), so this state is reported \
-                 nowhere else. Citing files: {}.{elsewhere} Either define the namespace (a heading per \
-                 entry) or declare it empty via `entry_prefix` if entries are coming later.",
-                files.len(),
-                files
-                    .iter()
-                    .map(|f| f.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                 nowhere else. Citing files: {citing}.{elsewhere} Either define the namespace (a \
+                 heading per entry) or declare it empty via `entry_prefix` if entries are coming \
+                 later. If the ids are owned OUTSIDE markdown (a test suite, a JSON fixture, a \
+                 code constant), use neither — both damage that state — and declare \
+                 `external_prefix: {{{prefix}: <repo-relative path>}}` in an artifact instead; \
+                 this check then stays silent only while that file holds a `{prefix}-<n>` id.",
+                files.len()
             ),
+        };
+
+        out.push(Violation::new(
+            "cited_prefix_with_no_definer",
+            None,
+            files[0].clone(),
+            detail,
         ));
     }
     Ok(out)
@@ -12811,6 +12922,14 @@ mod tests {
             "must name the citing files: {}",
             v[0].detail
         );
+        // Remedy SHAPE, not prose: the message must still name the third remedy. Its two
+        // older remedies both damage an externally-owned namespace (measured −1 finding, +6
+        // dangling), so a message offering only those sends that reader somewhere harmful.
+        assert!(
+            v[0].detail.contains("external_prefix"),
+            "must offer the external-namespace remedy beside the two ledger ones: {}",
+            v[0].detail
+        );
     }
 
     /// Below the citation-count threshold, stay silent — the guard against the false
@@ -13023,6 +13142,197 @@ mod tests {
                 .is_empty(),
             "T is declared, so it's a known-but-empty namespace -- ledger_defines_nothing's \
          territory"
+        );
+    }
+
+    /// A prefix DECLARED external (`external_prefix: {TC: <path>}`) is silent — but only while
+    /// the named authority still holds it. That is the third state the two remedies above cannot
+    /// represent: alive and authoritative somewhere the resolver does not read (`TC-N` is owned
+    /// by `scripts/tc-suites/legacy-natural.json`). Both prescribed remedies damage it — defining
+    /// headings measured −1 finding, +6 dangling citations.
+    /// docs/issues/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md
+    ///
+    /// Load-bearing fixture details, each named so a tidy-up cannot silently remove it:
+    ///   * `CL` is cited in the SAME files and declares nothing. It must still fire, which is
+    ///     what makes this a discriminator: without it the silence assertion is monotone under
+    ///     "the check returns nothing" and would pass against a stub.
+    ///   * The declaring file sits in `docs/` and the authority in `scripts/`, with the path
+    ///     written repo-relative. Resolving against the declaring file's own directory instead
+    ///     of its git root would look for `docs/scripts/suite.json`, find nothing, and fire.
+    ///   * The `.git` directory is what makes `tmp` a repo root for that resolution.
+    #[test]
+    fn cited_prefix_is_silent_when_declared_external_and_its_authority_holds_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("scripts")).unwrap();
+        std::fs::write(
+            tmp.path().join("scripts/suite.json"),
+            r#"{"cases": [{"id": "TC-01", "query": "q"}]}"#,
+        )
+        .unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "decl",
+            &tmp.path().join("docs/benchmark.md"),
+            "---\nexternal_prefix:\n  TC: scripts/suite.json\n---\n\n# Benchmark\n",
+        );
+        seed_ledger(
+            &cat,
+            "a",
+            &tmp.path().join("docs/a.md"),
+            "TC-1 and TC-2 regressed. See CL-1 and CL-2.\n",
+        );
+        seed_ledger(
+            &cat,
+            "b",
+            &tmp.path().join("docs/b.md"),
+            "TC-3 held. CL-3 too.\n",
+        );
+
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_cited_prefix_with_no_definer(&mut ds, &cat.conn).unwrap();
+        assert!(
+            !v.iter().any(|x| x.detail.contains("`TC-N`")),
+            "TC is declared external and scripts/suite.json holds TC-01, so it is owned — not \
+             abandoned: {v:?}"
+        );
+        assert!(
+            v.iter().any(|x| x.detail.contains("`CL-N`")),
+            "CL declares nothing and must still be reported — the control that keeps the \
+             silence above from passing against a check that reports nothing: {v:?}"
+        );
+    }
+
+    /// A declaration is a claim about a FILE, and a claim that has stopped being true must not
+    /// keep muting the check. Here the named authority does not exist — the suite was deleted
+    /// or renamed — so the finding fires, and names the stale declaration rather than repeating
+    /// the generic remedies, which would send the reader back to the two that damage this state.
+    ///
+    /// Owned by the EXISTS bound alone: the contains-the-prefix bound cannot run on a file that
+    /// is not there. The sibling below is the case that bound owns.
+    #[test]
+    fn cited_prefix_declared_external_fires_when_the_authority_is_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "decl",
+            &tmp.path().join("docs/benchmark.md"),
+            "---\nexternal_prefix: {TC: scripts/gone.json}\n---\n\n# Benchmark\n",
+        );
+        seed_ledger(&cat, "a", &tmp.path().join("docs/a.md"), "TC-1 and TC-2.\n");
+        seed_ledger(&cat, "b", &tmp.path().join("docs/b.md"), "TC-3.\n");
+
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_cited_prefix_with_no_definer(&mut ds, &cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        let d = &v[0].detail;
+        assert!(
+            d.contains("external_prefix") && d.contains("scripts/gone.json"),
+            "must name the declaration and the authority it points at: {d}"
+        );
+        assert!(
+            d.contains("does not exist"),
+            "must say WHY the declaration no longer holds: {d}"
+        );
+    }
+
+    /// The authority exists but no longer holds a single `TC-<n>` id — the suite was rewritten
+    /// under another scheme. Existence alone would earn silence here, so this is the case the
+    /// CONTAINS bound owns: the EXISTS bound admits this input, which is what makes the case
+    /// reach the bound it is named for.
+    #[test]
+    fn cited_prefix_declared_external_fires_when_the_authority_no_longer_holds_the_prefix() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("scripts")).unwrap();
+        // Load-bearing: `TC` appears, but never as `TC-<digits>` — a bare substring test for
+        // the prefix would accept this file, and only the id-shaped test refuses it.
+        std::fs::write(
+            tmp.path().join("scripts/suite.json"),
+            r#"{"suite": "TC", "cases": [{"id": "case-01"}]}"#,
+        )
+        .unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "decl",
+            &tmp.path().join("docs/benchmark.md"),
+            "---\nexternal_prefix:\n  TC: scripts/suite.json\n---\n\n# Benchmark\n",
+        );
+        seed_ledger(&cat, "a", &tmp.path().join("docs/a.md"), "TC-1 and TC-2.\n");
+        seed_ledger(&cat, "b", &tmp.path().join("docs/b.md"), "TC-3.\n");
+
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_cited_prefix_with_no_definer(&mut ds, &cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        let d = &v[0].detail;
+        assert!(
+            d.contains("external_prefix") && d.contains("scripts/suite.json"),
+            "must name the declaration and the authority it points at: {d}"
+        );
+        assert!(
+            d.contains("no `TC-<n>` id"),
+            "must say WHY the declaration no longer holds: {d}"
+        );
+    }
+
+    /// Two declarations of one prefix, one stale and one that holds: silent. Ownership is
+    /// established by ANY declaration whose authority still carries the ids — a second artifact
+    /// repeating an older path must not un-mute a namespace a correct declaration covers.
+    ///
+    /// Load-bearing: BOTH declarations are needed. Every sibling fixture has exactly one, where
+    /// "any holds" and "all hold" are the same predicate — this is the only case that tells them
+    /// apart, and mutating `any` to `all` survived the suite before it was written.
+    #[test]
+    fn cited_prefix_declared_external_is_silent_when_any_one_declaration_holds() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("scripts")).unwrap();
+        std::fs::write(tmp.path().join("scripts/suite.json"), r#"{"id": "TC-01"}"#).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "stale",
+            &tmp.path().join("docs/old.md"),
+            "---\nexternal_prefix: {TC: scripts/gone.json}\n---\n\n# Old\n",
+        );
+        seed_ledger(
+            &cat,
+            "live",
+            &tmp.path().join("docs/new.md"),
+            "---\nexternal_prefix: {TC: scripts/suite.json}\n---\n\n# New\n",
+        );
+        seed_ledger(&cat, "a", &tmp.path().join("docs/a.md"), "TC-1 and TC-2.\n");
+        seed_ledger(&cat, "b", &tmp.path().join("docs/b.md"), "TC-3.\n");
+
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_cited_prefix_with_no_definer(&mut ds, &cat.conn).unwrap();
+        assert!(
+            !v.iter().any(|x| x.detail.contains("`TC-N`")),
+            "one live declaration is enough; the stale one must not re-arm the finding: {v:?}"
         );
     }
 

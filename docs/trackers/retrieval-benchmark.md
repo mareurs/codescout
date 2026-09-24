@@ -11,6 +11,9 @@ tags:
 - qdrant
 - embedding
 expects_augmentation: docs/augmentations/docs-trackers-retrieval-benchmark.yaml
+external_prefix:
+  TC: scripts/tc-suites/legacy-natural.json
+  AE: scripts/tc-suites/artifact-entries.json
 ---
 
 ## Why this tracker exists
@@ -404,7 +407,7 @@ trade.** The embedder rejects oversized input with HTTP 500 instead of
 truncating, and nothing in the librarian embed path clips first, so artifact
 grain leaves a third of this corpus permanently vectorless in the absorbing state
 `2026-09-02-indexer-stamps-content-seen-before-it-embeds` describes. Filed as
-`618fcd89dd2c5e24`. It was visible three times before it was seen —
+`799145380a54b665`. It was visible three times before it was seen —
 `embed_error_count` read 2, 1 and 1 across the preceding day and was dismissed as
 incidental each time, because at chunk grain only a handful of chunks exceed the
 limit.

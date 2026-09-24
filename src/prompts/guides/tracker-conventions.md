@@ -704,6 +704,25 @@ prose. See `docs/issues/archive/2026-08-26-cited-prefix-with-no-definer-is-invis
 `doctor` check, this documentation, and a `link_scan` `counts.truncated` flag per finding
 array all shipped and are archived together.
 
+**A prefix owned OUTSIDE markdown is a fourth state, and neither ledger remedy
+fits it.** A benchmark suite, a JSON fixture or a code constant can own a
+`PREFIX-N` namespace — `TC-N` is `scripts/tc-suites/legacy-natural.json`'s case
+ids. Adding headings hands that namespace's allocation to the librarian *and*
+makes the prefix known, so every cited id the authority lacks turns **dangling**
+(measured −1 finding, +6). `entry_prefix` is wrong too: it locks id allocation
+to the librarian's allocator. Declare it instead, in any artifact:
+
+```yaml
+external_prefix:
+  TC: scripts/tc-suites/legacy-natural.json   # path relative to the repo root
+```
+
+`cited_prefix_with_no_definer` then stays silent **only while that file exists
+and holds a `TC-<n>` id** — the silence is re-checked every run, so a deleted or
+rewritten suite re-arms the finding and names the stale declaration. `link_scan`
+does not read the key and keeps treating the tokens as prose, which is the point.
+`docs/issues/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md`.
+
 
 ### Citing an entry — bare, or qualified
 
