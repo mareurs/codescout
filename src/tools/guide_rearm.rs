@@ -79,7 +79,7 @@ impl GuideRearmInbox {
     /// subagent's own call may consume it: consumed on any other principal's call,
     /// it re-armed THAT principal's ledger, so the parent's next call after a
     /// dispatch or resume lost its entire ledger
-    /// (docs/issues/2026-09-24-guide-rearm-request-is-consumed-by-whichever-principal-calls-next.md).
+    /// (docs/issues/archive/2026-09-24-guide-rearm-request-is-consumed-by-whichever-principal-calls-next.md).
     /// A request whose agent never calls again waits for its server to exit, and the
     /// next server's dead-pid [`gc`] removes it.
     ///

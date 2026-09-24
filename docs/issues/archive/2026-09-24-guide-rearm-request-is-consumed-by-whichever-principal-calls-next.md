@@ -1,5 +1,5 @@
 ---
-id: '084cfc7d1eb60c45'
+id: 5201164f55ec16ff
 kind: bug
 status: fixed
 title: 'BUG: poll_guide_rearm consumes a subagent''s re-arm request on ANY principal''s call — the parent''s next call after a dispatch or resume re-arms the parent''s entire ledger'
@@ -11,7 +11,7 @@ owner: marius
 related:
 - docs/issues/2026-09-24-subagent-stop-restore-strips-the-parents-own-guide-marks.md
 severity: high
-unverified: 'not verified live: the serving MCP binary at fix time predates a126bf48. Verified by the regression test (observed RED then GREEN), three isolated mutations each KILLED by the intended test, and gate GATE_EXIT=0. Live check spelled out in Resume.'
+unverified: 'CLEARED 2026-09-24. Was: not verified live, because the serving MCP binary at fix time predated a126bf48. Verified live on PID 2968670 after rebuild -- see Tests added.'
 ---
 
 # BUG: `poll_guide_rearm` consumes a subagent's re-arm request on ANY principal's call — the parent's next call after a subagent dispatch or resume re-arms the parent's entire ledger
@@ -103,13 +103,23 @@ Residual, not fixed here: a **resumed** stamped subagent still consumes its own 
   All three `KILLED (rc=101, 1 test(s) ran)`. The fourth guard — the parent must not consume — is covered by the RED above, since the pre-fix code *is* that mutation.
 - `guide_rearm::` (11) + `guide_hint_tests` (55): 66/66 green.
 
+### Live end-to-end verification, 2026-09-24
+
+Serving PID 2968670 (started 13:11:17 +0300) runs `target/release/codescout` built 13:04:09, after `a126bf48` (11:53:34); the binary contains the new log line (1 match) and not the old one (0). The parent's reconnect bootstrap re-arm was absorbed by a first call before the check.
+
+1. The probe subagent (`…/a3ba615808d91a57d`) was resumed with **zero tool calls** — the exact trigger that wiped an 11-topic parent ledger that morning. Read with native `Glob`/`Read` (which do not poll the inbox): request `2968670-e6143c2506b9f291.json` pending; parent ledger 10 topics.
+2. **One parent codescout call.** After its poll: request **still pending**; parent ledger **byte-identical** (all 10 topics, every timestamp unchanged); no guide injected into the parent's response.
+3. **Positive control** — without it, step 2 is also what a build that never consumes anything would show. The probe was resumed for one codescout call: it received `project-activation-bootstrap` on **its own** ledger (the documented resume residual), and the inbox was then **empty** — the named subagent consumed its own request. The parent's ledger file was still unchanged afterwards.
+
+**Independent replication, 2026-09-24** — by sessionId `09093108-1425-4f6d-9695-a9e3bb98ea0d` (profile `~/.claude-sdd`; attributed from the socket its message arrived on, not a self-report), which ran this record's Resume recipe against its own server (PID 2965755, `git_sha` `a6c4921f`), its own 3-topic ledger and its own zero-tool-call Sonnet probe: request `2965755-62b0544d33559f95.json` pending (hash verified against its probe's agent id; topics = exactly its 3 keys); after one parent call **and** a second one the request was still pending, its ledger byte-unchanged, and no guide re-delivered. That replication covers the negative half only; the positive half (the named subagent consumes its own request) is step 3 above. Two observers, two ledgers, two probes — and the second shares none of this session's context.
+
 ## Workarounds
 
 None.
 
 ## Resume
 
-Verify live, then archive. `cargo rb` + `/mcp` so the serving binary contains `a126bf48`; dispatch or resume a subagent that makes no codescout call; before any codescout call, confirm with a non-codescout tool that its request sits in `~/.local/state/codescout/guide_rearm/`; make one parent call; confirm the request is **still there** and the parent's ledger file still holds its topics. Then archive via `doc(action="move")` — and re-point `deep-agent-workflow-observations:DWF-6`'s citation of this file's id in the same commit, since the move mints a new one.
+N/A — fixed (`a126bf48`), regression-tested, mutation-checked, gate green, and verified live.
 
 ## References
 

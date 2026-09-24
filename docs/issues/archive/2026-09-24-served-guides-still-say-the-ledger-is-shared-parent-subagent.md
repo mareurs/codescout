@@ -1,5 +1,5 @@
 ---
-id: '8bb2ec02b621c3f7'
+id: d01eaef12cce9b8a
 kind: bug
 status: fixed
 title: 'BUG: four served surfaces still say the guide ledger is shared parent↔subagent — false since the principal ADR whenever the companion stamps subagent calls'
@@ -70,15 +70,17 @@ Reword each site to condition the shared-ledger claim on the absence of the comp
 
 N/A for the prose — asserting on wording reds on every rewording (CLAUDE.md § *Testing Discipline*). The one behavioural property at stake, that the repeat note stays neutral about who received the guide, is already pinned by `repeat_fetch_keeps_body_and_flags_static` (`src/tools/guide.rs`), which passes against the new wording.
 
+**Seen served live, 2026-09-24** on PID 2968670 (binary built after `a126bf48`): `project-activation-bootstrap`'s subagent paragraph arrived reading *"…your context is not theirs, and unless the companion hook gives each subagent its own guide ledger, a topic you triggered will not auto-inject for them"* — to the parent, and independently to a stamped probe subagent, which remarked on the changed wording unprompted — and `workspace-state` § *Subagent semantics* arrived with the conditional *"only when their calls arrive unstamped"* wording. `iron-laws-detail` and `get_guide`'s repeat note were not triggered live; they rest on the gate.
+
 ## Workarounds
 
 None needed; the advice itself was right.
 
 ## Resume
 
-Archive via `doc(action="move")`, re-pointing `deep-agent-workflow-observations:DWF-6`'s citation of this file's id in the same commit (the move mints a new id). Deferred only because that ledger file currently carries two peer sessions' uncommitted entries.
+N/A — fixed (`a126bf48`) and archived.
 
 ## References
 
 - `docs/adrs/2026-09-14-a-subagent-is-a-principal.md`
-- `docs/issues/2026-09-24-guide-rearm-request-is-consumed-by-whichever-principal-calls-next.md` — found in the same verification
+- `docs/issues/archive/2026-09-24-guide-rearm-request-is-consumed-by-whichever-principal-calls-next.md` — found in the same verification

@@ -1133,7 +1133,7 @@ impl CodeScoutServer {
     /// Consuming on whichever principal called next re-armed the PARENT's whole
     /// ledger after every subagent dispatch or resume — measured live as 11 topics
     /// lost to one zero-tool-call resume
-    /// (docs/issues/2026-09-24-guide-rearm-request-is-consumed-by-whichever-principal-calls-next.md).
+    /// (docs/issues/archive/2026-09-24-guide-rearm-request-is-consumed-by-whichever-principal-calls-next.md).
     /// Cost of the scoping, accepted there: an unstamped subagent is
     /// indistinguishable from its parent and no longer receives a re-arm.
     ///
@@ -12020,7 +12020,7 @@ mod guide_hint_tests {
     }
 
     /// Regression for
-    /// docs/issues/2026-09-24-guide-rearm-request-is-consumed-by-whichever-principal-calls-next.md.
+    /// docs/issues/archive/2026-09-24-guide-rearm-request-is-consumed-by-whichever-principal-calls-next.md.
     /// A re-arm request names ONE subagent — `<pid>-<shortHash(agent_id)>.json` —
     /// and consuming it on the parent's call re-armed the PARENT's whole ledger:
     /// measured live as 11 topics lost to a single zero-tool-call subagent resume.
