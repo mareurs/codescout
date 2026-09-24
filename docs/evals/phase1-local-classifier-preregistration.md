@@ -324,3 +324,35 @@ Nothing in Stages 2–4 has run, so these are corrections to the plan, not to an
 - **Three cases, drawn with `random.Random(20260924).sample(ids, 3)` from the 9 ids in numeric order, are given to the operator blind:** RTD-1, RTD-4 and RTD-7. The operator sees only the positive excerpt and its tell question, not the auditor's verdict. Agreement is reported as k of 3, and every disagreement is shown.
 
 **Limits, stated now.** A tell is written by someone who knew the violation, so it is a generous criterion: an S or V verdict says the excerpt is judgeable *given the tell*, not that a rule-level judge could find it. Nine cases, one auditor plus a three-case check, no interval claimed.
+
+## Amendment — S0 form 4: do spec gaps explain the silence? A diagnostic, 2026-09-24 (registered before it ran)
+
+**Question.** The `partial` audit found every excerpt shows its tell, and S0 silent even on the three that need nothing outside the excerpt. For the rules involved, the spec's own NO clause excuses the case: `count_unit`'s "NO when the number names its unit and population" drops its law's "Derive it, don't cite it"; `question_asked` narrows "the instrument" to compiles and green tests; `scope_instant` covers searches and counts but not a relation between two measurements. **If the spec names the shape, does S0 fire?** A yes means the silence is spec coverage. A no means the per-rule judge itself is the limit.
+
+**This is a diagnostic, not a ship candidate, and that is forced by the tailoring.** The widened wording (`SPECS_F4` in `scripts/phase1-span-selector.py`) was written after reading RTD-1, 2, 4, 11, 12, 16 and 19 in the audit, so a hit on those says the judge *can* fire given the shape, never that the spec generalises. No ship decision is taken from form 4. A spec breadth that generalises is tested on T in Stage 4, where the author has not seen the texts.
+
+**Arm.** S0 (Sonnet 5, `claude-sonnet-5`), clean judge channel (`judge-config-main`), **form 3's question** (the generic clause removed, since it states the opposite of "derive it, don't cite it") with `SPECS_F4` replacing three specs: `count_unit`, `question_asked`, `scope_instant`. One variable against form 3.
+
+**Only the three widened rules are re-run.** Every other rule's rows are carried unchanged from form 3's Score A (`p1s-S0f3-corpus.jsonl`, `--carry`), so Score A still covers 42 texts × 22 rules and its completeness check applies. About 200 subscription calls.
+
+**Gate, which stops the run on failure.** The three rules only (`--rules`), 3 runs per text, ≥ 2 of 3, 0 errored rows:
+
+- the five clean gate texts must stay clean for all three rules;
+- three new positives, one per widened spec, written fresh for the gate (`GATE_F4`), must each fire their rule;
+- the five gate positives for other rules are not applicable and are shown as such;
+- the span gate is not re-run: its three texts test rules this form does not change.
+
+**Predictions:**
+
+- **P1, the gate passes.** The risk is `count_unit` firing on clean-4's "12 rows".
+- **P2, gold fires on ≥ 5 of the 9 positives whose gold includes a widened rule** (RTD-1, 2, 4, 9, 11, 12, 16, 17, 19). Under form 3 it fired on 0 of them.
+- **P3, gold fires on ≥ 2 of the 3 audit V cases** (RTD-1, 12, 16).
+- **P4, the cost:** negatives with any fire rise by ≥ 2 texts over form 3's 5/21.
+
+**Reading, fixed now:**
+
+- **P2 holds:** the silence is spec coverage. The fix to carry forward is spec breadth written from each law's text, to be tested where the author is blind (T).
+- **Gold fires on ≤ 2 of the 9:** a spec that names the shape does not make S0 fire, so the per-rule judge design is the limit and further spec work is not the next step.
+- **In between:** reported per case, with no follow-up started from this alone.
+
+**Limits.** Score A is used a fourth time and the corpus is not blind to the author. One run per row. RTD-16's negative also violates `count_unit` by the corpus's own note, so a fire there is not a false positive.

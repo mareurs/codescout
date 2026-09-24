@@ -19,7 +19,9 @@ import io
 import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -85,6 +87,31 @@ class ScoreACompleteness(unittest.TestCase):
         self.assertEqual(code, 2, out)
         self.assertIn(f"UNEXPECTED ('NOT-A-CASE', '{self.first[1]}')", out)
         self.assertIn("0 incomplete", out)
+
+
+class CarriedRuleSubset(unittest.TestCase):
+    """--corpus --rules X --carry F: X is judged afresh, every other rule's rows come from F.
+
+    The judge is stubbed, so no model call is made. Asserts on the MERGE, which is what a
+    subset run's Score A rests on: one row per rule per text, the judged rule's rows new and
+    the rest carried."""
+
+    def test_a_judged_subset_plus_carried_rows_is_a_complete_score_a(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "merged.jsonl"
+            args = type("A", (), {"carry": str(CORPUS), "out": str(out), "pool": 4})()
+            with mock.patch.object(sel, "JUDGED", ["count_unit"]), \
+                    mock.patch.object(sel, "judge_rule",
+                                      lambda text, rule: {"rule": rule, "verdict": "NO"}), \
+                    contextlib.redirect_stdout(io.StringIO()) as buf:
+                code = sel.corpus(args)
+            rows = [json.loads(l) for l in out.read_text().splitlines()]
+        self.assertEqual(code, 0, buf.getvalue())
+        self.assertIn("42 of 42 texts, 924 rows", buf.getvalue())
+        fresh = [r for r in rows if "carried_from" not in r]
+        self.assertEqual({r["rule"] for r in fresh}, {"count_unit"})
+        self.assertEqual(len(fresh), 42)          # one fresh row per text, for the judged rule
+        self.assertFalse(any(r["rule"] == "count_unit" for r in rows if "carried_from" in r))
 
 
 if __name__ == "__main__":

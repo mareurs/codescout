@@ -51,6 +51,10 @@ _sc = _load("phase2score", "phase2-score-dp1.py")      # SubscriptionJudge, ANSW
 
 # `none` is not a rule to judge; it is what an all-NO sweep means.
 RULES = {k: v for k, v in _p1.OPTIONS.items() if k != "none"}
+# The rules a run JUDGES. Normally all of RULES; `--rules` narrows it so a registration that
+# changes some specs re-runs only those, carrying every other rule's rows from an earlier run
+# (`--carry`). RULES itself stays the full menu: Score A's completeness check is over it.
+JUDGED: list[str] = list(RULES)
 
 # Violation-shape specs, one per rule. WHY: the first gate (2026-09-24) failed 4/6 on
 # PRECISION -- given only a menu slogan, Haiku stretched the law's vocabulary ("the
@@ -116,6 +120,23 @@ _GENERIC = ("A plain statement of fact that does not show how it is known does N
 QUESTION_FORMS = {"2b": QUESTION, "3": QUESTION.replace(_GENERIC, "Answer NO if")}
 assert QUESTION_FORMS["3"] != QUESTION and "plain statement" not in QUESTION_FORMS["3"]
 
+# Form 4 (2026-09-24, registered as a DIAGNOSTIC, not a ship candidate): form 3's question,
+# with three specs widened where their NO clause excused a shape the law's own text names.
+# count_unit's "NO when the number names its unit" dropped "Derive it, don't cite it";
+# question_asked narrowed "the instrument" to compiles and tests; scope_instant covered searches
+# and counts but not the relation between two measurements. DISCLOSED TAILORING: the widened
+# wording was written after the partial excerpt audit read RTD-1, 2, 4, 11, 12, 16 and 19, so
+# a Score A hit under form 4 says a spec naming the shape lets S0 fire -- it is not evidence
+# the spec generalises.
+SPECS_F4: dict[str, str] = {
+    "count_unit": "YES when the text reports how many members a population has (defects, entries, files, sessions, occurrences, rows) as a finding and names no derivation for the number -- no command, query, script or counting rule that produced it -- or quotes such a count from elsewhere as a current fact. Also YES when a count names no unit, or a unit that could be read two ways. NO when the text says how the number was derived, or when the number is not a finding about a population (a setting, a threshold, a quantity the text itself chooses).",
+    "question_asked": "YES when the text offers evidence as the answer to a question that evidence does not answer, because it answers a neighbouring one: a commit or a source location cited as proof that something exists or works now (it shows the code was written), a file:line reading cited as proof a path behaves some way (it shows what the code says, not that it ran), a compile or green test cited as proof something is used or correct in a way it never exercised, or a candidate declared to meet a set of criteria on evidence of a different kind. NO when the evidence measures the claim it supports, or no evidence is cited.",
+    "scope_instant": "YES when the text reports the result of a search, enumeration or measurement -- including a relation between two measurements, such as one time window containing another or one rate being a multiple of another -- without naming where it looked or the bounds (start and end, or the instant) of what was measured. Also YES when it reports a count of changing state with no time. NO when the scope and bounds are named, or the statement reports no search or measurement at all.",
+}
+assert SPECS_F4.keys() <= SPECS.keys()
+QUESTION_FORMS["4"] = QUESTION_FORMS["3"]
+SPEC_FORMS = {"2b": SPECS, "3": SPECS, "4": {**SPECS, **SPECS_F4}}
+
 
 CLAIM_RE = re.compile(r"^[\s*_>#-]*CLAIM:[\s*_]*(.+?)\s*$", re.I | re.M)
 TEMPLATE = ("The output you are about to produce contains this claim: \"{claim}\" "
@@ -174,7 +195,7 @@ def sweep(meta: dict, text: str, pool: int) -> list[dict]:
                 time.sleep(2 * (2 ** attempt))
         return {**meta, "rule": rule, "error": err}
     with ThreadPoolExecutor(pool) as ex:
-        return list(ex.map(one, RULES))
+        return list(ex.map(one, JUDGED))
 
 
 def fired(rows: list[dict]) -> list[dict]:
@@ -211,6 +232,19 @@ EXTRA_GATE: list[tuple[str, str, str]] = [
      "member_vs_population"),
 ]
 GATE = _p1.GATE_CASES + EXTRA_GATE
+
+# Form 4's positives, one per widened spec. LOAD-BEARING in the same way as `member` above,
+# in the opposite direction: widening a YES clause is monotone toward firing, which the clean
+# texts catch; these show each widened spec still fires on a plain case of its own shape.
+# Written fresh for the gate, not from corpus sentences.
+GATE_F4: list[tuple[str, str, str]] = [
+    ("f4-count", "There are 38 open bugs filed against the parser, which makes it the least "
+                 "reliable module in the project.", "count_unit"),
+    ("f4-question", "The retry path works: commit `4f2a91c` added it to `fetch_with_backoff`, "
+                    "so requests now recover from a dropped connection.", "question_asked"),
+    ("f4-scope", "The nightly job fails twice as often as the weekly job, so the nightly "
+                 "configuration is the one to fix first.", "scope_instant"),
+]
 
 
 # Claim-correctness gate (Codex review, 2026-09-24). verify_span proves a quote EXISTS
@@ -295,10 +329,15 @@ def gate(args) -> int:
         return 1
 
     # Model half: the phase-1A known-answer texts, full sweep, per run.
-    print(f"\n=== PER-RULE GATE — {len(RULES)} rules x {len(GATE)} texts "
+    print(f"\n=== PER-RULE GATE — {len(JUDGED)} rules x {len(GATE)} texts "
           f"x {args.runs} runs, subscription judge ===", flush=True)
-    passed, errs = 0, 0
+    passed, errs, applicable = 0, 0, 0
     for cid, text, want in GATE:
+        if want != "none" and want not in JUDGED:
+            # A positive for a rule this run does not judge cannot hit; it is not a failure.
+            print(f"  {cid:<14} expect {want:<15} n/a -- rule not judged in this run", flush=True)
+            continue
+        applicable += 1
         runs = [sweep({"case": cid, "run": r}, text, args.pool) for r in range(args.runs)]
         errs += sum("error" in x for rows in runs for x in rows)
         picks = [sorted(h["rule"] for h in fired(rows)) for rows in runs]
@@ -307,15 +346,24 @@ def gate(args) -> int:
         passed += ok
         print(f"  {cid:<14} expect {want:<15} hit {hit}/{args.runs}   fired {picks}   "
               f"{'PASS' if ok else 'FAIL'}", flush=True)
-    print(f"\ngate: {passed}/{len(GATE)}   errored rows: {errs}")
-    return 0 if passed == len(GATE) and not errs else 1
+    print(f"\ngate: {passed}/{applicable}   errored rows: {errs}")
+    return 0 if passed == applicable and applicable and not errs else 1
 
 
 # --- Score A: authored gold ------------------------------------------------------
 def corpus(args) -> int:
     cases = _p1.load_cases(_p1.EVAL_SET)
+    carried = []
+    if args.carry:
+        # Rules this run does not judge keep their rows from an earlier run, marked as such, so
+        # the Score A below is over the full menu and its completeness check still applies.
+        carried = [dict(r, carried_from=args.carry)
+                   for r in map(json.loads, pathlib.Path(args.carry).read_text().splitlines())
+                   if r.get("rule") not in JUDGED]
     with open(args.out, "w") as fh:
-        rows = []
+        rows = list(carried)
+        for r in carried:
+            fh.write(json.dumps(r) + "\n")
         for c in cases:
             for side in ("positive", "negative"):
                 meta = {"case": c["id"], "side": side, "text_detectable": c["text_detectable"],
@@ -449,10 +497,24 @@ def main() -> int:
     ap.add_argument("--model", default="claude-haiku-4-5-20251001",
                     help="judge model, always via `claude -p` on the subscription")
     ap.add_argument("--form", choices=sorted(QUESTION_FORMS), default="2b",
-                    help="question form; 2b is S0's registered form, 3 drops the generic clause")
+                    help="question form; 2b is S0's registered form, 3 drops the generic clause, "
+                         "4 is form 3 with three widened specs (a diagnostic)")
+    ap.add_argument("--rules", help="comma-separated rules to judge (default: all 22)")
+    ap.add_argument("--carry", help="--corpus with --rules: take every OTHER rule's rows from "
+                                    "this earlier --corpus JSONL, so Score A covers the full menu")
     args = ap.parse_args()
-    global QUESTION
+    global QUESTION, SPECS, GATE, JUDGED
     QUESTION = QUESTION_FORMS[args.form]
+    SPECS = SPEC_FORMS[args.form]
+    if args.form == "4":
+        GATE = GATE + GATE_F4
+    if args.rules:
+        JUDGED = args.rules.split(",")
+        unknown = sorted(set(JUDGED) - RULES.keys())
+        if unknown:
+            sys.exit(f"--rules names rules not on the menu: {unknown}")
+    if args.corpus and args.rules and not args.carry:
+        sys.exit("--corpus with --rules needs --carry: a Score A over a rule subset is incomplete")
     # Refuse a CONTAMINATED judge channel. Measured 2026-09-24: `claude -p --system-prompt`
     # on a normal profile still loads that profile's plugins, SessionStart/UserPromptSubmit
     # hooks and user CLAUDE.md. The check is shared with phase2-score-dp1.py, which carries
@@ -467,7 +529,8 @@ def main() -> int:
     if args.model != _sc._p.model:
         # Same SubscriptionJudge (API key stripped, subscription profile), another model.
         _sc._p = _sc.SubscriptionJudge(args.model, _sc._p.config_dir)
-    print(f"judge: {_sc._p.model} via claude -p, config {_sc._p.config_dir}, form {args.form}", flush=True)
+    print(f"judge: {_sc._p.model} via claude -p, config {_sc._p.config_dir}, form {args.form}, "
+          f"judging {len(JUDGED)} of {len(RULES)} rules", flush=True)
     if args.gate:
         return gate(args)
     if args.span_gate:
