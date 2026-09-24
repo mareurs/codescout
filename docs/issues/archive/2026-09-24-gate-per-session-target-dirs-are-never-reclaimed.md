@@ -1,5 +1,5 @@
 ---
-id: '37b251b33adb37eb'
+id: 1da62c896d649aa6
 kind: bug
 status: fixed
 title: 'BUG: gate.sh''s per-session target dirs are never reclaimed — 323G across 17 trees filled /home to 97%'
@@ -13,7 +13,7 @@ related:
 - docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md
 - docs/issues/archive/2026-09-17-a-full-disk-truncates-a-live-sessions-registry-row-so-provenance-reports-it-dead.md
 severity: high
-unverified: 'tests/gate-slot.sh is wired as CI job `gate-slot-tests` (appended to .github/workflows/ci.yml) but has never run on CI: nothing is pushed. Confirm its first CI run is green before archiving.'
+unverified: 'CLEARED 2026-09-24. Was: tests/gate-slot.sh wired as CI job gate-slot-tests but never run on CI. It ran green in CI run 36041448098 on ea972b40.'
 ---
 
 # BUG: gate.sh's per-session target dirs are never reclaimed — 323G across 17 trees filled /home to 97%

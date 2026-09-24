@@ -16985,7 +16985,7 @@ no-disambiguator half, and the pusher who raised it to me cited it bare.
 
 **Valid:** dated 2026-09-24
 
-**Observed:** Before this scout, my ADR for bug `37b251b33adb37eb` recommended leasing a gate slot with `flock -n -o`. It said `-o` rules out a daemon inheriting the lock "regardless", and that "a crashed run frees its slot automatically". I had run neither claim. On 2026-09-24 a self-cleaning probe in the session scratchpad measured both lock modes:
+**Observed:** Before this scout, my ADR for bug `1da62c896d649aa6` recommended leasing a gate slot with `flock -n -o`. It said `-o` rules out a daemon inheriting the lock "regardless", and that "a crashed run frees its slot automatically". I had run neither claim. On 2026-09-24 a self-cleaning probe in the session scratchpad measured both lock modes:
 
 - **no `-o`, control:** a background child that outlives the command keeps the lock **HELD**. The lock frees only when that child is killed by pid.
 - **`-o`, same child:** the lock is FREE. It is held for the command's duration and freed afterwards.
@@ -17012,7 +17012,7 @@ The daemon path is live, not hypothetical. The shared sccache (pid 1116) was aut
 
 **Valid:** dated 2026-09-24
 
-**Observed:** I edited `scripts/gate.sh` in the shared working tree to replace per-session target dirs with a leased slot pool (bug `37b251b33adb37eb`). I then started my own verification gate. Its first line read `CARGO_TARGET_DIR=…/codescout-gate/slot-2`. `slot-0` and `slot-1` already existed, created at 18:15 and 18:16 local time, within about two minutes of my edit. `fuser` on the lock files named their holders by environment: session `ebf651ec` held `slot-0` and session `774ba049` held `slot-1`. Every session runs `./scripts/gate.sh` from the working tree, so an **uncommitted** edit became live for every session the moment it was saved.
+**Observed:** I edited `scripts/gate.sh` in the shared working tree to replace per-session target dirs with a leased slot pool (bug `1da62c896d649aa6`). I then started my own verification gate. Its first line read `CARGO_TARGET_DIR=…/codescout-gate/slot-2`. `slot-0` and `slot-1` already existed, created at 18:15 and 18:16 local time, within about two minutes of my edit. `fuser` on the lock files named their holders by environment: session `ebf651ec` held `slot-0` and session `774ba049` held `slot-1`. Every session runs `./scripts/gate.sh` from the working tree, so an **uncommitted** edit became live for every session the moment it was saved.
 
 **Why it mattered:** Each peer's first run under the pool is a **cold** build in a new slot. Their old per-session trees (warm, 20–21G each) are no longer used by anyone. `/home` was at 97% with 65G free. Three concurrent cold builds of roughly 20–25G each could exhaust that, and a full disk is the condition in which `c23d86eb` saw live sessions' registry rows truncated. On top of that, snapper's hourly `@home` snapshots pin every new tree from the next snapshot onward.
 

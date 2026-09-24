@@ -374,7 +374,7 @@ eq   "21 and still renders no verdict" "$(printf '%s' "$OUT" | grep -cE 'KILLED|
 # --- 22-25. THE ISOLATED WORKTREE IS LEASED PER RUN, not keyed on the session --------
 # Keying the tree on the session id left one 3.5-7.5G worktree per session that ever
 # ran the probe, never removed: 72G across 18 on 2026-09-24
-# (docs/issues/2026-09-24-mutation-probe-worktrees-are-never-reclaimed.md). It also
+# (docs/issues/archive/2026-09-24-mutation-probe-worktrees-are-never-reclaimed.md). It also
 # handed two CONCURRENT runs from one session (parallel subagents share the id) the
 # same tree, where each run's reset reverts the other's mutation.
 tree_of() { printf '%s\n' "$1" | sed -n 's/.*ARMED .* tree=//p' | head -1; }

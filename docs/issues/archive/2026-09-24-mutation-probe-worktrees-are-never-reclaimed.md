@@ -1,5 +1,5 @@
 ---
-id: '84b3e8d0960b439e'
+id: de0b7a1d8e53e685
 kind: bug
 status: fixed
 title: 'BUG: mutation-probe.sh keys its isolated worktree on the session id and never removes it — 72G across 18 trees'
@@ -10,16 +10,16 @@ tags:
 closed: 2026-09-24
 opened: 2026-09-24
 related:
-- docs/issues/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md
+- docs/issues/archive/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md
 severity: medium
-unverified: 'The mutation-probe-tests CI job has not yet run cases 22-26: nothing is pushed. Confirm its first CI run is green before archiving.'
+unverified: 'CLEARED 2026-09-24. Was: the mutation-probe-tests CI job had not yet run cases 22-26. It ran green in CI run 36041448098 on ea972b40.'
 ---
 
 # BUG: mutation-probe.sh keys its isolated worktree on the session id and never removes it — 72G across 18 trees
 
 ## Summary
 
-`scripts/mutation-probe.sh` creates one linked worktree per Claude session, at `<repo>.worktrees/mutation-<sessionId>`, and nothing ever removes it. cargo builds inside the worktree, so each tree holds a full `target/`. This is the sibling of `docs/issues/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md` (fixed in `3591f2ca`): the same key, and the same missing teardown.
+`scripts/mutation-probe.sh` creates one linked worktree per Claude session, at `<repo>.worktrees/mutation-<sessionId>`, and nothing ever removes it. cargo builds inside the worktree, so each tree holds a full `target/`. This is the sibling of `docs/issues/archive/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md` (fixed in `3591f2ca`): the same key, and the same missing teardown.
 
 ## Symptom (Effect)
 
@@ -99,4 +99,4 @@ Nothing claimed.
 ## References
 
 - `scripts/mutation-probe.sh:150-155`
-- `docs/issues/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md`, the sibling
+- `docs/issues/archive/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md`, the sibling

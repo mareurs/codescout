@@ -893,7 +893,7 @@ jobs:
   #
   # WHY IT IS WIRED AT ALL. `scripts/gate.sh` leases each run's CARGO_TARGET_DIR from a slot
   # pool, replacing per-session trees that nothing reclaimed (323G across 17 trees,
-  # docs/issues/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md). The
+  # docs/issues/archive/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md). The
   # properties that matter are all ones a green gate cannot show: a held slot is never
   # shared, a SIGKILLed gate does not free a slot its cargo still writes
   # (bug-fix-session-log:F-173), and a later session reuses a freed slot instead of minting

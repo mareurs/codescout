@@ -56,7 +56,7 @@ Why each part, one line each. Every measurement, date and superseded form →
   a policy for everyone else — the four commands above stay the canonical statement of *what* runs
   and in *what order*. Cost is one tree per CONCURRENT gate run, not per session. Keying on the
   session id left 323G in 17 trees behind
-  ([`docs/issues/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md`](docs/issues/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md)).
+  ([`docs/issues/archive/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md`](docs/issues/archive/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md)).
   The script prints its slot's size and the pool's total on every run, rather than this file
   quoting a number that would decay.
 - **Chain the two test lanes with `;`, never `&&`.** The guarantee above is conditional on the

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Suite for scripts/gate.sh's slot pool — bug 37b251b33adb37eb.
+# Suite for scripts/gate.sh's slot pool — bug 1da62c896d649aa6.
 #
 # gate.sh used to key CARGO_TARGET_DIR on the session id, so every session that ever ran
 # the gate left a 16-33G tree behind (323G across 17 trees on 2026-09-24). The isolation

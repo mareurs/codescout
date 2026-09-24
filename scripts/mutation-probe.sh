@@ -152,7 +152,7 @@ if [ "$SHARED" -eq 1 ]; then
 else
     # Leased per RUN from a pool, not keyed on the session: a session-keyed tree was never
     # removed (72G across 18 on 2026-09-24,
-    # docs/issues/2026-09-24-mutation-probe-worktrees-are-never-reclaimed.md) and gave two
+    # docs/issues/archive/2026-09-24-mutation-probe-worktrees-are-never-reclaimed.md) and gave two
     # concurrent runs from one session the same tree. Same lease as scripts/gate.sh: the
     # lock sits on an fd the test command inherits, deliberately without `flock -o`, so a
     # SIGKILLed probe whose command still runs keeps its tree (bug-fix-session-log:F-173).

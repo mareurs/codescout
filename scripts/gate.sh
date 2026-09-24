@@ -24,7 +24,7 @@
 # THE POOL, and why a lease rather than a directory per session. The race above lasts one
 # RUN, so a slot is held for one run and reused by the next, whichever session starts it.
 # The pool therefore grows with peak concurrent gate runs, not with sessions ever started:
-# keying on the session id left 323G in 17 trees on 2026-09-24 (bug 37b251b33adb37eb).
+# keying on the session id left 323G in 17 trees on 2026-09-24 (bug 1da62c896d649aa6).
 # The lock sits on an fd every child inherits, deliberately WITHOUT `flock -o`: with `-o`,
 # SIGKILLing this script frees the slot while its cargo is still writing into it, which
 # reopens the race; without it, a daemon started mid-run (sccache, measured) pins one slot,

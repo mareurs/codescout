@@ -399,7 +399,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 2. I classified liveness by registry row plus `/proc`, then widened the scope to all 5 config dirs and added a `CLAUDE_CODE_SESSION_ID` scan over `/proc/*/environ`, because the archived bug `c23d86eb` shows registry rows lie under disk pressure. Result: 11 orphan trees and 6 live.
 3. The first delete aborted without removing anything: `fuser` exits 1 when nothing holds the path, and `set -e` treated that as an error.
 4. The second delete removed all 11. `du` fell from 323G to 125G, but `df` did not move: snapper `@home` snapshots pin the deleted trees, and listing them needs root.
-5. Filed bug `37b251b33adb37eb`.
+5. Filed bug `1da62c896d649aa6`.
 6. Ran recon. `bug-fix-session-log:F-173` measured `flock -o` against no-`-o` and reversed the lock-mode recommendation.
 
 **Pre-action (fix):**
