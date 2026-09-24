@@ -518,3 +518,51 @@ A first build of the **mined correction pairs**, with no model call and nothing 
 **Exploratory, decided after seeing the data, and not an admission test:** on the binary that decides what enters T (a rule versus anything dropped), Codex and the agent labels agree on 37 of 40, κ = 0.754. Both `not-a-pair` and `not-a-violation` rows are dropped at admission, so the 4-way metric registered here counted a distinction the downstream use does not make. Admitting on that basis would need a new registration. Choosing the binary after seeing the 4-way result is disclosed as exactly that.
 
 **A reading Codex made that both Claude passes missed:** row 47, `monotone_absence`. The paragraph attributes the GPU traffic *because no index lock existed*, an absence used as proof, and the correcting commit says "the GPU load WAS indexing". It is the same pattern as the model-vs-context experiment: a different model family catches a different defect.
+
+## Amendment — binary admission on a second blind sample, under a revised instruction, 2026-09-24 (registered before the sample is drawn)
+
+**Operator decision, 2026-09-24:** after the Codex result above, fix the instruction's `not-a-pair`/`not-a-violation` overlap, admit on the binary label T uses, and test it on a fresh sample with the same independent labeller.
+
+**Why the admission label changes, disclosed as chosen after seeing data.** The 4-way collapsed label registered above separates `not-a-violation` from `not-a-pair`. Every downstream use drops both. The label that decides what enters T is binary: a rule, or dropped (`not-a-violation`, `not-a-pair`, `unsure`). This binary was picked *after* the 4-way κ failed, and on the first sample it gives 0.754. **So it is not tested on the first sample.** It is tested only on a second sample, drawn after this is committed.
+
+**The revised instruction:** `docs/evals/data/2026-09-24-rule-tell/stage2/label-instruction-v2.md`.
+
+- **What changed from v1:** only the title and the `not-a-violation` and `not-a-pair` definitions (`diff` against `label-instruction.md`). A later version of the same sentence is a pair, whether it fixes an error or updates a fact that was true when written. `not-a-pair` is kept for a twin about something else, or a fragment.
+- **Tailoring, disclosed:** v2's examples (a status changed, a to-do done, a commit id refreshed, a pointer added) come from the first sample's disagreements. The second sample is the protection against fitting the instruction to them.
+- **The rule and violation text is byte-identical to v1.** The agent labels were made under v1. v2 changes only a distinction the binary merges, so the agent labels stand under the admission label unchanged (sha256 `b9d9ac59ade9b740c4b8b4431aac565ac379c098f890b535cab9de8b1bbc0162`).
+
+**The second sample:**
+
+- 40 rows by `random.Random(20260928).sample` over the 904 row ids not in the first sample. The first sample is recomputed from its own seed, not read from a label file. Script: `draw_second_sample.py`.
+- Nobody reads these rows or their agent labels before Codex's labels exist.
+
+**The labeller and channel, as in the previous amendment, with one change:**
+
+- Codex `gpt-6-astra` at `medium`, `codex exec` on the ChatGPT subscription, API-key variables stripped, one run, outside the repository, in a directory holding only the v2 instruction (as `label-instruction.md`), `menu.json` and the 40 unlabelled rows.
+- **The change:** a **new** `CODEX_HOME`. The first run's home now holds Codex's own state databases (`memories_1.sqlite` among them), and this run must not inherit anything from it.
+- A run that errors, or returns fewer than 40 valid rows, is reported and not scored.
+
+**Admission rule, fixed now. Both conditions must hold on the second sample alone:**
+
+1. **Binary κ ≥ 0.6** between Codex and the agent labels.
+2. **Same rule on at least 80%** of the rows both call a violation. If fewer than 3 rows qualify, condition 2 is *untestable*. The labels are then admitted only for a pooled "any violation" use, and per-rule use is withheld.
+
+If condition 1 fails, the agent labels are not admitted and Stage 2's mined route stops, with no relabelling. Admitted labels go to T by the draw already registered (connected components, `random.Random(20260927)`, p = 0.3).
+
+**Reported alongside, not gating:**
+
+- The 4-way collapsed κ. It compares v2 labels with v1 labels, so it is not an admission test.
+- The binary κ pooled over both samples (n = 80).
+- Codex's `not-a-pair` count, and every disagreement.
+
+**Predictions:**
+
+- Binary κ ≥ 0.6.
+- Codex's `not-a-pair` count falls from 16 of 40 to at most 6 of 40, the agent labels' rate on the first sample.
+- The 4-way collapsed κ is at least 0.6.
+
+**Limits.**
+
+- **Power.** The agent labels call 114 of 944 rows violations (12%), so about 5 of the 40 are expected to be violations. At that prevalence, κ on n = 40 has a wide interval, and one disagreement moves it a lot. The raw table is published so a reader can see this.
+- **The labeller has seen sample 1** in a separate run. The fresh home shares no state with it, but it is the same model, and the instruction was revised in response to that run.
+- **T power is unchanged by admission.** At most 22 mined positives per rule, before a 30% draw, so per-rule T claims very likely stay withheld under the stopping rule.
