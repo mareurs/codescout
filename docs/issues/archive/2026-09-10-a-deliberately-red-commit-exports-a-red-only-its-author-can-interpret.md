@@ -1,12 +1,11 @@
 ---
-id: '8af43c2dea666595'
+id: 72531c93a788c413
 kind: bug
-status: taken
+status: mitigated
 title: 'BUG: a deliberately-red commit on a shared checkout exports a red only its author can interpret'
 tags:
 - cluster/transient-shared-state-lies-to-readers
-claimed_at: 2026-09-24
-claimed_by: e4fbc7ef-27b7-4707-8469-ccdffa8e4e92
+closed: 2026-09-24
 severity: high
 unverified: 'the masked population is now MEASURED (36 binaries, 5730 sum, 356 masked, --no-fail-fast at d5f2b736). What remains unestablished: which of this plan''s five reported ''N passed'' figures (9351, 5323, 5370, 3438, 5374) were lib-target lines and which were sums — 5374 is confirmed lib-only, the other four are not'
 ---
@@ -220,6 +219,28 @@ Open-bug sweep (`deep-agent-workflow-observations:DWF-7`), verifier evidence. **
    red spanning a task boundary on a shared checkout at all, or whether the gate deletion must be
    folded into the commit that falsifies it. The second is one more file in one commit and removes
    the class. This is a plan-shape ruling, not a code fix, and it is deliberately not decided here.
+
+### Ruled 2026-09-24 — forbidden, and the ruling is placed where a plan author reads
+
+Operator ruling on item 3: **an SDD plan may not sanction a red that spans a task boundary on this
+checkout.** The gate's deletion or rewrite folds into the commit that falsifies it. Placed on three
+surfaces, chosen by who is reading at the moment that matters:
+
+- `CLAUDE.md` § *Git Workflow* — the plan author's read surface. A deliberately-red commit trips no
+  pre-commit hook (none runs the test suite), so a rule that lived only in hook output would never
+  reach the one party who can comply with it.
+- `docs/conventions/shared-checkout-commit-sequence.md` § *3. Decide the coupling before you stage* —
+  the rationale, as a third coupled pair beside a count and its member.
+- `scripts/commit-sequence-tail.txt` step 3 — one clause, so the terse copy every refusing hook prints
+  stays a summary of its source rather than drifting from it.
+
+**Considered and declined in the same ruling: `--no-fail-fast` in `scripts/gate.sh`.** The masking
+escalation above stays true for any red that does land — one failing test binary still hides the
+results of the binaries after it. Recorded so the next reader does not re-derive it as an oversight.
+
+**Why `mitigated`, not `fixed`:** this is a policy, and nothing refuses a plan that breaks it. No
+mechanism is known that could — plan shape is not visible to any hook or test in this repo. Ruled with
+and recorded by sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`.
 
 ## Tests added
 

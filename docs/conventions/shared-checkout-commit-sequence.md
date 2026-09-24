@@ -90,6 +90,18 @@ the gate for all six sessions until you finish. If you cannot commit both yet, c
 *neither* — an untracked file is invisible to `git ls-files` and therefore to the count
 gates, which is why leaving work uncommitted is safe and leaving it half-committed is not.
 
+**A gate and the change that falsifies it are a third such pair — and a plan can split them before
+anyone stages.** An SDD plan that deletes or rewrites a test in a *later* task than the change that
+makes it fail has sanctioned a red spanning the task boundary. Operator ruling 2026-09-24: not on this
+checkout — fold the gate's change into the falsifying commit. Measured 2026-09-10: one such sanctioned
+red was investigated independently by two peer sessions inside ninety minutes, neither of whom had
+touched what it covered and neither of whom made a mistake
+(`docs/issues/archive/2026-09-10-a-deliberately-red-commit-exports-a-red-only-its-author-can-interpret.md`).
+The explanatory assertion message tried there is kept as defence in depth, not as the remedy: it
+reaches the reader who opens the failure, and none of the results a fail-fast lane never ran.
+**Unlike the two pairs above, no hook can catch this one** — plan shape is invisible to every gate — so
+the ruling is also stated in `CLAUDE.md` § *Git Workflow*, the surface a plan author actually reads.
+
 ### 4. Stage, read the diff, then commit by pathspec
 
 ```

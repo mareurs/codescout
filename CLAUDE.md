@@ -515,6 +515,17 @@ fix. Instances and derivation →
 `docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md`,
 `docs/issues/2026-09-06-a-withheld-commit-is-indistinguishable-from-an-unpushed-one.md`.
 
+**A deliberately red commit is a published red — so a plan may not sanction one across a task
+boundary.** Operator ruling 2026-09-24. On a solo checkout an intermediate red is private; here every
+session that gates in this tree runs it, in files it never touched, with nothing marking it expected,
+and the fail-fast test lanes then hide every test binary after it. So fold a gate's deletion or
+rewrite into the commit that falsifies it rather than scheduling it for a later task: the gate and its
+falsifier are a coupled pair, like a count and its member. **No hook can see a plan's shape**, which is
+why this rule is stated on the surface a plan author reads rather than in a refusal they would never
+trip. Derivation → `docs/conventions/shared-checkout-commit-sequence.md` § *3. Decide the coupling
+before you stage*; instance →
+`docs/issues/archive/2026-09-10-a-deliberately-red-commit-exports-a-red-only-its-author-can-interpret.md`.
+
 Full release cycle, standard ship sequence, SHA + patch-id citation rule, chained-git state-check, and concurrent-work reset safety → **`docs/RELEASE.md`**. SHA-citation + cross-repo `<repo>:<sha>` prefix discipline → memory `gotchas`. Commit style → memory `conventions`.
 ## Reaching a Peer Session — address by scope, not by the list you were handed
 
@@ -553,6 +564,13 @@ in one call. Then address by profile:
 `No agent named 'X' is reachable` is true of the **name** and false of the session — a
 cross-profile peer refuses by name and delivers by socket path. Never read it as "no such
 session".
+
+**The table's `LAUNCH-CWD` column is where a process started, not where its session works** —
+`workspace(action="activate")` moves the second without touching the first, and no registry field
+records it. Before any action whose safety depends on occupancy (a `git worktree remove`, a reset, a
+campaign that assumes a tree is idle), ask the session over its socket; the skill's Step 4 holds the
+question. Measured 2026-09-09: reading occupancy off that column was one message from licensing
+`git worktree remove` on an occupied worktree.
 
 **Three rules the corpus paid for, each once:**
 

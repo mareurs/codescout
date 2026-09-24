@@ -10,6 +10,7 @@ opened: 2026-09-09
 owner: marius
 related: []
 severity: high
+unverified: 'Not live: committed at claude-plugins:91b3205 but codescout-companion is still 1.20.14 in every profile cache, so no session runs the relabel or Step 4 until a release. No test pins either.'
 ---
 
 # BUG: the peer table's CWD column answers "who is alive" and is read as "who is working where"
@@ -200,6 +201,23 @@ other two are documentation.
   `workspace(action="activate")` moves a session after launch — which is the case this file records.
 
 Decision between options 1–3 still owed. Checked by sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`.
+
+### Fixed 2026-09-24 — options 1 and 2, committed, not yet live
+
+Operator chose relabel + ask-first. Landed as `claude-plugins:91b3205`, patch-id
+`525837ab253405ffafdbaa2e084d753d00fa29a2`: Step 1's header now reads `LAUNCH-CWD` with a one-line note
+under the table, and a new **Step 4 — before acting on where a peer is WORKING, ask** carries the
+socket question. `claude-plugins` `tests/test-skill-positional-tokens.sh` 4/4 and `tests/run-all.sh`
+all suites green. `CLAUDE.md` § *Reaching a Peer Session* gained the matching paragraph in the same
+codescout change, as § *Resume* required.
+
+**Not live yet, and deliberately:** every profile installs `codescout-companion` from its own cache
+(1.20.14), so a content edit reaches no one until a version bump
+(`docs/issues/archive/2026-08-17-plugin-content-edit-without-a-version-bump-never-reaches-any-profile.md`).
+Three unreleased hook commits by sessionId `774ba049-d97c-443a-b31d-f662a9cb6a1e` (`1cc83fb`, `3a069d5`,
+`cc99a6f`) sit between the 1.20.14 bump and this commit, so a release ships their work too — left to
+the operator. **`mitigated`, not `fixed`, once live:** the root cause (occupancy is not observable
+without cooperation) stays; option 3 is still not in this repo's gift. No test pins the label or Step 4.
 
 ## Tests added
 

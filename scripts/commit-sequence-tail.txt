@@ -9,8 +9,8 @@ on this checkout — the sequence, not the rules, is what nobody had written dow
        scripts/file-provenance.py — never by a commit range. A range is a proxy
        for authorship and stops being one the moment anyone else commits.
   3. Decide the COUPLING before you stage. A count and its member, a citation
-       and its target, commit together or not at all: every partial state is a
-       red tree for every other session.
+       and its target, a gate and the change that falsifies it, commit together
+       or not at all: every partial state is a red tree for every other session.
   4. Stage, read the diff, then commit by pathspec — in SEPARATE calls.
        git add <paths>
        git diff --cached --name-only   # the index is SHARED: are these all yours?
