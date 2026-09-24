@@ -14,7 +14,7 @@ entry_prefix:
 - DWF
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
-entry_high_water_DWF: 9
+entry_high_water_DWF: 10
 entry_high_water_DCS: 7
 ---
 
@@ -101,6 +101,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DCS-7 | 2026-09-24 | coverage | session-receipt | 571eb3d6/post-compaction-3-2026-09-24 |
 | DWF-8 | 2026-09-24 | workflow | routine-first | 938e2953/gate-cache-disk |
 | DWF-9 | 2026-09-24 | workflow | routine-first | e4fbc7ef/high-severity-bug-reverify |
+| DWF-10 | 2026-09-24 | workflow | enrichment | 571eb3d6/review-model-vs-context |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -443,6 +444,25 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 
 **Outcome 2026-09-24 (verification phase).** `good` / `verified-complete` for the stated check — each bug got a dated verdict backed by command output, written into its own file through the catalog (6 files, +119/−5): cross-account **still live** (17 of 27 peers invisible, a 4th profile appeared); cwd-column **still live**, no option applied; zombie trigger **not met** over the whole window (first use of `audit_log` for it); mcp-reconnect **not reproducible from a session** — and on `.claude-sdd`/`.claude-kat` the env surface is `.claude.json`, not `settings.json`; pre-commit guards **still structurally live**, the 09-16 ack excludes its shape by construction — **code-read, not a live reproduction**; deliberately-red: DWF-7's verdict stands, `gate.sh` still fail-fast. Five claimed `taken`; zombie left `zombie`. What the check did NOT establish: any fix. Four of six are gated on an operator decision or an operator-typed `/mcp`, which is the delegation-relevant finding: a bounded re-verify workflow completes autonomously, and the next step does not. |
 | Rests on / grouping / overhead | Canonical records: the six `docs/issues/` files named above; related DWF-7 (earlier open-bug sweep today). Capture ~5 min |
+
+## DWF-10 — Review model-vs-context experiment: 24 cross-model review runs settle what they can — the model picks WHICH defects, priming changes nothing
+
+**Status:** observed
+**Valid:** dated 2026-09-24
+
+| Field | Record |
+|---|---|
+| Status / Valid | `observed`; dated 2026-09-24 |
+| Sampling / capture mode | `enrichment`, operator-requested experiment; `retrospective` (written after the runs completed, from the committed artifacts) |
+| Identity / key / times | Session 571eb3d6, a background fork of it as collector and experimenter (Claude Opus 5.5). Reviewers: `claude-opus-5-5` via `claude -p` and `gpt-5.6-sol` (high effort) via `codex exec`, both on subscriptions. 2026-09-24, about 21:30–23:30 EEST |
+| Task / authority / substrate | Operator: settle whether two Codex reviews caught the authoring session's 11 defects because of the model or the context. Registered first (`f446e759`). Stimuli `a8835d06` and `898d3ea3`, one fresh detached worktree per run, removed after; every checkout was left clean |
+| Pre-action evidence | The 11 known defects, re-derived before the experiment. The two Codex review docs. The author's own pre-review summaries (primed texts) |
+| Initial next action / completion check | 24 review runs (a 2×2 per stimulus, n = 3), scored by a Sonnet 5 per-defect checker gated on the real reviews against the same reviews with each defect cut (22/22) |
+| Trajectory | CLI and auth probes (Codex `auth_mode chatgpt`, no key); clean channels for both, with no user instructions and no MCP; smoke tests; registration commit; checker gate; 24 runs, 4 in parallel, all exit 0; scoring; binding (the misses read); precision sample of 10 |
+| Effects / recovery | One pre-commit refusal: `runs/` was staged as a directory, a blanket add. Re-staged by explicit paths and committed as `50113f61`. No other retry |
+| Outcome / basis | `good`, `verified-complete` against its own registration. Registered reading: "not settled at this n". Context effect 0.015, model effect 0.015 pooled, but −0.13 on s1 and +0.39 on s2. Descriptive result: **the model decides which defects are found** (Claude: numeric recounts against the data; Codex: code and protocol holes). **A Claude+Codex pair covers 0.62–0.78 of the known set, a same-model pair 0.42–0.72**, and the union is 10 of 11. Priming with the author's summary changed nothing measurable. The authoring session found 0 of 11; a primed Claude reviewer found 13 of 33 |
+| Delegation candidate | A cross-model pair review (one Claude plus one Codex, cold, re-derive-every-number brief) before committing data artifacts. A proposal only: the observation window defers building it until 2026-10-02 |
+| Rests on / grouping / overhead | `docs/evals/review-model-vs-context-2026-09-24.md`, `docs/evals/data/2026-09-24-review-model-vs-context/`. Overhead about 2 h wall clock, mostly waiting for the reviewers. Limits: the known set is Codex's own findings; n = 3; one checker definition (O3) bundled a reason and produced 5 false negatives, reported both ways |
 
 ## Template for new entries
 
