@@ -1,17 +1,19 @@
 ---
 id: b085022bc2f05c36
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the gate''s slot pool bounds how many trees exist, not how big each grows — a slot trends toward the shared tree''s 104G'
 owners:
 - marius
 tags:
 - cluster/unclassified
+closed: 2026-09-24
 opened: 2026-09-24
 related:
 - docs/issues/archive/2026-09-24-gate-per-session-target-dirs-are-never-reclaimed.md
 - docs/issues/archive/2026-09-24-mutation-probe-worktrees-are-never-reclaimed.md
 severity: med
+unverified: CI has not yet run tests/gate-slot.sh cases G-K or tests/mutation-probe.sh cases 27-29. They run in the gate-slot-tests and mutation-probe-tests jobs on the next push of 9d755a16.
 ---
 
 # BUG: the gate's slot pool bounds how many trees exist, not how big each grows — a slot trends toward the shared tree's 104G
@@ -74,13 +76,37 @@ None yet.
 
 ## Fix
 
-Not started. Proposed: enforce a per-slot size ceiling at lease time, under the lock that proves
-the slot idle. Wiping `incremental/` alone is unmeasured as a remedy, because `deps/` grew by the
-same 49G in the shared tree.
+Fixed in `9d755a16`, patch-id `7316b17fb59c636ee0e7135f00e9e141d494c384`.
+
+`scripts/slot-pool.sh` now holds the lease that `gate.sh` and `mutation-probe.sh` had copied. Its `slot_tend` runs on every lease, under the locks that prove a slot idle:
+
+- **Ceiling.** A tree past `CODESCOUT_SLOT_CEILING_MB` is emptied before the run. The default is 49152 (48G): above the largest per-session tree measured (33G), below the 104G a long-lived tree reached. For the probe the tree is the worktree's `target/`, never the checkout.
+- **Burst reclaim.** Every FREE slot numbered KEEP or higher is removed. KEEP is `CODESCOUT_GATE_POOL_KEEP` (3, the most concurrent gate runs seen) or `CODESCOUT_PROBE_POOL_KEEP` (2). The probe removes a tree through `git worktree remove`, so its registration goes too.
+- **What it will not do.** It never unlinks a lock file: a run that opened the file just before the unlink could hold the orphaned inode while the next run locks a new file, and then two runs hold one slot. It never touches a tree that has no lock file, because nothing can prove such a tree idle. A non-numeric value for either knob exits 2 before any lane runs, since a typo like `48G` would otherwise switch the bound off without a word.
+
+The gate pool's disk use is now capped near 3 × 48G whether or not anyone is watching. A run that crosses the ceiling builds cold. That cost was **measured at 367 s and 16G** for a full gate from an empty pool (FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0), which is how this commit was gated.
+
+Wiping only `incremental/` was not tried. `deps/` grew by the same 49G in the shared tree, so it would bound the wrong half.
 
 ## Tests added
 
-None yet.
+- `tests/gate-slot.sh`:
+  - **G**: the ceiling, both directions;
+  - **H**: free slots at or past KEEP go, slots below KEEP stay, a held slot stays, and an already-reclaimed slot is not re-reported;
+  - **I**: with KEEP=0 the run's own slot survives, and so does a tree with no lock file;
+  - **J**: a non-numeric ceiling or KEEP exits 2 and runs no lane.
+
+  All red first: 13 failures against the previous script.
+- `tests/mutation-probe.sh`:
+  - **27**: KEEP, including the git registration;
+  - **28**: the ceiling aims at `target/` and leaves the checkout intact;
+  - **29**: a bad KEEP exits 2 before any worktree exists.
+
+  All red first: 5 failures.
+- **Mutations: 26, one per guarded site, all killed**, each on the assertion aimed at it. They went through `scripts/mutation-probe.sh` from a private worktree, so no mutant was ever live in the shared tree.
+  - The lease-loop mutations were re-run, because the loop moved files and a verdict measures bytes.
+  - Case 28's "checkout is intact" line exists because the first draft let a ceiling aimed at the whole tree pass. Git still lists a deleted tree, so a count cannot tell the difference.
+  - Final counts: 41/0 and 70/0.
 
 ## Workarounds
 
@@ -88,8 +114,7 @@ Delete a slot while holding its lock: `flock -n ~/.cache/codescout-gate/slot-N.l
 
 ## Resume
 
-Measure what a cold build costs in a wiped slot before choosing the ceiling. Also decide whether
-free slots above the usual concurrency should be reclaimed, since the high-water mark never falls.
+Remaining after the fix: clear `unverified` once CI runs the new cases. Nothing here bounds the shared `target/` (129G on 2026-09-24): nothing leases it, so nothing can prove it idle. That is a separate decision for the operator.
 
 ## References
 
