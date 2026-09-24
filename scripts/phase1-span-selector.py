@@ -338,7 +338,7 @@ def report_corpus(rows: list[dict]) -> int:
     # A text counts only with EXACTLY one row per judged rule. Without this a partial
     # sweep scores as a clean text: one NO row for 1 of 22 rules reported "0/1 false
     # positives, 0 errors, exit 0" (Codex review, 2026-09-24,
-    # docs/issues/2026-09-24-codex-phase1-partial-sweep-scoring.md). The live
+    # docs/issues/archive/2026-09-24-codex-phase1-partial-sweep-scoring.md). The live
     # --corpus path always writes 22, but --report reads whatever file it is given.
     want = collections.Counter(RULES.keys())   # NOT Counter(RULES): a dict's values are read as counts
     incomplete = {k for k, rs in texts.items()
@@ -346,7 +346,7 @@ def report_corpus(rows: list[dict]) -> int:
     # ...and the TEXTS are checked against the corpus the same way: the rule check above
     # only sees texts that have at least one row, so an empty file, or one with whole texts
     # dropped, reported "0 incomplete" and exit 0 on an undeclared subset
-    # (docs/issues/2026-09-24-codex-phase1-missing-case-groups.md).
+    # (docs/issues/archive/2026-09-24-codex-phase1-missing-case-groups.md).
     cases = _p1.load_cases(_p1.EVAL_SET)
     expected = {(c["id"], side) for c in cases for side in ("positive", "negative")}
     missing, unexpected = expected - texts.keys(), texts.keys() - expected

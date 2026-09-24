@@ -5,9 +5,9 @@ any file that is not the whole corpus sweep. Two holes, both found by the Codex 
 2026-09-24 and both exiting 0 on an undeclared subset:
 
 - a text with only some of its 22 rules judged scored as a complete text
-  (docs/issues/2026-09-24-codex-phase1-partial-sweep-scoring.md, fixed 0fef5562);
+  (docs/issues/archive/2026-09-24-codex-phase1-partial-sweep-scoring.md, fixed 0fef5562);
 - whole texts absent from the file were never noticed, since the rule check only sees texts
-  that have rows (docs/issues/2026-09-24-codex-phase1-missing-case-groups.md).
+  that have rows (docs/issues/archive/2026-09-24-codex-phase1-missing-case-groups.md).
 
 Fixtures are the committed S0 form-2b sweep, so no model call is made. Each case breaks the
 file in exactly one way that every OTHER check admits, so it exercises only the check it names.

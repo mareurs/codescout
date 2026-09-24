@@ -39,7 +39,7 @@ Stage 2 calls every other sentence a negative for every rule. Neither a mined ed
 
 ### Medium: whole missing texts still bypass Score A completeness
 
-The earlier within-text fix works: one of 22 rule rows returns 2. Actual offline report_corpus probes still return 0 for zero rows and for one complete negative text (22 rows), with zero incomplete groups. Validate the expected case/side manifest as well as the per-text rule grid. Filed as docs/issues/2026-09-24-codex-phase1-missing-case-groups.md. Both committed corpus files are complete, so the measured S0 numbers stand.
+The earlier within-text fix works: one of 22 rule rows returns 2. Actual offline report_corpus probes still return 0 for zero rows and for one complete negative text (22 rows), with zero incomplete groups. Validate the expected case/side manifest as well as the per-text rule grid. Filed as docs/issues/archive/2026-09-24-codex-phase1-missing-case-groups.md. Both committed corpus files are complete, so the measured S0 numbers stand.
 
 ### Medium: saved phase-2 scoring loses row-level adjudication and provenance
 
