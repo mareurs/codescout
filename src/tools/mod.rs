@@ -17,6 +17,7 @@ pub mod file_summary;
 pub(crate) mod format;
 pub mod grep;
 pub mod library;
+pub mod libtest_compact;
 pub mod markdown;
 pub mod memory;
 pub mod onboarding;

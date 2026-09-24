@@ -43,7 +43,57 @@ pub(crate) fn rebuild_buffered_summary(raw: Value, output_id: &str) -> Value {
         }
     }
 
+    // 5. The stderr tail's remedy names `<output_id>.err`; this is the one place that
+    // holds the id, so the placeholder becomes a call the reader can run as written.
+    if let Some(Value::String(s)) = map.get_mut("stderr") {
+        *s = s.replace(
+            crate::tools::command_summary::OUTPUT_ID_PLACEHOLDER,
+            output_id,
+        );
+    }
+
     Value::Object(map)
+}
+
+/// The inline response for a libtest run that `compact_libtest_output` accepted.
+///
+/// The raw streams go into a `@cmd_*` buffer — the same handle a buffered run gets — so
+/// nothing the command printed is lost; the reader gets the compacted text with a trailer
+/// naming that handle, plus the `passed`/`failed`/`ignored` counts `format_run_command`
+/// renders for `type: "test"`. Every diagnostic was already computed from the raw streams
+/// by the caller, so none of them can be silenced here.
+fn compacted_test_response(
+    c: crate::tools::libtest_compact::CompactedTest,
+    command: &str,
+    raw_stdout: &str,
+    raw_stderr: &str,
+    exit_code: i32,
+    ctx: &ToolContext,
+) -> Value {
+    let output_id = ctx.output_buffer.store(
+        command.to_string(),
+        raw_stdout.to_string(),
+        raw_stderr.to_string(),
+        exit_code,
+    );
+    let mut summary =
+        super::super::command_summary::summarize_test_output(raw_stdout, raw_stderr, exit_code);
+    // The compacted text already carries the failure detail and the stderr, so the
+    // summarizer's excerpts of both would say it twice.
+    if let Some(obj) = summary.as_object_mut() {
+        obj.remove("failures");
+        obj.remove("stderr");
+    }
+    let trailer = c.trailer(&output_id);
+    summary["stdout"] = json!(if c.stdout.is_empty() {
+        trailer
+    } else {
+        format!("{}\n{trailer}", c.stdout)
+    });
+    if !c.stderr.is_empty() {
+        summary["stderr"] = json!(c.stderr);
+    }
+    rebuild_buffered_summary(summary, &output_id)
 }
 
 /// Name the cause when the shell performed command substitution the caller did not intend.
@@ -674,6 +724,24 @@ pub(crate) async fn handle_successful_output(
                 );
             }
             r
+        } else if let Some(c) = (!buffer_only
+            && detect_command_type(original_command) == CommandType::Test)
+            .then(|| {
+                crate::tools::libtest_compact::compact_libtest_output(&raw_stdout, &raw_stderr)
+            })
+            .flatten()
+        {
+            // A short libtest run is ~40% cargo progress and empty sibling targets
+            // (docs/research/2026-09-24-rtk-evaluation.pdf § 7). Compacted only when that
+            // pays; otherwise the raw arm below returns it exactly as before.
+            compacted_test_response(
+                c,
+                original_command,
+                &raw_stdout,
+                &raw_stderr,
+                exit_code,
+                ctx,
+            )
         } else {
             let mut r = json!({"exit_code": exit_code});
             if !raw_stdout.is_empty() {

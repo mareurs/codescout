@@ -3427,6 +3427,308 @@ async fn an_unreadable_tee_capture_drops_the_whole_key_group_without_panicking()
     );
 }
 
+/// A filtered workspace run that matched nothing: eight sibling targets, each `running 0
+/// tests` + `0 passed … N filtered out`. Load-bearing: it is over 1 KB and almost entirely
+/// noise, so it is COMPACTED — which is what makes it the right input for asserting that
+/// compaction leaves the raw output and the empty-selection diagnostic intact.
+const INLINE_EMPTY_WORKSPACE_STDOUT: &str = "
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4479 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 0.00s
+
+";
+
+const INLINE_EMPTY_WORKSPACE_STDERR: &str =
+    "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running unittests src/lib.rs (target/debug/deps/codescout-abe48e7f59a7161f)
+     Running unittests src/main.rs (target/debug/deps/codescout-8a214943111ff1fb)
+     Running tests/audit_doc_refs.rs (target/debug/deps/audit_doc_refs-eaa5462f2843ab20)
+     Running tests/bug_regression.rs (target/debug/deps/bug_regression-403c50d5d427ce9f)
+     Running tests/cli_artifact.rs (target/debug/deps/cli_artifact-d7fa82706169fa18)
+     Running tests/link_scan.rs (target/debug/deps/link_scan-48c68e17171d75f4)
+     Running tests/retrieval_unit.rs (target/debug/deps/retrieval_unit-4078ae56642d5ce4)
+     Running tests/symbol_lsp.rs (target/debug/deps/symbol_lsp-4c27c61aaa67bd08)
+";
+
+async fn run_inline(command: &str, stdout: &str, stderr: &str) -> (serde_json::Value, ToolContext) {
+    let (_dir, ctx) = project_ctx().await;
+    let result = super::output::handle_successful_output(
+        command,
+        stdout.to_string(),
+        stderr.to_string(),
+        0,
+        false,
+        None,
+        std::path::Path::new("."),
+        &ctx,
+    )
+    .await
+    .expect("a completed command returns a response");
+    (result, ctx)
+}
+
+/// The compaction contract: the reader gets the compacted text, and the RAW streams stay
+/// byte-for-byte retrievable behind `output_id`. If the store were skipped, the trailer
+/// would point at a handle that resolves to nothing.
+#[tokio::test]
+async fn an_inline_libtest_run_is_compacted_and_its_raw_streams_stay_in_the_buffer() {
+    let (result, ctx) = run_inline(
+        "cargo test no_such_filter",
+        INLINE_EMPTY_WORKSPACE_STDOUT,
+        INLINE_EMPTY_WORKSPACE_STDERR,
+    )
+    .await;
+
+    let id = result["output_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("a compacted run must carry output_id; got {result}"));
+    let entry = ctx.output_buffer.get(id).expect("the handle must resolve");
+    assert_eq!(entry.stdout, INLINE_EMPTY_WORKSPACE_STDOUT);
+    assert_eq!(entry.stderr, INLINE_EMPTY_WORKSPACE_STDERR);
+
+    let stdout = result["stdout"].as_str().unwrap();
+    assert!(
+        !stdout.contains("running 0 tests"),
+        "empty targets must be dropped; got {stdout:?}"
+    );
+    assert!(
+        stdout.contains("omitted 8 target(s) that ran no tests (4554 filtered out)"),
+        "the trailer must name what was dropped; got {stdout:?}"
+    );
+    assert!(
+        stdout.contains(&format!("read_file(\"{id}\")")),
+        "the trailer must name the handle"
+    );
+    assert_eq!(result["type"], "test");
+    assert_eq!(result["passed"], 0);
+    // Every stderr line was cargo progress, so nothing is left to show — and the
+    // summarizer's raw stderr excerpt must not be reinstated in its place.
+    assert!(
+        result.get("stderr").is_none(),
+        "compacted stderr was empty; got {result}"
+    );
+}
+
+/// The guard rtk silenced (docs/research/2026-09-24-rtk-evaluation.pdf § 5) must survive
+/// codescout's own compaction, because it is computed from the raw output first.
+#[tokio::test]
+async fn an_empty_selection_is_still_named_after_compaction() {
+    let (result, _ctx) = run_inline(
+        "cargo test no_such_filter",
+        INLINE_EMPTY_WORKSPACE_STDOUT,
+        INLINE_EMPTY_WORKSPACE_STDERR,
+    )
+    .await;
+    assert!(
+        result["output_id"].is_string(),
+        "precondition: this run was compacted"
+    );
+    assert!(
+        result["empty_test_selection"].is_string(),
+        "compaction must not silence the empty-selection diagnostic; got {result}"
+    );
+}
+
+/// Below the 1 KB gate the response is exactly what it was before compaction existed.
+#[tokio::test]
+async fn a_short_libtest_run_is_returned_raw_as_before() {
+    let stdout = "\nrunning 1 test\ntest a::b ... ok\n\ntest result: ok. 1 passed; 0 failed; \
+                  0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n";
+    let (result, _ctx) = run_inline("cargo test a::b", stdout, "").await;
+    assert!(
+        result.get("output_id").is_none(),
+        "no buffer for a short run; got {result}"
+    );
+    assert_eq!(result["stdout"], stdout);
+}
+
+/// A non-test command with a libtest-shaped output is not compacted: the gate is the
+/// command type AND the content, and this pins the first half.
+#[tokio::test]
+async fn a_non_test_command_is_never_compacted() {
+    let (result, _ctx) = run_inline(
+        "cat saved-run.log",
+        INLINE_EMPTY_WORKSPACE_STDOUT,
+        INLINE_EMPTY_WORKSPACE_STDERR,
+    )
+    .await;
+    assert!(
+        result.get("output_id").is_none(),
+        "only a test command is compacted; got {result}"
+    );
+    assert_eq!(result["stdout"], INLINE_EMPTY_WORKSPACE_STDOUT);
+}
+
+/// A buffer QUERY never mints a new buffer — that is the invariant the buffer-only arms
+/// above exist for (a query answered with a handle would be queried again). A query whose
+/// text mentions `cargo test` classifies as a test command, so the compaction arm must
+/// exclude it on `buffer_only`, not on command type.
+///
+/// Built as a CONTROLLED pair: the same command and streams with `buffer_only = false`
+/// must compact, which proves every OTHER guard (type, libtest summary, size, saving)
+/// admits this input — so the only thing refusing the query is the gate this test names.
+/// Two uncontrolled versions of this test each passed with that gate deleted, refused
+/// first by the type gate and then by the size gate (mutation SURVIVED twice, 2026-09-24).
+#[tokio::test]
+async fn a_buffer_query_is_never_compacted_even_when_it_names_cargo_test() {
+    // Load-bearing: `detect_command_type` needs `cargo test` delimited by WHITESPACE, so the
+    // query names it after a shell comment; a quoted `'cargo test'` classifies Generic.
+    const QUERY: &str = "grep -B2 FAILED @cmd_abc12345 # from cargo test --lib";
+    let (_dir, ctx) = project_ctx().await;
+    let run = |buffer_only: bool| {
+        super::output::handle_successful_output(
+            QUERY,
+            INLINE_EMPTY_WORKSPACE_STDOUT.to_string(),
+            // Load-bearing: stdout alone is under the 1 KB size gate.
+            INLINE_EMPTY_WORKSPACE_STDERR.to_string(),
+            0,
+            buffer_only,
+            None,
+            std::path::Path::new("."),
+            &ctx,
+        )
+    };
+
+    let control = run(false).await.expect("a command returns a response");
+    assert!(
+        control["output_id"].is_string(),
+        "control: as an ordinary command this input must compact, or the case below proves \
+         nothing about buffer_only; got {control}"
+    );
+
+    let query = run(true).await.expect("a buffer query returns a response");
+    assert!(
+        query.get("output_id").is_none(),
+        "a query must not mint a buffer; got {query}"
+    );
+}
+
+/// A compacted RED: the failure stays in `stdout` and the counts are right, and the
+/// summarizer's `failures` excerpt is NOT added beside it, which would say it twice.
+/// Six empty sibling targets make it compactable.
+#[tokio::test]
+async fn a_compacted_red_keeps_its_failure_once_and_its_counts() {
+    let stdout = "
+running 2 tests
+test a::ok_one ... ok
+test a::broken ... FAILED
+
+failures:
+
+---- a::broken stdout ----
+
+thread 'a::broken' (1) panicked at src/a.rs:9:5:
+assertion `left == right` failed
+  left: 1
+ right: 2
+
+
+failures:
+    a::broken
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+"
+    .to_string()
+        + &"
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+"
+        .repeat(6);
+    let (result, _ctx) = run_inline("cargo test", &stdout, INLINE_EMPTY_WORKSPACE_STDERR).await;
+
+    assert!(
+        result["output_id"].is_string(),
+        "precondition: this run was compacted; got {result}"
+    );
+    assert!(result["stdout"]
+        .as_str()
+        .unwrap()
+        .contains("panicked at src/a.rs:9:5"));
+    assert_eq!(result["failed"], 1);
+    assert_eq!(result["passed"], 1);
+    assert!(
+        result.get("failures").is_none(),
+        "failure detail must appear once; got {result}"
+    );
+}
+
+/// The cut marker's remedy must name a call that WORKS, with this run's real handle. Its
+/// original text — "Full stderr is NOT in the @cmd_* buffer — buffer reads return stdout
+/// only" — was true when written (9c2b542f) and was made false by the `.err` suffix, so it
+/// sent every reader away from the full stderr. Load-bearing: stdout over 10 KB (forces the
+/// BUFFERED path, where this marker lives) and 30 non-progress stderr lines (over the 20-line
+/// tail budget, so the marker is emitted at all).
+#[tokio::test]
+async fn a_cut_stderr_tail_names_the_err_handle_that_holds_the_rest() {
+    let mut stdout = String::from("\nrunning 400 tests\n");
+    for i in 0..400 {
+        stdout.push_str(&format!("test tools::tests::case_{i:03} ... ok\n"));
+    }
+    stdout.push_str(
+        "\ntest result: ok. 400 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s\n",
+    );
+    let stderr: String = (1..=30)
+        .map(|i| format!("note: diagnostic line {i}\n"))
+        .collect();
+
+    let (result, ctx) = run_inline("cargo test", &stdout, &stderr).await;
+    let id = result["output_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("precondition: this run was buffered; got {result}"));
+    let rendered = result["stderr"].as_str().expect("a cut tail is rendered");
+
+    assert!(
+        rendered.contains(&format!("read_file(\"{id}.err\")")),
+        "the marker must name this run's .err handle; got {rendered:?}"
+    );
+    assert!(
+        !rendered.contains("NOT in the @cmd"),
+        "the false claim must be gone; got {rendered:?}"
+    );
+    // And the handle it names really holds the rest.
+    assert_eq!(
+        ctx.output_buffer.get(&format!("{id}.err")).unwrap().stderr,
+        stderr
+    );
+}
+
 /// Regression for docs/issues/archive/2026-08-26-unfiltered-output-ref-carries-no-size-signal.md:
 /// when the filter matched nothing, the response used to omit `stdout` entirely (absent,
 /// not `""`) and attach a bare `unfiltered_output` ref with no size signal — an agent

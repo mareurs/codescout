@@ -67,6 +67,12 @@ const STDERR_SUMMARY_BYTE_BUDGET: usize = 2000;
 /// lines in the wrong place — and both markers sit in the same envelope.
 pub(crate) const STDERR_TAIL_MARKER: &str = "--- stderr TAIL:";
 
+/// Stands for the envelope's own `output_id` inside a summarized `stderr` field's remedy.
+/// `summarize_stderr` cannot know the handle; `rebuild_buffered_summary` — which every
+/// buffered envelope passes through, and which holds the id — replaces it. Chosen to read
+/// sensibly if a caller ever renders the field without that pass.
+pub(crate) const OUTPUT_ID_PLACEHOLDER: &str = "<output_id>";
+
 // ---------------------------------------------------------------------------
 // CommandType
 // ---------------------------------------------------------------------------
@@ -243,18 +249,38 @@ fn clip_to_bytes(s: &str, max: usize) -> &str {
 /// — so taking the head here would re-report what is already covered and drop
 /// the only thing that is not.
 ///
+/// **Cargo's progress lines are removed before the tail is taken.** A workspace
+/// test run ends in one `Running …` line per target, and twenty of them fill the
+/// line budget by themselves, so the warning above them was exactly the line cut.
+/// A stderr of nothing but progress is omitted like an empty one; the raw stream
+/// stays in the buffer either way.
+///
+/// The marker's remedy names `<output_id>.err` through [`OUTPUT_ID_PLACEHOLDER`],
+/// which `rebuild_buffered_summary` replaces with the real handle. Until 2026-09-24
+/// it said the full stderr was NOT in the buffer — true when written, and made false
+/// by the `.err` suffix, so it sent readers away from the stream it described.
+///
 /// Returns `None` for empty stderr so the key is omitted rather than rendered
 /// empty, matching [`summarize_generic`].
 fn summarize_stderr(stderr: &str) -> Option<String> {
     if stderr.is_empty() {
         return None;
     }
-    let lines: Vec<&str> = stderr.lines().collect();
+    let all: Vec<&str> = stderr.lines().collect();
+    let lines: Vec<&str> = all
+        .iter()
+        .copied()
+        .filter(|l| !crate::tools::libtest_compact::is_cargo_progress_line(l))
+        .collect();
+    let progress = all.len() - lines.len();
+    if lines.iter().all(|l| l.trim().is_empty()) {
+        return None;
+    }
     let total = lines.len();
 
     // Walk backwards, so when the byte ceiling binds it drops the OLDEST line
     // kept rather than the newest. Forwards, a long compile log would spend the
-    // whole budget on `Compiling …` and cut off exactly the verdict.
+    // whole budget on its first lines and cut off exactly the verdict.
     let mut kept: Vec<&str> = Vec::new();
     let mut bytes = 0usize;
     let mut clipped = false;
@@ -278,13 +304,16 @@ fn summarize_stderr(stderr: &str) -> Option<String> {
     kept.reverse();
 
     let dropped = total - kept.len();
-    if dropped == 0 && !clipped {
+    if dropped == 0 && !clipped && progress == 0 {
         // Nothing lost: hand back the stream verbatim, trailing newline and all, so a
         // complete small stderr renders byte-identically to `summarize_generic`'s.
         return Some(stderr.to_string());
     }
 
     let mut notes: Vec<String> = Vec::new();
+    if progress > 0 {
+        notes.push(format!("{progress} cargo progress line(s) omitted"));
+    }
     if dropped > 0 {
         notes.push(format!("{dropped} earlier line(s) dropped"));
     }
@@ -293,7 +322,7 @@ fn summarize_stderr(stderr: &str) -> Option<String> {
     }
     Some(format!(
         "{STDERR_TAIL_MARKER} {notes}; {shown} of {total} line(s) shown. \
-         Full stderr is NOT in the @cmd_* buffer — buffer reads return stdout only. ---\n{body}",
+         Full stderr: read_file(\"{OUTPUT_ID_PLACEHOLDER}.err\") ---\n{body}",
         notes = notes.join("; "),
         shown = kept.len(),
         body = kept.join("\n"),
@@ -913,6 +942,57 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         // `cluster/capped-result-presented-as-complete` shape the bug itself is.
         assert!(rendered.contains("--- stderr TAIL:"));
         assert!(rendered.contains("earlier line(s) dropped"));
+    }
+
+    /// A workspace run's stderr tail is cargo's `Running …` line per target, and 20 of them
+    /// fill the LINE budget alone — so the warning above them, the thing the tail exists to
+    /// carry, is the line that gets cut. Load-bearing: 25 progress lines (over the 20-line
+    /// budget) at ~60 B each (~1.5 KB, UNDER the 2 KB byte budget), so it is the line cap
+    /// that would drop the warning, and removing progress first is the only thing that
+    /// keeps it.
+    #[test]
+    fn cargo_progress_does_not_spend_the_stderr_tail_budget() {
+        let mut stderr = String::from("warning: unused variable: `x`\n --> src/a.rs:1:5\n");
+        for i in 1..=25 {
+            stderr.push_str(&format!(
+                "     Running tests/t{i:02}.rs (target/debug/deps/t{i:02}-00000000)\n"
+            ));
+        }
+        assert!(
+            stderr.len() < 2000,
+            "fixture must stay under the BYTE budget"
+        );
+
+        let summary = summarize_test_output("running 0 tests\n", &stderr, 0);
+        let rendered = summary["stderr"].as_str().unwrap();
+        assert!(
+            rendered.contains("warning: unused variable: `x`"),
+            "the warning must survive; got {rendered:?}"
+        );
+        assert!(
+            !rendered.contains("Running tests/"),
+            "progress must not be shown"
+        );
+        assert!(
+            rendered.contains("25 cargo progress line(s) omitted"),
+            "the omission must be announced; got {rendered:?}"
+        );
+    }
+
+    /// A green run's stderr is often nothing BUT progress; showing it is pure noise, and the
+    /// raw stream stays in the buffer behind `.err`.
+    #[test]
+    fn a_stderr_of_only_cargo_progress_is_omitted() {
+        let stderr =
+            "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s\n     \
+                      Running unittests src/lib.rs (target/debug/deps/a-0000000000000001)\n     \
+                      Running tests/b.rs (target/debug/deps/b-0000000000000002)\n";
+        let summary = summarize_test_output("running 0 tests\n", stderr, 0);
+        assert!(
+            summary.get("stderr").is_none(),
+            "progress-only stderr must not be rendered; got {:?}",
+            summary.get("stderr")
+        );
     }
 
     #[test]
