@@ -1,7 +1,7 @@
 # Open-source Jev ("System 1") clones: can we fine-tune one for phase-1 rule + claim-span selection?
 
 Date: 2026-09-24. This is web and docs research only: no weights were downloaded, nothing was installed or trained, no paid API was called, Jev was not called, and no key was read.
-It builds on `scratchpad/jev-research.md` (Jev's API, its limits, the sentence-ID trick) and does not repeat it.
+It builds on `jev-research.md` in this directory (Jev's API, its limits, the sentence-ID trick) and does not repeat it.
 `[INFERRED]` marks my reasoning. "Not found" means I looked and found nothing.
 
 In-repo context I read:
@@ -51,7 +51,7 @@ In-repo context I read:
 **Where the harness, tasks and data live.** [github.com/fstandhartinger/jevbench](https://github.com/fstandhartinger/jevbench), MIT (harness, 72 original public decisions, scoring rules). It contains:
 - `datasets/public/{original,easy,hard}.jsonl`;
 - the `jevbench/` harness with adapters `typesafe`, `systemone_list`, `gradio_space`, `local_openjev` and `openai_compat`;
-- `results/v1.x/` and `docs/METHOD-v1.4.md` ([README](https://github.com/fstandhartinger/jevbench); [method](https://github.com/fstandhartinger/jevbench/blob/main/docs/METHOD-v1.4.md)).
+- `results/v1.x/` and the method document, METHOD-v1.4 ([README](https://github.com/fstandhartinger/jevbench); [method](https://github.com/fstandhartinger/jevbench/blob/main/docs/METHOD-v1.4.md)).
 
 **Data.**
 - v1.0 had 242 decisions (72 hand-written public, 24 held out, 146 imported from the author's router experiment).
@@ -99,7 +99,7 @@ Current ranks are v1.4.1 ([leaderboard](https://benchmarkheaven.com/jev-models))
 
 | system (rank v1.4.1) | architecture / base | licence | weights | API | probabilities | context | hardware / latency | training recipe published? |
 |---|---|---|---|---|---|---|---|---|
-| **Jev 1.13.0** (#1, 63.3; public 86.6% / sealed 36.7%) | closed | proprietary | none | `/v1/systemone` choice/score/noul | "native", RLCD-trained (previous report) | 32k state + question | p50 0.65 s | no ([previous report](../jev-research.md)) |
+| **Jev 1.13.0** (#1, 63.3; public 86.6% / sealed 36.7%) | closed | proprietary | none | `/v1/systemone` choice/score/noul | "native", RLCD-trained (previous report) | 32k state + question | p50 0.65 s | no ([previous report](jev-research.md)) |
 | **JevK5 v0.2.0** (#2, 62.0; 85.3% / 33.1%) | Qwen3.5-4B + LoRA r16 on attention, merged bf16; distilled from Qwen3.6-27B-thinking | Apache-2.0 (code + weights); prompt/readout adapted from SemIf (MIT) | [HF alibiserikbay/JevK5](https://huggingface.co/alibiserikbay/JevK5), plus `-GGUF` and a `-2B` variant | TypeSafe `/v1/systemone` shape | softmax over option-letter logits at the last position, one temperature T=1.532 | **refuses >16,384 tokens**; ≤16 options | ~9 GB VRAM bf16; ~13 ms/decision on H100 with CUDA graphs | **yes**: `training/teacher.py`, `training/lora.py`; 2 epochs, lr 3e-5; data 3,272 teacher + 3,272 human-labelled items ([repo](https://github.com/allebee/jevk5); [issue #31](https://github.com/fstandhartinger/jevbench/issues/31)) |
 | **Hopper** (#3, 59.4; 82.3% / 34.1%) | Qwen3.5-4B + LoRA r16 (PEFT) | Apache-2.0 | [HF HopitAI/hopper](https://huggingface.co/HopitAI/hopper) | `/v1/systemone` | letter-logit softmax plus per-type temperature map (choice 0.790, noul 0.753, score 0.900) | not stated; "weak on long, multi-hop documents" | needs `flash-linear-attention` or ">10x slower"; VRAM not stated | serving code only; data sources listed, sizes and hyperparameters not stated ([card](https://huggingface.co/HopitAI/hopper)) |
 | **Winnow-12B Q8** (#4, 55.6; 85.7% / 33.1%) | 12B GGUF (Gemma-3-12B reference for pricing) | not found | not found (model card not found) | `/v1/systemone` server; run at 8,192 context | native | 8,192 in the benchmark run | ~13 GB Q8 file `[INFERRED]`; p50 0.23 s | no: "private training corpus was not released" ([leaderboard](https://benchmarkheaven.com/jev-models); [search summary of issue](https://github.com/EldanRing/winnow-inference/issues/1)) |

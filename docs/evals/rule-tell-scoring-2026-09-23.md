@@ -708,7 +708,7 @@ Registered in `6aa61dff` before it ran, and **chosen after form 4's gate**, whic
 
 - **Judge channel:** `JUDGE_CONFIG_DIR=<scratchpad>/judge-config-main`. That dir holds only a symlink to `~/.claude/.credentials.json` and `{"enabledPlugins":{},"hooks":{}}`. The selector refuses a dirty channel, and since the Codex-review fixes so does `phase2-score-dp1.py` (both call its `dirty_reasons`); `--allow-dirty-judge` reproduces old rows on purpose. `phase2-score-dp1.py` now also requires `--out`, a JSONL of every row's three votes and outcome under a header naming the checker's question hash, the judge and the input's hash, so a later checker change can be traced row by row. The scratchpad is session-local, so a new session must rebuild the dir.
 - **Interpreter:** run forks and scoring with `prompt-engineering/.venv/bin/python`. The system python lacks `anthropic`.
-- **Forks:** on another profile, `--resume` needs a transcript prefix in `$CLAUDE_CONFIG_DIR/projects/<slug>/`. See `scratchpad/score-b-s0.sh` for the whole pipeline, including the guard that refuses to score partial fork output.
+- **Forks:** on another profile, `--resume` needs a transcript prefix in `$CLAUDE_CONFIG_DIR/projects/<slug>/`. See `docs/evals/data/2026-09-24-rule-tell/score-b-s0.sh` for the whole pipeline, including the guard that refuses to score partial fork output.
 - **Accounts:** `~/.claude-kat` hit its session limit on 2026-09-24. Judging and forks moved to `~/.claude` at the operator's direction.
 
 **Standing constraints:** subscription only, never the paid API; register before running; compare only within one route and one judge channel; never print the Jev key; commit only my own paths, each by pathspec; do not push unless asked.
