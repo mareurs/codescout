@@ -566,3 +566,30 @@ If condition 1 fails, the agent labels are not admitted and Stage 2's mined rout
 - **Power.** The agent labels call 114 of 944 rows violations (12%), so about 5 of the 40 are expected to be violations. At that prevalence, κ on n = 40 has a wide interval, and one disagreement moves it a lot. The raw table is published so a reader can see this.
 - **The labeller has seen sample 1** in a separate run. The fresh home shares no state with it, but it is the same model, and the instruction was revised in response to that run.
 - **T power is unchanged by admission.** At most 22 mined positives per rule, before a 30% draw, so per-rule T claims very likely stay withheld under the stopping rule.
+
+**Result, 2026-09-24:**
+
+- **Run:** one, exit 0. The header shows `gpt-6-astra`, reasoning effort `medium`, in a new home (`codex-run2-header.txt`). Output: 40 rows, 40 distinct ids equal to the sample, every label allowed. This was checked by a separate script, not only by Codex's own check.
+- **Blindness:** verified from the log. Codex ran five commands. The first `cat`s the three input files. The four Python heredocs open only `sample.jsonl`, `menu.json` and Codex's own output file.
+- **Files:** `codex-sample2-labels.jsonl` and `agreement-codex-sample2.txt` in the Stage 2 data directory.
+
+| second sample, Codex (v2) vs agent labels | raw | κ (chance) |
+|---|---|---|
+| **binary: a rule vs dropped, the admission label** | 36/40 | **0.615** (0.740) |
+| 4-way collapsed, v2 against v1 labels, not gating | 33/40 | 0.696 (0.424) |
+| both call a violation → same rule | 4 → 4 | |
+| *(pooled over both samples, binary, not gating)* | 73/80 | 0.690 (0.718) |
+
+**Against the registered readings:**
+
+- **Condition 1: binary κ = 0.615 ≥ 0.6, holds.** **Condition 2: 4 of 4 same rule, holds**, with 4 ≥ 3 qualifying rows. **Under the registered rule, the agent labels are admitted** for T and for mined training rows.
+- **Predictions:** binary κ ≥ 0.6 held. 4-way κ ≥ 0.6 held (0.696). **Codex's `not-a-pair` count ≤ 6 failed:** it was 10 of 40. The agent labels also have 10 on this sample, so the baseline the prediction borrowed from sample 1 did not carry over. The `not-a-pair`/`not-a-violation` confusion, 8 of 11 disagreements on sample 1, is 2 of 7 here (rows 561 and 692).
+
+**What the admission does not show, read from the same numbers:**
+
+- **The margin is one row.** Had Codex dropped one more of the rows both call a violation, sample 2's binary κ would be 0.490.
+- **The disagreements run one way.** On sample 2, all 4 binary disagreements are rows the agent calls a violation and Codex does not (473 `contradiction`; 511, 583, 893 `count_unit`). Across both samples it is 6 agent-only against 1 Codex-only (row 47).
+- **So Codex confirms 10 of the 16 agent violation calls with the same rule (62%).** By rule: `count_unit` 2 of 5, `question_asked` 3 of 4, `d_sessionid` 2 of 2, `lines_read` 0 of 1, `contradiction` 0 of 1, and 1 of 1 each for `cannot_happen`, `selector_narrow` and `scope_instant`. Each rule has at most 5 rows, so no per-rule rate is established. `count_unit`, with 13 labels in the full set, is the rule the disagreement sits on.
+- Which labeller is right on these rows is not established. Both are models, and the agent labels share the spec author's model family. The only violation Codex found that the agent missed is row 47. No row is relabelled.
+
+**Consequence, as registered:** T is drawn next from the admitted labels by the registered procedure, and its per-rule counts are published. The 62% confirmation rate is a limit any T claim carries. Restricting T to rows both labellers call violations would be a new registration, and it would need Codex labels on all 944 rows.

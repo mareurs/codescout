@@ -1,0 +1,14 @@
+n=40  collapsed raw agreement 0.825  kappa 0.696  (chance 0.424)
+marginals a: {'not-a-pair': 10, 'not-a-violation': 26, 'violation': 4}  b: {'not-a-pair': 10, 'not-a-violation': 21, 'violation': 8, 'unsure': 1}
+n=40  binary raw agreement 0.900  kappa 0.615  (chance 0.740)
+binary marginals a: {'dropped': 36, 'violation': 4}  b: {'dropped': 32, 'violation': 8}
+both call a violation: 4; same rule: 4
+
+disagreements (id: a | b):
+  473: not-a-violation | contradiction  -- b: Resume routes to strategy A while the same tracker's review rejected it.
+  511: not-a-violation | count_unit  -- b: Spread adjudication cited over n=11 kept as if current at n=12; correction states which population it was deri
+  561: not-a-violation | not-a-pair  -- b: Positive retained; appended note corrects a different sentence about git commit staging.
+  583: not-a-violation | count_unit  -- b: Count of tools implementing format_compact offered as the affected population; unit misread.
+  692: not-a-pair | not-a-violation  -- b: Tense change only; editorial.
+  756: not-a-violation | unsure  -- b: Effort estimate corrected after measurement; unclear which rule, if any, applied.
+  893: not-a-violation | count_unit  -- b: 14 stale processes treated as 14 peer sessions; one is a mux, so the unit read two ways.

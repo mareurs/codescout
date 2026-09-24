@@ -1,0 +1,40 @@
+{"id": 733, "label": "not-a-violation", "second_rule": null, "reason": "The correction records completion and adds a confirming run; the original identifies specific tests without misusing aggregate evidence."}
+{"id": 583, "label": "not-a-violation", "second_rule": null, "reason": "The count names its unit and population; no derivation or selection error is visible in the supplied evidence."}
+{"id": 300, "label": "d_sessionid", "second_rule": null, "reason": "The original attributes the work by session name; the correction removes that incorrect named attribution."}
+{"id": 735, "label": "not-a-violation", "second_rule": null, "reason": "The correction narrows the proposed testing work; no visible rule breach establishes the original causal explanation as prohibited."}
+{"id": 842, "label": "not-a-pair", "second_rule": null, "reason": "The original discusses script ownership; the twin assesses a bounded rendering design."}
+{"id": 808, "label": "not-a-violation", "second_rule": null, "reason": "The twin extends the cluster definition to causal explanations and additional inputs; it does not repair a demonstrated rule breach."}
+{"id": 893, "label": "not-a-violation", "second_rule": null, "reason": "The twin corrects the process classification and adds the mux exception; the original shows no selection mechanism or unsupported evidentiary basis."}
+{"id": 33, "label": "not-a-violation", "second_rule": null, "reason": "The twin changes its history to all history within the same explicitly ordered transaction."}
+{"id": 230, "label": "not-a-pair", "second_rule": null, "reason": "Both extracted sentences stop inside an unfinished parenthesis and lack the proposed action needed for judgment."}
+{"id": 101, "label": "not-a-violation", "second_rule": null, "reason": "The original proposes separate checks for the error and directory creation; the twin preserves that distinction in shorter wording."}
+{"id": 840, "label": "not-a-pair", "second_rule": null, "reason": "The original characterizes stderr content and size; the twin describes the stdout distribution of synthetic reproductions."}
+{"id": 473, "label": "not-a-violation", "second_rule": null, "reason": "The twin retracts the earlier strategy instruction; the supplied context does not show the rejecting review or a conflicting passage."}
+{"id": 375, "label": "not-a-violation", "second_rule": null, "reason": "The correction updates what the test comment says about the remaining gap."}
+{"id": 663, "label": "not-a-violation", "second_rule": null, "reason": "A proposed withholding mechanism is updated to shipped status."}
+{"id": 211, "label": "not-a-violation", "second_rule": null, "reason": "The twin updates an archived document path and adds its artifact identifier."}
+{"id": 756, "label": "not-a-violation", "second_rule": null, "reason": "The twin revises the estimated implementation scope; the original does not visibly rely on a prohibited source or measurement."}
+{"id": 358, "label": "scope_instant", "second_rule": null, "reason": "The original presents a changing peer listing without a timestamp; the twin explicitly dates the observation and uses past tense."}
+{"id": 543, "label": "not-a-violation", "second_rule": null, "reason": "The twin records a retrieval decision and existing behavior where the original left the choice open."}
+{"id": 876, "label": "question_asked", "second_rule": null, "reason": "The original uses a scan exit code to assert CI passed after the fix; the twin limits the claim to the scan."}
+{"id": 491, "label": "not-a-pair", "second_rule": null, "reason": "The original describes developing a hook copy; the twin discusses two sessions failing to combine previously filed evidence."}
+{"id": 30, "label": "not-a-violation", "second_rule": null, "reason": "The twin removes a redundant illustration of self-edges without changing the stated behavior."}
+{"id": 280, "label": "not-a-violation", "second_rule": null, "reason": "The extracted correction changes wrapping and blockquote placement; it preserves the historical statement rather than repairing it."}
+{"id": 712, "label": "not-a-violation", "second_rule": null, "reason": "The twin dates the schema description to filing time; this is a temporal qualification of a potentially formerly accurate statement."}
+{"id": 734, "label": "not-a-pair", "second_rule": null, "reason": "The original discusses audit scope for source comments; the twin summarizes the absence of behavioral changes in a documentation fix."}
+{"id": 428, "label": "not-a-violation", "second_rule": null, "reason": "The original diagnoses an attribution failure rather than endorsing elimination; the twin corrects that diagnosis to absence of any instrument."}
+{"id": 692, "label": "not-a-pair", "second_rule": null, "reason": "The extracted clause ends at reds without naming the failing assertion; neither sentence is complete enough to judge."}
+{"id": 612, "label": "not-a-violation", "second_rule": null, "reason": "The twin updates project routing from constructor-time resolution to per-call routing after the implementation fix."}
+{"id": 724, "label": "not-a-pair", "second_rule": null, "reason": "The original proposes a pre-push comparison and refusal; the twin states how the remote committed value can be accessed."}
+{"id": 856, "label": "d_sessionid", "second_rule": null, "reason": "The original attributes work to a peer label; the twin supplies the sessionId and confirms it from commit trailers."}
+{"id": 561, "label": "not-a-violation", "second_rule": null, "reason": "The original sentence remains unchanged; the appended correction concerns a different claim about which index git stages into."}
+{"id": 884, "label": "not-a-violation", "second_rule": null, "reason": "The twin revises the description of refusal guidance; no prohibited evidentiary basis is visible for the original factual claim."}
+{"id": 105, "label": "not-a-violation", "second_rule": null, "reason": "The twin restates cleanup of the same two phantom directories after the fix."}
+{"id": 63, "label": "not-a-violation", "second_rule": null, "reason": "The original explicitly offers an unconfirmed hypothesis; the twin lowers its ranking and clarifies what it might explain."}
+{"id": 202, "label": "not-a-pair", "second_rule": null, "reason": "The original reports deferred implementation; the twin describes the contents and cap of a notification."}
+{"id": 290, "label": "not-a-violation", "second_rule": null, "reason": "The twin changes a conditional promotion instruction into a report of the earlier plan."}
+{"id": 587, "label": "not-a-violation", "second_rule": null, "reason": "The context identifies the referenced document; the twin merely updates its path to the archive."}
+{"id": 26, "label": "not-a-pair", "second_rule": null, "reason": "The positive states the replication gate decision; the appended note corrects a different corollary about why directives are dropped."}
+{"id": 257, "label": "not-a-violation", "second_rule": null, "reason": "The twin clarifies the wording of required instrument and observed-output fields without changing the underlying requirement."}
+{"id": 511, "label": "not-a-violation", "second_rule": null, "reason": "The twin refreshes membership and distinguishes the earlier spread adjudication from the expanded population; the original already timestamps its adjudication."}
+{"id": 670, "label": "not-a-pair", "second_rule": null, "reason": "The original concerns an end-state assertion missing an intermediate defect; the twin concerns an unreachable allocation capability."}

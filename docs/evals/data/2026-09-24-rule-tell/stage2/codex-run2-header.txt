@@ -1,0 +1,11 @@
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/claude-1000/-home-marius-work-claude-codescout/571eb3d6-c879-43f6-b3f9-5a51e744e1af/scratchpad/codex-label-work-2
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d51c-d50f-75f0-89e9-ebfcb61900e6
+--------
