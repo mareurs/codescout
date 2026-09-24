@@ -150,20 +150,31 @@ pub(crate) fn format_library_path(lib_name: &str, lib_root: &Path, file_path: &P
 
 /// Classify a reference path as project, library, or external.
 /// Returns (classification_tag, display_path).
+///
+/// Every root is compared without its Windows verbatim marker: roots arrive
+/// canonicalized (`\\?\C:\…`) and reference paths arrive from `file://` URIs
+/// (`C:\…`), which never `starts_with` each other (`868e689cccfe84b3`).
 pub(crate) fn classify_reference_path(
     path: &Path,
     project_root: &Path,
     library_roots: &[(String, PathBuf)],
 ) -> (String, String) {
-    if path.starts_with(project_root) {
+    use crate::util::fs::strip_verbatim;
+    // Only the ROOTS are stripped: `path` comes from a URI, which cannot carry the marker.
+    let project_root = strip_verbatim(project_root);
+    if path.starts_with(&project_root) {
         (
             "project".to_string(),
-            relative_forward_slash(path, project_root),
+            relative_forward_slash(path, &project_root),
         )
-    } else if let Some((name, lib_root)) = library_roots.iter().find(|(_, r)| path.starts_with(r)) {
+    } else if let Some((name, lib_root)) = library_roots
+        .iter()
+        .map(|(name, root)| (name, strip_verbatim(root)))
+        .find(|(_, r)| path.starts_with(r))
+    {
         (
             "lib:".to_string() + name,
-            format_library_path(name, lib_root, path),
+            format_library_path(name, &lib_root, path),
         )
     } else {
         ("external".to_string(), to_forward_slash(path))

@@ -441,11 +441,16 @@ impl Tool for References {
         // definition, and an agent reads a 0-callers result as dead code and deletes it. The
         // call-hierarchy cross-check above is also LSP-backed (shares the staleness), so corroborate
         // with an LSP-independent text scan.
+        // `full_path` is canonical (`\\?\C:\…` on Windows) while a location's path
+        // comes from a URI (`C:\…`), so compare against the marker-free spelling;
+        // unequal spellings counted the declaration as an outside reference
+        // (868e689cccfe84b3).
+        let full_path_plain = crate::util::fs::strip_verbatim(&full_path);
         let external_refs = refs
             .iter()
             .filter(|loc| {
                 uri_to_path(loc.uri.as_str())
-                    .map(|p| p != full_path)
+                    .map(|p| p.as_path() != &*full_path_plain)
                     .unwrap_or(false)
             })
             .count();

@@ -9478,8 +9478,13 @@ async fn references_on_an_unused_file_local_symbol_that_returns_its_declaration_
             character: 9,
         },
     };
+    // `from_file_path`, never `format!("file://{}")`: on Windows that yields
+    // `file://C:\…`, which `Uri` refuses, so the test panicked before reaching the code
+    // under test (868e689cccfe84b3).
     let declaration = lsp_types::Location {
-        uri: format!("file://{}", file.display())
+        uri: url::Url::from_file_path(&file)
+            .unwrap()
+            .as_str()
             .parse::<lsp_types::Uri>()
             .unwrap(),
         range: at,
@@ -9499,11 +9504,82 @@ async fn references_on_an_unused_file_local_symbol_that_returns_its_declaration_
     assert_eq!(
         result["total"].as_u64(),
         Some(1),
-        "the declaration itself is the one location"
+        "the declaration itself is the one location: {result}"
     );
     assert!(
         result.get("completeness_warning").is_none(),
         "a real answer for an unused symbol must stay unwarned: {result}"
+    );
+}
+
+/// The declaration-only answer must reach the text-scan cross-check: when another file
+/// names the symbol, "0 references outside the definition file" is suspicious and is
+/// flagged. On Windows the declaration's path (from a URI, `C:\…`) was compared against
+/// the canonical `\\?\C:\…` definition path, so it counted as an OUTSIDE reference and
+/// the cross-check never ran (868e689cccfe84b3). Only the wine and windows-latest lanes
+/// exercise that spelling; on Linux this pins the branch itself.
+#[tokio::test]
+async fn references_with_only_the_declaration_is_cross_checked_against_other_files() {
+    use crate::lsp::mock::{MockLspClient, MockLspProvider};
+    use crate::lsp::{SymbolInfo, SymbolKind};
+    use crate::tools::symbol::references::References;
+
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    // Canonical, as `Agent::new` makes the root: on Windows this is the `\\?\` form
+    // the fix exists for, so do not replace it with the raw tempdir path.
+    let src = std::fs::canonicalize(dir.path()).unwrap().join("src");
+    let file = src.join("lib.rs");
+    std::fs::write(&file, "fn helper() {}\n").unwrap();
+    // The load-bearing second file: the text scan must find `helper` somewhere the
+    // language server reported nothing. Without it the branch stays silent either way.
+    std::fs::write(src.join("other.rs"), "fn caller() { helper(); }\n").unwrap();
+    let helper = SymbolInfo {
+        name: "helper".to_string(),
+        name_path: "helper".to_string(),
+        kind: SymbolKind::Function,
+        file: file.clone(),
+        start_line: 0,
+        end_line: 0,
+        start_col: 3,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let declaration = lsp_types::Location {
+        uri: url::Url::from_file_path(&file)
+            .unwrap()
+            .as_str()
+            .parse::<lsp_types::Uri>()
+            .unwrap(),
+        range: lsp_types::Range {
+            start: lsp_types::Position {
+                line: 0,
+                character: 3,
+            },
+            end: lsp_types::Position {
+                line: 0,
+                character: 9,
+            },
+        },
+    };
+    let mock = MockLspClient::new().with_symbols(&file, vec![helper]);
+    mock.references_results
+        .lock()
+        .unwrap()
+        .insert(file.clone(), vec![declaration]);
+    let ctx = path_scoped_ctx(dir.path(), MockLspProvider::with_client(mock)).await;
+
+    let result = References
+        .call(json!({ "symbol": "helper", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap();
+
+    let warning = result["completeness_warning"].as_str().unwrap_or_default();
+    assert!(
+        warning.contains("outside the definition file") && warning.contains("src/other.rs"),
+        "a declaration-only answer with `helper` in another file must be flagged: {result}"
     );
 }
 

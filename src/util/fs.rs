@@ -217,6 +217,43 @@ pub fn drive_letter_prefix_len(s: &str) -> Option<usize> {
         .then_some(verbatim_len + 2)
 }
 
+/// `path` without Windows' `\\?\` verbatim marker, so a canonicalized path compares
+/// equal to — and `starts_with` — the same location spelled without it.
+///
+/// Only Windows has the two spellings. `fs::canonicalize` there returns `\\?\C:\…`,
+/// while a `file://` URI cannot carry the marker, so every path
+/// `FileAddress::from_lsp_uri` yields is `C:\…`. `Path::starts_with` compares
+/// components, and the prefixes parse as `VerbatimDisk('C')` against `Disk('C')`, so
+/// no location a language server reports is ever under a canonical project root
+/// (`868e689cccfe84b3`). Verbatim disk and UNC prefixes are rewritten; every other
+/// path, and every path on other platforms, is returned borrowed and unchanged.
+///
+/// A `Path` operation rather than [`to_forward_slash`]-style string surgery, because
+/// callers need component-aware containment, not string equality.
+pub fn strip_verbatim(path: &std::path::Path) -> std::borrow::Cow<'_, std::path::Path> {
+    use std::borrow::Cow;
+    use std::path::{Component, PathBuf, Prefix};
+
+    let mut components = path.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return Cow::Borrowed(path);
+    };
+    let plain = match prefix.kind() {
+        Prefix::VerbatimDisk(drive) => format!("{}:", drive as char),
+        Prefix::VerbatimUNC(server, share) => format!(
+            r"\\{}\{}",
+            server.to_string_lossy(),
+            share.to_string_lossy()
+        ),
+        _ => return Cow::Borrowed(path),
+    };
+    let mut out = PathBuf::from(plain);
+    for component in components {
+        out.push(component.as_os_str());
+    }
+    Cow::Owned(out)
+}
+
 /// A path string in forward-slash separator form, suitable for catalog
 /// storage, hashing into IDs, and LIKE-pattern construction.
 ///
@@ -419,6 +456,34 @@ mod tests {
         assert_eq!(drive_letter_prefix_len("Cusers/foo.md"), None);
         assert_eq!(drive_letter_prefix_len(""), None);
         assert_eq!(drive_letter_prefix_len("//?/"), None);
+    }
+
+    #[test]
+    fn strip_verbatim_leaves_a_path_without_the_marker_borrowed() {
+        // Every non-Windows path takes this branch, and so does a plain Windows one.
+        let p = std::path::Path::new("/home/dev/proj/src/lib.rs");
+        assert!(matches!(strip_verbatim(p), std::borrow::Cow::Borrowed(q) if q == p));
+    }
+
+    // Windows-only: no other platform parses a path prefix, so this cannot run anywhere
+    // else. It runs on the windows-latest lanes and on the wine lane.
+    #[cfg(windows)]
+    #[test]
+    fn strip_verbatim_makes_a_canonical_root_contain_its_uri_spelling() {
+        use std::path::Path;
+        let canonical_root = Path::new(r"\\?\C:\Users\dev\proj");
+        let from_uri = Path::new(r"C:\Users\dev\proj\src\lib.rs");
+        // Precondition: the raw spellings really do not match, or this proves nothing.
+        assert!(!from_uri.starts_with(canonical_root));
+        assert!(strip_verbatim(from_uri).starts_with(strip_verbatim(canonical_root)));
+        assert_eq!(
+            strip_verbatim(canonical_root),
+            Path::new(r"C:\Users\dev\proj")
+        );
+        assert_eq!(
+            strip_verbatim(Path::new(r"\\?\UNC\srv\share\proj")),
+            Path::new(r"\\srv\share\proj")
+        );
     }
 
     #[test]
