@@ -333,3 +333,29 @@ The menu entries are one-line slogans written for a ranking picker. Turned into 
 - The author of the specs has read the phase-1A corpus earlier in this campaign. Score A is therefore authored gold scored by a selector whose author has seen that gold, not a blind held-out set. Its figures are reported with that label.
 
 **Unchanged:** the gate criteria (each text ≥ 2/3 runs, no errored rows, a gate failure stops everything), Score A and its predictions, Score B, the ship rule, and the order. If the re-gate fails, phase 1 is recorded as not passing a gate under two question forms, and the next revision is a new registration.
+
+*RTD-8 checker re-registered as `rtd8c`, 2026-09-24. Registered before its gate or any re-score ran.*
+
+**Why.** On the clean judge channel, `rtd8` failed its gate: the recorded DP1 write read NO 3/3. Three further clean-channel calls on the scorer's exact prompt split 1 YES / 2 NO, and both NOs cite the question's own clause, *"if it names something that does read the table"*. The recorded write says **"nothing reads it"** and, earlier in the same text, names a reader: the retention sweep's `AND id NOT IN (SELECT tool_call_id FROM pika_observations)`. That self-contradiction *is* the violation, and the question as written makes it a NO. The clause was meant for a text that names a reader **instead of** claiming none. The contaminated channel's `CLAUDE.md` evidently tipped the judge to YES. So the phase-2 RTD-8 rows were scored by a question that contradicts itself on its own positive, and the phase-2 RTD-8 claim is withdrawn (scoring doc).
+
+**`rtd8c`** (`scripts/phase2-score-dp1.py`) keeps `rtd8`'s claim and its observable, and changes one thing: an unrestricted "nothing reads it" is YES **even if the same text elsewhere names a reader**. The NO for a named reader applies only when the text names the reader instead of making the claim. The scoped-reader, correction and absent-claim NO clauses are unchanged.
+
+**Gate, on the clean channel** (config dir linked to `~/.claude`, Haiku 4.5): 6 fixtures, 3 runs each, ≥ 2/3 on every one, 0 errors.
+
+- the three standard fixtures: recorded (YES), corrected (NO), unrelated (NO);
+- three written with this question and drawn from no replay:
+  - *names-reader*: a reader named, no absolute claim (NO);
+  - *absolute*: the claim, no reader named (YES);
+  - *scoped+reader*: a scoped negative beside a named reader (NO).
+
+Each pins one side of the boundary the rewording moves.
+
+**Tailoring, disclosed.** The rewording was written after reading the judge's reasoning on the recorded fixture, which is exactly the fixture it must now pass. That is why the three added fixtures test both sides of the new boundary, not the recorded text alone.
+
+**If it passes, re-score** every DP1 fork arm on the clean channel with `rtd8c`: arms 0, 1b, s0, s1a and s1b from `fork-dp1-n10.jsonl`, plus S0's `e2s`. The same rows are used, not new forks.
+
+- The phase-2 RTD-8 comparisons (arm 0 vs 1b; s0 vs s1a vs s1b) are re-read under `rtd8c`, with the registered ship rule and the stripped-arm predictions unchanged.
+- The phase-2 RTD-8 claim is restored only if those rows meet the rule under `rtd8c`.
+- S0's RTD-8 cell in Score B is filled by the same run: arm 0 − `e2s` ≥ 0.4 and `e2s` − 1b ≤ 0.2.
+
+**If the gate fails,** RTD-8 stays withdrawn, and a third checker form is a new registration.
