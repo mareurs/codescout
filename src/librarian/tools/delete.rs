@@ -77,17 +77,41 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
 
         // Dry-run gate. The catalog delete cascades to this artifact's augmentation, links,
-        // observations and events — and those are CATALOG-ONLY. `reindex` rebuilds the row
-        // from the file, but nothing rebuilds an augmentation's params or an event log, and
-        // neither is in git. So the FILE is recoverable and the HISTORY is not, which is the
-        // asymmetry a caller cannot see from the id alone.
+        // observations, events and outgoing entry citations — and those are CATALOG-ONLY.
+        // `reindex` rebuilds the row from the file, but nothing rebuilds an augmentation's
+        // params, an event log or an `origin='write'` entry citation, and none is in git.
+        // So the FILE is recoverable and the HISTORY is not, which is the asymmetry a
+        // caller cannot see from the id alone.
         //
         // Preview first; `force=true` applies. Modelled on `librarian(doctor, fix=…)`, which
         // is a dry run until `confirm=true`. Measured 2026-09-03: `delete` runs ~15 times per
         // 30 days, so the round-trip is cheap — that frequency is why this gate is here and
         // not on `update` (2,555 calls).
         if !a.force.unwrap_or(false) {
-            use crate::librarian::catalog::{augmentation, events, links, observations};
+            use crate::librarian::catalog::{
+                augmentation, entry_cite, events, links, observations,
+            };
+            // `entry_cite` is keyed by the artifact's SLUG, not its id, and only the
+            // outgoing side cascades: `src_slug REFERENCES artifact(slug) ON DELETE CASCADE`,
+            // while `dst_ref` is plain text with no FK, so rows citing this artifact survive
+            // it. A NULL slug holds no outgoing rows. Read directly rather than through
+            // `ensure_slug`, which MINTS one — a write this dry run must not make.
+            let slug: Option<String> =
+                cat.conn
+                    .query_row("SELECT slug FROM artifact WHERE id = ?1", [&a.id], |r| {
+                        r.get(0)
+                    })?;
+            let cites_out = match slug.as_deref() {
+                Some(s) => entry_cite::outgoing(&cat, s)?,
+                None => Vec::new(),
+            };
+            // `origin='scan'` rows are re-derived from prose by a write-mode `link_scan`;
+            // every other origin (`append_entry(cites=…)` writes `write`) is rebuilt by
+            // nothing, which makes it the one irreversible casualty a caller must see.
+            let cites_unrebuildable = cites_out
+                .iter()
+                .filter(|c| c.origin != entry_cite::ORIGIN_SCAN)
+                .count();
             return Ok(json!({
                 "dry_run": true,
                 "deleted": false,
@@ -99,9 +123,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     "links_in": links::incoming(&cat, &a.id)?.len(),
                     "observations": observations::list_for_artifact(&cat, &a.id)?.len(),
                     "has_events": events::latest_for_artifact(&cat, &a.id)?.is_some(),
+                    "entry_cite_out": cites_out.len(),
+                    "entry_cite_out_unrebuildable": cites_unrebuildable,
                 },
                 "recoverable": "the file is git-tracked and restorable; the augmentation, \
-                                events, links and observations are catalog-only and are not",
+                                events, links and observations are catalog-only and are not. \
+                                Of the outgoing entry citations, origin='scan' rows are \
+                                re-derived by a write-mode link_scan; the \
+                                entry_cite_out_unrebuildable ones are rebuilt by nothing",
                 "hint": format!("re-run with force=true to apply: doc(action=\"delete\", id=\"{}\", force=true)", a.id),
             }));
         }
@@ -161,7 +190,7 @@ mod tests {
     use crate::librarian::{
         catalog::{
             artifact,
-            artifact::ArtifactRow,
+            artifact::{ArtifactRow, TestArtifactRowBuilder},
             augmentation::{self, AugmentationRow},
             Catalog,
         },
@@ -369,9 +398,10 @@ mod tests {
     /// disk and the catalog row still resolves. The flag is asserted too, but it is the
     /// weaker half.
     ///
-    /// The preview must also report the augmentation, because that is the one casualty
-    /// `reindex` cannot rebuild — the file is git-tracked and restorable; an
-    /// augmentation's params are catalog-only and are not.
+    /// The preview must also report the augmentation, because `reindex` cannot rebuild
+    /// it — the file is git-tracked and restorable; an augmentation's params are
+    /// catalog-only and are not. It is not the ONLY such casualty: outgoing
+    /// `origin='write'` entry citations are another, covered separately below.
     #[tokio::test]
     async fn delete_without_force_is_a_dry_run_and_destroys_nothing() {
         let tmp = tempfile::tempdir().unwrap();
@@ -387,8 +417,9 @@ mod tests {
         assert_eq!(result["deleted"], false);
         assert_eq!(
             result["cascades"]["augmentation"], true,
-            "this fixture carries an augmentation, and it is the casualty `reindex` cannot \
-             rebuild — a preview that omits it hides the only irreversible part"
+            "this fixture carries an augmentation, and reindex cannot rebuild one — a preview \
+             that omits it hides an irreversible casualty (origin='write' entry citations are \
+             the other, pinned by the test below)"
         );
 
         assert!(file.exists(), "dry run must not remove the file");
@@ -400,6 +431,89 @@ mod tests {
         assert!(
             augmentation::get(&cat, ID).unwrap().is_some(),
             "dry run must not cascade-delete the augmentation"
+        );
+    }
+
+    /// The preview names the `entry_cite` rows the cascade DESTROYS, split by whether
+    /// anything can rebuild them.
+    ///
+    /// `entry_cite.src_slug` is `REFERENCES artifact(slug) ON DELETE CASCADE`, so deleting
+    /// the artifact drops every OUTGOING entry citation — and the preview enumerated five
+    /// relations and omitted this one. The half that matters: a write-mode `link_scan`
+    /// re-derives `origin='scan'` rows from prose, and NOTHING rebuilds `origin='write'`
+    /// rows (`append_entry(cites=…)`), so those are the preview's truly irreversible part.
+    /// docs/issues/2026-09-21-the-delete-preview-omits-the-entry-cite-rows-its-cascade-destroys.md
+    ///
+    /// Load-bearing fixture details:
+    ///   * ONE row of each origin. An all-`write` fixture cannot tell the total from the
+    ///     unrebuildable count, so a preview that reported one number twice would pass.
+    ///   * The slug is set, and differs from the id. `entry_cite` is keyed by SLUG; a
+    ///     preview that queried by id would find nothing here and report 0.
+    ///   * An INCOMING row (dst_ref naming this artifact) is present and must NOT be
+    ///     counted: `dst_ref` is plain text with no FK, so the cascade leaves it standing.
+    #[tokio::test]
+    async fn delete_preview_names_the_outgoing_entry_citations_the_cascade_destroys() {
+        use crate::librarian::catalog::entry_cite::{self, EntryCiteRow, ORIGIN_SCAN};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+        {
+            let cat = ctx.catalog.lock();
+            cat.conn
+                .execute(
+                    "UPDATE artifact SET slug = 'doomed-slug' WHERE id = ?1",
+                    [ID],
+                )
+                .unwrap();
+            let cite = |src: &str, local: &str, dst: &str, origin: &str| EntryCiteRow {
+                src_slug: src.into(),
+                src_local: local.into(),
+                dst_ref: dst.into(),
+                rel: "cites".into(),
+                origin: origin.into(),
+                created_at: 1,
+            };
+            for row in [
+                cite("doomed-slug", "W-1", "elsewhere:X-1", "write"),
+                cite("doomed-slug", "W-2", "elsewhere:X-2", ORIGIN_SCAN),
+            ] {
+                entry_cite::insert_with(&cat.conn, &row).unwrap();
+            }
+            // Incoming: another artifact citing this one. It gets a real source row so the
+            // fixture is a state the catalog can actually hold.
+            artifact::upsert(&cat, &TestArtifactRowBuilder::new("citer").build()).unwrap();
+            cat.conn
+                .execute(
+                    "UPDATE artifact SET slug = 'citer-slug' WHERE id = 'citer'",
+                    [],
+                )
+                .unwrap();
+            entry_cite::insert_with(
+                &cat.conn,
+                &cite("citer-slug", "R-1", "doomed-slug:W-1", "write"),
+            )
+            .unwrap();
+        }
+
+        let v = delete::call(&ctx, serde_json::json!({"id": ID}))
+            .await
+            .unwrap();
+
+        assert_eq!(v["dry_run"], true);
+        assert_eq!(
+            v["cascades"]["entry_cite_out"], 2,
+            "both outgoing rows die with the artifact — and the incoming one must not be \
+             counted, since dst_ref has no FK and survives: {v}"
+        );
+        assert_eq!(
+            v["cascades"]["entry_cite_out_unrebuildable"], 1,
+            "only the origin='write' row is beyond link_scan's reach: {v}"
+        );
+        let cat = ctx.catalog.lock();
+        assert_eq!(
+            entry_cite::outgoing(&cat, "doomed-slug").unwrap().len(),
+            2,
+            "a dry run must not cascade-delete the citations it previews"
         );
     }
 
