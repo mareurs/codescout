@@ -382,6 +382,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
     let id = crate::librarian::ids::artifact_id_from_abs(&full);
     reject_reserved_extra_keys(&a.extra, ExtraKeySurface::Create)?;
+    // One owner per prefix per repository. Checked before anything is written, so a refusal
+    // leaves no second owner on disk for the next reindex to catalog.
+    crate::librarian::catalog::augmentation::refuse_taken_prefixes(
+        &ctx.catalog.lock().conn,
+        &full,
+        &crate::librarian::catalog::augmentation::claimed_prefixes(&a.extra),
+    )?;
     reject_body_leading_frontmatter(&a.body)?;
     let status = resolve_status(&a.kind, a.status.as_deref())?;
     let fm = Frontmatter {
@@ -1003,6 +1010,40 @@ mod tests {
         assert_eq!(
             fm.extra.get("branch"),
             Some(&serde_json::json!("feature/x"))
+        );
+    }
+
+    /// `doc(create)` refuses a ledger whose `entry_prefix` another ledger in the repository
+    /// already owns — the wiring half of `refuse_taken_prefixes`, whose own tests pin the
+    /// policy. Asserts the EFFECT too: a refusal that still wrote the file would leave a
+    /// second owner on disk for the next reindex to catalog.
+    #[tokio::test]
+    async fn create_refuses_a_ledger_whose_prefix_is_already_taken() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let ledger = |rel: &str| {
+            json!({
+                "repo": "r",
+                "rel_path": rel,
+                "kind": "tracker",
+                "title": "Ledger",
+                "body": "",
+                "extra": {"entry_prefix": "QX"}
+            })
+        };
+        call(&ctx, ledger("trackers/first.md")).await.unwrap();
+
+        let err = call(&ctx, ledger("trackers/second.md"))
+            .await
+            .expect_err("a second owner of `QX` must be refused");
+        assert!(
+            err.to_string().contains("first.md"),
+            "must name the owner: {err}"
+        );
+        assert!(
+            !tmp.path().join("trackers/second.md").exists(),
+            "refused means nothing written"
         );
     }
 

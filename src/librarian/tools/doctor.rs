@@ -360,6 +360,7 @@ impl Check {
                 | Check::EntryConditionalPastDue
                 | Check::EntryDatedStale
                 | Check::EntryDefinedTwice
+                | Check::EntryPrefixDeclaredTwice
                 | Check::EntryWithoutDefinition
                 | Check::FrontmatterIdIsNotACatalogId
                 | Check::FrontmatterIdMismatch
@@ -404,6 +405,7 @@ declare_checks! {
     EntryConditionalPastDue => "entry_conditional_past_due",
     EntryDatedStale => "entry_dated_stale",
     EntryDefinedTwice => "entry_defined_twice",
+    EntryPrefixDeclaredTwice => "entry_prefix_declared_twice",
     EntryWithoutDefinition => "entry_without_definition",
     FrontmatterIdIsNotACatalogId => "frontmatter_id_is_not_a_catalog_id",
     FrontmatterIdMismatch => "frontmatter_id_mismatch",
@@ -552,6 +554,8 @@ const ROW_GRAIN_SCOPED_CHECKS: &[Check] = &[
     Check::LedgerDefinesNothing,
     Check::EntryWithoutDefinition,
     Check::EntryDefinedTwice,
+    // Row grain: one finding per declaring artifact, admitted by that artifact's own id.
+    Check::EntryPrefixDeclaredTwice,
     Check::TerminalStatusWithCaveat,
     // Added 2026-09-10 on the instruction the 2026-08-27 bug left behind: *"If one of
     // them starts firing across repos, add it to the scoped set — and read its repair
@@ -817,6 +821,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // beside scan_undefined_entries because the two ask opposite questions of the
     // same bodies (never defined / defined twice). See `scan_entry_defined_twice`.
     all_violations.extend(scan_entry_defined_twice(&mut doctor_scope, &cat.conn)?);
+    // Two ledgers owning one prefix — the write paths refuse it, so this is the hand-edit,
+    // merge and pre-guard population. See `scan_entry_prefix_declared_twice`.
+    all_violations.extend(scan_entry_prefix_declared_twice(
+        &mut doctor_scope,
+        &cat.conn,
+    )?);
     // Starts from the citation graph rather than a known ledger's claimed entries — the
     // gap neither scan_undefined_entries nor link_scan's own report reaches. See
     // `scan_cited_prefix_with_no_definer`. Scoped like the entry-validity family (Ruling
@@ -4129,6 +4139,103 @@ fn scan_entry_defined_twice(
     Ok(out)
 }
 
+/// `entry_prefix_declared_twice`: two artifacts in one repository own the same prefix.
+///
+/// A bare `PREFIX-N` citation binds whichever ledger defines `PREFIX-N`, so two owners
+/// capture each other's citations silently — the `T` collision
+/// (docs/issues/archive/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md).
+/// `doc(create)`, `doc(update)` and `rekey_prefix` all refuse a taken prefix
+/// (`augmentation::refuse_taken_prefixes`), so what reaches this check is the population no
+/// write path mediates: hand-edited frontmatter, a merge, or a declaration older than the
+/// guard. The check that runs when nobody is worried, for the path the guard cannot see.
+///
+/// **Different question from `link_scan`'s `prefix_conflicts`**, which needs a declared prefix
+/// with two active DEFINERS. A second ledger that has declared a prefix and defined nothing
+/// yet is invisible there, and it is exactly the state the guard exists to stop at birth.
+///
+/// Ownership shares its whole definition with the guard — `claimed_prefixes` (both
+/// `entry_prefix` and `external_prefix`), `SHARED_ENTRY_PREFIXES`, per-repository grouping,
+/// archived artifacts counted — so the two cannot disagree about what a collision is.
+///
+/// Row grain: one finding per declaring artifact, each naming its rivals, so whichever file a
+/// reader opens says where the other owner is. Read-only; there is no `fix=`. Which ledger
+/// keeps the prefix is a content decision, and the repair (`rekey_prefix`) moves citations.
+fn scan_entry_prefix_declared_twice(
+    scope: &mut scope::DoctorScope,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
+    use crate::librarian::catalog::augmentation::{claimed_prefixes, SHARED_ENTRY_PREFIXES};
+
+    let mut stmt = conn.prepare(
+        "SELECT a.id, a.abs_path FROM artifact a \
+         WHERE a.missing_since IS NULL ORDER BY a.abs_path",
+    )?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<std::result::Result<_, _>>()?;
+
+    // (repository root, prefix) -> every (id, abs_path) claiming it there.
+    let mut owners: std::collections::BTreeMap<(PathBuf, String), Vec<(String, String)>> =
+        std::collections::BTreeMap::new();
+    for (id, abs_path) in rows {
+        let Ok(text) = std::fs::read_to_string(&abs_path) else {
+            continue;
+        };
+        let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&text) else {
+            continue;
+        };
+        let claimed: Vec<String> = claimed_prefixes(&fm.extra)
+            .into_iter()
+            .filter(|p| !SHARED_ENTRY_PREFIXES.contains(&p.as_str()))
+            .collect();
+        if claimed.is_empty() {
+            continue;
+        }
+        let dir = Path::new(&abs_path).parent().unwrap_or(Path::new("."));
+        let root = crate::librarian::current_project::lookup_git_root(dir)
+            .unwrap_or_else(|| dir.to_path_buf());
+        for prefix in claimed {
+            let list = owners.entry((root.clone(), prefix)).or_default();
+            if !list.iter().any(|(i, _)| i == &id) {
+                list.push((id.clone(), abs_path.clone()));
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for ((_, prefix), claimants) in owners {
+        if claimants.len() < 2 {
+            continue;
+        }
+        for (id, abs_path) in &claimants {
+            if !scope.admit("entry_prefix_declared_twice", id, abs_path) {
+                continue;
+            }
+            let rivals = claimants
+                .iter()
+                .filter(|(i, _)| i != id)
+                .map(|(_, p)| p.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push(Violation::new(
+                "entry_prefix_declared_twice",
+                Some(id.clone()),
+                abs_path.clone(),
+                format!(
+                    "`{prefix}` is also claimed in this repository by {rivals}. A prefix has \
+                     one owner per repository: a bare `{prefix}-N` citation binds whichever \
+                     ledger defines `{prefix}-N`, so these capture each other's citations \
+                     silently. The write paths refuse this, so the second claim arrived by a \
+                     hand edit, a merge, or predates the guard. Decide which artifact keeps \
+                     `{prefix}`, then move the other with rekey_prefix — dry run first; its \
+                     refusal lists free alternatives. `F` and `W` are the only shared family."
+                ),
+            ));
+        }
+    }
+    Ok(out)
+}
+
 /// Cross-file citations below which a Statement is not worth anyone's attention.
 ///
 /// Shared, on purpose, by every check in this family (Tasks 5-7): two checks producing
@@ -4935,45 +5042,6 @@ fn scan_undefined_entries(
     Ok(out)
 }
 
-/// The `external_prefix` declarations in a file's frontmatter, as `(prefix, authority)` pairs,
-/// where `authority` is a path relative to the declaring file's git root.
-///
-/// ```yaml
-/// external_prefix:
-///   TC: scripts/tc-suites/legacy-natural.json
-/// ```
-///
-/// Declares that a cited `PREFIX-N` namespace is **owned outside the markdown corpus** — a
-/// benchmark suite, a JSON fixture, a code constant — which is the third state
-/// [`scan_cited_prefix_with_no_definer`] could not represent. Both of its older remedies damage
-/// such a namespace: defining headings hands allocation to the librarian and turns silent
-/// citations dangling (measured −1 finding, +6), and `entry_prefix` locks id allocation to the
-/// librarian's allocator. docs/issues/archive/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md
-///
-/// **A map rather than a set, because the authority is what makes silence earned.** A bare
-/// `external_prefix: TC` would mute the check forever, including after the suite it names is
-/// deleted; naming the file lets the check re-verify the claim on every run.
-///
-/// **Read here and nowhere else, deliberately.** It is not added to
-/// [`crate::librarian::tools::link_scan::extract::DocExtract`]: the resolver must keep treating
-/// these tokens as prose, and a prefix it learned about would start reporting every citation
-/// dangling — the exact damage this declaration exists to avoid. Nor does it need the
-/// hand-rolled `--no-default-features` reader `entry_prefix` has, because it does not make a
-/// file a ledger and so the guard never asks. Malformed frontmatter or a non-map value yields
-/// nothing, which leaves the finding firing: the safe direction.
-fn declared_external_prefixes(text: &str) -> Vec<(String, String)> {
-    let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(text) else {
-        return Vec::new();
-    };
-    let Some(serde_json::Value::Object(map)) = fm.extra.get("external_prefix") else {
-        return Vec::new();
-    };
-    map.iter()
-        .filter_map(|(prefix, v)| Some((prefix.trim().to_string(), v.as_str()?.trim().to_string())))
-        .filter(|(p, a)| !p.is_empty() && !a.is_empty())
-        .collect()
-}
-
 /// Why an `external_prefix` declaration does NOT hold, or `None` when it does: the authority
 /// exists under the declaring file's git root and contains at least one `PREFIX-<digits>` id.
 ///
@@ -5112,7 +5180,14 @@ fn scan_cited_prefix_with_no_definer(
             }
         }
         known_prefixes.extend(ex.declared_prefixes.iter().cloned());
-        for (prefix, authority) in declared_external_prefixes(&text) {
+        // One reader, shared with `refuse_taken_prefixes`, so this check and the uniqueness
+        // guard can never disagree about what a file declares.
+        let fm = crate::librarian::frontmatter::parse(&text)
+            .ok()
+            .and_then(|(fm, _)| fm);
+        for (prefix, authority) in
+            crate::librarian::catalog::augmentation::declared_external_prefixes(fm.as_ref())
+        {
             external
                 .entry(prefix)
                 .or_default()
@@ -13336,6 +13411,107 @@ mod tests {
         );
     }
 
+    // ---- scan_entry_prefix_declared_twice --------------------------------------------------
+
+    /// Two artifacts owning one prefix are reported, ONE finding per declarer, each naming
+    /// the other — so whichever file a reader opens tells them where the rival is.
+    ///
+    /// Load-bearing fixture details, each killing a different wrong implementation:
+    ///   * `UQ` is declared once: it must stay silent, or the check reports every ledger.
+    ///   * `F`/`W` are declared by two session logs: the one shared family, silent.
+    ///   * The benchmark claims `TC` through `external_prefix` and a ledger through
+    ///     `entry_prefix`: a cross-KIND collision, which a scan reading only one key misses.
+    ///   * `d.md` claims `DUP` through BOTH keys, alone: one artifact is one owner, so it is
+    ///     not a collision. A scan that counted declarations instead of declarers would
+    ///     report a file against itself.
+    ///   * `nested/` is its OWN repository (its own `.git`) and also claims `QX`. Ownership is
+    ///     per repository, so it collides with nothing; a scan that grouped every repo into
+    ///     one would pull it into a/b's collision.
+    ///   * Each finding must NOT name its own file among the rivals — "also claimed by
+    ///     yourself" sends the reader to the one file that is not the problem.
+    #[test]
+    fn entry_prefix_declared_twice_reports_each_owner_and_spares_the_shared_family() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("nested/.git")).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        for (id, rel, text) in [
+            ("a", "docs/a.md", "---\nentry_prefix: QX\n---\n"),
+            ("b", "docs/b.md", "---\nentry_prefix: [QX, UQ]\n---\n"),
+            (
+                "s1",
+                "docs/one-session-log.md",
+                "---\nentry_prefix: [F, W]\n---\n",
+            ),
+            (
+                "s2",
+                "docs/two-session-log.md",
+                "---\nentry_prefix: [F, W]\n---\n",
+            ),
+            (
+                "bench",
+                "docs/bench.md",
+                "---\nexternal_prefix: {TC: scripts/x.json}\n---\n",
+            ),
+            ("tcl", "docs/tc-ledger.md", "---\nentry_prefix: TC\n---\n"),
+            (
+                "d",
+                "docs/d.md",
+                "---\nentry_prefix: DUP\nexternal_prefix: {DUP: scripts/d.json}\n---\n",
+            ),
+            ("c", "nested/docs/c.md", "---\nentry_prefix: QX\n---\n"),
+        ] {
+            seed_ledger(&cat, id, &tmp.path().join(rel), text);
+        }
+
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_entry_prefix_declared_twice(&mut ds, &cat.conn).unwrap();
+        let by = |id: &str| -> Vec<&Violation> {
+            v.iter()
+                .filter(|x| x.artifact_id.as_deref() == Some(id))
+                .collect()
+        };
+
+        assert!(
+            by("a").len() == 1 && by("a")[0].detail.contains("b.md"),
+            "a's finding must name its rival: {v:?}"
+        );
+        assert!(
+            by("b").len() == 1 && by("b")[0].detail.contains("a.md"),
+            "and b's must name a — one finding per declarer: {v:?}"
+        );
+        assert!(
+            !v.iter().any(|x| x.detail.contains("`UQ`")),
+            "a prefix declared once is not a collision: {v:?}"
+        );
+        assert!(
+            by("s1").is_empty() && by("s2").is_empty(),
+            "F/W are the shared session-log family: {v:?}"
+        );
+        assert!(
+            by("bench").len() == 1 && by("tcl").len() == 1,
+            "external_prefix and entry_prefix collide with each other: {v:?}"
+        );
+        assert!(
+            by("d").is_empty(),
+            "one artifact claiming a prefix through both keys is one owner: {v:?}"
+        );
+        assert!(
+            by("c").is_empty() && !by("a")[0].detail.contains("nested"),
+            "a nested repository's QX is its own namespace: {v:?}"
+        );
+        assert!(
+            !by("a")[0].detail.contains("docs/a.md") && !by("b")[0].detail.contains("docs/b.md"),
+            "a finding must not list its own file among the rivals: {v:?}"
+        );
+        assert!(v.iter().all(|x| x.check == "entry_prefix_declared_twice"));
+    }
+
     /// The scoping guard, pinned in BOTH directions in one test: an unowned prefix cited
     /// inside the active project is reported, and one cited only under a sibling root is
     /// COUNTED as scoped out rather than silently dropped. Two separate prefixes, so a
@@ -14240,6 +14416,21 @@ mod tests {
                     seed_artifact(cat, "dup", &abs);
                 }),
                 run: Box::new(scan_entry_defined_twice),
+            },
+            Row {
+                name: "scan_entry_prefix_declared_twice",
+                expected_check: "entry_prefix_declared_twice",
+                setup: Box::new(|cat, dir| {
+                    // Two ledgers in one directory both claiming `QQ` — the smallest real
+                    // collision. Both land under the sibling dir, so both must be scoped out.
+                    for name in ["qq-one", "qq-two"] {
+                        let path = dir.join(format!("{name}.md"));
+                        std::fs::write(&path, "---\nentry_prefix: QQ\n---\n# L\n").unwrap();
+                        let abs = crate::util::fs::RepoPath::from(path.as_path()).into_string();
+                        seed_artifact(cat, name, &abs);
+                    }
+                }),
+                run: Box::new(scan_entry_prefix_declared_twice),
             },
             Row {
                 name: "scan_undefined_entries (ledger_defines_nothing)",

@@ -1222,6 +1222,220 @@ pub(crate) fn declared_prefixes_from_frontmatter(
     }
 }
 
+/// Frontmatter key declaring an id namespace owned OUTSIDE the markdown corpus — a
+/// benchmark suite, a JSON fixture, a code constant — as a map from prefix to the
+/// repo-relative file that owns it: `external_prefix: {TC: scripts/tc-suites/x.json}`.
+///
+/// Read by `doctor`'s `cited_prefix_with_no_definer`, which stays silent for a declared
+/// prefix only while that file still holds a `PREFIX-<n>` id, and by
+/// [`refuse_taken_prefixes`], for which an external namespace is as owned as a ledger's.
+/// Deliberately NOT read by `link_scan`: a resolver that learned the prefix would report
+/// every citation of it dangling.
+/// docs/issues/archive/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md
+pub const EXTERNAL_PREFIX_KEY: &str = "external_prefix";
+
+/// The `external_prefix` declarations in a parsed frontmatter block, as `(prefix,
+/// authority)` pairs. A non-map value, or an entry whose value is not a string, yields
+/// nothing for that entry — which leaves every consumer in its conservative state
+/// (doctor keeps firing; the uniqueness check simply sees no external owner).
+pub(crate) fn declared_external_prefixes(
+    fm: Option<&crate::librarian::frontmatter::Frontmatter>,
+) -> Vec<(String, String)> {
+    let Some(Value::Object(map)) = fm.and_then(|f| f.extra.get(EXTERNAL_PREFIX_KEY)) else {
+        return Vec::new();
+    };
+    map.iter()
+        .filter_map(|(prefix, v)| Some((prefix.trim().to_string(), v.as_str()?.trim().to_string())))
+        .filter(|(p, a)| !p.is_empty() && !a.is_empty())
+        .collect()
+}
+
+/// Prefixes MANY ledgers may declare at once, and the only ones.
+///
+/// `docs/templates/session-log.md` gives every per-work-stream log its own `F-N` frictions
+/// and `W-N` wins, and those logs are cited QUALIFIED by file stem
+/// (`bug-fix-session-log:F-97`), which is what keeps fifteen `F-7`s apart. Refusing a second
+/// declaration of `F` would break the template every reconnaissance run copies. Every other
+/// prefix has exactly one owner per repository — see [`refuse_taken_prefixes`].
+///
+/// A list rather than a rule derived from the corpus on purpose: the exemption is a decision
+/// about ONE family, and a derived rule ("any prefix several ledgers already share") would
+/// bless the next accidental collision the moment it happened twice.
+pub const SHARED_ENTRY_PREFIXES: &[&str] = &["F", "W"];
+
+/// Every prefix an `extra` frontmatter map claims — `entry_prefix` and `external_prefix`
+/// keys alike. The single definition of "a claim", shared by [`prefix_owners_under`] (reading
+/// files) and the write paths (reading a caller's `extra` before anything is written), so the
+/// guard and the scan it consults cannot disagree about what a declaration says.
+pub(crate) fn claimed_prefixes(extra: &std::collections::BTreeMap<String, Value>) -> Vec<String> {
+    let fm = crate::librarian::frontmatter::Frontmatter {
+        extra: extra.clone(),
+        ..Default::default()
+    };
+    declared_prefixes_from_frontmatter(Some(&fm))
+        .into_iter()
+        .chain(
+            declared_external_prefixes(Some(&fm))
+                .into_iter()
+                .map(|(p, _)| p),
+        )
+        .collect()
+}
+
+/// Every prefix declared by an artifact under `root`, mapped to the declaring paths.
+///
+/// Both declarations count as ownership — `entry_prefix` (a ledger allocating ids) and
+/// `external_prefix` (a namespace whose ids live outside markdown). Status is ignored, and
+/// that is load-bearing: an ARCHIVED ledger still owns its namespace, because citations of
+/// its entries still resolve to it, and a new ledger reusing the prefix would capture them
+/// as silent wrong edges — `T-1`…`T-12` bound ~65 citations of three retired ledgers into a
+/// new one that way (docs/issues/archive/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md).
+pub(crate) fn prefix_owners_under(
+    conn: &rusqlite::Connection,
+    root: &std::path::Path,
+) -> Result<std::collections::BTreeMap<String, Vec<String>>> {
+    let mut stmt = conn.prepare("SELECT abs_path FROM artifact ORDER BY abs_path")?;
+    let paths: Vec<String> = stmt
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut owners: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for path in paths {
+        if !std::path::Path::new(&path).starts_with(root) {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        // Cheap pre-filter: nearly every artifact declares neither key, and a YAML parse per
+        // file is the whole cost of this scan.
+        if !text.contains(ENTRY_PREFIX_KEY) && !text.contains(EXTERNAL_PREFIX_KEY) {
+            continue;
+        }
+        let fm = crate::librarian::frontmatter::parse(&text)
+            .ok()
+            .and_then(|(fm, _)| fm);
+        let Some(fm) = fm else { continue };
+        for prefix in claimed_prefixes(&fm.extra) {
+            let list = owners.entry(prefix).or_default();
+            if !list.contains(&path) {
+                list.push(path.clone());
+            }
+        }
+    }
+    Ok(owners)
+}
+
+/// Refuse to let `declaring` claim any of `prefixes` that another artifact in the same
+/// repository already owns, naming the owner and offering free alternatives.
+///
+/// The collision this closes is not a small-namespace problem — 37 prefixes are in use out
+/// of ~18,000 expressible — it is two authors picking the same mnemonic (`T` for tool, test
+/// and task), which nothing checked. Called at every WRITE path that can declare a prefix:
+/// `doc(create)`, `doc(update)` and `rekey_prefix`. A hand-edited frontmatter bypasses all
+/// three, which is what `doctor`'s `entry_prefix_declared_twice` is for.
+///
+/// Scoped to `declaring`'s git root, falling back to its directory outside a repository. A
+/// catalog that has not indexed a sibling ledger yet cannot see it — a false ACCEPT, the
+/// permissive direction, which `doctor` catches after the next reindex. A linked WORKTREE is
+/// its own git root here and cannot see the main checkout's ledgers either; same direction,
+/// caught by `doctor` once `merge_worktree` brings the ledger home.
+pub(crate) fn refuse_taken_prefixes(
+    conn: &rusqlite::Connection,
+    declaring: &std::path::Path,
+    prefixes: &[String],
+) -> Result<()> {
+    let claimed: Vec<&String> = prefixes
+        .iter()
+        .filter(|p| !SHARED_ENTRY_PREFIXES.contains(&p.as_str()))
+        .collect();
+    if claimed.is_empty() {
+        return Ok(());
+    }
+    let dir = declaring.parent().unwrap_or(std::path::Path::new("."));
+    let root = crate::librarian::current_project::lookup_git_root(dir)
+        .unwrap_or_else(|| dir.to_path_buf());
+    let owners = prefix_owners_under(conn, &root)?;
+    let me = declaring.to_string_lossy();
+
+    let taken: Vec<(&String, Vec<&String>)> = claimed
+        .into_iter()
+        .filter_map(|p| {
+            let others: Vec<&String> = owners.get(p)?.iter().filter(|o| o.as_str() != me).collect();
+            (!others.is_empty()).then_some((p, others))
+        })
+        .collect();
+    if taken.is_empty() {
+        return Ok(());
+    }
+
+    let described = taken
+        .iter()
+        .map(|(p, others)| {
+            let others = others
+                .iter()
+                .map(|o| o.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("`{p}` is owned by {others}")
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let suggestions = taken
+        .iter()
+        .map(|(p, _)| {
+            let free = free_prefix_suggestions(p, &owners);
+            format!(
+                "instead of `{p}`: {}",
+                free.iter()
+                    .map(|s| format!("`{s}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    Err(
+        crate::librarian::tools::LibrarianRecoverableError::with_hint(
+            format!(
+                "entry prefix already taken in this repository — {described}. A prefix has one \
+             owner per repository, because a bare `PREFIX-N` citation resolves to whichever \
+             ledger defines it, and two owners bind each other's citations silently."
+            ),
+            format!(
+                "Pick a free prefix — {suggestions} (checked against every declaration here, \
+             archived ledgers included, since their citations still resolve). If this is the \
+             SAME namespace continued, extend the existing ledger instead of declaring a \
+             second one. `F` and `W` are the only shared family (session logs, cited \
+             qualified by file stem). Nothing has been written."
+            ),
+        ),
+    )
+}
+
+/// Up to three free prefixes near `requested`, for a refusal to hand the caller a next move
+/// it can take rather than a bare "taken". Longer candidates first extend the prefix
+/// (`R` -> `RA`, `RB`, ...), a three-letter one varies its last letter; the grammar is
+/// `[A-Z]{1,3}`, so nothing longer is ever offered, and the shared family is never offered.
+fn free_prefix_suggestions(
+    requested: &str,
+    owners: &std::collections::BTreeMap<String, Vec<String>>,
+) -> Vec<String> {
+    let stem = if requested.len() < 3 {
+        requested.to_string()
+    } else {
+        requested[..2].to_string()
+    };
+    ('A'..='Z')
+        .map(|c| format!("{stem}{c}"))
+        .filter(|c| {
+            c != requested
+                && !owners.contains_key(c)
+                && !SHARED_ENTRY_PREFIXES.contains(&c.as_str())
+        })
+        .take(3)
+        .collect()
+}
+
 /// Frontmatter key by which a ledger declares WHERE its rendered snapshot block
 /// lives in the body: that block's header line, verbatim.
 ///
@@ -2513,6 +2727,179 @@ mod tests {
         assert_eq!(row.artifact_id, "art1");
         assert_eq!(row.prompt, "test prompt");
         assert_eq!(row.refresh_count, 0);
+    }
+
+    // ---- prefix uniqueness -----------------------------------------------------------------
+
+    /// A temp repository (`.git` makes it one for `lookup_git_root`) with its ledgers written
+    /// to disk AND seeded into the catalog, since the check reads both.
+    fn repo_with(files: &[(&str, &str)]) -> (tempfile::TempDir, Catalog) {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        for (i, (rel, text)) in files.iter().enumerate() {
+            let p = tmp.path().join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, text).unwrap();
+            art_upsert(
+                &cat,
+                &TestArtifactRowBuilder::new(&format!("a{i}"))
+                    .with_abs_path(&p)
+                    .build(),
+            )
+            .unwrap();
+        }
+        (tmp, cat)
+    }
+
+    fn prefixes(ps: &[&str]) -> Vec<String> {
+        ps.iter().map(|p| p.to_string()).collect()
+    }
+
+    /// The whole feature in one case: a second ledger claiming a taken prefix is refused, and
+    /// the refusal names who owns it and what is free. The remedy half is asserted as SHAPE
+    /// (an owner path, a free alternative), never as prose, so rewording stays green and the
+    /// deletion of either half reds.
+    #[test]
+    fn a_prefix_another_ledger_owns_is_refused_naming_the_owner_and_a_free_alternative() {
+        let (tmp, cat) = repo_with(&[(
+            "docs/trackers/recon.md",
+            "---\nkind: tracker\nentry_prefix: R\n---\n\n## R-1 — first\n",
+        )]);
+        let err = refuse_taken_prefixes(
+            &cat.conn,
+            &tmp.path().join("docs/trackers/new.md"),
+            &prefixes(&["R"]),
+        )
+        .unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::librarian::tools::LibrarianRecoverableError>()
+            .expect("a refusal the caller can act on must stay recoverable");
+        let text = format!("{} {}", rec.message, rec.hint.clone().unwrap_or_default());
+        assert!(text.contains("recon.md"), "must name the owner: {text}");
+        assert!(
+            text.contains("`RA`") || text.contains("`RB`"),
+            "must offer a free alternative to pick instead: {text}"
+        );
+    }
+
+    /// A suggested alternative is FREE. Load-bearing: `RA` is taken here, so a suggestion
+    /// list that skipped the ownership check would offer it — and the first test cannot see
+    /// that, since its fixture owns only `R` and every `R?` candidate is free anyway. A
+    /// refusal that hands the caller a taken prefix sends them straight into a second refusal.
+    #[test]
+    fn a_suggested_alternative_is_never_itself_taken() {
+        let (tmp, cat) = repo_with(&[
+            ("docs/trackers/r.md", "---\nentry_prefix: R\n---\n"),
+            ("docs/trackers/ra.md", "---\nentry_prefix: RA\n---\n"),
+        ]);
+        let err = refuse_taken_prefixes(
+            &cat.conn,
+            &tmp.path().join("docs/trackers/new.md"),
+            &prefixes(&["R"]),
+        )
+        .unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::librarian::tools::LibrarianRecoverableError>()
+            .unwrap();
+        let hint = rec.hint.clone().unwrap_or_default();
+        assert!(!hint.contains("`RA`"), "offered a taken prefix: {hint}");
+        assert!(
+            hint.contains("`RB`"),
+            "the next free one should be offered: {hint}"
+        );
+    }
+
+    /// Re-declaring your OWN prefix is not a conflict — `doc(update)` rewrites the whole
+    /// `extra` value, so a ledger touching an unrelated key re-sends its own declaration.
+    #[test]
+    fn a_ledger_re_declaring_its_own_prefix_is_not_a_conflict() {
+        let (tmp, cat) = repo_with(&[(
+            "docs/trackers/recon.md",
+            "---\nkind: tracker\nentry_prefix: R\n---\n",
+        )]);
+        refuse_taken_prefixes(
+            &cat.conn,
+            &tmp.path().join("docs/trackers/recon.md"),
+            &prefixes(&["R"]),
+        )
+        .expect("the owner re-declaring its own prefix must pass");
+    }
+
+    /// The one shared family. Load-bearing: the declarer here would be refused for `R` in the
+    /// same call if the exemption were a blanket "allow everything", so the case pins that
+    /// the exemption is F/W and nothing wider.
+    #[test]
+    fn the_session_log_family_is_shared_and_nothing_else_is() {
+        let (tmp, cat) = repo_with(&[
+            (
+                "docs/trackers/a-session-log.md",
+                "---\nentry_prefix: [F, W]\n---\n",
+            ),
+            ("docs/trackers/recon.md", "---\nentry_prefix: R\n---\n"),
+        ]);
+        let new = tmp.path().join("docs/trackers/b-session-log.md");
+        refuse_taken_prefixes(&cat.conn, &new, &prefixes(&["F", "W"]))
+            .expect("every session log declares F and W, cited qualified by stem");
+        assert!(
+            refuse_taken_prefixes(&cat.conn, &new, &prefixes(&["F", "W", "R"])).is_err(),
+            "the exemption covers F and W only"
+        );
+    }
+
+    /// An `external_prefix` declaration owns its prefix exactly as a ledger does: a ledger
+    /// declaring `entry_prefix: TC` would make `TC` known to the resolver and turn every
+    /// citation of the benchmark's ids dangling — the measured −1 finding, +6 damage.
+    #[test]
+    fn an_external_namespace_owns_its_prefix() {
+        let (tmp, cat) = repo_with(&[(
+            "docs/trackers/benchmark.md",
+            "---\nexternal_prefix:\n  TC: scripts/tc-suites/legacy-natural.json\n---\n",
+        )]);
+        assert!(refuse_taken_prefixes(
+            &cat.conn,
+            &tmp.path().join("docs/trackers/new.md"),
+            &prefixes(&["TC"]),
+        )
+        .is_err());
+    }
+
+    /// Status is ignored: an archived ledger's namespace is still bound by every citation of
+    /// its entries, so reusing it captures them. Pinned against an "active rows only"
+    /// optimisation that would read as harmless.
+    #[test]
+    fn an_archived_ledger_still_owns_its_prefix() {
+        let (tmp, cat) = repo_with(&[(
+            "docs/trackers/archive/old.md",
+            "---\nkind: tracker\nstatus: archived\nentry_prefix: U\n---\n",
+        )]);
+        cat.conn
+            .execute("UPDATE artifact SET status = 'archived'", [])
+            .unwrap();
+        assert!(refuse_taken_prefixes(
+            &cat.conn,
+            &tmp.path().join("docs/trackers/new.md"),
+            &prefixes(&["U"]),
+        )
+        .is_err());
+    }
+
+    /// Ownership is per REPOSITORY: bare citations resolve inside one repo, and a cross-repo
+    /// citation is qualified (`<repo>:<TOKEN>`). Refusing across repos would stop a sibling
+    /// project from ever using `R` because this one does. Load-bearing: the two temp repos
+    /// are SIBLINGS, so neither path is a prefix of the other.
+    #[test]
+    fn a_ledger_in_another_repository_does_not_own_the_prefix_here() {
+        let (other, cat) = repo_with(&[("docs/trackers/recon.md", "---\nentry_prefix: R\n---\n")]);
+        let here = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(here.path().join(".git")).unwrap();
+        let _keep = other;
+        refuse_taken_prefixes(
+            &cat.conn,
+            &here.path().join("docs/trackers/new.md"),
+            &prefixes(&["R"]),
+        )
+        .expect("a prefix owned in a sibling repository is free here");
     }
 
     #[test]

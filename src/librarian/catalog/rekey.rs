@@ -460,6 +460,23 @@ pub fn rekey_prefix_rows(
             "rekey_prefix: `from` and `to` are the same prefix — nothing to move",
         ));
     }
+    // The target must be FREE — this ledger's schema text said so and nothing checked it.
+    // Before the transaction, so `Preview` reports the collision too rather than a clean plan.
+    let own_path: Option<String> = cat
+        .conn
+        .query_row(
+            "SELECT abs_path FROM artifact WHERE id=?1",
+            [artifact_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(p) = own_path {
+        augmentation::refuse_taken_prefixes(
+            &cat.conn,
+            std::path::Path::new(&p),
+            &[to_prefix.to_string()],
+        )?;
+    }
 
     let tx = cat
         .conn
@@ -985,6 +1002,43 @@ mod tests {
 
         assert!(err.to_string().contains("same prefix"), "got: {err}");
     }
+
+    /// `rekey_prefix` onto a prefix ANOTHER ledger owns is refused before anything moves —
+    /// the third guarded site. Its schema already said the target "must be free" and nothing
+    /// checked: the only refusal was a prefix this SAME ledger reserves. Refused in `Preview`
+    /// too, so the dry run a caller is told to take first reports the collision instead of
+    /// a clean plan.
+    ///
+    /// Load-bearing: real files in a temp repository, unlike this module's `/repo/…` paths —
+    /// ownership is read from frontmatter on disk, so a fixture with no file would make the
+    /// owner invisible and the refusal vacuous.
+    #[test]
+    fn rekeying_onto_a_prefix_another_ledger_owns_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let owner = tmp.path().join("owner.md");
+        let ledger = tmp.path().join("ledger.md");
+        std::fs::write(&owner, "---\nentry_prefix: SRX\n---\n\n## SRX-1 — theirs\n").unwrap();
+        std::fs::write(&ledger, "---\nentry_prefix: T\n---\n\n## T-1 — mine\n").unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "own", owner.to_str().unwrap(), "owner-slug");
+        art(&cat, "led", ledger.to_str().unwrap(), "my-ledger");
+
+        for mode in [RekeyMode::Preview, RekeyMode::Apply] {
+            let err = rekey_prefix_rows(&mut cat, "led", "T", "SRX", mode).unwrap_err();
+            assert!(
+                err.to_string().contains("owner.md"),
+                "must name the owner: {err}"
+            );
+        }
+        assert!(
+            std::fs::read_to_string(&ledger)
+                .unwrap()
+                .contains("## T-1 — mine"),
+            "refused means the ledger's headings did not move"
+        );
+    }
+
     /// A rekey onto a prefix this ledger already reserves would discard one of the two
     /// high-water marks and let the allocator re-issue live ids. `graft` merges by MAX in the
     /// same situation, which is right for a merge and wrong for a rename.

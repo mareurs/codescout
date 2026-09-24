@@ -570,6 +570,30 @@ A ledger is **declared, never inferred**. A design doc that quotes `## R-4` in
 prose is not a namespace, and inferring one from content would make every such doc
 allocatable.
 
+### A prefix has one owner per repository
+
+A bare `PREFIX-N` citation resolves to whichever ledger defines `PREFIX-N`, so two
+ledgers owning one prefix bind each other's citations **silently**. `T` did exactly that:
+three ledgers chose it for "tool", "test" and "task", and ~65 citations of three retired
+ledgers resolved into a new one as wrong edges. Longer prefixes do not prevent this, since
+two authors thinking "TEST" collide at four letters too. Uniqueness does, so the librarian
+enforces it:
+
+- `doc(action="create")`, `doc(action="update")` and `rekey_prefix` **refuse** a prefix
+  another artifact in the same repository already owns. The refusal names the owner and
+  offers free alternatives. Nothing is written.
+- **Both declarations own a prefix**: `entry_prefix` (a ledger allocating ids) and
+  `external_prefix` (ids owned by a file outside markdown, e.g. a benchmark suite).
+- **Archived ledgers still own theirs.** Citations of their entries still resolve to them.
+- **`F` and `W` are the one shared family.** Every session log carries them, and they are
+  cited qualified by file stem (`bug-fix-session-log:F-97`). No other prefix is shared.
+- A hand-edited frontmatter bypasses all three write paths. `doctor`'s
+  `entry_prefix_declared_twice` reports it after the fact.
+
+Choosing one: prefer a distinctive two- or three-letter mnemonic, and **never more than
+three**. The citation grammar is `[A-Z]{1,3}-\d+`, so a four-letter prefix allocates ids
+nobody can cite.
+
 ### Entry ids
 
 The resolver's token grammar is `\b[A-Z]{1,3}-\d+\b` — one to three uppercase

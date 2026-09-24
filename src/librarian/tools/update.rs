@@ -550,6 +550,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // that names the right parameter beats answering it with silence.
     if let Some(extra) = &patch.extra {
         super::create::reject_reserved_extra_keys(extra, super::create::ExtraKeySurface::Update)?;
+        // One owner per prefix per repository. `cat` is already held here — the catalog
+        // mutex is parking_lot's, not reentrant, so re-locking would deadlock. The artifact's
+        // own path is excluded inside, so re-sending its own declaration is not a conflict.
+        crate::librarian::catalog::augmentation::refuse_taken_prefixes(
+            &cat.conn,
+            &full,
+            &crate::librarian::catalog::augmentation::claimed_prefixes(extra),
+        )?;
     }
 
     let body_changing = patch.body.is_some() || patch.body_edits.is_some();
@@ -2161,6 +2169,66 @@ text
         .await
         .expect_err("a reserved key is refused whatever its value");
     }
+
+    /// `doc(update)` refuses a patch that makes an existing artifact claim a prefix another
+    /// ledger owns — the second guarded SITE of `refuse_taken_prefixes`, with its own test
+    /// because a mutation at `create` says nothing about this call. The owner re-sending its
+    /// own declaration alongside an unrelated key must still pass: `extra` is re-sent whole
+    /// by callers, and a guard that refused its own owner would block every ledger edit.
+    #[tokio::test]
+    async fn update_refuses_claiming_a_prefix_another_ledger_owns() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let make = |rel: &str, extra: serde_json::Value| {
+            serde_json::json!({
+                "repo": "r", "rel_path": rel, "kind": "tracker", "title": "T", "body": "b",
+                "extra": extra
+            })
+        };
+        let owner = crate::librarian::tools::create::call(
+            &ctx,
+            make("owner.md", serde_json::json!({"entry_prefix": "QX"})),
+        )
+        .await
+        .unwrap();
+        let other =
+            crate::librarian::tools::create::call(&ctx, make("other.md", serde_json::json!({})))
+                .await
+                .unwrap();
+        let other_id = other["id"].as_str().unwrap().to_string();
+        let other_abs = artifact::get(&ctx.catalog.lock(), &other_id)
+            .unwrap()
+            .unwrap()
+            .abs_path;
+        let before = std::fs::read_to_string(&other_abs).unwrap();
+
+        let err = call(
+            &ctx,
+            serde_json::json!({"id": other_id, "patch": {"extra": {"entry_prefix": "QX"}}}),
+        )
+        .await
+        .expect_err("claiming a taken prefix through update must be refused");
+        assert!(
+            err.to_string().contains("owner.md"),
+            "must name the owner: {err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&other_abs).unwrap(),
+            before,
+            "refused before any write"
+        );
+
+        call(
+            &ctx,
+            serde_json::json!({"id": owner["id"], "patch": {"extra": {
+                "entry_prefix": "QX", "note": "unrelated"
+            }}}),
+        )
+        .await
+        .expect("the owner re-declaring its own prefix must pass");
+    }
+
     /// The second guarded SITE, and it gets its own test for the reason CLAUDE.md
     /// § *Testing Discipline* gives: a mutation answers a question about one line, so
     /// `create`'s kill says nothing about this call. Measured before the guard existed
