@@ -652,6 +652,60 @@ quality); here Fable is the *positive exemplar* to learn from.
 patterns feed Tool Usage Patterns (`f2ecdd76a6189efb`).
 
 ---
+### Reviewer-Lens Map — Which Reviewer Configuration Catches Which Class of Error
+
+Measure, per class of defect, which reviewer configuration finds it. The output is a
+distribution, not a single recall number: which **prime** (model, context, role, lens) moves
+detection of which **error class**, and which mix of reviewers covers the most.
+
+**Motivation:** the 2026-09-24 model-vs-context experiment
+(`docs/evals/review-model-vs-context-2026-09-24.md`) found that recall barely moved with
+model or context (both effects 0.015, pooled). But **which** defects were found split
+cleanly by model. Claude found the numeric claims recounted against the data in 16 of 18 s1
+reviews, where Codex found none. Codex found the code and protocol holes in 16 of 24
+(review, defect) pairs, where Claude found 1. One review of each covered 0.62–0.78 of the
+known set, against 0.42–0.72 for two reviews by the same model. The same split recurred in
+Stage 2 labelling, where Codex alone read row 47 as `monotone_absence`. An aggregate score
+hides this, and it is the part a review policy would act on.
+
+**Approach sketch:**
+
+1. **Error taxonomy, reused, not invented.** Classify each known defect with the closed sets
+   that already exist: the `cluster/<slug>` classes of `docs/trackers/issue-clusters.md` for
+   code and protocol defects, and the 22 rule-tell rules for claim-level errors. A defect
+   that fits neither lands in an explicit `unclassified` bucket, and that bucket's size is
+   itself published.
+2. **Ground truth from history.** Archived bug files carry a fix SHA and a patch-id. Check
+   out the parent of each fix, ask the reviewers to review it, and score whether each one
+   names the defect the fix repaired. This gives a known-defect set that no reviewer
+   authored, unlike the 2026-09-24 set, which was Codex's own findings.
+3. **Primes, one factor per arm:** model family (Claude, Codex, others on the subscription),
+   effort, context (cold, primed with the author's summary, the author's own session), role
+   (reviewer against builder: the authoring session found 0 of 11 while a primed reviewer
+   of the same model found 13 of 33), lens prompt (for example "recount every number" or
+   "trace every code path"), and tools (codescout MCP, `AGENTS.md`).
+4. **Output:** a detection matrix of prime × error class with per-cell n, the marginal
+   distribution of error classes per prime, and a greedy set cover picking the smallest
+   reviewer panel that reaches a chosen coverage.
+5. **Use:** route review by artifact type. A write-up heavy on numbers gets the recounting
+   lens; a scorer or harness change gets the code-path lens.
+
+**Design lessons already paid for, from the 2026-09-24 run:**
+
+- One concept per rubric item: O3 bundled a reason with the defect and scored five valid
+  catches NO.
+- Pin the model and effort of the reviewer you are trying to explain: the Codex cells ran
+  `gpt-5.6-sol`/`high`, and the real reviews `gpt-6-astra`/`medium`.
+- n = 3 per cell cannot separate effects near 0.1.
+- Register before running, and store transcripts under `docs/evals/data/*/runs/`, which the
+  audit excludes (`2af7ad80`).
+
+**Related:** `docs/evals/review-model-vs-context-2026-09-24.md` and its data directory;
+`docs/trackers/issue-clusters.md` (`1b5a080fe2efcb6b`);
+`docs/evals/phase1-local-classifier-preregistration.md` (the rule set, and the Codex
+labelling runs); DWF-10 in `docs/trackers/deep-agent-workflow-observations.md`.
+
+---
 ### Practice Rules — Injecting codescout's Own Working Rules Into Skills We Don't Own
 
 **Proposal: `CAP-10`** in [`docs/trackers/capability-proposals.md`](trackers/capability-proposals.md).
