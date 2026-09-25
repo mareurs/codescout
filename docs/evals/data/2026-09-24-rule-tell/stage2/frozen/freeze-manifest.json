@@ -1,0 +1,424 @@
+{
+ "dropped": {
+  "T: target not exactly one unit": 15,
+  "cal: target not exactly one unit": 7,
+  "train: cross-fold collision dropped": 18,
+  "train: target not exactly one unit": 11,
+  "val: target not exactly one unit": 3
+ },
+ "files": {
+  "T": {
+   "per_rule": {
+    "cannot_happen": {
+     "neg": 2,
+     "pos": 2
+    },
+    "count_unit": {
+     "neg": 2,
+     "pos": 1
+    },
+    "monotone_absence": {
+     "neg": 4,
+     "pos": 3
+    },
+    "open_artifact": {
+     "neg": 1,
+     "pos": 1
+    },
+    "question_asked": {
+     "neg": 6,
+     "pos": 5
+    },
+    "run_tool": {
+     "neg": 1,
+     "pos": 1
+    },
+    "scope_instant": {
+     "neg": 2,
+     "pos": 2
+    },
+    "selector_narrow": {
+     "neg": 3,
+     "pos": 3
+    }
+   },
+   "positives": 18,
+   "rows": 39,
+   "sha256": "f1c80dc439382bec9d934005e2207abf005e37cafb71ed20badfd805d0a08a37"
+  },
+  "cal": {
+   "per_rule": {
+    "closed_population": {
+     "neg": 16,
+     "pos": 16
+    },
+    "d_adjacency": {
+     "neg": 15,
+     "pos": 15
+    },
+    "d_history": {
+     "neg": 8,
+     "pos": 8
+    },
+    "d_loudness": {
+     "neg": 9,
+     "pos": 9
+    },
+    "d_mutation": {
+     "neg": 12,
+     "pos": 12
+    },
+    "d_red": {
+     "neg": 10,
+     "pos": 10
+    },
+    "d_semicolon": {
+     "neg": 4,
+     "pos": 4
+    },
+    "d_sessionid": {
+     "neg": 12,
+     "pos": 12
+    },
+    "d_visibility": {
+     "neg": 13,
+     "pos": 13
+    },
+    "member_vs_population": {
+     "neg": 4,
+     "pos": 4
+    },
+    "open_artifact": {
+     "neg": 13,
+     "pos": 13
+    },
+    "question_asked": {
+     "neg": 23,
+     "pos": 23
+    },
+    "run_tool": {
+     "neg": 20,
+     "pos": 20
+    },
+    "selector_narrow": {
+     "neg": 21,
+     "pos": 20
+    }
+   },
+   "positives": 179,
+   "rows": 359,
+   "sha256": "4f69aa8a9434ab0fc613185eadf1a96716ce5a6c59a955c623e1f47da9359fe5"
+  },
+  "train": {
+   "per_rule": {
+    "closed_population": {
+     "neg": 51,
+     "pos": 51
+    },
+    "d_adjacency": {
+     "neg": 54,
+     "pos": 54
+    },
+    "d_history": {
+     "neg": 75,
+     "pos": 75
+    },
+    "d_loudness": {
+     "neg": 74,
+     "pos": 74
+    },
+    "d_mutation": {
+     "neg": 53,
+     "pos": 53
+    },
+    "d_red": {
+     "neg": 52,
+     "pos": 52
+    },
+    "d_semicolon": {
+     "neg": 56,
+     "pos": 56
+    },
+    "d_sessionid": {
+     "neg": 70,
+     "pos": 70
+    },
+    "d_visibility": {
+     "neg": 52,
+     "pos": 52
+    },
+    "member_vs_population": {
+     "neg": 55,
+     "pos": 55
+    },
+    "open_artifact": {
+     "neg": 63,
+     "pos": 63
+    },
+    "question_asked": {
+     "neg": 77,
+     "pos": 76
+    },
+    "run_tool": {
+     "neg": 62,
+     "pos": 62
+    },
+    "selector_narrow": {
+     "neg": 102,
+     "pos": 102
+    }
+   },
+   "positives": 895,
+   "rows": 1791,
+   "sha256": "2c8213eeffd16ee8a8a0eb7b65b8d7e95a8caf0bd003cf325f50ee0d31b473fb"
+  },
+  "tsyn-cross": {
+   "per_rule": {
+    "act_on_artifact": {
+     "neg": 15,
+     "pos": 15
+    },
+    "cannot_happen": {
+     "neg": 15,
+     "pos": 15
+    },
+    "closed_population": {
+     "neg": 14,
+     "pos": 14
+    },
+    "contradiction": {
+     "neg": 15,
+     "pos": 15
+    },
+    "count_unit": {
+     "neg": 14,
+     "pos": 14
+    },
+    "d_adjacency": {
+     "neg": 15,
+     "pos": 15
+    },
+    "d_fixture": {
+     "neg": 15,
+     "pos": 15
+    },
+    "d_history": {
+     "neg": 15,
+     "pos": 15
+    },
+    "d_loudness": {
+     "neg": 15,
+     "pos": 15
+    },
+    "d_mutation": {
+     "neg": 15,
+     "pos": 15
+    },
+    "d_red": {
+     "neg": 15,
+     "pos": 15
+    },
+    "d_semicolon": {
+     "neg": 14,
+     "pos": 14
+    },
+    "d_sessionid": {
+     "neg": 15,
+     "pos": 15
+    },
+    "d_visibility": {
+     "neg": 15,
+     "pos": 15
+    },
+    "lines_read": {
+     "neg": 15,
+     "pos": 15
+    },
+    "member_vs_population": {
+     "neg": 15,
+     "pos": 15
+    },
+    "monotone_absence": {
+     "neg": 14,
+     "pos": 14
+    },
+    "question_asked": {
+     "neg": 15,
+     "pos": 15
+    },
+    "run_tool": {
+     "neg": 15,
+     "pos": 15
+    },
+    "selector_narrow": {
+     "neg": 15,
+     "pos": 15
+    }
+   },
+   "positives": 296,
+   "rows": 592,
+   "sha256": "40b4bfa0984e63bb82be9cec3891e6634025fef3421c8c7b03d151f974ef5a13"
+  },
+  "tsyn-in": {
+   "per_rule": {
+    "act_on_artifact": {
+     "neg": 11,
+     "pos": 11
+    },
+    "cannot_happen": {
+     "neg": 9,
+     "pos": 9
+    },
+    "closed_population": {
+     "neg": 11,
+     "pos": 11
+    },
+    "contradiction": {
+     "neg": 5,
+     "pos": 5
+    },
+    "d_adjacency": {
+     "neg": 9,
+     "pos": 9
+    },
+    "d_fixture": {
+     "neg": 12,
+     "pos": 12
+    },
+    "d_history": {
+     "neg": 8,
+     "pos": 8
+    },
+    "d_loudness": {
+     "neg": 10,
+     "pos": 10
+    },
+    "d_mutation": {
+     "neg": 15,
+     "pos": 15
+    },
+    "d_red": {
+     "neg": 9,
+     "pos": 9
+    },
+    "d_semicolon": {
+     "neg": 13,
+     "pos": 13
+    },
+    "d_sessionid": {
+     "neg": 10,
+     "pos": 10
+    },
+    "d_visibility": {
+     "neg": 2,
+     "pos": 2
+    },
+    "lines_read": {
+     "neg": 6,
+     "pos": 6
+    },
+    "member_vs_population": {
+     "neg": 8,
+     "pos": 8
+    },
+    "open_artifact": {
+     "neg": 10,
+     "pos": 10
+    }
+   },
+   "positives": 148,
+   "rows": 296,
+   "sha256": "2d0a81852b696d8e7c2ef4fb9515fa1e18a909341eb1b290fba5804c5d404651"
+  },
+  "val": {
+   "per_rule": {
+    "closed_population": {
+     "neg": 15,
+     "pos": 15
+    },
+    "d_adjacency": {
+     "neg": 26,
+     "pos": 26
+    },
+    "d_history": {
+     "neg": 13,
+     "pos": 13
+    },
+    "d_loudness": {
+     "neg": 15,
+     "pos": 15
+    },
+    "d_mutation": {
+     "neg": 14,
+     "pos": 14
+    },
+    "d_red": {
+     "neg": 16,
+     "pos": 16
+    },
+    "d_semicolon": {
+     "neg": 21,
+     "pos": 21
+    },
+    "d_sessionid": {
+     "neg": 25,
+     "pos": 25
+    },
+    "d_visibility": {
+     "neg": 15,
+     "pos": 15
+    },
+    "member_vs_population": {
+     "neg": 11,
+     "pos": 11
+    },
+    "open_artifact": {
+     "neg": 11,
+     "pos": 12
+    },
+    "question_asked": {
+     "neg": 32,
+     "pos": 32
+    },
+    "run_tool": {
+     "neg": 20,
+     "pos": 20
+    },
+    "selector_narrow": {
+     "neg": 26,
+     "pos": 26
+    }
+   },
+   "positives": 261,
+   "rows": 521,
+   "sha256": "27c54b1b0b6518ac877ab406dfe8adf935ac66cb8c0ffab3b811a2abf2bed9f4"
+  }
+ },
+ "haiku_only": [
+  "act_on_artifact",
+  "cannot_happen",
+  "contradiction",
+  "count_unit",
+  "d_fixture",
+  "lines_read",
+  "monotone_absence",
+  "scope_instant"
+ ],
+ "menu": [
+  "closed_population",
+  "d_adjacency",
+  "d_history",
+  "d_loudness",
+  "d_mutation",
+  "d_red",
+  "d_semicolon",
+  "d_sessionid",
+  "d_visibility",
+  "member_vs_population",
+  "open_artifact",
+  "question_asked",
+  "run_tool",
+  "selector_narrow"
+ ],
+ "unknown_cells": "masked (no unknown-cell audit run)"
+}

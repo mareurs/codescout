@@ -991,3 +991,38 @@ If condition 1 fails, the agent labels are not admitted and Stage 2's mined rout
 - the train, validation and calibration folds, T, T-syn-in and T-syn-cross written as JSONL, with their hashes;
 - the 14-rule menu for the local arms;
 - the 8 Haiku-only rules listed.
+
+## Freeze — Stage 2 data, 2026-09-25 (committed before Stage 3 runs)
+
+**Procedure:** `freeze_stage2.py`, no model calls, byte-identical on a re-run. It reuses `count_trainable.py`'s admission rules, and it **asserts that its train-fold positive items equal `trainable.json` for every menu rule**. The assertion passed.
+
+**Files, in `docs/evals/data/2026-09-24-rule-tell/stage2/frozen/`:**
+
+| file | rows | positive rows | sha256 |
+|---|---|---|---|
+| `train.jsonl` | 1,791 | 895 | `2c8213eeffd16ee8a8a0eb7b65b8d7e95a8caf0bd003cf325f50ee0d31b473fb` |
+| `val.jsonl` | 521 | 261 | `27c54b1b0b6518ac877ab406dfe8adf935ac66cb8c0ffab3b811a2abf2bed9f4` |
+| `cal.jsonl` | 359 | 179 | `4f69aa8a9434ab0fc613185eadf1a96716ce5a6c59a955c623e1f47da9359fe5` |
+| `T.jsonl` | 39 | 18 | `f1c80dc439382bec9d934005e2207abf005e37cafb71ed20badfd805d0a08a37` |
+| `tsyn-in.jsonl` | 296 | 148 | `2d0a81852b696d8e7c2ef4fb9515fa1e18a909341eb1b290fba5804c5d404651` |
+| `tsyn-cross.jsonl` | 592 | 296 | `40b4bfa0984e63bb82be9cec3891e6634025fef3421c8c7b03d151f974ef5a13` |
+| `freeze-manifest.json` | | | `78b375f2ac1212099f6adeddf424f344ec4104d9a54363c7d82f356ea02a3274` |
+
+**The row format:** each row is one text with a `target` sentence index into `segment(text)`, a `rule` and a 0 or 1 `label`. The label covers that single (sentence, rule) cell.
+
+**The local arms' menu, 14 rules:** `closed_population`, `d_adjacency`, `d_history`, `d_loudness`, `d_mutation`, `d_red`, `d_semicolon`, `d_sessionid`, `d_visibility`, `member_vs_population`, `open_artifact`, `question_asked`, `run_tool`, `selector_narrow`. Their train positive rows run from 51 (`closed_population`) to 102 (`selector_narrow`), all at least 50.
+
+**Haiku-only, 8 rules, excluded from the local menu:** `act_on_artifact`, `cannot_happen`, `contradiction`, `count_unit`, `d_fixture`, `lines_read`, `monotone_absence`, `scope_instant`.
+
+**Checks:**
+
+- No id is shared between `train` and `val`, `cal`, `T` or either T-syn set.
+- **`train` holds no Codex-generated row**, as the recorded permission scope requires.
+
+**Choices the earlier text left open, disclosed:**
+
+1. **Unknown cells are masked.** Amendment 2's unknown-cell audit was not run, so no source's unknown cells are admitted as negatives. That is the same branch a failing audit takes.
+2. **Cross-fold collisions are dropped, not moved.** The 18 colliding train items are dropped, where amendment 3 said the smaller group moves. That is what the registered count assumed, and it keeps the frozen count equal to it.
+3. **Targets that are not one segmenter unit are dropped:** 11 in train, 3 in val, 7 in cal, **15 in T**. The mined contexts are windows, and the miner's sentence split does not always match the segmenter's. T keeps 18 of its 27 positives. **T's per-rule claims were already withheld**, so no registered claim changes. That T shrank further is recorded here as a fact about it.
+
+**What Stage 3 may read:** `train`, and `val` and `cal` for selection and calibration as registered. It does not read `T`, `tsyn-in` or `tsyn-cross` until every choice is fixed (amendment 1).
