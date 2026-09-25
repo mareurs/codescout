@@ -1,7 +1,7 @@
 ---
 id: '1c5e106ee122f582'
 kind: bug
-status: investigating
+status: mitigated
 title: 'BUG: /mcp reconnect applies a CHANGED env var from settings.json but not a REMOVED one — and the change that lands falsely confirms the one that did not'
 tags:
 - cluster/config-propagation-is-additive
@@ -249,6 +249,38 @@ next reconnect. Run by sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`; the ope
 Not ours. The harness should build the MCP spawn environment by **replacing** the
 config-derived env rather than merging over the previous one, so that a removed key
 is removed.
+
+## Disposition 2026-09-25 — terminal here, and why it was not already
+
+**Status moved `investigating` → `mitigated`.** Nothing in this file is still under
+investigation: the behaviour is reproduced, the layer is discriminated, and § *Fix* reads
+*"Not ours"* with § *Tests added* reading *"None — no codescout code is involved."*
+
+**The reason it sat in the live pool is worth one line, because it is a routing defect rather
+than an oversight.** `investigating` means *worked, no live owner* — which was true — so the
+bug kept surfacing in the "what is available?" query that `CLAUDE.md` § *Querying active
+trackers* prescribes, and in the `claimable` hint's unclaimed list. A triager therefore reaches
+it as available work and pays a 267-line read to arrive at a conclusion the file already
+reached. The status vocabulary has no value meaning *"complete, but the fix belongs to someone
+else's codebase"*; `mitigated` is the closest, and this section is what the status alone cannot
+say.
+
+**The general workaround is MEASURED, not merely the restart one.** § *Workarounds* leads with
+a full Claude Code restart, flagged *"untested at filing time"*, and it is still untested —
+testing it means ending the session that would observe the result. But § *Measured 2026-09-24*
+already establishes a tested alternative: **the `.claude.json` layer applies a deletion; only
+the `settings.json` layer drops one.** So a key that may need removing later belongs in
+`.claude.json`, and that rests on a measurement taken the same day, on the same harness version,
+rather than on an argument about how a restart must work.
+
+**What would reopen this:** a harness release whose changelog names the MCP spawn environment,
+or an observation that `.claude.json` has begun dropping deletions too — the control that makes
+the workaround a workaround. Re-running the § *Reproduced 2026-09-24* two-phase procedure is the
+check; it needs the `PUPPETEER_EXECUTABLE_PATH`-style precondition re-verified first, or an
+absent key proves nothing.
+
+*(Dispositioned by sessionId `3aa55c01-9663-44ca-82d2-48b6b8d76d66`, who did not author this file,
+added no measurement of their own, and changed no code. The claim taken to do this is released.)*
 
 ## Tests added
 
