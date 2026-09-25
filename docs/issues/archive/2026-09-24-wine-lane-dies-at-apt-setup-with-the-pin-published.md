@@ -119,7 +119,7 @@ None needed after `87d90d8c`. On an older tree: re-running the job does not help
 **Verified on a GitHub runner, 2026-09-24.** Run `36054775540` (head `51edbf86`, which contains `87d90d8c`), job `107818878761`: `Install MinGW + wine` succeeded and logged `>>> wine pinned to: wine-11.17`. `Cross-build` and `Cross-clippy` then succeeded, and the job reached `Cross-test under wine (lib only)` for the first time since 09-19. That meets the pass condition this section named, so the file is archived.
 
 **The job is still red, for reasons that are not this bug.** Its cross-test ran `5701 passed; 2 failed`. Those two failures are the first tests this lane has reached since it broke, so they are newly visible, not new regressions:
-- `librarian::catalog::augmentation::tests::a_ledger_re_declaring_its_own_prefix_is_not_a_conflict` (from `45d49a10`, filed as `c6cff39df3eed0c6`);
+- `librarian::catalog::augmentation::tests::a_ledger_re_declaring_its_own_prefix_is_not_a_conflict` (from `45d49a10`, filed as `400ab6cb83b08f59`);
 - `tools::symbol::tests::references_on_an_unused_file_local_symbol_that_returns_its_declaration_stays_bare` (from `1ea1d36b`, filed as `fed1c5731a623c30`).
 
 Both also fail on native `Test (windows-latest / default)`. The earlier note here that the native Windows jobs were failing in `cargo test` is these same two tests. The `Audit Doc Refs` red on `51edbf86` is raw eval transcripts from `50113f61`, owned by that session.

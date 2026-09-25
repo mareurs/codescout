@@ -1384,7 +1384,7 @@ pub(crate) fn refuse_taken_prefixes(
     // The catalog's WRITE normalization, so any spelling a caller passes compares equal to
     // the stored row. Raw `to_string_lossy` was native on Windows (`C:\…\docs/x.md`)
     // against an all-forward-slash `abs_path`, and refused an owner as a conflict with
-    // itself. docs/issues/2026-09-24-prefix-owner-check-compares-path-spellings-as-text.md
+    // itself. docs/issues/archive/2026-09-24-prefix-owner-check-compares-path-spellings-as-text.md
     let me = crate::util::fs::RepoPath::from(declaring);
 
     // Refused before ownership, because a free-but-uncitable prefix is the worse outcome: a

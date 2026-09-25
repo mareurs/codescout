@@ -1,5 +1,5 @@
 ---
-id: c6cff39df3eed0c6
+id: 400ab6cb83b08f59
 kind: bug
 status: fixed
 title: 'BUG: the prefix-owner check compares path spellings as text, so on Windows a ledger re-declaring its own prefix is refused as a conflict'
@@ -9,7 +9,7 @@ closed: 2026-09-25
 opened: 2026-09-24
 owner: marius
 severity: medium
-unverified: The original red was on the Windows-gnu wine lane, which has not yet run 1df22edc; the Linux-reproducible test and its mutation are the evidence so far. Archive once a CI run on a commit containing 1df22edc shows a_ledger_re_declaring_its_own_prefix_is_not_a_conflict green on that lane.
+unverified: 'CLEARED 2026-09-25 by CI run 36096588131 (ffff1dfb), wine lane job 107950021509: the originally red test passed by name and the suite reported 0 failed. Was: the wine lane had not yet run 1df22edc.'
 ---
 
 # BUG: the prefix-owner check compares path spellings as text, so on Windows a ledger re-declaring its own prefix is refused as a conflict
@@ -86,6 +86,9 @@ Move `comparable_path` down to `src/librarian/util.rs` (both layers can import i
 - **RED observed on Linux before the fix**, with the CI message's exact shape (`` `R` is owned by `` the file itself). GREEN after.
 - **Mutation** restoring `declaring.to_string_lossy()`: KILLED by that test (`scripts/mutation-probe.sh`, isolated, 104 tests ran).
 - **Gate green:** FMT 0, CLIPPY 0, LEAN 0, DEFAULT 0. The new test runs in the default lane only, because librarian code is not compiled in the lean lane.
+
+
+**CI confirmation 2026-09-25: run `36096588131` on `ffff1dfb` (contains `1df22edc`), Windows-gnu cross (MinGW + wine), job `107950021509`.** Both `a_ledger_re_declaring_its_own_prefix_is_not_a_conflict ... ok` and `the_owner_is_recognized_under_a_backslash_spelling_of_its_own_path ... ok` were read by name in the log; the suite result was `5711 passed; 0 failed`. The same lane failed the first of those in run `36054775540`, so this is a before and after on the lane where the bug was seen.
 
 ## Workarounds
 

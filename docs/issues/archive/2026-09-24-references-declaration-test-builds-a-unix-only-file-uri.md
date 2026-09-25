@@ -52,7 +52,7 @@ Any Windows lane in CI. It does not reproduce on Linux, which is why the four-la
 
 ## Fix
 
-- `src/util/fs.rs`: new `strip_verbatim(&Path) -> Cow<Path>`. It rewrites `\\?\C:\…` to `C:\…` and `\\?\UNC\srv\share` to `\\srv\share`. Every other path, including every non-Windows path, is returned borrowed. It is a `Path` operation, not a string one, because the callers need component-aware containment. So it is not a second copy of the librarian's string-equality `comparable_path` (`c6cff39df3eed0c6`).
+- `src/util/fs.rs`: new `strip_verbatim(&Path) -> Cow<Path>`. It rewrites `\\?\C:\…` to `C:\…` and `\\?\UNC\srv\share` to `\\srv\share`. Every other path, including every non-Windows path, is returned borrowed. It is a `Path` operation, not a string one, because the callers need component-aware containment. So it is not a second copy of the librarian's string-equality `comparable_path` (`400ab6cb83b08f59`).
 - `src/fs/mod.rs` `classify_reference_path`: compares against the project root and the library roots with the marker stripped. Only the roots are stripped, since `path` comes from a URI and stripping it would be inert.
 - `src/tools/symbol/references.rs`: the outside-reference count compares against `full_path` with the marker stripped.
 - Fixture: `url::Url::from_file_path`.
@@ -72,13 +72,13 @@ Library roots are stripped for the same reason as the project root, but no test 
   - M1 leaves the cross-check test green, and that is correct: with the scope filter broken, zero locations count as outside and the text scan still warns. Each site has its own test.
 - **Gate:** `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`. All three cross-platform tests ran in both test lanes.
 
-**Observed on CI, 2026-09-24, run `36058985076` (head `87001799`, which contains `0ac67b35`).** `references_on_an_unused_file_local_symbol_that_returns_its_declaration_stays_bare`, `references_with_only_the_declaration_is_cross_checked_against_other_files` and the Windows-only `strip_verbatim_makes_a_canonical_root_contain_its_uri_spelling` all passed on native `Test (windows-latest / no-features)` (lib `3608 passed; 0 failed`), native `Test (windows-latest / local-embed)`, and `Windows-gnu cross (MinGW + wine)`. Those jobs are still red for other reasons: the wine lane on `c6cff39df3eed0c6`, and the native lanes on `the_hook_script_agrees_on_the_cluster_parsers` (`8efcf7dba0d8a327`, which this bug's lib failure had been hiding). The archive condition is met.
+**Observed on CI, 2026-09-24, run `36058985076` (head `87001799`, which contains `0ac67b35`).** `references_on_an_unused_file_local_symbol_that_returns_its_declaration_stays_bare`, `references_with_only_the_declaration_is_cross_checked_against_other_files` and the Windows-only `strip_verbatim_makes_a_canonical_root_contain_its_uri_spelling` all passed on native `Test (windows-latest / no-features)` (lib `3608 passed; 0 failed`), native `Test (windows-latest / local-embed)`, and `Windows-gnu cross (MinGW + wine)`. Those jobs are still red for other reasons: the wine lane on `400ab6cb83b08f59`, and the native lanes on `the_hook_script_agrees_on_the_cluster_parsers` (`8efcf7dba0d8a327`, which this bug's lib failure had been hiding). The archive condition is met.
 
 **Still unmeasured:** library roots (see Fix).
 
 ## References
 
-- `docs/issues/2026-09-24-prefix-owner-check-compares-path-spellings-as-text.md` (`c6cff39df3eed0c6`): the same shape, two spellings of one Windows path compared as different, in the librarian. Candidate shared class.
+- `docs/issues/archive/2026-09-24-prefix-owner-check-compares-path-spellings-as-text.md` (`400ab6cb83b08f59`): the same shape, two spellings of one Windows path compared as different, in the librarian. Candidate shared class.
 - `docs/issues/archive/2026-09-24-references-silent-false-zero-for-file-local-symbols-while-warming.md`: the fix whose test this is.
 
 ## Fix provenance
