@@ -1219,3 +1219,39 @@ Run from commit `2a600b5d` on the RTX A5000. Transcripts and every row's probabi
    - The demonstrated false positives are the gate's clean texts, which are clean by construction: 5 of 5 fire, for both arms.
    - For `d_semicolon` (479/479) and `d_sessionid` (470/471) to be mostly true positives, nearly every val text would have to contain that shape. That is implausible, but no label checks it.
    - **Missing negatives from outside each rule remain a plausible explanation that fits the evidence. It has not been causally tested.** The causal test is to retrain with such negatives, which would be a new registration.
+
+## Diagnostics after the stop, for the phase-1b design, 2026-09-25 (registered before any of them runs)
+
+**Purpose:** measurements that can change the phase-1b design (`docs/evals/phase1b-local-classifier-preregistration.md`, still a draft), taken before phase 1b is registered.
+- They read `train` and `val`. `cal` is read only inside `train_arm.py`'s own post-training calibration, as always.
+- **T, the T-syn sets and the gate texts are not read.**
+- None of them changes phase 1's outcome, and none can ship.
+
+**Code:**
+- `train_arm.py` gains `--seed`, whose default is the registered 20260935, and `--permute-labels`, a within-rule shuffle of train labels by `random.Random(20260938)`. With neither flag, behaviour is unchanged.
+- `docs/evals/data/2026-09-24-rule-tell/phase1b/diagnose_run.py` and `phase1b/surface_probe.py`.
+
+**The diagnostics:**
+
+1. **Control, run first.** `diagnose_run.py` on the phase-1 L2 checkpoint must reproduce the committed cross-rule total, 2,614/6,773. If it does not, the script is wrong, and N's and S's numbers from it are withheld until it is fixed. The same run gives phase 1's pooled val AUC, which is the baseline N is read against.
+2. **Permutation null (N).** L2-QWEN, phase-1 settings, seed 20260935, `--permute-labels`. The labels are shuffled within each rule, so every rule keeps its positive count, and only the link between text and label is gone.
+   - **It passes if** the selected checkpoint's pooled val AUC over own cells is within **[0.45, 0.55]**, and **every** epoch's val loss is at least **0.68**. The band is ±1.96 × 0.025, the AUC's standard error under the null at 261 val positives and 260 negatives.
+   - **If it fails,** something other than the labels links train to val, and phase 1b is not registered until the link is found.
+3. **Seed floor (S).** L2-QWEN, phase-1 settings, seed **20260937**. It measures val loss per epoch, the selected epoch, pooled and per-rule val AUC, and cross-rule firing on val. **Its difference from phase 1's run on each is the floor** for a single-seed comparison. Its checkpoint also becomes phase 1b's second phase-1 checkpoint, **D2**.
+4. **Surface probe (P).** For each menu rule, a bag-of-tokens logistic regression on the **target unit's text only**:
+   - fitted on that rule's train rows and scored by AUC on its val rows;
+   - unigrams and bigrams, binary, with `&&` and `;` kept as tokens;
+   - C = 1.0.
+
+   **Its control** is the same probe fitted on within-rule shuffled train labels (`random.Random(20260939)`). If the control's mean AUC falls outside [0.4, 0.6], the probe leaks and its numbers are withheld.
+
+   **A token tally** counts `&&` and `;` in `d_semicolon`'s positive and negative target units, and a `codescout-XX` name and `session…id` in `d_sessionid`'s, beside the same counts in other rules' rows. A high probe AUC means a rule's pairs can be told apart by surface tokens, which a trained arm can learn in place of the rule.
+
+**Hardware:** the A5000, with N and S training concurrently (about 8.7 GB each).
+
+**Predictions:**
+1. N passes.
+2. S's cross-rule firing on val is at least 25% overall. Phase 1's failure is systematic, not a seed accident.
+3. S's selected val loss is within 0.05 of phase 1's 0.231.
+4. P: `d_semicolon`'s probe AUC is at least 0.95, and at least 5 of the 14 rules reach 0.9.
+5. P's control has a mean AUC within [0.4, 0.6].

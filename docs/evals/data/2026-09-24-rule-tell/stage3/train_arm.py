@@ -37,6 +37,7 @@ from segment import segment  # noqa: E402
 
 READABLE = {"train", "val", "cal"}          # amendment 1: nothing else before choices are fixed
 SEED = 20260935
+PERMUTE_SEED = 20260938     # the permutation null's label shuffle (diagnostic only)
 
 # Fixed before any run; registered in the Stage 3 execution amendment. Not tuned.
 ARMS = {
@@ -266,12 +267,16 @@ def main():
     ap.add_argument("--arm", choices=sorted(ARMS), required=True)
     ap.add_argument("--out", type=Path, required=True, help="run directory, outside the repo")
     ap.add_argument("--device", default="cuda:0")
+    ap.add_argument("--seed", type=int, default=SEED,
+                    help="training seed; the registered arm uses the default. Others are diagnostics")
+    ap.add_argument("--permute-labels", action="store_true",
+                    help="permutation null: shuffle train labels within each rule; val/cal untouched")
     ap.add_argument("--smoke", type=int, default=0,
                     help="engineering check only: train on the first N train rows for one epoch; reads no val/cal")
     args = ap.parse_args()
 
-    random.seed(SEED)
-    torch.manual_seed(SEED)
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
     args.out.mkdir(parents=True, exist_ok=True)
     log = (args.out / "log.jsonl").open("a")
 
@@ -285,6 +290,16 @@ def main():
     rule_idx = {r: i for i, r in enumerate(menu)}
     train = load_rows("train")
     assert {r["rule"] for r in train} <= set(menu)
+    if args.permute_labels:
+        # Within each rule, so every rule keeps its positive count (and pos_weight); only the
+        # link between a text and its label is destroyed.
+        prng = random.Random(PERMUTE_SEED)
+        for rule in menu:
+            idx = [i for i, r in enumerate(train) if r["rule"] == rule]
+            labels = [train[i]["label"] for i in idx]
+            prng.shuffle(labels)
+            for i, y in zip(idx, labels):
+                train[i] = {**train[i], "label": y}
     pw = pos_weights(train, menu)
     cfg = ARMS[args.arm]
     epochs = cfg["epochs"]
@@ -295,7 +310,8 @@ def main():
     body_p, head_p = model.trainable()
     emit(event="start", arm=args.arm, device=args.device, backend=("rocm" if torch.version.hip else "cuda"),
          torch=torch.__version__, gpu=torch.cuda.get_device_name(args.device), menu=menu, pos_weight=pw,
-         trainable_body=sum(p.numel() for p in body_p), smoke=args.smoke, seed=SEED, cfg=cfg)
+         trainable_body=sum(p.numel() for p in body_p), smoke=args.smoke, seed=args.seed,
+         permute_labels=args.permute_labels, cfg=cfg)
 
     opt = torch.optim.AdamW([
         {"params": body_p, "lr": cfg["lr_body"], "weight_decay": WEIGHT_DECAY},
@@ -311,7 +327,7 @@ def main():
     for ep in range(epochs):
         model.train()
         order = list(range(len(train)))
-        random.Random(SEED + ep).shuffle(order)
+        random.Random(args.seed + ep).shuffle(order)
         run, n = 0.0, 0
         for i, j in enumerate(order):
             r = train[j]
