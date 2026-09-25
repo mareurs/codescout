@@ -1,15 +1,15 @@
 ---
 id: c6cff39df3eed0c6
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: the prefix-owner check compares path spellings as text, so on Windows a ledger re-declaring its own prefix is refused as a conflict'
 tags:
 - cluster/unclassified
-claimed_at: 2026-09-24
-claimed_by: 09093108-1425-4f6d-9695-a9e3bb98ea0d
+closed: 2026-09-25
 opened: 2026-09-24
 owner: marius
 severity: medium
+unverified: The original red was on the Windows-gnu wine lane, which has not yet run 1df22edc; the Linux-reproducible test and its mutation are the evidence so far. Archive once a CI run on a commit containing 1df22edc shows a_ledger_re_declaring_its_own_prefix_is_not_a_conflict green on that lane.
 ---
 
 # BUG: the prefix-owner check compares path spellings as text, so on Windows a ledger re-declaring its own prefix is refused as a conflict
@@ -21,6 +21,15 @@ severity: medium
 ## Symptom (Effect)
 
 On Windows, any `doc(update)` to a ledger that declares an `entry_prefix` — or `rekey_prefix` back onto one — is refused with *"entry prefix already taken in this repository — `R` is owned by <the ledger itself>"*. `doc(update)` re-sends the whole `extra` value, so it is refused even when the edit is to an unrelated key. That is exactly the case the test names.
+
+
+**Correction 2026-09-25, same session: the paragraph above overstates the production reach.** Each of the three production callers was traced to what it passes as `declaring`:
+
+- `doc(update)` passes `row.abs_path` (`src/librarian/tools/update.rs:520`), which is the stored string itself.
+- `rekey_prefix` passes the stored `abs_path` (`src/librarian/catalog/rekey.rs:568-580`).
+- `doc(create)` passes the native-joined `full` (`src/librarian/tools/create.rs:373`). A create has no row of its own yet, so no comparison against itself can happen.
+
+So as far as the code shows, no production call is refused on Windows today. What was red is the test, which passes a native-joined path the way `create` does. The defect stands: the function takes a `&Path`, answers wrongly for any spelling other than the stored one, and the next caller to pass a native path inherits it. For the same reason, case folding and `strip_verbatim` are NOT warranted here: every caller's two spellings derive from one source, so only the separator can differ.
 
 ## Reproduction
 
@@ -67,9 +76,16 @@ Move `comparable_path` down to `src/librarian/util.rs` (both layers can import i
 
 **Case is still open and must be decided in the fix, not assumed.** Neither helper folds case, and in production the two spellings come from different sources: the doc tool's resolved path against the catalog's `abs_path`. The failing test cannot show this. Both of its spellings derive from one `tmp.path()`, and the lowercase `users` in the log is wine's real directory name, not a case fold.
 
+
+**Done 2026-09-25: `1df22edc` · patch-id `42564a7813d7a7d4565ceacb44c69384487a940b`.** `me` is now `crate::util::fs::RepoPath::from(declaring)`, the catalog's own write normalization, so the comparison is between two strings in the same form. This is smaller than the correction above anticipated: once the production callers were traced, neither `strip_verbatim` nor case folding had a caller that needed it (see § *Symptom*'s second correction).
+
 ## Tests added
 
-None yet. The test that fails is the regression test; it needs a Windows lane to be red. A Linux-reachable test should compare a backslash spelling against the forward-slash one through `comparable_path`, under `cfg(windows)`, where `\` is a separator.
+`the_owner_is_recognized_under_a_backslash_spelling_of_its_own_path` (`src/librarian/catalog/augmentation.rs`) passes the owner's path with its last separator spelled `\`. `to_forward_slash` rewrites `\` on EVERY platform, so this test reds on Linux too. The original `a_ledger_re_declaring_its_own_prefix_is_not_a_conflict` can only red on Windows.
+
+- **RED observed on Linux before the fix**, with the CI message's exact shape (`` `R` is owned by `` the file itself). GREEN after.
+- **Mutation** restoring `declaring.to_string_lossy()`: KILLED by that test (`scripts/mutation-probe.sh`, isolated, 104 tests ran).
+- **Gate green:** FMT 0, CLIPPY 0, LEAN 0, DEFAULT 0. The new test runs in the default lane only, because librarian code is not compiled in the lean lane.
 
 ## Workarounds
 
