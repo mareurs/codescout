@@ -579,7 +579,7 @@ mod tests {
         // executable's), so the assertion below compared the wrong file. Wait until the
         // entry names the copy before unlinking it; a timeout fails loudly rather than
         // letting the test assert about the parent.
-        // docs/issues/2026-09-25-build-id-deleted-binary-test-is-red-on-every-linux-ci-lane-and-green-locally.md
+        // docs/issues/archive/2026-09-25-build-id-deleted-binary-test-is-red-on-every-linux-ci-lane-and-green-locally.md
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         while fs::read_link(&proc_exe)
             .ok()

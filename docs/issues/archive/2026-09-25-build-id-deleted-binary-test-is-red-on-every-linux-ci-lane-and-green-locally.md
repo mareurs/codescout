@@ -1,5 +1,5 @@
 ---
-id: '7000537572fca820'
+id: 1d7e7cc9268942e3
 kind: bug
 status: fixed
 title: 'BUG: build_id_reads_the_inode_of_a_deleted_binary is red on every Linux CI lane and green locally'
@@ -12,7 +12,7 @@ opened: 2026-09-25
 related:
 - docs/issues/archive/2026-09-11-the-written_by-check-compares-shas-only-so-two-dirty-builds-at-one-commit-are-equal.md
 severity: med
-unverified: The failure was CI-first. The three Linux lanes that were red (no-features, local-embed, server-stack) have not yet run c71c16e0; the evidence so far is local stress only. Archive once a CI run on a commit containing c71c16e0 shows the test green on those lanes.
+unverified: 'CLEARED 2026-09-25 by CI run 36096588131 (ffff1dfb): the test passed by name on all four Linux lanes, three of which were red on it in run 36058985076. Was: the three red Linux lanes had not yet run c71c16e0, and the evidence was local stress only.'
 ---
 
 # BUG: `build_id_reads_the_inode_of_a_deleted_binary` is red on every Linux CI lane and green locally — `/proc/<pid>/exe` hashes to something other than the deleted copy
@@ -77,6 +77,9 @@ No new test. The fix IS the test.
 - **Stress:** 3000 parallel runs of the fixed test binary, 0 failures, against a baseline of about 1 in 500. At that baseline, 0 in 3000 has roughly a 0.4% chance of happening by luck.
 - **Mutation:** M7 (resolve the link before reading, from the original fix `f35af160`) was re-run against the EDITED test and still KILLED, at the intended assertion (`left: None`). That re-observes the red after the edit.
 - **Gate:** lean lane green. Default lane: the lib suite passed 5822/0 on re-run. Its two other reds were the known flake `98dd2eb72228cf9d` (recurrence recorded there) and a peer's uncommitted `tests/issue_clusters.rs`.
+
+
+**CI confirmation 2026-09-25: run `36096588131` on `ffff1dfb` (contains `c71c16e0`).** `build_id_reads_the_inode_of_a_deleted_binary ... ok` was read by name in each job log: ubuntu no-features (`107950021664`), local-embed (`107950022131`), default, and server-stack (`107950021525`), with 0 `FAILED` lines for it anywhere. Three of those four failed on this test in run `36058985076`, so this is a before and after on the same lanes, not just a green run.
 
 ## Workarounds
 
