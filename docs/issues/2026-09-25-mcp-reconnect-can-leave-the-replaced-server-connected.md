@@ -20,8 +20,8 @@ unverified: The leak itself is the harness's (Claude Code) and is unaddressed. A
 ## Summary
 
 A `/mcp` reconnect spawns a new codescout server but does not always close the previous server's stdio
-connection. The old process keeps running with nobody talking to it: measured 2026-09-24/25, **2 of 6**
-servers replaced in one session are still alive (the sixth replacement, 2026-09-25 07:53, closed cleanly), each still `ESTAB` to the parent `claude` process on its
+connection. The old process keeps running with nobody talking to it: measured 2026-09-24/25, **2 of 7**
+servers replaced in one session were left alive (the sixth and seventh replacements, 2026-09-25 07:53 and 09:15, closed cleanly), each still `ESTAB` to the parent `claude` process on its
 stdin socket. codescout behaves correctly (a stdio server stays up while its stdin is open); the leak is the
 harness's. The part codescout owns is the instrument: `scripts/stale-servers.sh` flags a server `STALE`
 only when its executable inode has been unlinked, so the orphan on a live binary is reported `current`, and
@@ -40,14 +40,15 @@ Children of one `claude` process (pid 2834158, `.claude-sdd`, Claude Code 2.1.28
 | 3190735 | 00:00:06 | 00:02:32 | no | — |
 | 3474525 | 00:02:32 | 00:07:52 | no | — |
 | 4080390 | 00:07:52 | 07:53:04 | no, and fd 18 is closed | — |
-| 2291837 | 07:53:04 | (current) | yes | fd 26 |
+| 2291837 | 07:53:04 | 09:15:52 | no, closed cleanly | — |
+| 3533331 | 09:15:52 | (current) | yes, and `stale-servers.sh` `CONN` reads `live` | fd 16, a number reused after 3543619's socket closed |
 
 `scripts/stale-servers.sh` the same hour: 3543619 `STALE` (right, for the wrong reason — its binary was
 rebuilt), **2826596 `current`** (wrong: nothing will ever send it a request), 4080390 `current` (right).
 
 ## Reproduction
 
-Not deterministic: 4 of 6 replacements closed the old connection. Observe, per `/mcp`: list
+Not deterministic: 5 of 7 replacements closed the old connection. Observe, per `/mcp`: list
 `ps -o pid= --ppid <claude-pid>` before and after, and for each surviving codescout child resolve its stdin
 peer: `ino=$(readlink /proc/<pid>/fd/0 | tr -dc 0-9); ss -xpn | awk -v i=$ino '$6==i || $8==i'`. A leaked
 server's peer row names `"claude",pid=<claude-pid>`.
@@ -153,7 +154,7 @@ or session ids. Filing it publishes it, so it waits on the operator.
 > ```
 >
 > **Measured in one session, 2026-09-24/25:**
-> - 6 reconnects; 4 closed the old connection cleanly and 2 did not.
+> - 7 reconnects; 5 closed the old connection cleanly and 2 did not.
 > - The 2 leaked connections were never closed by any LATER reconnect. One outlived four more reconnects, holding
 >   ~320 MB RSS.
 > - Killing the leaked process with SIGKILL makes `claude` close its end of the socket immediately, and the live
