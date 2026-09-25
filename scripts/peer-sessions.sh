@@ -137,7 +137,7 @@ binary_name() {
 # its codescout server holds stays held until it resumes. Measured 2026-09-14: a session
 # stopped for four days held a SHARED lock on the production catalog while this table
 # offered it as a peer to ask
-# (docs/issues/2026-09-14-a-stopped-session-holds-a-catalog-lock-and-reads-as-a-live-peer.md).
+# (docs/issues/archive/2026-09-14-a-stopped-session-holds-a-catalog-lock-and-reads-as-a-live-peer.md).
 #
 # The state is the first field after the LAST ')' of /proc/<pid>/stat, never the third
 # whitespace field: field 2 is the comm in parentheses, and a comm may itself contain

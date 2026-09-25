@@ -140,8 +140,8 @@ names and which this change does not attempt: IC-17's own reading is *isolate th
 listing*, and this change improves the listing. What it buys is that the listing no longer tells a reader that a
 party who cannot answer is askable.
 
-Fix SHA: *(recorded when archived)*
-Patch-id: *(recorded when archived)*
+Fix SHA: `4025b965` (experiments)
+Patch-id: `3926b8ec3dc20b2119bb385f28ecac6fa5ad75ff`
 
 ## Tests added
 

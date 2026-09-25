@@ -1,15 +1,15 @@
 ---
-status: open
+kind: bug
+status: investigating
+tags:
+- cluster/shared-resource-carries-no-owner
+closed: null
 opened: 2026-09-02
-closed:
-severity: medium
 owner: marius
 related:
-  - docs/issues/archive/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md
-  - docs/issues/archive/2026-09-02-cluster-gate-failure-text-prescribes-the-blindness-that-caused-it.md
-tags:
-  - cluster/shared-resource-carries-no-owner
-kind: bug
+- docs/issues/archive/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md
+- docs/issues/archive/2026-09-02-cluster-gate-failure-text-prescribes-the-blindness-that-caused-it.md
+severity: medium
 ---
 
 # BUG: staging is not a state you can hold — any two-step index operation on a shared checkout has a window another session can take
@@ -51,7 +51,7 @@ throwaway repos with the real recorder and guards.
   `e110c5a8acfbe97497cf5f7447efc87e5c1a6388`) covers `git reset` only.
 - **Archive-move case covered for helper users.** `commit-mine` refuses a staged rename whose halves have different
   owners (read, `scripts/commit-mine.sh:97-104`), which is § *2026-09-13*'s archive-move case.
-- **Stale sections of this file:**
+- **Stale sections of this file (all four repaired the same day):**
   - Fix item 3 was decided index-ward at `a27b3988`, so § Resume's "decide item 3" is done.
   - § Fix item 1 and § Workarounds still prescribe the single-call `add && commit --` form, which the served
     commit-sequence tail (step 4) says must be SEPARATE calls.
@@ -94,7 +94,7 @@ git add path/to/file
 git diff --cached --name-only        # -> path/to/file
 
 # shell B
-git restore --staged path/to/file    # or `git reset`, or any pre-commit run
+git restore --staged path/to/file    # or `git reset` (NOT a pre-commit run: hooks run with no stash since 074b749e)
 
 # shell A
 git diff --cached --name-only        # -> empty. No error, no notification.
@@ -352,21 +352,28 @@ distinct and this instance does not close the second; see
 
 ## Fix
 
-Not a code change in this repo — the defect is in git's model and in the sequence this project's
-docs and gates recommend. Three concrete items:
+Not a code change in this repo. The defect is in git's model and in the sequence this project's
+docs and gates recommend. Three items, in their state as of 2026-09-25:
 
-1. **Document the atomic shape** wherever a stage-then-check-then-commit sequence is prescribed —
-   `CLAUDE.md` § *Git Workflow*, `docs/RELEASE.md`, and the `ledger-counts` gate's own failure text,
-   which currently sends the reader to re-derive and commit as separate steps.
-2. **Say it in the dispatch brief.** `codescout-26` has already changed its remaining subagent
-   dispatches to *"if the shared index holds paths you did not stage, commit by pathspec and leave
-   them alone — never `git restore --staged`, never `git reset`"*. That is the correct instruction
-   and it belongs in the shared guidance rather than in one session's briefs.
-3. **Consider whether the gate can read the worktree instead of the index** for an interactive run,
-   so that verification does not *require* staging first. That is the same index-vs-worktree axis as
-   `docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` and should
-   be decided with it, not separately — note the two want opposite things, which is the real
-   question rather than an oversight.
+1. **SUPERSEDED: "document the atomic shape".** The single-call `git add … && git commit -- …` form this item
+   proposed is the one the shared guidance now forbids. A read placed in the same command as the commit it
+   gates reaches the reader only after the commit has run, and that batching captured four files at
+   `21258b4b`. The served commit-sequence tail (step 4) prescribes SEPARATE calls, and
+   `scripts/pre-commit-unreviewed-content.sh` refuses a pathspec commit carrying unstaged content. Do not
+   re-propose the atomic shape: it trades this file's losing half for the capture half.
+2. **OPEN: put "never unstage a path you did not stage" into the shared guidance.** A dispatch brief
+   carried *"if the shared index holds paths you did not stage, commit by pathspec and leave them alone.
+   Never `git restore --staged`, never `git reset`"*, and no shared page says it yet.
+   `scripts/git-safe-reset.sh` guards `git reset` for sessions that choose to use it. Nothing guards
+   `git restore --staged`.
+3. **DECIDED at `a27b3988`: the gate reads the INDEX.** That is the opposite direction to the
+   worktree-reading option this item considered, decided together with
+   `docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` as this item
+   asked.
+
+For the CAPTURE half only, `scripts/commit-mine.sh` (`d859d04b`) now commits from a private index holding
+just the entries the stage log attributes to you, so a peer's staged paths stay out of your commit. It does
+nothing for the losing half: a path a peer unstaged is simply absent from what it commits.
 
 ## Tests added
 
@@ -380,16 +387,20 @@ and commits in one call, so the unsafe shape is not reachable by following the d
 
 ## Workarounds
 
-Never hold a staged set across another command. Use:
+Never hold a staged set across another command longer than you must, and read what you are about to
+commit in a SEPARATE call from the commit itself (the served commit-sequence tail, step 4):
 
 ```
-git add <explicit paths> && git commit -F <msgfile> -- <the same explicit paths>
+git add <explicit paths>
+git diff --cached --name-only        # every path yours? a peer may have staged, or UNSTAGED
+git diff --cached                    # read the content
+git commit -m "..."                  # or scripts/commit-mine.sh -m "..." if the index holds a peer's paths
 ```
 
-Never a directory token (`git add docs/issues/`) — that records ownership as `-` in
+Never a directory token (`git add docs/issues/`): that records ownership as `-` in
 `.git/session-stage-log`, which reads as foreign and gets your own later commit refused
-(`scripts/post-index-change-stage-log.sh:250-255`). Let the pre-commit hooks be the verification;
-they read the index and run inside the commit.
+(`scripts/post-index-change-stage-log.sh:279-281`, and the assignment at `:394-399`). Let the pre-commit
+hooks be the verification; they read the index and run inside the commit.
 
 **This closes the losing half only.** It does not stop you committing a peer's concurrent edits to
 the paths you name — see § *The remedy solves one of two problems*. Before naming a path, check
@@ -410,10 +421,13 @@ identifies content and never ownership — usable only if you remember what your
 
 ## Resume
 
-Decide item 3 against
-`docs/issues/archive/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` — they pull in
-opposite directions and the resolution is one decision, not two. Then add the atomic shape to
-`CLAUDE.md` § *Git Workflow* and to the `ledger-counts` failure text.
+Item 3 is decided and item 1 superseded (see § Fix). What is left is the LOSING half, which is still live
+(re-verified 2026-09-25): a peer's `git restore --staged` or `git reset` drops your staged path silently, from a
+bare commit and from `commit-mine` alike. Two open moves:
+
+- Fix item 2, the shared-guidance sentence.
+- A detector. `post-index-change` fires on the peer's unstage too, so the recorder is positioned to notice a
+  session removing a pair that another session staged. Nothing is designed yet.
 
 ## References
 

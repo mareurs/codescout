@@ -35,7 +35,8 @@ the real recorder and guards.
 - **Still live: `git commit -a`** (Instances 1-3), and both guards pass it. A peer's never-staged edit to a tracked
   file was committed with `rc=0` and nothing printed. The coordinator reproduced this independently, with a control
   arm. The hooks see `.git/index.lock`, which neither guard reads as a staging record. Filed as
-  `docs/issues/2026-09-25-git-commit-a-sweeps-a-peers-edit-past-both-ownership-guards.md`.
+  `docs/issues/archive/2026-09-25-git-commit-a-sweeps-a-peers-edit-past-both-ownership-guards.md` (fixed at
+  `93bc8c59` the same day).
 - **Mitigated: `git add -A` / `git add .`.** Swept pairs are stamped `-`/`unnamed`, so both commit forms refuse. The
   refusal is loud, and it over-refuses the sweeper's own file too.
 - **Routing.** The served commit-sequence tail (step 4) still prescribes the pathspec commit. `commit-mine` is

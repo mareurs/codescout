@@ -128,8 +128,8 @@ Two halves, independent.
    child the lexical `/proc` glob visited last, so session 1194273 read `cs REPLACED` while its live server was
    current. It now reports the newest child by start time, plus `+N superseded`.
 
-Fix SHA: *(recorded in the archive or status commit)*
-Patch-id: *(recorded in the archive or status commit)*
+Fix SHA: `59c10059` (experiments; the instrument half)
+Patch-id: `2df2498830a27ec70f56658b71b4fac5b51ff524`
 
 
 ## Upstream report (draft, NOT filed)

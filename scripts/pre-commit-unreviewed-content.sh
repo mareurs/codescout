@@ -102,7 +102,7 @@ set -uo pipefail
 # `index.lock` went unexamined until 2026-09-25, and that was not a judgement: the stage
 # log never records staging into it either, so `git commit -a` swept a peer's unstaged
 # edit past BOTH ownership guards with rc=0
-# (docs/issues/2026-09-25-git-commit-a-sweeps-a-peers-edit-past-both-ownership-guards.md).
+# (docs/issues/archive/2026-09-25-git-commit-a-sweeps-a-peers-edit-past-both-ownership-guards.md).
 idx="${GIT_INDEX_FILE:-}"
 case "${idx##*/}" in
     next-index-*) form=pathspec ;;
@@ -140,7 +140,7 @@ done < <(GIT_INDEX_FILE="$idx" git diff-index --cached --name-only HEAD)
         echo "(\`-i <paths>\` does the same for the paths it names). On this shared checkout that"
         echo "includes files another session is editing, and the foreign-index guard cannot see"
         echo "it: git stages them into a private index.lock, which the stage log never records."
-        echo "Recorded in docs/issues/2026-09-25-git-commit-a-sweeps-a-peers-edit-past-both-ownership-guards.md."
+        echo "Recorded in docs/issues/archive/2026-09-25-git-commit-a-sweeps-a-peers-edit-past-both-ownership-guards.md."
         echo
         # The list above is every path the commit would sweep, so it can name a PEER's file.
         # The pathspec branch prints `git add <the list>` because there the list is paths the

@@ -1,13 +1,11 @@
 ---
-id: '3c394db3801157d0'
+id: ecb8e59d7be06c01
 kind: bug
-status: taken
+status: fixed
 title: git commit -a sweeps a peer's unstaged edit into your commit, and both ownership guards pass it
 tags:
 - cluster/gate-keyed-on-unobservable-event
-claimed_at: 2026-09-25
-claimed_by: e4fbc7ef-27b7-4707-8469-ccdffa8e4e92
-closed: null
+closed: 2026-09-25
 opened: 2026-09-25
 owner: marius
 related:
@@ -120,8 +118,8 @@ A touched. Now that unreviewed-content refuses any `-a` that sweeps unstaged con
 label (*refuse a pathspec commit carrying unstaged content*) was kept verbatim, because about ten records quote
 it as a name.
 
-Fix SHA: *(recorded when archived)*
-Patch-id: *(recorded when archived)*
+Fix SHA: `93bc8c59` (experiments)
+Patch-id: `cb53b3b4ff5ba84cb4c3d4e7057cf2ef10dccc4b`
 
 ## Tests added
 
@@ -150,8 +148,9 @@ commit by pathspec, or with `scripts/commit-mine.sh` (which refuses `-a`).
 
 ## Resume
 
-Archive once the gate is green, recording the fix SHA and patch-id, and repoint the citations of this path: the
-guard's header and refusal text, the test comment, and `e421be689a23ae2a`'s re-verification note.
+Nothing owed. Fixed at `93bc8c59` and archived 2026-09-25 after a green gate (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`),
+with the regression suite at 163/0. One doubt stays open, as the `unverified:` caveat: `-p` and `--interactive`
+were not probed.
 
 ## References
 

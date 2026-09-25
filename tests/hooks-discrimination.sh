@@ -395,7 +395,7 @@ rm -rf "$T"
 # 2026-09-25 this guard examined only the latter. So `git commit -a` swept a peer's
 # unstaged edit past it with rc=0 (and past foreign-index too, since the stage log never
 # records staging into index.lock):
-# docs/issues/2026-09-25-git-commit-a-sweeps-a-peers-edit-past-both-ownership-guards.md.
+# docs/issues/archive/2026-09-25-git-commit-a-sweeps-a-peers-edit-past-both-ownership-guards.md.
 # These cases drive REAL commits through a pre-commit shim instead of handing the guard a
 # hand-named index as section 4 does. The defect was the guard not recognising the name
 # git actually uses, and a copied `index.lock` would pass whether or not git still used it.
