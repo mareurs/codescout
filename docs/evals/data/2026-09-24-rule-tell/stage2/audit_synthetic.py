@@ -42,8 +42,9 @@ def item(p: dict) -> dict:
     return {"pair_id": p["pair_id"], "original": orig, "substituted": sub}
 
 
-def audit_prompt(rule: str, items: list[dict]) -> str:
-    body = (HERE / "synthetic-audit-prompt.md").read_text()
+def audit_prompt(rule: str, items: list[dict], relational: bool = False) -> str:
+    name = "synthetic-audit-prompt-relational.md" if relational else "synthetic-audit-prompt.md"
+    body = (HERE / name).read_text()
     return (f"{body}\n\n## The rule: `{rule}`\n\nLAW: {gs.mp.sel.RULES[rule]}\n\nUSUAL SHAPE: {gs.mp.sel.SPECS[rule]}\n\n"
             "## Items\n\n" + "\n".join(json.dumps(i, ensure_ascii=False) for i in items))
 
@@ -57,21 +58,39 @@ def main() -> int:
     ap.add_argument("--pairs", nargs="+", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--seed", type=int, default=20260932, help="round 1: 20260932; round 2: 20260934")
+    ap.add_argument("--relational", default="", help="comma-separated rules audited with the relational prompt")
+    ap.add_argument("--rules", default="", help="comma-separated rules to audit (default: all)")
+    ap.add_argument("--resample-from", help="an earlier audit.jsonl: audit exactly its sampled pair ids, no new draw")
+    ap.add_argument("--dry-run", action="store_true", help="print the plan (cells, N, sample ids) and exit; no model call")
     a = ap.parse_args()
+    relational = set(filter(None, a.relational.split(",")))
+    only = set(filter(None, a.rules.split(",")))
     out = pathlib.Path(a.out); (out / "raw").mkdir(parents=True, exist_ok=True)
 
     pairs = [json.loads(l) for f in a.pairs for l in pathlib.Path(f).read_text().splitlines()]
     cells = collections.defaultdict(list)
     for p in pairs:
-        if p["ok"]:
+        if p["ok"] and (not only or p["rule"] in only):
             side = "tsyn" if p["set"].startswith("tsyn") else "training"
             cells[(p["generator"], side, p["rule"])].append(p)
-    rng = random.Random(20260932)
+    rng = random.Random(a.seed)
+    fixed = None
+    if a.resample_from:
+        fixed = {json.loads(l)["pair_id"] for l in pathlib.Path(a.resample_from).read_text().splitlines() if l.strip()}
     plan = []
     for key in sorted(cells):
         pool = sorted(cells[key], key=lambda p: p["pair_id"])
+        if fixed is not None:
+            plan.append((key, len(pool), [p for p in pool if p["pair_id"] in fixed]))
+            continue
         n = min(len(pool), max(math.ceil(0.1 * len(pool)), 8))
         plan.append((key, len(pool), rng.sample(pool, n)))
+    if a.dry_run:
+        for key, N, sample in plan:
+            print("|".join(key), f"N={N}", f"n={len(sample)}", "relational" if key[2] in relational else "v1",
+                  sorted(p["pair_id"] for p in sample))
+        return 0
 
     cfg = os.environ.get("JUDGE_CONFIG_DIR", "")
     if not cfg or (dirty := gs.sc.dirty_reasons(cfg)):
@@ -85,7 +104,7 @@ def main() -> int:
     def run(entry):
         (gen, side, rule), N, sample = entry
         auditor = f"codex:{gs.CODEX_MODEL}/{gs.CODEX_EFFORT}" if gen.startswith("claude") else f"claude:{AUDIT_MODEL_CLAUDE}"
-        pr = audit_prompt(rule, [item(p) for p in sample])
+        pr = audit_prompt(rule, [item(p) for p in sample], relational=rule in relational)
         cid = f"{gen.split(':')[0]}-{side}-{rule}"
         answers = {}
         for attempt in (1, 2):

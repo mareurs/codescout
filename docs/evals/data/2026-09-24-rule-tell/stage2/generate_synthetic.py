@@ -34,7 +34,8 @@ CODEX_MODEL, CODEX_EFFORT = "gpt-6-astra", "medium"
 PER_CALL = 5
 BANNED = re.compile(r"\b(violation|violates|rule|incorrect|correction|corrected|wrong|fix)\b", re.I)
 FIELDS = ("seed_id", "rule", "paragraph", "violating_sentence", "fixed_sentence", "why")
-SET_USE = {"pilot": "pilot", "train": "train", "tsyn-in": "tsyn", "tsyn-cross": "tsyn"}
+SET_USE = {"pilot": "pilot", "train": "train", "tsyn-in": "tsyn", "tsyn-cross": "tsyn", "topup": "topup"}
+SEED_FILE = {"topup": "seed-topup.jsonl"}          # every other set reads seed-manifest.jsonl
 
 
 def check_pair(pair: dict, rule: str, seed_text: str, banned_sh: set) -> list[str]:
@@ -139,7 +140,7 @@ def main() -> int:
         gen = ClaudeGen(CLAUDE_MODEL, cfg, timeout=900)
         complete, generator = (lambda pr, cid=None: gen.complete(pr)[0]), f"claude:{CLAUDE_MODEL}"
 
-    manifest = [json.loads(l) for l in (HERE / "seed-manifest.jsonl").read_text().splitlines()]
+    manifest = [json.loads(l) for l in (HERE / SEED_FILE.get(a.set, "seed-manifest.jsonl")).read_text().splitlines()]
     want = SET_USE[a.set]
     rules = sorted({r["use"].split(":")[1] for r in manifest if r["use"] and r["use"].startswith(want + ":")})
     if a.rules:
