@@ -165,18 +165,22 @@ Common to all three: JevK5 with LoRA r16/α32/dropout 0.05 on all linear project
 - The candidate arm proceeds to T only if **all three** of its seeds pass the gate on their own final menus.
 - The checkpoint carried to T is **seed 20260935**, fixed now, so nothing is selected after the gate.
 
-**Open decisions, for the operator, before registration:**
+**Open decisions, for the operator, before registration.** *Decided 2026-09-25, all three as recommended: NC is registered and is the ship arm, with N its diagnostic; the per-rule heads are kept; and the ship bar is all three seeds.*
 
 1. **Cue counterexamples, arm NC.**
    - **Why N alone likely fails the gate.** Cross-rule negatives cannot remove a cue that no other rule's text contains. `&&` is in all 77 `d_semicolon` positives in train and val (surface probe, target units). It is in none of the 13,033 units of the 2,509 other rules' rows across train, val and cal, counted over every unit with `ta.segment` while this was drafted. Prediction 6 already expects N to fire on `clean-12` for that reason. So N would likely fail the gate by construction.
    - **What the research says.** It puts counterexamples in *training*: cue present, label unchanged (Gardner et al., Prop. 1; McCoy et al., §7).
    - **(a) NC is the ship arm, and N is its diagnostic.**
-     - *Cue list:* for each head with probe AUC ≥ 0.9, the 3 tokens with the largest positive coefficients in its train-fit surface probe, printed and committed before mining.
-     - *Candidates:* training-side units containing a cue, from documents outside the campaign exclusion, up to 30 per head, drawn by fixed seed.
+     - *Cue list* (`phase1b/cue_list.py`, output `cue-list.json`, computed from `train` and the training-side manifest only, before registration). Cue candidates are, for each head with probe AUC ≥ 0.9, the 3 features with the largest positive coefficients in its train-fit surface probe.
+     - *Which cues are mined.* The cross-rule term already counters a cue that other rules' units carry, because each such unit becomes a negative for the head. So a cue is mined only where that is not enough: where the head's train positives carrying it outnumber its train negatives carrying it plus the cross-pool units carrying it. The cross pool is every unit of other rules' train rows.
+       - This criterion was chosen after the train-side counts were seen. It is derived from the cross term's mechanism, and it reads nothing outside `train` and the training-side manifest.
+       - It selects `&&`, `&& cargo` and `lib &&` for `d_semicolon` (56 train positives carry `&&`, 0 negatives, 0 of 8,761 pool units); `future` for `closed_population` (13 / 0 / 7); `he` for `d_adjacency` (14 / 0 / 2); `exits` for `run_tool` (25 / 2 / 22); and `per the` for `open_artifact` (19 / 1 / 17).
+       - The other 29 candidate cues are carried by 45 to 5,831 pool units, and are left to the cross term.
+     - *Candidates:* training-side manifest units carrying a mined cue (the manifest already excludes campaign documents, T's groups and held-out shingles), drawn by fixed seed. Up to 30 per head from the train fold, and up to 10 each from val and cal. The corpus holds 89 units with `&&`, 208 with `future`, 79 with `exits`, 63 with `per the` and 2 with `he`.
      - *Leakage:* each candidate passes the 8-token filter against T, both T-syn sets, S and every gate text, and is dropped, never moved, on a collision.
      - *What `clean-12` then measures.* The filter catches copied text, not a shared pattern. A mined `&&` unit that is not a test-lane chain is the same kind of sentence as `clean-12`, by design. Under NC, a pass on `clean-12` shows the counterexamples work on an unseen instance of a pattern training contained. It does not show the head generalises past what it was shown. That is disclosed with the result, and the gate's other swap texts and T carry the rest.
      - *Labels:* candidates go to Step 1's two labellers in the same runs. An unflagged candidate is admitted as a negative for its head alone; a flagged or unsure one is dropped and counted. A Codex verdict can only exclude a candidate, never set a target, which is the audit role Codex holds in Step 1.
-     - *Folds:* assigned by source document, in the freeze's proportions.
+     - *Folds:* each candidate keeps its paragraph's fold from the registered seed manifest, so no new split is drawn.
      - *Cost:* a mining script, and three more runs.
      - *Negative-side cues* (such as "sessionid", which marks 53 of 95 `d_sessionid` negatives in train and val) are not mined. The cross-rule term already makes "fire unless the fix's word is present" costly, because every other rule's unit lacking the word becomes a negative for that head.
    - **(b) N only.** Stage 2 stays the clean causal test of the negatives, and its gate likely fails on `clean-12`; counterexamples become Stage 3.
