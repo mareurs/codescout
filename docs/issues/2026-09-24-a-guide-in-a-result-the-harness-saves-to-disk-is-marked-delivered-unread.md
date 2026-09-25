@@ -20,6 +20,17 @@ severity: medium
 
 codescout marks a guide topic delivered the moment its block is pushed onto a tool response. Claude Code may then decide — client-side, after the response has left the server — that the result is too large to inline, save it to `tool-results/<id>.json`, and show the model a ~2 KB preview of the **first** block. The guide is always a later block, so it is never in the preview, and the ledger suppresses it for the rest of the session. The model is not told it missed anything. `tracker-conventions` is the one that trips this: 59,381 bytes, shipped whole, it can by itself push a small answer over the line.
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `fcd451de`) — still live, and one clause
+understates it.** Reproduced by a subagent: a narrow `doc(action="find", …)` came back as a harness-saved
+61 KB result whose second block (59,593 B) was `auto-injected get_guide('tracker-conventions')`, and its
+ledger then held `"tracker-conventions"`. **The model is not merely left untold — it is told the opposite:**
+the answer was small enough that the saved preview carried the `_guide_hint` "Full guide auto-injected …
+do not re-call get_guide". At the bytes: `guide_emit.rs:136-146` stamps on push with no size bound;
+`tracker-conventions.md` is 59,381 B with **0** `serves:` declarations (confirmed independently by the
+coordinator), so that one guide alone overflows any response. **Reproduction step 2 as written no longer
+reproduces** — the 50-row open-bug list now overflows first and `LibrarianAdapter::relevant_guide_topic`
+(`adapter.rs:408-474`) routes it to `progressive-disclosure`; use a narrow filter. Fix 1 stands.
+
 ## Symptom (Effect)
 
 Measured 2026-09-24T13:33:48Z, session `774ba049-d97c-443a-b31d-f662a9cb6a1e`, first `doc(action="find", kind="bug", …)` after a compaction. The response carried two blocks:

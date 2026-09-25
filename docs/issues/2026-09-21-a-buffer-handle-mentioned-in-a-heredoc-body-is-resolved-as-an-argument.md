@@ -22,6 +22,15 @@ is data, not syntax"* — is not distinguished from command text. Two consequenc
 loudness: an **expired** handle refuses the whole call, and a **live** one is silently
 substituted into the heredoc's content. There is no way to write a handle literally.
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `fcd451de`) — still live, all four modes.** A
+quoted-heredoc body mentioning `@cmd_deadbeef` is refused `buffer reference not found` (reproduced
+independently by the coordinator as well); `echo harmless @cmd_deadbeef1` is refused naming the 8-hex prefix
+(the regex is not right-anchored); a single-quoted `'@cmd_deadbeef'` is refused the same way; and a LIVE
+handle inside a quoted heredoc is silently **substituted** with its temp path (exit 0). At the bytes:
+unanchored `REF_RE` at `output_buffer.rs:901-903`, refusal at the `ok_or_else` near `:965`,
+`result.replace(token, …)` near `:1025`; `mask_heredoc_bodies`' only caller is `run_command/inner.rs:175`; no
+fix commit has touched these files since 2026-09-21.
+
 ## Symptom (Effect)
 
 **Expired handle, loud.** Measured 2026-09-21, this session, using a fabricated handle:

@@ -26,6 +26,17 @@ So there is no live eval whose verdict this blindness distorts, and the file's s
 
 **What survives, unchanged and still worth fixing.** The blindness itself is measured and real: `/analyze-usage`, any Pika scan, and `docs/trackers/tool-usage-patterns.md` cannot see shell work routed through native `Bash`, and a zero from any of them reads as *"none"* rather than *"never looked"*. What changes is the deadline, not the defect — this is ordinary technical debt on a measurement surface, not something gating an in-flight decision. Tier 1 below (name the scope at every reader) is accordingly the whole of what is clearly owed; Tier 2's recorder now needs a demand argument it does not currently have.
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `fcd451de`) — partial.** The `Bash` half is
+closed by policy: `permissions.deny` lists `Bash`, `Write`, `Edit` in all three profiles, so native shell work
+no longer happens here to be missed. The recorder blind spot is still live for the other native tools:
+`usage.db` holds 76,292 `tool_calls` rows and **0** with a capitalised (native) tool name (confirmed by the
+coordinator; a subagent's own native `Read`/`Grep` calls left it at 0). The only writer is `write_record`
+(`src/usage/db.rs:272`); the companion's `PostToolUse` hooks record nothing. No `tool_calls` reader states its
+scope: `Report` (`src/mcp_resources/tool_usage.rs:75-84`) has no scope field, the dashboard never says "MCP
+calls only" — the one scope note is `.claude/skills/analyze-usage/SKILL.md:387`. Tier 1 (a scope sentence on
+every reader) is unbuilt. **Counting trap for whoever re-derives this:** match native names case-SENSITIVELY —
+a case-insensitive match catches codescout's own `grep` (10,081 false hits).
+
 ## Symptom (Effect)
 
 ```

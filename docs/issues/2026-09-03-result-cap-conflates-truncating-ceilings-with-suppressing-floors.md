@@ -15,6 +15,15 @@ severity: medium
 
 The `result-cap-marker-gate` branch's `RESULT_CAP` classification vocabulary is used for two mechanically different things: caps that **truncate** (a ceiling — more input than the cap allows, excess is dropped) and caps that **suppress** (a floor — input below a threshold is withheld). A marker means opposite things under each: for a ceiling, the marker is observable exactly when the cap *bites*; for a floor, the marker described in this branch is observable exactly when the cap does *not* bite. This was flagged once for `doctor.exposure_threshold` (left `Deferred`) but a structural twin, `context.attestation_exposure`, was independently classified `Probed` **and** `Mutation::Killed` — inside the branch's own headline "17 mutation-verified" count.
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `fcd451de`) — the inconsistency is live; the
+decision is owed.** `doctor.exposure_threshold` is still `Deferred` (`cap_probe.rs:459-475`) while
+`context.attestation_exposure` is still `Probed`/`Killed` (`:642-649`); `git grep -hoE 'cap-class: [A-Z_]+' HEAD --
+src` returns only `RESULT_CAP` and `NOT_A_CAP`, so no floor/ceiling vocabulary exists. **One correction to this
+file's framing:** a below-floor test does exist for context (`the_tap_stays_silent_one_citation_below_the_floor`,
+`context.rs` ~1722), and context's floor gates an ADVISORY block while doctor's drops RESULT rows
+(`doctor.rs:4311`, `:4457`, `:4586`) — so "structural twin" overstates it, though the opposite classifications
+stand. The doctor row's reason text still cites `doctor.rs:2947` / `:11267`, now `:4311` / `:17902`.
+
 ## Symptom (Effect)
 
 Two `RESULT_CAP`-annotated constants with the identical `>=` threshold shape receive opposite dispositions in the branch's probe table (`src/tools/core/cap_probe.rs`):
@@ -91,4 +100,3 @@ A reader triaging the `result-cap-marker-gate` gate's `Probed`/`Killed` count sh
 - `src/librarian/tools/context.rs:58-70,355,376`, `src/librarian/tools/doctor.rs:2882,2947,3096,3219`, `src/tools/core/cap_probe.rs` (rows for both ids)
 - Surfaced during `result-cap-marker-gate` branch's whole-branch review (2026-09-03), session ledger `.superpowers/sdd/2026-09-02-result-cap-marker-gate/progress.md`, finding I1
 - `docs/trackers/issue-clusters/IC-13-capped-result-presented-as-complete.md` (artifact `8a9dd5a27cd03480`) — supersedes/extends the standing owed item there for `doctor.exposure_threshold` alone
-

@@ -15,6 +15,14 @@ severity: medium
 
 On the `result-cap-marker-gate` branch, `Coverage::Deferred`'s reason strings mix two populations that need opposite remedies: **43 of 48** say "no test drives this cap past its bound" (a worklist item — write a test), and **5 of 48** say "no marker exists to test for" (a production defect — the cap truncates and discloses nothing, which is `IC-13` membership, not a coverage gap). Only one of the five (`preview.plan_open_next`) was escalated as a possible bug; three others state `IC-13`'s own defining property in their own reason text and were left as ordinary backlog items.
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `fcd451de`) — still live, and the population
+grew.** `Coverage::Deferred(&'static str)` is still one free-text variant (`src/tools/core/cap_probe.rs:74`,
+confirmed by the coordinator). By grep, 48 `Deferred(` against 23 `Probed {` rows. Reading all 48 reasons,
+**8** now state that no marker exists, not 5: the five named here plus `preview.plan_task_text` (:438, "appends
+no ellipsis or other marker"), `doctor.exposure_threshold` (:459, "no field reports how many were dropped"), and
+`doctor.recently_touched_walk` (:1071, added by `8fe822af`). `## Resume` step 2 (one IC-13 bug per no-marker row)
+has not been done — no such files exist.
+
 ## Symptom (Effect)
 
 The branch's tally reports "48 deferred" as a single undifferentiated backlog. A reader triaging it by writing tests for each row will find 5 of them unwritable — because the row itself says the marker being tested for does not exist — and the production defect those five point at stays unaddressed.
@@ -83,4 +91,3 @@ A reader triaging the 48 `Deferred` rows should read each reason string for "no 
 - `src/tools/core/cap_probe.rs` (all `Coverage::Deferred` rows)
 - Surfaced during `result-cap-marker-gate` branch's whole-branch review (2026-09-03), session ledger `.superpowers/sdd/2026-09-02-result-cap-marker-gate/progress.md`, finding I3
 - `docs/trackers/issue-clusters/IC-13-capped-result-presented-as-complete.md` (artifact `8a9dd5a27cd03480`) — extends the standing owed item there, which previously named only `preview.plan_open_next`
-

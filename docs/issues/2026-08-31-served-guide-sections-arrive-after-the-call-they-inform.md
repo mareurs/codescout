@@ -29,6 +29,16 @@ Guidance that prevents a first-call error can never be moved off the always-pres
 surface, no matter how long it is, because moving it would silently convert "expensive but
 protective" into "cheap and useless".
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `fcd451de`) — still live; decision owed.** A
+subagent's first `librarian(action="doctor")` call received its served sections AFTER the result, with
+`_guide_hint: "selected for this call"`. At the bytes: `src/tools/core/types.rs:1383` runs `self.call(...)`
+before `run_post` (`:1476`) → `emit_guide_sections` → `guide_blocks_for` (`src/engines/emitters.rs:98`); there is
+no `run_pre` anywhere in `src/`; `parse_declarations` (`guide_index.rs:219`) still parses only `serves:` and
+`requires:`. The `write_ack` capture/replay machinery exists and is wired to nothing guide-related. What is owed
+is the choice `## Resume` already names: a `blocks:` declaration versus a call-property trigger. Verified by a
+read-only Opus subagent dispatched by sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`
+(`deep-agent-context-observations:DCX-3`).
+
 ## Symptom (Effect)
 
 Observed ~8 times in one session (2026-08-31) across `artifact`, `librarian` and

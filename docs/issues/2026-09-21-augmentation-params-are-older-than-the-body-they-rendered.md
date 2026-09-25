@@ -24,6 +24,13 @@ catalog now holds a state *older* than the render it produced. Nothing reports t
 `librarian(action="doctor")` is silent on this artifact — so a reader of the file and a consumer
 of `params` get two different answers with nothing marking either stale.
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `fcd451de`) — still live; the mechanism cannot be
+settled from this host.** Both sides reproduce: the committed body says "Scanned 2026-08-28 · **47 open**" with 47
+rows, while `doc get` returns `scan_meta.last_scan_at` 2026-06-15 and `n_candidates` 17 (42 candidates: 17 open,
+25 closed). `doctor` reports 80 violations, none naming `cd886c414f6751b4`: no check renders params through
+`render_template` and diffs the result against the managed region. The audit trail's only augmentation write is
+an insert on host `ripper-1848b7` (2026-09-14); this host has none — hypotheses 2 and 3 need that host's catalog.
+
 ## Symptom (Effect)
 
 Committed body, `docs/trackers/legibility-backlog.md` line 15 (working tree clean, identical to

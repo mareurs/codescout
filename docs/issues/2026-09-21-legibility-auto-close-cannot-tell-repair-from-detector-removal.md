@@ -29,6 +29,16 @@ twelve genuine closes sitting beside them — same `status`, same `defects`, sam
 `render_template.j2` files all nineteen under a heading that reads `### Closed (refactored — before →
 after)` with a column headed `defects cleared`.
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `fcd451de`) — still live, and a fourth cause.**
+25 closed candidates, 19 of them `name_collision` closed 2026-06-13 — the detector's retirement, not a repair:
+`Defect` now has only `OverBudgetBody` and `UnMappableFile` (`src/legibility/mod.rs:15-18`, confirmed by the
+coordinator). A genuine close (`LspClient/did_change`) and a detector-removed one (`SensitiveString/fmt`) carry
+identical keys and no `closed_reason`; `reconcile`'s close rule (`legibility_scan/mod.rs:298-310`) and the template's
+"Closed (refactored …)" / "defects cleared" text are unchanged. Threshold-widening is confirmed structurally
+(gate `exceeds_inline_limit`, closing row's `after.budget` = `MAX_INLINE_TOKENS`), not measured. **Not listed here:**
+a renamed or deleted symbol also closes as "refactored" with `after = None`, since `measure_target` returns `None`
+(`src/legibility/mod.rs:351-367`).
+
 ## Symptom (Effect)
 
 Read 2026-09-21 from artifact `cd886c414f6751b4` via

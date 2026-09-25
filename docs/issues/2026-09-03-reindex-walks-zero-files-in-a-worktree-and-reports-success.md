@@ -23,6 +23,17 @@ a root holding 1516 tracked markdown files does not mean "nothing changed"; it m
 and `doc(action="find")` reports it does not exist — which is indistinguishable from never
 having written it.
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `fcd451de`) — still live, the REPORTING half; the
+zero-file walk itself is deliberate.** Code-read only (a reindex writes the shared catalog, so none was run):
+`src/librarian/indexer.rs:291-297` returns early with an empty report when `is_linked_worktree(abs_root)` — the
+only signal a `tracing::warn!` no MCP caller sees (read by the coordinator) — added by `9d84f347` (2026-06-14) and
+pinned by `index_repo_sync_skips_linked_worktree`. `reindex.rs:226-257` targets the worktree path; `IndexReport`
+carries no skip field; the response (`reindex.rs:640-715`) has no worktree key and prints
+`"unknown_sample_note": "complete"` regardless. So the defect is a guarded skip reported as success.
+**The `unverified:` caveat is NARROWED, not resolved:** it asks why THIS worktree differs from
+`.worktrees/tool-collapse`, which has rows. The skip explains zero files walked; it does not explain the
+comparison, since rows can arrive by other routes (worktree-overlay shadow rows, rows predating the 06-14 guard).
+
 ## Symptom (Effect)
 
 In the worktree (`scope="project"`, then `force=true`, then `scope="repo"` — all three

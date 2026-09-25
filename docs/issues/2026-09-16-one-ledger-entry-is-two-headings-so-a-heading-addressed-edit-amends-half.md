@@ -27,6 +27,14 @@ returns `updated: true` while the row still says whatever it said before.
 
 Nothing in the call, the response, or the tool's contract indicates a second surface exists.
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `fcd451de`) — still live, by code read.** Both
+surfaces still exist (`bug-fix-session-log.md`: `## Index` :64, `| F-168 |` :243, `## F-168 — …` :16675), and
+`apply_body_edits` (`src/librarian/tools/update.rs:285-390`) detects neither entry-shaped headings nor Index rows;
+the response (`:806-835`) carries no such warning, and `src/librarian` has no index-row warning anywhere. Not run
+live: the reproduction is a shared-catalog write and the CLI `doc update` takes no body_edits. **A guide conflict
+feeds it:** `librarian.md:144` says "keep the table too if it reads well" while `tracker-conventions.md:807`
+says not to hand-maintain an index beside sections.
+
 ## Symptom (Effect)
 
 Two sessions verified the same quoted figure against `F-168` and reached **opposite verdicts**,

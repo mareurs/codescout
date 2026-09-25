@@ -24,6 +24,14 @@ correct*. `no_index_row_stores_a_count` requires `declared` to be empty and
 `no_class_field_states_a_bare_n` requires `claimed` to be empty. The parity test's population is
 exactly what two other rules exist to keep at zero.
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `fcd451de`) — still live.**
+`scripts/pre-commit-ledger-counts.py --json` under `--source=worktree`, `--source=index`, and HEAD's copy under
+`--source=head` all return `claimed=[]`, `declared={}` with 25 `actual` entries — two of three arms are still
+equality over two empty collections. `the_hook_script_agrees_on_the_cluster_parsers`
+(`tests/issue_clusters.rs:1810-1853`) moved to `--source=index` in `a27b3988` without touching the empty arms: no
+inert annotation, no `is_empty` assertion. The `## Reproduction` still cites `--source=worktree`. Vacuity is by
+inspection; no mutation was run (`mutation-probe.sh` creates a worktree, outside the read-only brief).
+
 ## Symptom (Effect)
 
 The test passes, and would keep passing if the Rust parser or the Python parser stopped matching

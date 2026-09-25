@@ -23,6 +23,14 @@ through `atomic_write()` (`src/util/fs.rs:62-77`): write to `<path>.tmp`, then
 notification for files edited this way, so the running server keeps serving
 stale pre-edit code after a codescout edit, silently.
 
+**Re-verified 2026-09-25 (medium-tier sweep) — the Windows half cannot be verified here; the code is
+unchanged in kind.** `atomic_write` now lives at `src/util/fs.rs:105-128` (the `:62-77` cited above is stale):
+still a sibling temp file then `std::fs::rename`, no mtime touch; every write tool routes through it,
+`create_file` included. Since 2026-08-14 only `8001f61c` (staging name is now `<filename>.tmp`) and `f671c3a1`
+(temp cleaned up on a failed write) touched it, neither aimed at watchers. **Linux control:** `watchfiles` on the
+same temp-then-rename shape reported `added main.py`, `added main.py.tmp`, `deleted main.py.tmp` — visible, so the
+defect, if real, is platform-specific. Next step is `## Resume`'s own A/B on a Windows host.
+
 ## Symptom (Effect)
 Reported from `Mercury MRP Automation` (`docs/trackers/web-ui-fixes-session-log.md`
 F-1, 2026-06-09, status `mitigated` in that repo): after editing `.py` files

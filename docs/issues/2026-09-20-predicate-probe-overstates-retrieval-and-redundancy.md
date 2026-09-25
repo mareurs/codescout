@@ -16,6 +16,16 @@ severity: medium
 
 The observer-phase research and overflow handoff promote next-call reference syntax into eventual retrieval of a particular overflow, and identical read arguments into redundant reads. The implementation observes neither eventual target retrieval nor unchanged source content.
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `fcd451de`) — partial.** The prose overclaim is
+fixed at `5909c464` (patch-id `2f48235a28b166c55646cd51ad9befee1ebdb72f`); the INSTRUMENT defect is still live.
+The probe, loaded via importlib and fed synthetic rows, reproduces all three counterexamples: q4 returns
+`{'switched_tool': 1}` although the overflow's own buffer is read two calls later; `classify_next` returns
+`queried_the_buffer` for an unrelated `@cmd_` handle; q2 counts `repeat_with_identical_args=1` for read → edit →
+same read. Its logic is unchanged since `04734cdc`. **New since filing:** `a832ae89` added `emitted_output_id` /
+`read_output_ids` columns (370 / 441 rows now) that the probe does not use — they record a handle MENTIONED, not
+content delivered, so matching on them needs that label. The research doc's `classify_next` citation
+(`:301-316`) has drifted to `:307-334`.
+
 ## Symptom (Effect)
 
 The research Q4 correctly labels its table as next-call classification, but its implication and the handoff describe results as never retrieved. Q2 calls identical-argument reads unambiguously redundant. These conclusions exceed the predicates and could select the wrong intervention.
