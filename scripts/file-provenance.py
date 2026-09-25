@@ -59,6 +59,7 @@ USAGE
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -545,14 +546,33 @@ def write_base(name, inp, active: Path | None, cwd: Path | None) -> Path | None:
     """The directory a relative path in this tool call was written against.
 
     codescout tools resolve against the ACTIVE project -- `run_command` included, since it
-    runs in the project root -- unless the call pins one with `workspace=`. Native `Bash`
-    runs in the session's cwd. Native Write/Edit take absolute paths, so the base is moot.
+    runs in the project root, or in its `cwd=` subdirectory when the call names one -- unless
+    the call pins a project with `workspace=`. Native `Bash` runs in the session's cwd. Native
+    Write/Edit take absolute paths, so the base is moot.
     """
     if isinstance(name, str) and name.startswith("mcp__codescout__"):
+        base = active
         if isinstance(inp, dict) and isinstance(inp.get("workspace"), str):
-            return Path(inp["workspace"])
-        return active
+            base = Path(inp["workspace"])
+        if (name == "mcp__codescout__run_command" and base is not None
+                and isinstance(inp, dict) and isinstance(inp.get("cwd"), str)):
+            base = base / inp["cwd"]
+        return base
     return cwd
+
+
+@functools.lru_cache(maxsize=None)
+def checkout_root(cwd: str) -> Path:
+    """The git checkout containing `cwd`: where codescout resolves a relative path.
+
+    A session's cwd can be a subdirectory, but the active project is the checkout root, so
+    starting the active tree at the raw cwd lost every relative codescout write from such a
+    session. Falls back to `cwd` itself when git cannot answer (a deleted dir, not a repo).
+    """
+    out = subprocess.run(["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+                         capture_output=True, text=True)
+    top = out.stdout.strip() if out.returncode == 0 else ""
+    return Path(top) if top else Path(cwd)
 
 
 def activated_tree(name, inp, active: Path | None) -> Path | None:
@@ -572,93 +592,159 @@ def activated_tree(name, inp, active: Path | None) -> Path | None:
     return target
 
 
+def transcript_files(root: Path) -> list[Path]:
+    """Every transcript file that can hold writes to this checkout, own and subagent."""
+    files: list[Path] = []
+    for d in transcript_roots(root):
+        if not d.is_dir():
+            continue
+        # `<project-dir>/*.jsonl` is a session's OWN transcript. Claude Code 2.1.x
+        # puts a SUBAGENT's records in `<project-dir>/<parent-session-id>/subagents/
+        # agent-<id>.jsonl` — one directory down, which the non-recursive glob this
+        # replaces never reached.
+        #
+        # That omission is why three successive readings of "are there subagent
+        # records?" all returned zero: every one was taken through this same glob, so
+        # each described the WINDOW rather than the disk, and each agreed with the
+        # last. Re-derived 2026-09-12 outside it, for one checkout across 3 profiles:
+        # 756 subagent transcript files, 755 carrying `isSidechain: true`, 192,797
+        # such records — the newest written that day by 2.1.267, a version the
+        # superseded comment named as emitting none.
+        files.extend(sorted(list(d.glob("*.jsonl")) + list(d.glob("*/subagents/*.jsonl"))))
+    return files
+
+
+def file_session_id(f: Path) -> str:
+    """The session a transcript file belongs to, when its records do not say.
+
+    For a subagent file the stem is `agent-<id>`, which addresses no session and no human. The
+    directory two levels up IS the parent session id — a party who can actually be asked — so
+    the fallback comes from the path, not the filename.
+    """
+    return f.parent.parent.name if f.parent.name == "subagents" else f.stem
+
+
+def tool_records(f: Path):
+    """Yield (record, tool_use blocks) for each record of `f` that carries a tool call."""
+    try:
+        fh = open(f, errors="replace")
+    except OSError:
+        return
+    with fh:
+        for line in fh:
+            if '"tool_use"' not in line:
+                continue        # cheap prefilter; most lines are not tool calls
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            content = (rec.get("message") or {}).get("content")
+            if not isinstance(content, list):
+                continue
+            blocks = [b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"]
+            if blocks:
+                yield rec, blocks
+
+
+def record_session(rec: dict, fallback: str) -> str:
+    # `sessionId` over the filename, and for a SUBAGENT record that field holds the PARENT's
+    # id — the session a human can actually be asked about.
+    #
+    # This comment has been wrong twice, in the same direction both times, and the shape is
+    # worth more than either claim was. It said the substrate carried no subagent records;
+    # corrected, it said Claude Code 2.1.x emitted none. Each correction narrowed the blame —
+    # substrate, then version — and neither questioned the instrument, because every
+    # re-derivation ran through the same non-recursive glob and returned the same zero. Two
+    # agreeing counts over one blind spot is one blind spot counted twice, which at the point
+    # of use is indistinguishable from corroboration. The records were one directory down the
+    # whole time.
+    # docs/issues/archive/2026-09-10-subagent-writes-leave-no-transcript-record-so-provenance-and-fmt-mine-refuse-them.md
+    return rec.get("sessionId") or rec.get("session_id") or fallback
+
+
+def session_activations(files: list[Path]) -> dict[str, dict]:
+    """Per session: did its OWN transcript activate a tree other than its checkout root, and
+    when did any of its SUBAGENTS first activate one (ISO timestamp; "" if a record carried
+    none, which sorts first and so taints everything after the start)?
+
+    codescout's active project belongs to the MCP server, which a session SHARES with its
+    subagents (docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-
+    subagent-can-flip-it.md). So an activation in one transcript moves the tree for the
+    others, and no single file holds the whole timeline — `scan()` needs these facts first.
+    """
+    facts: dict[str, dict] = {}
+    for f in files:
+        is_sub = f.parent.name == "subagents"
+        fallback = file_session_id(f)
+        root_of: Path | None = None
+        for rec, blocks in tool_records(f):
+            if root_of is None and isinstance(rec.get("cwd"), str):
+                root_of = checkout_root(rec["cwd"])
+            for b in blocks:
+                target = activated_tree(b.get("name"), b.get("input"), None)
+                if target is None:
+                    continue
+                fs = facts.setdefault(record_session(rec, fallback),
+                                      {"parent_activated": False, "sub_activated_at": None})
+                if is_sub:
+                    ts = rec.get("timestamp") or ""
+                    if fs["sub_activated_at"] is None or ts < fs["sub_activated_at"]:
+                        fs["sub_activated_at"] = ts
+                elif root_of is None or target.resolve() != root_of.resolve():
+                    fs["parent_activated"] = True
+    return facts
+
+
 def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
     """path (repo-relative) -> [(session id, ISO timestamp or None), ...].
 
     Timestamps are kept rather than filtered here: a record with no timestamp
     cannot be placed in or out of any window, and dropping it would convert a
     substrate gap into a clean exoneration.
+
+    A RELATIVE codescout write names a file in whichever tree was active. That is known from
+    the session's own transcript until a subagent could have moved it, so such a write is
+    credited to NEITHER tree when (a) it comes from a subagent of a session that activated a
+    non-root tree, or whose subagents activated one, or (b) it comes from the parent at or
+    after its subagents' first activation. Crediting it to a guessed tree is the worse error:
+    fmt-mine acts on this answer. Absolute paths and native tools are unaffected.
     """
     owners: dict[str, list[tuple[str, str | None]]] = {}
-    for d in transcript_roots(root):
-        if not d.is_dir():
-            continue
-        for f in sorted(
-            list(d.glob("*.jsonl")) + list(d.glob("*/subagents/*.jsonl"))
-        ):
-            # `<project-dir>/*.jsonl` is a session's OWN transcript. Claude Code 2.1.x
-            # puts a SUBAGENT's records in `<project-dir>/<parent-session-id>/subagents/
-            # agent-<id>.jsonl` — one directory down, which the non-recursive glob this
-            # replaces never reached.
-            #
-            # That omission is why three successive readings of "are there subagent
-            # records?" all returned zero: every one was taken through this same glob, so
-            # each described the WINDOW rather than the disk, and each agreed with the
-            # last. Re-derived 2026-09-12 outside it, for one checkout across 3 profiles:
-            # 756 subagent transcript files, 755 carrying `isSidechain: true`, 192,797
-            # such records — the newest written that day by 2.1.267, a version the
-            # superseded comment named as emitting none.
-            #
-            # For a subagent file the stem is `agent-<id>`, which addresses no session and
-            # no human. The directory two levels up IS the parent session id — a party who
-            # can actually be asked — so the fallback comes from the path, not the
-            # filename. `who` below still prefers the record's own `sessionId`, which real
-            # subagent records carry and which holds that same parent id.
-            sid = f.parent.parent.name if f.parent.name == "subagents" else f.stem
-            try:
-                fh = open(f, errors="replace")
-            except OSError:
-                continue
-            # The tree a RELATIVE codescout path names: the session's cwd until a
-            # `workspace(action="activate")` moves it. Per file, because each transcript
-            # is one session (or one subagent) with its own history. None until a record
-            # carries `cwd`, which keeps cwd-less fixtures on the old "relative means this
-            # checkout" reading. Blind spot: an MCP server restart silently resets the
-            # active project to the cwd, and the transcript does not record it.
-            active: Path | None = None
-            with fh:
-                for line in fh:
-                    if '"tool_use"' not in line:
-                        continue        # cheap prefilter; most lines are not tool calls
-                    try:
-                        rec = json.loads(line)
-                    except Exception:
+    files = transcript_files(root)
+    facts = session_activations(files)
+    no_facts = {"parent_activated": False, "sub_activated_at": None}
+    for f in files:
+        is_sub = f.parent.name == "subagents"
+        fallback = file_session_id(f)
+        # The tree a RELATIVE codescout path names: the checkout root of the session's cwd
+        # until a `workspace(action="activate")` moves it. None until a record carries `cwd`,
+        # which keeps cwd-less fixtures on the old "relative means this checkout" reading.
+        # Blind spot: an MCP server restart silently resets the active project to the cwd,
+        # and the transcript does not record it.
+        active: Path | None = None
+        for rec, blocks in tool_records(f):
+            who = record_session(rec, fallback)
+            when = rec.get("timestamp")
+            cwd = Path(rec["cwd"]) if isinstance(rec.get("cwd"), str) else None
+            if active is None and cwd is not None:
+                active = checkout_root(str(cwd))
+            fs = facts.get(who, no_facts)
+            sub_at = fs["sub_activated_at"]
+            if is_sub:
+                unknowable = fs["parent_activated"] or sub_at is not None
+            else:
+                unknowable = sub_at is not None and (when is None or when >= sub_at)
+            for b in blocks:
+                name, inp = b.get("name"), b.get("input")
+                base = write_base(name, inp, active, cwd)
+                relative_cs = isinstance(name, str) and name.startswith("mcp__codescout__")
+                for raw in write_targets(name, inp, root):
+                    if unknowable and relative_cs and not Path(raw).is_absolute():
                         continue
-                    msg = rec.get("message") or {}
-                    content = msg.get("content")
-                    if not isinstance(content, list):
-                        continue
-                    # `sessionId` over the filename, and for a SUBAGENT record that field
-                    # holds the PARENT's id — the session a human can actually be asked
-                    # about. The glob above now reaches those records; see its comment for
-                    # where they live and how three readings missed them.
-                    #
-                    # This comment has been wrong twice, in the same direction both times,
-                    # and the shape is worth more than either claim was. It said the
-                    # substrate carried no subagent records; corrected, it said Claude Code
-                    # 2.1.x emitted none. Each correction narrowed the blame — substrate,
-                    # then version — and neither questioned the instrument, because every
-                    # re-derivation ran through the same non-recursive glob and returned
-                    # the same zero. Two agreeing counts over one blind spot is one blind
-                    # spot counted twice, which at the point of use is indistinguishable
-                    # from corroboration. The records were one directory down the whole
-                    # time.
-                    # docs/issues/archive/2026-09-10-subagent-writes-leave-no-transcript-record-so-provenance-and-fmt-mine-refuse-them.md
-                    who = rec.get("sessionId") or rec.get("session_id") or sid
-                    when = rec.get("timestamp")
-                    cwd = Path(rec["cwd"]) if isinstance(rec.get("cwd"), str) else None
-                    if active is None:
-                        active = cwd
-                    for b in content:
-                        if not isinstance(b, dict) or b.get("type") != "tool_use":
-                            continue
-                        name, inp = b.get("name"), b.get("input")
-                        base = write_base(name, inp, active, cwd)
-                        for raw in write_targets(name, inp, root):
-                            rel = normalize(raw, root, base)
-                            if rel:
-                                owners.setdefault(rel, []).append((who, when))
-                        active = activated_tree(name, inp, active)
+                    rel = normalize(raw, root, base)
+                    if rel:
+                        owners.setdefault(rel, []).append((who, when))
+                active = activated_tree(name, inp, active)
     return owners
 
 

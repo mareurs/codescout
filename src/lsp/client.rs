@@ -2263,7 +2263,10 @@ struct Point {
         // Load-bearing: `B` sits at the SAME (0, 0) as `A`, so matching it against a.py's
         // parse would widen it. Only the per-file filter keeps it one line.
         std::fs::write(&single, "B = 1\n").unwrap();
-        std::fs::write(&rust, "const C: &[u8] = &[\n    1,\n];\n").unwrap();
+        // Load-bearing: these bytes are VALID multi-line Python. A Rust-looking fixture fails to
+        // parse as Python, so it stayed one line even with the language filter removed — the
+        // test passed either way (review finding). Only the `.rs` extension may exclude it.
+        std::fs::write(&rust, "C = (\n    1,\n)\n").unwrap();
 
         let out = with_python_ranges_by_file(vec![
             name_only("B", SymbolKind::Constant, &single),

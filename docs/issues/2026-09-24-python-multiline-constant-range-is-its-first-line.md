@@ -80,6 +80,14 @@ Fix: `ce41048f` on branch `fix/lessons-friction` · patch-id `066083d1ea88e38ed7
   hand 2026-09-24: green; RED with the language gate in `with_python_ranges` disabled
   ("body must run to the closing paren"), which is what shows it exercises pyright rather than
   skipping.
+### Review follow-up (2026-09-25)
+
+`with_python_ranges_by_file_scopes_each_parse_to_its_own_file_and_keeps_order` passed with the
+language filter removed: its `.rs` fixture was Rust syntax, which fails to parse as Python and so
+stayed one line either way. The fixture is now bytes that ARE valid multi-line Python, so only
+the extension filter can exclude it. Known limit, not changed: for `a, b = (…)` / `a = b = (…)`
+both names get the whole statement's range, so an `edit_code(replace)` on one rewrites the line
+binding the other.
 ## Workarounds
 `read_file(path, start_line, end_line, force=true)` with a guessed range; `edit_file` with
 unique anchors instead of `edit_code`.

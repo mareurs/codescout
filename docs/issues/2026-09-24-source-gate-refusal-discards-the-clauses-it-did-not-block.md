@@ -52,6 +52,15 @@ would not be sound, a `No rerun offered: <reason>.` line naming why:
 A stage inside a pipeline takes its whole run with it. The refuse-in-full contract is unchanged.
 
 Fix: `ce41048f` on branch `fix/lessons-friction` · patch-id `066083d1ea88e38ed7083576925b833c14bf39d5`.
+### Review follow-up (2026-09-25, independent Opus review)
+
+The rerun joined runs with `; `, so a `#` comment swallowed what followed:
+`echo a # note⏎cat src/main.rs⏎echo b` offered `echo a # note; echo b`, which never runs
+`echo b`; and `cat x # c; echo b` split a `;` that sits INSIDE the comment. A line ending in
+`|`/`&`/`\` produced a broken rerun (`ls |; grep x`). Now no rerun is offered when the command
+holds an unquoted comment (`has_unquoted_comment`, checked over the WHOLE command) or a run ends
+in a continuation character. Tests: `source_gate_offers_no_rerun_across_a_comment_or_a_line_continuation`,
+and the control `source_gate_rerun_is_not_suppressed_by_a_quoted_or_mid_word_hash`.
 ## Tests added
 
 Eight `source_gate_*` tests in `src/util/path_security.rs`, one per row of the rewrite table,

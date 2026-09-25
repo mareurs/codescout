@@ -804,8 +804,9 @@ fn shell_tokens(cmd: &str) -> Vec<String> {
 ///
 /// The one thing an index cannot express is grouping glued to a word — `(cat src/x.rs)`
 /// tokenizes as `(cat` — so a leading `(`/`{` is stripped from the head and the skip re-runs,
-/// which also catches `( FOO=1 cat …)`. Trailing `)` / `}` are left in place: they follow the
-/// command's words and no caller reads them as the head.
+/// which also catches `( FOO=1 cat …)`. A trailing `)`/`}` is trimmed from the HEAD too: a
+/// one-word group `(pytest)` is the single token `(pytest)`, and leaving `pytest)` as the head
+/// matched nothing and let the pipe through. No command name ends in either character.
 /// BUG docs/issues/2026-09-24-source-gate-is-bypassed-by-a-keyword-or-group-prefix.md
 fn executed_command(mut tokens: Vec<String>) -> Vec<String> {
     loop {
@@ -816,6 +817,10 @@ fn executed_command(mut tokens: Vec<String>) -> Vec<String> {
         };
         let bare = head.trim_start_matches(['(', '{']);
         if bare.len() == head.len() {
+            let trimmed = head.trim_end_matches([')', '}']);
+            if !trimmed.is_empty() && trimmed.len() != head.len() {
+                tokens[0] = trimmed.to_string();
+            }
             return tokens;
         }
         if bare.is_empty() {
@@ -1425,8 +1430,11 @@ fn grep_is_counting(stage: &str) -> bool {
 /// the shell or a wrapper consumes first: leading `NAME=value` assignments, a closed set of
 /// wrappers that exec their argument — `env` (plus its own assignments/flags), `nice [-n N]`,
 /// `timeout [flags] DURATION`, `nohup`, `time`, `command`, `stdbuf` — and the compound-command
-/// keywords and grouping tokens that introduce a command (`do`, `then`, `else`, `elif`, `!`,
-/// `(`, `{`).
+/// keywords that introduce a command (`if`, `while`, `until`, `do`, `then`, `else`, `elif`,
+/// `!`). Grouping (`(`, `{`)
+/// is NOT skipped here: [`executed_command`], this function's only caller, strips it in both
+/// forms (standalone and glued to a word), and a mutation run showed a second copy here could
+/// never fire.
 ///
 /// Without it the first token was the head, so `FOO=1 cargo test | grep` read as the unknown
 /// command `FOO=1`, fell to "ambiguous -> bounded", and the pipe masked cargo's exit status —
@@ -1442,8 +1450,7 @@ fn grep_is_counting(stage: &str) -> bool {
 /// something legitimate. `command` is on the list although `command -v cargo` is a one-line
 /// lookup, so that one spelling is over-refused. The CALLER must slice the token list at this
 /// index, not merely take its head: later checks read positions (`git`'s subcommand is
-/// `tokens[1]`). Grouping glued to a word (`(cat`) cannot be skipped by index; see
-/// [`executed_command`].
+/// `tokens[1]`).
 fn producer_index(tokens: &[String]) -> usize {
     fn is_assignment(t: &str) -> bool {
         let Some((name, _)) = t.split_once('=') else {
@@ -1457,7 +1464,11 @@ fn producer_index(tokens: &[String]) -> usize {
     // and `-` counts as an option (`env -` is "empty environment", not a command).
     fn takes_value(wrapper: &str, opt: &str) -> bool {
         let valued: &[&str] = match wrapper {
-            "env" => &["-u", "--unset", "-C", "--chdir", "-S", "--split-string"],
+            // Not `-S`/`--split-string`: its value IS the command (`env -S cargo test`), so
+            // skipping it as a value would read `test` as the head.
+            "env" => &["-u", "--unset", "-C", "--chdir"],
+            // GNU `time` (as `/usr/bin/time`); bash's builtin only takes `-p`, which has none.
+            "time" => &["-f", "-o", "--format", "--output"],
             "nice" => &["-n", "--adjustment"],
             "timeout" => &["-k", "-s", "--kill-after", "--signal"],
             "stdbuf" => &["-i", "-o", "-e", "--input", "--output", "--error"],
@@ -1467,7 +1478,12 @@ fn producer_index(tokens: &[String]) -> usize {
     }
     let mut i = 0;
     while let Some(t) = tokens.get(i).map(String::as_str) {
-        if is_assignment(t) || matches!(t, "do" | "then" | "else" | "elif" | "!" | "(" | "{") {
+        if is_assignment(t)
+            || matches!(
+                t,
+                "if" | "while" | "until" | "do" | "then" | "else" | "elif" | "!"
+            )
+        {
             i += 1;
             continue;
         }
@@ -1989,6 +2005,25 @@ fn rerun_without_offenders(
                 body. "
             .to_string();
     }
+    // A comment runs to the end of its LINE, but the split treats `;` inside it as a separator
+    // and the rerun re-joins lines with `; ` — either way the comment swallows clauses the
+    // shell would, or would not, have run. Checked over the whole command, not only the kept
+    // runs: `cat x # c; echo b` never runs `echo b`, so offering it changes the meaning.
+    if has_unquoted_comment(command) {
+        return "No rerun offered: the command has a `#` comment, and re-joining its clauses \
+                would change which of them the comment swallows. "
+            .to_string();
+    }
+    // A line ending in `|`, `&` or `\` continues onto the next, so the newline split cut one
+    // command in two and the halves are not independent clauses.
+    if runs
+        .iter()
+        .any(|run| run.trim_end().ends_with(['|', '&', '\\']))
+    {
+        return "No rerun offered: a line ends in `|`, `&` or `\\` and continues onto the next, \
+                so its clauses are not independent. "
+            .to_string();
+    }
     if split_outside_quotes(stripped, &["&&", "||"]).len() > 1 {
         return "No rerun offered: the clauses are joined by && or ||, so dropping one would \
                 change which of the others run. "
@@ -2032,6 +2067,30 @@ fn has_unquoted_grouping(s: &str) -> bool {
             '(' | ')' | '{' | '}' | '`' if !in_single && !in_double => return true,
             _ => {}
         }
+    }
+    false
+}
+
+/// True if `s` holds a shell comment: an unquoted `#` that starts a word (at the start of the
+/// text or after whitespace). `echo a#b` and `echo '# x'` hold none.
+fn has_unquoted_comment(s: &str) -> bool {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut prev_is_space = true;
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if !in_single => {
+                chars.next();
+                prev_is_space = false;
+                continue;
+            }
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '#' if !in_single && !in_double && prev_is_space => return true,
+            _ => {}
+        }
+        prev_is_space = c.is_whitespace() || (!in_single && !in_double && c == ';');
     }
     false
 }
@@ -3922,6 +3981,49 @@ mod tests {
         }
     }
 
+    // Review finding: the keyword set had `elif` but not `if`, `while` or `until`, and every
+    // fixture put the reader AFTER `then`, never after the opening keyword itself.
+    #[test]
+    fn source_gate_sees_through_a_leading_if_while_or_until() {
+        for cmd in [
+            "if cat src/main.rs >/dev/null; then :; fi",
+            "while cat src/main.rs; do :; done",
+            "until cat src/main.rs; do :; done",
+        ] {
+            assert!(
+                check_source_file_access_at_root(cmd).is_some(),
+                "must block: `{cmd}`"
+            );
+        }
+    }
+
+    // Review finding: runs are re-joined with `; `, so a `#` comment on one line swallowed
+    // the runs after it in the offered rerun (`echo a # note; echo b` never runs `echo b`), and
+    // `cat x # c; echo b` split a `;` that sits INSIDE the comment into a run of its own.
+    #[test]
+    fn source_gate_offers_no_rerun_across_a_comment_or_a_line_continuation() {
+        for cmd in [
+            "echo a # note\ncat src/main.rs\necho b",
+            "cat src/main.rs # c; echo b",
+            "ls |\ngrep x\ncat src/main.rs",
+        ] {
+            let hint = check_source_file_access_at_root(cmd).expect("blocks");
+            assert_eq!(rerun_of(&hint), None, "`{cmd}` → {hint}");
+            assert!(
+                hint.contains("No rerun offered"),
+                "must say WHY: `{cmd}` → {hint}"
+            );
+        }
+    }
+
+    #[test]
+    fn source_gate_rerun_is_not_suppressed_by_a_quoted_or_mid_word_hash() {
+        // Control for the comment rule: a `#` inside quotes or inside a word is not a comment.
+        let hint = check_source_file_access_at_root("echo 'a # b'; echo c#d; cat src/main.rs")
+            .expect("blocks");
+        assert_eq!(rerun_of(&hint), Some("echo 'a # b'; echo c#d"), "{hint}");
+    }
+
     #[test]
     fn source_gate_prefix_stripping_does_not_invent_readers() {
         // Stripping exposes the real command; a non-reader behind a keyword stays allowed.
@@ -4533,6 +4635,30 @@ mod tests {
         }
     }
 
+    // Review findings: `if`/`while`/`until` were missing from the keyword set (the realistic
+    // shape masks cargo's exit status inside a conditional); a one-word group `(pytest)` left the
+    // head as `pytest)`; `env -S`'s value IS the command; GNU `time -f/-o` take a value; and several
+    // `takes_value` entries had no test at all.
+    #[test]
+    fn il3_sees_through_conditionals_one_word_groups_and_every_valued_option() {
+        for cmd in [
+            "if cargo test | tail -5; then :; fi",
+            "while cargo test | tail -1; do :; done",
+            "until cargo test | tail -1; do :; done",
+            "(pytest) | tail",
+            "env -S cargo test | tail",
+            "time -f %e cargo test | tail",
+            "env -C /tmp cargo test | tail",
+            "env --unset HOME cargo test | tail",
+            "timeout --signal KILL 60 cargo test | tail",
+            "timeout --kill-after 5 60 cargo test | tail",
+            "stdbuf -e L cargo test | tail",
+            "stdbuf --output L cargo test | tail",
+        ] {
+            assert!(detect_il3_violation(cmd).is_some(), "must block: `{cmd}`");
+        }
+    }
+
     /// Over-reach controls beyond `il3_skipping_a_prefix_keeps_bounded_producers_bounded`:
     /// a limiter flag on the producer is still read after the prefix is skipped.
     #[test]
@@ -5101,6 +5227,8 @@ EOF"#;
         assert!(detect_il3_violation("git check-ignore .worktrees | head -1").is_none());
         assert!(detect_il3_violation("git cat-file -t HEAD | head -1").is_none());
         assert!(detect_il3_violation("git cat-file -s HEAD:Cargo.toml | head -1").is_none());
+        // Review finding: `-e` was in the match with no test; removing it survived.
+        assert!(detect_il3_violation("git cat-file -e HEAD:Cargo.toml | head -1").is_none());
     }
 
     #[test]

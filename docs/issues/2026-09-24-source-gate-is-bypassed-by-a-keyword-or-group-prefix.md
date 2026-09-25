@@ -52,6 +52,19 @@ clause). `command` stays a wrapper as upstream decided, so `command -v cargo | h
 over-refused — stated at the site.
 
 Fix: `ce41048f` on branch `fix/lessons-friction` · patch-id `066083d1ea88e38ed7083576925b833c14bf39d5`.
+### Review follow-up (2026-09-25, independent Opus review)
+
+- **`if`, `while`, `until` were missing** from the keyword set (it had `elif` but not `if`), so
+  `if cat src/main.rs; then …` still read source and `if cargo test | tail; then …` still masked
+  cargo's exit status. Every fixture had put the reader after `then`. Added, with tests
+  `source_gate_sees_through_a_leading_if_while_or_until` and
+  `il3_sees_through_conditionals_one_word_groups_and_every_valued_option`.
+- **A one-word group `(pytest)`** left the head as `pytest)`; `executed_command` now trims a
+  trailing `)`/`}` from the head.
+- **`env -S`'s value is the command**, so it is no longer skipped as a value; GNU `time -f/-o`
+  now are.
+- **The redundant standalone `(`/`{` skip** in `producer_index` was removed: a mutation run
+  showed it could never fire behind `executed_command`, its only caller.
 ## Tests added
 
 `source_gate_sees_through_keyword_group_and_assignment_prefixes` (10 shapes),

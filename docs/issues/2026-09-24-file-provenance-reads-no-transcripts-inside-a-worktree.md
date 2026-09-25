@@ -69,6 +69,23 @@ Fix: `d10d7f60` on branch `fix/lessons-friction` · patch-id `f6700f1da3b06df15d
 (Rebased onto `experiments` @ `ffff1dfb` on 2026-09-25, via `f918548c`. The first commit was `1f7c6e0c`,
 patch-id `e6df17c8…`: the patch-id CHANGED because resolving the `tests/file-provenance.sh`
 conflict moved the hunk's context, so the old value no longer identifies this fix.)
+### Review follow-up (2026-09-25, independent Opus review)
+
+- **The active tree is process-wide, not per transcript.** codescout's active project belongs to
+  the MCP server, shared by a session and its subagents
+  (`docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`),
+  so per-file tracking credited a subagent's relative write to the wrong tree. `scan` is now two
+  passes: `session_activations` collects per-session facts first, and a relative codescout write
+  is credited to NEITHER tree where its tree is unknowable — from a subagent of a session that
+  activated a non-root tree (or whose subagents activated one), or from the parent at or after
+  its subagents' first activation. The parent's own activations are still tracked, which keeps
+  the original worktree fix.
+- **A subdirectory cwd lost every relative write**: the active tree now starts at the cwd's
+  checkout root (`checkout_root`), not the raw cwd.
+- **`run_command`'s `cwd=`** now resolves under the active tree.
+
+Tests: 11 more assertions in `tests/file-provenance.sh` (179 total), each negative paired with a
+positive control; 7/7 mutations killed.
 ## Tests added
 
 `tests/file-provenance.sh` § *a linked worktree finds its transcripts* — 11 assertions, run
