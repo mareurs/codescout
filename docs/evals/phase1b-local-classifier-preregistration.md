@@ -122,6 +122,77 @@ Common to all three: JevK5 with LoRA r16/α32/dropout 0.05 on all linear project
 4. The chosen recipe's worst-seed pooled val AUC is at least 0.90.
 5. **Cross-rule firing on val stays at 25% or more in every learned run.** Fixing the recipe does not fix over-firing; that is Stage 2's target.
 
+## Stage 2 — cross-rule negatives, a draft (not registered)
+
+**Status: draft, written while Stage 1's last seed was training.** It is registered only after § *Stage 1 results* is written and the open decisions below are settled. Steps 1–5 below are Stage 2's steps; this section states what changes in them.
+
+**What Stage 2 tests.** Stage 1 changes optimisation only, and Stage 1's registered prediction 5 expects its learned runs to keep firing on other rules' text. Stage 2 adds the training change this draft was built around, audited cross-rule negatives, and asks two questions:
+1. Do the negatives stop that firing without costing own-rule detection?
+2. Does the result pass the gate?
+
+**What Stage 1 settles for Stage 2:**
+- **The recipe:** the recipe Stage 1 carries forward, unchanged. It replaces the phase-1 settings listed in § *Carried unchanged*, and is named here at registration.
+- **Seeds:** 20260935, 20260937 and 20260940. Every arm is trained or read at all three.
+- **Runs are not bit-reproducible,** so arms are compared by counts over seeds, never by one run.
+
+**The arms:**
+
+| arm | training | trained in | can ship |
+|---|---|---|---|
+| **B** | Stage 1's three checkpoints of the carried recipe, unchanged | Stage 1 | no |
+| **N** | the same recipe, plus Step 3's cross-rule term | Stage 2 | yes |
+| **NC** | N, plus cue counterexamples | Stage 2, if open decision 1 registers it | yes, if registered |
+
+- **B replaces D and D2.** D and D2 differ from the phase-1b arm in the recipe as well as the negatives, and D2 never learned. B differs from N only by the cross-rule term, so B against N is the causal comparison this draft wanted: one recipe, three seeds each.
+- **B goes through Steps 4 and 5 exactly as N does,** on the same admitted heads, and is not retrained. It is diagnostic and cannot ship, so that exactly one arm is the ship candidate and none is chosen after the gate.
+
+**Changes to Steps 1–5:**
+1. **Step 1, the audit:** unchanged. It reads the frozen data, which Stage 1 did not change.
+2. **Step 2, the clean texts:** unchanged. `clean-6` to `clean-14` were committed in `02511d99`, before any phase-1b training. The three Codex texts are generated after Stage 2 is registered and before its training, from the committed prompt. Stage 1 had trained by then, and it read no gate text.
+3. **Step 3, training:** the recipe and seeds above replace the phase-1 settings and the L2-1b / L2-1b-s2 pair. The loss, λ = 1, and selection by the lowest validation-fold L (own term plus cross term) are unchanged.
+4. **Step 4:** unchanged. B takes it identically.
+5. **Step 5:** every checkpoint of every arm goes through the gate once.
+
+**Measured per run, in addition to Stage 1's measurements:**
+- **All-cells val AUC,** over own cells plus admitted cross cells, pooled and per head. Own-cell AUC cannot see a head that fires on another rule's text. In each of the four Stage 1 runs read when this was drafted, the `d_semicolon` head scored 1.000 on its own pairs and fired on 479 of 479 other rules' val cells. The all-cells AUC falls when that happens.
+- **Own-negative firing on `cal`,** not `val`. Thresholds are chosen on `val`, so a count there is set by the threshold rule rather than by the model (bug `2bac7e0a27fbc392`).
+
+**Reading, over every seed.** The research showed that a reading over only the runs that learned is selection after treatment. If the negatives change how often training fails, conditioning on "learned" biases the comparison. So:
+- **Each arm's result is its number of seeds that pass the gate,** out of 3, on the common menu. A seed that did not learn (own-cell val AUC below 0.80) counts as a failure for its arm.
+- **The causal claim needs N at 2 or 3 of 3 and B at 0 of 3,** on the common menu. That claim is that the negatives remove the over-firing that failed phase 1's gate. It is worded as a pattern, because three seeds per arm cannot establish more: the one-sided Fisher exact p is 0.05 for 3 of 3 against 0 of 3, and 0.2 for 2 of 3 against 0 of 3.
+
+**Ship rule:**
+- The candidate arm proceeds to T only if **all three** of its seeds pass the gate on their own final menus.
+- The checkpoint carried to T is **seed 20260935**, fixed now, so nothing is selected after the gate.
+
+**Open decisions, for the operator, before registration:**
+
+1. **Cue counterexamples, arm NC.**
+   - **Why N alone likely fails the gate.** Cross-rule negatives cannot remove a cue that no other rule's text contains. `&&` is in all 77 `d_semicolon` positives in train and val (surface probe, target units). It is in none of the 13,033 units of the 2,509 other rules' rows across train, val and cal, counted over every unit with `ta.segment` while this was drafted. Prediction 6 already expects N to fire on `clean-12` for that reason. So N would likely fail the gate by construction.
+   - **What the research says.** It puts counterexamples in *training*: cue present, label unchanged (Gardner et al., Prop. 1; McCoy et al., §7).
+   - **(a) NC is the ship arm, and N is its diagnostic.**
+     - *Cue list:* for each head with probe AUC ≥ 0.9, the 3 tokens with the largest positive coefficients in its train-fit surface probe, printed and committed before mining.
+     - *Candidates:* training-side units containing a cue, from documents outside the campaign exclusion, up to 30 per head, drawn by fixed seed.
+     - *Leakage:* each candidate passes the 8-token filter against T, both T-syn sets, S and every gate text, and is dropped, never moved, on a collision.
+     - *What `clean-12` then measures.* The filter catches copied text, not a shared pattern. A mined `&&` unit that is not a test-lane chain is the same kind of sentence as `clean-12`, by design. Under NC, a pass on `clean-12` shows the counterexamples work on an unseen instance of a pattern training contained. It does not show the head generalises past what it was shown. That is disclosed with the result, and the gate's other swap texts and T carry the rest.
+     - *Labels:* candidates go to Step 1's two labellers in the same runs. An unflagged candidate is admitted as a negative for its head alone; a flagged or unsure one is dropped and counted. A Codex verdict can only exclude a candidate, never set a target, which is the audit role Codex holds in Step 1.
+     - *Folds:* assigned by source document, in the freeze's proportions.
+     - *Cost:* a mining script, and three more runs.
+     - *Negative-side cues* (such as "sessionid", which marks 53 of 95 `d_sessionid` negatives in train and val) are not mined. The cross-rule term already makes "fire unless the fix's word is present" costly, because every other rule's unit lacking the word becomes a negative for that head.
+   - **(b) N only.** Stage 2 stays the clean causal test of the negatives, and its gate likely fails on `clean-12`; counterexamples become Stage 3.
+   - **Recommendation: (a).** Without it, a gate failure on `clean-12` is predicted before anything runs, and Stage 2 could not ship.
+2. **Formulation: keep per-rule heads for Stage 2** (recommended). The rule-conditioned form, JevK5's own answer tokens with the rule text in the prompt (Llama Guard, LM-BFF in the research synthesis), becomes Stage 3 and runs only if Stage 2 fails.
+   - The cross-rule term is the per-head form of Llama Guard's "NO outside the given category". It is the smallest change aimed at the measured failure.
+   - The rule-conditioned form needs one forward pass per menu rule per draft, about 14 where the current form needs one.
+3. **The ship bar: all three seeds** (proposed above), or at least two with seed 20260935 among them.
+
+**Predictions, to be fixed at registration:**
+1. **B fails the gate at 3 of 3 seeds,** on its own menu and on the common menu. Stage 1 did not touch the over-firing.
+2. **N keeps own-cell val AUC at 0.90 or more at 3 of 3 seeds.** The negatives do not cost own-rule detection.
+3. **N's pre-gate check removes at most 2 heads at every seed.**
+4. **N fires `d_semicolon` on `clean-12` at 2 or more of 3 seeds.** This is prediction 6 below, restated per seed.
+5. **If NC is registered, NC does not fire `d_semicolon` on `clean-12` at 2 or more of 3 seeds.**
+
 ## Step 1 — the cross-rule audit (decides which cells become negatives)
 
 **The cells in question.** For a text whose row is about rule A, a cell (unit, B) with B ≠ A, over every unit of the text. These are the cells phase 1 masked.
@@ -236,6 +307,8 @@ For a training row with rule A, target unit t and label y, the loss is:
 
 ## A diagnostic arm, which cannot ship
 
+**Superseded in the Stage 2 draft:** arm B, Stage 1's three checkpoints of the carried recipe, replaces D and D2. B differs from the phase-1b arm only by the cross-rule term; D and D2 differ in the recipe too, and D2 never learned. The text below is kept until Stage 2 is registered.
+
 **D** is phase 1's L2 checkpoint (`db18339d…`), unchanged, taken through Step 4's calibration, thresholds, pre-gate check and the gate, on the same admitted heads. **D2** is the phase-1-settings checkpoint at seed 20260937, from the seed-floor diagnostic, taken through the same steps.
 - **It separates the two changes:** whether the evaluation change alone (thresholds over all cells) would have fixed phase 1, or the training change is needed.
 - **D is reported whatever it shows, and cannot ship.** Phase 1's stopping rule bars rescuing a phase-1 arm by re-thresholding, so D is evidence about the cause, never a candidate.
@@ -269,7 +342,7 @@ For a training row with rule A, target unit t and label y, the loss is:
 
 ## Known limits
 
-- **One seed and one run,** as in phase 1.
+- **One seed and one run,** as in phase 1. *(Stage 2 draft: three seeds per arm, read as counts; runs are not bit-reproducible.)*
 - **Phase 1's gate texts have now been seen,** and they shaped this design. The new clean texts are the counterweight. The old texts stay in the gate, so the gate is at least as hard as phase 1's.
 - **The audit's two labellers are models.** Opus shares a model family with the spec author and the synthetic generator. The union rule is conservative for admission, and it can mask cells that are in fact negative, which costs data and never correctness.
 - **Removing heads trades coverage for precision.** A head removed at Step 1 or Step 4 moves to Haiku, and the local menu that ships may be smaller than 14.
