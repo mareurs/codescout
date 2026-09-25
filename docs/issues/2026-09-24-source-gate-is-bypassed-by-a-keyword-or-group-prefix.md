@@ -51,7 +51,7 @@ source gate's head check, and its remedy picker (which chose the `cat` remedy fo
 clause). `command` stays a wrapper as upstream decided, so `command -v cargo | head` is
 over-refused — stated at the site.
 
-Fix: `fae5f447` on branch `fix/lessons-friction` · patch-id `e0bf356dfae93ca97e5fdf42df91158030332fb5`.
+Fix: `ce41048f` on branch `fix/lessons-friction` · patch-id `066083d1ea88e38ed7083576925b833c14bf39d5`.
 ## Tests added
 
 `source_gate_sees_through_keyword_group_and_assignment_prefixes` (10 shapes),

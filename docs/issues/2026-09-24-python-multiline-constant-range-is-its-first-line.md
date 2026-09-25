@@ -66,7 +66,7 @@ ranges are both corrected:
 - Called from `with_python_ranges` in both branches of `LspClient::document_symbols`, and from
   `with_python_ranges_by_file` in `LspClient::workspace_symbols` (in place, order preserved).
 
-Fix: `fae5f447` on branch `fix/lessons-friction` · patch-id `e0bf356dfae93ca97e5fdf42df91158030332fb5`.
+Fix: `ce41048f` on branch `fix/lessons-friction` · patch-id `066083d1ea88e38ed7083576925b833c14bf39d5`.
 ## Tests added
 
 - 11 unit tests, `src/ast/python_ranges.rs` `tests` — every load-bearing site was mutated and

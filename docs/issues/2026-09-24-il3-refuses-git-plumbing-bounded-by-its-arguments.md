@@ -53,7 +53,7 @@ commands that stay refused (`detect_il3_violation`, and `refusal_predicate` in
 
 **Partial by design:** the report's own `ls-files` and `diff` examples still refuse, correctly.
 
-Fix: `fae5f447` on branch `fix/lessons-friction` · patch-id `e0bf356dfae93ca97e5fdf42df91158030332fb5`.
+Fix: `ce41048f` on branch `fix/lessons-friction` · patch-id `066083d1ea88e38ed7083576925b833c14bf39d5`.
 ## Tests added
 
 `src/util/path_security.rs` tests: `il3_allows_git_plumbing_bounded_by_its_argument_count`,

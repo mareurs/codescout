@@ -51,7 +51,7 @@ would not be sound, a `No rerun offered: <reason>.` line naming why:
 
 A stage inside a pipeline takes its whole run with it. The refuse-in-full contract is unchanged.
 
-Fix: `fae5f447` on branch `fix/lessons-friction` · patch-id `e0bf356dfae93ca97e5fdf42df91158030332fb5`.
+Fix: `ce41048f` on branch `fix/lessons-friction` · patch-id `066083d1ea88e38ed7083576925b833c14bf39d5`.
 ## Tests added
 
 Eight `source_gate_*` tests in `src/util/path_security.rs`, one per row of the rewrite table,

@@ -65,7 +65,10 @@ Two effects, not one: `fmt-mine` over-refuses (loud, recoverable), and `wip_auth
 Known blind spot, stated at the site: an MCP server restart resets the active project to the cwd
 and the transcript does not record it.
 
-Fix: `1f7c6e0c` on branch `fix/lessons-friction` · patch-id `e6df17c87ec6a3019446d094f6130a3a32c34ed2`.
+Fix: `d10d7f60` on branch `fix/lessons-friction` · patch-id `f6700f1da3b06df15dd6e52222da6f4b54724232`.
+(Rebased onto `experiments` @ `ffff1dfb` on 2026-09-25, via `f918548c`. The first commit was `1f7c6e0c`,
+patch-id `e6df17c8…`: the patch-id CHANGED because resolving the `tests/file-provenance.sh`
+conflict moved the hunk's context, so the old value no longer identifies this fix.)
 ## Tests added
 
 `tests/file-provenance.sh` § *a linked worktree finds its transcripts* — 11 assertions, run
