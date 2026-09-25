@@ -5127,9 +5127,6 @@ EOF"#;
         assert!(detect_il3_violation("git ls-files --error-unmatch src | tail -2").is_some());
     }
 
-
-
-
     #[test]
     fn il3_still_blocks_git_config_listing_the_whole_file() {
         // Control: `git config --get x` is one value; `--list` dumps the file.
