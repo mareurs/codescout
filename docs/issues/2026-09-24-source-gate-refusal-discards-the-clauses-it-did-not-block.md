@@ -61,6 +61,9 @@ The rerun joined runs with `; `, so a `#` comment swallowed what followed:
 holds an unquoted comment (`has_unquoted_comment`, checked over the WHOLE command) or a run ends
 in a continuation character. Tests: `source_gate_offers_no_rerun_across_a_comment_or_a_line_continuation`,
 and the control `source_gate_rerun_is_not_suppressed_by_a_quoted_or_mid_word_hash`.
+
+Review fix: `c4043285` on branch `fix/lessons-friction` · patch-id `07184a2f8dfc2f054db97537536b619489cc4e95`.
+
 ## Tests added
 
 Eight `source_gate_*` tests in `src/util/path_security.rs`, one per row of the rewrite table,

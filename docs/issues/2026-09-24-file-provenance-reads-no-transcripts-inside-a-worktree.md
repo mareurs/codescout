@@ -86,6 +86,9 @@ conflict moved the hunk's context, so the old value no longer identifies this fi
 
 Tests: 11 more assertions in `tests/file-provenance.sh` (179 total), each negative paired with a
 positive control; 7/7 mutations killed.
+
+Review fix: `c4043285` on branch `fix/lessons-friction` · patch-id `07184a2f8dfc2f054db97537536b619489cc4e95`.
+
 ## Tests added
 
 `tests/file-provenance.sh` § *a linked worktree finds its transcripts* — 11 assertions, run

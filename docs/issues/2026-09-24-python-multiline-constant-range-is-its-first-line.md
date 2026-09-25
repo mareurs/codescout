@@ -88,6 +88,9 @@ stayed one line either way. The fixture is now bytes that ARE valid multi-line P
 the extension filter can exclude it. Known limit, not changed: for `a, b = (…)` / `a = b = (…)`
 both names get the whole statement's range, so an `edit_code(replace)` on one rewrites the line
 binding the other.
+
+Review fix: `c4043285` on branch `fix/lessons-friction` · patch-id `07184a2f8dfc2f054db97537536b619489cc4e95`.
+
 ## Workarounds
 `read_file(path, start_line, end_line, force=true)` with a guessed range; `edit_file` with
 unique anchors instead of `edit_code`.

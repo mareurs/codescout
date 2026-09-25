@@ -65,6 +65,9 @@ Fix: `ce41048f` on branch `fix/lessons-friction` · patch-id `066083d1ea88e38ed7
   now are.
 - **The redundant standalone `(`/`{` skip** in `producer_index` was removed: a mutation run
   showed it could never fire behind `executed_command`, its only caller.
+
+Review fix: `c4043285` on branch `fix/lessons-friction` · patch-id `07184a2f8dfc2f054db97537536b619489cc4e95`.
+
 ## Tests added
 
 `source_gate_sees_through_keyword_group_and_assignment_prefixes` (10 shapes),
