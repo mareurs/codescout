@@ -1,0 +1,6 @@
+{"pair_id":"tsyn-in-contradiction-1165","a":"yes","b":"yes","c":"no","note":"The target denies all body inlining despite explicit observation of an inlined body. The replacement limits omission to large results."}
+{"pair_id":"tsyn-in-contradiction-1651","a":"yes","b":"yes","c":"no","note":"The target says comparisons fail on backslashes, contradicting their stated correctness. The replacement agrees that only stringification needed fixing."}
+{"pair_id":"tsyn-in-contradiction-3425","a":"no","b":"yes","c":"no","note":"Different binaries can have different compiled-in defaults. Each process using its own default is compatible with the observed protocol split."}
+{"pair_id":"tsyn-in-contradiction-6604","a":"yes","b":"yes","c":"no","note":"The target permits an acknowledgement override expressly excluded earlier. The replacement consistently forbids that override."}
+{"pair_id":"tsyn-in-contradiction-7296","a":"yes","b":"yes","c":"no","note":"Claiming live parity runs every CI build conflicts with the contract test standing in for it. The replacement resolves this."}
+{"pair_id":"tsyn-in-contradiction-8412","a":"yes","b":"yes","c":"no","note":"The target makes cache write failures fatal despite the earlier statement that calls continue. The replacement restores consistency."}

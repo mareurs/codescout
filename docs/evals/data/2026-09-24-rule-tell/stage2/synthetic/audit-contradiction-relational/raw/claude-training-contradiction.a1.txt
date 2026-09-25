@@ -1,0 +1,8 @@
+{"pair_id":"train-contradiction-10567","a":"yes","b":"yes","c":"no","note":"The gate confirms declarations only, contradicting the claim that it proves execution. The replacement removes that conflict."}
+{"pair_id":"train-contradiction-10896","a":"yes","b":"yes","c":"no","note":"The audit finds five status markers, contradicting their asserted absence. The replacement limits absence to an earlier time."}
+{"pair_id":"train-contradiction-1461","a":"yes","b":"yes","c":"no","note":"The done summary lacks real totals, contradicting the marked claim. The replacement correctly locates totals at the top level."}
+{"pair_id":"train-contradiction-6958","a":"yes","b":"yes","c":"no","note":"The reported dependency error contradicts successful resolution from pinning only the top-level package. The replacement agrees with the error."}
+{"pair_id":"train-contradiction-7440","a":"yes","b":"yes","c":"no","note":"Running every judge call in a container sandbox conflicts with having no isolation layer. The replacement removes this conflict."}
+{"pair_id":"train-contradiction-7965","a":"yes","b":"no","c":"no","note":"Both versions say the description mentions append_entry, conflicting with the assertion that agents never learn it exists."}
+{"pair_id":"train-contradiction-8526","a":"yes","b":"yes","c":"no","note":"Permission for rendered prose to differ conflicts with the requirement to reproduce existing prose. The replacement requires matching."}
+{"pair_id":"train-contradiction-8638","a":"yes","b":"yes","c":"no","note":"Settling on auto-redirect contradicts explicitly leaving that choice open. The replacement preserves the unresolved choice."}

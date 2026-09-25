@@ -1,0 +1,4 @@
+training-side source claude:claude-sonnet-5: 1/8 = 0.125 [0.022, 0.471] kept
+  claude:claude-sonnet-5         training contradiction          1/8 (N=48) 
+  claude:claude-sonnet-5         tsyn     contradiction          1/6 (N=6) 
+  codex:gpt-6-astra/medium       tsyn     contradiction          0/8 (N=15) 

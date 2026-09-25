@@ -1,0 +1,52 @@
+{
+ "sources": {
+  "claude:claude-sonnet-5": {
+   "audited": 8,
+   "disagree": 1,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  }
+ },
+ "cells": {
+  "claude:claude-sonnet-5|training|contradiction": {
+   "N": 48,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|contradiction": {
+   "N": 6,
+   "audited": 6,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.167,
+   "wilson95": [
+    0.03,
+    0.564
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|contradiction": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  }
+ }
+}

@@ -1,0 +1,97 @@
+{"pair_id":"train-contradiction-10567","a":"yes","b":"yes","c":"no","note":"The gate confirms declarations only, contradicting the claim that it proves execution. The replacement removes that conflict."}
+{"pair_id":"train-contradiction-10896","a":"yes","b":"yes","c":"no","note":"The audit finds five status markers, contradicting their asserted absence. The replacement limits absence to an earlier time."}
+{"pair_id":"train-contradiction-1461","a":"yes","b":"yes","c":"no","note":"The done summary lacks real totals, contradicting the marked claim. The replacement correctly locates totals at the top level."}
+{"pair_id":"train-contradiction-6958","a":"yes","b":"yes","c":"no","note":"The reported dependency error contradicts successful resolution from pinning only the top-level package. The replacement agrees with the error."}
+{"pair_id":"train-contradiction-7440","a":"yes","b":"yes","c":"no","note":"Running every judge call in a container sandbox conflicts with having no isolation layer. The replacement removes this conflict."}
+{"pair_id":"train-contradiction-7965","a":"yes","b":"no","c":"no","note":"Both versions say the description mentions append_entry, conflicting with the assertion that agents never learn it exists."}
+{"pair_id":"train-contradiction-8526","a":"yes","b":"yes","c":"no","note":"Permission for rendered prose to differ conflicts with the requirement to reproduce existing prose. The replacement requires matching."}
+{"pair_id":"train-contradiction-8638","a":"yes","b":"yes","c":"no","note":"Settling on auto-redirect contradicts explicitly leaving that choice open. The replacement preserves the unresolved choice."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-sovcu9lq"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-96b_0iey
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d74c-7f8e-7550-b283-77be98c0b0fa
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+2026-09-25T06:41:50.037346Z ERROR codex_core::shell_snapshot: Shell snapshot validation failed: Snapshot command exited with status exit status: 1: /usr/bin/bash: line 1: /tmp/codex-audit-home-sovcu9lq/shell_snapshots/01a0d74c-7f8e-7550-b283-77be98c0b0fa.tmp-1790318509967530987: No such file or directory
+
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-96b_0iey
+ succeeded in 0ms:
+# Synthetic pair audit prompt, relational v2 — for rules whose breach relates two statements (fixed; registered in the top-up amendment)
+
+Use this version, not `synthetic-audit-prompt.md`, for `contradiction`. Its law is about two
+statements that cannot both hold, so the sentence a marked target contradicts is PART of the
+breach, not a second breach. Version 1's question (c) counted it as one.
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec is guidance; where they disagree, the law wins. Judge only
+from what is shown.
+
+## Answer three questions per item
+
+- `a` — In `original`, does the marked sentence take part in a breach of the rule? For a
+  contradiction: is there another statement in the paragraph that it cannot both hold with?
+  `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is that breach gone? `yes` if replacing the marked
+  sentence removed it in context, `no` if the same breach remains.
+- `c` — Leaving aside the breach the marked sentence takes part in (and the statement it
+  contradicts), is there a SEPARATE, independent breach of this rule anywhere in `original`?
+  `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `contradiction`
+
+LAW: Two passages of the same text state things that cannot both be true.
+
+USUAL SHAPE: YES when two statements in the text cannot both be true of the same subject at the same time. NO when they concern different subjects, scopes or times.
+
+## Items
+
+{"pair_id": "train-contradiction-10567", "original": "The coverage gate for the stage registry was reworked on Tuesday. It reads the declared stages from the enum and compares them with the names in the config file. Removing a stage's registration call while leaving its enum member in place still yields a pass, so the gate confirms declaration only. We checked this on a scratch branch by deleting the registration call for the lint stage and rerunning; the gate printed zero missing stages. ⟦The gate proves that every declared stage executed during the nightly build.⟧ Anyone who needs execution evidence has to read the build logs, which list each stage as it starts.", "substituted": "The coverage gate for the stage registry was reworked on Tuesday. It reads the declared stages from the enum and compares them with the names in the config file. Removing a stage's registration call while leaving its enum member in place still yields a pass, so the gate confirms declaration only. We checked this on a scratch branch by deleting the registration call for the lint stage and rerunning; the gate printed zero missing stages. ⟦The gate proves only that every declared stage is named in the config for the nightly build.⟧ Anyone who needs execution evidence has to read the build logs, which list each stage as it starts."}
+{"pair_id": "train-contradiction-10896", "original": "⟦The design note says nobody writes status markers into the free-text field, and the audit confirms that this is still the case.⟧ Pass 2 of the audit read every record in the tracker and found five whose text opens with a marker such as CLEARED, REFUTED, or Resolved by measurement. Each was written by a different author, none of whom had a template to copy. The field stores only two machine states, yet its writers evidently need a third, and they invented one on their own. A proposal to add a formal third state is next on the list.", "substituted": "⟦The design note says nobody writes status markers into the free-text field, which held when it was drafted.⟧ Pass 2 of the audit read every record in the tracker and found five whose text opens with a marker such as CLEARED, REFUTED, or Resolved by measurement. Each was written by a different author, none of whom had a template to copy. The field stores only two machine states, yet its writers evidently need a third, and they invented one on their own. A proposal to add a formal third state is next on the list."}
+{"pair_id": "train-contradiction-1461", "original": "After a project-scope build finishes, the status action returns an `indexing` block marked done. Its `total_files` and `total_chunks` fields read `0` in every response we captured. The same response carries correct totals at the top level, in `file_count` and `chunk_count`, so the data exists at that point. This differs from the earlier running-state bug, where the counts had not been computed yet. Here they are simply not copied into the done summary. ⟦Since the indexing block reports the real totals once the build is done, the top-level fields duplicate it and could be dropped.⟧", "substituted": "After a project-scope build finishes, the status action returns an `indexing` block marked done. Its `total_files` and `total_chunks` fields read `0` in every response we captured. The same response carries correct totals at the top level, in `file_count` and `chunk_count`, so the data exists at that point. This differs from the earlier running-state bug, where the counts had not been computed yet. Here they are simply not copied into the done summary. ⟦Since only the top-level fields report the real totals once the build is done, the indexing block's zeros should be filled in from them.⟧"}
+{"pair_id": "train-contradiction-6958", "original": "WineHQ published 11.18 on 19 Sep, so apt now offers 11.18~noble-1 as the candidate for each package in the family. The packages depend on one another with exact version equality. ⟦Pinning only the top-level package to 11.17 is enough for the install to resolve, because the lower levels follow it.⟧ Apt's error output shows what happens one level down: it reports that wine-devel needs the amd64 build at exactly 11.17 while 11.18 is what would be installed.", "substituted": "WineHQ published 11.18 on 19 Sep, so apt now offers 11.18~noble-1 as the candidate for each package in the family. The packages depend on one another with exact version equality. ⟦Pinning only the top-level package to 11.17 leaves the lower levels at 11.18, so the install cannot resolve.⟧ Apt's error output shows what happens one level down: it reports that wine-devel needs the amd64 build at exactly 11.17 while 11.18 is what would be installed."}
+{"pair_id": "train-contradiction-7440", "original": "The evaluation harness we reviewed is worth studying as a template for judging model output, not as something we would deploy. It ships no isolation layer and no tool protocol; what it contains is a loop that calls the model plus three adapters for input and output. ⟦Because the harness runs every judge call inside a container sandbox, we can skip our own isolation work when borrowing it.⟧ The one piece we would actually lift is the schema check applied to the judge's reply, which rejects malformed verdicts before they reach scoring. The adapters are small enough that we would rewrite them anyway.", "substituted": "The evaluation harness we reviewed is worth studying as a template for judging model output, not as something we would deploy. It ships no isolation layer and no tool protocol; what it contains is a loop that calls the model plus three adapters for input and output. ⟦Because the harness offers no isolation of its own, we must keep our own isolation work when borrowing it.⟧ The one piece we would actually lift is the schema check applied to the judge's reply, which rejects malformed verdicts before they reach scoring. The adapters are small enough that we would rewrite them anyway."}
+{"pair_id": "train-contradiction-7965", "original": "The tool description for the artifact endpoint needs a small edit before release. The action list currently ends at state_at, so agents never learn that append_entry exists. We confirmed this by dumping the registered schema, where the enum has nine members and none is append_entry. Add the new action after state_at and attach one clause explaining that it assigns the next id atomically. The clause should tell agents to prefer it over read-then-write for every monotonic-ID tracker. ⟦The description also says append_entry has no effect on the id counter, since it only stores the entry text.⟧ Handlers for the other actions stay untouched.", "substituted": "The tool description for the artifact endpoint needs a small edit before release. The action list currently ends at state_at, so agents never learn that append_entry exists. We confirmed this by dumping the registered schema, where the enum has nine members and none is append_entry. Add the new action after state_at and attach one clause explaining that it assigns the next id atomically. The clause should tell agents to prefer it over read-then-write for every monotonic-ID tracker. ⟦The description also says append_entry advances the id counter, since it stores the entry text under the next id.⟧ Handlers for the other actions stay untouched."}
+{"pair_id": "train-contradiction-8526", "original": "Converting a tracker to structured form takes six steps. First, find the repeating X-N sections. Second, treat the key-value lines as fields and map them to a JSON schema, using the failure table's example as the template. Third, fill the params array from the existing sections. Fourth, write a render template that reproduces the existing prose, so humans see no change. Fifth, declare the array key as the entry collection. ⟦Because the rendered body is allowed to differ from the original prose, verify it section by section before committing.⟧", "substituted": "Converting a tracker to structured form takes six steps. First, find the repeating X-N sections. Second, treat the key-value lines as fields and map them to a JSON schema, using the failure table's example as the template. Third, fill the params array from the existing sections. Fourth, write a render template that reproduces the existing prose, so humans see no change. Fifth, declare the array key as the entry collection. ⟦Because the rendered body must match the original prose, verify it section by section before committing.⟧"}
+{"pair_id": "train-contradiction-8638", "original": "The scope note for this spec lists what it leaves out. The choice between failing loudly and redirecting automatically stays open; Component 3 gathers the evidence a later design needs, and this spec makes no choice on it. Component 2's detector is a closed list of two curated markers, and no third concrete shape has turned up that would justify a broader heuristic. The shell and pipe misuse classes already have shipped hookify gates, so they are handled elsewhere. ⟦The spec settles on auto-redirect as the behavior for every stale-match failure, and Component 3 only measures how often that happens.⟧ Two minor errors found during mining were not sequenced here.", "substituted": "The scope note for this spec lists what it leaves out. The choice between failing loudly and redirecting automatically stays open; Component 3 gathers the evidence a later design needs, and this spec makes no choice on it. Component 2's detector is a closed list of two curated markers, and no third concrete shape has turned up that would justify a broader heuristic. The shell and pipe misuse classes already have shipped hookify gates, so they are handled elsewhere. ⟦The spec leaves the redirect question to a later design, and Component 3 only measures how often stale-match failures happen.⟧ Two minor errors found during mining were not sequenced here."}
+codex
+{"pair_id":"train-contradiction-10567","a":"yes","b":"yes","c":"no","note":"The gate confirms declarations only, contradicting the claim that it proves execution. The replacement removes that conflict."}
+{"pair_id":"train-contradiction-10896","a":"yes","b":"yes","c":"no","note":"The audit finds five status markers, contradicting their asserted absence. The replacement limits absence to an earlier time."}
+{"pair_id":"train-contradiction-1461","a":"yes","b":"yes","c":"no","note":"The done summary lacks real totals, contradicting the marked claim. The replacement correctly locates totals at the top level."}
+{"pair_id":"train-contradiction-6958","a":"yes","b":"yes","c":"no","note":"The reported dependency error contradicts successful resolution from pinning only the top-level package. The replacement agrees with the error."}
+{"pair_id":"train-contradiction-7440","a":"yes","b":"yes","c":"no","note":"Running every judge call in a container sandbox conflicts with having no isolation layer. The replacement removes this conflict."}
+{"pair_id":"train-contradiction-7965","a":"yes","b":"no","c":"no","note":"Both versions say the description mentions append_entry, conflicting with the assertion that agents never learn it exists."}
+{"pair_id":"train-contradiction-8526","a":"yes","b":"yes","c":"no","note":"Permission for rendered prose to differ conflicts with the requirement to reproduce existing prose. The replacement requires matching."}
+{"pair_id":"train-contradiction-8638","a":"yes","b":"yes","c":"no","note":"Settling on auto-redirect contradicts explicitly leaving that choice open. The replacement preserves the unresolved choice."}
+tokens used
+6,245
