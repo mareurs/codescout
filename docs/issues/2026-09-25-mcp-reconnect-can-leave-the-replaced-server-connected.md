@@ -19,8 +19,8 @@ severity: low
 ## Summary
 
 A `/mcp` reconnect spawns a new codescout server but does not always close the previous server's stdio
-connection. The old process keeps running with nobody talking to it: measured 2026-09-24/25, **2 of 5**
-servers replaced in one session are still alive, each still `ESTAB` to the parent `claude` process on its
+connection. The old process keeps running with nobody talking to it: measured 2026-09-24/25, **2 of 6**
+servers replaced in one session are still alive (the sixth replacement, 2026-09-25 07:53, closed cleanly), each still `ESTAB` to the parent `claude` process on its
 stdin socket. codescout behaves correctly (a stdio server stays up while its stdin is open); the leak is the
 harness's. The part codescout owns is the instrument: `scripts/stale-servers.sh` flags a server `STALE`
 only when its executable inode has been unlinked, so the orphan on a live binary is reported `current`, and
@@ -38,14 +38,15 @@ Children of one `claude` process (pid 2834158, `.claude-sdd`, Claude Code 2.1.28
 | **2826596** | 23:56:55 | 09-25 00:00:06 | **yes** — 180 MB RSS, 68 threads, current binary | **fd 21** |
 | 3190735 | 00:00:06 | 00:02:32 | no | — |
 | 3474525 | 00:02:32 | 00:07:52 | no | — |
-| 4080390 | 00:07:52 | (current) | yes | fd 18 |
+| 4080390 | 00:07:52 | 07:53:04 | no, and fd 18 is closed | — |
+| 2291837 | 07:53:04 | (current) | yes | fd 26 |
 
 `scripts/stale-servers.sh` the same hour: 3543619 `STALE` (right, for the wrong reason — its binary was
 rebuilt), **2826596 `current`** (wrong: nothing will ever send it a request), 4080390 `current` (right).
 
 ## Reproduction
 
-Not deterministic — 3 of 5 replacements closed the old connection. Observe, per `/mcp`: list
+Not deterministic: 4 of 6 replacements closed the old connection. Observe, per `/mcp`: list
 `ps -o pid= --ppid <claude-pid>` before and after, and for each surviving codescout child resolve its stdin
 peer: `ino=$(readlink /proc/<pid>/fd/0 | tr -dc 0-9); ss -xpn | awk -v i=$ino '$6==i || $8==i'`. A leaked
 server's peer row names `"claude",pid=<claude-pid>`.
@@ -75,6 +76,22 @@ a reconnect that does not disconnect.
 
 The table above; `ss -xpn` rows, e.g. `u_str ESTAB … 289175551 … 289175550 users:(("claude",pid=2834158,fd=16))`
 paired with `289175550 … users:(("codescout",pid=3543619,fd=0))`.
+
+
+### 2026-09-25 07:53: a sixth replacement closed cleanly, and the two leaks survived it
+
+The operator rebuilt the binary (`target/release/codescout` mtime 07:52:02, HEAD `6eae6b74`) and ran `/mcp`. The
+observations below are `ps`, and `ss -xpn` resolved per stdin inode, with the new server as the control:
+
+- **Clean close.** The server that was answering, 4080390, exited, and `claude`'s fd 18 no longer exists.
+- **Control.** The new server 2291837 is `ESTAB` with `claude` fd 26. Its stdin inode matches no `claude` fd
+  directly, because each end of a socketpair has its own inode, so resolving the PEER inode is what makes the
+  check discriminate.
+- **Both leaks persist.** 3543619 is still `ESTAB` with fd 16, and 2826596 with fd 21, both `Sl+`.
+  - 3543619 has now outlived four later reconnects, and 2826596 three.
+  - So a leaked connection is not closed by a later reconnect either. No reconnect has closed one yet.
+- **The instrument is right for the wrong reason.** `stale-servers.sh` now reports 2826596 `STALE`, only because
+  the binary under it was rebuilt at 07:52. Its orphan status did not change; an unrelated rebuild moved its label.
 
 ## Hypotheses tried
 
