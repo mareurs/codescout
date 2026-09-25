@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-member_vs_population-4983", "a": "yes", "b": "yes", "c": "no", "note": "Batch map count can't identify the journal's output; the fix makes a batch-level claim. Other claims are batch-level or direct evidence."}
+{"pair_id": "tsyn-cross-member_vs_population-5844", "a": "yes", "b": "yes", "c": "no", "note": "Cardinality drop can't identify which file was excluded; the fix claims only one fewer document."}
+{"pair_id": "tsyn-cross-member_vs_population-9387", "a": "yes", "b": "yes", "c": "no", "note": "Fleet compliance rate can't verify Birch's briefing; the fix restates the sample count as a population claim."}
+{"pair_id": "tsyn-cross-member_vs_population-1622", "a": "yes", "b": "yes", "c": "no", "note": "Exit total can't identify Birch's rejection; the fix is a population claim. Maple's claim rests on its own trace."}
+{"pair_id": "tsyn-cross-member_vs_population-11571", "a": "yes", "b": "yes", "c": "no", "note": "Ownership share can't attribute d72ac; the fix restates the share. The d72ac position claim rests on the commit listing directly."}
+{"pair_id": "tsyn-cross-member_vs_population-7085", "a": "yes", "b": "yes", "c": "no", "note": "Coverage percentage can't confirm the startup module is indexed; the fix makes an aggregate claim only."}
+{"pair_id": "tsyn-cross-member_vs_population-8137", "a": "yes", "b": "yes", "c": "no", "note": "Recall can't show CacheBridge was retrieved; the fix restates the match count. The path claim rests on inspecting each path."}
+{"pair_id": "tsyn-cross-member_vs_population-2007", "a": "yes", "b": "yes", "c": "no", "note": "Mean age can't establish parent 7420's age; the fix claims only the average. The worker 7318 claim comes from direct lookup."}

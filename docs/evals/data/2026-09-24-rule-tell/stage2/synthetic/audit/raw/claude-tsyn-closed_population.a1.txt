@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-closed_population-2396","a":"yes","b":"yes","c":"no","note":"The original excludes other models without establishing a closed population; the fix presents the configured remote embedder as a likely cause."}
+{"pair_id":"tsyn-in-closed_population-5641","a":"yes","b":"yes","c":"no","note":"The original generalizes to every branch forever; the fix limits the finding to the tested branch."}
+{"pair_id":"tsyn-in-closed_population-2905","a":"yes","b":"yes","c":"no","note":"Future ledgers form an open population; the fix explicitly limits coverage to the five present today."}
+{"pair_id":"tsyn-in-closed_population-7810","a":"yes","b":"yes","c":"no","note":"Four tests cannot close the population of future projects; the fix confines the result to the two tested paths."}
+{"pair_id":"tsyn-in-closed_population-8498","a":"yes","b":"yes","c":"no","note":"The original extends today's results to future archetypes; the fix restricts the claim to seven registered archetypes."}
+{"pair_id":"tsyn-in-closed_population-1432","a":"yes","b":"yes","c":"no","note":"Future callers can use different operations; the fix limits transparency to current callers."}
+{"pair_id":"tsyn-in-closed_population-5497","a":"yes","b":"yes","c":"no","note":"The original extrapolates to unwritten documents; the fix bounds the finding to today's twelve documents. Running an assertion does not guarantee passage."}
+{"pair_id":"tsyn-in-closed_population-4207","a":"yes","b":"yes","c":"no","note":"The original includes all future tracker sections; the fix limits the claim to the four measured sections."}

@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-d_sessionid-5643", "a": "yes", "b": "yes", "c": "no", "note": "Original attributes to Harbor by name; fix uses s-427. Other sentences only record the name as metadata."}
+{"pair_id": "tsyn-cross-d_sessionid-7737", "a": "yes", "b": "yes", "c": "no", "note": "Original credits Birch by name; fix uses s-649. The receipt sentence attributes by sessionId."}
+{"pair_id": "tsyn-cross-d_sessionid-809", "a": "yes", "b": "yes", "c": "no", "note": "Original attributes the probe to Copper by name; fix uses s-41b. The metadata mention is not an attribution."}
+{"pair_id": "tsyn-cross-d_sessionid-5280", "a": "yes", "b": "yes", "c": "no", "note": "Original attributes the audit to Lantern; fix uses s-318. The artifact sentence attributes by sessionId."}
+{"pair_id": "tsyn-cross-d_sessionid-2760", "a": "yes", "b": "yes", "c": "no", "note": "Original bases attribution on registry name Meadow; fix bases it on s-65f. No other name-based attribution."}
+{"pair_id": "tsyn-cross-d_sessionid-8115", "a": "yes", "b": "yes", "c": "no", "note": "Original identifies the session by registry name Birch; fix uses s-604. The display-name mention is not an attribution."}
+{"pair_id": "tsyn-cross-d_sessionid-1538", "a": "yes", "b": "yes", "c": "no", "note": "Original attributes the trace to registered name Juniper; fix uses s-82c. The receipt sentence uses sessionId."}
+{"pair_id": "tsyn-cross-d_sessionid-7832", "a": "yes", "b": "yes", "c": "no", "note": "Original credits Copper by name; fix credits s-218. The record sentence only lists the name as a label."}

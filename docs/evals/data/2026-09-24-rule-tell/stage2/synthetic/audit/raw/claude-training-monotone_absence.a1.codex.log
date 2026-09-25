@@ -1,0 +1,88 @@
+{"pair_id":"train-monotone_absence-10224","a":"yes","b":"yes","c":"no","note":"No warnings cannot establish cleanliness for an unselected crate; the fix explicitly identifies that coverage gap."}
+{"pair_id":"train-monotone_absence-9698","a":"yes","b":"yes","c":"no","note":"Warning silence does not prove correct metadata handling; the fix adds positive evidence from the event dump."}
+{"pair_id":"train-monotone_absence-9794","a":"yes","b":"yes","c":"no","note":"Zero search hits cannot establish no prior diagnosis; the fix limits its conclusion to index responsiveness supported by a positive result."}
+{"pair_id":"train-monotone_absence-1664","a":"yes","b":"yes","c":"no","note":"Absent complaints in a write-failure log cannot establish user preferences; the fix explains the log's limited scope."}
+{"pair_id":"train-monotone_absence-7918","a":"yes","b":"yes","c":"no","note":"An empty recorder lane cannot distinguish no friction from missing records; the fix explicitly preserves both possibilities."}
+{"pair_id":"train-monotone_absence-796","a":"yes","b":"yes","c":"no","note":"A parser that never checks ordering cannot validate ordering through silence; the fix states that limitation."}
+{"pair_id":"train-monotone_absence-3094","a":"yes","b":"yes","c":"no","note":"No delete errors cannot prove cleanup ran; the fix supplies recorded deletions corroborated by a table-size decrease."}
+{"pair_id":"train-monotone_absence-7757","a":"yes","b":"yes","c":"no","note":"Absent validation errors cannot prove parser ranges are well formed; the fix reports positive detection of deliberately bad ranges."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-cu516flv
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d708-01ed-7360-b99e-83c8bc89c11a
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-cu516flv
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `monotone_absence`
+
+LAW: Absence assertions are monotone under removal: a dead mechanism produces exactly the silence they assert.
+
+USUAL SHAPE: YES when the text treats an absence, silence or zero (no errors, an empty result, zero samples, nothing found) as proof that something works or as proof of a particular cause, where a broken or disconnected mechanism would produce the same silence. NO when the absence is reported only as an absence, or a positive control is reported.
+
+## Items
+
+{"pair_id": "train-monotone_absence-10224", "original": "Checked the manifest directly: it lists the root and one embed crate as members, so a bare lint command selects the root package alone. The gate line passes the all-targets flag, which picks target kinds and not packages. ⟦The lint step printed no warnings for the embed crate, so its code is clean.⟧ I re-ran with the workspace flag and it produced eleven warnings in the embed crate's local module. The heading over that gate line should say what it actually covers.", "substituted": "Checked the manifest directly: it lists the root and one embed crate as members, so a bare lint command selects the root package alone. The gate line passes the all-targets flag, which picks target kinds and not packages. ⟦The lint step printed no warnings, but it never selected the embed crate, so that says nothing about its code.⟧ I re-ran with the workspace flag and it produced eleven warnings in the embed crate's local module. The heading over that gate line should say what it actually covers."}
+{"pair_id": "train-monotone_absence-9698", "original": "Reading the source of `extract()` and `resolve()` suggested the self-cite logic was correct, but bisection told otherwise. Dumping raw pulldown_cmark events showed that the YAML metadata option pairs any two bare `---` lines as a metadata block, and session-log trackers separate every entry that way. That is why the link graph was undercounted. Once we scoped the option to leading frontmatter, the dangling-link count dropped by about 34. ⟦The parser logged no warnings during the run, so the metadata handling is now behaving as intended.⟧", "substituted": "Reading the source of `extract()` and `resolve()` suggested the self-cite logic was correct, but bisection told otherwise. Dumping raw pulldown_cmark events showed that the YAML metadata option pairs any two bare `---` lines as a metadata block, and session-log trackers separate every entry that way. That is why the link graph was undercounted. Once we scoped the option to leading frontmatter, the dangling-link count dropped by about 34. ⟦The parser logged no warnings during the run, and the dump now shows one metadata block per file, at the top.⟧"}
+{"pair_id": "train-monotone_absence-9794", "original": "⟦The archive search returned zero hits for the upload timeout symptom, so no one has diagnosed this before.⟧ I read Tuesday's session log directly, and its retry counter shows three attempts, so the client did back off as configured. I also opened the proxy config and found a 30-second limit, which matches the durations of the failing requests in the trace. Next step is to reproduce against staging with the limit raised to 60 seconds and compare the two traces.", "substituted": "⟦The archive search returned zero hits for the upload timeout symptom, and the same query does find the older F-120 entry, so the index responds.⟧ I read Tuesday's session log directly, and its retry counter shows three attempts, so the client did back off as configured. I also opened the proxy config and found a 30-second limit, which matches the durations of the failing requests in the trace. Next step is to reproduce against staging with the limit raised to 60 seconds and compare the two traces."}
+{"pair_id": "train-monotone_absence-1664", "original": "The workspace-level layout question looked stuck for a week, and the reason is now clear. The git-tracking argument applies equally to both trees, since the ignore file exempts the workspace projects directory and 53 files under it are tracked. So that argument could not separate the two branches. The write path did separate them, because it already writes only to the project-local tree, and the write log confirms it. ⟦Reviewers grepped the audit log for complaints about the project-local choice and found none, which shows that the project-local layout is what users want.⟧ The analysis below stays as written for the record.", "substituted": "The workspace-level layout question looked stuck for a week, and the reason is now clear. The git-tracking argument applies equally to both trees, since the ignore file exempts the workspace projects directory and 53 files under it are tracked. So that argument could not separate the two branches. The write path did separate them, because it already writes only to the project-local tree, and the write log confirms it. ⟦Reviewers grepped the audit log for complaints about the project-local choice and found none, but that log records only write failures, not user preferences.⟧ The analysis below stays as written for the record."}
+{"pair_id": "train-monotone_absence-7918", "original": "The phase-2a engine parses a project, finds over-budget bodies, name collisions and unmappable files, then ranks candidates by structural defect plus friction from the recorder lane. The database opener creates the usage file and schema if absent, so a missing database gives an empty recorder lane automatically. ⟦On the fixture project, the recorder lane came back empty for every candidate, which shows that no agent hit truncations or retries there, so ranking rests on structure alone.⟧ The inline token cap is 2500, and the body-budget check reads that constant directly.", "substituted": "The phase-2a engine parses a project, finds over-budget bodies, name collisions and unmappable files, then ranks candidates by structural defect plus friction from the recorder lane. The database opener creates the usage file and schema if absent, so a missing database gives an empty recorder lane automatically. ⟦On the fixture project, the recorder lane came back empty for every candidate, which matches either no friction or a freshly created database with no rows.⟧ The inline token cap is 2500, and the body-budget check reads that constant directly."}
+{"pair_id": "train-monotone_absence-796", "original": "Each patch-id line binds to the SHA line directly above it and to nothing else, so a reader cannot recover which pair supersedes which from position alone. The second entry replaces the mechanism of the first, and the plural form has no field to record that. ⟦The parser reported no ordering errors on the sample file, so the pair ordering is being read correctly.⟧ The parser's only check is that every patch-id has a SHA above it; it never inspects the sequence of pairs, and a shuffled file would pass identically. We state the supersession in prose inside the declared section instead.", "substituted": "Each patch-id line binds to the SHA line directly above it and to nothing else, so a reader cannot recover which pair supersedes which from position alone. The second entry replaces the mechanism of the first, and the plural form has no field to record that. ⟦The parser reported no ordering errors on the sample file, though it never inspects ordering, only each binding to its SHA.⟧ The parser's only check is that every patch-id has a SHA above it; it never inspects the sequence of pairs, and a shuffled file would pass identically. We state the supersession in prose inside the declared section instead."}
+{"pair_id": "train-monotone_absence-3094", "original": "Orphaned observation rows accumulate in the scratch database after their parents are deleted. On a copy with foreign keys off, deleting a parent left its children behind; with keys on, the children went with it, so the cascade itself is sound. ⟦The nightly cleanup job's log has no delete errors, so the job is removing the orphaned rows.⟧ The table still holds about 4,000 rows whose parent ids match nothing in the sessions table. Enabling the pragma on every connection is the obvious next step, and the cleanup job needs a separate check.", "substituted": "Orphaned observation rows accumulate in the scratch database after their parents are deleted. On a copy with foreign keys off, deleting a parent left its children behind; with keys on, the children went with it, so the cascade itself is sound. ⟦The nightly cleanup job's log records 212 orphan deletions in its last run, matching the drop in table size.⟧ The table still holds about 4,000 rows whose parent ids match nothing in the sessions table. Enabling the pragma on every connection is the obvious next step, and the cleanup job needs a separate check."}
+{"pair_id": "train-monotone_absence-7757", "original": "The nine unit tests around range handling must be rewritten because the function now validates a symbol range instead of repairing it. Each degenerate-range test should assert an Err containing the phrase for a suspicious range, and each good-range test should assert Ok. Before the rewrite, I ran the old suite against the new validator and it failed on the repair-based assertions, as expected. ⟦After the rewrite, the Python, TypeScript and Go cases returned no validation errors on the sample files, so those parsers produce well-formed ranges.⟧ The name-not-in-file case should assert Ok because the AST is unavailable there.", "substituted": "The nine unit tests around range handling must be rewritten because the function now validates a symbol range instead of repairing it. Each degenerate-range test should assert an Err containing the phrase for a suspicious range, and each good-range test should assert Ok. Before the rewrite, I ran the old suite against the new validator and it failed on the repair-based assertions, as expected. ⟦After the rewrite, the Python, TypeScript and Go cases returned Err on the degenerate sample files, so the validator catches those bad ranges.⟧ The name-not-in-file case should assert Ok because the AST is unavailable there."}
+codex
+{"pair_id":"train-monotone_absence-10224","a":"yes","b":"yes","c":"no","note":"No warnings cannot establish cleanliness for an unselected crate; the fix explicitly identifies that coverage gap."}
+{"pair_id":"train-monotone_absence-9698","a":"yes","b":"yes","c":"no","note":"Warning silence does not prove correct metadata handling; the fix adds positive evidence from the event dump."}
+{"pair_id":"train-monotone_absence-9794","a":"yes","b":"yes","c":"no","note":"Zero search hits cannot establish no prior diagnosis; the fix limits its conclusion to index responsiveness supported by a positive result."}
+{"pair_id":"train-monotone_absence-1664","a":"yes","b":"yes","c":"no","note":"Absent complaints in a write-failure log cannot establish user preferences; the fix explains the log's limited scope."}
+{"pair_id":"train-monotone_absence-7918","a":"yes","b":"yes","c":"no","note":"An empty recorder lane cannot distinguish no friction from missing records; the fix explicitly preserves both possibilities."}
+{"pair_id":"train-monotone_absence-796","a":"yes","b":"yes","c":"no","note":"A parser that never checks ordering cannot validate ordering through silence; the fix states that limitation."}
+{"pair_id":"train-monotone_absence-3094","a":"yes","b":"yes","c":"no","note":"No delete errors cannot prove cleanup ran; the fix supplies recorded deletions corroborated by a table-size decrease."}
+{"pair_id":"train-monotone_absence-7757","a":"yes","b":"yes","c":"no","note":"Absent validation errors cannot prove parser ranges are well formed; the fix reports positive detection of deliberately bad ranges."}
+tokens used
+5,734

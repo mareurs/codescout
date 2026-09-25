@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-contradiction-7430", "a": "yes", "b": "yes", "c": "no", "note": "Original says the patch deletes the gate; earlier sentences say identical contents and establish it is preserved. Fix agrees with them."}
+{"pair_id": "tsyn-cross-contradiction-8412", "a": "yes", "b": "yes", "c": "no", "note": "Original says the request terminates without a result; the handler returns the graph. Fix matches: log, then return."}
+{"pair_id": "tsyn-cross-contradiction-1504", "a": "yes", "b": "yes", "c": "no", "note": "Original claims an older archive was present; the inventory found the current archive was the only one. Fix agrees."}
+{"pair_id": "tsyn-cross-contradiction-5722", "a": "yes", "b": "yes", "c": "no", "note": "Original says no diagnostic; the prior sentence says exactly one message for the same input. Fix says one diagnostic."}
+{"pair_id": "tsyn-cross-contradiction-1165", "a": "yes", "b": "yes", "c": "no", "note": "Original says the body was omitted; the capture shows the body field with full text. The explicit-false probe is a separate case."}
+{"pair_id": "tsyn-cross-contradiction-3425", "a": "yes", "b": "yes", "c": "no", "note": "Original says same protocol; the snapshot shows openai and llama-server split. Fix says same endpoint, consistent with matching addresses."}
+{"pair_id": "tsyn-cross-contradiction-1651", "a": "yes", "b": "yes", "c": "no", "note": "Original says the stored path changes; the diff leaves the stored path unchanged. Fix describes the display change, which is consistent."}
+{"pair_id": "tsyn-cross-contradiction-6604", "a": "yes", "b": "yes", "c": "no", "note": "Original permits reset at zero count; every reset is rejected, including on an empty index. Fix agrees."}

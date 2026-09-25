@@ -1,0 +1,91 @@
+{"pair_id":"train-d_semicolon-6147","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-83","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-2402","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-1793","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-8286","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-11660","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-5936","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-10566","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-l3c7f87x
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d707-880a-70d2-a51e-629b88c30499
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+codex
+I’ll read task.md and follow its instructions.
+
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-l3c7f87x
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_semicolon`
+
+LAW: Chain the two test lanes with ';', never '&&'.
+
+USUAL SHAPE: YES when the text runs or describes running the two cargo test lanes chained with `&&`. NO otherwise.
+
+## Items
+
+{"pair_id": "train-d_semicolon-6147", "original": "Each new test carries a control that shows it can fail. The dispatch test reads the enum of `doc` for real, so an empty map would trip it instead of passing by finding nothing. Its over-match twin bills `doc(hedaing)`, which shows that excusing every bare identifier would fail. ⟦The last step was a full pass, `cargo test --lib && cargo test --test billing_forms`, over the two lanes where these tests live.⟧ Both lanes need reporting even if the first one fails, because the guard tests sit in the second.", "substituted": "Each new test carries a control that shows it can fail. The dispatch test reads the enum of `doc` for real, so an empty map would trip it instead of passing by finding nothing. Its over-match twin bills `doc(hedaing)`, which shows that excusing every bare identifier would fail. ⟦The last step was a full pass, `cargo test --lib; cargo test --test billing_forms`, over the two lanes where these tests live.⟧ Both lanes need reporting even if the first one fails, because the guard tests sit in the second."}
+{"pair_id": "train-d_semicolon-83", "original": "Switching embedding models on an indexed catalog now has one recovery path. ⟦Before merging, I ran `cargo test --features sqlite-vec && cargo test --no-default-features` on the branch.⟧ The reset drops the vectors table and rebuilds it at the new dimension; a schema dump showed 768 columns where the old table had 384. Other projects sharing the catalog lose their vectors as well, and the warning names none of them. That gap remains open until the follow-up ships.", "substituted": "Switching embedding models on an indexed catalog now has one recovery path. ⟦Before merging, I ran `cargo test --features sqlite-vec; cargo test --no-default-features` on the branch.⟧ The reset drops the vectors table and rebuilds it at the new dimension; a schema dump showed 768 columns where the old table had 384. Other projects sharing the catalog lose their vectors as well, and the warning names none of them. That gap remains open until the follow-up ships."}
+{"pair_id": "train-d_semicolon-2402", "original": "The drift flag queries a table that nothing writes to, so session-start warnings never appear. The manual mentions a `threshold` parameter, yet the status tool's input schema declares no properties at all. I checked both by reading the schema and by grepping the writer code for the table name, which returned zero hits. ⟦To confirm the tree stays green after the doc edits, run `cargo test && cargo test --features drift`, which covers both lanes.⟧", "substituted": "The drift flag queries a table that nothing writes to, so session-start warnings never appear. The manual mentions a `threshold` parameter, yet the status tool's input schema declares no properties at all. I checked both by reading the schema and by grepping the writer code for the table name, which returned zero hits. ⟦To confirm the tree stays green after the doc edits, run `cargo test ; cargo test --features drift`, which covers both lanes.⟧"}
+{"pair_id": "train-d_semicolon-1793", "original": "The write-path tool stops with a hard error when a path escapes the project root, and that is intended. A pinned test asserts the exact error message, so the behavior is locked in on purpose. Only the module comment disagreed, because it promised a soft, recoverable result, so I edited the comment and left the code alone. ⟦Before pushing I ran both lanes in one line, `cargo test --lib && cargo test --test tools_e2e`, and both came back green.⟧", "substituted": "The write-path tool stops with a hard error when a path escapes the project root, and that is intended. A pinned test asserts the exact error message, so the behavior is locked in on purpose. Only the module comment disagreed, because it promised a soft, recoverable result, so I edited the comment and left the code alone. ⟦Before pushing I ran both lanes in one line, `cargo test --lib ; cargo test --test tools_e2e`, and both came back green.⟧"}
+{"pair_id": "train-d_semicolon-8286", "original": "The onboarding prompt still treats a workspace as a single project. Running `Onboarding::call()` against a two-project fixture produced memories only under the focused project's directory, and the sub-project directory stayed empty, as the directory listing in the log shows. The prompt text never mentions sub-projects, which is why the LLM never explores them. The planned change adds a workspace section to the prompt and a per-project write loop. ⟦I ran the lanes with `cargo test --lib && cargo test --test onboarding_e2e` before handoff, and both passed.⟧", "substituted": "The onboarding prompt still treats a workspace as a single project. Running `Onboarding::call()` against a two-project fixture produced memories only under the focused project's directory, and the sub-project directory stayed empty, as the directory listing in the log shows. The prompt text never mentions sub-projects, which is why the LLM never explores them. The planned change adds a workspace section to the prompt and a per-project write loop. ⟦I ran the lanes with `cargo test --lib ; cargo test --test onboarding_e2e` before handoff, and both passed.⟧"}
+{"pair_id": "train-d_semicolon-11660", "original": "⟦Rerun of the count discrepancy, using `cargo test --lib && cargo test --test api` for the two lanes.⟧ The lib lane reports 51 passed and 4 ignored, and the integration lane adds 1 test, so the total of 52 matches the earlier figure. The four ignored tests are the ollama family, marked ignore until a live server is available. Nothing in the tree changed between the two runs; I checked the commit hash before and after, and it was identical.", "substituted": "⟦Rerun of the count discrepancy, using `cargo test --lib; cargo test --test api` for the two lanes.⟧ The lib lane reports 51 passed and 4 ignored, and the integration lane adds 1 test, so the total of 52 matches the earlier figure. The four ignored tests are the ollama family, marked ignore until a live server is available. Nothing in the tree changed between the two runs; I checked the commit hash before and after, and it was identical."}
+{"pair_id": "train-d_semicolon-5936", "original": "⟦I ran the lanes as `cargo test --lib && cargo test --test provenance` so one command covered both.⟧ The unit lane passed and the provenance lane failed, with the detector reporting the section as absent. Restating the facts in a prose heading changed nothing, while adding the `- **SHA:**` and `- **patch-id:**` bullets cleared it, so the parser reads structured fields only; the two failing runs and the passing third run show this. Anyone closing a bug should expect the refusal text to mislead them, since it reports absence when the section exists but cannot be parsed. The handoff note needs a result from each lane, whichever one fails.", "substituted": "⟦I ran the lanes as `cargo test --lib; cargo test --test provenance` so one command covered both.⟧ The unit lane passed and the provenance lane failed, with the detector reporting the section as absent. Restating the facts in a prose heading changed nothing, while adding the `- **SHA:**` and `- **patch-id:**` bullets cleared it, so the parser reads structured fields only; the two failing runs and the passing third run show this. Anyone closing a bug should expect the refusal text to mislead them, since it reports absence when the section exists but cannot be parsed. The handoff note needs a result from each lane, whichever one fails."}
+{"pair_id": "train-d_semicolon-10566", "original": "The guard test asserted only that the status field was empty, and an empty field meant both that no job ran and that a job ran and produced nothing. It therefore passed under both states, so no run could have flagged the conflation. Tests share the vocabulary of the code they cover and inherit its blind spots. ⟦After tightening the assertion to check the job counter, I ran the crate's suites with `cargo test --lib && cargo test --test guard`.⟧", "substituted": "The guard test asserted only that the status field was empty, and an empty field meant both that no job ran and that a job ran and produced nothing. It therefore passed under both states, so no run could have flagged the conflation. Tests share the vocabulary of the code they cover and inherit its blind spots. ⟦After tightening the assertion to check the job counter, I ran the crate's suites with `cargo test --lib; cargo test --test guard`.⟧"}
+codex
+{"pair_id":"train-d_semicolon-6147","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-83","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-2402","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-1793","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-8286","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-11660","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-5936","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-10566","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+tokens used
+5,607

@@ -1,0 +1,24 @@
+set train  generator claude:claude-sonnet-5  calls 352  pairs 1760  ok 939
+failures: {"shares an 8-token shingle with its seed": 728, "banned word": 163, "seed missing from output": 19, "violating sentence is not one segmenter unit": 13, "fixed sentence is not one segmenter unit": 13, "violating sentence not exactly once in paragraph": 2, "call failed": 5, "paragraph length outside 60-200 words": 2, "fixed sentence equals violating sentence": 1, "missing or mistyped field": 4}
+  act_on_artifact        40/80
+  cannot_happen          36/80
+  closed_population      45/80
+  contradiction          48/80
+  count_unit             48/80
+  d_adjacency            29/80
+  d_fixture              65/80
+  d_history              35/80
+  d_loudness             43/80
+  d_mutation             53/80
+  d_red                  56/80
+  d_semicolon            66/80
+  d_sessionid            32/80
+  d_visibility           35/80
+  lines_read             33/80
+  member_vs_population   45/80
+  monotone_absence       45/80
+  open_artifact          34/80
+  question_asked         44/80
+  run_tool               33/80
+  scope_instant          28/80
+  selector_narrow        46/80

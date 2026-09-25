@@ -1,0 +1,8 @@
+{"pair_id":"train-contradiction-10896","a":"yes","b":"yes","c":"yes","note":"The audit finding contradicts the marked denial. The fix separates the design note's historical accuracy from the later audit."}
+{"pair_id":"train-contradiction-6958","a":"yes","b":"yes","c":"yes","note":"The error output contradicts the claim that lower versions follow automatically. The fix agrees with the reported mismatch."}
+{"pair_id":"train-contradiction-7965","a":"yes","b":"no","c":"yes","note":"Both versions say the description mentions append_entry, conflicting with the assertion that agents never learn it exists."}
+{"pair_id":"train-contradiction-1461","a":"yes","b":"yes","c":"yes","note":"The earlier statement that totals are not copied contradicts the marked claim. The fix consistently identifies the top-level totals as correct."}
+{"pair_id":"train-contradiction-7440","a":"yes","b":"yes","c":"yes","note":"Shipping no isolation layer contradicts running every judge call in a container sandbox. The fix removes that conflict."}
+{"pair_id":"train-contradiction-8638","a":"yes","b":"yes","c":"yes","note":"The earlier sentence explicitly leaves the decision open, contradicting the marked claim that it is settled. The fix restores agreement."}
+{"pair_id":"train-contradiction-10567","a":"yes","b":"yes","c":"yes","note":"The declaration-only statement contradicts the marked execution-proof claim. The fix limits the gate's guarantee to configuration coverage."}
+{"pair_id":"train-contradiction-8526","a":"yes","b":"yes","c":"yes","note":"The fourth step requires reproducing the original prose, contradicting permission to differ. The fix makes verification enforce that requirement."}

@@ -1,0 +1,91 @@
+{"pair_id":"tsyn-in-member_vs_population-9387","a":"yes","b":"yes","c":"no","note":"An average briefing score cannot establish session 17's briefing contents; its dispatch transcript supplies direct evidence."}
+{"pair_id":"tsyn-in-member_vs_population-104","a":"yes","b":"yes","c":"no","note":"Matching counts cannot establish that the last agent appears in session B's list; the fix explicitly rejects that inference."}
+{"pair_id":"tsyn-in-member_vs_population-311","a":"yes","b":"yes","c":"no","note":"Suite success does not establish the specific call's preamble shape; the fix removes that inference."}
+{"pair_id":"tsyn-in-member_vs_population-309","a":"yes","b":"yes","c":"no","note":"Total output cannot verify one shape's section; the fix uses observed fallback output without claiming section correctness."}
+{"pair_id":"tsyn-in-member_vs_population-7085","a":"yes","b":"yes","c":"no","note":"Aggregate CI success lacks demonstrated coverage of the specific lookup; the fix identifies a check exercising that lookup."}
+{"pair_id":"tsyn-in-member_vs_population-1622","a":"yes","b":"yes","c":"no","note":"Module-wide success does not establish coverage of the particular external-reference case; the fix explicitly identifies that case as untested."}
+{"pair_id":"tsyn-in-member_vs_population-6899","a":"yes","b":"yes","c":"no","note":"Suite success cannot verify delivery to the observed subagent; the fix limits its claim to a directly inspected test call."}
+{"pair_id":"tsyn-in-member_vs_population-2012","a":"yes","b":"yes","c":"no","note":"Integration-suite success cannot verify the specific watch-path termination scenario; the fix states that scenario lacks test coverage."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-b6v1n4_f
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d709-9ec3-7c23-a75d-256e89152c67
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+codex
+I’ll read task.md and follow its instructions.
+
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-b6v1n4_f
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `member_vs_population`
+
+LAW: An assertion computed over a population cannot verify a claim about a member.
+
+USUAL SHAPE: YES when the text uses an aggregate (a total, a whole suite being green, an average, "all tests pass") as proof of a claim about ONE specific item that the aggregate is not shown to exercise -- for example the full suite passing offered as proof that one particular function handles one particular case. NO when the evidence is about that item itself, or when the check plainly exercises the change it is cited for (running a module's own tests after a local edit to that module).
+
+## Items
+
+{"pair_id": "tsyn-in-member_vs_population-9387", "original": "Tracker entry criteria for the refactor. We log an F-N entry when a tool-call observation shows unexpected behavior, for instance a model calling get_guide for the librarian topic after auto-injection already delivered it. We log another F-N when a subagent's first call is get_guide and the parent should have briefed it. A W-N entry records a briefed subagent that skipped a tool family that used to cause friction. Routine usage frictions still go to the separate usage file, since this tracker is refactor-scoped. ⟦Across the 30 sessions we reviewed, the average briefing completeness score was 0.9, so the subagent in session 17 was certainly briefed on the librarian guide.⟧", "substituted": "Tracker entry criteria for the refactor. We log an F-N entry when a tool-call observation shows unexpected behavior, for instance a model calling get_guide for the librarian topic after auto-injection already delivered it. We log another F-N when a subagent's first call is get_guide and the parent should have briefed it. A W-N entry records a briefed subagent that skipped a tool family that used to cause friction. Routine usage frictions still go to the separate usage file, since this tracker is refactor-scoped. ⟦In session 17, the dispatch transcript shows the librarian guide in the subagent's briefing, so it was certainly briefed on it.⟧"}
+{"pair_id": "tsyn-in-member_vs_population-104", "original": "The peer listing in the agent registry showed a discrepancy during Tuesday's handoff. Two sessions launched under separate profiles each printed a peer count of 2, so I dumped the session tables from both stores and compared the IDs. The two ID sets shared no entries: each profile only enumerates the sessions registered in its own store. The count is therefore computed per profile, and neither number covers the other profile's sessions. ⟦Both sessions reported 2, so the count is confirmed for session B's peer list, including the agent that joined last.⟧ I am changing the listing to print the profile name next to the number.", "substituted": "The peer listing in the agent registry showed a discrepancy during Tuesday's handoff. Two sessions launched under separate profiles each printed a peer count of 2, so I dumped the session tables from both stores and compared the IDs. The two ID sets shared no entries: each profile only enumerates the sessions registered in its own store. The count is therefore computed per profile, and neither number covers the other profile's sessions. ⟦Both sessions reported 2, but that confirms nothing about session B's peer list, including whether the agent that joined last appears in it.⟧ I am changing the listing to print the profile name next to the number."}
+{"pair_id": "tsyn-in-member_vs_population-311", "original": "The new assertion in the guide-delivery test matches a marker string, and that is its weakest point. If the marker text is reworded, the assertion keeps passing without discriminating anything. The typed signal, the `Preamble` variant, exists one layer down, but the test only sees emitted content blocks and cannot reach it. Separately, the whole delivery suite finished green after the change, 48 of 48 cases. ⟦That shows the preamble shape is delivered for the `search_symbols` call.⟧ Until the enum is surfaced to the test, the string match stays as the best available discriminator.", "substituted": "The new assertion in the guide-delivery test matches a marker string, and that is its weakest point. If the marker text is reworded, the assertion keeps passing without discriminating anything. The typed signal, the `Preamble` variant, exists one layer down, but the test only sees emitted content blocks and cannot reach it. Separately, the whole delivery suite finished green after the change, 48 of 48 cases. ⟦That shows no case in the suite regressed, not that `search_symbols` delivers the preamble shape.⟧ Until the enum is surfaced to the test, the string match stays as the best available discriminator."}
+{"pair_id": "tsyn-in-member_vs_population-309", "original": "The mutation run on the shape-emission tests produced two findings. First, deleting the section for one shape made the aggregate byte-count assertion fail, as designed, because the total output dropped. Second, a per-shape non-emptiness check looked promising as a sharper alternative. It cannot work here, because a shape whose section is gone still receives a 491-byte fallback, so every shape has a floor above zero. I confirmed this by reading the emitted blocks under mutation: `append_entry` reads 491, not 0. ⟦The total staying above the threshold across all shapes shows that `append_entry` still emits its own section correctly.⟧", "substituted": "The mutation run on the shape-emission tests produced two findings. First, deleting the section for one shape made the aggregate byte-count assertion fail, as designed, because the total output dropped. Second, a per-shape non-emptiness check looked promising as a sharper alternative. It cannot work here, because a shape whose section is gone still receives a 491-byte fallback, so every shape has a floor above zero. I confirmed this by reading the emitted blocks under mutation: `append_entry` reads 491, not 0. ⟦The 491-byte fallback under mutation shows that `append_entry` can be non-empty without emitting its own section.⟧"}
+{"pair_id": "tsyn-in-member_vs_population-7085", "original": "Handoff notes for the orientation walkthrough. The suggested order starts with onboarding, then building the semantic index, then a tree pass over the root and key subdirectories. After that, listing symbols under src gives the top-level definitions. Finding the entry point is next, using either a semantic query or a symbol lookup for main. ⟦Every one of the 40 walkthrough checks in CI is green, which confirms that the symbol lookup for main returns the right entry point in the Rust fixture.⟧ From the entry point, follow callers with references and go deeper into subsystems with symbols.", "substituted": "Handoff notes for the orientation walkthrough. The suggested order starts with onboarding, then building the semantic index, then a tree pass over the root and key subdirectories. After that, listing symbols under src gives the top-level definitions. Finding the entry point is next, using either a semantic query or a symbol lookup for main. ⟦The CI check that runs the symbol lookup for main on the Rust fixture is green, and it returns the right entry point.⟧ From the entry point, follow callers with references and go deeper into subsystems with symbols."}
+{"pair_id": "tsyn-in-member_vs_population-1622", "original": "The audit tool's exit-code gating is implemented. `build_response` now returns a `Result` and maps each threshold level to a predicate: `never` gives 0, `high` fires on any High finding, `med` on High or Med, and `low` on any non-resolved, non-external finding. The old `any` value stays as an alias for the `low` predicate. Any unrecognized value now returns a recoverable error that names it, instead of silently gating nothing. ⟦The module's tests all pass, 31 of 31, so the `med` level correctly treats a Med finding in an external reference as non-gating.⟧", "substituted": "The audit tool's exit-code gating is implemented. `build_response` now returns a `Result` and maps each threshold level to a predicate: `never` gives 0, `high` fires on any High finding, `med` on High or Med, and `low` on any non-resolved, non-external finding. The old `any` value stays as an alias for the `low` predicate. Any unrecognized value now returns a recoverable error that names it, instead of silently gating nothing. ⟦The module's tests all pass, 31 of 31, but none of them builds a Med finding in an external reference, so that `med` case is untested.⟧"}
+{"pair_id": "tsyn-in-member_vs_population-6899", "original": "We traced why the re-arm hook did not help the stamped subagent. The hook fires on every resume, and the dispatch log shows three resume events for the one subagent we watched. The parent's request carried all 11 topics, including the roughly 38 KB tracker-conventions entry. ⟦The full hook test suite passed on the branch, 214 of 214, so the stamped subagent's first call must have received its own copy of tracker-conventions.⟧ Yet the subagent's ledger dump at first call was empty, and the re-arm bought it nothing, because per-principal ledgers start blank for each principal.", "substituted": "We traced why the re-arm hook did not help the stamped subagent. The hook fires on every resume, and the dispatch log shows three resume events for the one subagent we watched. The parent's request carried all 11 topics, including the roughly 38 KB tracker-conventions entry. ⟦The hook test that stamps a subagent and inspects its first call passed on the branch, so that call was shown a copy of tracker-conventions in the test.⟧ Yet the subagent's ledger dump at first call was empty, and the re-arm bought it nothing, because per-principal ledgers start blank for each principal."}
+{"pair_id": "tsyn-in-member_vs_population-2012", "original": "The leaked workers from last week's incident do not look like a shutdown-handling problem. Each of the eleven orphans we inspected was blocked in a read on its stdin pipe, and `/proc/<pid>/fdinfo` showed the pipe's peer still open in a surviving grandchild. A closed peer would have produced a 0-byte read and an exit, so these workers never received an EOF at all. ⟦The whole integration suite passed on the branch that reworked the stdin loop, so the worker spawned by the `--watch` path must also exit correctly when its parent is killed.⟧ We therefore need to look at who holds the write end, not at how the worker reads.", "substituted": "The leaked workers from last week's incident do not look like a shutdown-handling problem. Each of the eleven orphans we inspected was blocked in a read on its stdin pipe, and `/proc/<pid>/fdinfo` showed the pipe's peer still open in a surviving grandchild. A closed peer would have produced a 0-byte read and an exit, so these workers never received an EOF at all. ⟦The whole integration suite passed on the branch that reworked the stdin loop, but no test there kills the parent of a worker spawned by the `--watch` path.⟧ We therefore need to look at who holds the write end, not at how the worker reads."}
+codex
+{"pair_id":"tsyn-in-member_vs_population-9387","a":"yes","b":"yes","c":"no","note":"An average briefing score cannot establish session 17's briefing contents; its dispatch transcript supplies direct evidence."}
+{"pair_id":"tsyn-in-member_vs_population-104","a":"yes","b":"yes","c":"no","note":"Matching counts cannot establish that the last agent appears in session B's list; the fix explicitly rejects that inference."}
+{"pair_id":"tsyn-in-member_vs_population-311","a":"yes","b":"yes","c":"no","note":"Suite success does not establish the specific call's preamble shape; the fix removes that inference."}
+{"pair_id":"tsyn-in-member_vs_population-309","a":"yes","b":"yes","c":"no","note":"Total output cannot verify one shape's section; the fix uses observed fallback output without claiming section correctness."}
+{"pair_id":"tsyn-in-member_vs_population-7085","a":"yes","b":"yes","c":"no","note":"Aggregate CI success lacks demonstrated coverage of the specific lookup; the fix identifies a check exercising that lookup."}
+{"pair_id":"tsyn-in-member_vs_population-1622","a":"yes","b":"yes","c":"no","note":"Module-wide success does not establish coverage of the particular external-reference case; the fix explicitly identifies that case as untested."}
+{"pair_id":"tsyn-in-member_vs_population-6899","a":"yes","b":"yes","c":"no","note":"Suite success cannot verify delivery to the observed subagent; the fix limits its claim to a directly inspected test call."}
+{"pair_id":"tsyn-in-member_vs_population-2012","a":"yes","b":"yes","c":"no","note":"Integration-suite success cannot verify the specific watch-path termination scenario; the fix states that scenario lacks test coverage."}
+tokens used
+6,079

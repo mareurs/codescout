@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-d_semicolon-199","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-1558","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-4725","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-2380","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-5856","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-8361","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-2717","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-7292","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}

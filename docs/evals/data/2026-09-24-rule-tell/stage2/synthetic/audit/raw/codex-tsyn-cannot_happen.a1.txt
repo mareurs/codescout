@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-cannot_happen-270", "a": "yes", "b": "yes", "c": "no", "note": "The original claims further disagreements are impossible because of the current layout. The fix says they are untested."}
+{"pair_id": "tsyn-cross-cannot_happen-4972", "a": "yes", "b": "yes", "c": "no", "note": "The original says failures cannot occur because of the shared client. The fix says they are untested and names the gap."}
+{"pair_id": "tsyn-cross-cannot_happen-9426", "a": "yes", "b": "yes", "c": "no", "note": "The original says an oversized prompt cannot reach users under the present gates. The fix says it could still reach users."}
+{"pair_id": "tsyn-cross-cannot_happen-4642", "a": "yes", "b": "yes", "c": "no", "note": "The original calls premature stamping impossible because of the current design. The fix limits the claim to the six-chunk replay."}
+{"pair_id": "tsyn-cross-cannot_happen-7087", "a": "yes", "b": "yes", "c": "no", "note": "The original says a default install can never contact a vector service, based on configuration. The fix limits it to the tested install's log."}
+{"pair_id": "tsyn-cross-cannot_happen-7107", "a": "yes", "b": "yes", "c": "no", "note": "The original says lookup cannot omit a declaration because of the index structure. The fix reports only the fixture result."}
+{"pair_id": "tsyn-cross-cannot_happen-297", "a": "yes", "b": "yes", "c": "no", "note": "The original says an ordinary CI run can never reveal such gaps. The fix limits the claim to the original run and this gap."}
+{"pair_id": "tsyn-cross-cannot_happen-1141", "a": "yes", "b": "yes", "c": "no", "note": "The original says the mismatch cannot recur now that the helper normalizes paths. The fix limits the claim to the reproduced case."}

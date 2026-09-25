@@ -1,0 +1,91 @@
+{"pair_id":"train-d_sessionid-9326","a":"yes","b":"yes","c":"no","note":"Original credits a registry name; substitution credits a sessionId. No other sentence violates the rule."}
+{"pair_id":"train-d_sessionid-1936","a":"yes","b":"yes","c":"no","note":"Original attributes the config edit by session name; substitution uses its sessionId. No other attribution breaches the rule."}
+{"pair_id":"train-d_sessionid-10521","a":"yes","b":"yes","c":"no","note":"Original credits the citation count to a registered name; substitution identifies the sessionId. Other sentences contain no name-based attribution."}
+{"pair_id":"train-d_sessionid-11309","a":"yes","b":"yes","c":"no","note":"Original attributes the edit by registered name despite later sessionId evidence. Substitution uses the sessionId; other sentences do not breach the rule."}
+{"pair_id":"train-d_sessionid-6871","a":"yes","b":"yes","c":"no","note":"Original blames a self-reported session name; substitution attributes responsibility by sessionId. No other sentence breaks the rule."}
+{"pair_id":"train-d_sessionid-10042","a":"yes","b":"yes","c":"no","note":"Original attributes the clash to a session label; substitution uses a sessionId. Other sentences do not attribute work by session name."}
+{"pair_id":"train-d_sessionid-9316","a":"yes","b":"yes","c":"no","note":"Original credits the partial close to a registered session name; substitution credits a sessionId. No other sentence violates the rule."}
+{"pair_id":"train-d_sessionid-11493","a":"yes","b":"yes","c":"no","note":"Original attributes the regression to a registered session name; substitution uses an explicit sessionId. Other sentences contain no name-based session attribution."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-7ni06_nl
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d707-b7a3-72c2-aaf5-8e74a2925d9c
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+codex
+I’ll read task.md and follow its instructions.
+
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-7ni06_nl
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_sessionid`
+
+LAW: Attribute by sessionId, never by a self-reported session name.
+
+USUAL SHAPE: YES when the text attributes work to a session by its self-reported or registry NAME rather than its sessionId. NO otherwise.
+
+## Items
+
+{"pair_id": "train-d_sessionid-9326", "original": "Grep against a tool buffer returned nothing for a pattern that the buffer plainly contains. Three explanations fit: grep does not read raw buffer text the way it reads filesystem paths, the underscore in the pattern tripped a tokenizer-style heuristic, or suggestion routing intercepted the search first. Reading the same buffer with read_file and a json_path worked, so the data is reachable, just not through grep. ⟦This dead end was first logged by the session whose registry entry says \"scout-north\", and their notes match what I saw.⟧ I have not yet isolated which of the three causes applies.", "substituted": "Grep against a tool buffer returned nothing for a pattern that the buffer plainly contains. Three explanations fit: grep does not read raw buffer text the way it reads filesystem paths, the underscore in the pattern tripped a tokenizer-style heuristic, or suggestion routing intercepted the search first. Reading the same buffer with read_file and a json_path worked, so the data is reachable, just not through grep. ⟦This dead end was first logged by session c91d6e02, whose notes match what I saw.⟧ I have not yet isolated which of the three causes applies."}
+{"pair_id": "train-d_sessionid-1936", "original": "The reindex flag semantics caused confusion during the handoff. Passing force makes the walker ignore cached file hashes and re-classify every file, but it does not queue anything for embedding. That is why the embedding backlog stayed empty after the first run: the queue log shows zero enqueue events between the walk start and walk end. The reembed option is the one that queues unchanged files, and it matters after switching backends on an already-indexed project. ⟦The stalled backlog was traced to the session called \"nightly-indexer\", since that name appears on the config edit in the audit log.⟧ Until reembed is passed, unchanged content is silently never embedded.", "substituted": "The reindex flag semantics caused confusion during the handoff. Passing force makes the walker ignore cached file hashes and re-classify every file, but it does not queue anything for embedding. That is why the embedding backlog stayed empty after the first run: the queue log shows zero enqueue events between the walk start and walk end. The reembed option is the one that queues unchanged files, and it matters after switching backends on an already-indexed project. ⟦The stalled backlog was traced to session a41f9c07, since that sessionId appears on the config edit in the audit log.⟧ Until reembed is passed, unchanged content is silently never embedded."}
+{"pair_id": "train-d_sessionid-10521", "original": "Handoff on the stale worktree recovery. The directory is present at 174M and its gitdir target is absent; I read both from a listing taken at 14:02, so that part is settled. ⟦The session registered as OB-4 counted the citations, 84 across 16 files, and the count is credited to it in the ledger.⟧ The recovery command in the report was copied without being run, and it refuses because the path already exists. Next step is to rerun the count against the current tree before anyone deletes the directory.", "substituted": "Handoff on the stale worktree recovery. The directory is present at 174M and its gitdir target is absent; I read both from a listing taken at 14:02, so that part is settled. ⟦The session with sessionId 3c91e0a4 counted the citations, 84 across 16 files, and the count is credited to it in the ledger.⟧ The recovery command in the report was copied without being run, and it refuses because the path already exists. Next step is to rerun the count against the current tree before anyone deletes the directory."}
+{"pair_id": "train-d_sessionid-11309", "original": "⟦The uncommitted edit to the config loader belongs to the session that registered as nightowl, going by the label on the lock file.⟧ I confirmed the loader edit from the Session-Id trailer on the latest commit touching that path, which carries 8a2f61c9, and the scratchpad directory for that id holds the matching draft. Index membership would tell me nothing here, since two sessions stage into one checkout. Before sending this to the affected party, I will state the trailer lookup in the same message so they can check it.", "substituted": "⟦The uncommitted edit to the config loader belongs to the session with sessionId 8a2f61c9, going by the id on the lock file.⟧ I confirmed the loader edit from the Session-Id trailer on the latest commit touching that path, which carries 8a2f61c9, and the scratchpad directory for that id holds the matching draft. Index membership would tell me nothing here, since two sessions stage into one checkout. Before sending this to the affected party, I will state the trailer lookup in the same message so they can check it."}
+{"pair_id": "train-d_sessionid-6871", "original": "The stamping walk climbs the process tree and reads each registry row along the way. When a stale row reuses a pid that belongs to our chain, the walk stops early and our server stays unstamped, which is the safe direction. The row's start time matches field 22 of the proc stat file (84228601 for PID 50568), so it can serve as a third guard if needed. ⟦During the trial, the stale row was created by the session that called itself \"nightly-refactor\", so that name is who we blame for the reused pid.⟧ The check itself only reads the registry and never writes to it.", "substituted": "The stamping walk climbs the process tree and reads each registry row along the way. When a stale row reuses a pid that belongs to our chain, the walk stops early and our server stays unstamped, which is the safe direction. The row's start time matches field 22 of the proc stat file (84228601 for PID 50568), so it can serve as a third guard if needed. ⟦During the trial, the stale row was created by the session with sessionId 3f9a1c7e, so that id is what we blame for the reused pid.⟧ The check itself only reads the registry and never writes to it."}
+{"pair_id": "train-d_sessionid-10042", "original": "Two entries in the statement-validity log collided this week. The allocator returned F-5 for my append, and the response body shows that id, so the number in my index row is the authoritative one. ⟦The earlier F-4 clash came from the session labeled 'docs-sweeper', which wrote its entry between my scan and my write.⟧ Hand-allocated ids are the cause: a max-id read is stale the moment a peer in the same checkout appends. From now on every entry goes through the append call, and the index row is added afterward using the returned id.", "substituted": "Two entries in the statement-validity log collided this week. The allocator returned F-5 for my append, and the response body shows that id, so the number in my index row is the authoritative one. ⟦The earlier F-4 clash came from session c94e02ab, which wrote its entry between my scan and my write.⟧ Hand-allocated ids are the cause: a max-id read is stale the moment a peer in the same checkout appends. From now on every entry goes through the append call, and the index row is added afterward using the returned id."}
+{"pair_id": "train-d_sessionid-9316", "original": "Scouting the upsert before acting changed the plan. Without it, I would have either skipped re-augmenting L1 entirely, leaving the dogfood goal on the broken old prompt, or fired the merge=false call blind. The audit had named one instance for H-8, and the goal record shows refresh_count above zero, so a blind overwrite would have repeated F-15. ⟦The earlier partial close of H-8 was done by the session that registered as \"closer-b\", so that half of the work is theirs.⟧ Path (a) accepts a partial close; path (b) risks clobbering refreshed state.", "substituted": "Scouting the upsert before acting changed the plan. Without it, I would have either skipped re-augmenting L1 entirely, leaving the dogfood goal on the broken old prompt, or fired the merge=false call blind. The audit had named one instance for H-8, and the goal record shows refresh_count above zero, so a blind overwrite would have repeated F-15. ⟦The earlier partial close of H-8 was done by session 7be03d15, per the audit trail, so that half of the work is theirs.⟧ Path (a) accepts a partial close; path (b) risks clobbering refreshed state."}
+{"pair_id": "train-d_sessionid-11493", "original": "The symbol search runs its file filter twice: once to build the accepted set that gates LSP matches, once more for the tree-sitter fallback. Sharing one set between them looks like a cheap speedup, but the fallback only runs when the LSP list comes back empty, and a truncated first walk is what empties it. A second, complete walk therefore still finds the symbol, which a shared set would not. ⟦The reuse edit landed in the commit history under the session that registered itself as \"walker-bot\", so that session caused the zero-result regression.⟧ I reverted the edit, and the repro query returns its symbol again.", "substituted": "The symbol search runs its file filter twice: once to build the accepted set that gates LSP matches, once more for the tree-sitter fallback. Sharing one set between them looks like a cheap speedup, but the fallback only runs when the LSP list comes back empty, and a truncated first walk is what empties it. A second, complete walk therefore still finds the symbol, which a shared set would not. ⟦The reuse edit landed in the commit history under the session with sessionId 7c1e9a42, so that session caused the zero-result regression.⟧ I reverted the edit, and the repro query returns its symbol again."}
+codex
+{"pair_id":"train-d_sessionid-9326","a":"yes","b":"yes","c":"no","note":"Original credits a registry name; substitution credits a sessionId. No other sentence violates the rule."}
+{"pair_id":"train-d_sessionid-1936","a":"yes","b":"yes","c":"no","note":"Original attributes the config edit by session name; substitution uses its sessionId. No other attribution breaches the rule."}
+{"pair_id":"train-d_sessionid-10521","a":"yes","b":"yes","c":"no","note":"Original credits the citation count to a registered name; substitution identifies the sessionId. Other sentences contain no name-based attribution."}
+{"pair_id":"train-d_sessionid-11309","a":"yes","b":"yes","c":"no","note":"Original attributes the edit by registered name despite later sessionId evidence. Substitution uses the sessionId; other sentences do not breach the rule."}
+{"pair_id":"train-d_sessionid-6871","a":"yes","b":"yes","c":"no","note":"Original blames a self-reported session name; substitution attributes responsibility by sessionId. No other sentence breaks the rule."}
+{"pair_id":"train-d_sessionid-10042","a":"yes","b":"yes","c":"no","note":"Original attributes the clash to a session label; substitution uses a sessionId. Other sentences do not attribute work by session name."}
+{"pair_id":"train-d_sessionid-9316","a":"yes","b":"yes","c":"no","note":"Original credits the partial close to a registered session name; substitution credits a sessionId. No other sentence violates the rule."}
+{"pair_id":"train-d_sessionid-11493","a":"yes","b":"yes","c":"no","note":"Original attributes the regression to a registered session name; substitution uses an explicit sessionId. Other sentences contain no name-based session attribution."}
+tokens used
+5,902

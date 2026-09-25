@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-selector_narrow-8207","a":"yes","b":"yes","c":"no","note":"Filtering for taken cannot establish coverage of every status; the fix limits the claim to taken."}
+{"pair_id":"tsyn-in-selector_narrow-8640","a":"yes","b":"yes","c":"yes","note":"The fix narrows the conclusion to retrieval, but an earlier sentence also claims every consumer reads env."}
+{"pair_id":"tsyn-in-selector_narrow-5646","a":"yes","b":"no","c":"no","note":"The fixture cannot establish coverage across repositories; even within the fixture, skipped sample hooks remain outside the audit."}
+{"pair_id":"tsyn-in-selector_narrow-6226","a":"yes","b":"yes","c":"no","note":"Searching direct variable mentions cannot exclude indirect reads; the fix restricts its claim to direct mentions in the searched directory."}
+{"pair_id":"tsyn-in-selector_narrow-3451","a":"yes","b":"yes","c":"yes","note":"The fix limits the call-site claim to login. Separately, testing three roots does not establish correct lookup behavior every time."}
+{"pair_id":"tsyn-in-selector_narrow-4592","a":"yes","b":"yes","c":"no","note":"Absence of one phrase cannot establish complete family listings; the fix claims only that phrase's absence in the searched directory."}
+{"pair_id":"tsyn-in-selector_narrow-4949","a":"yes","b":"yes","c":"no","note":"Annotation matches do not establish the total population of capped tools; the fix limits the comparison to annotations."}
+{"pair_id":"tsyn-in-selector_narrow-7608","a":"yes","b":"yes","c":"no","note":"Searching one file cannot establish repository-wide caller behavior; the fix confines the conclusion to the searched file."}

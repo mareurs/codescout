@@ -1,0 +1,73 @@
+{"pair_id":"tsyn-in-question_asked-1479","a":"yes","b":"yes","c":"no","note":"Unit results support tested lookup behavior, but do not establish which ordering resolves production edits."}
+{"pair_id":"tsyn-in-question_asked-10946","a":"yes","b":"yes","c":"no","note":"Successful loading supports receiving the guide in context, not following its instructions when deciding to re-check claims."}
+{"pair_id":"tsyn-in-question_asked-9012","a":"yes","b":"no","c":"no","note":"Error messages do not measure supplied arguments, even for failing calls; narrowing the claim to failures preserves the mismatch."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-9dtgmq6q
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d709-c84a-7ae1-b269-98465e25e242
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-9dtgmq6q
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `question_asked`
+
+LAW: The instrument must answer the question you actually have, not a neighbouring one.
+
+USUAL SHAPE: YES when the text offers the result of a check or measurement as the answer to a question it does not actually measure (a compile or a green test cited as proof something is used, reached or correct in a way the check never exercised). NO when the cited check measures the claim it supports, or no check is cited.
+
+## Items
+
+{"pair_id": "tsyn-in-question_asked-1479", "original": "The end-line lookup now matches on the symbol's qualified path before it looks at any line number. Same-name symbols are gathered from the whole tree, and a unique path match wins however far away it sits. Line distance survives only as a tiebreaker when the path is missing or ambiguous. The edit module always hands over a path in production, so the tiebreaker is a rare branch. ⟦After the change, the full unit suite for the symbol module passed, which shows the new path-first ordering is what resolves real edits.⟧ Before the change, a moved function had been resolving to a same-name sibling twenty lines away, and the new lookup returns the right one in the fixture that reproduces it.", "substituted": "The end-line lookup now matches on the symbol's qualified path before it looks at any line number. Same-name symbols are gathered from the whole tree, and a unique path match wins however far away it sits. Line distance survives only as a tiebreaker when the path is missing or ambiguous. The edit module always hands over a path in production, so the tiebreaker is a rare branch. ⟦After the change, the full unit suite for the symbol module passed, which shows the new ordering breaks no existing lookup case.⟧ Before the change, a moved function had been resolving to a same-name sibling twenty lines away, and the new lookup returns the right one in the fixture that reproduces it."}
+{"pair_id": "tsyn-in-question_asked-10946", "original": "The shipped bootstrap guide carries a third wording of the instruction, telling the agent to open the artifact or run the command rather than repeat what a doc or memory says. It is not the text of this entry, and its arm is scored separately. Its arm scored 7/10 on the verification probe, which is the same probe used for the other entries. ⟦Because the guide file loads without a parse error at session start, the agent has been shown to follow its wording when deciding whether to re-check a claim.⟧ Do not read this entry's number as evidence for the other one, or the reverse.", "substituted": "The shipped bootstrap guide carries a third wording of the instruction, telling the agent to open the artifact or run the command rather than repeat what a doc or memory says. It is not the text of this entry, and its arm is scored separately. Its arm scored 7/10 on the verification probe, which is the same probe used for the other entries. ⟦Because the guide file loads without a parse error at session start, the agent has been shown to receive its wording in context.⟧ Do not read this entry's number as evidence for the other one, or the reverse."}
+{"pair_id": "tsyn-in-question_asked-9012", "original": "The usage database records the tool name, duration and outcome for every call, but the input_json column is populated only under debug mode. In normal sessions the arguments are therefore absent, which both the schema and the recording code make plain. Error text does get stored, so failures can be searched by message. ⟦Agents almost never pass the scope argument, since the error column contains no mention of it.⟧ Whether agents supply the argument in calls that succeed stays unanswered by this corpus.", "substituted": "The usage database records the tool name, duration and outcome for every call, but the input_json column is populated only under debug mode. In normal sessions the arguments are therefore absent, which both the schema and the recording code make plain. Error text does get stored, so failures can be searched by message. ⟦Failing calls almost never involve the scope argument, since the error column contains no mention of it.⟧ Whether agents supply the argument in calls that succeed stays unanswered by this corpus."}
+codex
+{"pair_id":"tsyn-in-question_asked-1479","a":"yes","b":"yes","c":"no","note":"Unit results support tested lookup behavior, but do not establish which ordering resolves production edits."}
+{"pair_id":"tsyn-in-question_asked-10946","a":"yes","b":"yes","c":"no","note":"Successful loading supports receiving the guide in context, not following its instructions when deciding to re-check claims."}
+{"pair_id":"tsyn-in-question_asked-9012","a":"yes","b":"no","c":"no","note":"Error messages do not measure supplied arguments, even for failing calls; narrowing the claim to failures preserves the mismatch."}
+tokens used
+4,238

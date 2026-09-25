@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-act_on_artifact-1267","a":"yes","b":"yes","c":"no","note":"Release tagging relied on tests predating new commits; the fix reruns tests at the new head."}
+{"pair_id":"tsyn-in-act_on_artifact-1354","a":"yes","b":"yes","c":"no","note":"The kill used an outdated lock-holder listing; the fix queries the current holder before killing it."}
+{"pair_id":"tsyn-in-act_on_artifact-4681","a":"yes","b":"yes","c":"no","note":"Merging relied on yesterday's gate result; the fix checks the edited description on the current branch."}
+{"pair_id":"tsyn-in-act_on_artifact-7808","a":"yes","b":"yes","c":"no","note":"Tagging relied on yesterday's search; the fix searches the current source immediately before tagging."}
+{"pair_id":"tsyn-in-act_on_artifact-2043","a":"yes","b":"yes","c":"no","note":"The rewrite relied on a cached manual copy; the fix reads the current manual. Metric compatibility is outside this rule."}
+{"pair_id":"tsyn-in-act_on_artifact-10241","a":"yes","b":"yes","c":"no","note":"Dropping detectors relied on an old blog's lint list; the fix uses the lint list for the pinned clippy version."}
+{"pair_id":"tsyn-in-act_on_artifact-7831","a":"yes","b":"yes","c":"no","note":"Final assignments relied on last week's copied rollout table; the fix uses the current specification's table."}
+{"pair_id":"tsyn-in-act_on_artifact-119","a":"yes","b":"yes","c":"no","note":"Deletion relied on a listing predating directory rewrites; the fix checks a fresh listing for empty files."}

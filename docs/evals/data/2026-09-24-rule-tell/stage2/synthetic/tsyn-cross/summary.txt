@@ -1,0 +1,24 @@
+set tsyn-cross  generator codex:gpt-6-astra/medium  calls 66  pairs 330  ok 330
+failures: {}
+  act_on_artifact        15/15
+  cannot_happen          15/15
+  closed_population      15/15
+  contradiction          15/15
+  count_unit             15/15
+  d_adjacency            15/15
+  d_fixture              15/15
+  d_history              15/15
+  d_loudness             15/15
+  d_mutation             15/15
+  d_red                  15/15
+  d_semicolon            15/15
+  d_sessionid            15/15
+  d_visibility           15/15
+  lines_read             15/15
+  member_vs_population   15/15
+  monotone_absence       15/15
+  open_artifact          15/15
+  question_asked         15/15
+  run_tool               15/15
+  scope_instant          15/15
+  selector_narrow        15/15

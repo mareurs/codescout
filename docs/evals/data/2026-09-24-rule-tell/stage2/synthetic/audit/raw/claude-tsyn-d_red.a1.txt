@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-d_red-1308","a":"yes","b":"yes","c":"no","note":"The original transfers evidence between assertions; the fix explicitly requires a fresh failing run."}
+{"pair_id":"tsyn-in-d_red-237","a":"yes","b":"yes","c":"no","note":"The original credits the edited assertion with an earlier failure; the fix reports observing the new assertion fail."}
+{"pair_id":"tsyn-in-d_red-4971","a":"yes","b":"no","c":"no","note":"The fix claims a fresh failing run, but the final sentence explicitly says the counter check has not run against old code."}
+{"pair_id":"tsyn-in-d_red-4838","a":"yes","b":"yes","c":"no","note":"The original reuses a failure from another placement; the fix reruns the rewritten test and observes the miss."}
+{"pair_id":"tsyn-in-d_red-7104","a":"yes","b":"yes","c":"no","note":"The original reuses the wrong-message failure; the fix observes the revised assertion fail with the guard disabled."}
+{"pair_id":"tsyn-in-d_red-2323","a":"yes","b":"yes","c":"no","note":"The original treats the old matcher's failure as proof for its replacement; the fix observes the new matcher fail."}
+{"pair_id":"tsyn-in-d_red-9849","a":"yes","b":"yes","c":"no","note":"The original transfers the old count assertion's red; the fix reports a red for the revised assertion on the unpatched trigger."}
+{"pair_id":"tsyn-in-d_red-12247","a":"yes","b":"yes","c":"no","note":"The original credits the new baseline comparison with the old guard's result; the fix replays the report and observes rejection."}

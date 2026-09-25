@@ -1,0 +1,8 @@
+{"pair_id":"train-run_tool-2684","a":"yes","b":"no","c":"no","note":"The fix still predicts runtime output from the README without running the fenced-reference case; expressing expectation does not supply runtime evidence."}
+{"pair_id":"train-run_tool-2625","a":"yes","b":"yes","c":"no","note":"The original infers stderr and exit status from source; the fix reports triggering the gate and observing both."}
+{"pair_id":"train-run_tool-12127","a":"yes","b":"yes","c":"no","note":"The original asserts runtime failure from source; the fix describes source assignments and control flow without claiming observed runtime behavior."}
+{"pair_id":"train-run_tool-7463","a":"yes","b":"yes","c":"no","note":"The original infers output shape from the prompt template; the fix grounds that shape in actual run logs."}
+{"pair_id":"train-run_tool-9895","a":"yes","b":"yes","c":"no","note":"The original uses documentation to dismiss an observed exit status; the fix accepts the runtime result and identifies the documentation discrepancy."}
+{"pair_id":"train-run_tool-587","a":"yes","b":"yes","c":"no","note":"The original claims push behavior from its man page; the fix reports a scratch-remote run and its observed status and output."}
+{"pair_id":"train-run_tool-6547","a":"yes","b":"yes","c":"no","note":"The original derives jobctl's exit status from source alone; the fix reports running that command and observing its exit status."}
+{"pair_id":"train-run_tool-923","a":"yes","b":"yes","c":"no","note":"The original explicitly claims formatter output without executing it; the fix reports execution on both endpoints and inspection of the output."}

@@ -1,0 +1,88 @@
+{"pair_id":"tsyn-in-monotone_absence-3613","a":"yes","b":"no","c":"no","note":"An empty grep result still supports a universal absence claim without a positive control; a broken search could return nothing."}
+{"pair_id":"tsyn-in-monotone_absence-7064","a":"yes","b":"yes","c":"no","note":"The fix reports direct inspection of all nine descriptions rather than relying on an unchecked collision check's empty output."}
+{"pair_id":"tsyn-in-monotone_absence-8300","a":"yes","b":"yes","c":"no","note":"The deliberately broken link provides a positive control demonstrating that the checker reports failures."}
+{"pair_id":"tsyn-in-monotone_absence-5858","a":"yes","b":"yes","c":"no","note":"The fix reports positively counting the required branches in every schema instead of inferring their presence from no failures."}
+{"pair_id":"tsyn-in-monotone_absence-2058","a":"yes","b":"yes","c":"no","note":"The fix explains the empty log through the bypassed logging path and no longer treats silence as evidence of correct chunking."}
+{"pair_id":"tsyn-in-monotone_absence-570","a":"yes","b":"no","c":"no","note":"The fix still infers no activity from an empty scan without a successful positive control; the earlier known edit demonstrates a limitation."}
+{"pair_id":"tsyn-in-monotone_absence-7719","a":"yes","b":"yes","c":"no","note":"The fix explicitly acknowledges that the recovery scenario was never exercised and leaves recovery untested."}
+{"pair_id":"tsyn-in-monotone_absence-2378","a":"yes","b":"yes","c":"no","note":"The fix describes the absence of compiler detection for observed losses, rather than claiming silence proves the backstop reliable."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-t10yu887
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d709-b035-7ec1-891b-a23def37ed70
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-t10yu887
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `monotone_absence`
+
+LAW: Absence assertions are monotone under removal: a dead mechanism produces exactly the silence they assert.
+
+USUAL SHAPE: YES when the text treats an absence, silence or zero (no errors, an empty result, zero samples, nothing found) as proof that something works or as proof of a particular cause, where a broken or disconnected mechanism would produce the same silence. NO when the absence is reported only as an absence, or a positive control is reported.
+
+## Items
+
+{"pair_id": "tsyn-in-monotone_absence-3613", "original": "The three read tools and the link scanner do not agree on what an omitted scope means. The read tools route through a shared resolver whose derived default is the repo-wide variant, so a call with no scope searches the whole repository. The link scanner skips that resolver and hardcodes the project-level variant at its call site, and the reindex tool uses a third policy that depends on whether a current project is set. We want to collapse these into one policy before the next release. ⟦The deprecation-warning log stayed empty all week, so no caller omits scope anymore.⟧ Until the policy is unified, new callers should pass scope explicitly.", "substituted": "The three read tools and the link scanner do not agree on what an omitted scope means. The read tools route through a shared resolver whose derived default is the repo-wide variant, so a call with no scope searches the whole repository. The link scanner skips that resolver and hardcodes the project-level variant at its call site, and the reindex tool uses a third policy that depends on whether a current project is set. We want to collapse these into one policy before the next release. ⟦A grep over every call site found no caller that omits scope anymore.⟧ Until the policy is unified, new callers should pass scope explicitly."}
+{"pair_id": "tsyn-in-monotone_absence-7064", "original": "Before writing a new tracker, the last step is to make sure it does not duplicate an existing concern. Two trackers covering the same ground drift apart, and we have already merged one such pair by hand. ⟦For the deploy-window tracker, the collision check returned an empty list for the new tracker, so no existing tracker covers its concern.⟧ The earlier steps went as planned: it fits the scheduling archetype, its params are flat and use stable keys, and the render template projects them to a short markdown table. Schema discipline stays loose for now and gets locked once the History block has a few entries.", "substituted": "Before writing a new tracker, the last step is to make sure it does not duplicate an existing concern. Two trackers covering the same ground drift apart, and we have already merged one such pair by hand. ⟦For the deploy-window tracker, reading all nine existing tracker descriptions turned up none covering its concern.⟧ The earlier steps went as planned: it fits the scheduling archetype, its params are flat and use stable keys, and the render template projects them to a short markdown table. Schema discipline stays loose for now and gets locked once the History block has a few entries."}
+{"pair_id": "tsyn-in-monotone_absence-8300", "original": "Checklist for closing out the graduation of the three workspace features. The experimental index lists no features, and the graduated source files were deleted from that directory. All three features appear in the stable manual without experimental callouts. The Claude Code guide now covers the routing plugin and the daily workflow, at over 100 lines. ⟦The link checker printed nothing for the summary file, so its links all resolve.⟧ The `project` parameter is documented in the tool reference pages, and the workspace config file is documented in the configuration chapter.", "substituted": "Checklist for closing out the graduation of the three workspace features. The experimental index lists no features, and the graduated source files were deleted from that directory. All three features appear in the stable manual without experimental callouts. The Claude Code guide now covers the routing plugin and the daily workflow, at over 100 lines. ⟦The link checker printed nothing for the summary file, and a deliberately broken link added to a copy was reported.⟧ The `project` parameter is documented in the tool reference pages, and the workspace config file is documented in the configuration chapter."}
+{"pair_id": "tsyn-in-monotone_absence-5858", "original": "The schema gate in the server tests reasons soundly about aliases: listing only path as required is false once file_path, relative_path or file can supply the same value, so it demands a top-level anyOf. Its companion was meant to confirm that demand had been met. ⟦The gate produced no failures on the seven schemas, which shows each one declares an anyOf branch per alias.⟧ Before this change the companion asserted the opposite of what it should, checking for a flat required list, and I confirmed that by reading its assertions line by line. It now inspects each schema's anyOf branches directly and names any alias that lacks one.", "substituted": "The schema gate in the server tests reasons soundly about aliases: listing only path as required is false once file_path, relative_path or file can supply the same value, so it demands a top-level anyOf. Its companion was meant to confirm that demand had been met. ⟦The companion test read each of the seven schemas and counted an anyOf branch per accepted alias.⟧ Before this change the companion asserted the opposite of what it should, checking for a flat required list, and I confirmed that by reading its assertions line by line. It now inspects each schema's anyOf branches directly and names any alias that lacks one."}
+{"pair_id": "tsyn-in-monotone_absence-2058", "original": "I traced nodes_to_chunks on a Rust file containing a single impl block. The outer call emits the whole impl as one chunk. The inner call then receives the entire file text with prev_end at zero, so it emits every leading line a second time as a gap chunk. The duplicate-warning log is written only by the legacy chunker, which this path bypasses. ⟦The log stayed empty on the whole corpus, so the recursion emits no redundant chunks.⟧ Counting index rows for that file gave 14 chunks where the declarations account for 9.", "substituted": "I traced nodes_to_chunks on a Rust file containing a single impl block. The outer call emits the whole impl as one chunk. The inner call then receives the entire file text with prev_end at zero, so it emits every leading line a second time as a gap chunk. The duplicate-warning log is written only by the legacy chunker, which this path bypasses. ⟦The log stayed empty on the whole corpus, as expected of a path that never writes to it.⟧ Counting index rows for that file gave 14 chunks where the declarations account for 9."}
+{"pair_id": "tsyn-in-monotone_absence-570", "original": "We audited the shared release-notes file with a script that lists added lines beginning with a heading marker. I replayed it against commit a4f, where I know a paragraph inside an old entry was rewritten, and it printed nothing, so the script cannot see that kind of edit. ⟦The scan came back empty across the whole week's history, so nobody amended any existing entry.⟧ The next step is to rebuild the check around hunks and their authors, since headings only track newly added entries.", "substituted": "We audited the shared release-notes file with a script that lists added lines beginning with a heading marker. I replayed it against commit a4f, where I know a paragraph inside an old entry was rewritten, and it printed nothing, so the script cannot see that kind of edit. ⟦The scan came back empty across the whole week's history, so nobody added a new entry.⟧ The next step is to rebuild the check around hunks and their authors, since headings only track newly added entries."}
+{"pair_id": "tsyn-in-monotone_absence-7719", "original": "The stuck-session bug follows a fixed sequence. The agent runs a worktree removal, and it fails because the directory is already gone. It retries variations of the same command and gets the same error each time. The Bash tool checks the working directory before running anything, so once that directory is deleted every command fails, and the tool is dead for the session. The agent then loops until interrupted. ⟦After the patch, the loop never appeared again in the overnight run, which shows the working-directory check now recovers correctly.⟧", "substituted": "The stuck-session bug follows a fixed sequence. The agent runs a worktree removal, and it fails because the directory is already gone. It retries variations of the same command and gets the same error each time. The Bash tool checks the working directory before running anything, so once that directory is deleted every command fails, and the tool is dead for the session. The agent then loops until interrupted. ⟦After the patch, the loop never appeared again in the overnight run, though no run deleted its working directory, so recovery is untested.⟧"}
+{"pair_id": "tsyn-in-monotone_absence-2378", "original": "I propose raising the severity of the lost-attribute bug from medium to high. It occurred twice in one session. The first time a doc comment vanished. The second time a serde rename attribute vanished and the JSON keys changed, which I confirmed by diffing the serialized output before and after. Only a dropped derive stops the build, because trait bounds then go unmet. ⟦Neither build printed a compile error, so the compiler backstop is safe to rely on.⟧", "substituted": "I propose raising the severity of the lost-attribute bug from medium to high. It occurred twice in one session. The first time a doc comment vanished. The second time a serde rename attribute vanished and the JSON keys changed, which I confirmed by diffing the serialized output before and after. Only a dropped derive stops the build, because trait bounds then go unmet. ⟦Neither build printed a compile error, so the compiler backstop caught neither loss.⟧"}
+codex
+{"pair_id":"tsyn-in-monotone_absence-3613","a":"yes","b":"no","c":"no","note":"An empty grep result still supports a universal absence claim without a positive control; a broken search could return nothing."}
+{"pair_id":"tsyn-in-monotone_absence-7064","a":"yes","b":"yes","c":"no","note":"The fix reports direct inspection of all nine descriptions rather than relying on an unchecked collision check's empty output."}
+{"pair_id":"tsyn-in-monotone_absence-8300","a":"yes","b":"yes","c":"no","note":"The deliberately broken link provides a positive control demonstrating that the checker reports failures."}
+{"pair_id":"tsyn-in-monotone_absence-5858","a":"yes","b":"yes","c":"no","note":"The fix reports positively counting the required branches in every schema instead of inferring their presence from no failures."}
+{"pair_id":"tsyn-in-monotone_absence-2058","a":"yes","b":"yes","c":"no","note":"The fix explains the empty log through the bypassed logging path and no longer treats silence as evidence of correct chunking."}
+{"pair_id":"tsyn-in-monotone_absence-570","a":"yes","b":"no","c":"no","note":"The fix still infers no activity from an empty scan without a successful positive control; the earlier known edit demonstrates a limitation."}
+{"pair_id":"tsyn-in-monotone_absence-7719","a":"yes","b":"yes","c":"no","note":"The fix explicitly acknowledges that the recovery scenario was never exercised and leaves recovery untested."}
+{"pair_id":"tsyn-in-monotone_absence-2378","a":"yes","b":"yes","c":"no","note":"The fix describes the absence of compiler detection for observed losses, rather than claiming silence proves the backstop reliable."}
+tokens used
+7,987

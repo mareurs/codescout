@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-open_artifact-1428", "a": "yes", "b": "yes", "c": "no", "note": "The original asserts hook behavior on the proposal's authority. The fix states only the design requirement, not what the code does."}
+{"pair_id": "tsyn-cross-open_artifact-12211", "a": "yes", "b": "yes", "c": "no", "note": "The original asserts a script exemption based on remembered onboarding. The fix marks it unverified. Other sentences rest on the opened export."}
+{"pair_id": "tsyn-cross-open_artifact-8468", "a": "yes", "b": "yes", "c": "no", "note": "The original asserts helper behavior from recollection. The fix leaves it unverified. Other claims rest on run traces."}
+{"pair_id": "tsyn-cross-open_artifact-1596", "a": "yes", "b": "no", "c": "no", "note": "The fix still states what the summary says the local arm's code does, which the law literally forbids."}
+{"pair_id": "tsyn-cross-open_artifact-7618", "a": "yes", "b": "yes", "c": "no", "note": "The original asserts wrapper behavior from the migration note alone. The fix says this cannot be established."}
+{"pair_id": "tsyn-cross-open_artifact-334", "a": "yes", "b": "yes", "c": "no", "note": "The original asserts launcher behavior per the note. The fix states only the note's process prescription, not code behavior."}
+{"pair_id": "tsyn-cross-open_artifact-6565", "a": "yes", "b": "yes", "c": "no", "note": "The original asserts editor behavior from the design memo. The fix states only the intended requirement ('should retain')."}
+{"pair_id": "tsyn-cross-open_artifact-4970", "a": "yes", "b": "no", "c": "no", "note": "The fix still states what the summary says the adapter code does, which remains a breach under the literal law."}

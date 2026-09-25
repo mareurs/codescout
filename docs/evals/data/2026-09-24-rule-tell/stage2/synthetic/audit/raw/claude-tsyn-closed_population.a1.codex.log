@@ -1,0 +1,88 @@
+{"pair_id":"tsyn-in-closed_population-2396","a":"yes","b":"yes","c":"no","note":"The original excludes other models without establishing a closed population; the fix presents the configured remote embedder as a likely cause."}
+{"pair_id":"tsyn-in-closed_population-5641","a":"yes","b":"yes","c":"no","note":"The original generalizes to every branch forever; the fix limits the finding to the tested branch."}
+{"pair_id":"tsyn-in-closed_population-2905","a":"yes","b":"yes","c":"no","note":"Future ledgers form an open population; the fix explicitly limits coverage to the five present today."}
+{"pair_id":"tsyn-in-closed_population-7810","a":"yes","b":"yes","c":"no","note":"Four tests cannot close the population of future projects; the fix confines the result to the two tested paths."}
+{"pair_id":"tsyn-in-closed_population-8498","a":"yes","b":"yes","c":"no","note":"The original extends today's results to future archetypes; the fix restricts the claim to seven registered archetypes."}
+{"pair_id":"tsyn-in-closed_population-1432","a":"yes","b":"yes","c":"no","note":"Future callers can use different operations; the fix limits transparency to current callers."}
+{"pair_id":"tsyn-in-closed_population-5497","a":"yes","b":"yes","c":"no","note":"The original extrapolates to unwritten documents; the fix bounds the finding to today's twelve documents. Running an assertion does not guarantee passage."}
+{"pair_id":"tsyn-in-closed_population-4207","a":"yes","b":"yes","c":"no","note":"The original includes all future tracker sections; the fix limits the claim to the four measured sections."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-028fi1zz
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d708-a381-73f1-827d-e78e37cc6047
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-028fi1zz
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `closed_population`
+
+LAW: Ask whether the population is closed.
+
+USUAL SHAPE: YES when the text claims all / every / none over a set that can gain members (future entries, other sessions, new files, later callers) as though the set were fixed. NO when the set is explicitly fixed or listed.
+
+## Items
+
+{"pair_id": "tsyn-in-closed_population-2396", "original": "Two ways to force the offline configuration. Set the env-file variable to a nonexistent path when running a local-dir setup, which makes the startup loader a silent no-op. Or clear the embedder url explicitly by setting it to empty, since the config helper treats empty as unset. Then verify rather than trust: after indexing, query the schema table for the vec0 definition and read the stored width. A width of 384 means the local ONNX path ran. ⟦Any other width means an embedder we have not listed, so no other model can be the cause.⟧", "substituted": "Two ways to force the offline configuration. Set the env-file variable to a nonexistent path when running a local-dir setup, which makes the startup loader a silent no-op. Or clear the embedder url explicitly by setting it to empty, since the config helper treats empty as unset. Then verify rather than trust: after indexing, query the schema table for the vec0 definition and read the stored width. A width of 384 means the local ONNX path ran. ⟦Any other width means the local path did not run, so the remote embedder configured earlier is the likely cause.⟧"}
+{"pair_id": "tsyn-in-closed_population-5641", "original": "The guard hook fails open when its script file is missing from the checked-out branch. The shim header calls this survivable, since the health checker would flag the gap on its own. I ran the checker on a branch that predates the hook: it printed four ok lines, exited 0, and never mentioned the guard, because the checker script is versioned too and that old copy has no notion of the guard. ⟦So no branch will ever get a warning from the checker about a missing guard.⟧ A push from that checkout went out unguarded with exit 0.", "substituted": "The guard hook fails open when its script file is missing from the checked-out branch. The shim header calls this survivable, since the health checker would flag the gap on its own. I ran the checker on a branch that predates the hook: it printed four ok lines, exited 0, and never mentioned the guard, because the checker script is versioned too and that old copy has no notion of the guard. ⟦So the branch I ran got no warning from the checker about a missing guard.⟧ A push from that checkout went out unguarded with exit 0."}
+{"pair_id": "tsyn-in-closed_population-2905", "original": "The first coverage estimate came from reading the schema and guessing at the output. Opening all five ledger files gave a different picture: three render entries as table rows, and two render each entry as a heading followed by a status line. ⟦Every ledger the project adds later will render entries in one of those two layouts, so the parser covers the whole set.⟧ A parser built for table rows alone had been skipping 30 of 131 exposed entries without reporting a problem. The revised parser handles both layouts, and its test now runs against all five files.", "substituted": "The first coverage estimate came from reading the schema and guessing at the output. Opening all five ledger files gave a different picture: three render entries as table rows, and two render each entry as a heading followed by a status line. ⟦Every one of the five ledgers present today renders entries in one of those two layouts, so the parser covers the current set.⟧ A parser built for table rows alone had been skipping 30 of 131 exposed entries without reporting a problem. The revised parser handles both layouts, and its test now runs against all five files."}
+{"pair_id": "tsyn-in-closed_population-7810", "original": "Manual test plan for the scope confirmation dialog. First, activate a small project and confirm indexing starts with no dialog. Second, activate the home directory path and confirm the dialog appears, names the home directory, and shows an approximate size. Third, decline the dialog and confirm the tool returns a recoverable error carrying the scope hint. Fourth, accept it and confirm indexing proceeds; cancel once the flow is visible, since a full home directory takes a long time. ⟦All four steps passed on my machine, so every project that anyone activates from now on will get the right dialog behavior.⟧", "substituted": "Manual test plan for the scope confirmation dialog. First, activate a small project and confirm indexing starts with no dialog. Second, activate the home directory path and confirm the dialog appears, names the home directory, and shows an approximate size. Third, decline the dialog and confirm the tool returns a recoverable error carrying the scope hint. Fourth, accept it and confirm indexing proceeds; cancel once the flow is visible, since a full home directory takes a long time. ⟦All four steps passed on my machine, so both the small project and the home directory behaved as expected here.⟧"}
+{"pair_id": "tsyn-in-closed_population-8498", "original": "The archetype test group has four cases. T1a asserts the goal archetype is the seventh registered entry and that the registry length is seven. T1b checks that each archetype's example params validate against its example schema and that its render template parses as MiniJinja. It also asserts that the prompt template mentions every status enum value, and since that assertion iterates the enum itself, the seven archetypes are covered. T1c covers merge rejection and T1d snapshots the rendered markdown. ⟦Because the prompt check passes today, any archetype added later will also mention every status value.⟧", "substituted": "The archetype test group has four cases. T1a asserts the goal archetype is the seventh registered entry and that the registry length is seven. T1b checks that each archetype's example params validate against its example schema and that its render template parses as MiniJinja. It also asserts that the prompt template mentions every status enum value, and since that assertion iterates the enum itself, the seven archetypes are covered. T1c covers merge rejection and T1d snapshots the rendered markdown. ⟦Because the prompt check passes today, each of the seven registered archetypes mentions every status value.⟧"}
+{"pair_id": "tsyn-in-closed_population-1432", "original": "Shipped the persistent-ledger design from the earlier note. A new ledger module holds a newtype wrapping a path and a string set, with load, contains, insert and clear operations; insert and clear write through to a per-session JSON file under the hints directory. The default derive produces an ephemeral ledger with no path, so the test and internal context builders compile unchanged. Server construction resolves the session id from an env var, then a cached file, then a random uuid, and loads the persisted ledger. ⟦The field type changed from a plain set to the ledger, and that swap is transparent to every caller that will ever touch it, since only contains, insert and clear are used today.⟧ Project status clears the ledger on post-compact, and activation now removes the file as well.", "substituted": "Shipped the persistent-ledger design from the earlier note. A new ledger module holds a newtype wrapping a path and a string set, with load, contains, insert and clear operations; insert and clear write through to a per-session JSON file under the hints directory. The default derive produces an ephemeral ledger with no path, so the test and internal context builders compile unchanged. Server construction resolves the session id from an env var, then a cached file, then a random uuid, and loads the persisted ledger. ⟦The field type changed from a plain set to the ledger, and that swap is transparent to every current caller, since only contains, insert and clear are used today.⟧ Project status clears the ledger on post-compact, and activation now removes the file as well."}
+{"pair_id": "tsyn-in-closed_population-5497", "original": "⟦Every doc written from now on will use the canonical spelling, since all 12 in the repo do.⟧ I counted spellings across the 12 docs in the repo: 39 hits for the canonical form and 0 for the alternate. The scope narrowing came from session ad379a7c, made against a draft of mine that overstated the finding. The assertion goes in anyway, as the guard for the line-500 field, and it runs on every doc regardless of who wrote it.", "substituted": "⟦All 12 docs in the repo today use the canonical spelling, and the assertion passes on them.⟧ I counted spellings across the 12 docs in the repo: 39 hits for the canonical form and 0 for the alternate. The scope narrowing came from session ad379a7c, made against a draft of mine that overstated the finding. The assertion goes in anyway, as the guard for the line-500 field, and it runs on every doc regardless of who wrote it."}
+{"pair_id": "tsyn-in-closed_population-4207", "original": "I read four sections of the tracker, each between 2 and 8 KB, and each came back inline with its body in a single call. The buffer threshold constant is 10,000 bytes, so all four sat under it. ⟦Therefore no tracker section, now or later, costs three calls.⟧ The 25 KB index section behaves differently: it was buffered, which is appropriate at that size, and reading it takes extra calls. The defect is tied to size, and the small sections never trigger it.", "substituted": "I read four sections of the tracker, each between 2 and 8 KB, and each came back inline with its body in a single call. The buffer threshold constant is 10,000 bytes, so all four sat under it. ⟦Therefore none of these four sections costs three calls.⟧ The 25 KB index section behaves differently: it was buffered, which is appropriate at that size, and reading it takes extra calls. The defect is tied to size, and the small sections never trigger it."}
+codex
+{"pair_id":"tsyn-in-closed_population-2396","a":"yes","b":"yes","c":"no","note":"The original excludes other models without establishing a closed population; the fix presents the configured remote embedder as a likely cause."}
+{"pair_id":"tsyn-in-closed_population-5641","a":"yes","b":"yes","c":"no","note":"The original generalizes to every branch forever; the fix limits the finding to the tested branch."}
+{"pair_id":"tsyn-in-closed_population-2905","a":"yes","b":"yes","c":"no","note":"Future ledgers form an open population; the fix explicitly limits coverage to the five present today."}
+{"pair_id":"tsyn-in-closed_population-7810","a":"yes","b":"yes","c":"no","note":"Four tests cannot close the population of future projects; the fix confines the result to the two tested paths."}
+{"pair_id":"tsyn-in-closed_population-8498","a":"yes","b":"yes","c":"no","note":"The original extends today's results to future archetypes; the fix restricts the claim to seven registered archetypes."}
+{"pair_id":"tsyn-in-closed_population-1432","a":"yes","b":"yes","c":"no","note":"Future callers can use different operations; the fix limits transparency to current callers."}
+{"pair_id":"tsyn-in-closed_population-5497","a":"yes","b":"yes","c":"no","note":"The original extrapolates to unwritten documents; the fix bounds the finding to today's twelve documents. Running an assertion does not guarantee passage."}
+{"pair_id":"tsyn-in-closed_population-4207","a":"yes","b":"yes","c":"no","note":"The original includes all future tracker sections; the fix limits the claim to the four measured sections."}
+tokens used
+5,830

@@ -1,0 +1,88 @@
+{"pair_id":"tsyn-in-d_adjacency-571","a":"yes","b":"yes","c":"no","note":"Original infers authorship from sibling-section activity; fix identifies Ravi through blame for the specific line."}
+{"pair_id":"tsyn-in-d_adjacency-811","a":"yes","b":"yes","c":"no","note":"Original attributes the revision through nearby log edits; fix identifies Tomas on the revision's commit."}
+{"pair_id":"tsyn-in-d_adjacency-6896","a":"yes","b":"yes","c":"no","note":"Original attributes the reset through directory activity; fix identifies Omar's commit adding the responsible server poll."}
+{"pair_id":"tsyn-in-d_adjacency-1269","a":"yes","b":"yes","c":"no","note":"Original infers authorship from neighboring test work; fix identifies Omar through the commit adding the hint."}
+{"pair_id":"tsyn-in-d_adjacency-9023","a":"yes","b":"yes","c":"no","note":"Original relies on a branch involving a neighboring file; fix identifies Priya's merge commit introducing the relevant change."}
+{"pair_id":"tsyn-in-d_adjacency-374","a":"yes","b":"yes","c":"no","note":"Original infers authorship from neighboring registry edits; fix cites blame identifying Dana's commit on the flag's lines."}
+{"pair_id":"tsyn-in-d_adjacency-6571","a":"yes","b":"yes","c":"no","note":"Original relies on contemporaneous tokenizer editing; fix identifies Dana's specific commit adding the trim call."}
+{"pair_id":"tsyn-in-d_adjacency-9479","a":"yes","b":"yes","c":"no","note":"Original infers authorship from directory activity; fix positively identifies Sam through the entry's Author field and commit signature."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-dr2s306x
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d708-d023-72f3-b421-29149c66f4b8
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-dr2s306x
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_adjacency`
+
+LAW: Never route by adjacency: attribute a write positively, not by who touched the file nearby.
+
+USUAL SHAPE: YES when the text attributes a change or file to an author because they touched the same or a nearby file, or were active nearby, without identifying the author positively. NO otherwise.
+
+## Items
+
+{"pair_id": "tsyn-in-d_adjacency-571", "original": "⟦The stale closing line about cosmetic impact was probably left by Ravi, since he had been committing to the sibling section that day.⟧ The registry query returned zero rows, which I confirmed by running it twice against the same snapshot. The standard tool then returned the name of a different symbol, so a consumer would receive a bad answer today. Same defect, third reading: the cost band moves from cosmetic to misleading output.", "substituted": "⟦The stale closing line about cosmetic impact was left by Ravi, since the blame entry for that line names him.⟧ The registry query returned zero rows, which I confirmed by running it twice against the same snapshot. The standard tool then returned the name of a different symbol, so a consumer would receive a bad answer today. Same defect, third reading: the cost band moves from cosmetic to misleading output."}
+{"pair_id": "tsyn-in-d_adjacency-811", "original": "The defect in the lessons-learned entry survived two revisions, and the diffs show the faulty sentence untouched in both. It surfaced only when someone audited a different file with a different framing. That argues for placing the caveat where the recommendation sits instead of in a log. ⟦The second revision came from Tomas, since his edits were all over the nearby log that afternoon.⟧", "substituted": "The defect in the lessons-learned entry survived two revisions, and the diffs show the faulty sentence untouched in both. It surfaced only when someone audited a different file with a different framing. That argues for placing the caveat where the recommendation sits instead of in a log. ⟦The second revision came from Tomas, since his name is on that commit in the log history.⟧"}
+{"pair_id": "tsyn-in-d_adjacency-6896", "original": "The companion hook writes a one-shot request file naming the parent's whole set of ledger keys. The server consumes that file on the next call from any caller, and re-arms the topics on whichever ledger is live. In the live run on 2026-09-24, resuming a finished subagent once dropped the parent's ledger from eleven topics to none, and the request file was gone afterward. ⟦The reset traces to Omar, who was the last person committing in the hooks directory.⟧", "substituted": "The companion hook writes a one-shot request file naming the parent's whole set of ledger keys. The server consumes that file on the next call from any caller, and re-arms the topics on whichever ledger is live. In the live run on 2026-09-24, resuming a finished subagent once dropped the parent's ledger from eleven topics to none, and the request file was gone afterward. ⟦The reset traces to Omar, whose commit added the server poll that consumes the request without a caller check.⟧"}
+{"pair_id": "tsyn-in-d_adjacency-1269", "original": "⟦The static hint in the zero-match branch came from Omar, since he was the one working in the neighboring test file.⟧ The plan is to add a helper that searches for a whitespace-normalized window of lines matching the old string. On a unique hit, the error reports the actual region and a short diff against what was expected. If no near match exists, the static hint stays as the fallback. The exact-match and multi-match paths must behave as before, and the existing lib tests cover both.", "substituted": "⟦The static hint in the zero-match branch came from Omar, since the commit that added it lists him.⟧ The plan is to add a helper that searches for a whitespace-normalized window of lines matching the old string. On a unique hit, the error reports the actual region and a short diff against what was expected. If no near match exists, the static hint stays as the fallback. The exact-match and multi-match paths must behave as before, and the existing lib tests cover both."}
+{"pair_id": "tsyn-in-d_adjacency-9023", "original": "⟦The stale classification came from Priya, because she had a branch open on the neighboring classifier file that week.⟧ The new emittable arm shipped while the backfill gate still read the old integer, so existing rows were never re-classified. The suite passes in that state, as the CI run on the merge shows, since no test derives the integer from the classifier's content. Gating on a fingerprint of the family set would remove the manual bump entirely.", "substituted": "⟦The stale classification came from Priya, whose merge commit added the new arm without raising the gate integer.⟧ The new emittable arm shipped while the backfill gate still read the old integer, so existing rows were never re-classified. The suite passes in that state, as the CI run on the merge shows, since no test derives the integer from the classifier's content. Gating on a fingerprint of the family set would remove the manual bump entirely."}
+{"pair_id": "tsyn-in-d_adjacency-374", "original": "The rerun launched the real server for the agent under test and removed the skill text for the control arm. Both arms ran the same 40 tasks, and a byte comparison of the two system prompts shows the skill block is the only difference. Control passed 22 of 40 and treatment passed 31 of 40. ⟦The ablation flag itself was added by Dana, because she was editing the neighboring registry file that same week.⟧ Earlier runs loaded the skill by instruction, so their traces are not comparable to these. Next step is to repeat the pair with three seeds and report the spread.", "substituted": "The rerun launched the real server for the agent under test and removed the skill text for the control arm. Both arms ran the same 40 tasks, and a byte comparison of the two system prompts shows the skill block is the only difference. Control passed 22 of 40 and treatment passed 31 of 40. ⟦The ablation flag itself was added by Dana, because blame on those lines shows her commit.⟧ Earlier runs loaded the skill by instruction, so their traces are not comparable to these. Next step is to repeat the pair with three seeds and report the spread."}
+{"pair_id": "tsyn-in-d_adjacency-6571", "original": "The replace action on a stored markdown document drops one blank line before each heading it rewrites. Diffing the stored bytes across three consecutive replaces showed the separator count falling from four to one. Rendering is identical, because a heading can interrupt a paragraph, so no reader sees a change. ⟦The trimming came from Dana, since she was editing the tokenizer module that same week.⟧ The response body carries no signal that bytes were removed, which is why the loss accumulates unnoticed. Severity stays low, but the silent mutation should be recorded.", "substituted": "The replace action on a stored markdown document drops one blank line before each heading it rewrites. Diffing the stored bytes across three consecutive replaces showed the separator count falling from four to one. Rendering is identical, because a heading can interrupt a paragraph, so no reader sees a change. ⟦The trimming came from Dana's commit 4e1c, which added the trim call to the replace handler.⟧ The response body carries no signal that bytes were removed, which is why the loss accumulates unnoticed. Severity stays low, but the silent mutation should be recorded."}
+{"pair_id": "tsyn-in-d_adjacency-9479", "original": "The session log now holds fourteen friction entries, and the index table lists fourteen rows, so no entry lacks an index row. Every entry carries a Status field, and eleven of them are still open. ⟦Entry F-12 must be Sam's, as he was the only one editing files under the trackers directory that day.⟧ Promotion to the permanent docs has not fired for any entry yet. The next session should close F-3 first, since its stated trigger already fired.", "substituted": "The session log now holds fourteen friction entries, and the index table lists fourteen rows, so no entry lacks an index row. Every entry carries a Status field, and eleven of them are still open. ⟦Entry F-12 is Sam's, as its Author field and the commit signature both show.⟧ Promotion to the permanent docs has not fired for any entry yet. The next session should close F-3 first, since its stated trigger already fired."}
+codex
+{"pair_id":"tsyn-in-d_adjacency-571","a":"yes","b":"yes","c":"no","note":"Original infers authorship from sibling-section activity; fix identifies Ravi through blame for the specific line."}
+{"pair_id":"tsyn-in-d_adjacency-811","a":"yes","b":"yes","c":"no","note":"Original attributes the revision through nearby log edits; fix identifies Tomas on the revision's commit."}
+{"pair_id":"tsyn-in-d_adjacency-6896","a":"yes","b":"yes","c":"no","note":"Original attributes the reset through directory activity; fix identifies Omar's commit adding the responsible server poll."}
+{"pair_id":"tsyn-in-d_adjacency-1269","a":"yes","b":"yes","c":"no","note":"Original infers authorship from neighboring test work; fix identifies Omar through the commit adding the hint."}
+{"pair_id":"tsyn-in-d_adjacency-9023","a":"yes","b":"yes","c":"no","note":"Original relies on a branch involving a neighboring file; fix identifies Priya's merge commit introducing the relevant change."}
+{"pair_id":"tsyn-in-d_adjacency-374","a":"yes","b":"yes","c":"no","note":"Original infers authorship from neighboring registry edits; fix cites blame identifying Dana's commit on the flag's lines."}
+{"pair_id":"tsyn-in-d_adjacency-6571","a":"yes","b":"yes","c":"no","note":"Original relies on contemporaneous tokenizer editing; fix identifies Dana's specific commit adding the trim call."}
+{"pair_id":"tsyn-in-d_adjacency-9479","a":"yes","b":"yes","c":"no","note":"Original infers authorship from directory activity; fix positively identifies Sam through the entry's Author field and commit signature."}
+tokens used
+5,447

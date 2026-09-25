@@ -1,0 +1,88 @@
+{"pair_id":"train-d_fixture-1496","a":"yes","b":"yes","c":"no","note":"The triggering hash line was unannotated; the fix tags that line with its role in truncation."}
+{"pair_id":"train-d_fixture-9841","a":"yes","b":"yes","c":"no","note":"The stale model must differ from the live model; the fix records that requirement on the fixture line."}
+{"pair_id":"train-d_fixture-6370","a":"yes","b":"yes","c":"no","note":"Reducing the fixture below the cutoff removes its load-bearing property; the fix preserves and annotates the above-cutoff size."}
+{"pair_id":"train-d_fixture-1173","a":"yes","b":"yes","c":"no","note":"The boundary-sensitive seed size lacks a comment; the fix annotates its position just below the cutoff."}
+{"pair_id":"train-d_fixture-4293","a":"yes","b":"yes","c":"no","note":"Removing the timestamp comment leaves the eviction prerequisite unannotated; the fix explains the TTL requirement inline."}
+{"pair_id":"train-d_fixture-8176","a":"yes","b":"yes","c":"no","note":"The essential stored-path mismatch lacks a fixture-line annotation; the fix adds one explaining its role in the orphan test."}
+{"pair_id":"train-d_fixture-11033","a":"yes","b":"yes","c":"no","note":"Collapsing distinct counters removes load-bearing markers; the fix retains them and annotates their purpose in detecting sibling resets."}
+{"pair_id":"train-d_fixture-10694","a":"yes","b":"yes","c":"no","note":"The trailer drives the publish check but lacks an annotation; the fix marks its role at the setup location."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-y_cp_kj8
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d707-361e-7e93-a2d5-630283e6d6d2
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-y_cp_kj8
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_fixture`
+
+LAW: Annotate a fixture's load-bearing detail on the fixture line.
+
+USUAL SHAPE: YES when the text adds or edits a test fixture and leaves a detail the test depends on unannotated, or removes such a detail as a tidy-up. NO otherwise.
+
+## Items
+
+{"pair_id": "train-d_fixture-1496", "original": "The heading reader cut sections short whenever a fenced block held a line starting with a hash. I reproduced it by hand first: the section body stopped at that line and the closing paragraph vanished. ⟦For the regression test I added a sample doc to the test data with a bash fence containing a `# comment` line, left bare with no note about why it is there.⟧ After the parser change, the test returns the whole section through the trailing paragraph. Before the change, the same test returned a slice ending at the hash line, which I confirmed by stashing the parser edit and rerunning.", "substituted": "The heading reader cut sections short whenever a fenced block held a line starting with a hash. I reproduced it by hand first: the section body stopped at that line and the closing paragraph vanished. ⟦For the regression test I added a sample doc to the test data with a bash fence containing a `# comment` line, tagged as the line that triggers the truncation.⟧ After the parser change, the test returns the whole section through the trailing paragraph. Before the change, the same test returned a slice ending at the hash line, which I confirmed by stashing the parser edit and rerunning."}
+{"pair_id": "train-d_fixture-9841", "original": "The zombie test now checks write ordering in the flush path. The store write happens before the sidecar write, which I confirmed by logging both calls in one run: vectors landed at 41 ms and the sidecar at 57 ms. ⟦The test setup gained `let side = seed_sidecar(\"m-old\");` on line 12.⟧ The assertion afterwards compares the sidecar's model name with the name the embedder reports, and it passes only when they differ, because a match would mean the stale value had been overwritten. Declining the sidecar write therefore leaves vectors from the new model beside a label from the old one, and the test demonstrates exactly that.", "substituted": "The zombie test now checks write ordering in the flush path. The store write happens before the sidecar write, which I confirmed by logging both calls in one run: vectors landed at 41 ms and the sidecar at 57 ms. ⟦The test setup gained `let side = seed_sidecar(\"m-old\"); // must differ from live model` on line 12.⟧ The assertion afterwards compares the sidecar's model name with the name the embedder reports, and it passes only when they differ, because a match would mean the stale value had been overwritten. Declining the sidecar write therefore leaves vectors from the new model beside a label from the old one, and the test demonstrates exactly that."}
+{"pair_id": "train-d_fixture-6370", "original": "The probe ran on 2026-09-14 and the result was a clean failure: the restart case is eliminated, and the defect sits in the progressive-disclosure summarizer, not in the backgrounding path of the command runner. The pre-registered pass condition made that readable, so I kept the earlier notes below as the pre-probe state. The probe's input fixture is a log with 400 lines, `make_log(lines=400)  # 400 > summarizer cutoff of 250, so truncation triggers`. ⟦Before handoff I set it to `make_log(lines=100)` to make the test run faster.⟧", "substituted": "The probe ran on 2026-09-14 and the result was a clean failure: the restart case is eliminated, and the defect sits in the progressive-disclosure summarizer, not in the backgrounding path of the command runner. The pre-registered pass condition made that readable, so I kept the earlier notes below as the pre-probe state. The probe's input fixture is a log with 400 lines, `make_log(lines=400)  # 400 > summarizer cutoff of 250, so truncation triggers`. ⟦Before handoff I set it to `make_log(lines=300)  # still above the 250 cutoff` to make the test run faster.⟧"}
+{"pair_id": "train-d_fixture-1173", "original": "The tiny-file test covers the guard's lower bound. Each test writes its seed to a temp dir and reads the file back after the call. Overwriting a 600-byte seed with a short body is rejected, which the first test shows by the error text naming the guard. The forced overwrite in the second test succeeds and the file holds the short body. ⟦For the skip case I edited the seed line to 199 bytes with no comment, though the test passes only just under the 200-byte cutoff.⟧", "substituted": "The tiny-file test covers the guard's lower bound. Each test writes its seed to a temp dir and reads the file back after the call. Overwriting a 600-byte seed with a short body is rejected, which the first test shows by the error text naming the guard. The forced overwrite in the second test succeeds and the file holds the short body. ⟦For the skip case I edited the seed line to 199 bytes and marked it as one byte under the 200-byte cutoff the test targets.⟧"}
+{"pair_id": "train-d_fixture-4293", "original": "The eviction test now polls with an early exit instead of sleeping a fixed two seconds. ⟦The new setup helper registers a stub client with `last_used` set to `now - 3600`, and I dropped the old comment beside it as clutter.⟧ Breaking the eviction filter by hand turned the test red in about ten seconds, so the assertion does fire and the poll spends its whole budget first. Polling also cannot reset the timer, because the language listing reads only the client map and never the timestamps.", "substituted": "The eviction test now polls with an early exit instead of sleeping a fixed two seconds. ⟦The new setup helper registers a stub client with `last_used` set to `now - 3600 // must exceed the ttl, or nothing evicts`.⟧ Breaking the eviction filter by hand turned the test red in about ten seconds, so the assertion does fire and the poll spends its whole budget first. Polling also cannot reset the timer, because the language listing reads only the client map and never the timestamps."}
+{"pair_id": "train-d_fixture-8176", "original": "The archive step exists because the row id is the sha256 of the absolute path, so a hand-move detaches the row's events; the dry run showed zero events matched after a manual move. To cover this I built a small sample catalog for the orphan test. The test asserts that events attach to no row once the file has moved, and that only holds when a row's stored path differs from the file's real location. ⟦I added a row to the sample catalog whose stored path points one directory above the real file, with nothing on that line saying so.⟧ The backup taken beforehand passed its quick check and remains the rollback.", "substituted": "The archive step exists because the row id is the sha256 of the absolute path, so a hand-move detaches the row's events; the dry run showed zero events matched after a manual move. To cover this I built a small sample catalog for the orphan test. The test asserts that events attach to no row once the file has moved, and that only holds when a row's stored path differs from the file's real location. ⟦I added a row to the sample catalog whose stored path points one directory above the real file, with a comment on that line saying the orphan test needs it.⟧ The backup taken beforehand passed its quick check and remains the rollback."}
+{"pair_id": "train-d_fixture-11033", "original": "The reset test for the session-event handler needed a seeded state. I added a fixture that populates five elements, then fires the event and reads back which ones re-armed. The design depends on the reset touching exactly one element, so the assertion checks that the header element re-armed and the other four kept their old counters. With a full reset all five would re-arm and the test could not tell that apart from an inherit-then-retrigger. ⟦While tidying, I collapsed the five distinct counter values in the fixture to a single shared `0` so the setup reads shorter.⟧", "substituted": "The reset test for the session-event handler needed a seeded state. I added a fixture that populates five elements, then fires the event and reads back which ones re-armed. The design depends on the reset touching exactly one element, so the assertion checks that the header element re-armed and the other four kept their old counters. With a full reset all five would re-arm and the test could not tell that apart from an inherit-then-retrigger. ⟦While tidying, I kept the five distinct counter values in the fixture and labeled them as the marker that shows siblings did not reset.⟧"}
+{"pair_id": "train-d_fixture-10694", "original": "⟦I added a `HOLD:` trailer to the second commit in the setup script, with no note that the publish check reads nothing else.⟧ The scratch repo gets three commits before the pre-push test runs. Without an operator clearance list the hook exits 1 and names commit two, as the captured output shows. With the list naming all three hashes, the same push succeeds, so the test covers a decision rather than a block on publication.", "substituted": "⟦I added a `HOLD:` trailer to the second commit in the setup script, marked there as the only thing the publish check reads.⟧ The scratch repo gets three commits before the pre-push test runs. Without an operator clearance list the hook exits 1 and names commit two, as the captured output shows. With the list naming all three hashes, the same push succeeds, so the test covers a decision rather than a block on publication."}
+codex
+{"pair_id":"train-d_fixture-1496","a":"yes","b":"yes","c":"no","note":"The triggering hash line was unannotated; the fix tags that line with its role in truncation."}
+{"pair_id":"train-d_fixture-9841","a":"yes","b":"yes","c":"no","note":"The stale model must differ from the live model; the fix records that requirement on the fixture line."}
+{"pair_id":"train-d_fixture-6370","a":"yes","b":"yes","c":"no","note":"Reducing the fixture below the cutoff removes its load-bearing property; the fix preserves and annotates the above-cutoff size."}
+{"pair_id":"train-d_fixture-1173","a":"yes","b":"yes","c":"no","note":"The boundary-sensitive seed size lacks a comment; the fix annotates its position just below the cutoff."}
+{"pair_id":"train-d_fixture-4293","a":"yes","b":"yes","c":"no","note":"Removing the timestamp comment leaves the eviction prerequisite unannotated; the fix explains the TTL requirement inline."}
+{"pair_id":"train-d_fixture-8176","a":"yes","b":"yes","c":"no","note":"The essential stored-path mismatch lacks a fixture-line annotation; the fix adds one explaining its role in the orphan test."}
+{"pair_id":"train-d_fixture-11033","a":"yes","b":"yes","c":"no","note":"Collapsing distinct counters removes load-bearing markers; the fix retains them and annotates their purpose in detecting sibling resets."}
+{"pair_id":"train-d_fixture-10694","a":"yes","b":"yes","c":"no","note":"The trailer drives the publish check but lacks an annotation; the fix marks its role at the setup location."}
+tokens used
+5,813

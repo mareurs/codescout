@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-question_asked-9411", "a": "yes", "b": "yes", "c": "no", "note": "The marker and payload check cannot show prediction. The fix claims payload receipt, which the checker actually compared."}
+{"pair_id": "tsyn-cross-question_asked-11934", "a": "yes", "b": "yes", "c": "no", "note": "Presence flags cannot show position. The fix claims consistent presence across ten responses, which the flags measure."}
+{"pair_id": "tsyn-cross-question_asked-7283", "a": "yes", "b": "yes", "c": "no", "note": "A build without a launch cannot show runtime routing. The fix limits the claim to compile-time referencing."}
+{"pair_id": "tsyn-cross-question_asked-4973", "a": "yes", "b": "yes", "c": "no", "note": "Ticket metadata cannot show storage deletion. The fix claims only an administrative completion mark, which the metadata supports."}
+{"pair_id": "tsyn-cross-question_asked-4208", "a": "yes", "b": "yes", "c": "no", "note": "The branch assertion never compares content. The fix claims only branch selection, which the assertion checks."}
+{"pair_id": "tsyn-cross-question_asked-4847", "a": "yes", "b": "yes", "c": "no", "note": "The stubbed unit test never touches the live allocator. The fix claims only the fixture commit list, which the test verifies."}
+{"pair_id": "tsyn-cross-question_asked-11884", "a": "yes", "b": "yes", "c": "no", "note": "A module search cannot show repository-wide absence. The fix is module-scoped. The controller's copying is reported, not endorsed by the text."}
+{"pair_id": "tsyn-cross-question_asked-4796", "a": "yes", "b": "yes", "c": "no", "note": "A name-presence check cannot show structure is concealed. The fix claims only name coverage, which the check measures."}

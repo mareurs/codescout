@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-scope_instant-11561", "a": "yes", "b": "yes", "c": "no", "note": "Names the manifest scope but gives no time for the changing out-of-sync count; the fix adds the instant."}
+{"pair_id": "tsyn-cross-scope_instant-10409", "a": "yes", "b": "yes", "c": "no", "note": "Timestamped inspection names no searched scope, and nothing else in the paragraph does; the fix names the command schema."}
+{"pair_id": "tsyn-cross-scope_instant-576", "a": "no", "b": "yes", "c": "no", "note": "The next sentence names the searched scope (release branch r18–r19), so the paragraph already reports the scope."}
+{"pair_id": "tsyn-cross-scope_instant-4042", "a": "no", "b": "yes", "c": "no", "note": "Scope is named, and the next sentence stamps the count's capture instant, 11:05 UTC September 11."}
+{"pair_id": "tsyn-cross-scope_instant-2025", "a": "no", "b": "yes", "c": "no", "note": "The following sentence names the audited runtime module at revision c82e, so the scope is reported in context."}
+{"pair_id": "tsyn-cross-scope_instant-982", "a": "no", "b": "yes", "c": "no", "note": "The next sentence names the searched material, the indexing test module at c82d; the scope is reported."}
+{"pair_id": "tsyn-cross-scope_instant-3918", "a": "no", "b": "yes", "c": "no", "note": "The preceding sentence names the guard-test module and the time; 'at that instant, inspection' refers back to both."}
+{"pair_id": "tsyn-cross-scope_instant-7274", "a": "yes", "b": "yes", "c": "no", "note": "The caller count is timestamped but no searched scope appears anywhere; the fix names the indexing module."}

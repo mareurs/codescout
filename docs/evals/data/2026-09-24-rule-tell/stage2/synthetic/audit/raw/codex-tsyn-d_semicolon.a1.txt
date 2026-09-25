@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-d_semicolon-1558", "a": "yes", "b": "yes", "c": "no", "note": "Lib and integration lanes chained with &&; the fix uses ';' and no other sentence chains lanes."}
+{"pair_id": "tsyn-cross-d_semicolon-369", "a": "yes", "b": "yes", "c": "no", "note": "Handoff command chains both lanes with &&; the fix uses ';'. The earlier prose semicolon is not a test command."}
+{"pair_id": "tsyn-cross-d_semicolon-199", "a": "yes", "b": "yes", "c": "no", "note": "Lanes chained with &&; the substituted sentence uses ';' and nothing else in the paragraph mentions test lanes."}
+{"pair_id": "tsyn-cross-d_semicolon-8058", "a": "yes", "b": "yes", "c": "no", "note": "Migration check chains the lanes with &&; the fix uses ';' and the other sentences do not concern test commands."}
+{"pair_id": "tsyn-cross-d_semicolon-363", "a": "yes", "b": "yes", "c": "no", "note": "Validation command uses &&; the fix replaces it with ';' and there is no other lane invocation."}
+{"pair_id": "tsyn-cross-d_semicolon-8361", "a": "yes", "b": "yes", "c": "no", "note": "Validation command chains the lanes with &&; the fix uses ';' and 'chaining' there is compliant."}
+{"pair_id": "tsyn-cross-d_semicolon-7292", "a": "yes", "b": "yes", "c": "no", "note": "Post-move lanes chained with &&; the fix uses ';'. The prose semicolon later is irrelevant."}
+{"pair_id": "tsyn-cross-d_semicolon-2380", "a": "no", "b": "yes", "c": "no", "note": "Chains two integration tests, not the lib and integration lanes; whether the rule applies is ambiguous."}

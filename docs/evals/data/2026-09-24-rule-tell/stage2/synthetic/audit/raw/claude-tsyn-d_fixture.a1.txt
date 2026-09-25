@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-d_fixture-7843","a":"yes","b":"yes","c":"no","note":"The exact boundary latency is load-bearing; the fix annotates it on the fixture line."}
+{"pair_id":"tsyn-in-d_fixture-1501","a":"yes","b":"yes","c":"no","note":"The heap cap keeps the fixture below the kill threshold; the fix explains this on its line."}
+{"pair_id":"tsyn-in-d_fixture-1175","a":"yes","b":"yes","c":"no","note":"Removing the delay defeats detection of serial traversal; retaining and annotating it fixes the breach."}
+{"pair_id":"tsyn-in-d_fixture-7433","a":"yes","b":"yes","c":"no","note":"The filler causes the required boundary crossing; the fix retains it and labels its purpose at the fixture entry."}
+{"pair_id":"tsyn-in-d_fixture-2763","a":"yes","b":"yes","c":"no","note":"The recorded version must predate the binary; the inline comment documents that required relationship."}
+{"pair_id":"tsyn-in-d_fixture-9861","a":"yes","b":"yes","c":"no","note":"The non-breaking space reproduces the engine mismatch; the fix identifies it with a comment on the fixture line."}
+{"pair_id":"tsyn-in-d_fixture-1765","a":"yes","b":"yes","c":"no","note":"The single-line mock span triggers rejection; the fix annotates that purpose on the return line."}
+{"pair_id":"tsyn-in-d_fixture-7579","a":"yes","b":"yes","c":"no","note":"CRLF endings are essential to the test; the fix names them in a comment on the fixture's manifest line."}

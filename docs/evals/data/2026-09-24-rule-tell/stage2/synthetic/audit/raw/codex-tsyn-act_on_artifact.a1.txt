@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-act_on_artifact-9228", "a": "yes", "b": "yes", "c": "no", "note": "Original acts on the bug report's proxy description of ownership; the fix inspects the current data structures directly."}
+{"pair_id": "tsyn-cross-act_on_artifact-4681", "a": "yes", "b": "yes", "c": "no", "note": "Monday's extract is stale while another change is queued today; the fix reads the current strings immediately before editing."}
+{"pair_id": "tsyn-cross-act_on_artifact-1840", "a": "yes", "b": "yes", "c": "no", "note": "Original ships on an earlier revision's dashboard badge; the fix requires a passing run on the package being shipped."}
+{"pair_id": "tsyn-cross-act_on_artifact-4987", "a": "yes", "b": "yes", "c": "no", "note": "Original patches from yesterday's inspection without rereading; the fix reads the current function before applying the patch."}
+{"pair_id": "tsyn-cross-act_on_artifact-4520", "a": "yes", "b": "yes", "c": "no", "note": "Original uses last week's snapshot of a changeable registry; the fix queries the active registry immediately beforehand."}
+{"pair_id": "tsyn-cross-act_on_artifact-6979", "a": "yes", "b": "yes", "c": "no", "note": "Original relies on yesterday's exported copy of a shared template; the fix reads the template fresh before replacing it."}
+{"pair_id": "tsyn-cross-act_on_artifact-10241", "a": "yes", "b": "yes", "c": "no", "note": "Original sets the threshold from last week's dashboard summary; the fix inspects the current function measurements."}
+{"pair_id": "tsyn-cross-act_on_artifact-5282", "a": "yes", "b": "yes", "c": "no", "note": "Original changes code from last month's summary without inspecting it; the fix reads the current implementation first."}

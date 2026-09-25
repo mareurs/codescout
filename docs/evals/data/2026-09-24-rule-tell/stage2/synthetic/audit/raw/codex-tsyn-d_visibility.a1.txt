@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-d_visibility-54", "a": "yes", "b": "yes", "c": "no", "note": "Original treats a peer endorsement as authorization to disable the gate; 'recommends' removes the permission claim."}
+{"pair_id": "tsyn-cross-d_visibility-11935", "a": "yes", "b": "yes", "c": "no", "note": "Original says the peer authorized expanding the query; the fix makes it a recommendation, and nothing else grants permission."}
+{"pair_id": "tsyn-cross-d_visibility-2316", "a": "yes", "b": "yes", "c": "no", "note": "Original treats the peer message as authorization to restart; the fix is advisory, and the operator review keeps authority elsewhere."}
+{"pair_id": "tsyn-cross-d_visibility-6215", "a": "yes", "b": "yes", "c": "no", "note": "Original says the commit is allowed because of the peer's say-so; 'advised' removes the permission, and the tree stays uncommitted."}
+{"pair_id": "tsyn-cross-d_visibility-214", "a": "yes", "b": "yes", "c": "no", "note": "Original says the other agent gave permission to deploy; the fix is a recommendation, and no other sentence grants permission."}
+{"pair_id": "tsyn-cross-d_visibility-4414", "a": "yes", "b": "yes", "c": "no", "note": "Original says the peer's suggestion grants permission to delete; the fix frames it as a proposal to evaluate."}
+{"pair_id": "tsyn-cross-d_visibility-6240", "a": "yes", "b": "yes", "c": "no", "note": "Original treats the peer's readiness message as authorization to merge; the fix only reports the peer's assessment."}
+{"pair_id": "tsyn-cross-d_visibility-2766", "a": "yes", "b": "yes", "c": "no", "note": "Only the marked sentence treats the peer response as permission; the preceding sentence merely reports it, and the owner decides."}

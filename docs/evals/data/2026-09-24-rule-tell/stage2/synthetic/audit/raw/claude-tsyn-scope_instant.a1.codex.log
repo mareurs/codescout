@@ -1,0 +1,88 @@
+{"pair_id":"tsyn-in-scope_instant-5056","a":"yes","b":"no","c":"no","note":"The search context names its scope, but neither result stamps an instant; the fix only narrows the claim."}
+{"pair_id":"tsyn-in-scope_instant-3918","a":"yes","b":"no","c":"no","note":"Both versions name a scope but omit the instant of the search; narrowing to the guard module does not satisfy the law."}
+{"pair_id":"tsyn-in-scope_instant-4042","a":"yes","b":"yes","c":"no","note":"The original ledger count lacks a time; the fix anchors the topic count to the second probe's end."}
+{"pair_id":"tsyn-in-scope_instant-873","a":"yes","b":"yes","c":"no","note":"The tracker-wide absence claim lacks an instant. The fix removes that search claim and compares the derivation with an existing record."}
+{"pair_id":"tsyn-in-scope_instant-2025","a":"yes","b":"no","c":"no","note":"The original lacks search scope and instant. The fix identifies call sites in the search crate but still omits the instant."}
+{"pair_id":"tsyn-in-scope_instant-3619","a":"yes","b":"no","c":"no","note":"The caller count lacks scope and instant. The fix supplies the tools directory but no instant for that count."}
+{"pair_id":"tsyn-in-scope_instant-7274","a":"yes","b":"yes","c":"no","note":"The original makes an unbounded timing claim. The fix names registry tools and anchors the measurements to the branch's timing run."}
+{"pair_id":"tsyn-in-scope_instant-576","a":"yes","b":"no","c":"yes","note":"The fix bounds the commits but supplies no observation instant. The preceding search report likewise gives a cutoff without an observation instant."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-3w4dekpy
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d709-f895-7c20-8ea3-39a33df6e770
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-3w4dekpy
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `scope_instant`
+
+LAW: Report the scope you searched, name the unit, and stamp the instant.
+
+USUAL SHAPE: YES when the text reports the result of a search or enumeration ("none remain", "no other sessions", "3 callers") without naming where it looked, or reports a count of changing state (sessions, open items) with no time. NO when the scope searched is named, or the statement is not the result of a search at all.
+
+## Items
+
+{"pair_id": "tsyn-in-scope_instant-5056", "original": "The formatter has no way to take a list of files: it walks every target in every workspace member. The pre-commit config already works around this for the hook by limiting the formatter to staged files, and its comment cites timings of about 2000 ms for the whole tree against about 40 ms for one file. The slow path matters because the long run is a window in which another session's write can land in the hook's after-snapshot and get attributed to the hook. I grepped the hook definitions in the repo's pre-commit config and the CI workflow files for other formatter invocations. ⟦Nothing else calls the formatter over the whole tree, so the staged-file scoping covers the concurrency risk.⟧", "substituted": "The formatter has no way to take a list of files: it walks every target in every workspace member. The pre-commit config already works around this for the hook by limiting the formatter to staged files, and its comment cites timings of about 2000 ms for the whole tree against about 40 ms for one file. The slow path matters because the long run is a window in which another session's write can land in the hook's after-snapshot and get attributed to the hook. I grepped the hook definitions in the repo's pre-commit config and the CI workflow files for other formatter invocations. ⟦No other hook or CI step in those two files calls the formatter over the whole tree, so the staged-file scoping covers the concurrency risk there.⟧"}
+{"pair_id": "tsyn-in-scope_instant-3918", "original": "Two options remain for the three wiring tests that fail when the checkout sits under the OS temp dir. Asserting at the top of each test gives an accurate panic message, but a run from /tmp stays red. Injecting a synthetic temp_dir works because should_refuse is pure and already takes that path as a parameter, so all three become location-independent. I ran the three tests from a /tmp clone and from a home-directory clone, and only the /tmp run failed. ⟦Nothing else in the suite reads current_dir().⟧", "substituted": "Two options remain for the three wiring tests that fail when the checkout sits under the OS temp dir. Asserting at the top of each test gives an accurate panic message, but a run from /tmp stays red. Injecting a synthetic temp_dir works because should_refuse is pure and already takes that path as a parameter, so all three become location-independent. I ran the three tests from a /tmp clone and from a home-directory clone, and only the /tmp run failed. ⟦Nothing else in the guard test module reads current_dir().⟧"}
+{"pair_id": "tsyn-in-scope_instant-4042", "original": "The second probe could not test shared suppression. ⟦Eleven topics are marked as fired in the ledger, so the subagent receiving nothing new says little.⟧ Had the ledger been shared and fresh, a same-topic re-delivery would be suppressed every time, so the earlier 84% figure needs another explanation. The clean test starts a new session, triggers one topic as the parent, dispatches a non-fork subagent at once, and records whether it also receives that topic.", "substituted": "The second probe could not test shared suppression. ⟦Eleven topics were marked as fired in the ledger when the second probe ended, so the subagent receiving nothing new says little.⟧ Had the ledger been shared and fresh, a same-topic re-delivery would be suppressed every time, so the earlier 84% figure needs another explanation. The clean test starts a new session, triggers one topic as the parent, dispatches a non-fork subagent at once, and records whether it also receives that topic."}
+{"pair_id": "tsyn-in-scope_instant-873", "original": "The reporting agent's finding deserves a note on what it does and does not show. It had read nothing about this bug beforehand. From its own observation it derived the mechanism: sibling subagents share one sessionId, the check discriminates per sessionId, so nothing is refused. Its conclusion was that the issue was worth a bug file. ⟦The bug was already filed, and no other report in the tracker describes it, so the agent's derivation was a true rediscovery.⟧ That tells us about the instrument's invisibility: the mechanism can be re-derived, but the existing record cannot be reached from the point of use.", "substituted": "The reporting agent's finding deserves a note on what it does and does not show. It had read nothing about this bug beforehand. From its own observation it derived the mechanism: sibling subagents share one sessionId, the check discriminates per sessionId, so nothing is refused. Its conclusion was that the issue was worth a bug file. ⟦The bug was already filed, and the agent's derivation matches that record's mechanism step for step, so it was a true rediscovery.⟧ That tells us about the instrument's invisibility: the mechanism can be re-derived, but the existing record cannot be reached from the point of use."}
+{"pair_id": "tsyn-in-scope_instant-2025", "original": "The reranker is now opt-in through an environment variable, and the default run leaves it idle. In the A/B on the rebuilt index, the off arm scored 26 of 75 with a warm median of 990 ms, while the on arm scored 23 with 1559 ms. ⟦No other code path invokes the reranker.⟧ The container log confirms the wiring: 2 lines across 25 default queries, versus 3552 with the flag set. The direction of the score gap held on a repeat run, though its three-point size did not, so the notes claim only the direction.", "substituted": "The reranker is now opt-in through an environment variable, and the default run leaves it idle. In the A/B on the rebuilt index, the off arm scored 26 of 75 with a warm median of 990 ms, while the on arm scored 23 with 1559 ms. ⟦No other call site in the search crate invokes the reranker.⟧ The container log confirms the wiring: 2 lines across 25 default queries, versus 3552 with the flag set. The direction of the score gap held on a repeat run, though its three-point size did not, so the notes claim only the direction."}
+{"pair_id": "tsyn-in-scope_instant-3619", "original": "⟦Three callers still rely on the old default scope.⟧ The response carried no more_in_repo hint, and that is expected: the hint's count is the repo total minus the project total, and here the project path equals the git root, so the difference is zero. The same equality hid the bug for months, since every query on this checkout returned identical rows under both scopes. A checkout where the project is a subdirectory would show the hint immediately, and the probe script's crosstab prints the requested-to-applied table to confirm it.", "substituted": "⟦Three callers under the tools directory still rely on the old default scope.⟧ The response carried no more_in_repo hint, and that is expected: the hint's count is the repo total minus the project total, and here the project path equals the git root, so the difference is zero. The same equality hid the bug for months, since every query on this checkout returned identical rows under both scopes. A checkout where the project is a subdirectory would show the hint immediately, and the probe script's crosstab prints the requested-to-applied table to confirm it."}
+{"pair_id": "tsyn-in-scope_instant-7274", "original": "The progress plan attaches reporting to four long-running tools. IndexProject reports the file index once per file, with a text message at start and finish. SemanticSearch emits text on its cold path, first while the embedding model loads and then while it searches. LSP cold-start emits a starting message per language and an indexing message. For run_command, once elapsed wall time passes 2 seconds, each tick reports elapsed time and lines so far, and the throttle enforces a 2 Hz cap. ⟦Every other tool finishes in under a second, so none of them needs progress reporting.⟧", "substituted": "The progress plan attaches reporting to four long-running tools. IndexProject reports the file index once per file, with a text message at start and finish. SemanticSearch emits text on its cold path, first while the embedding model loads and then while it searches. LSP cold-start emits a starting message per language and an indexing message. For run_command, once elapsed wall time passes 2 seconds, each tick reports elapsed time and lines so far, and the throttle enforces a 2 Hz cap. ⟦The other tools in the registry finished in under a second in the timing run on this branch, so none of them needs progress reporting.⟧"}
+{"pair_id": "tsyn-in-scope_instant-576", "original": "The duplicate trailer problem needs a status split. The guard in the hook script is unchanged, and a test message with a hand-written session trailer above the co-author block still ends with two raw lines when run through the trailer tool with the do-nothing option. So the defect reproduces. What changed is behaviour: the commit history shows no duplicate raw trailer in any commit made after the 09-17 cutoff, which I checked by grepping message bodies across all 246 of those commits on the main branch. ⟦Nobody is pasting the line any more, but nothing in the hook stops them.⟧ Separately, the parse-side bug where a pasted co-author line was invisible to queries was closed by an earlier commit, and a pasted line now parses once.", "substituted": "The duplicate trailer problem needs a status split. The guard in the hook script is unchanged, and a test message with a hand-written session trailer above the co-author block still ends with two raw lines when run through the trailer tool with the do-nothing option. So the defect reproduces. What changed is behaviour: the commit history shows no duplicate raw trailer in any commit made after the 09-17 cutoff, which I checked by grepping message bodies across all 246 of those commits on the main branch. ⟦Nobody has pasted the line in the 246 commits since 09-17, but nothing in the hook stops them.⟧ Separately, the parse-side bug where a pasted co-author line was invisible to queries was closed by an earlier commit, and a pasted line now parses once."}
+codex
+{"pair_id":"tsyn-in-scope_instant-5056","a":"yes","b":"no","c":"no","note":"The search context names its scope, but neither result stamps an instant; the fix only narrows the claim."}
+{"pair_id":"tsyn-in-scope_instant-3918","a":"yes","b":"no","c":"no","note":"Both versions name a scope but omit the instant of the search; narrowing to the guard module does not satisfy the law."}
+{"pair_id":"tsyn-in-scope_instant-4042","a":"yes","b":"yes","c":"no","note":"The original ledger count lacks a time; the fix anchors the topic count to the second probe's end."}
+{"pair_id":"tsyn-in-scope_instant-873","a":"yes","b":"yes","c":"no","note":"The tracker-wide absence claim lacks an instant. The fix removes that search claim and compares the derivation with an existing record."}
+{"pair_id":"tsyn-in-scope_instant-2025","a":"yes","b":"no","c":"no","note":"The original lacks search scope and instant. The fix identifies call sites in the search crate but still omits the instant."}
+{"pair_id":"tsyn-in-scope_instant-3619","a":"yes","b":"no","c":"no","note":"The caller count lacks scope and instant. The fix supplies the tools directory but no instant for that count."}
+{"pair_id":"tsyn-in-scope_instant-7274","a":"yes","b":"yes","c":"no","note":"The original makes an unbounded timing claim. The fix names registry tools and anchors the measurements to the branch's timing run."}
+{"pair_id":"tsyn-in-scope_instant-576","a":"yes","b":"no","c":"yes","note":"The fix bounds the commits but supplies no observation instant. The preceding search report likewise gives a cutoff without an observation instant."}
+tokens used
+6,243

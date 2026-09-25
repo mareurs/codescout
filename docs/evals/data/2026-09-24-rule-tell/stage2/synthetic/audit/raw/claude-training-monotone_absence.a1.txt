@@ -1,0 +1,8 @@
+{"pair_id":"train-monotone_absence-10224","a":"yes","b":"yes","c":"no","note":"No warnings cannot establish cleanliness for an unselected crate; the fix explicitly identifies that coverage gap."}
+{"pair_id":"train-monotone_absence-9698","a":"yes","b":"yes","c":"no","note":"Warning silence does not prove correct metadata handling; the fix adds positive evidence from the event dump."}
+{"pair_id":"train-monotone_absence-9794","a":"yes","b":"yes","c":"no","note":"Zero search hits cannot establish no prior diagnosis; the fix limits its conclusion to index responsiveness supported by a positive result."}
+{"pair_id":"train-monotone_absence-1664","a":"yes","b":"yes","c":"no","note":"Absent complaints in a write-failure log cannot establish user preferences; the fix explains the log's limited scope."}
+{"pair_id":"train-monotone_absence-7918","a":"yes","b":"yes","c":"no","note":"An empty recorder lane cannot distinguish no friction from missing records; the fix explicitly preserves both possibilities."}
+{"pair_id":"train-monotone_absence-796","a":"yes","b":"yes","c":"no","note":"A parser that never checks ordering cannot validate ordering through silence; the fix states that limitation."}
+{"pair_id":"train-monotone_absence-3094","a":"yes","b":"yes","c":"no","note":"No delete errors cannot prove cleanup ran; the fix supplies recorded deletions corroborated by a table-size decrease."}
+{"pair_id":"train-monotone_absence-7757","a":"yes","b":"yes","c":"no","note":"Absent validation errors cannot prove parser ranges are well formed; the fix reports positive detection of deliberately bad ranges."}

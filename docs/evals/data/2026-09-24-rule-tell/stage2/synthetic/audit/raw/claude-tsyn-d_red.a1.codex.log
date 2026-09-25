@@ -1,0 +1,88 @@
+{"pair_id":"tsyn-in-d_red-1308","a":"yes","b":"yes","c":"no","note":"The original transfers evidence between assertions; the fix explicitly requires a fresh failing run."}
+{"pair_id":"tsyn-in-d_red-237","a":"yes","b":"yes","c":"no","note":"The original credits the edited assertion with an earlier failure; the fix reports observing the new assertion fail."}
+{"pair_id":"tsyn-in-d_red-4971","a":"yes","b":"no","c":"no","note":"The fix claims a fresh failing run, but the final sentence explicitly says the counter check has not run against old code."}
+{"pair_id":"tsyn-in-d_red-4838","a":"yes","b":"yes","c":"no","note":"The original reuses a failure from another placement; the fix reruns the rewritten test and observes the miss."}
+{"pair_id":"tsyn-in-d_red-7104","a":"yes","b":"yes","c":"no","note":"The original reuses the wrong-message failure; the fix observes the revised assertion fail with the guard disabled."}
+{"pair_id":"tsyn-in-d_red-2323","a":"yes","b":"yes","c":"no","note":"The original treats the old matcher's failure as proof for its replacement; the fix observes the new matcher fail."}
+{"pair_id":"tsyn-in-d_red-9849","a":"yes","b":"yes","c":"no","note":"The original transfers the old count assertion's red; the fix reports a red for the revised assertion on the unpatched trigger."}
+{"pair_id":"tsyn-in-d_red-12247","a":"yes","b":"yes","c":"no","note":"The original credits the new baseline comparison with the old guard's result; the fix replays the report and observes rejection."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-zwpxbvp9
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d709-45c9-7d10-a10d-3e7a3d8d5b91
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-zwpxbvp9
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_red`
+
+LAW: A red is evidence for the assertion that produced it and for no other; re-observe the red after editing an assertion.
+
+USUAL SHAPE: YES when the text edits an assertion after watching it fail and treats that earlier failure as evidence for the edited version without re-observing a failure. NO otherwise.
+
+## Items
+
+{"pair_id": "tsyn-in-d_red-1308", "original": "Multi-line edits with escaped newlines keep breaking in two ways. In one, a `new_string` written with the two-character `\\n` escape is treated as a single physical line and lands on disk as one collapsed line, which is a syntax error. In the other, a body with the same escape is rejected as introducing syntax errors. Our regression test first asserted that the tool returns an error for an escaped body, and it failed against the build, as the log shows. We then changed it to assert that the file on disk is unchanged after the call. ⟦Since the earlier run failed, the disk-unchanged assertion is confirmed to catch the corruption.⟧ The one corrupted file was restored via `git checkout`.", "substituted": "Multi-line edits with escaped newlines keep breaking in two ways. In one, a `new_string` written with the two-character `\\n` escape is treated as a single physical line and lands on disk as one collapsed line, which is a syntax error. In the other, a body with the same escape is rejected as introducing syntax errors. Our regression test first asserted that the tool returns an error for an escaped body, and it failed against the build, as the log shows. We then changed it to assert that the file on disk is unchanged after the call. ⟦Since the earlier run failed on the error-return assertion, the disk-unchanged assertion still needs its own failing run.⟧ The one corrupted file was restored via `git checkout`."}
+{"pair_id": "tsyn-in-d_red-237", "original": "After a pull from the other host, the local catalog can still hold rows keyed on pre-move paths, because the pull brings the rename but not the re-key. Last week the check for stale rows failed on the archived-artifact fixture: it expected `removed: 0` after the pull and got `removed: 3`. We then changed the assertion to read the count after running reindex instead of before the pull. ⟦That earlier failure already shows the new assertion catches stale rows, so no extra run was needed.⟧ The fixture itself is unchanged, and the doctor's `missing_file` field still names any row left behind when the reindex step is skipped.", "substituted": "After a pull from the other host, the local catalog can still hold rows keyed on pre-move paths, because the pull brings the rename but not the re-key. Last week the check for stale rows failed on the archived-artifact fixture: it expected `removed: 0` after the pull and got `removed: 3`. We then changed the assertion to read the count after running reindex instead of before the pull. ⟦That earlier failure came from the old assertion, so we reran the fixture without reindex to watch the new one fail.⟧ The fixture itself is unchanged, and the doctor's `missing_file` field still names any row left behind when the reindex step is skipped."}
+{"pair_id": "tsyn-in-d_red-4971", "original": "The read-side gap in the catalog is now covered by a test. It seeds a candidate whose id resolves to no chunk row and asserts that the page reports one unresolved entry instead of coming back silently short. Because it is written against the catalog and not a backend, both gate lanes run it. While drafting, I first asserted `page.len() == 0`, and that assertion failed against the old code. ⟦I then changed it to check the unresolved counter and reported the test as proven to catch the regression, citing that earlier failure.⟧ The counter check has not been run against the old code.", "substituted": "The read-side gap in the catalog is now covered by a test. It seeds a candidate whose id resolves to no chunk row and asserts that the page reports one unresolved entry instead of coming back silently short. Because it is written against the catalog and not a backend, both gate lanes run it. While drafting, I first asserted `page.len() == 0`, and that assertion failed against the old code. ⟦I then changed it to check the unresolved counter and reran it against the old code, where it failed, so the test is proven to catch the regression.⟧ The counter check has not been run against the old code."}
+{"pair_id": "tsyn-in-d_red-4838", "original": "The lint check for retired tool names has one blind spot left. Bare mentions of a tool name in the Iron Laws, with no call parentheses, slip past both regexes, so `read_file` in Law 1 goes unseen. Yesterday the test that plants a retired name in Law 3 failed as expected: the scanner reported nothing. ⟦I then rewrote that test to plant the name in Law 1 instead, and since the earlier run had already shown the scanner missing bare names, I counted the rewritten test as a confirmed miss and did not run it.⟧ The denylist route still catches any name someone adds to `DEPRECATED_TOOL_NAMES`, so the residual is a tool deleted without an entry.", "substituted": "The lint check for retired tool names has one blind spot left. Bare mentions of a tool name in the Iron Laws, with no call parentheses, slip past both regexes, so `read_file` in Law 1 goes unseen. Yesterday the test that plants a retired name in Law 3 failed as expected: the scanner reported nothing. ⟦I then rewrote that test to plant the name in Law 1 instead, ran it, and watched the scanner report nothing again, so the miss is confirmed for that placement too.⟧ The denylist route still catches any name someone adds to `DEPRECATED_TOOL_NAMES`, so the residual is a tool deleted without an entry."}
+{"pair_id": "tsyn-in-d_red-7104", "original": "The multiple-match test for the edit tool went red on its first run because it searched the error text for the word 'ambiguous'. The tool's real message says 'multiple matches', which a grep over the error module confirmed in one line. ⟦I rewrote the assertion to look for 'multiple matches' and marked the guard as covered, since the test had already gone red once.⟧ The replace_all path is separate: its test passed against the real tool, and passed again with the guard stubbed to return early, so it proves nothing about that branch. That test needs a stricter input before anyone trusts it.", "substituted": "The multiple-match test for the edit tool went red on its first run because it searched the error text for the word 'ambiguous'. The tool's real message says 'multiple matches', which a grep over the error module confirmed in one line. ⟦I rewrote the assertion to look for 'multiple matches' and marked the guard as covered after watching that version go red with the guard stubbed out.⟧ The replace_all path is separate: its test passed against the real tool, and passed again with the guard stubbed to return early, so it proves nothing about that branch. That test needs a stricter input before anyone trusts it."}
+{"pair_id": "tsyn-in-d_red-2323", "original": "The path-stripping work is covered by unit tests on the key handling plus a set of server-level tests. `root_keys_stay_absolute` and `unknown_key_keeps_its_absolute_path` pin the two cases where the absolute form must survive, and both ran green on the final build. The CI gate scans rendered output for absolute project paths across the whole corpus. Its first version failed on the fixture with a leaked path, so we tightened the matcher to also skip banner lines. ⟦The gate failed before the matcher change, so it now proves the leak check works.⟧ A per-case liveness guard was added afterwards to keep the gate from passing on an empty corpus.", "substituted": "The path-stripping work is covered by unit tests on the key handling plus a set of server-level tests. `root_keys_stay_absolute` and `unknown_key_keeps_its_absolute_path` pin the two cases where the absolute form must survive, and both ran green on the final build. The CI gate scans rendered output for absolute project paths across the whole corpus. Its first version failed on the fixture with a leaked path, so we tightened the matcher to also skip banner lines. ⟦The gate failed before the matcher change, so we reran it with a leaked path planted to watch the new matcher fail.⟧ A per-case liveness guard was added afterwards to keep the gate from passing on an empty corpus."}
+{"pair_id": "tsyn-in-d_red-9849", "original": "Reindex churn measured 0.4% of rows in the sample. The larger share came from no-op updates: the trigger has no WHEN clause, so an update that writes identical values still fires, and a query over the audit table showed 1,904 of 2,311 rows carrying an empty diff. The test for this first counted all audit rows after a no-op update and failed with 1 row. ⟦I then rewrote it to count only rows whose diff is empty, and the red from the old version stands as its proof.⟧ Adding the WHEN clause is the next change.", "substituted": "Reindex churn measured 0.4% of rows in the sample. The larger share came from no-op updates: the trigger has no WHEN clause, so an update that writes identical values still fires, and a query over the audit table showed 1,904 of 2,311 rows carrying an empty diff. The test for this first counted all audit rows after a no-op update and failed with 1 row. ⟦I then rewrote it to count only rows whose diff is empty, and it went red on the unpatched trigger with 1 row.⟧ Adding the WHEN clause is the next change."}
+{"pair_id": "tsyn-in-d_red-12247", "original": "⟦I changed the count guard to compare against a per-lane baseline instead of the total, and treated the 3540 report that tripped the old version as showing the new one works.⟧ The earlier report was inconsistent because a task adding two tests cannot lower the total by 129, and re-running gave 3671 as expected. That arithmetic is why the guard exists. The ignored test appears only in the server-stack lane, so the per-lane baselines differ by one.", "substituted": "⟦I changed the count guard to compare against a per-lane baseline instead of the total, then replayed the 3540 report through it and watched it reject the report.⟧ The earlier report was inconsistent because a task adding two tests cannot lower the total by 129, and re-running gave 3671 as expected. That arithmetic is why the guard exists. The ignored test appears only in the server-stack lane, so the per-lane baselines differ by one."}
+codex
+{"pair_id":"tsyn-in-d_red-1308","a":"yes","b":"yes","c":"no","note":"The original transfers evidence between assertions; the fix explicitly requires a fresh failing run."}
+{"pair_id":"tsyn-in-d_red-237","a":"yes","b":"yes","c":"no","note":"The original credits the edited assertion with an earlier failure; the fix reports observing the new assertion fail."}
+{"pair_id":"tsyn-in-d_red-4971","a":"yes","b":"no","c":"no","note":"The fix claims a fresh failing run, but the final sentence explicitly says the counter check has not run against old code."}
+{"pair_id":"tsyn-in-d_red-4838","a":"yes","b":"yes","c":"no","note":"The original reuses a failure from another placement; the fix reruns the rewritten test and observes the miss."}
+{"pair_id":"tsyn-in-d_red-7104","a":"yes","b":"yes","c":"no","note":"The original reuses the wrong-message failure; the fix observes the revised assertion fail with the guard disabled."}
+{"pair_id":"tsyn-in-d_red-2323","a":"yes","b":"yes","c":"no","note":"The original treats the old matcher's failure as proof for its replacement; the fix observes the new matcher fail."}
+{"pair_id":"tsyn-in-d_red-9849","a":"yes","b":"yes","c":"no","note":"The original transfers the old count assertion's red; the fix reports a red for the revised assertion on the unpatched trigger."}
+{"pair_id":"tsyn-in-d_red-12247","a":"yes","b":"yes","c":"no","note":"The original credits the new baseline comparison with the old guard's result; the fix replays the report and observes rejection."}
+tokens used
+5,957

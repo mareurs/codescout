@@ -1,0 +1,88 @@
+{"pair_id":"train-member_vs_population-7970","a":"yes","b":"no","c":"no","note":"The original cites a prior workspace run; the fix cites path-helper tests that do not establish the loader's fresh-machine behavior."}
+{"pair_id":"train-member_vs_population-143","a":"yes","b":"yes","c":"no","note":"The replays do not establish staged/worktree divergence handling; the fix limits the claim to exercised seeded IDs."}
+{"pair_id":"train-member_vs_population-10716","a":"yes","b":"yes","c":"no","note":"The suite total does not verify empty-queue handling; the fix cites a passing test specifically exercising that case."}
+{"pair_id":"train-member_vs_population-9290","a":"yes","b":"yes","c":"no","note":"The crate-wide result does not establish overflow gating; the fix cites the specific overflow-gating test."}
+{"pair_id":"train-member_vs_population-3859","a":"yes","b":"yes","c":"no","note":"Workspace success does not establish 503 routing; the fix directly tests the status arm with a 503 body."}
+{"pair_id":"train-member_vs_population-1924","a":"yes","b":"yes","c":"no","note":"Suite success and elapsed duration do not verify this run's lock release; the fix reports direct observation of its absent lock file."}
+{"pair_id":"train-member_vs_population-5792","a":"yes","b":"yes","c":"no","note":"Two-parent test results cannot establish octopus-merge handling; the fix supplies a direct three-parent merge check."}
+{"pair_id":"train-member_vs_population-7200","a":"yes","b":"yes","c":"no","note":"Other workspace tests do not establish trailing-dot resolution; the fix cites the resolver's own test for that case."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-wugu18xk
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d707-d23d-7640-a618-090986306857
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-wugu18xk
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `member_vs_population`
+
+LAW: An assertion computed over a population cannot verify a claim about a member.
+
+USUAL SHAPE: YES when the text uses an aggregate (a total, a whole suite being green, an average, "all tests pass") as proof of a claim about ONE specific item that the aggregate is not shown to exercise -- for example the full suite passing offered as proof that one particular function handles one particular case. NO when the evidence is about that item itself, or when the check plainly exercises the change it is cited for (running a module's own tests after a local edit to that module).
+
+## Items
+
+{"pair_id": "train-member_vs_population-7970", "original": "The plan for loading startup environment touches six places. The dependency manifest gains the dotenvy crate, and the global config module gets a shared directory helper, an env-path helper and a loader, with four new tests. The config module re-exports the loader, and the main entry point calls it before command-line parsing. The example env files gain the embedding variables, and the manual page on the embedded librarian replaces its env-block example. ⟦Since the full workspace suite was green before I started, the new loader will read the env file from the right directory on a fresh machine.⟧ The four new tests in the global module cover the path helpers directly.", "substituted": "The plan for loading startup environment touches six places. The dependency manifest gains the dotenvy crate, and the global config module gets a shared directory helper, an env-path helper and a loader, with four new tests. The config module re-exports the loader, and the main entry point calls it before command-line parsing. The example env files gain the embedding variables, and the manual page on the embedded librarian replaces its env-block example. ⟦Once the four new tests in the global module pass, the loader will read the env file from the right directory on a fresh machine.⟧ The four new tests in the global module cover the path helpers directly."}
+{"pair_id": "train-member_vs_population-143", "original": "The pre-commit hook now scans staged files for catalog ids that are missing from the audit report. Across the 60 commits replayed through it last week, the hook flagged every seeded bad id, and the stderr output named each one. ⟦Because all 60 replays exited cleanly, the hook must also handle a staged file that differs from the worktree copy.⟧ It still passes open when no binary is runnable or when the report cannot be read, and we chose that deliberately so a broken tool never blocks a commit. Those two states are documented in the header comment.", "substituted": "The pre-commit hook now scans staged files for catalog ids that are missing from the audit report. Across the 60 commits replayed through it last week, the hook flagged every seeded bad id, and the stderr output named each one. ⟦Because all 60 replays exited cleanly, the hook handles those seeded ids; no replay staged a file that differs from the worktree copy.⟧ It still passes open when no binary is runnable or when the report cannot be read, and we chose that deliberately so a broken tool never blocks a commit. Those two states are documented in the header comment."}
+{"pair_id": "train-member_vs_population-10716", "original": "Two commits arrived between the operator's count and the push. I re-derived the range at push time with `git log` against the remote ref and got 42 commits, matching the push output line for line. The tip was then tagged and left alone. ⟦The test suite passed on that tip, 1,318 of 1,318, so the retry change in c41d09 handles the empty-queue case.⟧", "substituted": "Two commits arrived between the operator's count and the push. I re-derived the range at push time with `git log` against the remote ref and got 42 commits, matching the push output line for line. The tip was then tagged and left alone. ⟦The retry change in c41d09 handles the empty-queue case, since its new test `empty_queue_retries_once` passed on that tip.⟧"}
+{"pair_id": "train-member_vs_population-9290", "original": "The hint mechanism is opt-in per tool. Each tool may override a topic accessor, and the default returns nothing, so no hint is emitted. When a tool builds its response, it consults a session-scoped set of already-emitted topics shared through the tool context; if the topic is absent, it injects a hint field. Dedup is session-wide by topic, so a second tool sharing the topic stays silent, as the two-adapter test in the log shows. Activating a workspace clears the set first, so new projects start fresh. ⟦All 212 tests in the crate pass, which shows the progressive-disclosure hint fires only on overflow responses.⟧", "substituted": "The hint mechanism is opt-in per tool. Each tool may override a topic accessor, and the default returns nothing, so no hint is emitted. When a tool builds its response, it consults a session-scoped set of already-emitted topics shared through the tool context; if the topic is absent, it injects a hint field. Dedup is session-wide by topic, so a second tool sharing the topic stays silent, as the two-adapter test in the log shows. Activating a workspace clears the set first, so new projects start fresh. ⟦The overflow-gating test for the progressive-disclosure hint passes, which shows it fires only on overflow responses.⟧"}
+{"pair_id": "train-member_vs_population-3859", "original": "⟦The full workspace run finished green with 1,412 tests, so the classifier's status arm routes a 503 body into the status bucket.⟧ The connect case was settled by exporting the error text as a type-level constant, and the status case now follows the same pattern. The embed crate renders its status message from a single exported marker, and the search classifier imports that marker instead of spelling the string a second time. A grep across both crates finds the literal in exactly one place. Before this change, a literal on each side could drift apart without any test noticing, which is why the single definition matters.", "substituted": "⟦The classifier's status-arm test feeds it a 503 body, asserts the status bucket, and passes.⟧ The connect case was settled by exporting the error text as a type-level constant, and the status case now follows the same pattern. The embed crate renders its status message from a single exported marker, and the search classifier imports that marker instead of spelling the string a second time. A grep across both crates finds the literal in exactly one place. Before this change, a literal on each side could drift apart without any test noticing, which is why the single definition matters."}
+{"pair_id": "train-member_vs_population-1924", "original": "The original symptom was four concurrent index runs on one project, all orphaned to the user systemd manager. After the change I started two separate index runs on this host, and each held exactly one lock and finished alone. Useful throughput rose from about 1.45 chunks/s to 4.45, roughly 3x, which matches the duplicated work being removed. ⟦The lock-acquisition path was also exercised by the whole integration suite, which passed in full, so the MRV-poc run's 28-minute duration confirms that its lock was released cleanly on exit.⟧ Codescout finished in 18 minutes under the same conditions.", "substituted": "The original symptom was four concurrent index runs on one project, all orphaned to the user systemd manager. After the change I started two separate index runs on this host, and each held exactly one lock and finished alone. Useful throughput rose from about 1.45 chunks/s to 4.45, roughly 3x, which matches the duplicated work being removed. ⟦The lock-acquisition path was also exercised by the whole integration suite, which passed in full, and after the MRV-poc run's 28 minutes its lock file was gone from disk.⟧ Codescout finished in 18 minutes under the same conditions."}
+{"pair_id": "train-member_vs_population-5792", "original": "The guard's second check reads the high-water scalar at the merge base and at both parents, and it needs nothing beyond local objects, since a commit cannot exist without its parents. I replayed three merges from the project history: two produced the duplicate heading the check names, and one came back clean because the collision had already been resolved. The hook's script tests cover two-parent merges only, and all 31 of them pass. ⟦With all 31 hook tests green, octopus merges are handled correctly by the collision check.⟧", "substituted": "The guard's second check reads the high-water scalar at the merge base and at both parents, and it needs nothing beyond local objects, since a commit cannot exist without its parents. I replayed three merges from the project history: two produced the duplicate heading the check names, and one came back clean because the collision had already been resolved. The hook's script tests cover two-parent merges only, and all 31 of them pass. ⟦A scratch-repo octopus merge with three advanced parents produced the expected duplicate report.⟧"}
+{"pair_id": "train-member_vs_population-7200", "original": "The host-identity patch touched only the resolver in the audit module, and the tree built cleanly afterward. Two chunk-reuse tests in the librarian then failed, which looked like a regression from the patch. I traced the call graph: the resolver has three callers, the shard exporter, the audit-log tool and the doctor tool, and neither failing test imports any of them. Both tests fail identically on a clean checkout of the parent commit, so the patch is not the cause. ⟦The other 212 tests in the workspace pass, so the resolver now returns the right id for hosts with a trailing dot in their name.⟧ I am filing the two failures as a separate bug against chunk reuse.", "substituted": "The host-identity patch touched only the resolver in the audit module, and the tree built cleanly afterward. Two chunk-reuse tests in the librarian then failed, which looked like a regression from the patch. I traced the call graph: the resolver has three callers, the shard exporter, the audit-log tool and the doctor tool, and neither failing test imports any of them. Both tests fail identically on a clean checkout of the parent commit, so the patch is not the cause. ⟦The resolver's own unit tests pass, including the new case for hosts with a trailing dot in their name.⟧ I am filing the two failures as a separate bug against chunk reuse."}
+codex
+{"pair_id":"train-member_vs_population-7970","a":"yes","b":"no","c":"no","note":"The original cites a prior workspace run; the fix cites path-helper tests that do not establish the loader's fresh-machine behavior."}
+{"pair_id":"train-member_vs_population-143","a":"yes","b":"yes","c":"no","note":"The replays do not establish staged/worktree divergence handling; the fix limits the claim to exercised seeded IDs."}
+{"pair_id":"train-member_vs_population-10716","a":"yes","b":"yes","c":"no","note":"The suite total does not verify empty-queue handling; the fix cites a passing test specifically exercising that case."}
+{"pair_id":"train-member_vs_population-9290","a":"yes","b":"yes","c":"no","note":"The crate-wide result does not establish overflow gating; the fix cites the specific overflow-gating test."}
+{"pair_id":"train-member_vs_population-3859","a":"yes","b":"yes","c":"no","note":"Workspace success does not establish 503 routing; the fix directly tests the status arm with a 503 body."}
+{"pair_id":"train-member_vs_population-1924","a":"yes","b":"yes","c":"no","note":"Suite success and elapsed duration do not verify this run's lock release; the fix reports direct observation of its absent lock file."}
+{"pair_id":"train-member_vs_population-5792","a":"yes","b":"yes","c":"no","note":"Two-parent test results cannot establish octopus-merge handling; the fix supplies a direct three-parent merge check."}
+{"pair_id":"train-member_vs_population-7200","a":"yes","b":"yes","c":"no","note":"Other workspace tests do not establish trailing-dot resolution; the fix cites the resolver's own test for that case."}
+tokens used
+5,907

@@ -1,0 +1,88 @@
+{"pair_id":"train-d_loudness-4374","a":"yes","b":"yes","c":"no","note":"No scheduled job reaches the alarm; the fix acknowledges this and calls for a manual recheck."}
+{"pair_id":"train-d_loudness-7309","a":"yes","b":"yes","c":"no","note":"Every CI build excludes the test, so it cannot guard pushes. The fix states that limitation."}
+{"pair_id":"train-d_loudness-5382","a":"no","b":"yes","c":"no","note":"The next peer's build reaches the lint, the peer sees the error, and reverting restores the build. Author notification is inaccurately claimed."}
+{"pair_id":"train-d_loudness-6957","a":"yes","b":"yes","c":"no","note":"The failure neither blocks merging nor reaches an observer. The fix withdraws the protection claim."}
+{"pair_id":"train-d_loudness-6407","a":"yes","b":"yes","c":"no","note":"Stored stderr has no reachable reader for failed count queries. The fix acknowledges the missing observation path."}
+{"pair_id":"train-d_loudness-336","a":"yes","b":"yes","c":"no","note":"The original warning is discarded. The fix routes the failure through the results table read by the analysis script."}
+{"pair_id":"train-d_loudness-5423","a":"yes","b":"yes","c":"no","note":"The timeout emits an unobserved log line despite the protection claim. The fix explicitly acknowledges silent termination."}
+{"pair_id":"train-d_loudness-3759","a":"yes","b":"yes","c":"no","note":"Memory calls never reach the router's error guard because they lack selectors. The fix makes that unreachable path explicit."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-nil_wvcd
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d707-654b-7c81-a8de-fb57fa39f734
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-nil_wvcd
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_loudness`
+
+LAW: Loudness is a property of a path: name the caller that reaches a guard and the observer who acts on it.
+
+USUAL SHAPE: YES when the text relies on a guard, alarm, error or panic as protection while the text itself indicates nothing reaches it or nobody sees what it emits. NO otherwise.
+
+## Items
+
+{"pair_id": "train-d_loudness-4374", "original": "The patch landed inside a commit authored by another session, so its message and trailer do not describe this work. Cite the scoped patch-id over the four touched files, not the whole-commit one, which also hashes two unrelated files. I recomputed the scoped value at archive time and it matched the recorded one. The archive script has a mismatch alarm, but it only runs under an audit flag that no scheduled job passes and nobody has used since March. ⟦Any later drift in these ids will trip that alarm, so the recorded values are safe to trust.⟧ Original provenance stays as adopted from the demo branch.", "substituted": "The patch landed inside a commit authored by another session, so its message and trailer do not describe this work. Cite the scoped patch-id over the four touched files, not the whole-commit one, which also hashes two unrelated files. I recomputed the scoped value at archive time and it matched the recorded one. The archive script has a mismatch alarm, but it only runs under an audit flag that no scheduled job passes and nobody has used since March. ⟦Later drift in these ids would trip nothing, since no job runs that flag, so recheck the recorded values by hand.⟧ Original provenance stays as adopted from the demo branch."}
+{"pair_id": "train-d_loudness-7309", "original": "⟦That gated test guards the lean build against regressions on every push.⟧ Step 1.0 adds it: with the vector backend env set to qdrant, from_env must return an error, and a successful lean from_env must report lite and dense-only. The test compiles only when the server-stack feature is off. Every CI job builds with default features, and the default set includes server-stack; a grep of the workflow files finds no job passing no-default-features. Env mutation goes through the shared guard helper so the tests stay serial.", "substituted": "⟦That gated test compiles only in a lean build, which no CI job produces yet.⟧ Step 1.0 adds it: with the vector backend env set to qdrant, from_env must return an error, and a successful lean from_env must report lite and dense-only. The test compiles only when the server-stack feature is off. Every CI job builds with default features, and the default set includes server-stack; a grep of the workflow files finds no job passing no-default-features. Env mutation goes through the shared guard helper so the tests stay serial."}
+{"pair_id": "train-d_loudness-5382", "original": "Three agents share one build directory. On Tuesday one of them committed a helper with no caller yet, and the next build, run by a different agent, stopped on the dead-code lint. The lint is denied at workspace level, so the error is real and reproducible. ⟦The denied lint guards the shared build against half-wired code, because whoever leaves a stub behind is told at once.⟧ The log line carries a file and line but no author, and the peer who hit it had no way to reach whoever wrote the helper. Reverting the helper turned the build green on the next run.", "substituted": "Three agents share one build directory. On Tuesday one of them committed a helper with no caller yet, and the next build, run by a different agent, stopped on the dead-code lint. The lint is denied at workspace level, so the error is real and reproducible. ⟦The denied lint stops the shared build on half-wired code, but the message lands on whichever peer builds next.⟧ The log line carries a file and line but no author, and the peer who hit it had no way to reach whoever wrote the helper. Reverting the helper turned the build green on the next run."}
+{"pair_id": "train-d_loudness-6957", "original": "Reproduced in a clean ubuntu container on 2026-09-24, first attempt, with the same i386 architecture added and the same pinned Wine repository. The lane's install command exits 100 with the identical apt error, so the failure is tied neither to the runner image nor to leftover state. The CI step, pulled out of the workflow file and run with a stubbed sudo, also returned exit 100. The lane is marked continue-on-error, and the merge gate lists only the unit-test jobs as required. A red result there notifies no one, because the lane's status feeds no chat channel and no dashboard. ⟦Its exit-100 check therefore protects the release branch from a broken Wine install.⟧", "substituted": "Reproduced in a clean ubuntu container on 2026-09-24, first attempt, with the same i386 architecture added and the same pinned Wine repository. The lane's install command exits 100 with the identical apt error, so the failure is tied neither to the runner image nor to leftover state. The CI step, pulled out of the workflow file and run with a stubbed sudo, also returned exit 100. The lane is marked continue-on-error, and the merge gate lists only the unit-test jobs as required. A red result there notifies no one, because the lane's status feeds no chat channel and no dashboard. ⟦Its exit-100 check therefore only colors the lane red, and no merge decision or person depends on that.⟧"}
+{"pair_id": "train-d_loudness-6407", "original": "The gate on output length is inverted relative to need. A count query over the marker returns a bare zero and a newline, two bytes, so the predicate is false and control takes the short-output branch, skipping the stderr entirely. A query that dumps 10 KB of hits receives the whole stderr. ⟦A failed count query is therefore covered, because its error is recorded in the stored stderr.⟧ The stream is stored, but the only code that reads it sits behind the same predicate, and no other reader exists. The person running the count sees a zero and cannot tell absence from loss.", "substituted": "The gate on output length is inverted relative to need. A count query over the marker returns a bare zero and a newline, two bytes, so the predicate is false and control takes the short-output branch, skipping the stderr entirely. A query that dumps 10 KB of hits receives the whole stderr. ⟦A failed count query is therefore uncovered, because its recorded stderr is never shown to the reader.⟧ The stream is stored, but the only code that reads it sits behind the same predicate, and no other reader exists. The person running the count sees a zero and cannot tell absence from loss."}
+{"pair_id": "train-d_loudness-336", "original": "The eval compares four arms on adoption of result-carried guidance and on resistance to forged in-content directives. P1 predicts ADOPTION(B) > ADOPTION(A), because the delegation line gives the envelope channel authority. Both alternatives are informative: a floor at zero means result bodies are too weak a channel, and a ceiling at one means the delegation line is unnecessary. For P2, the pre-registered risk is C < D, which would mean the delegation line opened an in-content hole, and in that case the wording does not ship. The harness runs each arm three times and writes scores to a results table that the analysis script reads on every run. ⟦If a forged directive is followed in arm C, a warning is printed to the harness's stderr, which is redirected to /dev/null in the batch runner, so that warning will catch any regression before ship.⟧", "substituted": "The eval compares four arms on adoption of result-carried guidance and on resistance to forged in-content directives. P1 predicts ADOPTION(B) > ADOPTION(A), because the delegation line gives the envelope channel authority. Both alternatives are informative: a floor at zero means result bodies are too weak a channel, and a ceiling at one means the delegation line is unnecessary. For P2, the pre-registered risk is C < D, which would mean the delegation line opened an in-content hole, and in that case the wording does not ship. The harness runs each arm three times and writes scores to a results table that the analysis script reads on every run. ⟦If a forged directive is followed in arm C, the harness records it as a failed row in the results table, which the analysis script reads, so that row will catch any regression before ship.⟧"}
+{"pair_id": "train-d_loudness-5423", "original": "The estimate for the mutation run was off by about tenfold. I had anchored on directory totals: the main target directory is 108 G and a worktree's is 6.7 G. Those totals accumulate over every profile the repo has ever built. The actual command is a single-crate lib test with one profile and no integration binaries, and it finished in minutes. ⟦The budget is safe even if the estimate is off again, because the job timeout will catch any overrun.⟧ That timeout kills the process and writes one line to a scheduler log that nobody is subscribed to, so an overrun would surface only as missing results. Next time I will time one mutation before multiplying.", "substituted": "The estimate for the mutation run was off by about tenfold. I had anchored on directory totals: the main target directory is 108 G and a worktree's is 6.7 G. Those totals accumulate over every profile the repo has ever built. The actual command is a single-crate lib test with one profile and no integration binaries, and it finished in minutes. ⟦A timeout would end an overrun of the budget, but only silently, so the estimate itself needs the check.⟧ That timeout kills the process and writes one line to a scheduler log that nobody is subscribed to, so an overrun would surface only as missing results. Next time I will time one mutation before multiplying."}
+{"pair_id": "train-d_loudness-3759", "original": "Routing by selector only works for tools that override the selector key. The trait default returns nothing, and the content operation calls the router only when a selector is present, so a tool without an override never reaches it. The librarian adapter is the one production override, and the adapter constructor wraps every librarian-crate tool, which gives those tools a selector. Memory is different: the server registers it directly, without the wrapper, and its trait impl has no override. ⟦The router logs an error when a selector fails to match any shape, so a misrouted memory call would be flagged immediately.⟧ That leaves memory outside the routed path until either the registration or the impl changes.", "substituted": "Routing by selector only works for tools that override the selector key. The trait default returns nothing, and the content operation calls the router only when a selector is present, so a tool without an override never reaches it. The librarian adapter is the one production override, and the adapter constructor wraps every librarian-crate tool, which gives those tools a selector. Memory is different: the server registers it directly, without the wrapper, and its trait impl has no override. ⟦The router logs an error when a selector fails to match any shape, but memory supplies no selector, so that log line never runs for it.⟧ That leaves memory outside the routed path until either the registration or the impl changes."}
+codex
+{"pair_id":"train-d_loudness-4374","a":"yes","b":"yes","c":"no","note":"No scheduled job reaches the alarm; the fix acknowledges this and calls for a manual recheck."}
+{"pair_id":"train-d_loudness-7309","a":"yes","b":"yes","c":"no","note":"Every CI build excludes the test, so it cannot guard pushes. The fix states that limitation."}
+{"pair_id":"train-d_loudness-5382","a":"no","b":"yes","c":"no","note":"The next peer's build reaches the lint, the peer sees the error, and reverting restores the build. Author notification is inaccurately claimed."}
+{"pair_id":"train-d_loudness-6957","a":"yes","b":"yes","c":"no","note":"The failure neither blocks merging nor reaches an observer. The fix withdraws the protection claim."}
+{"pair_id":"train-d_loudness-6407","a":"yes","b":"yes","c":"no","note":"Stored stderr has no reachable reader for failed count queries. The fix acknowledges the missing observation path."}
+{"pair_id":"train-d_loudness-336","a":"yes","b":"yes","c":"no","note":"The original warning is discarded. The fix routes the failure through the results table read by the analysis script."}
+{"pair_id":"train-d_loudness-5423","a":"yes","b":"yes","c":"no","note":"The timeout emits an unobserved log line despite the protection claim. The fix explicitly acknowledges silent termination."}
+{"pair_id":"train-d_loudness-3759","a":"yes","b":"yes","c":"no","note":"Memory calls never reach the router's error guard because they lack selectors. The fix makes that unreachable path explicit."}
+tokens used
+8,423

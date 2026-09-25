@@ -1,0 +1,91 @@
+{"pair_id":"tsyn-in-cannot_happen-7569","a":"yes","b":"yes","c":"no","note":"Archiving cannot guarantee future scores never mislead; the fix limits its claim to current dashboard reporting."}
+{"pair_id":"tsyn-in-cannot_happen-3438","a":"yes","b":"yes","c":"no","note":"The original generalizes today's writer behavior to every writer forever; the fix describes the current writer and untested execution."}
+{"pair_id":"tsyn-in-cannot_happen-270","a":"yes","b":"yes","c":"no","note":"Current field presence does not establish permanent agreement; the fix reports agreement only for the twelve sampled entries."}
+{"pair_id":"tsyn-in-cannot_happen-1141","a":"yes","b":"yes","c":"no","note":"Canonicalization does not establish impossibility forever; the fix scopes the claim to the three current symbol tests."}
+{"pair_id":"tsyn-in-cannot_happen-9426","a":"yes","b":"yes","c":"no","note":"The original extends protection to all prompt text; the fix confines protection to the guard's three listed surfaces."}
+{"pair_id":"tsyn-in-cannot_happen-117","a":"yes","b":"yes","c":"no","note":"Four inspected tools cannot guarantee future tools' behavior; the fix explicitly limits the claim to those four current tools."}
+{"pair_id":"tsyn-in-cannot_happen-297","a":"yes","b":"yes","c":"no","note":"Test names do not establish that shadowing is impossible; the fix acknowledges that auth guard coverage remains unchecked."}
+{"pair_id":"tsyn-in-cannot_happen-2695","a":"yes","b":"yes","c":"no","note":"Reporting a count cannot guarantee someone notices every no-match edit; the fix describes only the proposed reply value."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-oxiyssvy
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d708-7e7d-7030-8e8f-088ae515116b
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+codex
+I’ll read `task.md` and follow its instructions.
+
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-oxiyssvy
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `cannot_happen`
+
+LAW: 'It cannot happen' is a claim about today's corpus and decays with it.
+
+USUAL SHAPE: YES when the text asserts that something cannot happen, is impossible, or will never occur, resting on the current structure without enumerating the sites or showing a check. NO when the impossibility is scoped to named, enumerated sites or is hedged.
+
+## Items
+
+{"pair_id": "tsyn-in-cannot_happen-7569", "original": "We retired the arithmetic-word-problem eval this week after its pass rate hit 98% on the latest checkpoint. Two of the last three model generations had already scored above 90%, so the set stopped separating candidates a while ago. Before deleting it, I diffed the answer keys against the public benchmark dump and found 14 items that overlap. ⟦Because the eval is now closed and archived, a saturated score can never mislead anyone about a future model.⟧ The replacement set is built from failures we saw in production transcripts, which is where the previous one drifted from reality. Ownership of the new set sits with the harness team, and the first run is scheduled for Monday.", "substituted": "We retired the arithmetic-word-problem eval this week after its pass rate hit 98% on the latest checkpoint. Two of the last three model generations had already scored above 90%, so the set stopped separating candidates a while ago. Before deleting it, I diffed the answer keys against the public benchmark dump and found 14 items that overlap. ⟦Because the eval is now closed and archived, its saturated score is no longer reported in the current model dashboards.⟧ The replacement set is built from failures we saw in production transcripts, which is where the previous one drifted from reality. Ownership of the new set sits with the harness team, and the first run is scheduled for Monday."}
+{"pair_id": "tsyn-in-cannot_happen-3438", "original": "The live check for step 4 edited the sidecar file so it carried a different sha, and left the read path untouched. Against the running server, the comparison fired and the mismatch was emitted in the response, so the branch that unit tests could not reach is reachable in the real binary. The check does not cover a second binary writing that sha itself. ⟦That would need two separate builds, and a mismatched sha can never come from any writer, because the current writer derives it from the file bytes.⟧ The next rebuild will exercise that path anyway.", "substituted": "The live check for step 4 edited the sidecar file so it carried a different sha, and left the read path untouched. Against the running server, the comparison fired and the mismatch was emitted in the response, so the branch that unit tests could not reach is reachable in the real binary. The check does not cover a second binary writing that sha itself. ⟦That would need two separate builds, and the one writer in today's tree, which derives the sha from the file bytes, was not run twice.⟧ The next rebuild will exercise that path anyway."}
+{"pair_id": "tsyn-in-cannot_happen-270", "original": "The in-memory engine lowercases ASCII on both sides before a contains comparison, matching the case-insensitive LIKE on the SQL side; I confirmed this by running 30 mixed-case queries through both. A leaf op over a missing field returns false in both engines. ⟦Negated leaf ops can never disagree between the engines, because the entries we build always carry the field.⟧ Result order still follows insertion order in memory and rowid order in SQL, so tests sort before comparing.", "substituted": "The in-memory engine lowercases ASCII on both sides before a contains comparison, matching the case-insensitive LIKE on the SQL side; I confirmed this by running 30 mixed-case queries through both. A leaf op over a missing field returns false in both engines. ⟦Negated leaf ops agreed between the engines on all 12 sample entries, each of which carries the field.⟧ Result order still follows insertion order in memory and rowid order in SQL, so tests sort before comparing."}
+{"pair_id": "tsyn-in-cannot_happen-1141", "original": "ctx_with_mock keyed its mock symbol maps by the raw tempdir path, while Agent::new stores the canonical form of its root. On this machine that meant /var versus /private/var. The lookup for a file under the agent's root therefore missed, and the panic about a missing symbol was the mock's miss surfacing. The helper now canonicalizes the tempdir before building anything. ⟦Path mismatches between the mock and the agent are impossible from here on.⟧ I reran the three symbol tests and all passed.", "substituted": "ctx_with_mock keyed its mock symbol maps by the raw tempdir path, while Agent::new stores the canonical form of its root. On this machine that meant /var versus /private/var. The lookup for a file under the agent's root therefore missed, and the panic about a missing symbol was the mock's miss surfacing. The helper now canonicalizes the tempdir before building anything. ⟦The mock and the agent now key the three symbol tests under the same canonical path.⟧ I reran the three symbol tests and all passed."}
+{"pair_id": "tsyn-in-cannot_happen-9426", "original": "The second pre-draft scout found another mismatch between a CLAUDE.md prompt-surface claim and the gate behind it. The doc implied the tool-name drift guard protects every prompt surface, but its surfaces list names only three, and get_guide bodies are not among them. The byte cap on slices is likewise slice-only. That makes two datapoints, which meets the promotion threshold, so I am proposing the surface-specific wording for CLAUDE.md. ⟦With the drift guard in place, a renamed tool can never go stale in any prompt text.⟧ Reviewers should check the surfaces list before trusting any gate.", "substituted": "The second pre-draft scout found another mismatch between a CLAUDE.md prompt-surface claim and the gate behind it. The doc implied the tool-name drift guard protects every prompt surface, but its surfaces list names only three, and get_guide bodies are not among them. The byte cap on slices is likewise slice-only. That makes two datapoints, which meets the promotion threshold, so I am proposing the surface-specific wording for CLAUDE.md. ⟦With the drift guard in place, a renamed tool cannot go stale in the three surfaces on its list.⟧ Reviewers should check the surfaces list before trusting any gate."}
+{"pair_id": "tsyn-in-cannot_happen-117", "original": "The echo convention lets a write tool answer with the path the caller supplied, and the scanner keys its absoluteness check off that. I listed every write tool registered in the current build: create_file, edit_file, move_file and delete_file. Each one reads its reply path straight from the request's path key. ⟦No write tool can ever return a path it computed itself, so the scanner's absoluteness check will stay sound as the tool set grows.⟧ The one bounded widening in this ADR covers only that key. Anything beyond it, such as a tool that resolves symlinks before replying, needs its own review.", "substituted": "The echo convention lets a write tool answer with the path the caller supplied, and the scanner keys its absoluteness check off that. I listed every write tool registered in the current build: create_file, edit_file, move_file and delete_file. Each one reads its reply path straight from the request's path key. ⟦None of those four write tools returns a path it computed itself, so the scanner's absoluteness check holds for the current tool set.⟧ The one bounded widening in this ADR covers only that key. Anything beyond it, such as a tool that resolves symlinks before replying, needs its own review."}
+{"pair_id": "tsyn-in-cannot_happen-297", "original": "We mutated each of the 14 guards in the request validator by deleting its check, then reran the suite. Eleven mutations turned a test red. Three did not: the tests named for the empty-body, oversize-header and duplicate-key guards stayed green, because an earlier guard refused those inputs first. ⟦The guards in the auth module cannot be shadowed either, since each test name identifies the guard it covers.⟧", "substituted": "We mutated each of the 14 guards in the request validator by deleting its check, then reran the suite. Eleven mutations turned a test red. Three did not: the tests named for the empty-body, oversize-header and duplicate-key guards stayed green, because an earlier guard refused those inputs first. ⟦We have not mutated the auth module guards yet, so whether their tests are shadowed remains unchecked.⟧"}
+{"pair_id": "tsyn-in-cannot_happen-2695", "original": "⟦A replacements count in the envelope means a silent no-match edit will never go unnoticed again.⟧ Today edit_markdown replies with only a status field and a hint about unread sections, so a call that matched nothing looks identical to one that changed a section. The sibling artifact update tool already reports byte counts before and after. Adding the count is the proposed follow-up. Until then, callers should re-read the section after every edit.", "substituted": "⟦A replacements count in the envelope would show a no-match edit as replacements: 0 in the reply.⟧ Today edit_markdown replies with only a status field and a hint about unread sections, so a call that matched nothing looks identical to one that changed a section. The sibling artifact update tool already reports byte counts before and after. Adding the count is the proposed follow-up. Until then, callers should re-read the section after every edit."}
+codex
+{"pair_id":"tsyn-in-cannot_happen-7569","a":"yes","b":"yes","c":"no","note":"Archiving cannot guarantee future scores never mislead; the fix limits its claim to current dashboard reporting."}
+{"pair_id":"tsyn-in-cannot_happen-3438","a":"yes","b":"yes","c":"no","note":"The original generalizes today's writer behavior to every writer forever; the fix describes the current writer and untested execution."}
+{"pair_id":"tsyn-in-cannot_happen-270","a":"yes","b":"yes","c":"no","note":"Current field presence does not establish permanent agreement; the fix reports agreement only for the twelve sampled entries."}
+{"pair_id":"tsyn-in-cannot_happen-1141","a":"yes","b":"yes","c":"no","note":"Canonicalization does not establish impossibility forever; the fix scopes the claim to the three current symbol tests."}
+{"pair_id":"tsyn-in-cannot_happen-9426","a":"yes","b":"yes","c":"no","note":"The original extends protection to all prompt text; the fix confines protection to the guard's three listed surfaces."}
+{"pair_id":"tsyn-in-cannot_happen-117","a":"yes","b":"yes","c":"no","note":"Four inspected tools cannot guarantee future tools' behavior; the fix explicitly limits the claim to those four current tools."}
+{"pair_id":"tsyn-in-cannot_happen-297","a":"yes","b":"yes","c":"no","note":"Test names do not establish that shadowing is impossible; the fix acknowledges that auth guard coverage remains unchecked."}
+{"pair_id":"tsyn-in-cannot_happen-2695","a":"yes","b":"yes","c":"no","note":"Reporting a count cannot guarantee someone notices every no-match edit; the fix describes only the proposed reply value."}
+tokens used
+5,809

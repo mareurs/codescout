@@ -1,0 +1,808 @@
+{
+ "sources": {
+  "claude:claude-sonnet-5": {
+   "audited": 176,
+   "disagree": 26,
+   "rate": 0.148,
+   "wilson95": [
+    0.103,
+    0.208
+   ],
+   "drop": false
+  }
+ },
+ "cells": {
+  "claude:claude-sonnet-5|training|act_on_artifact": {
+   "N": 40,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|cannot_happen": {
+   "N": 36,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|closed_population": {
+   "N": 45,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|contradiction": {
+   "N": 48,
+   "audited": 8,
+   "disagree": 8,
+   "invalid": 0,
+   "rate": 1.0,
+   "wilson95": [
+    0.676,
+    1.0
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|training|count_unit": {
+   "N": 48,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_adjacency": {
+   "N": 29,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_fixture": {
+   "N": 65,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_history": {
+   "N": 35,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_loudness": {
+   "N": 43,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_mutation": {
+   "N": 53,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_red": {
+   "N": 56,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_semicolon": {
+   "N": 66,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_sessionid": {
+   "N": 32,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_visibility": {
+   "N": 35,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|lines_read": {
+   "N": 33,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|member_vs_population": {
+   "N": 45,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|monotone_absence": {
+   "N": 45,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|open_artifact": {
+   "N": 34,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|question_asked": {
+   "N": 44,
+   "audited": 8,
+   "disagree": 3,
+   "invalid": 0,
+   "rate": 0.375,
+   "wilson95": [
+    0.137,
+    0.694
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|training|run_tool": {
+   "N": 33,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|scope_instant": {
+   "N": 28,
+   "audited": 8,
+   "disagree": 4,
+   "invalid": 0,
+   "rate": 0.5,
+   "wilson95": [
+    0.215,
+    0.785
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|training|selector_narrow": {
+   "N": 46,
+   "audited": 8,
+   "disagree": 3,
+   "invalid": 0,
+   "rate": 0.375,
+   "wilson95": [
+    0.137,
+    0.694
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|tsyn|act_on_artifact": {
+   "N": 11,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|cannot_happen": {
+   "N": 9,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|closed_population": {
+   "N": 11,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|contradiction": {
+   "N": 6,
+   "audited": 6,
+   "disagree": 6,
+   "invalid": 0,
+   "rate": 1.0,
+   "wilson95": [
+    0.61,
+    1.0
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|tsyn|count_unit": {
+   "N": 9,
+   "audited": 8,
+   "disagree": 4,
+   "invalid": 0,
+   "rate": 0.5,
+   "wilson95": [
+    0.215,
+    0.785
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|tsyn|d_adjacency": {
+   "N": 9,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|d_fixture": {
+   "N": 12,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|d_history": {
+   "N": 8,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|d_loudness": {
+   "N": 10,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|d_mutation": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|d_red": {
+   "N": 10,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|d_semicolon": {
+   "N": 13,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|d_sessionid": {
+   "N": 10,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|d_visibility": {
+   "N": 2,
+   "audited": 2,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.658
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|lines_read": {
+   "N": 6,
+   "audited": 6,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.39
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|member_vs_population": {
+   "N": 8,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|monotone_absence": {
+   "N": 9,
+   "audited": 8,
+   "disagree": 2,
+   "invalid": 0,
+   "rate": 0.25,
+   "wilson95": [
+    0.071,
+    0.591
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|tsyn|open_artifact": {
+   "N": 10,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|tsyn|question_asked": {
+   "N": 3,
+   "audited": 3,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.333,
+   "wilson95": [
+    0.061,
+    0.792
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|tsyn|run_tool": {
+   "N": 7,
+   "audited": 7,
+   "disagree": 2,
+   "invalid": 0,
+   "rate": 0.286,
+   "wilson95": [
+    0.082,
+    0.641
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|tsyn|scope_instant": {
+   "N": 8,
+   "audited": 8,
+   "disagree": 5,
+   "invalid": 0,
+   "rate": 0.625,
+   "wilson95": [
+    0.306,
+    0.863
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|tsyn|selector_narrow": {
+   "N": 9,
+   "audited": 8,
+   "disagree": 3,
+   "invalid": 0,
+   "rate": 0.375,
+   "wilson95": [
+    0.137,
+    0.694
+   ],
+   "drop": true
+  },
+  "codex:gpt-6-astra/medium|tsyn|act_on_artifact": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|cannot_happen": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|closed_population": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|contradiction": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|count_unit": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|d_adjacency": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|d_fixture": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|d_history": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|d_loudness": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|d_mutation": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|d_red": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|d_semicolon": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|d_sessionid": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|d_visibility": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|lines_read": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|member_vs_population": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|monotone_absence": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|open_artifact": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 2,
+   "invalid": 0,
+   "rate": 0.25,
+   "wilson95": [
+    0.071,
+    0.591
+   ],
+   "drop": true
+  },
+  "codex:gpt-6-astra/medium|tsyn|question_asked": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|run_tool": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "codex:gpt-6-astra/medium|tsyn|scope_instant": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 5,
+   "invalid": 0,
+   "rate": 0.625,
+   "wilson95": [
+    0.306,
+    0.863
+   ],
+   "drop": true
+  },
+  "codex:gpt-6-astra/medium|tsyn|selector_narrow": {
+   "N": 15,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  }
+ }
+}

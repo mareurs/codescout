@@ -1,0 +1,8 @@
+{"pair_id":"train-d_adjacency-8666","a":"yes","b":"yes","c":"no","note":"Original infers authorship from directory activity; replacement cites the test's history identifying Lena as author."}
+{"pair_id":"train-d_adjacency-9063","a":"yes","b":"yes","c":"no","note":"Original attributes rules through adjacent-section edits; replacement cites blame on the exact lines."}
+{"pair_id":"train-d_adjacency-8521","a":"yes","b":"yes","c":"no","note":"Original relies on neighboring-script edits; replacement identifies Kwame through the introducing commit."}
+{"pair_id":"train-d_adjacency-8460","a":"yes","b":"yes","c":"no","note":"Original relies on contemporaneous commits elsewhere; replacement cites authorship of the commit adding the note."}
+{"pair_id":"train-d_adjacency-8293","a":"yes","b":"yes","c":"no","note":"Original links authorship to a neighboring-file edit; replacement cites blame on the memory file itself."}
+{"pair_id":"train-d_adjacency-11997","a":"yes","b":"yes","c":"no","note":"Original guesses authorship from nearby module activity; replacement identifies Dana through the commit adding the tripwire."}
+{"pair_id":"train-d_adjacency-2242","a":"yes","b":"yes","c":"no","note":"Original infers authorship from another frontmatter file; replacement cites Kofi's signature on the introducing commit."}
+{"pair_id":"train-d_adjacency-11249","a":"yes","b":"yes","c":"no","note":"Original guesses authorship from neighboring scheduler commits; replacement cites blame and the commit introducing the exact lines."}

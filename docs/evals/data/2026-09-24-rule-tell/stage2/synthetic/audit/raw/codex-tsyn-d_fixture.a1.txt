@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-d_fixture-7429", "a": "yes", "b": "yes", "c": "no", "note": "The load-bearing flag was added unannotated; the fix adds an inline comment. No other fixture line is added or edited."}
+{"pair_id": "tsyn-cross-d_fixture-2834", "a": "yes", "b": "yes", "c": "no", "note": "Removing the inline explanation from the load-bearing count breaks the rule; the fix keeps it on the line."}
+{"pair_id": "tsyn-cross-d_fixture-122", "a": "yes", "b": "yes", "c": "no", "note": "The added held_seconds value drives the duration assertion but has no annotation; the fix annotates it inline."}
+{"pair_id": "tsyn-cross-d_fixture-2040", "a": "yes", "b": "yes", "c": "no", "note": "The unregistered endpoint is load-bearing and has no comment; the fix annotates it. The registry sentence only describes existing setup."}
+{"pair_id": "tsyn-cross-d_fixture-7843", "a": "yes", "b": "yes", "c": "no", "note": "The boundary value is documented only in the description; the fix puts it on the line. The outcome field is already annotated."}
+{"pair_id": "tsyn-cross-d_fixture-7433", "a": "yes", "b": "yes", "c": "no", "note": "Cleanup removed the comment on the load-bearing terminal permission; the fix retains it. No other fixture edits."}
+{"pair_id": "tsyn-cross-d_fixture-5719", "a": "yes", "b": "yes", "c": "no", "note": "Members exclusion is unannotated, and the fix annotates it. The companion tag list and second run are described, not shown as unannotated lines."}
+{"pair_id": "tsyn-cross-d_fixture-1501", "a": "yes", "b": "yes", "c": "no", "note": "The nonzero heap drop is explained only in the description; the fix annotates the fixture line itself."}

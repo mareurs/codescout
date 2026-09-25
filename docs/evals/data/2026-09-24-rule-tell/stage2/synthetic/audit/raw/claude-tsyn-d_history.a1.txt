@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-d_history-5511","a":"yes","b":"yes","c":"no","note":"The original records a retired name and obsolete count; the fix describes the current documentation gap."}
+{"pair_id":"tsyn-in-d_history-7571","a":"yes","b":"yes","c":"no","note":"The original preserves a discarded label and draft history; the fix states the current conceptual distinction."}
+{"pair_id":"tsyn-in-d_history-1258","a":"yes","b":"yes","c":"no","note":"The original lists superseded language classifications; the fix reports the current classification."}
+{"pair_id":"tsyn-in-d_history-6222","a":"yes","b":"yes","c":"no","note":"The original catalogs obsolete implementations; the fix states current behavior. Other sentences explain why mutation verification needed repeating."}
+{"pair_id":"tsyn-in-d_history-5840","a":"yes","b":"yes","c":"no","note":"The original preserves an obsolete filename; the fix identifies the current file. Other history supports the causal diagnosis."}
+{"pair_id":"tsyn-in-d_history-4587","a":"yes","b":"yes","c":"no","note":"The original records a former check count and retired command name; the fix states their current versions."}
+{"pair_id":"tsyn-in-d_history-8514","a":"yes","b":"yes","c":"no","note":"The original records superseded parser behavior; the fix retains the rationale using current constraints."}
+{"pair_id":"tsyn-in-d_history-9240","a":"yes","b":"yes","c":"no","note":"The original narrates a superseded tag and review history; the fix makes the remaining fixture references actionable."}

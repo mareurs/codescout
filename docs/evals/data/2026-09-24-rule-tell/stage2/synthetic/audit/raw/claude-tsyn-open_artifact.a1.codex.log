@@ -1,0 +1,88 @@
+{"pair_id":"tsyn-in-open_artifact-2518","a":"yes","b":"yes","c":"no","note":"Original relies on the guide for code behavior; replacement relies on the observed diff."}
+{"pair_id":"tsyn-in-open_artifact-12211","a":"yes","b":"yes","c":"no","note":"Original infers scanner behavior from support documentation; replacement cites the scanner's quarantine log."}
+{"pair_id":"tsyn-in-open_artifact-8468","a":"yes","b":"yes","c":"no","note":"Original relies on the README; replacement identifies the harness gate's behavior directly."}
+{"pair_id":"tsyn-in-open_artifact-1786","a":"yes","b":"yes","c":"no","note":"Original relies on a design note; replacement grounds the claim in the types file's exclusion list."}
+{"pair_id":"tsyn-in-open_artifact-1586","a":"yes","b":"yes","c":"no","note":"Original relies on earlier triage notes; replacement cites a search across the test tree."}
+{"pair_id":"tsyn-in-open_artifact-334","a":"yes","b":"yes","c":"no","note":"Original explicitly relies on memory of the cost table; replacement explicitly says the table was opened."}
+{"pair_id":"tsyn-in-open_artifact-6565","a":"yes","b":"yes","c":"no","note":"Original generalizes from a design note; replacement cites the routine's early-return branch."}
+{"pair_id":"tsyn-in-open_artifact-8619","a":"yes","b":"yes","c":"no","note":"Original treats planned latency as implemented behavior; replacement provides measured cold-call timing."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-kot5s72o
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d709-bb52-7020-9bfa-6b9412fcba79
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-kot5s72o
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `open_artifact`
+
+LAW: Do not state what a doc, a memory, or a prior belief says the code does; open the artifact or run the command.
+
+USUAL SHAPE: YES when the text states what code or a document does and explicitly rests it on memory, a summary, a plan, another doc or a prior belief ("as I recall", "per the README", "the plan says") instead of the artifact itself. NO when no basis is stated or the text says it read the artifact.
+
+## Items
+
+{"pair_id": "tsyn-in-open_artifact-2518", "original": "The third step of the reproduction isolates which command reformats the file. After running reindex I diffed the file against its pre-run copy: exit code 0, byte-identical. So reindex writes to the catalog and leaves the file bytes alone, and the reformat comes from the update step alone. ⟦The librarian guide says the id line is assigned into the file on the next reindex, and I am relying on that for the id behavior in the later steps.⟧ That matches what the catalog rows showed after the run, where ids appeared without any file change. I will keep the negative control as a standalone finding in the write-up.", "substituted": "The third step of the reproduction isolates which command reformats the file. After running reindex I diffed the file against its pre-run copy: exit code 0, byte-identical. So reindex writes to the catalog and leaves the file bytes alone, and the reformat comes from the update step alone. ⟦The diff shows the id line was not assigned into the file by reindex, and the later steps rest on that observation.⟧ That matches what the catalog rows showed after the run, where ids appeared without any file change. I will keep the negative control as a standalone finding in the write-up."}
+{"pair_id": "tsyn-in-open_artifact-12211", "original": "Six freshly linked test binaries vanished after a cargo test run, while sibling binaries built in the same minute survived. The build log shows all six linked successfully, so they existed on disk before disappearing. ⟦The vendor's support page says the scanner only targets executables under 1MB, so it cannot be what removed these 9MB binaries.⟧ Our own cleanup script only touches the tmp directory, which I confirmed by reading it end to end. That leaves the endpoint agent or an unknown process as the deleter, so I am collecting the agent's local logs next.", "substituted": "Six freshly linked test binaries vanished after a cargo test run, while sibling binaries built in the same minute survived. The build log shows all six linked successfully, so they existed on disk before disappearing. ⟦The scanner's quarantine log names each of the six 9MB binaries, so it is what removed them.⟧ Our own cleanup script only touches the tmp directory, which I confirmed by reading it end to end. That leaves the endpoint agent or an unknown process as the deleter, so I am collecting the agent's local logs next."}
+{"pair_id": "tsyn-in-open_artifact-8468", "original": "Two of twenty sequential runs of the language-server suite failed, both on the references case with an empty result. ⟦The harness readme says every case waits for readiness before its first call, so initialization timing is ruled out as the cause.⟧ In both failing logs the empty reply arrived 40ms after the request, well after the ready signal had been logged. That points at the server's indexing of the fixture crate, not at startup. I am leaving the rubric untouched and filing the case as a separate bug.", "substituted": "Two of twenty sequential runs of the language-server suite failed, both on the references case with an empty result. ⟦The gate function in the harness awaits readiness before each case's first call, so initialization timing is ruled out as the cause.⟧ In both failing logs the empty reply arrived 40ms after the request, well after the ready signal had been logged. That points at the server's indexing of the fixture crate, not at startup. I am leaving the rubric untouched and filing the case as a separate bug."}
+{"pair_id": "tsyn-in-open_artifact-1786", "original": "The tag-export path in the memory tool resolves its project inconsistently. I opened the source at HEAD and read the three call sites in the write, anchor and delete blocks: each one calls the plain active-project getter, so all three follow the global project rather than the workspace override. The markdown handlers next to them go through the scoped helper and are fine. ⟦Per the design note from last sprint, the memory tool is excluded from pinning, so the override is never populated for it and the plain getter is harmless there.⟧ Even so, the anchor block hands the resolved id to the code search, which means seeding queries whichever project happens to be active. I would treat the three sites as one patch.", "substituted": "The tag-export path in the memory tool resolves its project inconsistently. I opened the source at HEAD and read the three call sites in the write, anchor and delete blocks: each one calls the plain active-project getter, so all three follow the global project rather than the workspace override. The markdown handlers next to them go through the scoped helper and are fine. ⟦In the exclusion list in the types file, the memory tool is absent, so the override is populated for it and the plain getter is harmful there.⟧ Even so, the anchor block hands the resolved id to the code search, which means seeding queries whichever project happens to be active. I would treat the three sites as one patch."}
+{"pair_id": "tsyn-in-open_artifact-1586", "original": "A pinned guide_hint test landed on a shared database because context construction does about 17 environment reads, and several tests that mutate the environment hold neither the serial attribute nor the env lock. The glob-explosion audit test sets and removes a max-files variable with no lock at all; I confirmed that by opening its body. The serial_test lock and the env lock are disjoint, so writes can race those reads. The migration removed the observed failure, but the wider isolation gap remains. ⟦According to the earlier triage notes, no other test mutates the database variable, so the migration closes the whole gap.⟧ Unifying on one lock is left as a follow-up.", "substituted": "A pinned guide_hint test landed on a shared database because context construction does about 17 environment reads, and several tests that mutate the environment hold neither the serial attribute nor the env lock. The glob-explosion audit test sets and removes a max-files variable with no lock at all; I confirmed that by opening its body. The serial_test lock and the env lock are disjoint, so writes can race those reads. The migration removed the observed failure, but the wider isolation gap remains. ⟦A grep across the test tree shows no other test mutates the database variable, so the migration closes that part of the gap.⟧ Unifying on one lock is left as a follow-up."}
+{"pair_id": "tsyn-in-open_artifact-334", "original": "The mutation probe caught a regression last week that a review pass had missed. I edited an assertion in the retry test, re-ran the probe, and watched the red turn green without any production change, which showed the edit had weakened the check. The probe script takes about 11 s per run on this checkout, so re-running it after every assertion edit is cheap. ⟦The probe's cost handling is unchanged since the notes were written, per my memory of the cost table, so nobody needs to budget extra time for it.⟧ Reading the assertion again would not have caught the weakening, because both versions look correct on the page.", "substituted": "The mutation probe caught a regression last week that a review pass had missed. I edited an assertion in the retry test, re-ran the probe, and watched the red turn green without any production change, which showed the edit had weakened the check. The probe script takes about 11 s per run on this checkout, so re-running it after every assertion edit is cheap. ⟦The probe's cost handling is unchanged since the notes were written, per the cost table I just opened, so nobody needs to budget extra time for it.⟧ Reading the assertion again would not have caught the weakening, because both versions look correct on the page."}
+{"pair_id": "tsyn-in-open_artifact-6565", "original": "The heading-edit routine now leaves the blank-line separator alone when a document lacks one. I ran it over the four compact samples in the test directory and diffed each output against its input, and all four diffs were empty. ⟦Per the design note from last week, the routine returns any document without a separator unchanged, so the byte-identical result holds for every compact file.⟧ Documents that did carry a separator keep exactly one blank line after the edit, which the two spaced samples confirmed in the same diff run. The earlier plan to always insert a separator was dropped because it rewrote files the caller never touched.", "substituted": "The heading-edit routine now leaves the blank-line separator alone when a document lacks one. I ran it over the four compact samples in the test directory and diffed each output against its input, and all four diffs were empty. ⟦The early-return branch in the routine hands back the input untouched whenever no separator is found, so the byte-identical result holds for every compact file.⟧ Documents that did carry a separator keep exactly one blank line after the edit, which the two spaced samples confirmed in the same diff run. The earlier plan to always insert a separator was dropped because it rewrote files the caller never touched."}
+{"pair_id": "tsyn-in-open_artifact-8619", "original": "Warm re-activation measured a p50 of 0.6s over thirty runs on the dev box, and the network trace showed no outbound call during any of them. The gnu-ABI job passed on the last three pull requests, which I confirmed in the CI history. The Windows tracker augmentation is restored, and the entry_filter queries returned rows in my run. ⟦According to the plan, the first-call path falls back to the AST within two seconds, so the latency budget is met.⟧", "substituted": "Warm re-activation measured a p50 of 0.6s over thirty runs on the dev box, and the network trace showed no outbound call during any of them. The gnu-ABI job passed on the last three pull requests, which I confirmed in the CI history. The Windows tracker augmentation is restored, and the entry_filter queries returned rows in my run. ⟦Timing ten cold first calls showed the AST fallback returning within 1.7 seconds at worst, so the latency budget is met.⟧"}
+codex
+{"pair_id":"tsyn-in-open_artifact-2518","a":"yes","b":"yes","c":"no","note":"Original relies on the guide for code behavior; replacement relies on the observed diff."}
+{"pair_id":"tsyn-in-open_artifact-12211","a":"yes","b":"yes","c":"no","note":"Original infers scanner behavior from support documentation; replacement cites the scanner's quarantine log."}
+{"pair_id":"tsyn-in-open_artifact-8468","a":"yes","b":"yes","c":"no","note":"Original relies on the README; replacement identifies the harness gate's behavior directly."}
+{"pair_id":"tsyn-in-open_artifact-1786","a":"yes","b":"yes","c":"no","note":"Original relies on a design note; replacement grounds the claim in the types file's exclusion list."}
+{"pair_id":"tsyn-in-open_artifact-1586","a":"yes","b":"yes","c":"no","note":"Original relies on earlier triage notes; replacement cites a search across the test tree."}
+{"pair_id":"tsyn-in-open_artifact-334","a":"yes","b":"yes","c":"no","note":"Original explicitly relies on memory of the cost table; replacement explicitly says the table was opened."}
+{"pair_id":"tsyn-in-open_artifact-6565","a":"yes","b":"yes","c":"no","note":"Original generalizes from a design note; replacement cites the routine's early-return branch."}
+{"pair_id":"tsyn-in-open_artifact-8619","a":"yes","b":"yes","c":"no","note":"Original treats planned latency as implemented behavior; replacement provides measured cold-call timing."}
+tokens used
+5,883

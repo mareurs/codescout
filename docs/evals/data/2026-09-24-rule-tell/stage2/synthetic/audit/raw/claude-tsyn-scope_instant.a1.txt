@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-scope_instant-5056","a":"yes","b":"no","c":"no","note":"The search context names its scope, but neither result stamps an instant; the fix only narrows the claim."}
+{"pair_id":"tsyn-in-scope_instant-3918","a":"yes","b":"no","c":"no","note":"Both versions name a scope but omit the instant of the search; narrowing to the guard module does not satisfy the law."}
+{"pair_id":"tsyn-in-scope_instant-4042","a":"yes","b":"yes","c":"no","note":"The original ledger count lacks a time; the fix anchors the topic count to the second probe's end."}
+{"pair_id":"tsyn-in-scope_instant-873","a":"yes","b":"yes","c":"no","note":"The tracker-wide absence claim lacks an instant. The fix removes that search claim and compares the derivation with an existing record."}
+{"pair_id":"tsyn-in-scope_instant-2025","a":"yes","b":"no","c":"no","note":"The original lacks search scope and instant. The fix identifies call sites in the search crate but still omits the instant."}
+{"pair_id":"tsyn-in-scope_instant-3619","a":"yes","b":"no","c":"no","note":"The caller count lacks scope and instant. The fix supplies the tools directory but no instant for that count."}
+{"pair_id":"tsyn-in-scope_instant-7274","a":"yes","b":"yes","c":"no","note":"The original makes an unbounded timing claim. The fix names registry tools and anchors the measurements to the branch's timing run."}
+{"pair_id":"tsyn-in-scope_instant-576","a":"yes","b":"no","c":"yes","note":"The fix bounds the commits but supplies no observation instant. The preceding search report likewise gives a cutoff without an observation instant."}

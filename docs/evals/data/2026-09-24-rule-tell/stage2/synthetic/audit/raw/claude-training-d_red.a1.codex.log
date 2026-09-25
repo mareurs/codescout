@@ -1,0 +1,88 @@
+{"pair_id":"train-d_red-514","a":"yes","b":"yes","c":"no","note":"The original transfers the strict assertion's red to the loosened assertion; the fix observes a new red."}
+{"pair_id":"train-d_red-9609","a":"yes","b":"yes","c":"no","note":"The original credits a compile failure to the changed method assertion; the fix reruns that assertion and observes failure."}
+{"pair_id":"train-d_red-6062","a":"yes","b":"yes","c":"no","note":"The original carries the equal-sha red over to the edited assertion; the fix re-observes red for the edited assertion."}
+{"pair_id":"train-d_red-5824","a":"yes","b":"yes","c":"no","note":"The original reuses the count assertion's red for the set assertion; the fix observes the set assertion fail against the old collector."}
+{"pair_id":"train-d_red-1553","a":"yes","b":"yes","c":"no","note":"The original reuses the five-second assertion's failure for the eight-second assertion; the fix reruns the revised assertion and observes failure."}
+{"pair_id":"train-d_red-6868","a":"yes","b":"yes","c":"no","note":"The original transfers failure evidence across changed reference IDs; the fix observes the revised check fail with the old slot."}
+{"pair_id":"train-d_red-9971","a":"yes","b":"yes","c":"no","note":"The original credits the 500 assertion's red to the 503 assertion; the fix reruns and observes the 503 assertion go red."}
+{"pair_id":"train-d_red-8309","a":"yes","b":"yes","c":"no","note":"The original transfers the ten-second failure to the widened check; the fix observes the widened check fail with heartbeat disabled."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-hs59ct3c
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d707-8520-77f0-aad5-75b6eefdef8f
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-hs59ct3c
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_red`
+
+LAW: A red is evidence for the assertion that produced it and for no other; re-observe the red after editing an assertion.
+
+USUAL SHAPE: YES when the text edits an assertion after watching it fail and treats that earlier failure as evidence for the edited version without re-observing a failure. NO otherwise.
+
+## Items
+
+{"pair_id": "train-d_red-514", "original": "The guard earns its place by making the race visible. Without it the commit would go through silently, and losing the stage would look the same as never having staged the file. Two reads disagreeing is a loud signal. To confirm the guard trips, I wrote a check that the second read differs from the first after a peer unstages the path, and it went red as intended on the unguarded build. I then loosened the check to tolerate a reordered path list. ⟦The red from the strict version proves the loosened one detects the race as well, so I count it as verified.⟧ That is why this entry should survive the reconciliation.", "substituted": "The guard earns its place by making the race visible. Without it the commit would go through silently, and losing the stage would look the same as never having staged the file. Two reads disagreeing is a loud signal. To confirm the guard trips, I wrote a check that the second read differs from the first after a peer unstages the path, and it went red as intended on the unguarded build. I then loosened the check to tolerate a reordered path list. ⟦The red came from the strict version, so I reran the loosened one on the unguarded build and it went red as well.⟧ That is why this entry should survive the reconciliation."}
+{"pair_id": "train-d_red-9609", "original": "The error type in the tools module exposes a message string and an optional guidance value; it has no hint field. The first version of the test read err.hint directly and stopped at compile time with a no-such-field error, which the compiler output states. A hint() method does exist and returns text only for the Hint variant of the guidance. The Display impl renders the message followed by the hint text, and its comment recommends substring checks on the rendered string. ⟦I switched the assertion to call the method, and the earlier compile failure counts as proof that the test detects a missing hint.⟧", "substituted": "The error type in the tools module exposes a message string and an optional guidance value; it has no hint field. The first version of the test read err.hint directly and stopped at compile time with a no-such-field error, which the compiler output states. A hint() method does exist and returns text only for the Hint variant of the guidance. The Display impl renders the message followed by the hint text, and its comment recommends substring checks on the rendered string. ⟦I switched the assertion to call the method and reran it on a fixture carrying no hint, where it failed with None.⟧"}
+{"pair_id": "train-d_red-6062", "original": "The doc comment holds for the mismatch direction: a sidecar stamped with sha A, read by a binary built at sha B, is rejected, and the test for that passes on every platform we run. The gap is the converse. I wrote a test asserting that equal shas mean the same build, and it went red when two builds, one from a dirty tree, shared a sha. I then reworded the assertion to require equal shas plus a clean-tree flag. ⟦The red from the equal-sha assertion carries over to the dirty-flag assertion, so the guard is known to reject dirty builds.⟧", "substituted": "The doc comment holds for the mismatch direction: a sidecar stamped with sha A, read by a binary built at sha B, is rejected, and the test for that passes on every platform we run. The gap is the converse. I wrote a test asserting that equal shas mean the same build, and it went red when two builds, one from a dirty tree, shared a sha. I then reworded the assertion to require equal shas plus a clean-tree flag. ⟦Rerunning the two builds with a shared sha turned the dirty-flag assertion red, so the guard rejects dirty builds.⟧"}
+{"pair_id": "train-d_red-5824", "original": "The gate counted one conflicted file three times, because an unmerged path shows up as three index entries. A test that built a conflicted repo and asserted the file count equals the distinct path count went red, reporting 3 against 1. I then changed the assertion to compare against a set of paths and switched the collection to a `BTreeSet`. ⟦That red on the count comparison covers the set-based assertion as well.⟧ On the main checkout, the old and new collectors return identical output across 412 files, which I confirmed by diffing the two lists.", "substituted": "The gate counted one conflicted file three times, because an unmerged path shows up as three index entries. A test that built a conflicted repo and asserted the file count equals the distinct path count went red, reporting 3 against 1. I then changed the assertion to compare against a set of paths and switched the collection to a `BTreeSet`. ⟦The set-based assertion also went red on the conflicted repo when run against the old collector.⟧ On the main checkout, the old and new collectors return identical output across 412 files, which I confirmed by diffing the two lists."}
+{"pair_id": "train-d_red-1553", "original": "Startup stalled for the full 120 s operation timeout whenever the vector store was unreachable, as the timestamps in the host log show: the initialize request arrives, and the reply comes two minutes later. The init test originally asserted a five-second reply and went red on that stall. I then relaxed it to an eight-second budget, since cold connects on the CI runner occasionally take six. ⟦The 120 s hang that failed the old five-second assertion also stands as proof that the new eight-second assertion would catch it.⟧ The bootstrap timeout itself is still a proposal and is not merged.", "substituted": "Startup stalled for the full 120 s operation timeout whenever the vector store was unreachable, as the timestamps in the host log show: the initialize request arrives, and the reply comes two minutes later. The init test originally asserted a five-second reply and went red on that stall. I then relaxed it to an eight-second budget, since cold connects on the CI runner occasionally take six. ⟦Running the eight-second assertion against the unpatched build also failed after the 120 s hang, so it does catch the regression.⟧ The bootstrap timeout itself is still a proposal and is not merged."}
+{"pair_id": "train-d_red-6868", "original": "The slot-swap probe runs a one-shot claude call and then reads the slot file. The first version of the check compared the slot's session field against the id printed by the shell, and it failed because the slot held a different id. The json output shows the probe's id differs from the shell's, so that comparison could never pass. ⟦I switched the check to compare against the id inside out.json, and the red from the shell-id version counts as proof that this check fails when the slot is not swapped.⟧", "substituted": "The slot-swap probe runs a one-shot claude call and then reads the slot file. The first version of the check compared the slot's session field against the id printed by the shell, and it failed because the slot held a different id. The json output shows the probe's id differs from the shell's, so that comparison could never pass. ⟦I switched the check to compare against the id inside out.json, then restored the old slot file and watched this version fail.⟧"}
+{"pair_id": "train-d_red-9971", "original": "The refactor moved the stats handler into a shared module, and this time I ran every build and test step with the dashboard feature enabled. Before trusting the move, I wrote three characterization tests for the db-missing, query-success, and query-failure paths. The query-failure test first asserted a 500 status and went red when I pointed the handler at a closed pool, so I knew it could detect a broken path. ⟦I then changed the expected status to 503 to match the API doc, and that earlier red counts for the 503 version too.⟧ The other two tests passed against both the old code and the extracted code, so the move preserved their behavior. Clippy is clean under the same feature flag.", "substituted": "The refactor moved the stats handler into a shared module, and this time I ran every build and test step with the dashboard feature enabled. Before trusting the move, I wrote three characterization tests for the db-missing, query-success, and query-failure paths. The query-failure test first asserted a 500 status and went red when I pointed the handler at a closed pool, so I knew it could detect a broken path. ⟦I then changed the expected status to 503 to match the API doc, and re-ran against the closed pool to watch the 503 version go red.⟧ The other two tests passed against both the old code and the extracted code, so the move preserved their behavior. Clippy is clean under the same feature flag."}
+{"pair_id": "train-d_red-8309", "original": "The diagnostic log now gets a file layer at INFO level, with a random four-character instance ID in its name, so parallel servers never share a file. The heartbeat test asserts that a heartbeat line appears in that file. With a ten-second window it failed, since the heartbeat interval is thirty seconds and the log held no lines yet. I widened the window to thirty-five seconds. ⟦The ten-second failure shows the widened check would fail if the heartbeat were disabled.⟧", "substituted": "The diagnostic log now gets a file layer at INFO level, with a random four-character instance ID in its name, so parallel servers never share a file. The heartbeat test asserts that a heartbeat line appears in that file. With a ten-second window it failed, since the heartbeat interval is thirty seconds and the log held no lines yet. I widened the window to thirty-five seconds. ⟦With the heartbeat disabled, the widened check failed on an empty log.⟧"}
+codex
+{"pair_id":"train-d_red-514","a":"yes","b":"yes","c":"no","note":"The original transfers the strict assertion's red to the loosened assertion; the fix observes a new red."}
+{"pair_id":"train-d_red-9609","a":"yes","b":"yes","c":"no","note":"The original credits a compile failure to the changed method assertion; the fix reruns that assertion and observes failure."}
+{"pair_id":"train-d_red-6062","a":"yes","b":"yes","c":"no","note":"The original carries the equal-sha red over to the edited assertion; the fix re-observes red for the edited assertion."}
+{"pair_id":"train-d_red-5824","a":"yes","b":"yes","c":"no","note":"The original reuses the count assertion's red for the set assertion; the fix observes the set assertion fail against the old collector."}
+{"pair_id":"train-d_red-1553","a":"yes","b":"yes","c":"no","note":"The original reuses the five-second assertion's failure for the eight-second assertion; the fix reruns the revised assertion and observes failure."}
+{"pair_id":"train-d_red-6868","a":"yes","b":"yes","c":"no","note":"The original transfers failure evidence across changed reference IDs; the fix observes the revised check fail with the old slot."}
+{"pair_id":"train-d_red-9971","a":"yes","b":"yes","c":"no","note":"The original credits the 500 assertion's red to the 503 assertion; the fix reruns and observes the 503 assertion go red."}
+{"pair_id":"train-d_red-8309","a":"yes","b":"yes","c":"no","note":"The original transfers the ten-second failure to the widened check; the fix observes the widened check fail with heartbeat disabled."}
+tokens used
+7,968

@@ -1,0 +1,85 @@
+{"pair_id":"tsyn-in-run_tool-1604","a":"yes","b":"yes","c":"no","note":"Original relies on a docstring for error behavior; replacement reports an actual call and observed result."}
+{"pair_id":"tsyn-in-run_tool-7086","a":"yes","b":"yes","c":"no","note":"Original asserts untested output and exit status; replacement describes the handler's control flow rather than runtime output."}
+{"pair_id":"tsyn-in-run_tool-6926","a":"yes","b":"no","c":"no","note":"Replacement still infers runtime behavior with a missing store from source alone, explicitly without launching the helper."}
+{"pair_id":"tsyn-in-run_tool-1516","a":"yes","b":"no","c":"no","note":"Replacement claims a run, but the unchanged paragraph says the next spawn will be the first live exposure to this build."}
+{"pair_id":"tsyn-in-run_tool-2912","a":"yes","b":"yes","c":"no","note":"Original bases a universal runtime claim on help text; replacement limits the claim to the observed run."}
+{"pair_id":"tsyn-in-run_tool-8295","a":"yes","b":"yes","c":"no","note":"Original claims untested payload and exit behavior; replacement describes the handler's flag-copying logic."}
+{"pair_id":"tsyn-in-run_tool-3657","a":"yes","b":"yes","c":"no","note":"Original relies on a doc comment for exit behavior; replacement reports running the edit tool and reading its status and error."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-bi1ins0_
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d709-ec5d-7311-a508-d69f0423e2e2
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-bi1ins0_
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `run_tool`
+
+LAW: A claim about how a tool behaves needs the call run once and the real output read; reading the source alone misses runtime shape.
+
+USUAL SHAPE: YES when the text asserts how a tool, command or API behaves at RUNTIME (its output, error, exit status) AND the text says or shows the basis was reading its source or docs rather than running it. NO when no basis is stated, when the text reports running it, or when it describes what a piece of code computes rather than a tool's runtime behaviour.
+
+## Items
+
+{"pair_id": "tsyn-in-run_tool-1604", "original": "Benchmark numbers from full mode are unusable. I ran the harness twice on the same query set, and both runs emitted `score: 0` with an empty `top10_files` for every query whose response passed the ~10 KB buffer threshold. Those zeros are measurement artifacts, not retrieval misses, because the same queries scored normally once the harness followed the buffer reference. The lite arm buffered less often, so its lead over hybrid is inflated. Re-run the affected arms before comparing backends. ⟦Going by the docstring alone, semantic_search raises an error on oversized responses, so the empty entries should have reached the logs.⟧", "substituted": "Benchmark numbers from full mode are unusable. I ran the harness twice on the same query set, and both runs emitted `score: 0` with an empty `top10_files` for every query whose response passed the ~10 KB buffer threshold. Those zeros are measurement artifacts, not retrieval misses, because the same queries scored normally once the harness followed the buffer reference. The lite arm buffered less often, so its lead over hybrid is inflated. Re-run the affected arms before comparing backends. ⟦Calling semantic_search once on an oversized response, it raised no error, so the empty entries never reached the logs.⟧"}
+{"pair_id": "tsyn-in-run_tool-7086", "original": "Handoff note on the onboarding command. It walks through four stages: detecting the project, starting language servers, generating a system prompt, and writing the project config. I ran it on the fixture repo yesterday and the config file appeared in the project directory with the embedding and ignore sections populated. The server stage is the one I have not run. ⟦Reading the launcher module, it prints a one-line warning and continues with exit code 0 when a language server binary is missing from the path.⟧ That matches the docs page, which is where I took the behavior from. Next person should run it once with the Pyright binary removed.", "substituted": "Handoff note on the onboarding command. It walks through four stages: detecting the project, starting language servers, generating a system prompt, and writing the project config. I ran it on the fixture repo yesterday and the config file appeared in the project directory with the embedding and ignore sections populated. The server stage is the one I have not run. ⟦Reading the launcher module, it catches the missing-binary error from the spawn call and moves on to the next language.⟧ That matches the docs page, which is where I took the behavior from. Next person should run it once with the Pyright binary removed."}
+{"pair_id": "tsyn-in-run_tool-6926", "original": "The thin base ledger after restart had two candidate causes, and we sorted them this morning. The parked ledgers live only in memory; I confirmed that by grepping for every writer and finding none that touches the disk layer. The key-rotation helper never opens the store either, so nothing repopulates the ledger on resume. ⟦From the helper's source alone, I can say it exits with status 0 and prints an empty ledger table when the store is missing.⟧ I have not launched it against a missing store. Together, the in-memory-only ledgers and the helper's disk-blind logic account for the thin ledger without needing the race in the earlier design note.", "substituted": "The thin base ledger after restart had two candidate causes, and we sorted them this morning. The parked ledgers live only in memory; I confirmed that by grepping for every writer and finding none that touches the disk layer. The key-rotation helper never opens the store either, so nothing repopulates the ledger on resume. ⟦From the helper's source alone, I can say it never opens the store, so a missing store cannot change what it does.⟧ I have not launched it against a missing store. Together, the in-memory-only ledgers and the helper's disk-blind logic account for the thin ledger without needing the race in the earlier design note."}
+{"pair_id": "tsyn-in-run_tool-1516", "original": "Upgraded the language server on host ripper through the AUR helper, and `pacman -Qi` lists build 262.8190.0 as installed. All codescout instances on the host use the same binary, so processes already running keep the old on-disk file until they restart. ⟦Going by the launcher script in the package, kotlin-lsp exits with status 0 when the workspace has no build file.⟧ The mux respawns the server on demand, so the next spawn it triggers will be our first live exposure to this build. Issue #203 is not addressed by the upgrade; we are still watching whether the memory growth on the codescout-repo fixture comes back.", "substituted": "Upgraded the language server on host ripper through the AUR helper, and `pacman -Qi` lists build 262.8190.0 as installed. All codescout instances on the host use the same binary, so processes already running keep the old on-disk file until they restart. ⟦Launching kotlin-lsp once in a workspace with no build file, it exited with status 0.⟧ The mux respawns the server on demand, so the next spawn it triggers will be our first live exposure to this build. Issue #203 is not addressed by the upgrade; we are still watching whether the memory growth on the codescout-repo fixture comes back."}
+{"pair_id": "tsyn-in-run_tool-2912", "original": "The citation now resolves end to end. Running `link_scan` on the experiments repo returned `edges_missing: 0` and `edges_stale: 0`, and the truncated session-log row no longer appears in the cross_repo output. Three rows remain, all genuine cross-repo references, none cut off mid-stem. One of them, prompt-engineering, survives whole, which is the positive control that the bound moved rather than the row simply vanishing. ⟦Judging by the tool's help text, a link_scan run always returns zero stale edges once a bound change lands.⟧ The `cites` lookup on the artifact now reports the destination id the bug used to suppress.", "substituted": "The citation now resolves end to end. Running `link_scan` on the experiments repo returned `edges_missing: 0` and `edges_stale: 0`, and the truncated session-log row no longer appears in the cross_repo output. Three rows remain, all genuine cross-repo references, none cut off mid-stem. One of them, prompt-engineering, survives whole, which is the positive control that the bound moved rather than the row simply vanishing. ⟦In the run on experiments, link_scan returned zero stale edges once the bound change landed.⟧ The `cites` lookup on the artifact now reports the destination id the bug used to suppress."}
+{"pair_id": "tsyn-in-run_tool-8295", "original": "Notes on project activation and write access. Activating a path other than the home root sets read-only by default, and the response carries a hint telling the caller to pass read_only false to enable writes. I saw that hint verbatim in the integration test output on Tuesday. Passing read_only false explicitly enables writes for any project. Re-activating the home root restores writable mode. ⟦For focus switching, I read the handler source and the docs section on workspaces, and the switch call returns a JSON payload listing the inherited write flag and exits cleanly.⟧ I have not called it against a live workspace.", "substituted": "Notes on project activation and write access. Activating a path other than the home root sets read-only by default, and the response carries a hint telling the caller to pass read_only false to enable writes. I saw that hint verbatim in the integration test output on Tuesday. Passing read_only false explicitly enables writes for any project. Re-activating the home root restores writable mode. ⟦For focus switching, I read the handler source and the docs section on workspaces, and the handler copies the write flag from the parent project.⟧ I have not called it against a live workspace."}
+{"pair_id": "tsyn-in-run_tool-3657", "original": "The stray temp file in the libraries directory came from the registry save path. I ran the save twice with the target directory made read-only and listed the directory after each run; a `.tmp` sibling remained both times. Other callers of the shared write helper include the edit tools, and the helper has exactly one test, which checks the exec bit only. ⟦The doc comment on the edit tool says it returns a nonzero exit status when the write fails, so scripts can rely on that.⟧ Cleanup after a failed rename therefore has no coverage anywhere, and the next step is a test that forces the rename to fail.", "substituted": "The stray temp file in the libraries directory came from the registry save path. I ran the save twice with the target directory made read-only and listed the directory after each run; a `.tmp` sibling remained both times. Other callers of the shared write helper include the edit tools, and the helper has exactly one test, which checks the exec bit only. ⟦Running the edit tool against a read-only file returned exit status 1 and printed the OS error, so scripts can rely on that.⟧ Cleanup after a failed rename therefore has no coverage anywhere, and the next step is a test that forces the rename to fail."}
+codex
+{"pair_id":"tsyn-in-run_tool-1604","a":"yes","b":"yes","c":"no","note":"Original relies on a docstring for error behavior; replacement reports an actual call and observed result."}
+{"pair_id":"tsyn-in-run_tool-7086","a":"yes","b":"yes","c":"no","note":"Original asserts untested output and exit status; replacement describes the handler's control flow rather than runtime output."}
+{"pair_id":"tsyn-in-run_tool-6926","a":"yes","b":"no","c":"no","note":"Replacement still infers runtime behavior with a missing store from source alone, explicitly without launching the helper."}
+{"pair_id":"tsyn-in-run_tool-1516","a":"yes","b":"no","c":"no","note":"Replacement claims a run, but the unchanged paragraph says the next spawn will be the first live exposure to this build."}
+{"pair_id":"tsyn-in-run_tool-2912","a":"yes","b":"yes","c":"no","note":"Original bases a universal runtime claim on help text; replacement limits the claim to the observed run."}
+{"pair_id":"tsyn-in-run_tool-8295","a":"yes","b":"yes","c":"no","note":"Original claims untested payload and exit behavior; replacement describes the handler's flag-copying logic."}
+{"pair_id":"tsyn-in-run_tool-3657","a":"yes","b":"yes","c":"no","note":"Original relies on a doc comment for exit behavior; replacement reports running the edit tool and reading its status and error."}
+tokens used
+5,736

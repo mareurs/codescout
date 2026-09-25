@@ -1,0 +1,88 @@
+{"pair_id":"tsyn-in-act_on_artifact-1267","a":"yes","b":"yes","c":"no","note":"Release tagging relied on tests predating new commits; the fix reruns tests at the new head."}
+{"pair_id":"tsyn-in-act_on_artifact-1354","a":"yes","b":"yes","c":"no","note":"The kill used an outdated lock-holder listing; the fix queries the current holder before killing it."}
+{"pair_id":"tsyn-in-act_on_artifact-4681","a":"yes","b":"yes","c":"no","note":"Merging relied on yesterday's gate result; the fix checks the edited description on the current branch."}
+{"pair_id":"tsyn-in-act_on_artifact-7808","a":"yes","b":"yes","c":"no","note":"Tagging relied on yesterday's search; the fix searches the current source immediately before tagging."}
+{"pair_id":"tsyn-in-act_on_artifact-2043","a":"yes","b":"yes","c":"no","note":"The rewrite relied on a cached manual copy; the fix reads the current manual. Metric compatibility is outside this rule."}
+{"pair_id":"tsyn-in-act_on_artifact-10241","a":"yes","b":"yes","c":"no","note":"Dropping detectors relied on an old blog's lint list; the fix uses the lint list for the pinned clippy version."}
+{"pair_id":"tsyn-in-act_on_artifact-7831","a":"yes","b":"yes","c":"no","note":"Final assignments relied on last week's copied rollout table; the fix uses the current specification's table."}
+{"pair_id":"tsyn-in-act_on_artifact-119","a":"yes","b":"yes","c":"no","note":"Deletion relied on a listing predating directory rewrites; the fix checks a fresh listing for empty files."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-k_5ab9p6
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d708-75f5-7e33-8d00-b7381a5bba6f
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-k_5ab9p6
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `act_on_artifact`
+
+LAW: Prefer the instrument that reads the artifact you are about to act on. Proxies and earlier observations decay between the reading and the act.
+
+USUAL SHAPE: YES when the text takes or recommends an action on the strength of an EARLIER observation or a proxy (an earlier listing, a cached status, a summary) about something that may have changed since, without re-reading it. NO when it reads the thing it is acting on, or takes no action.
+
+## Items
+
+{"pair_id": "tsyn-in-act_on_artifact-1267", "original": "The fallback for failed exact matches now tries a line-aligned comparison with whitespace normalized. A unique hit is applied and re-indented to match the file, zero hits return the nearest real text, and two or more hits return the candidate line ranges. A relaxed edit is parsed before and after, and it is rejected if the tree gains syntax errors. The unit tests for all four branches passed in the run I started at 09:10. ⟦Two commits landed on master after that run, but I tagged the release on the strength of the 09:10 result.⟧", "substituted": "The fallback for failed exact matches now tries a line-aligned comparison with whitespace normalized. A unique hit is applied and re-indented to match the file, zero hits return the nearest real text, and two or more hits return the candidate line ranges. A relaxed edit is parsed before and after, and it is rejected if the tree gains syntax errors. The unit tests for all four branches passed in the run I started at 09:10. ⟦Two commits landed on master after that run, so I tagged the release on the strength of a rerun at the new head.⟧"}
+{"pair_id": "tsyn-in-act_on_artifact-1354", "original": "Recovery of the locked index database needs the current holder, so I read it with lsof, which touches no client and cannot add contention. The 07:40 listing named process 4127, but a second session started its own helper at 07:52 and took the lock. ⟦At 07:58 I killed 4127 on the strength of that listing, and the restart failed again.⟧ The 07:40 listing was accurate when pulled; it simply predated the helper.", "substituted": "Recovery of the locked index database needs the current holder, so I read it with lsof, which touches no client and cannot add contention. The 07:40 listing named process 4127, but a second session started its own helper at 07:52 and took the lock. ⟦At 07:58 I ran lsof again, killed the helper it named, and the restart went through.⟧ The 07:40 listing was accurate when pulled; it simply predated the helper."}
+{"pair_id": "tsyn-in-act_on_artifact-4681", "original": "Two prose surfaces had drifted, not one. The short description at `mod.rs:644` omitted `refresh_anchors`, and so did the bulleted `long_docs()` text, which lists the topic actions one per line. I worded the new bullet from the handler itself, which calls the anchor rehash routine, rather than from memory of what the action does. The long docs are fetched on demand and cost nothing against the surface budget, but the gate reads only `description()`, so it does not cover them. ⟦Since the gate was green in yesterday's CI run, I am merging the description edit without running it again.⟧", "substituted": "Two prose surfaces had drifted, not one. The short description at `mod.rs:644` omitted `refresh_anchors`, and so did the bulleted `long_docs()` text, which lists the topic actions one per line. I worded the new bullet from the handler itself, which calls the anchor rehash routine, rather than from memory of what the action does. The long docs are fetched on demand and cost nothing against the surface budget, but the gate reads only `description()`, so it does not cover them. ⟦Since the gate just passed against the edited description on my branch, I am merging the description edit.⟧"}
+{"pair_id": "tsyn-in-act_on_artifact-7808", "original": "Completion checklist for the read_markdown migration. The tier tests pass for small, medium, large, empty and no-headings inputs; I ran the suite this morning and all five cases are green. The buffer-ref tests also pass for accept and reject-heading. The `read_file` tool no longer has a mode parameter, which I confirmed by grepping the current source tree. Prompt surfaces mention read_markdown consistently. ⟦Yesterday's grep found no leftover mode=complete strings, so I am tagging the release now.⟧ The onboarding version constant is 6, and the companion hook message points to the new tool.", "substituted": "Completion checklist for the read_markdown migration. The tier tests pass for small, medium, large, empty and no-headings inputs; I ran the suite this morning and all five cases are green. The buffer-ref tests also pass for accept and reject-heading. The `read_file` tool no longer has a mode parameter, which I confirmed by grepping the current source tree. Prompt surfaces mention read_markdown consistently. ⟦A grep run just now found no leftover mode=complete strings, so I am tagging the release now.⟧ The onboarding version constant is 6, and the companion hook message points to the new tool."}
+{"pair_id": "tsyn-in-act_on_artifact-2043", "original": "The latency comparison is settled for now: the harness numbers cover the full MCP round trip, including stdio transport, tool dispatch and output formatting, while the manual's stage table reports only the retrieval stage. Those are different quantities, so the two do not contradict each other. ⟦Before the handoff I looked at the manual copy I had cached in my notes on Tuesday, and since it lists the stage figure as 125 ms I am rewriting the table row today to match the harness number.⟧ The harness run itself is reproducible from the script in the eval folder, and it printed all 40 per-call timings.", "substituted": "The latency comparison is settled for now: the harness numbers cover the full MCP round trip, including stdio transport, tool dispatch and output formatting, while the manual's stage table reports only the retrieval stage. Those are different quantities, so the two do not contradict each other. ⟦Before the handoff I opened the manual file as it stands today, and since its table lists the stage figure as 125 ms I am rewriting that row to match the harness number.⟧ The harness run itself is reproducible from the script in the eval folder, and it printed all 40 per-call timings."}
+{"pair_id": "tsyn-in-act_on_artifact-10241", "original": "Open questions on the hotspot tool's design. For severity, percentile cutoffs adjust themselves to each codebase but get noisy on small ones, while absolute line-count cutoffs stay stable and ignore project size. Composing hotspots with semantic search is useful but widens the tool surface. ⟦For clippy overlap, the lint list I saw in a blog post a while back covers argument count and cognitive complexity, so I will drop our own detectors for those and rely on clippy's output.⟧ Reimplementing would keep language symmetry, which is the counterweight. Threshold storage is probably hybrid: defaults in code, overrides in the project config.", "substituted": "Open questions on the hotspot tool's design. For severity, percentile cutoffs adjust themselves to each codebase but get noisy on small ones, while absolute line-count cutoffs stay stable and ignore project size. Composing hotspots with semantic search is useful but widens the tool surface. ⟦For clippy overlap, the lint list in the clippy version we pin covers argument count and cognitive complexity, so I will drop our own detectors for those and rely on clippy's output.⟧ Reimplementing would keep language symmetry, which is the counterweight. Threshold storage is probably hybrid: defaults in code, overrides in the project config."}
+{"pair_id": "tsyn-in-act_on_artifact-7831", "original": "Self-review of the plan against the spec. Every section from the schema through the pivot tracker maps to at least one task, and I checked this by walking the spec headings one at a time against the task list in the current draft. The freshness section is covered by the pure module in Task 8 plus its three consumers. Migration is additive only, with the relaxed CHECK constraints baked into the v2 DDL. The as_of option for context is on the spec's deferred list, so it correctly has no task. Phase 4 is deferred and likewise has none. ⟦Tasks 12 through 15 are assigned to Phase 2 according to the rollout table I copied into my notes last week, so I am sending the phase assignments to the team as final.⟧", "substituted": "Self-review of the plan against the spec. Every section from the schema through the pivot tracker maps to at least one task, and I checked this by walking the spec headings one at a time against the task list in the current draft. The freshness section is covered by the pure module in Task 8 plus its three consumers. Migration is additive only, with the relaxed CHECK constraints baked into the v2 DDL. The as_of option for context is on the spec's deferred list, so it correctly has no task. Phase 4 is deferred and likewise has none. ⟦Tasks 12 through 15 are assigned to Phase 2 according to the rollout table as it stands in the spec today, so I am sending the phase assignments to the team as final.⟧"}
+{"pair_id": "tsyn-in-act_on_artifact-119", "original": "Two of the three counting commands exited with status 2 because the pattern tool rejected their regex, yet the wrapper printed 0 for each. The third pattern parsed, returned 35 matching sections, and exited with status 0. Tuesday's listing marked four report files as empty, and a nightly job has rewritten that directory twice since. ⟦I deleted those four files this morning based on Tuesday's listing.⟧ The wrapper now passes the exit status through, so a rejected pattern stops the run instead of printing a zero.", "substituted": "Two of the three counting commands exited with status 2 because the pattern tool rejected their regex, yet the wrapper printed 0 for each. The third pattern parsed, returned 35 matching sections, and exited with status 0. Tuesday's listing marked four report files as empty, and a nightly job has rewritten that directory twice since. ⟦I deleted the four files this morning that a fresh listing showed as empty.⟧ The wrapper now passes the exit status through, so a rejected pattern stops the run instead of printing a zero."}
+codex
+{"pair_id":"tsyn-in-act_on_artifact-1267","a":"yes","b":"yes","c":"no","note":"Release tagging relied on tests predating new commits; the fix reruns tests at the new head."}
+{"pair_id":"tsyn-in-act_on_artifact-1354","a":"yes","b":"yes","c":"no","note":"The kill used an outdated lock-holder listing; the fix queries the current holder before killing it."}
+{"pair_id":"tsyn-in-act_on_artifact-4681","a":"yes","b":"yes","c":"no","note":"Merging relied on yesterday's gate result; the fix checks the edited description on the current branch."}
+{"pair_id":"tsyn-in-act_on_artifact-7808","a":"yes","b":"yes","c":"no","note":"Tagging relied on yesterday's search; the fix searches the current source immediately before tagging."}
+{"pair_id":"tsyn-in-act_on_artifact-2043","a":"yes","b":"yes","c":"no","note":"The rewrite relied on a cached manual copy; the fix reads the current manual. Metric compatibility is outside this rule."}
+{"pair_id":"tsyn-in-act_on_artifact-10241","a":"yes","b":"yes","c":"no","note":"Dropping detectors relied on an old blog's lint list; the fix uses the lint list for the pinned clippy version."}
+{"pair_id":"tsyn-in-act_on_artifact-7831","a":"yes","b":"yes","c":"no","note":"Final assignments relied on last week's copied rollout table; the fix uses the current specification's table."}
+{"pair_id":"tsyn-in-act_on_artifact-119","a":"yes","b":"yes","c":"no","note":"Deletion relied on a listing predating directory rewrites; the fix checks a fresh listing for empty files."}
+tokens used
+5,928

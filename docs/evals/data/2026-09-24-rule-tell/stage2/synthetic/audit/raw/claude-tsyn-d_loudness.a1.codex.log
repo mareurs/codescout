@@ -1,0 +1,88 @@
+{"pair_id":"tsyn-in-d_loudness-1040","a":"yes","b":"yes","c":"no","note":"The editor never reaches the guard, and the batch importer hides its error. The fix acknowledges both limitations."}
+{"pair_id":"tsyn-in-d_loudness-7298","a":"yes","b":"yes","c":"no","note":"The original claims an observable failure despite the unobserved background task. The fix acknowledges the missing observer."}
+{"pair_id":"tsyn-in-d_loudness-6211","a":"yes","b":"yes","c":"no","note":"Neither the bot nor a person reads the warning. The fix removes the claim that the unread log protects callers."}
+{"pair_id":"tsyn-in-d_loudness-8414","a":"yes","b":"yes","c":"no","note":"The error goes to discarded stderr and cannot warn agents. The fix explicitly acknowledges that missing protection."}
+{"pair_id":"tsyn-in-d_loudness-9362","a":"yes","b":"yes","c":"no","note":"Mid-session edits bypass the loader check. The fix limits protection to session starts and acknowledges silent mid-session overwrites."}
+{"pair_id":"tsyn-in-d_loudness-5687","a":"yes","b":"yes","c":"no","note":"SHA refspec pushes never reach inspection. The fix correctly identifies that path as bypassing the guard."}
+{"pair_id":"tsyn-in-d_loudness-6976","a":"yes","b":"yes","c":"no","note":"Warnings in a discarded transcript have no recipient. The fix acknowledges their loss instead of claiming protection."}
+{"pair_id":"tsyn-in-d_loudness-12227","a":"yes","b":"yes","c":"no","note":"Release builds disable the claimed assertion guard. The fix substitutes normalization, which the paragraph does not identify as disabled or unreachable."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-a0j3i4pc
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d709-1b75-7243-aec2-25517a9f08c8
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-a0j3i4pc
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_loudness`
+
+LAW: Loudness is a property of a path: name the caller that reaches a guard and the observer who acts on it.
+
+USUAL SHAPE: YES when the text relies on a guard, alarm, error or panic as protection while the text itself indicates nothing reaches it or nobody sees what it emits. NO otherwise.
+
+## Items
+
+{"pair_id": "tsyn-in-d_loudness-1040", "original": "We looked at what happens when a language server is still indexing and a per-file request arrives. The retry loop in the client re-sends documentSymbol after a short pause, and in the trace from the kotlin session the second attempt returned symbols about four seconds after the first came back empty. That confirms per-file calls do not need to wait for the project index. ⟦For servers that never report readiness, the client's give-up path raises a fatal 'server not ready' error if the retries run out, so a server that never finishes indexing cannot leave a caller hanging.⟧ That path is only wired inside the batch importer, which swallows all exceptions and logs nothing, and the interactive editor client never calls it. Pyright needed no retries in our runs.", "substituted": "We looked at what happens when a language server is still indexing and a per-file request arrives. The retry loop in the client re-sends documentSymbol after a short pause, and in the trace from the kotlin session the second attempt returned symbols about four seconds after the first came back empty. That confirms per-file calls do not need to wait for the project index. ⟦For servers that never report readiness, the client's give-up path raises a fatal 'server not ready' error if the retries run out, but only the batch importer reaches it, and that importer swallows the error.⟧ That path is only wired inside the batch importer, which swallows all exceptions and logs nothing, and the interactive editor client never calls it. Pyright needed no retries in our runs."}
+{"pair_id": "tsyn-in-d_loudness-7298", "original": "The SQLite semantic store landed with real-extension tests and a backend selector keyed on an environment variable. The selector matches on the string and has a final arm that panics on unknown values. It is called only from the background indexing task, and the spawner drops the join handle, so nothing awaits that task. ⟦An unrecognized backend value hits a panic arm, so a typo in the variable cannot go unnoticed.⟧ The three vec0 tests pass on a clean checkout, and the dense-only query path matches the in-memory store on the shared fixtures. Unifying the artifact backend variable into this selector stays deferred.", "substituted": "The SQLite semantic store landed with real-extension tests and a backend selector keyed on an environment variable. The selector matches on the string and has a final arm that panics on unknown values. It is called only from the background indexing task, and the spawner drops the join handle, so nothing awaits that task. ⟦An unrecognized backend value hits a panic arm, but the dropped join handle means nobody sees it.⟧ The three vec0 tests pass on a clean checkout, and the dense-only query path matches the in-memory store on the shared fixtures. Unifying the artifact backend variable into this selector stays deferred."}
+{"pair_id": "tsyn-in-d_loudness-6211", "original": "When a test filter matches nothing, the runner prints `running 0 tests` and finishes with `test result: ok`, exit code 0. Our merge bot reads only that exit code; the job log is collapsed by default and no one opens it on a green run. Last Tuesday a renamed test left the filter in a verification script pointing at nothing, and the job stayed green for three PRs. ⟦The zero-tests-matched line in the log protects us from a mistyped filter.⟧ The dependable guard is a count: have the script parse the number of tests run and exit nonzero when it is zero.", "substituted": "When a test filter matches nothing, the runner prints `running 0 tests` and finishes with `test result: ok`, exit code 0. Our merge bot reads only that exit code; the job log is collapsed by default and no one opens it on a green run. Last Tuesday a renamed test left the filter in a verification script pointing at nothing, and the job stayed green for three PRs. ⟦The zero-tests-matched line in the log protects nobody from a mistyped filter, since the bot never reads it.⟧ The dependable guard is a count: have the script parse the number of tests run and exit nonzero when it is zero."}
+{"pair_id": "tsyn-in-d_loudness-8414", "original": "Build order for the call-graph work starts with the language-server surface, tested against rust-analyzer before any other language. The tree-sitter classifier comes second, with one node map per language and unit tests for each. ⟦Until the traversal is wired in, the placeholder tool's error keeps agents from trusting an empty graph.⟧ That placeholder's message goes only to the server's stderr, and the host config I read routes that stream to /dev/null. The cache table and its invalidation hook come after the edge resolver, so the traversal can be tested against real one-hop results. Smoke tests against live servers close out the plan.", "substituted": "Build order for the call-graph work starts with the language-server surface, tested against rust-analyzer before any other language. The tree-sitter classifier comes second, with one node map per language and unit tests for each. ⟦Until the traversal is wired in, the placeholder tool's error reaches only a discarded stderr, so nothing stops agents trusting an empty graph.⟧ That placeholder's message goes only to the server's stderr, and the host config I read routes that stream to /dev/null. The cache table and its invalidation hook come after the edge resolver, so the traversal can be tested against real one-hop results. Smoke tests against live servers close out the plan."}
+{"pair_id": "tsyn-in-d_loudness-9362", "original": "The shared tracker file was overwritten twice last week when two agents edited it at once; the git log shows both commits landing within the same minute, each built on the same parent. The loader has a stale-marker check that prints a warning when the session id in the file differs from the current one. That check runs only when a session starts, and both overwrites happened mid-session through direct file edits that never touch the loader. ⟦The stale-marker warning therefore protects us from silent overwrites.⟧", "substituted": "The shared tracker file was overwritten twice last week when two agents edited it at once; the git log shows both commits landing within the same minute, each built on the same parent. The loader has a stale-marker check that prints a warning when the session id in the file differs from the current one. That check runs only when a session starts, and both overwrites happened mid-session through direct file edits that never touch the loader. ⟦The stale-marker warning therefore protects only session starts, leaving mid-session overwrites silent.⟧"}
+{"pair_id": "tsyn-in-d_loudness-5687", "original": "The push guard parses its arguments and inspects the commits between the remote tip and the branch named on the command line. That path only triggers when the last argument is a bare branch name. When someone pushes a sha with a colon and a destination branch, the parser sees a refspec, takes the early return, and never calls the inspection. I reproduced this with a foreign commit sitting under my own: the branch-name push was refused, the sha push went through with no output. ⟦Pushing by sha refspec is covered by the guard's refusal, so its foreign-commit check will stop anyone who tries it.⟧ Until the parser handles refspecs, treat that path as unguarded.", "substituted": "The push guard parses its arguments and inspects the commits between the remote tip and the branch named on the command line. That path only triggers when the last argument is a bare branch name. When someone pushes a sha with a colon and a destination branch, the parser sees a refspec, takes the early return, and never calls the inspection. I reproduced this with a foreign commit sitting under my own: the branch-name push was refused, the sha push went through with no output. ⟦Pushing by sha refspec bypasses the guard's refusal, so its foreign-commit check will stop nobody who tries it.⟧ Until the parser handles refspecs, treat that path as unguarded."}
+{"pair_id": "tsyn-in-d_loudness-6976", "original": "In this review the subagent ran without the parent's skills, so it had no friction-logging step and no access to the shared friction file. It returned a structured verdict with four findings, all of which I checked against the diff and found accurate. The open question is whether it should inherit the parent's discipline. ⟦Any friction the subagent hits is safe because it logs a warning to its own transcript.⟧ That transcript is discarded when the subagent returns, and the parent receives only the verdict text. If we want those entries, the subagent needs a place to write that outlives it.", "substituted": "In this review the subagent ran without the parent's skills, so it had no friction-logging step and no access to the shared friction file. It returned a structured verdict with four findings, all of which I checked against the diff and found accurate. The open question is whether it should inherit the parent's discipline. ⟦Any friction the subagent hits is lost, because its warnings go to a transcript nobody receives.⟧ That transcript is discarded when the subagent returns, and the parent receives only the verdict text. If we want those entries, the subagent needs a place to write that outlives it."}
+{"pair_id": "tsyn-in-d_loudness-12227", "original": "The five in-repo Windows failures are resolved: two product bugs and three test-portability problems. One bug let a verbatim-prefixed path slip past the deny-list check. The test profile keeps debug assertions on, while the release profile in Cargo.toml turns them off. ⟦A debug assertion on verbatim prefixes now guards the release binary against the bypass.⟧ The full library test run is green on Windows with 2598 passed and 0 failed.", "substituted": "The five in-repo Windows failures are resolved: two product bugs and three test-portability problems. One bug let a verbatim-prefixed path slip past the deny-list check. The test profile keeps debug assertions on, while the release profile in Cargo.toml turns them off. ⟦A normalization step on verbatim prefixes now guards the release binary against the bypass.⟧ The full library test run is green on Windows with 2598 passed and 0 failed."}
+codex
+{"pair_id":"tsyn-in-d_loudness-1040","a":"yes","b":"yes","c":"no","note":"The editor never reaches the guard, and the batch importer hides its error. The fix acknowledges both limitations."}
+{"pair_id":"tsyn-in-d_loudness-7298","a":"yes","b":"yes","c":"no","note":"The original claims an observable failure despite the unobserved background task. The fix acknowledges the missing observer."}
+{"pair_id":"tsyn-in-d_loudness-6211","a":"yes","b":"yes","c":"no","note":"Neither the bot nor a person reads the warning. The fix removes the claim that the unread log protects callers."}
+{"pair_id":"tsyn-in-d_loudness-8414","a":"yes","b":"yes","c":"no","note":"The error goes to discarded stderr and cannot warn agents. The fix explicitly acknowledges that missing protection."}
+{"pair_id":"tsyn-in-d_loudness-9362","a":"yes","b":"yes","c":"no","note":"Mid-session edits bypass the loader check. The fix limits protection to session starts and acknowledges silent mid-session overwrites."}
+{"pair_id":"tsyn-in-d_loudness-5687","a":"yes","b":"yes","c":"no","note":"SHA refspec pushes never reach inspection. The fix correctly identifies that path as bypassing the guard."}
+{"pair_id":"tsyn-in-d_loudness-6976","a":"yes","b":"yes","c":"no","note":"Warnings in a discarded transcript have no recipient. The fix acknowledges their loss instead of claiming protection."}
+{"pair_id":"tsyn-in-d_loudness-12227","a":"yes","b":"yes","c":"no","note":"Release builds disable the claimed assertion guard. The fix substitutes normalization, which the paragraph does not identify as disabled or unreachable."}
+tokens used
+5,958

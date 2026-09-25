@@ -1,0 +1,8 @@
+{"pair_id":"train-question_asked-5527","a":"yes","b":"yes","c":"yes","note":"Fresh-path tests do not establish rename correctness. A destination blob hash also does not establish that the recorder recognized the rename."}
+{"pair_id":"train-question_asked-5765","a":"yes","b":"yes","c":"no","note":"Nonempty-message assertions do not check an addressee; inspecting the rendered message directly checks that claim."}
+{"pair_id":"train-question_asked-7650","a":"yes","b":"yes","c":"yes","note":"Loopback tests cannot establish network safety. Sanitizing thirty strings also does not establish that the injection path is closed."}
+{"pair_id":"train-question_asked-288","a":"yes","b":"yes","c":"no","note":"Passing under advisory locks does not establish state isolation; the replacement explicitly acknowledges this limitation."}
+{"pair_id":"train-question_asked-1580","a":"yes","b":"yes","c":"no","note":"Loader unit tests establish error handling for payload shapes, not agents' successful recovery through the MCP server."}
+{"pair_id":"train-question_asked-974","a":"yes","b":"no","c":"no","note":"Restricting the claim to Linux does not resolve the mismatch: the required ownership-check correction is still explicitly unfinished."}
+{"pair_id":"train-question_asked-6345","a":"yes","b":"yes","c":"no","note":"A green suite does not establish coverage of both branches; the failing mutation directly establishes exercise of the detached default."}
+{"pair_id":"train-question_asked-11539","a":"yes","b":"yes","c":"no","note":"Passing tests do not establish absence of production callers; a source-tree search addresses that question directly."}

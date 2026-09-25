@@ -1,0 +1,88 @@
+{"pair_id":"train-act_on_artifact-3698","a":"yes","b":"yes","c":"no","note":"The original acts on a standup dashboard summary; the fix opens the ticket directly before acting."}
+{"pair_id":"train-act_on_artifact-5048","a":"yes","b":"yes","c":"no","note":"The original deletes sections using a report predating the rewrite; the fix requires a fresh probe run."}
+{"pair_id":"train-act_on_artifact-1108","a":"yes","b":"yes","c":"no","note":"Tuesday's clean checkout cannot establish current status; the fix checks the target tree immediately before committing."}
+{"pair_id":"train-act_on_artifact-3242","a":"yes","b":"yes","c":"no","note":"The original approves using last week's mutable fixture results; the fix uses today's run against the fixture."}
+{"pair_id":"train-act_on_artifact-5068","a":"yes","b":"yes","c":"no","note":"The original authorizes merging based on tests before the rebase; the fix tests the rebased head just before merging."}
+{"pair_id":"train-act_on_artifact-834","a":"yes","b":"yes","c":"no","note":"The original edits from yesterday's grep without rereading; the fix searches the target copy again before editing."}
+{"pair_id":"train-act_on_artifact-7655","a":"yes","b":"yes","c":"no","note":"The original deletes based on yesterday's listing; the fix searches the actual instructions file immediately before deletion."}
+{"pair_id":"train-act_on_artifact-4301","a":"yes","b":"yes","c":"no","note":"The original relies on an earlier, irrelevant stash listing; the fix checks artifact event counts identified as the applicable oracle."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-qdxpizvo
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d706-ca91-7693-a5b4-f0d2b1c608e0
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-qdxpizvo
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `act_on_artifact`
+
+LAW: Prefer the instrument that reads the artifact you are about to act on. Proxies and earlier observations decay between the reading and the act.
+
+USUAL SHAPE: YES when the text takes or recommends an action on the strength of an EARLIER observation or a proxy (an earlier listing, a cached status, a summary) about something that may have changed since, without re-reading it. NO when it reads the thing it is acting on, or takes no action.
+
+## Items
+
+{"pair_id": "train-act_on_artifact-3698", "original": "Status as of the last routing change: the precondition is closed, the predicate bug is not. The commit that added a selector key to the two write tools means the router is now consulted for them, so the test stub that pretended to be a real route is no longer pretending. That was needed, since fixing the predicate first would have changed nothing anyone could observe. ⟦The dashboard summary we pulled at standup lists the predicate ticket as still open, so I'll push the reviewer's patch onto its branch and mark it merged without opening the ticket again.⟧ The patch itself touches only the matching function and leaves routing alone.", "substituted": "Status as of the last routing change: the precondition is closed, the predicate bug is not. The commit that added a selector key to the two write tools means the router is now consulted for them, so the test stub that pretended to be a real route is no longer pretending. That was needed, since fixing the predicate first would have changed nothing anyone could observe. ⟦The ticket page I just opened lists the predicate ticket as still open, so I'll push the reviewer's patch onto its branch and mark it merged.⟧ The patch itself touches only the matching function and leaves routing alone."}
+{"pair_id": "train-act_on_artifact-5048", "original": "The probe now ships signatures for the deploy topic, so its scores are real measurements: a section scores nonzero only when a transcript quotes its heading. I checked this by feeding it a transcript that quotes two headings, and exactly those two scored. The cached report on the shared drive comes from the March run, before the guide was rewritten. ⟦Remove the sections the March report lists as never engaged from the deploy guide today.⟧", "substituted": "The probe now ships signatures for the deploy topic, so its scores are real measurements: a section scores nonzero only when a transcript quotes its heading. I checked this by feeding it a transcript that quotes two headings, and exactly those two scored. The cached report on the shared drive comes from the March run, before the guide was rewritten. ⟦Remove the sections a fresh probe run lists as never engaged from the deploy guide today.⟧"}
+{"pair_id": "train-act_on_artifact-1108", "original": "The handoff for the sibling-repo docs task needs one more step before anyone touches it. Reading Markdown files there works without a shell, because the companion hook only blocks source-file reads, and I confirmed that by opening two `.md` files this morning. For multi-step work, activate the sibling workspace and restore the original one at end of turn; the restore is mandatory. ⟦The sibling checkout was clean when I listed it on Tuesday, so the agent can commit its doc edits straight onto that tree without checking status again.⟧ A one-off commit is different: ask the user to run it inline.", "substituted": "The handoff for the sibling-repo docs task needs one more step before anyone touches it. Reading Markdown files there works without a shell, because the companion hook only blocks source-file reads, and I confirmed that by opening two `.md` files this morning. For multi-step work, activate the sibling workspace and restore the original one at end of turn; the restore is mandatory. ⟦The sibling checkout may have moved since Tuesday's listing, so the agent should run a status check on that tree right before committing its doc edits.⟧ A one-off commit is different: ask the user to run it inline."}
+{"pair_id": "train-act_on_artifact-3242", "original": "⟦Since the fixture held 51 dangling citations at last week's run, I'm tagging the cap test green for today's merge.⟧ The test builds on the shared fixture, which other suites edit. It checks that the array stops at 50 while the dangling counter reads 51, against a one-entry target so the prefix is known. It also asserts the truncation flag is true for dangling and false for the empty ambiguous arm. I watched it fail as an assertion before the field existed, so the assertions do bite.", "substituted": "⟦Since today's run against the fixture reported 51 dangling citations, I'm tagging the cap test green for this merge.⟧ The test builds on the shared fixture, which other suites edit. It checks that the array stops at 50 while the dangling counter reads 51, against a one-entry target so the prefix is known. It also asserts the truncation flag is true for dangling and false for the empty ambiguous arm. I watched it fail as an assertion before the field existed, so the assertions do bite."}
+{"pair_id": "train-act_on_artifact-5068", "original": "The mutation table shows the write-guard tests cannot see the reversed clear. I applied the reversed change locally and ran all seven tests; each stayed green, and only the new cleared-case assertion went red. The branch was also rebased onto main this morning, pulling in four commits. ⟦The suite was green on the earlier commit, so merge without running it again.⟧ The new assertion stays in either way, because it is the only one that reds under the mutation.", "substituted": "The mutation table shows the write-guard tests cannot see the reversed clear. I applied the reversed change locally and ran all seven tests; each stayed green, and only the new cleared-case assertion went red. The branch was also rebased onto main this morning, pulling in four commits. ⟦The suite ran green on the rebased head just now, so merge.⟧ The new assertion stays in either way, because it is the only one that reds under the mutation."}
+{"pair_id": "train-act_on_artifact-834", "original": "The hook test for the all-contested branch needs a failing case before any widening lands. Section 7 holds the control, a run with no sequencer that must still refuse, and both earlier relaxations were dropped because they reached wider than the defect. The second thing to settle is the duplicated diff pipeline, which lives in both the stage-log script and the pre-commit script. ⟦Yesterday's grep showed both copies carrying the same rename flag, so I will edit the pre-commit copy now and skip re-reading it.⟧ A mutation applied to only one copy leaves the other copy's assertion green, which is why the two sites have to move together.", "substituted": "The hook test for the all-contested branch needs a failing case before any widening lands. Section 7 holds the control, a run with no sequencer that must still refuse, and both earlier relaxations were dropped because they reached wider than the defect. The second thing to settle is the duplicated diff pipeline, which lives in both the stage-log script and the pre-commit script. ⟦Yesterday's grep showed both copies carrying the same rename flag, so I will re-grep the pre-commit copy now and edit that line.⟧ A mutation applied to only one copy leaves the other copy's assertion green, which is why the two sites have to move together."}
+{"pair_id": "train-act_on_artifact-7655", "original": "The drift-guard test scans prompt text for backticked tool names, and its pattern only accepts lowercase snake_case. I ran it against a copy of the instructions file containing a PascalCase harness tool name in backticks, and the test passed without comment, so PascalCase mentions are invisible to it. The design note claims the test catches stale names on all three prompt surfaces, which overstates what it does. ⟦Yesterday's grep listing showed two PascalCase mentions in the instructions file, so I'm deleting both from the file now to keep the surfaces consistent.⟧ After that, the allowlist can grow to cover the remaining names.", "substituted": "The drift-guard test scans prompt text for backticked tool names, and its pattern only accepts lowercase snake_case. I ran it against a copy of the instructions file containing a PascalCase harness tool name in backticks, and the test passed without comment, so PascalCase mentions are invisible to it. The design note claims the test catches stale names on all three prompt surfaces, which overstates what it does. ⟦A grep run just now shows two PascalCase mentions in the instructions file, so I'm deleting both from the file to keep the surfaces consistent.⟧ After that, the allowlist can grow to cover the remaining names."}
+{"pair_id": "train-act_on_artifact-4301", "original": "Pre-commit writes a patch under its cache directory instead of calling stash, so the stash listing stays empty during the whole episode. That is why the usual check gives a false all-clear. Byte counts from the artifact event log are the oracle to use. ⟦For the cleanup, the stash listing was empty when I looked at the start of the session, so I am deleting the cached patch files now, since nothing can still depend on them.⟧", "substituted": "Pre-commit writes a patch under its cache directory instead of calling stash, so the stash listing stays empty during the whole episode. That is why the usual check gives a false all-clear. Byte counts from the artifact event log are the oracle to use. ⟦For the cleanup, the artifact event byte counts show every cached patch already landed in HEAD, so I am deleting those patch files now.⟧"}
+codex
+{"pair_id":"train-act_on_artifact-3698","a":"yes","b":"yes","c":"no","note":"The original acts on a standup dashboard summary; the fix opens the ticket directly before acting."}
+{"pair_id":"train-act_on_artifact-5048","a":"yes","b":"yes","c":"no","note":"The original deletes sections using a report predating the rewrite; the fix requires a fresh probe run."}
+{"pair_id":"train-act_on_artifact-1108","a":"yes","b":"yes","c":"no","note":"Tuesday's clean checkout cannot establish current status; the fix checks the target tree immediately before committing."}
+{"pair_id":"train-act_on_artifact-3242","a":"yes","b":"yes","c":"no","note":"The original approves using last week's mutable fixture results; the fix uses today's run against the fixture."}
+{"pair_id":"train-act_on_artifact-5068","a":"yes","b":"yes","c":"no","note":"The original authorizes merging based on tests before the rebase; the fix tests the rebased head just before merging."}
+{"pair_id":"train-act_on_artifact-834","a":"yes","b":"yes","c":"no","note":"The original edits from yesterday's grep without rereading; the fix searches the target copy again before editing."}
+{"pair_id":"train-act_on_artifact-7655","a":"yes","b":"yes","c":"no","note":"The original deletes based on yesterday's listing; the fix searches the actual instructions file immediately before deletion."}
+{"pair_id":"train-act_on_artifact-4301","a":"yes","b":"yes","c":"no","note":"The original relies on an earlier, irrelevant stash listing; the fix checks artifact event counts identified as the applicable oracle."}
+tokens used
+5,751

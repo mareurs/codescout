@@ -1,0 +1,8 @@
+{"pair_id":"train-d_semicolon-6147","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-83","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-2402","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-1793","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-8286","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-11660","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-5936","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}
+{"pair_id":"train-d_semicolon-10566","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaches the rule."}

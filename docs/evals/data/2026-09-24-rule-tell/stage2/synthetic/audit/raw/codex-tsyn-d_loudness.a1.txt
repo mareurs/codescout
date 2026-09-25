@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-d_loudness-11948", "a": "yes", "b": "yes", "c": "no", "note": "Move event never invokes the sweep, and the report never reaches the owner. The fix disclaims the guarantee."}
+{"pair_id": "tsyn-cross-d_loudness-5189", "a": "yes", "b": "yes", "c": "no", "note": "The alarm buffer is discarded and nothing reads pending entries. The fix withdraws the guarantee."}
+{"pair_id": "tsyn-cross-d_loudness-6976", "a": "yes", "b": "yes", "c": "no", "note": "The detector is not loaded in the child. The fix names the verdict path the parent reviewer actually reads."}
+{"pair_id": "tsyn-cross-d_loudness-2908", "a": "yes", "b": "yes", "c": "no", "note": "The nightly publisher never enters the guarded handler. The fix states the guard cannot stop it."}
+{"pair_id": "tsyn-cross-d_loudness-6211", "a": "yes", "b": "yes", "c": "no", "note": "The warning stream is discarded and the exit code is unchanged. The fix names the actual signal and says it carries no stop."}
+{"pair_id": "tsyn-cross-d_loudness-12227", "a": "yes", "b": "yes", "c": "no", "note": "The hook runner discards stderr, so no maintainer sees it. The fix states it never reaches them."}
+{"pair_id": "tsyn-cross-d_loudness-9362", "a": "yes", "b": "yes", "c": "no", "note": "The guard sits in an importer that no agent invokes. The fix states the writes remain exposed."}
+{"pair_id": "tsyn-cross-d_loudness-8414", "a": "yes", "b": "yes", "c": "no", "note": "The alarm stays in a private buffer with no operator reader. The fix drops the notice claim; the tested cutoff is separate."}

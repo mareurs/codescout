@@ -1,0 +1,88 @@
+{"pair_id":"tsyn-in-d_history-5511","a":"yes","b":"yes","c":"no","note":"The original records a retired name and obsolete count; the fix describes the current documentation gap."}
+{"pair_id":"tsyn-in-d_history-7571","a":"yes","b":"yes","c":"no","note":"The original preserves a discarded label and draft history; the fix states the current conceptual distinction."}
+{"pair_id":"tsyn-in-d_history-1258","a":"yes","b":"yes","c":"no","note":"The original lists superseded language classifications; the fix reports the current classification."}
+{"pair_id":"tsyn-in-d_history-6222","a":"yes","b":"yes","c":"no","note":"The original catalogs obsolete implementations; the fix states current behavior. Other sentences explain why mutation verification needed repeating."}
+{"pair_id":"tsyn-in-d_history-5840","a":"yes","b":"yes","c":"no","note":"The original preserves an obsolete filename; the fix identifies the current file. Other history supports the causal diagnosis."}
+{"pair_id":"tsyn-in-d_history-4587","a":"yes","b":"yes","c":"no","note":"The original records a former check count and retired command name; the fix states their current versions."}
+{"pair_id":"tsyn-in-d_history-8514","a":"yes","b":"yes","c":"no","note":"The original records superseded parser behavior; the fix retains the rationale using current constraints."}
+{"pair_id":"tsyn-in-d_history-9240","a":"yes","b":"yes","c":"no","note":"The original narrates a superseded tag and review history; the fix makes the remaining fixture references actionable."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-svhonw5a
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d709-0675-7c72-aa72-af01e3165ad9
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-svhonw5a
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_history`
+
+LAW: Record less history: a superseded fact written in prose is indistinguishable from a live citation.
+
+USUAL SHAPE: YES when the text writes a superseded fact (an old filename, a former count, a retired name) into prose as history no decision needs. NO otherwise.
+
+## Items
+
+{"pair_id": "tsyn-in-d_history-5511", "original": "The parent bug file has gone stale in the same way as its child. Its Workarounds section lists three routes: appending with insert_before, editing unguarded files through the markdown editor, and rewriting the whole body. The Resolution section four lines below records the sentinel as shipped, so a reader reaching the parent never sees the answer. ⟦The sentinel was called the end-marker in the first draft, and the list once held five routes before two were dropped.⟧ The Workarounds section should be rewritten to lead with the sentinel.", "substituted": "The parent bug file has gone stale in the same way as its child. Its Workarounds section lists three routes: appending with insert_before, editing unguarded files through the markdown editor, and rewriting the whole body. The Resolution section four lines below records the sentinel as shipped, so a reader reaching the parent never sees the answer. ⟦The sentinel is named in the Resolution section, and the Workarounds list omits it.⟧ The Workarounds section should be rewritten to lead with the sentinel."}
+{"pair_id": "tsyn-in-d_history-7571", "original": "The speaker describes a gap between what a model can do and what products let it show. At each model generation the capability exists, but the product often fails to elicit it. He calls the product side of this hobbling: the harness gets in the way of the behavior. The two terms describe one problem seen from opposite sides. ⟦Before the current name was settled, he says the team briefly called this gap \"the slack\", and an earlier draft of the talk used that label throughout.⟧ His example is the original Claude Code, which he presents as a product built to remove the hobbling rather than add to it.", "substituted": "The speaker describes a gap between what a model can do and what products let it show. At each model generation the capability exists, but the product often fails to elicit it. He calls the product side of this hobbling: the harness gets in the way of the behavior. The two terms describe one problem seen from opposite sides. ⟦He says the gap has two sides, the model's unused ability and the product that hides it, and both are named.⟧ His example is the original Claude Code, which he presents as a product built to remove the hobbling rather than add to it."}
+{"pair_id": "tsyn-in-d_history-1258", "original": "⟦Earlier the status output listed `javascript` as the leading language for this root, and before that it said `unknown`.⟧ The new workspace test builds a root whose only manifest is `package.json`, plus four `.py` files and one `.ts` file. It asserts that `languages` leads with `python`, keeps `typescript` as fallback, and reports `python` as the dominant language. Trust the top-level status languages over the per-project hints, because that view is computed from the file walk and the test exercises exactly that path. After onboarding a polyglot repo, rewrite the language memory by hand.", "substituted": "⟦The status output now lists `python` as the leading language for this root, with `typescript` behind it.⟧ The new workspace test builds a root whose only manifest is `package.json`, plus four `.py` files and one `.ts` file. It asserts that `languages` leads with `python`, keeps `typescript` as fallback, and reports `python` as the dominant language. Trust the top-level status languages over the per-project hints, because that view is computed from the file walk and the test exercises exactly that path. After onboarding a polyglot repo, rewrite the language memory by hand."}
+{"pair_id": "tsyn-in-d_history-6222", "original": "Clippy's question_mark lint rewrote the ok. check, and the behaviour did not change. The mutation verdicts still had to be redone, because a verdict measures particular bytes and the anchor string for mutant M5 no longer existed. ⟦The check formerly used let-else with an early return, and before that a starts_with plus a slice.⟧ Re-run against the shipped source, all five mutants were killed and the control passed 189 tests with none failing on either side.", "substituted": "Clippy's question_mark lint rewrote the ok. check, and the behaviour did not change. The mutation verdicts still had to be redone, because a verdict measures particular bytes and the anchor string for mutant M5 no longer existed. ⟦The check now calls strip_prefix and propagates the miss with a question mark.⟧ Re-run against the shipped source, all five mutants were killed and the control passed 189 tests with none failing on either side."}
+{"pair_id": "tsyn-in-d_history-5840", "original": "Two suspected causes for the failing restore check did not hold up. The export added one artifact and moved the restored count to 24, but the failure was already present and its own row restores cleanly. The line-anchored grep gives 26 artifacts declaring augmentation against 24 sidecars, so the gap is two, not a large mismatch. ⟦The export file was called retro-notes.md until Tuesday, when it was renamed.⟧", "substituted": "Two suspected causes for the failing restore check did not hold up. The export added one artifact and moved the restored count to 24, but the failure was already present and its own row restores cleanly. The line-anchored grep gives 26 artifacts declaring augmentation against 24 sidecars, so the gap is two, not a large mismatch. ⟦The export file is system-retro.md, and its row shows tmpl=yes and prompt=343.⟧"}
+{"pair_id": "tsyn-in-d_history-4587", "original": "The doctor subcommand's help text is one more place that lists the catalog checks. I ran the binary on 2026-09-02 and it printed four: backslash separators, colon streams, dot-dot segments, and files missing on disk. ⟦Until the colon check landed the help named three checks, and the subcommand was first called catalog-lint.⟧ The text comes from the same doc comment as the README table, so the two are one source rendered twice rather than independent statements. Any audit of the docs should count that pair once.", "substituted": "The doctor subcommand's help text is one more place that lists the catalog checks. I ran the binary on 2026-09-02 and it printed four: backslash separators, colon streams, dot-dot segments, and files missing on disk. ⟦The help names those four checks, and the subcommand is called doctor.⟧ The text comes from the same doc comment as the README table, so the two are one source rendered twice rather than independent statements. Any audit of the docs should count that pair once."}
+{"pair_id": "tsyn-in-d_history-8514", "original": "This grammar deliberately leaves several forms out. Positive slice forms such as `[N:]`, `[:M]` and `[N:M]` are not supported, though a later change can add them without breaking the typed grammar. Slices with a step, including reverse, are also out. Full JSONPath filters, descendants and wildcards are out too; if they are ever needed, use a real jsonpath crate rather than extending this parser. ⟦The first draft of the parser accepted `[N:M]` and was cut back after review, when the reviewer found it disagreed with the negative-index forms.⟧ Mixed-sign slices like `[-3:5]` and `[:-1]` are likewise rejected, and each returns a parse error naming the offending token.", "substituted": "This grammar deliberately leaves several forms out. Positive slice forms such as `[N:]`, `[:M]` and `[N:M]` are not supported, though a later change can add them without breaking the typed grammar. Slices with a step, including reverse, are also out. Full JSONPath filters, descendants and wildcards are out too; if they are ever needed, use a real jsonpath crate rather than extending this parser. ⟦Accepting `[N:M]` would disagree with the negative-index forms, which is why the parser rejects it.⟧ Mixed-sign slices like `[-3:5]` and `[:-1]` are likewise rejected, and each returns a parse error naming the offending token."}
+{"pair_id": "tsyn-in-d_history-9240", "original": "The prefix should live in the Display impl for the error type, where one edit applies at every call site. The doc-comment beside it promises Display stability for test assertions, so the cost is fixtures that pin the start of the stringified error. Option B, injecting in `route_tool_error`, would double-tag, since the JSON envelope already carries a structural `hint` key. Option C relies on convention at each call site, so drift is inevitable. The hint accessor is already public, so fixtures that need the hint text have a stable surface. Because Display prepends the marker, substring assertions on the message body keep passing. ⟦Before this design, hints were tagged with `[hint]` and the tag was renamed to `[cs-hint]` after the first review, which is why some old fixtures still mention the shorter tag.⟧", "substituted": "The prefix should live in the Display impl for the error type, where one edit applies at every call site. The doc-comment beside it promises Display stability for test assertions, so the cost is fixtures that pin the start of the stringified error. Option B, injecting in `route_tool_error`, would double-tag, since the JSON envelope already carries a structural `hint` key. Option C relies on convention at each call site, so drift is inevitable. The hint accessor is already public, so fixtures that need the hint text have a stable surface. Because Display prepends the marker, substring assertions on the message body keep passing. ⟦Fixtures that still mention the `[hint]` tag need updating to `[cs-hint]` when the prefix lands in Display.⟧"}
+codex
+{"pair_id":"tsyn-in-d_history-5511","a":"yes","b":"yes","c":"no","note":"The original records a retired name and obsolete count; the fix describes the current documentation gap."}
+{"pair_id":"tsyn-in-d_history-7571","a":"yes","b":"yes","c":"no","note":"The original preserves a discarded label and draft history; the fix states the current conceptual distinction."}
+{"pair_id":"tsyn-in-d_history-1258","a":"yes","b":"yes","c":"no","note":"The original lists superseded language classifications; the fix reports the current classification."}
+{"pair_id":"tsyn-in-d_history-6222","a":"yes","b":"yes","c":"no","note":"The original catalogs obsolete implementations; the fix states current behavior. Other sentences explain why mutation verification needed repeating."}
+{"pair_id":"tsyn-in-d_history-5840","a":"yes","b":"yes","c":"no","note":"The original preserves an obsolete filename; the fix identifies the current file. Other history supports the causal diagnosis."}
+{"pair_id":"tsyn-in-d_history-4587","a":"yes","b":"yes","c":"no","note":"The original records a former check count and retired command name; the fix states their current versions."}
+{"pair_id":"tsyn-in-d_history-8514","a":"yes","b":"yes","c":"no","note":"The original records superseded parser behavior; the fix retains the rationale using current constraints."}
+{"pair_id":"tsyn-in-d_history-9240","a":"yes","b":"yes","c":"no","note":"The original narrates a superseded tag and review history; the fix makes the remaining fixture references actionable."}
+tokens used
+5,815

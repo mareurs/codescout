@@ -1,0 +1,8 @@
+{"pair_id":"train-member_vs_population-7970","a":"yes","b":"no","c":"no","note":"The original cites a prior workspace run; the fix cites path-helper tests that do not establish the loader's fresh-machine behavior."}
+{"pair_id":"train-member_vs_population-143","a":"yes","b":"yes","c":"no","note":"The replays do not establish staged/worktree divergence handling; the fix limits the claim to exercised seeded IDs."}
+{"pair_id":"train-member_vs_population-10716","a":"yes","b":"yes","c":"no","note":"The suite total does not verify empty-queue handling; the fix cites a passing test specifically exercising that case."}
+{"pair_id":"train-member_vs_population-9290","a":"yes","b":"yes","c":"no","note":"The crate-wide result does not establish overflow gating; the fix cites the specific overflow-gating test."}
+{"pair_id":"train-member_vs_population-3859","a":"yes","b":"yes","c":"no","note":"Workspace success does not establish 503 routing; the fix directly tests the status arm with a 503 body."}
+{"pair_id":"train-member_vs_population-1924","a":"yes","b":"yes","c":"no","note":"Suite success and elapsed duration do not verify this run's lock release; the fix reports direct observation of its absent lock file."}
+{"pair_id":"train-member_vs_population-5792","a":"yes","b":"yes","c":"no","note":"Two-parent test results cannot establish octopus-merge handling; the fix supplies a direct three-parent merge check."}
+{"pair_id":"train-member_vs_population-7200","a":"yes","b":"yes","c":"no","note":"Other workspace tests do not establish trailing-dot resolution; the fix cites the resolver's own test for that case."}

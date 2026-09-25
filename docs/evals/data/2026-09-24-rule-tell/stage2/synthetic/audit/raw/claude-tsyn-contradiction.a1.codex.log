@@ -1,0 +1,82 @@
+{"pair_id":"tsyn-in-contradiction-1165","a":"yes","b":"yes","c":"yes","note":"The marked denial contradicts both automatic inlining for small results and the observed body. The fix reconciles these statements."}
+{"pair_id":"tsyn-in-contradiction-3425","a":"no","b":"yes","c":"no","note":"Different binaries can have different compiled-in defaults; falling back to those defaults is consistent with the observed protocol split."}
+{"pair_id":"tsyn-in-contradiction-1651","a":"yes","b":"yes","c":"yes","note":"The marked sentence contradicts earlier claims that comparisons handle separators correctly and only stringification was faulty. The fix restores consistency."}
+{"pair_id":"tsyn-in-contradiction-7296","a":"yes","b":"yes","c":"yes","note":"Claiming live parity runs every build conflicts with the contract test standing in for it. The fix makes the replacement consistent."}
+{"pair_id":"tsyn-in-contradiction-6604","a":"yes","b":"yes","c":"yes","note":"The acknowledgement bypass contradicts the earlier explicit prohibition of acknowledgement variables. The fix agrees with that prohibition."}
+{"pair_id":"tsyn-in-contradiction-8412","a":"yes","b":"yes","c":"yes","note":"Fatal abortion on cache write failure contradicts the earlier statement that the call continues. The fix removes that contradiction."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-g_lptc1p
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d708-c2fe-7653-8e6a-745a5e290d43
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-g_lptc1p
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `contradiction`
+
+LAW: Two passages of the same text state things that cannot both be true.
+
+USUAL SHAPE: YES when two statements in the text cannot both be true of the same subject at the same time. NO when they concern different subjects, scopes or times.
+
+## Items
+
+{"pair_id": "tsyn-in-contradiction-1165", "original": "The failing test asserts that a search call returns no `body` field unless the caller asks for it. After the auto-inline change, the tool attaches the body whenever a result is small, and the fixture in this test is a three-line file. I confirmed this by printing the raw response: the `body` key is present and holds all three lines. Of the possible remedies, the cheapest is to pass an explicit `include_body: false` and see whether the tool honors it. The larger-fixture option would keep the old contract intact above the size threshold. ⟦The tool never inlines a body for any result, whatever its size, so the test's original expectation was sound all along.⟧", "substituted": "The failing test asserts that a search call returns no `body` field unless the caller asks for it. After the auto-inline change, the tool attaches the body whenever a result is small, and the fixture in this test is a three-line file. I confirmed this by printing the raw response: the `body` key is present and holds all three lines. Of the possible remedies, the cheapest is to pass an explicit `include_body: false` and see whether the tool honors it. The larger-fixture option would keep the old contract intact above the size threshold. ⟦The tool still omits the body for large results, so the test's original expectation holds only above the size threshold.⟧"}
+{"pair_id": "tsyn-in-contradiction-3425", "original": "The census of running writers turned up a divergence we had not expected. Seven processes write the shared sidecar for this project, and six of them run from unlinked binaries, so their code differs from the checked-out tree. All seven read the same endpoint. ⟦Reading /proc/<pid>/environ for each showed that none of them sets a model variable, so every process falls back to its compiled-in default protocol.⟧ Yet the launch logs show three of them speaking `openai` and four speaking `llama-server` at the same moment. The divergence is therefore not only in built code but in live behaviour between processes.", "substituted": "The census of running writers turned up a divergence we had not expected. Seven processes write the shared sidecar for this project, and six of them run from unlinked binaries, so their code differs from the checked-out tree. All seven read the same endpoint. ⟦Reading /proc/<pid>/environ for each showed that none of them sets a model variable, so the protocol split must come from the binaries' compiled-in defaults.⟧ Yet the launch logs show three of them speaking `openai` and four speaking `llama-server` at the same moment. The divergence is therefore not only in built code but in live behaviour between processes."}
+{"pair_id": "tsyn-in-contradiction-1651", "original": "Six of the 13 failures share one cause. `DiscoveredProject.relative_root` is set from `dir.strip_prefix(workspace_root)` over an OS directory walk, so a nested project comes out as `crates\\librarian-mcp` on Windows. I patched each place that renders the value as text rather than changing how it is built. The field is legitimately a `Path` used in comparisons such as `starts_with` and `==`, and those handle separators correctly as they are. Only the stringification was faulty. ⟦Normalizing the stored path at construction was also needed for the comparisons to work, since they fail on backslashes.⟧", "substituted": "Six of the 13 failures share one cause. `DiscoveredProject.relative_root` is set from `dir.strip_prefix(workspace_root)` over an OS directory walk, so a nested project comes out as `crates\\librarian-mcp` on Windows. I patched each place that renders the value as text rather than changing how it is built. The field is legitimately a `Path` used in comparisons such as `starts_with` and `==`, and those handle separators correctly as they are. Only the stringification was faulty. ⟦Normalizing the stored path at construction was unnecessary for the comparisons, since they handle backslashes correctly.⟧"}
+{"pair_id": "tsyn-in-contradiction-7296", "original": "Phase 1 of the storage split is done. I extracted a vector-store trait covering collection setup, chunk refs, upsert, delete, query and index stats, and the Qdrant wrapper is its first implementation. The retrieval client now holds a trait object instead of the concrete Qdrant handle, and semantic search and project sync both go through it. The memory store and artifact store build their own wrappers, so nothing outside the client touches its internals any more. An in-memory brute-force cosine store pins the contract, and the sqlite-vec implementation must pass the same tests. ⟦Because CI has no Qdrant daemon, a live parity test against the trait runs on every CI build.⟧ The contract test stands in for it, and the sqlite-vec work will rerun that.", "substituted": "Phase 1 of the storage split is done. I extracted a vector-store trait covering collection setup, chunk refs, upsert, delete, query and index stats, and the Qdrant wrapper is its first implementation. The retrieval client now holds a trait object instead of the concrete Qdrant handle, and semantic search and project sync both go through it. The memory store and artifact store build their own wrappers, so nothing outside the client touches its internals any more. An in-memory brute-force cosine store pins the contract, and the sqlite-vec implementation must pass the same tests. ⟦Because CI has no Qdrant daemon, a live parity test against the trait cannot run on any CI build.⟧ The contract test stands in for it, and the sqlite-vec work will rerun that."}
+{"pair_id": "tsyn-in-contradiction-6604", "original": "The reset guard landed as a small shell script with its own test file, copied in structure from the formatter guard because both protect a shared git index that nobody owns. It refuses `--mixed` and `--hard` outright, with no force flag and no acknowledgement variable, since no situation exists where either mode is safe once someone acknowledges the risk. The refusal message lists how many files are staged, their names, and who wrote them. A reset with zero staged files still refuses, because a peer's `git add` can land between the check and the reset. ⟦Any caller may pass an acknowledgement variable to proceed when the refusal is expected.⟧ With no prior implementation there was no failing test to start from, so I blanked the count line and saw 34 of 35 pass, exactly the count assertion.", "substituted": "The reset guard landed as a small shell script with its own test file, copied in structure from the formatter guard because both protect a shared git index that nobody owns. It refuses `--mixed` and `--hard` outright, with no force flag and no acknowledgement variable, since no situation exists where either mode is safe once someone acknowledges the risk. The refusal message lists how many files are staged, their names, and who wrote them. A reset with zero staged files still refuses, because a peer's `git add` can land between the check and the reset. ⟦No caller may pass an acknowledgement variable to proceed, even when the refusal is expected.⟧ With no prior implementation there was no failing test to start from, so I blanked the count line and saw 34 of 35 pass, exactly the count assertion."}
+{"pair_id": "tsyn-in-contradiction-8412", "original": "Error handling for the call graph tool follows the existing tiers. A missing symbol returns a recoverable error with a hint to use the symbol lookup tool for candidates. When neither an LSP nor a tree-sitter parser exists for the language, the tool returns a recoverable error naming the language. Timeouts and open circuit breakers are surfaced by the LSP layer, and we simply propagate them. A cache write failure is logged and the call continues, since the graph is already computed and persistence is best-effort. ⟦A failed cache write aborts the call with a fatal error so the operator notices.⟧ Genuine bugs such as panics, schema corruption and broken internal invariants bail out as fatal.", "substituted": "Error handling for the call graph tool follows the existing tiers. A missing symbol returns a recoverable error with a hint to use the symbol lookup tool for candidates. When neither an LSP nor a tree-sitter parser exists for the language, the tool returns a recoverable error naming the language. Timeouts and open circuit breakers are surfaced by the LSP layer, and we simply propagate them. A cache write failure is logged and the call continues, since the graph is already computed and persistence is best-effort. ⟦A failed cache write is never fatal, and the log line is what the operator notices.⟧ Genuine bugs such as panics, schema corruption and broken internal invariants bail out as fatal."}
+codex
+{"pair_id":"tsyn-in-contradiction-1165","a":"yes","b":"yes","c":"yes","note":"The marked denial contradicts both automatic inlining for small results and the observed body. The fix reconciles these statements."}
+{"pair_id":"tsyn-in-contradiction-3425","a":"no","b":"yes","c":"no","note":"Different binaries can have different compiled-in defaults; falling back to those defaults is consistent with the observed protocol split."}
+{"pair_id":"tsyn-in-contradiction-1651","a":"yes","b":"yes","c":"yes","note":"The marked sentence contradicts earlier claims that comparisons handle separators correctly and only stringification was faulty. The fix restores consistency."}
+{"pair_id":"tsyn-in-contradiction-7296","a":"yes","b":"yes","c":"yes","note":"Claiming live parity runs every build conflicts with the contract test standing in for it. The fix makes the replacement consistent."}
+{"pair_id":"tsyn-in-contradiction-6604","a":"yes","b":"yes","c":"yes","note":"The acknowledgement bypass contradicts the earlier explicit prohibition of acknowledgement variables. The fix agrees with that prohibition."}
+{"pair_id":"tsyn-in-contradiction-8412","a":"yes","b":"yes","c":"yes","note":"Fatal abortion on cache write failure contradicts the earlier statement that the call continues. The fix removes that contradiction."}
+tokens used
+5,523

@@ -1,0 +1,88 @@
+{"pair_id":"train-d_adjacency-8666","a":"yes","b":"yes","c":"no","note":"Original infers authorship from directory activity; replacement cites the test's history identifying Lena as author."}
+{"pair_id":"train-d_adjacency-9063","a":"yes","b":"yes","c":"no","note":"Original attributes rules through adjacent-section edits; replacement cites blame on the exact lines."}
+{"pair_id":"train-d_adjacency-8521","a":"yes","b":"yes","c":"no","note":"Original relies on neighboring-script edits; replacement identifies Kwame through the introducing commit."}
+{"pair_id":"train-d_adjacency-8460","a":"yes","b":"yes","c":"no","note":"Original relies on contemporaneous commits elsewhere; replacement cites authorship of the commit adding the note."}
+{"pair_id":"train-d_adjacency-8293","a":"yes","b":"yes","c":"no","note":"Original links authorship to a neighboring-file edit; replacement cites blame on the memory file itself."}
+{"pair_id":"train-d_adjacency-11997","a":"yes","b":"yes","c":"no","note":"Original guesses authorship from nearby module activity; replacement identifies Dana through the commit adding the tripwire."}
+{"pair_id":"train-d_adjacency-2242","a":"yes","b":"yes","c":"no","note":"Original infers authorship from another frontmatter file; replacement cites Kofi's signature on the introducing commit."}
+{"pair_id":"train-d_adjacency-11249","a":"yes","b":"yes","c":"no","note":"Original guesses authorship from neighboring scheduler commits; replacement cites blame and the commit introducing the exact lines."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-i0mx6lzc
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d707-28a8-7d21-b7ac-c2525febf99b
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-i0mx6lzc
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_adjacency`
+
+LAW: Never route by adjacency: attribute a write positively, not by who touched the file nearby.
+
+USUAL SHAPE: YES when the text attributes a change or file to an author because they touched the same or a nearby file, or were active nearby, without identifying the author positively. NO otherwise.
+
+## Items
+
+{"pair_id": "train-d_adjacency-8666", "original": "⟦The atomicity test was written by Lena, because she was the last person active in the markdown tests directory.⟧ It sends a replace plus a scoped edit on the same section and expects a RecoverableError naming both indices, with the file untouched. I ran it against the new batch code and it passes; the file hash before and after is identical. The order-independence test runs the pg36 batch rename-first and row-first and compares the bytes, which match. A batch of N inserts now yields one trailing newline.", "substituted": "⟦The atomicity test was written by Lena, as the history of that test shows her as its author.⟧ It sends a replace plus a scoped edit on the same section and expects a RecoverableError naming both indices, with the file untouched. I ran it against the new batch code and it passes; the file hash before and after is identical. The order-independence test runs the pg36 batch rename-first and row-first and compares the bytes, which match. A batch of N inserts now yields one trailing newline."}
+{"pair_id": "train-d_adjacency-9063", "original": "Rules enter the instruction file cheaply: a few anecdotes and one commit are enough. Taking one out needs an eval run, pre-registration, and a real spend, so nobody does it. ⟦The three newest rules in the file are Lena's, since she was the last person to touch the adjacent testing section.⟧ The only automated gates on the file are two tool-name tests, and neither one counts lines or tokens. So the file only grows, and compaction sessions then add tracker entries of their own on top of it.", "substituted": "Rules enter the instruction file cheaply: a few anecdotes and one commit are enough. Taking one out needs an eval run, pre-registration, and a real spend, so nobody does it. ⟦The three newest rules in the file are Lena's, since blame lists her commits on exactly those lines.⟧ The only automated gates on the file are two tool-name tests, and neither one counts lines or tokens. So the file only grows, and compaction sessions then add tracker entries of their own on top of it."}
+{"pair_id": "train-d_adjacency-8521", "original": "Step 1 ships the GetGuide tool with four topic files while the librarian instructions constant stays concatenated, so older clients see no change. Step 2 shrinks source.md to the 1,800-character cap and drops the runtime concat. The build-time size assert already fails on a 1,900-character draft, which I confirmed by pasting one in. ⟦The assert in build.rs came from Kwame, since he had been editing the neighboring build script last sprint.⟧ Step 3 adds the hint method to the trait and overrides it on the librarian adapters.", "substituted": "Step 1 ships the GetGuide tool with four topic files while the librarian instructions constant stays concatenated, so older clients see no change. Step 2 shrinks source.md to the 1,800-character cap and drops the runtime concat. The build-time size assert already fails on a 1,900-character draft, which I confirmed by pasting one in. ⟦The assert in build.rs came from Kwame, whose name is on the commit that introduced it.⟧ Step 3 adds the hint method to the trait and overrides it on the librarian adapters."}
+{"pair_id": "train-d_adjacency-8460", "original": "Round 1 of the eval ran all 14 cases end to end, and each produced one of the six verdicts. All 14 input files compiled cleanly before any edit, which I checked with a build over the inputs directory. The shared eval_common module now serves both nav_eval and edit_eval, and the round-1 verdict file is committed. H1 through H3 pass with R-02 exempt. ⟦The R-02 exemption note in the TODO file was written by Ines, since her commits landed in nav_eval around the same time.⟧", "substituted": "Round 1 of the eval ran all 14 cases end to end, and each produced one of the six verdicts. All 14 input files compiled cleanly before any edit, which I checked with a build over the inputs directory. The shared eval_common module now serves both nav_eval and edit_eval, and the round-1 verdict file is committed. H1 through H3 pass with R-02 exempt. ⟦The R-02 exemption note in the TODO file was written by Ines, as the commit that added it lists her as author.⟧"}
+{"pair_id": "train-d_adjacency-8293", "original": "⟦The hand-edited language-patterns memory in the api directory was written by Tomas, who had edited the neighboring session file the day before.⟧ Onboarding currently writes memories only for the focused project, because ActiveProject holds a single MemoryStore. I confirmed this by running onboarding on a two-project workspace: the api directory received both memory files and the frontend directory stayed empty. The response JSON also reports protected memories for one project only. The change needs a MemoryStore per discovered project, built from each project's memory directory.", "substituted": "⟦The hand-edited language-patterns memory in the api directory was written by Tomas, according to git blame on that memory file.⟧ Onboarding currently writes memories only for the focused project, because ActiveProject holds a single MemoryStore. I confirmed this by running onboarding on a two-project workspace: the api directory received both memory files and the frontend directory stayed empty. The response JSON also reports protected memories for one project only. The change needs a MemoryStore per discovered project, built from each project's memory directory."}
+{"pair_id": "train-d_adjacency-11997", "original": "We chose a denylist over an allowlist for the guide-body check. Counting on 2026-08-16 found 179 distinct backticked snake_case tokens in the ten bodies, against about 30 real tools, so an allowlist would need roughly 150 non-tool entries. The existing gate also requires every allowlist entry to appear backticked somewhere, which would make each guide edit a maintenance event. ⟦The stale-entry tripwire was added by whoever was reworking the prompts module around then, so it is probably Dana's.⟧ That count settles the question left open in the earlier finding.", "substituted": "We chose a denylist over an allowlist for the guide-body check. Counting on 2026-08-16 found 179 distinct backticked snake_case tokens in the ten bodies, against about 30 real tools, so an allowlist would need roughly 150 non-tool entries. The existing gate also requires every allowlist entry to appear backticked somewhere, which would make each guide edit a maintenance event. ⟦The stale-entry tripwire was added in the commit that the log lists under Dana's name, dated that same week.⟧ That count settles the question left open in the earlier finding."}
+{"pair_id": "train-d_adjacency-2242", "original": "The project has two frontmatter implementations, and only the markdown editing one is line-based. The librarian module parses into a typed struct with named fields plus an extra map, then reserialises the whole block, so multi-line values round-trip structurally. That is why the artifact update earlier in this session rewrote a tag list into a block sequence without incident, while the line-based editor corrupted the same shape. ⟦The line-based editor's parsing was written by Kofi, since he had been editing the librarian frontmatter file around then.⟧ For librarian-managed artifacts, the update action is the safe path.", "substituted": "The project has two frontmatter implementations, and only the markdown editing one is line-based. The librarian module parses into a typed struct with named fields plus an extra map, then reserialises the whole block, so multi-line values round-trip structurally. That is why the artifact update earlier in this session rewrote a tag list into a block sequence without incident, while the line-based editor corrupted the same shape. ⟦The line-based editor's parsing was written by Kofi, since the commit that added it carries his signature.⟧ For librarian-managed artifacts, the update action is the safe path."}
+{"pair_id": "train-d_adjacency-11249", "original": "We have one datapoint for the fan-out calibration gate so far. In that run, each subagent received the controller's own value for its slice and had to return a loud FAIL on mismatch. One agent did fail, and the diff showed the controller had passed a stale slice offset. The pattern is promotable once a second case appears. ⟦Whoever wrote the stale-offset logic in the dispatcher is probably Tomas, because his commits were the ones landing in the neighbouring scheduler file that week.⟧ Until then the note stays in the handoff file rather than the reconnaissance skill's dispatch guidance.", "substituted": "We have one datapoint for the fan-out calibration gate so far. In that run, each subagent received the controller's own value for its slice and had to return a loud FAIL on mismatch. One agent did fail, and the diff showed the controller had passed a stale slice offset. The pattern is promotable once a second case appears. ⟦Whoever wrote the stale-offset logic in the dispatcher is recorded by blame as Tomas, whose commit introduced those lines.⟧ Until then the note stays in the handoff file rather than the reconnaissance skill's dispatch guidance."}
+codex
+{"pair_id":"train-d_adjacency-8666","a":"yes","b":"yes","c":"no","note":"Original infers authorship from directory activity; replacement cites the test's history identifying Lena as author."}
+{"pair_id":"train-d_adjacency-9063","a":"yes","b":"yes","c":"no","note":"Original attributes rules through adjacent-section edits; replacement cites blame on the exact lines."}
+{"pair_id":"train-d_adjacency-8521","a":"yes","b":"yes","c":"no","note":"Original relies on neighboring-script edits; replacement identifies Kwame through the introducing commit."}
+{"pair_id":"train-d_adjacency-8460","a":"yes","b":"yes","c":"no","note":"Original relies on contemporaneous commits elsewhere; replacement cites authorship of the commit adding the note."}
+{"pair_id":"train-d_adjacency-8293","a":"yes","b":"yes","c":"no","note":"Original links authorship to a neighboring-file edit; replacement cites blame on the memory file itself."}
+{"pair_id":"train-d_adjacency-11997","a":"yes","b":"yes","c":"no","note":"Original guesses authorship from nearby module activity; replacement identifies Dana through the commit adding the tripwire."}
+{"pair_id":"train-d_adjacency-2242","a":"yes","b":"yes","c":"no","note":"Original infers authorship from another frontmatter file; replacement cites Kofi's signature on the introducing commit."}
+{"pair_id":"train-d_adjacency-11249","a":"yes","b":"yes","c":"no","note":"Original guesses authorship from neighboring scheduler commits; replacement cites blame and the commit introducing the exact lines."}
+tokens used
+5,662

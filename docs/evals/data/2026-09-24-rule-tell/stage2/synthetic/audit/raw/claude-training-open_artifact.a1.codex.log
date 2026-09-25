@@ -1,0 +1,88 @@
+{"pair_id":"train-open_artifact-4218","a":"yes","b":"yes","c":"no","note":"Original relies on the PR description for gating intent; replacement grounds the gating claim in code."}
+{"pair_id":"train-open_artifact-10084","a":"yes","b":"yes","c":"no","note":"Original infers file-list contents from a handoff note; replacement opens the file list directly."}
+{"pair_id":"train-open_artifact-6008","a":"yes","b":"yes","c":"no","note":"Original infers commit behavior from the design note; replacement cites the commit diff."}
+{"pair_id":"train-open_artifact-12237","a":"yes","b":"yes","c":"no","note":"Original relies on memory of the patch; replacement grounds the claim in the patch diff."}
+{"pair_id":"train-open_artifact-7240","a":"yes","b":"yes","c":"no","note":"Original relies on the changelog for script behavior; replacement cites the script's export line."}
+{"pair_id":"train-open_artifact-1392","a":"yes","b":"yes","c":"no","note":"Original relies on the design note for handler behavior; replacement explicitly reads the old handler."}
+{"pair_id":"train-open_artifact-6051","a":"yes","b":"yes","c":"no","note":"Original infers handler behavior from a bug entry; replacement uses executed test results. Sufficiency of that evidence is outside this rule."}
+{"pair_id":"train-open_artifact-9032","a":"yes","b":"yes","c":"no","note":"Original relies on the design doc for hook behavior; replacement grounds the claim in call_content's control flow."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-_wzyw12t
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d708-05c8-7220-9cc6-a2124c872d37
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-_wzyw12t
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `open_artifact`
+
+LAW: Do not state what a doc, a memory, or a prior belief says the code does; open the artifact or run the command.
+
+USUAL SHAPE: YES when the text states what code or a document does and explicitly rests it on memory, a summary, a plan, another doc or a prior belief ("as I recall", "per the README", "the plan says") instead of the artifact itself. NO when no basis is stated or the text says it read the artifact.
+
+## Items
+
+{"pair_id": "train-open_artifact-4218", "original": "The library tool was missing from `tools/list` in a fresh project, which is exactly when a user needs it. Its availability check returned `RequiresLibraries`, and `current_capabilities` computes that flag as true only when at least one library is already registered, as the function body shows. Yet registering a library is one of the tool's own actions, so nothing else can satisfy the precondition. ⟦According to the PR description, the gate was meant to hide only the read actions, so registration should have stayed reachable.⟧ The tool was therefore gated on a state it alone can create.", "substituted": "The library tool was missing from `tools/list` in a fresh project, which is exactly when a user needs it. Its availability check returned `RequiresLibraries`, and `current_capabilities` computes that flag as true only when at least one library is already registered, as the function body shows. Yet registering a library is one of the tool's own actions, so nothing else can satisfy the precondition. ⟦In the gate code, the check hides the whole tool, read actions and registration alike, so registration was unreachable.⟧ The tool was therefore gated on a state it alone can create."}
+{"pair_id": "train-open_artifact-10084", "original": "The stale-list incident is confirmed at the mechanism level. I checked the index directly: it held a path that the session's own file list did not contain, and that path was one half of an atomic pair. The subagent's commit `61441b3d` touched four files, and `get.rs` is among them. ⟦Going by the session's handoff note, its file list currently names `adapter.rs` as well, so a sweep would have caught both halves.⟧ What I cannot confirm is what the other session would have done had it trusted its own list; that part is its testimony, and I am recording it as such.", "substituted": "The stale-list incident is confirmed at the mechanism level. I checked the index directly: it held a path that the session's own file list did not contain, and that path was one half of an atomic pair. The subagent's commit `61441b3d` touched four files, and `get.rs` is among them. ⟦Opening the session's file list shows it currently names `adapter.rs` as well, so a sweep would have caught both halves.⟧ What I cannot confirm is what the other session would have done had it trusted its own list; that part is its testimony, and I am recording it as such."}
+{"pair_id": "train-open_artifact-6008", "original": "The drift audit turned up two stale figures in the design note. The render-path count moved because the code moved: commit `295a928e` added a fourth path, and I confirmed it by reading the dispatch table in the current tree, which lists four entries. ⟦The note's section on surface coverage says the collapsed surface is still excluded, so `8b396343` presumably leaves it alone.⟧ The note and the code change at independent rates, and nothing ties them together, so there is no authoring error to track down here.", "substituted": "The drift audit turned up two stale figures in the design note. The render-path count moved because the code moved: commit `295a928e` added a fourth path, and I confirmed it by reading the dispatch table in the current tree, which lists four entries. ⟦The diff of `8b396343` shows it merged the collapsed surface into the shared one, so the note's exclusion no longer holds.⟧ The note and the code change at independent rates, and nothing ties them together, so there is no authoring error to track down here."}
+{"pair_id": "train-open_artifact-12237", "original": "The usage telemetry vanished when worktrees were removed. The probable cause is that the usage database is scoped to the project root, and a worktree is its own root. The change redirects the database open to the main root while the row still names the worktree as project root. The live data shows the boundary: the worktree created after the change holds 937 rows in the main database and none stranded, while the two June worktrees, created before it, hold 705 and 934 stranded rows. The change only applies going forward. ⟦As I remember the patch, it also back-fills the stranded rows from those June worktrees into the main database.⟧", "substituted": "The usage telemetry vanished when worktrees were removed. The probable cause is that the usage database is scoped to the project root, and a worktree is its own root. The change redirects the database open to the main root while the row still names the worktree as project root. The live data shows the boundary: the worktree created after the change holds 937 rows in the main database and none stranded, while the two June worktrees, created before it, hold 705 and 934 stranded rows. The change only applies going forward. ⟦The patch diff contains no back-fill step, so the stranded rows in those June worktrees stay where they are.⟧"}
+{"pair_id": "train-open_artifact-7240", "original": "The default-features change had three side effects. First, the release alias inherits it: it passes no flag to disable defaults, so the live binary regains the local embedding backend and its extra size. Second, the Windows build script broke. The upstream runtime crate ships no prebuilt for the gnu Windows target, and I reproduced the build-script failure locally before landing the change, then reran the exact CI commands green after substituting the dynamic feature. Third, the gate script went red on machines without model weights, because the default lane now compiles two tests that panic without the weights directory variable. ⟦The gate script sets the skip variable the same way CI does, as the changelog entry says, so the gate is safe on every checkout now.⟧", "substituted": "The default-features change had three side effects. First, the release alias inherits it: it passes no flag to disable defaults, so the live binary regains the local embedding backend and its extra size. Second, the Windows build script broke. The upstream runtime crate ships no prebuilt for the gnu Windows target, and I reproduced the build-script failure locally before landing the change, then reran the exact CI commands green after substituting the dynamic feature. Third, the gate script went red on machines without model weights, because the default lane now compiles two tests that panic without the weights directory variable. ⟦The gate script sets the skip variable the same way CI does, as its export line shows, so the gate is safe on every checkout now.⟧"}
+{"pair_id": "train-open_artifact-1392", "original": "The new test seeds an artifact whose params schema requires an integer count, then sends one update with a valid body overwrite and a params patch that breaks the schema. It asserts the call errors and that the file on disk is byte-identical to before. Before the change, the test failed: the file had the new body even though the call returned an error. ⟦According to the design note, the handler validates the params patch before writing the body.⟧ The reorder now puts validation first, and the test passes.", "substituted": "The new test seeds an artifact whose params schema requires an integer count, then sends one update with a valid body overwrite and a params patch that breaks the schema. It asserts the call errors and that the file on disk is byte-identical to before. Before the change, the test failed: the file had the new body even though the call returned an error. ⟦Reading the old handler shows the body write ran before the params patch was validated.⟧ The reorder now puts validation first, and the test passes."}
+{"pair_id": "train-open_artifact-6051", "original": "The deletion is verified by running the checks, not by argument. The library build is clean, with no unused-import warning for `RecoverableError`, which is still used elsewhere in the file. Clippy across the workspace with warnings denied is clean too. The symbol-tool test module reports the same 344 passes before and after the change. ⟦Because the bug entry lists no new tests, the handler must still behave as it did before the deletion.⟧ That fits the reasoning that a removed branch leaves nothing new to assert, so parity is the right evidence.", "substituted": "The deletion is verified by running the checks, not by argument. The library build is clean, with no unused-import warning for `RecoverableError`, which is still used elsewhere in the file. Clippy across the workspace with warnings denied is clean too. The symbol-tool test module reports the same 344 passes before and after the change. ⟦Because the pass count is identical across both runs, the handler behaves as it did before the deletion.⟧ That fits the reasoning that a removed branch leaves nothing new to assert, so parity is the right evidence."}
+{"pair_id": "train-open_artifact-9032", "original": "⟦The design doc for guide injection says refusals get a guide too, so the hook covers both outcomes.⟧ The hook log tells a different story: progressive-disclosure logged 9 pushes, while iron-laws-detail logged none. Overflow is a successful result shape, so it reaches the injection step. A refusal is an Err, and in the call_content body the question mark on the inner call returns before the injection block runs. That asymmetry explains the counts, and it means half the outcomes never reach the hook.", "substituted": "⟦In call_content, the injection block runs only after the inner call succeeds, so the hook covers successes alone.⟧ The hook log tells a different story: progressive-disclosure logged 9 pushes, while iron-laws-detail logged none. Overflow is a successful result shape, so it reaches the injection step. A refusal is an Err, and in the call_content body the question mark on the inner call returns before the injection block runs. That asymmetry explains the counts, and it means half the outcomes never reach the hook."}
+codex
+{"pair_id":"train-open_artifact-4218","a":"yes","b":"yes","c":"no","note":"Original relies on the PR description for gating intent; replacement grounds the gating claim in code."}
+{"pair_id":"train-open_artifact-10084","a":"yes","b":"yes","c":"no","note":"Original infers file-list contents from a handoff note; replacement opens the file list directly."}
+{"pair_id":"train-open_artifact-6008","a":"yes","b":"yes","c":"no","note":"Original infers commit behavior from the design note; replacement cites the commit diff."}
+{"pair_id":"train-open_artifact-12237","a":"yes","b":"yes","c":"no","note":"Original relies on memory of the patch; replacement grounds the claim in the patch diff."}
+{"pair_id":"train-open_artifact-7240","a":"yes","b":"yes","c":"no","note":"Original relies on the changelog for script behavior; replacement cites the script's export line."}
+{"pair_id":"train-open_artifact-1392","a":"yes","b":"yes","c":"no","note":"Original relies on the design note for handler behavior; replacement explicitly reads the old handler."}
+{"pair_id":"train-open_artifact-6051","a":"yes","b":"yes","c":"no","note":"Original infers handler behavior from a bug entry; replacement uses executed test results. Sufficiency of that evidence is outside this rule."}
+{"pair_id":"train-open_artifact-9032","a":"yes","b":"yes","c":"no","note":"Original relies on the design doc for hook behavior; replacement grounds the claim in call_content's control flow."}
+tokens used
+5,816

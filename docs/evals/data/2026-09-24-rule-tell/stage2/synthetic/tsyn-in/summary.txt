@@ -1,0 +1,24 @@
+set tsyn-in  generator claude:claude-sonnet-5  calls 66  pairs 330  ok 195
+failures: {"shares an 8-token shingle with its seed": 119, "banned word": 28, "seed missing from output": 7, "violating sentence is not one segmenter unit": 1, "fixed sentence is not one segmenter unit": 1}
+  act_on_artifact        11/15
+  cannot_happen          9/15
+  closed_population      11/15
+  contradiction          6/15
+  count_unit             9/15
+  d_adjacency            9/15
+  d_fixture              12/15
+  d_history              8/15
+  d_loudness             10/15
+  d_mutation             15/15
+  d_red                  10/15
+  d_semicolon            13/15
+  d_sessionid            10/15
+  d_visibility           2/15
+  lines_read             6/15
+  member_vs_population   8/15
+  monotone_absence       9/15
+  open_artifact          10/15
+  question_asked         3/15
+  run_tool               7/15
+  scope_instant          8/15
+  selector_narrow        9/15

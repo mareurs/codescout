@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-monotone_absence-3613","a":"yes","b":"no","c":"no","note":"An empty grep result still supports a universal absence claim without a positive control; a broken search could return nothing."}
+{"pair_id":"tsyn-in-monotone_absence-7064","a":"yes","b":"yes","c":"no","note":"The fix reports direct inspection of all nine descriptions rather than relying on an unchecked collision check's empty output."}
+{"pair_id":"tsyn-in-monotone_absence-8300","a":"yes","b":"yes","c":"no","note":"The deliberately broken link provides a positive control demonstrating that the checker reports failures."}
+{"pair_id":"tsyn-in-monotone_absence-5858","a":"yes","b":"yes","c":"no","note":"The fix reports positively counting the required branches in every schema instead of inferring their presence from no failures."}
+{"pair_id":"tsyn-in-monotone_absence-2058","a":"yes","b":"yes","c":"no","note":"The fix explains the empty log through the bypassed logging path and no longer treats silence as evidence of correct chunking."}
+{"pair_id":"tsyn-in-monotone_absence-570","a":"yes","b":"no","c":"no","note":"The fix still infers no activity from an empty scan without a successful positive control; the earlier known edit demonstrates a limitation."}
+{"pair_id":"tsyn-in-monotone_absence-7719","a":"yes","b":"yes","c":"no","note":"The fix explicitly acknowledges that the recovery scenario was never exercised and leaves recovery untested."}
+{"pair_id":"tsyn-in-monotone_absence-2378","a":"yes","b":"yes","c":"no","note":"The fix describes the absence of compiler detection for observed losses, rather than claiming silence proves the backstop reliable."}

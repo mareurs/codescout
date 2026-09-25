@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-d_red-2323", "a": "yes", "b": "yes", "c": "no", "note": "The original credits the old failure to the unexecuted narrowed assertion. The fix credits it to the original assertion that produced it."}
+{"pair_id": "tsyn-cross-d_red-1308", "a": "yes", "b": "yes", "c": "no", "note": "The original treats the old red as evidence for the new, unrun rejection assertion. The fix assigns the red to the original comparison."}
+{"pair_id": "tsyn-cross-d_red-4979", "a": "yes", "b": "yes", "c": "no", "note": "The original claims the saved red confirms the revised, unrun assertion fails. The fix assigns it to the original cache-path assertion."}
+{"pair_id": "tsyn-cross-d_red-7282", "a": "yes", "b": "yes", "c": "no", "note": "The original says the old failure completes the failing stage of the revised assertion. The fix attributes it to the previous assertion."}
+{"pair_id": "tsyn-cross-d_red-12247", "a": "yes", "b": "yes", "c": "no", "note": "The original claims the 822 assertion was observed failing, though only the 800 version ran. The fix correctly names the 800 assertion."}
+{"pair_id": "tsyn-cross-d_red-237", "a": "yes", "b": "yes", "c": "no", "note": "The original uses the old failure as evidence for the unexecuted reindex assertion. The fix attributes it to the original assertion."}
+{"pair_id": "tsyn-cross-d_red-9849", "a": "yes", "b": "yes", "c": "no", "note": "The original counts the stored failure as a run of the edited assertion. The fix restricts it to the original assertion."}
+{"pair_id": "tsyn-cross-d_red-4971", "a": "yes", "b": "yes", "c": "no", "note": "The original credits the earlier red to the unrun unresolved-counter assertion. The fix credits the item-count assertion that failed."}

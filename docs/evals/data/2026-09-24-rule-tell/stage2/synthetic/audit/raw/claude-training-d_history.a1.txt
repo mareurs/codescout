@@ -1,0 +1,8 @@
+{"pair_id":"train-d_history-11602","a":"yes","b":"yes","c":"no","note":"The original preserves a superseded token count and hash; the fix states current values."}
+{"pair_id":"train-d_history-7024","a":"yes","b":"yes","c":"no","note":"The original records the retired inline-output limit; the fix describes current output behavior."}
+{"pair_id":"train-d_history-8669","a":"yes","b":"yes","c":"no","note":"The original records an obsolete column name and hash length; the fix supplies the current schema."}
+{"pair_id":"train-d_history-7045","a":"yes","b":"yes","c":"no","note":"The original names the superseded default model; the fix names the current default."}
+{"pair_id":"train-d_history-6846","a":"yes","b":"yes","c":"no","note":"The original preserves a retired script name and former count; the fix describes the current script and checks."}
+{"pair_id":"train-d_history-9461","a":"yes","b":"yes","c":"no","note":"The original preserves an obsolete section title and terminology; the fix uses current names. Other sentences establish the diagnosis."}
+{"pair_id":"train-d_history-4541","a":"yes","b":"yes","c":"yes","note":"The fix removes obsolete thresholds, but another sentence preserves the superseded no-match result and ratio of 0.130."}
+{"pair_id":"train-d_history-787","a":"yes","b":"yes","c":"no","note":"The original records an obsolete binary path and migration timing; the fix states current lookup and failure behavior."}

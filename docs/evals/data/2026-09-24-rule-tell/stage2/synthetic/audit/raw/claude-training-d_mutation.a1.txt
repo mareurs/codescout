@@ -1,0 +1,8 @@
+{"pair_id":"train-d_mutation-6483","a":"yes","b":"yes","c":"no","note":"The counter mutant cannot establish coverage at the listing or summary sites; the fix limits the claim to the counter."}
+{"pair_id":"train-d_mutation-3880","a":"yes","b":"yes","c":"no","note":"A planted match detected by check 3 does not verify the other independent checks; the fix limits coverage to check 3."}
+{"pair_id":"train-d_mutation-3701","a":"yes","b":"yes","c":"no","note":"Mutating the doctor loop does not verify the write and move loops; the fix restricts the claim to the doctor builder."}
+{"pair_id":"train-d_mutation-27","a":"yes","b":"yes","c":"no","note":"The archive probe cannot verify the post-rebase and cherry-pick sites; the fix claims verification only for the archive step."}
+{"pair_id":"train-d_mutation-8653","a":"yes","b":"yes","c":"no","note":"Mutating snapshot-diff output does not verify the other scorers; the fix confines verification to snapshot-diff."}
+{"pair_id":"train-d_mutation-11265","a":"yes","b":"yes","c":"no","note":"Deleting the launcher guard verifies only that site, not all four call sites; the fix limits the claim accordingly."}
+{"pair_id":"train-d_mutation-2097","a":"yes","b":"yes","c":"no","note":"Deleting the link resolver's index check does not verify other callers; the fix claims coverage only for the link resolver."}
+{"pair_id":"train-d_mutation-3285","a":"yes","b":"yes","c":"no","note":"The source gate mutation cannot establish coverage at the shell and find gates; the fix limits coverage to the source gate."}

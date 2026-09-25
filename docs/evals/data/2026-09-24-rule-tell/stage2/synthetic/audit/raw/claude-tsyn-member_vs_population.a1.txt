@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-member_vs_population-9387","a":"yes","b":"yes","c":"no","note":"An average briefing score cannot establish session 17's briefing contents; its dispatch transcript supplies direct evidence."}
+{"pair_id":"tsyn-in-member_vs_population-104","a":"yes","b":"yes","c":"no","note":"Matching counts cannot establish that the last agent appears in session B's list; the fix explicitly rejects that inference."}
+{"pair_id":"tsyn-in-member_vs_population-311","a":"yes","b":"yes","c":"no","note":"Suite success does not establish the specific call's preamble shape; the fix removes that inference."}
+{"pair_id":"tsyn-in-member_vs_population-309","a":"yes","b":"yes","c":"no","note":"Total output cannot verify one shape's section; the fix uses observed fallback output without claiming section correctness."}
+{"pair_id":"tsyn-in-member_vs_population-7085","a":"yes","b":"yes","c":"no","note":"Aggregate CI success lacks demonstrated coverage of the specific lookup; the fix identifies a check exercising that lookup."}
+{"pair_id":"tsyn-in-member_vs_population-1622","a":"yes","b":"yes","c":"no","note":"Module-wide success does not establish coverage of the particular external-reference case; the fix explicitly identifies that case as untested."}
+{"pair_id":"tsyn-in-member_vs_population-6899","a":"yes","b":"yes","c":"no","note":"Suite success cannot verify delivery to the observed subagent; the fix limits its claim to a directly inspected test call."}
+{"pair_id":"tsyn-in-member_vs_population-2012","a":"yes","b":"yes","c":"no","note":"Integration-suite success cannot verify the specific watch-path termination scenario; the fix states that scenario lacks test coverage."}

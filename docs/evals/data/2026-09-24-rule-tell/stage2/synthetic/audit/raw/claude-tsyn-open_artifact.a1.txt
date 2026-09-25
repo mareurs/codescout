@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-open_artifact-2518","a":"yes","b":"yes","c":"no","note":"Original relies on the guide for code behavior; replacement relies on the observed diff."}
+{"pair_id":"tsyn-in-open_artifact-12211","a":"yes","b":"yes","c":"no","note":"Original infers scanner behavior from support documentation; replacement cites the scanner's quarantine log."}
+{"pair_id":"tsyn-in-open_artifact-8468","a":"yes","b":"yes","c":"no","note":"Original relies on the README; replacement identifies the harness gate's behavior directly."}
+{"pair_id":"tsyn-in-open_artifact-1786","a":"yes","b":"yes","c":"no","note":"Original relies on a design note; replacement grounds the claim in the types file's exclusion list."}
+{"pair_id":"tsyn-in-open_artifact-1586","a":"yes","b":"yes","c":"no","note":"Original relies on earlier triage notes; replacement cites a search across the test tree."}
+{"pair_id":"tsyn-in-open_artifact-334","a":"yes","b":"yes","c":"no","note":"Original explicitly relies on memory of the cost table; replacement explicitly says the table was opened."}
+{"pair_id":"tsyn-in-open_artifact-6565","a":"yes","b":"yes","c":"no","note":"Original generalizes from a design note; replacement cites the routine's early-return branch."}
+{"pair_id":"tsyn-in-open_artifact-8619","a":"yes","b":"yes","c":"no","note":"Original treats planned latency as implemented behavior; replacement provides measured cold-call timing."}

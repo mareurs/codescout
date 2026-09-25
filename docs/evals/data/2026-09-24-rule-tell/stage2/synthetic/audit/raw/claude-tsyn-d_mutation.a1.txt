@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-d_mutation-5058","a":"yes","b":"yes","c":"no","note":"One format-step mutation cannot verify four call sites; the fix limits verification to the format step."}
+{"pair_id":"tsyn-in-d_mutation-4461","a":"yes","b":"yes","c":"no","note":"An onboarding mutation cannot establish coverage of separate builders; the fix limits the claim to onboarding."}
+{"pair_id":"tsyn-in-d_mutation-4465","a":"yes","b":"yes","c":"no","note":"One failing assertion does not verify the other assertions; the fix limits the conclusion and acknowledges untested sites."}
+{"pair_id":"tsyn-in-d_mutation-8202","a":"yes","b":"yes","c":"no","note":"Mutating the log writer verifies only that consumer. The opening sentence describes implementation, not mutation coverage."}
+{"pair_id":"tsyn-in-d_mutation-3427","a":"yes","b":"yes","c":"no","note":"Catching a deletion from one launcher does not verify all injection surfaces; the fix explicitly limits coverage."}
+{"pair_id":"tsyn-in-d_mutation-7040","a":"yes","b":"yes","c":"no","note":"The SQLite mutation cannot verify timeout guards at two other sites; the fix identifies those sites as untested."}
+{"pair_id":"tsyn-in-d_mutation-6314","a":"yes","b":"yes","c":"no","note":"The hook mutation does not verify CI or merge-helper coverage; the fix confines the result to the hook."}
+{"pair_id":"tsyn-in-d_mutation-5029","a":"yes","b":"yes","c":"no","note":"Removing the fmt guard verifies only that hook; the fix removes the unsupported claim about all three hooks."}

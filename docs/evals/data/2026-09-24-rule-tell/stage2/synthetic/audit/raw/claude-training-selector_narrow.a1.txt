@@ -1,0 +1,8 @@
+{"pair_id":"train-selector_narrow-10257","a":"yes","b":"yes","c":"no","note":"The original generalizes title matches to all vacuous tests; the fix limits coverage to matching titles."}
+{"pair_id":"train-selector_narrow-498","a":"yes","b":"yes","c":"no","note":"The original equates one phrase with all missing-functionality claims; the fix limits the conclusion to that phrase."}
+{"pair_id":"train-selector_narrow-1097","a":"yes","b":"no","c":"no","note":"Ten regression queries cover neither every search response nor every large search response."}
+{"pair_id":"train-selector_narrow-5463","a":"yes","b":"no","c":"no","note":"Restricting the conclusion to concepts fixes the path mismatch, but searching one word still cannot exclude all explanations of staleness."}
+{"pair_id":"train-selector_narrow-4304","a":"yes","b":"no","c":"no","note":"The fix narrows machine scope, but incident-hour patch files still do not establish the total number of stashes touched."}
+{"pair_id":"train-selector_narrow-1705","a":"yes","b":"yes","c":"no","note":"The original infers project health from an unrelated scope; the fix reports only what the default scope surfaced."}
+{"pair_id":"train-selector_narrow-10623","a":"yes","b":"yes","c":"no","note":"The original extends a keyword search to all stale claims; the fix confines the claim to those containing the keyword."}
+{"pair_id":"train-selector_narrow-8087","a":"yes","b":"yes","c":"no","note":"The original equates a function-name search with all deletion coverage; the fix limits the conclusion to direct calls in that directory."}

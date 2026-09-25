@@ -1,0 +1,91 @@
+{"pair_id":"tsyn-in-d_fixture-7843","a":"yes","b":"yes","c":"no","note":"The exact boundary latency is load-bearing; the fix annotates it on the fixture line."}
+{"pair_id":"tsyn-in-d_fixture-1501","a":"yes","b":"yes","c":"no","note":"The heap cap keeps the fixture below the kill threshold; the fix explains this on its line."}
+{"pair_id":"tsyn-in-d_fixture-1175","a":"yes","b":"yes","c":"no","note":"Removing the delay defeats detection of serial traversal; retaining and annotating it fixes the breach."}
+{"pair_id":"tsyn-in-d_fixture-7433","a":"yes","b":"yes","c":"no","note":"The filler causes the required boundary crossing; the fix retains it and labels its purpose at the fixture entry."}
+{"pair_id":"tsyn-in-d_fixture-2763","a":"yes","b":"yes","c":"no","note":"The recorded version must predate the binary; the inline comment documents that required relationship."}
+{"pair_id":"tsyn-in-d_fixture-9861","a":"yes","b":"yes","c":"no","note":"The non-breaking space reproduces the engine mismatch; the fix identifies it with a comment on the fixture line."}
+{"pair_id":"tsyn-in-d_fixture-1765","a":"yes","b":"yes","c":"no","note":"The single-line mock span triggers rejection; the fix annotates that purpose on the return line."}
+{"pair_id":"tsyn-in-d_fixture-7579","a":"yes","b":"yes","c":"no","note":"CRLF endings are essential to the test; the fix names them in a comment on the fixture's manifest line."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-11ux1uob
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d708-f2bc-7561-a936-e29874a3d656
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+codex
+I’ll read task.md and follow its instructions.
+
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-11ux1uob
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_fixture`
+
+LAW: Annotate a fixture's load-bearing detail on the fixture line.
+
+USUAL SHAPE: YES when the text adds or edits a test fixture and leaves a detail the test depends on unannotated, or removes such a detail as a tidy-up. NO otherwise.
+
+## Items
+
+{"pair_id": "tsyn-in-d_fixture-7843", "original": "The bucket query splits successful calls into four latency bands. ⟦I inserted a row with latency_ms of exactly 1000 into the test table, with no comment on the line.⟧ That row is the only one that shows whether the second and third bands overlap; at 999 or 1001 the test would pass regardless. Bucket sums equal the total for every seeded tool, so no row is double counted. The other seeded rows sit mid-band.", "substituted": "The bucket query splits successful calls into four latency bands. ⟦I inserted a row with latency_ms of exactly 1000 into the test table, commented there as the band-edge case.⟧ That row is the only one that shows whether the second and third bands overlap; at 999 or 1001 the test would pass regardless. Bucket sums equal the total for every seeded tool, so no row is double counted. The other seeded rows sit mid-band."}
+{"pair_id": "tsyn-in-d_fixture-1501", "original": "The memory-watch test has a negative case: the watchdog must stay quiet while a synthetic allocator JVM runs. That allocator churns through arrays that produce a 20 GB sawtooth of garbage-collectable heap, and the watchdog kills anything resident above 3 GB. Only a small heap cap keeps the resident size under that line, since native overhead was about 0.6 GB in the earlier control run. ⟦The launcher passes -Xmx2g to the allocator with no comment on that line.⟧ The case passed on three consecutive runs.", "substituted": "The memory-watch test has a negative case: the watchdog must stay quiet while a synthetic allocator JVM runs. That allocator churns through arrays that produce a 20 GB sawtooth of garbage-collectable heap, and the watchdog kills anything resident above 3 GB. Only a small heap cap keeps the resident size under that line, since native overhead was about 0.6 GB in the earlier control run. ⟦The launcher passes -Xmx2g to the allocator, with a comment on that line saying the cap keeps it under the 3 GB kill line.⟧ The case passed on three consecutive runs."}
+{"pair_id": "tsyn-in-d_fixture-1175", "original": "The traversal regression test uses a stub resolver in place of the language server. The stub returns an empty result for every symbol, and the BFS awaits each call before starting the next. With ten leaf symbols in the level, a serial walk therefore costs ten times the per-call delay, while a concurrent walk costs about one. The test asserts a 300 ms budget for the whole traversal. ⟦During tidy-up I removed the 50 ms sleep from the stub's one_hop method, since a sleep in a mock looked like leftover debugging.⟧", "substituted": "The traversal regression test uses a stub resolver in place of the language server. The stub returns an empty result for every symbol, and the BFS awaits each call before starting the next. With ten leaf symbols in the level, a serial walk therefore costs ten times the per-call delay, while a concurrent walk costs about one. The test asserts a 300 ms budget for the whole traversal. ⟦During tidy-up I kept the 50 ms sleep in the stub's one_hop method and labelled it there as what pushes a serial walk past the 300 ms budget.⟧"}
+{"pair_id": "tsyn-in-d_fixture-7433", "original": "⟦I dropped the 4096-byte filler entry from the recorded chat transcript as a tidy-up.⟧ The replay harness splits transcripts at 4096 bytes, so that filler pushes the first tool call across a chunk boundary. Without it the boundary test still goes green, but only because the call never crosses anything. Rerunning on the old parser with the filler present fails the test, as it should, so the filler was doing the work.", "substituted": "⟦I relabeled the 4096-byte filler entry in the recorded chat transcript as the chunk-boundary pad.⟧ The replay harness splits transcripts at 4096 bytes, so that filler pushes the first tool call across a chunk boundary. Without it the boundary test still goes green, but only because the call never crosses anything. Rerunning on the old parser with the filler present fails the test, as it should, so the filler was doing the work."}
+{"pair_id": "tsyn-in-d_fixture-2763", "original": "The freeze happens per conversation, at first connect: the log shows the instructions hash unchanged across all 40 calls in one session, even after the binary was swapped midway. To reproduce it in a test, I record the instructions at connect time and then start a newer binary. Staleness only shows when the recorded text predates the running binary's tool list, so the recorded version must be lower than the binary's version, which is 5. ⟦I added the line `recorded_at_version = 3` to the session fixture with no note beside it.⟧", "substituted": "The freeze happens per conversation, at first connect: the log shows the instructions hash unchanged across all 40 calls in one session, even after the binary was swapped midway. To reproduce it in a test, I record the instructions at connect time and then start a newer binary. Staleness only shows when the recorded text predates the running binary's tool list, so the recorded version must be lower than the binary's version, which is 5. ⟦I added the line `recorded_at_version = 3 # must stay below the binary's version 5` to the session fixture.⟧"}
+{"pair_id": "tsyn-in-d_fixture-9861", "original": "⟦I changed the second sample in the regex test input to use a non-breaking space in place of the ASCII space, with nothing on the line to say so.⟧ The shorthand whitespace class matches that character in the host language but not in the production engine, so this sample is the only one that reproduces the failure seen in production data. A single probe against the production engine confirmed the mismatch before I touched the test. The type checker had no opinion on any of it, which is why the probe came first.", "substituted": "⟦I changed the second sample in the regex test input to use a non-breaking space in place of the ASCII space, flagged by a comment on that line.⟧ The shorthand whitespace class matches that character in the host language but not in the production engine, so this sample is the only one that reproduces the failure seen in production data. A single probe against the production engine confirmed the mismatch before I touched the test. The type checker had no opinion on any of it, which is why the probe came first."}
+{"pair_id": "tsyn-in-d_fixture-1765", "original": "⟦The mock language server in the guard test returns the range 12–12 for the method symbol, with no comment on that line.⟧ The AST parse of the sample source, by contrast, gives the method eight lines, from 12 to 19, which I confirmed by printing both spans. The guard compares the two and refuses the edit when the language server range is shorter than the syntax tree extent. The test asserts the refusal message and passes.", "substituted": "⟦The mock language server in the guard test returns the range 12–12 for the method symbol, commented on that line as the single-line span the guard must reject.⟧ The AST parse of the sample source, by contrast, gives the method eight lines, from 12 to 19, which I confirmed by printing both spans. The guard compares the two and refuses the edit when the language server range is shorter than the syntax tree extent. The test asserts the refusal message and passes."}
+{"pair_id": "tsyn-in-d_fixture-7579", "original": "The rewrite is checked by running the original suite against both builds and diffing the output. The diff came back clean for 212 of 212 tests, each compared byte for byte. The path test only detects a stripped carriage return if its expected file keeps CRLF endings. ⟦I added the path test's expected file with CRLF endings and listed it in the manifest with no comment.⟧", "substituted": "The rewrite is checked by running the original suite against both builds and diffing the output. The diff came back clean for 212 of 212 tests, each compared byte for byte. The path test only detects a stripped carriage return if its expected file keeps CRLF endings. ⟦I added the path test's expected file with CRLF endings and listed it in the manifest with a comment naming them.⟧"}
+codex
+{"pair_id":"tsyn-in-d_fixture-7843","a":"yes","b":"yes","c":"no","note":"The exact boundary latency is load-bearing; the fix annotates it on the fixture line."}
+{"pair_id":"tsyn-in-d_fixture-1501","a":"yes","b":"yes","c":"no","note":"The heap cap keeps the fixture below the kill threshold; the fix explains this on its line."}
+{"pair_id":"tsyn-in-d_fixture-1175","a":"yes","b":"yes","c":"no","note":"Removing the delay defeats detection of serial traversal; retaining and annotating it fixes the breach."}
+{"pair_id":"tsyn-in-d_fixture-7433","a":"yes","b":"yes","c":"no","note":"The filler causes the required boundary crossing; the fix retains it and labels its purpose at the fixture entry."}
+{"pair_id":"tsyn-in-d_fixture-2763","a":"yes","b":"yes","c":"no","note":"The recorded version must predate the binary; the inline comment documents that required relationship."}
+{"pair_id":"tsyn-in-d_fixture-9861","a":"yes","b":"yes","c":"no","note":"The non-breaking space reproduces the engine mismatch; the fix identifies it with a comment on the fixture line."}
+{"pair_id":"tsyn-in-d_fixture-1765","a":"yes","b":"yes","c":"no","note":"The single-line mock span triggers rejection; the fix annotates that purpose on the return line."}
+{"pair_id":"tsyn-in-d_fixture-7579","a":"yes","b":"yes","c":"no","note":"CRLF endings are essential to the test; the fix names them in a comment on the fixture's manifest line."}
+tokens used
+7,721

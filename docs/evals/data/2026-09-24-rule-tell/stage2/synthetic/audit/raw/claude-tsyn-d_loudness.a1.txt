@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-d_loudness-1040","a":"yes","b":"yes","c":"no","note":"The editor never reaches the guard, and the batch importer hides its error. The fix acknowledges both limitations."}
+{"pair_id":"tsyn-in-d_loudness-7298","a":"yes","b":"yes","c":"no","note":"The original claims an observable failure despite the unobserved background task. The fix acknowledges the missing observer."}
+{"pair_id":"tsyn-in-d_loudness-6211","a":"yes","b":"yes","c":"no","note":"Neither the bot nor a person reads the warning. The fix removes the claim that the unread log protects callers."}
+{"pair_id":"tsyn-in-d_loudness-8414","a":"yes","b":"yes","c":"no","note":"The error goes to discarded stderr and cannot warn agents. The fix explicitly acknowledges that missing protection."}
+{"pair_id":"tsyn-in-d_loudness-9362","a":"yes","b":"yes","c":"no","note":"Mid-session edits bypass the loader check. The fix limits protection to session starts and acknowledges silent mid-session overwrites."}
+{"pair_id":"tsyn-in-d_loudness-5687","a":"yes","b":"yes","c":"no","note":"SHA refspec pushes never reach inspection. The fix correctly identifies that path as bypassing the guard."}
+{"pair_id":"tsyn-in-d_loudness-6976","a":"yes","b":"yes","c":"no","note":"Warnings in a discarded transcript have no recipient. The fix acknowledges their loss instead of claiming protection."}
+{"pair_id":"tsyn-in-d_loudness-12227","a":"yes","b":"yes","c":"no","note":"Release builds disable the claimed assertion guard. The fix substitutes normalization, which the paragraph does not identify as disabled or unreachable."}

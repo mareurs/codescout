@@ -1,0 +1,8 @@
+{"pair_id":"train-scope_instant-6000","a":"yes","b":"yes","c":"no","note":"The changing session count needs a timestamp; the fix supplies 14:05 UTC."}
+{"pair_id":"train-scope_instant-9224","a":"yes","b":"yes","c":"no","note":"The tracker supplies scope and slips supply the unit; the fix anchors the total to session close."}
+{"pair_id":"train-scope_instant-10122","a":"yes","b":"yes","c":"no","note":"The original lacks an observation time; the fix names systemctl, the machine, units, and a dated instant."}
+{"pair_id":"train-scope_instant-144","a":"yes","b":"yes","c":"no","note":"Today supplies time but no searched source; the fix identifies the dated tracker export."}
+{"pair_id":"train-scope_instant-4620","a":"no","b":"yes","c":"no","note":"The paragraph already supplies the registry scan, tools as units, and this morning as the temporal anchor."}
+{"pair_id":"train-scope_instant-7235","a":"yes","b":"no","c":"no","note":"The original makes an unbounded coverage claim. The fix names the probed fields but still lacks the instant required by the law."}
+{"pair_id":"train-scope_instant-9950","a":"yes","b":"no","c":"yes","note":"The fix bounds the claim to seven files but supplies no instant. The other seven-remedy agreement result likewise lacks a timestamp."}
+{"pair_id":"train-scope_instant-8551","a":"yes","b":"no","c":"yes","note":"Both marked versions lack an instant. The separate function-inspection result also lacks a timestamp, despite naming its scope."}

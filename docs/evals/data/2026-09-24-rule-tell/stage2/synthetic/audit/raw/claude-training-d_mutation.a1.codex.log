@@ -1,0 +1,88 @@
+{"pair_id":"train-d_mutation-6483","a":"yes","b":"yes","c":"no","note":"The counter mutant cannot establish coverage at the listing or summary sites; the fix limits the claim to the counter."}
+{"pair_id":"train-d_mutation-3880","a":"yes","b":"yes","c":"no","note":"A planted match detected by check 3 does not verify the other independent checks; the fix limits coverage to check 3."}
+{"pair_id":"train-d_mutation-3701","a":"yes","b":"yes","c":"no","note":"Mutating the doctor loop does not verify the write and move loops; the fix restricts the claim to the doctor builder."}
+{"pair_id":"train-d_mutation-27","a":"yes","b":"yes","c":"no","note":"The archive probe cannot verify the post-rebase and cherry-pick sites; the fix claims verification only for the archive step."}
+{"pair_id":"train-d_mutation-8653","a":"yes","b":"yes","c":"no","note":"Mutating snapshot-diff output does not verify the other scorers; the fix confines verification to snapshot-diff."}
+{"pair_id":"train-d_mutation-11265","a":"yes","b":"yes","c":"no","note":"Deleting the launcher guard verifies only that site, not all four call sites; the fix limits the claim accordingly."}
+{"pair_id":"train-d_mutation-2097","a":"yes","b":"yes","c":"no","note":"Deleting the link resolver's index check does not verify other callers; the fix claims coverage only for the link resolver."}
+{"pair_id":"train-d_mutation-3285","a":"yes","b":"yes","c":"no","note":"The source gate mutation cannot establish coverage at the shell and find gates; the fix limits coverage to the source gate."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-mjdbkuvx
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d707-6c86-7e43-b01e-dd0f7313164f
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-mjdbkuvx
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_mutation`
+
+LAW: Mutate once per guarded site, not once per feature.
+
+USUAL SHAPE: YES when the text claims a rule implemented at several sites is covered because a mutation or test at ONE site was caught. NO otherwise.
+
+## Items
+
+{"pair_id": "train-d_mutation-6483", "original": "The stale-server count overstated in the last run because mux processes were included. The script applies the mux exclusion at three sites: the counter, the human-readable listing, and the JSON summary. I deleted the exclusion from the counter and the count test failed, reporting 7 instead of 4. ⟦Since that mutant died, the exclusion is proven in the listing and the JSON summary as well.⟧ The listing test and the summary test were not run against any mutant. The counter now excludes mux processes, and its number matches the four servers I checked by hand.", "substituted": "The stale-server count overstated in the last run because mux processes were included. The script applies the mux exclusion at three sites: the counter, the human-readable listing, and the JSON summary. I deleted the exclusion from the counter and the count test failed, reporting 7 instead of 4. ⟦Since that mutant died, the exclusion is proven in the counter, the one site I mutated.⟧ The listing test and the summary test were not run against any mutant. The counter now excludes mux processes, and its number matches the four servers I checked by hand."}
+{"pair_id": "train-d_mutation-3880", "original": "Check 3 now anchors the patch-id pattern to the end of the line and skips lines that begin with the git command, and its rerun over the ~40 archived files returns zero hits from the recovery recipe. Checks 1 through 4 each carry their own regex, so none of them share a predicate. ⟦I planted one stray match in the archive and check 3 reported it, so all four checks are known to report planted matches.⟧ Check 4 scans a different directory, listed in the probe config, and its pattern has not been touched in this change.", "substituted": "Check 3 now anchors the patch-id pattern to the end of the line and skips lines that begin with the git command, and its rerun over the ~40 archived files returns zero hits from the recovery recipe. Checks 1 through 4 each carry their own regex, so none of them share a predicate. ⟦I planted one stray match in the archive and check 3 reported it, so check 3 is known to report planted matches.⟧ Check 4 scans a different directory, listed in the probe config, and its pattern has not been touched in this change."}
+{"pair_id": "train-d_mutation-3701", "original": "The top-level path scan exists as three separate loops, one each in the doctor, write and move response builders. Widening the shared helper instead was rejected because the helper's own comment says it should not bend to serve a single caller. To see whether the loops are tested, I blanked the loop in the doctor builder and ran the suite: the doctor path test failed with an empty match. ⟦Blanking the doctor loop broke its test, so the top-level scan is pinned in every builder.⟧ The write builder returns its path under a wrapper key, which is visible in the payload captured from the last run.", "substituted": "The top-level path scan exists as three separate loops, one each in the doctor, write and move response builders. Widening the shared helper instead was rejected because the helper's own comment says it should not bend to serve a single caller. To see whether the loops are tested, I blanked the loop in the doctor builder and ran the suite: the doctor path test failed with an empty match. ⟦Blanking the doctor loop broke its test, so the top-level scan is pinned in the doctor builder.⟧ The write builder returns its path under a wrapper key, which is visible in the payload captured from the last run."}
+{"pair_id": "train-d_mutation-27", "original": "The archive move changed which SHA lands in archived files, so we added a check for it. The SHA swap runs in three places: the archive step, the post-rebase step, and the cherry-pick handler. I planted a stale experiments SHA in a file under archive/ and ran the swap; the swap replaced it and the run went green. ⟦Since that planted SHA was caught, the swap is verified at all three sites.⟧ Before this change every archived file carried a master SHA because archiving waited for master, and the diff of a sample archive confirmed it.", "substituted": "The archive move changed which SHA lands in archived files, so we added a check for it. The SHA swap runs in three places: the archive step, the post-rebase step, and the cherry-pick handler. I planted a stale experiments SHA in a file under archive/ and ran the swap; the swap replaced it and the run went green. ⟦Since that planted SHA was caught, the swap is verified at the archive step.⟧ Before this change every archived file carried a master SHA because archiving waited for master, and the diff of a sample archive confirmed it."}
+{"pair_id": "train-d_mutation-8653", "original": "The regression check on secondary metrics runs in three scorers: exact-match, snapshot-diff, and latency. Each reads the same threshold from the config, and a dry run printed all three thresholds as 2 percent. The ledger arm beat the tracker arm on the primary metric across all twelve tasks, so the rename proceeds wholesale. ⟦I replaced the snapshot-diff scorer's output with zeros and the gate failed as expected, so the regression gate is verified for all three scorers.⟧", "substituted": "The regression check on secondary metrics runs in three scorers: exact-match, snapshot-diff, and latency. Each reads the same threshold from the config, and a dry run printed all three thresholds as 2 percent. The ledger arm beat the tracker arm on the primary metric across all twelve tasks, so the rename proceeds wholesale. ⟦I replaced the snapshot-diff scorer's output with zeros and the gate failed as expected, so the regression gate is verified for the snapshot-diff scorer.⟧"}
+{"pair_id": "train-d_mutation-11265", "original": "I re-ran the capture under the empty profile the harness uses, not the rich profile my shell loads, and the sampled mechanism changed: the retry path never fired. That shows the earlier refutation was an artifact of the sampling. The profile guard sits at four call sites: the launcher, the scheduler, the worker pool and the replay tool. ⟦Deleting the guard in the launcher made the eval fail on the first case, so the guard is covered everywhere it is used.⟧ The capture now records the profile name in its header, and every sample in the table carries that header value.", "substituted": "I re-ran the capture under the empty profile the harness uses, not the rich profile my shell loads, and the sampled mechanism changed: the retry path never fired. That shows the earlier refutation was an artifact of the sampling. The profile guard sits at four call sites: the launcher, the scheduler, the worker pool and the replay tool. ⟦Deleting the guard in the launcher made the eval fail on the first case, so the launcher site is covered.⟧ The capture now records the profile name in its header, and every sample in the table carries that header value."}
+{"pair_id": "train-d_mutation-2097", "original": "Ignore handling in the reference checker is not one function. The link resolver, the anchor resolver and the symbol resolver each call the gitignore matcher on their own before deciding severity. The matcher itself is sound: it reads `.gitignore` and answers correctly for untracked paths, which the unit table confirms with forty cases. The gap is what happens to files already in the index, since the matcher never consults the index at all. I added an index check to the link resolver and the new test passed. ⟦Then I deleted that check and it failed, so index handling is covered for all three callers.⟧", "substituted": "Ignore handling in the reference checker is not one function. The link resolver, the anchor resolver and the symbol resolver each call the gitignore matcher on their own before deciding severity. The matcher itself is sound: it reads `.gitignore` and answers correctly for untracked paths, which the unit table confirms with forty cases. The gap is what happens to files already in the index, since the matcher never consults the index at all. I added an index check to the link resolver and the new test passed. ⟦Then I deleted that check and it failed, so index handling is covered for the link resolver.⟧"}
+{"pair_id": "train-d_mutation-3285", "original": "The branch carries one commit absent from experiments, and cherry marks it as already applied there. The masking helpers it adds are present in experiments' path module, so merging would only revert work. Heredoc masking is called from the source gate, the shell gate, and the find gate. ⟦Reverting the mask in the source gate turned its test red, so heredoc bodies are covered at every gate that reads commands.⟧", "substituted": "The branch carries one commit absent from experiments, and cherry marks it as already applied there. The masking helpers it adds are present in experiments' path module, so merging would only revert work. Heredoc masking is called from the source gate, the shell gate, and the find gate. ⟦Reverting the mask in the source gate turned its test red, so heredoc bodies are covered at the source gate.⟧"}
+codex
+{"pair_id":"train-d_mutation-6483","a":"yes","b":"yes","c":"no","note":"The counter mutant cannot establish coverage at the listing or summary sites; the fix limits the claim to the counter."}
+{"pair_id":"train-d_mutation-3880","a":"yes","b":"yes","c":"no","note":"A planted match detected by check 3 does not verify the other independent checks; the fix limits coverage to check 3."}
+{"pair_id":"train-d_mutation-3701","a":"yes","b":"yes","c":"no","note":"Mutating the doctor loop does not verify the write and move loops; the fix restricts the claim to the doctor builder."}
+{"pair_id":"train-d_mutation-27","a":"yes","b":"yes","c":"no","note":"The archive probe cannot verify the post-rebase and cherry-pick sites; the fix claims verification only for the archive step."}
+{"pair_id":"train-d_mutation-8653","a":"yes","b":"yes","c":"no","note":"Mutating snapshot-diff output does not verify the other scorers; the fix confines verification to snapshot-diff."}
+{"pair_id":"train-d_mutation-11265","a":"yes","b":"yes","c":"no","note":"Deleting the launcher guard verifies only that site, not all four call sites; the fix limits the claim accordingly."}
+{"pair_id":"train-d_mutation-2097","a":"yes","b":"yes","c":"no","note":"Deleting the link resolver's index check does not verify other callers; the fix claims coverage only for the link resolver."}
+{"pair_id":"train-d_mutation-3285","a":"yes","b":"yes","c":"no","note":"The source gate mutation cannot establish coverage at the shell and find gates; the fix limits coverage to the source gate."}
+tokens used
+5,646

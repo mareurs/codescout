@@ -1,0 +1,8 @@
+{"pair_id":"train-count_unit-10363","a":"yes","b":"yes","c":"no","note":"The original omits what the additional 14 count; the fix identifies files."}
+{"pair_id":"train-count_unit-2810","a":"yes","b":"yes","c":"no","note":"The original carries forward a cited count; the fix derives the ledger-file count from today's directory listing."}
+{"pair_id":"train-count_unit-1641","a":"yes","b":"yes","c":"no","note":"The original gives 40 without a unit; the fix names entries in the policy file."}
+{"pair_id":"train-count_unit-9312","a":"no","b":"yes","c":"no","note":"Rebuilds already names the counted unit, and the last phase identifies the population; release builds adds specificity."}
+{"pair_id":"train-count_unit-3151","a":"yes","b":"yes","c":"no","note":"The original imports a unitless ceiling from a handoff; the fix identifies self-citations and derives the ceiling from today's dry run."}
+{"pair_id":"train-count_unit-9036","a":"yes","b":"yes","c":"no","note":"The original leaves 112 unitless; the fix identifies pipe-gate refusals observed in the replay window."}
+{"pair_id":"train-count_unit-1700","a":"yes","b":"yes","c":"no","note":"The original omits the unit for 100; the fix identifies reindex runs within the described reproduction."}
+{"pair_id":"train-count_unit-7765","a":"yes","b":"yes","c":"no","note":"The original leaves 23 unitless; the fix names tools, with the preceding listing and matching process establishing derivation."}

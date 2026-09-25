@@ -1,0 +1,88 @@
+{"pair_id":"tsyn-in-count_unit-6813","a":"no","b":"yes","c":"no","note":"Rows supplies the unit, recorder replay supplies the derivation, and surrounding text identifies the population."}
+{"pair_id":"tsyn-in-count_unit-8297","a":"yes","b":"no","c":"no","note":"The original omits the unit. The fix supplies lines but still gives no derivation for 400."}
+{"pair_id":"tsyn-in-count_unit-9412","a":"yes","b":"yes","c":"no","note":"The twelve-line decrease lacks derivation. The replacement uses the explicitly measured byte difference."}
+{"pair_id":"tsyn-in-count_unit-365","a":"yes","b":"no","c":"no","note":"Times leaves the counting unit ambiguous. Assistant turns clarifies the unit, but neither version explains how twelve was derived."}
+{"pair_id":"tsyn-in-count_unit-3689","a":"yes","b":"yes","c":"no","note":"The original leaves 119 unitless. The replacement identifies unpushed commits observed in the log."}
+{"pair_id":"tsyn-in-count_unit-7702","a":"yes","b":"yes","c":"yes","note":"A dozen exposed checkouts is unsupported by the inspection. The fix ties exposure to listed checkouts. Another sentence leaves 75 without a unit."}
+{"pair_id":"tsyn-in-count_unit-5169","a":"yes","b":"yes","c":"no","note":"The original omits what forty counts. The fix identifies results and derives the count from the sample run."}
+{"pair_id":"tsyn-in-count_unit-1373","a":"yes","b":"yes","c":"no","note":"The original leaves three unitless. The fix identifies lock-timeout errors observed in the backend log during the specified week."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-qx4582k2
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d708-c6e7-7f31-91e5-487556faf234
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-qx4582k2
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `count_unit`
+
+LAW: A count of a population must arrive with its unit or not at all. Derive it, don't cite it.
+
+USUAL SHAPE: YES when the text states a count of some population without naming what is counted, or with a unit that could be read two ways, or quotes a count from elsewhere as a current fact without saying how it was derived. NO when the number names its unit and population.
+
+## Items
+
+{"pair_id": "tsyn-in-count_unit-6813", "original": "The `effect` flag now lives in one place, and both the tool and the usage recorder read from it. The recorder stores the declared class in a new `effect_class` column, filled for shell calls and left NULL for every other tool. Whether the write lock engages for shell work is now a stated decision: the `is_write` method returns an explicit `false`, and a test pins that behaviour whatever class the caller declares. ⟦After the schema change we replayed a captured session through the recorder, and 212 rows came out with the column populated correctly.⟧ Telemetry can now separate mutating from non-mutating shell work, but only by the class the caller declared, not by what the command did.", "substituted": "The `effect` flag now lives in one place, and both the tool and the usage recorder read from it. The recorder stores the declared class in a new `effect_class` column, filled for shell calls and left NULL for every other tool. Whether the write lock engages for shell work is now a stated decision: the `is_write` method returns an explicit `false`, and a test pins that behaviour whatever class the caller declares. ⟦After the schema change we replayed a captured session through the recorder, and 212 shell-call rows came out with the column populated correctly.⟧ Telemetry can now separate mutating from non-mutating shell work, but only by the class the caller declared, not by what the command did."}
+{"pair_id": "tsyn-in-count_unit-8297", "original": "The merge plan appends the experimental material to the stable guide instead of replacing anything. Two new sections go in: one on per-library embedding databases, placed after the existing library-index section, and one on version tracking and staleness hints, placed after that. The library-index section itself gets a short edit so it points at the new per-library layout. The experimental file's intro and its closing reading list are dropped, since the merged form makes both redundant. ⟦The stable file is 400 long, so the additions should not push it past the size the docs build tolerates.⟧", "substituted": "The merge plan appends the experimental material to the stable guide instead of replacing anything. Two new sections go in: one on per-library embedding databases, placed after the existing library-index section, and one on version tracking and staleness hints, placed after that. The library-index section itself gets a short edit so it points at the new per-library layout. The experimental file's intro and its closing reading list are dropped, since the merged form makes both redundant. ⟦The stable file is 400 lines long, so the additions should not push it past the size the docs build tolerates.⟧"}
+{"pair_id": "tsyn-in-count_unit-9412", "original": "Status: fixed-verified. The wording of the sixth law is updated in the prompt source and in the detailed guide that expands it. The noun list now ends with the topics already triggered this session, and the guide gains a bullet explaining the shared-ledger substrate with a suggested brief shape. I measured the static prompt slice before and after with a byte count of the built file: the change adds 39 bytes, and the slice stays under its cap. The verification subagent's notes flagged the gap, and I promoted that observation into the law text itself. ⟦The prompt now carries 12 fewer lines than the last release.⟧", "substituted": "Status: fixed-verified. The wording of the sixth law is updated in the prompt source and in the detailed guide that expands it. The noun list now ends with the topics already triggered this session, and the guide gains a bullet explaining the shared-ledger substrate with a suggested brief shape. I measured the static prompt slice before and after with a byte count of the built file: the change adds 39 bytes, and the slice stays under its cap. The verification subagent's notes flagged the gap, and I promoted that observation into the law text itself. ⟦The static slice now carries 39 more bytes than the last release.⟧"}
+{"pair_id": "tsyn-in-count_unit-365", "original": "Reviewer instructions for the transcript audit are short. Every classification needs a line number and a quoted span, otherwise it is scored as unsupported. Truncated content and unpaired tool ids are reported as unmeasurable in the notes, never as zero. Use Python slices instead of loading a transcript into context. If a transcript shows no utilisation at all across its injections, report that as the finding. Five guide topics fired in the controller's session, and I listed them from its trigger ledger, so treat that list as the current state. ⟦The agent cited the guide 12 times across the transcript.⟧", "substituted": "Reviewer instructions for the transcript audit are short. Every classification needs a line number and a quoted span, otherwise it is scored as unsupported. Truncated content and unpaired tool ids are reported as unmeasurable in the notes, never as zero. Use Python slices instead of loading a transcript into context. If a transcript shows no utilisation at all across its injections, report that as the finding. Five guide topics fired in the controller's session, and I listed them from its trigger ledger, so treat that list as the current state. ⟦The agent cited the guide in 12 assistant turns across the transcript.⟧"}
+{"pair_id": "tsyn-in-count_unit-3689", "original": "The packaging gate went into the test suite rather than the CI config, and the timing is why. The documented gate commands all compile from the working tree, so none of them can notice a stale `exclude` list. A CI job would notice, but only after a push, and the local clone was well ahead of origin when the gate was written, since nothing had been pushed for two days. Listing package contents without compiling took 0.21s per crate on this machine, timed over five runs, so putting the check beside the other gate commands adds no real delay. Because CI already runs the test suite, it inherits the check without extra configuration. ⟦We saw 119 in the log during the review, which supports keeping the check local.⟧", "substituted": "The packaging gate went into the test suite rather than the CI config, and the timing is why. The documented gate commands all compile from the working tree, so none of them can notice a stale `exclude` list. A CI job would notice, but only after a push, and the local clone was well ahead of origin when the gate was written, since nothing had been pushed for two days. Listing package contents without compiling took 0.21s per crate on this machine, timed over five runs, so putting the check beside the other gate commands adds no real delay. Because CI already runs the test suite, it inherits the check without extra configuration. ⟦We saw 119 unpushed commits in the log during the review, which supports keeping the check local.⟧"}
+{"pair_id": "tsyn-in-count_unit-7702", "original": "Whether the hint directory is gitignored varies per repo, so check before deleting anything. Our own project ignores it, but not every project does. On 2026-08-18 I ran `git ls-files` on the directory in each of the checkouts on one machine. Most had nothing tracked, but one backend checkout had 75 tracked, and a blanket `rm -rf` sweep deleted committed content there. ⟦Across the machine, a dozen checkouts are affected by this kind of exposure.⟧ The deletion was fully recoverable with a `git checkout` of the directory, which restored everything from HEAD, but only because git held those files.", "substituted": "Whether the hint directory is gitignored varies per repo, so check before deleting anything. Our own project ignores it, but not every project does. On 2026-08-18 I ran `git ls-files` on the directory in each of the checkouts on one machine. Most had nothing tracked, but one backend checkout had 75 tracked, and a blanket `rm -rf` sweep deleted committed content there. ⟦Across the machine, one of the thirteen checkouts I listed tracks these files and was exposed.⟧ The deletion was fully recoverable with a `git checkout` of the directory, which restored everything from HEAD, but only because git held those files."}
+{"pair_id": "tsyn-in-count_unit-5169", "original": "Nothing looks broken when both sides carry the prefix. The semantic branch of the find action embeds its query through the same helper the indexer uses, so queries and documents land in one vector space. Retrieval still returns ranked, non-empty results that look plausible. The loss is in quality, because an asymmetric model is being used symmetrically, and no error, empty result, or other signature shows at the call site. ⟦Across the sample run, 40 came back on the first page, all of them reasonable at a glance, which is exactly why this stays hidden.⟧", "substituted": "Nothing looks broken when both sides carry the prefix. The semantic branch of the find action embeds its query through the same helper the indexer uses, so queries and documents land in one vector space. Retrieval still returns ranked, non-empty results that look plausible. The loss is in quality, because an asymmetric model is being used symmetrically, and no error, empty result, or other signature shows at the call site. ⟦Across the sample run, 40 results came back on the first page, all of them reasonable at a glance, which is exactly why this stays hidden.⟧"}
+{"pair_id": "tsyn-in-count_unit-1373", "original": "Option B, reaping a provably orphaned lock holder, is deferred rather than dropped. The one real residual case is a mux killed by SIGKILL or the OOM killer, leaving its language server alive as an immortal lock holder with no idle timeout. The design is sound, but it adds a cross-process scan and kill surface for a rare event that the shipped actionable error already lets a person recover from by hand. Nothing in the logs shows more than one such orphan deadlock, so the two-strike threshold is not met. ⟦The debug log for the Kotlin backend shows 3 in the last week.⟧ Revisit when a second orphan deadlock is observed.", "substituted": "Option B, reaping a provably orphaned lock holder, is deferred rather than dropped. The one real residual case is a mux killed by SIGKILL or the OOM killer, leaving its language server alive as an immortal lock holder with no idle timeout. The design is sound, but it adds a cross-process scan and kill surface for a rare event that the shipped actionable error already lets a person recover from by hand. Nothing in the logs shows more than one such orphan deadlock, so the two-strike threshold is not met. ⟦The debug log for the Kotlin backend shows 3 lock-timeout errors in the last week.⟧ Revisit when a second orphan deadlock is observed."}
+codex
+{"pair_id":"tsyn-in-count_unit-6813","a":"no","b":"yes","c":"no","note":"Rows supplies the unit, recorder replay supplies the derivation, and surrounding text identifies the population."}
+{"pair_id":"tsyn-in-count_unit-8297","a":"yes","b":"no","c":"no","note":"The original omits the unit. The fix supplies lines but still gives no derivation for 400."}
+{"pair_id":"tsyn-in-count_unit-9412","a":"yes","b":"yes","c":"no","note":"The twelve-line decrease lacks derivation. The replacement uses the explicitly measured byte difference."}
+{"pair_id":"tsyn-in-count_unit-365","a":"yes","b":"no","c":"no","note":"Times leaves the counting unit ambiguous. Assistant turns clarifies the unit, but neither version explains how twelve was derived."}
+{"pair_id":"tsyn-in-count_unit-3689","a":"yes","b":"yes","c":"no","note":"The original leaves 119 unitless. The replacement identifies unpushed commits observed in the log."}
+{"pair_id":"tsyn-in-count_unit-7702","a":"yes","b":"yes","c":"yes","note":"A dozen exposed checkouts is unsupported by the inspection. The fix ties exposure to listed checkouts. Another sentence leaves 75 without a unit."}
+{"pair_id":"tsyn-in-count_unit-5169","a":"yes","b":"yes","c":"no","note":"The original omits what forty counts. The fix identifies results and derives the count from the sample run."}
+{"pair_id":"tsyn-in-count_unit-1373","a":"yes","b":"yes","c":"no","note":"The original leaves three unitless. The fix identifies lock-timeout errors observed in the backend log during the specified week."}
+tokens used
+8,631

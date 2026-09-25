@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-d_sessionid-5643","a":"yes","b":"yes","c":"no","note":"Original attributes authorship by self-reported name; replacement uses the sessionId. No other sentence violates the rule."}
+{"pair_id":"tsyn-in-d_sessionid-8470","a":"yes","b":"yes","c":"no","note":"Original credits work to a self-reported session name; replacement credits sessionId 5b07e9d2. No other breach appears."}
+{"pair_id":"tsyn-in-d_sessionid-7832","a":"yes","b":"yes","c":"no","note":"Original attributes the handler to a registered session name; replacement uses the commit trailer's sessionId. Other sentences contain no breach."}
+{"pair_id":"tsyn-in-d_sessionid-9347","a":"yes","b":"yes","c":"no","note":"Original assigns filing and follow-up ownership by session name; replacement uses sessionId c21e6a94. No other sentence breaches the rule."}
+{"pair_id":"tsyn-in-d_sessionid-7737","a":"yes","b":"yes","c":"no","note":"The nearby sessionId does not excuse attribution by self-reported name. Replacement attributes by sessionId; remaining sentences comply."}
+{"pair_id":"tsyn-in-d_sessionid-8115","a":"yes","b":"yes","c":"no","note":"Original attributes sign-off by registered agent name; replacement uses sessionId a83d10c6. No other attribution violates the rule."}
+{"pair_id":"tsyn-in-d_sessionid-7576","a":"yes","b":"yes","c":"no","note":"Original credits runs by session label; replacement uses sessionId c40b77aa. The other attribution already uses a sessionId."}
+{"pair_id":"tsyn-in-d_sessionid-4579","a":"yes","b":"yes","c":"no","note":"Original attributes work by registered session name; replacement uses sessionId 8c41e0d7. No other sentence breaks the rule."}

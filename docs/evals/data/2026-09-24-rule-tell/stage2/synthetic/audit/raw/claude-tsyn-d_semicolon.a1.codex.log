@@ -1,0 +1,91 @@
+{"pair_id":"tsyn-in-d_semicolon-199","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-1558","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-4725","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-2380","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-5856","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-8361","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-2717","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-7292","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-5s6y2ul_
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d709-501c-7de0-a9b8-3c12319594ad
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+codex
+I’ll read task.md and follow its instructions.
+
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-5s6y2ul_
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_semicolon`
+
+LAW: Chain the two test lanes with ';', never '&&'.
+
+USUAL SHAPE: YES when the text runs or describes running the two cargo test lanes chained with `&&`. NO otherwise.
+
+## Items
+
+{"pair_id": "tsyn-in-d_semicolon-199", "original": "The section-end bug was reproduced on 2026-04-03 with a replace edit whose body held a fenced block opening with a shell comment. compute_section_end read the comment line as a level-1 heading and cut the section short, while parse_all_headings skipped it because it tracked the fence. ⟦Before pushing the patch I ran `cargo test --lib && cargo test --test markdown_edit` so both lanes were covered.⟧ The new regression tests fail on the old code and pass on the patched code, which I confirmed by stashing the patch and rerunning them. The two paths now share the same in-fence check.", "substituted": "The section-end bug was reproduced on 2026-04-03 with a replace edit whose body held a fenced block opening with a shell comment. compute_section_end read the comment line as a level-1 heading and cut the section short, while parse_all_headings skipped it because it tracked the fence. ⟦Before pushing the patch I ran `cargo test --lib; cargo test --test markdown_edit` so both lanes were covered.⟧ The new regression tests fail on the old code and pass on the patched code, which I confirmed by stashing the patch and rerunning them. The two paths now share the same in-fence check."}
+{"pair_id": "tsyn-in-d_semicolon-1558", "original": "The heartbeat file disappeared on commit e559c8a8 whenever a seventeenth server started while sixteen were alive. The prune step keeps the sixteen freshest by mtime, and a killed server's file stops updating, so it sorts oldest and gets deleted. I reproduced this by hand with sixteen live servers, one kill -9, and one extra start, and the dead server's file was gone afterwards. ⟦The guard tests run in CI as `cargo test --lib && cargo test --test heartbeat_prune`.⟧ The next change is to exempt files whose server died within the last hour.", "substituted": "The heartbeat file disappeared on commit e559c8a8 whenever a seventeenth server started while sixteen were alive. The prune step keeps the sixteen freshest by mtime, and a killed server's file stops updating, so it sorts oldest and gets deleted. I reproduced this by hand with sixteen live servers, one kill -9, and one extra start, and the dead server's file was gone afterwards. ⟦The guard tests run in CI as `cargo test --lib; cargo test --test heartbeat_prune`.⟧ The next change is to exempt files whose server died within the last hour."}
+{"pair_id": "tsyn-in-d_semicolon-4725", "original": "Acceptance here used a synthetic two-action schema instead of deleting the dispatch arm, so no shared checkout was ever left red. The schema registers one action that succeeds and one that returns an error, and the test asserts that the dispatcher reports each correctly. A peer running the gate during that window saw only green, which the gate log confirms. ⟦I ran the two lanes as `cargo test --lib && cargo test --test dispatch_schema` on the clean tree, and both passed.⟧", "substituted": "Acceptance here used a synthetic two-action schema instead of deleting the dispatch arm, so no shared checkout was ever left red. The schema registers one action that succeeds and one that returns an error, and the test asserts that the dispatcher reports each correctly. A peer running the gate during that window saw only green, which the gate log confirms. ⟦I ran the two lanes as `cargo test --lib; cargo test --test dispatch_schema` on the clean tree, and both passed.⟧"}
+{"pair_id": "tsyn-in-d_semicolon-2380", "original": "The replace response now lists only attributes that were lost. An attribute the caller repeats in the new list is kept, so it never appears in the report, and the unit test for that case asserts an empty diff. When nothing is dropped the field is omitted entirely, which the serializer test confirms by checking that the JSON has no such key. ⟦Before handoff I ran `cargo test --lib && cargo test --test replace_report`, and both lanes finished green.⟧ The remaining work is wording: the warning text still says 'removed' where 'dropped' would match the docs.", "substituted": "The replace response now lists only attributes that were lost. An attribute the caller repeats in the new list is kept, so it never appears in the report, and the unit test for that case asserts an empty diff. When nothing is dropped the field is omitted entirely, which the serializer test confirms by checking that the JSON has no such key. ⟦Before handoff I ran `cargo test --lib; cargo test --test replace_report`, and both lanes finished green.⟧ The remaining work is wording: the warning text still says 'removed' where 'dropped' would match the docs."}
+{"pair_id": "tsyn-in-d_semicolon-5856", "original": "⟦On the sanitizing client I ran `cargo test --lib && cargo test --test schema_anyof`, and both lanes passed, so the tool list is intact.⟧ The rewritten description line does not exist anywhere in the repository: a search for its text returned zero matches, which is why we attribute the rewrite to the client. On this machine all seven tools register and respond. A forwarding client shows none of them.", "substituted": "⟦On the sanitizing client I ran `cargo test --lib; cargo test --test schema_anyof`, and both lanes passed, so the tool list is intact.⟧ The rewritten description line does not exist anywhere in the repository: a search for its text returned zero matches, which is why we attribute the rewrite to the client. On this machine all seven tools register and respond. A forwarding client shows none of them."}
+{"pair_id": "tsyn-in-d_semicolon-8361", "original": "Design note for bash symbol support. The extractor will collect `function_definition` nodes, covering both the parenthesized and the keyword forms, and read each name from the node's name field. The result is a flat list, since bash has no class hierarchy. Variable assignments are skipped because hook scripts contain many of them and they do not map to a symbol. ⟦After wiring the new arm into the source dispatcher, verify with `cargo test --lib && cargo test --test symbols`, which exercises the extractor in both lanes.⟧ The grammar's node names were checked against the parser's own node-types file.", "substituted": "Design note for bash symbol support. The extractor will collect `function_definition` nodes, covering both the parenthesized and the keyword forms, and read each name from the node's name field. The result is a flat list, since bash has no class hierarchy. Variable assignments are skipped because hook scripts contain many of them and they do not map to a symbol. ⟦After wiring the new arm into the source dispatcher, verify with `cargo test --lib ; cargo test --test symbols`, which exercises the extractor in both lanes.⟧ The grammar's node names were checked against the parser's own node-types file."}
+{"pair_id": "tsyn-in-d_semicolon-2717", "original": "⟦I confirmed the guard change by running `cargo test -p guard --lib && cargo test -p guard --test heredoc_pipes`, which reproduces the refusal and then checks the patch.⟧ The splitter cuts the command at every pipe character before the heredoc exemption is consulted, so a pipe inside the body yields extra segments. Each extra segment is scanned like a real command, and one that starts with a reader name followed by a source-looking filename is refused. The regression test feeds in a body containing a single pipe and shows three segments instead of one.", "substituted": "⟦I confirmed the guard change by running `cargo test -p guard --lib; cargo test -p guard --test heredoc_pipes`, which reproduces the refusal and then checks the patch.⟧ The splitter cuts the command at every pipe character before the heredoc exemption is consulted, so a pipe inside the body yields extra segments. Each extra segment is scanned like a real command, and one that starts with a reader name followed by a source-looking filename is refused. The regression test feeds in a body containing a single pipe and shows three segments instead of one."}
+{"pair_id": "tsyn-in-d_semicolon-7292", "original": "Handoff for the helper-extraction sprint. Moving helper bodies with the LSP-backed remove tool kept attributes and indentation attached, so I stopped hand-editing ranges after the second file. Every failure after an extraction so far traced to a missing `use` in the destination module; I confirmed this by adding the import and watching the test go green in all six cases. ⟦To finish a sub-phase I run the unit lane and the integration lane as `cargo test --lib && cargo test --test integration`, then commit.⟧ Each sub-phase gets its own commit, which keeps the bisect window small enough to read in one screen.", "substituted": "Handoff for the helper-extraction sprint. Moving helper bodies with the LSP-backed remove tool kept attributes and indentation attached, so I stopped hand-editing ranges after the second file. Every failure after an extraction so far traced to a missing `use` in the destination module; I confirmed this by adding the import and watching the test go green in all six cases. ⟦To finish a sub-phase I run the unit lane and the integration lane as `cargo test --lib ; cargo test --test integration`, then commit.⟧ Each sub-phase gets its own commit, which keeps the bisect window small enough to read in one screen."}
+codex
+{"pair_id":"tsyn-in-d_semicolon-199","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-1558","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-4725","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-2380","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-5856","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-8361","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-2717","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"tsyn-in-d_semicolon-7292","a":"yes","b":"yes","c":"no","note":"Original chains the two test lanes with &&; substitution uses a semicolon. No other sentence breaks the rule."}
+tokens used
+5,850

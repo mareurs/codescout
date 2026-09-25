@@ -1,0 +1,8 @@
+{"pair_id":"train-lines_read-5899","a":"yes","b":"yes","c":"no","note":"Search matches cannot establish side effects; the fix leaves counter behavior pending inspection."}
+{"pair_id":"train-lines_read-6263","a":"yes","b":"yes","c":"no","note":"The original locates the clamp from an unopened grep hit; the fix reports reading the relevant lines."}
+{"pair_id":"train-lines_read-8737","a":"yes","b":"yes","c":"no","note":"A filename cannot establish uniform key handling; the fix explicitly bases the finding on reading the helper body."}
+{"pair_id":"train-lines_read-43","a":"yes","b":"no","c":"yes","note":"Unread hits are treated as declarations. The earlier claim that nine logs declare F remains despite the fix calling some declarations unchecked."}
+{"pair_id":"train-lines_read-6662","a":"yes","b":"yes","c":"no","note":"The original infers table selection from a filename without inspection; the fix reports reading the table-setting line."}
+{"pair_id":"train-lines_read-9217","a":"yes","b":"yes","c":"no","note":"A single search match does not establish caller safety; the fix reports reading the definition and call sites."}
+{"pair_id":"train-lines_read-10035","a":"yes","b":"yes","c":"no","note":"The original identifies a leak from a helper-name match alone; the fix treats the matching file as an investigation starting point."}
+{"pair_id":"train-lines_read-8726","a":"yes","b":"yes","c":"no","note":"The original establishes causation from a search match; the fix reports reading the helper and its relevant branch condition."}

@@ -840,3 +840,61 @@ If condition 1 fails, the agent labels are not admitted and Stage 2's mined rout
   - all six fields, `rule` included.
 
   No other part of the prompt changed. This was the last permitted change.
+
+## Stage 2 — synthetic generation and audit results, 2026-09-25
+
+**Runs.** All exited 0. The files are in `docs/evals/data/2026-09-24-rule-tell/stage2/synthetic/`: `train/`, `tsyn-in/`, `tsyn-cross/` and `audit/`, each with raw replies and a `summary.txt`.
+
+| set | generator | pairs | pass construction checks |
+|---|---|---|---|
+| training pool | Claude Sonnet 5 | 1,760 | **939 (53%)**: train 645, val 173, cal 121 |
+| T-syn-in | Claude Sonnet 5 | 330 | **195 (59%)** |
+| T-syn-cross | Codex `gpt-6-astra`/medium | 330 | **330 (100%)** |
+
+- **Claude's failures:**
+  - 728 share an 8-token shingle with their seed;
+  - 163 contain a banned word;
+  - 26 have a sentence that is not one segmenter unit;
+  - 19 seeds are missing from the output;
+  - 5 are failed calls, and the rest are field, length or duplicate faults.
+- **Codex passed everything.** Whether it used its read-only shell to check its own output cannot be established. Its work directories were deleted, `--ephemeral` keeps no session, and the run's log table is empty. Per-call logs were added afterwards (`6eae6b74`).
+  - The audit's Codex calls, which are logged, each ran exactly one command, `cat task.md`.
+  - **So the T-syn-cross pipeline and Claude's differ in tool access, and that difference is unmeasured.**
+
+**The audit.** Codex audited Claude's pairs and Opus 5.5 audited Codex's, with 512 audited pairs and **0 invalid answers**.
+
+- **Claude's training-side source: 26/176 = 14.8%**, Wilson [10.3%, 20.8%], so **kept**.
+- **(Claude, training, rule) cells above 20%, dropped from training:**
+  - `contradiction` 8/8;
+  - `scope_instant` 4/8;
+  - `question_asked` 3/8;
+  - `selector_narrow` 3/8.
+- **T-syn cells above 20%, dropped from scoring:**
+  - T-syn-in (Claude, 24/160 overall): `contradiction`, `count_unit`, `monotone_absence`, `question_asked`, `run_tool`, `scope_instant` and `selector_narrow`;
+  - T-syn-cross (Codex, 11/176 overall): `scope_instant` and `open_artifact`.
+- **`contradiction`'s 8/8 is an audit-design defect, read from the auditor's own notes.**
+  - In 7 of 8 cases the auditor answered a = yes and b = yes (the pair is right) and c = yes. Its reason: the sentence the marked one contradicts "also" breaks the rule.
+  - Question (c) is ill-posed for a rule that always involves two sentences. **The registered drop stands.** A corrected question would need a new amendment, which would also have to disclose that it follows this reading.
+
+**Trainable rules at this point** (train-fold positives: audited synthetic plus admitted mined rows, after correction 2's T-context drop; before the freeze-time cross-fold filter):
+
+- **No rule of the 22 reaches 50.**
+- **The largest are** `d_fixture` 43, `count_unit` 41 and `d_semicolon` 41. `contradiction` was 44 before its training cells were dropped.
+- **The smallest,** among rules whose synthetic pairs were kept, is `d_adjacency`, at 18.
+- **The four rules dropped from training keep only their mined rows:** `contradiction` 6, `question_asked` 7, `scope_instant` 7 and `selector_narrow` 2.
+
+**Against the registered readings:**
+
+- **Trainable rules: none.** Stage 3 has no rule to train under this registration, so it does not run. T-syn is not scored, since there is no trained arm.
+- **Predictions:**
+  - "At most 15% discarded per source" failed for Claude (47% and 41%) and held for Codex (0%).
+  - "Both sources pass the audit" held: Claude's training side at 14.8%, and Codex's only cells, T-syn, at 6.3% overall.
+  - "At least 15 of 22 rules reach 50" failed, at zero.
+  - The generator-gap and probe predictions are not tested, since there is no trained arm.
+- **A design shortfall the registration did not foresee.** Trainability counts **train-fold** positives. With 68% of training seeds in the train fold and about 53% passing construction, 80 seeds per rule could give only about 29 train-fold synthetic positives before the audit. The 80-per-rule size could not reach 50 at this yield. That should have been computed at registration.
+
+**What is open, each a new amendment:**
+
+1. **A top-up round** from the unused training-side seeds (about 7,780, by the manifest). It would be sized from the measured yield, and it needs a fresh draw committed before it runs.
+2. **A corrected audit question for two-sentence rules**, with `contradiction` re-audited under it, disclosed as following the reading above.
+3. Leave Stage 3 unrun, and record the local route as data-limited at this generation volume.

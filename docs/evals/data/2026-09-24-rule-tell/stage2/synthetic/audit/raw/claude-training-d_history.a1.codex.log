@@ -1,0 +1,88 @@
+{"pair_id":"train-d_history-11602","a":"yes","b":"yes","c":"no","note":"The original preserves a superseded token count and hash; the fix states current values."}
+{"pair_id":"train-d_history-7024","a":"yes","b":"yes","c":"no","note":"The original records the retired inline-output limit; the fix describes current output behavior."}
+{"pair_id":"train-d_history-8669","a":"yes","b":"yes","c":"no","note":"The original records an obsolete column name and hash length; the fix supplies the current schema."}
+{"pair_id":"train-d_history-7045","a":"yes","b":"yes","c":"no","note":"The original names the superseded default model; the fix names the current default."}
+{"pair_id":"train-d_history-6846","a":"yes","b":"yes","c":"no","note":"The original preserves a retired script name and former count; the fix describes the current script and checks."}
+{"pair_id":"train-d_history-9461","a":"yes","b":"yes","c":"no","note":"The original preserves an obsolete section title and terminology; the fix uses current names. Other sentences establish the diagnosis."}
+{"pair_id":"train-d_history-4541","a":"yes","b":"yes","c":"yes","note":"The fix removes obsolete thresholds, but another sentence preserves the superseded no-match result and ratio of 0.130."}
+{"pair_id":"train-d_history-787","a":"yes","b":"yes","c":"no","note":"The original records an obsolete binary path and migration timing; the fix states current lookup and failure behavior."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-_8e5wria
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d707-3d5e-7602-8137-a63b3cbbaa85
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-_8e5wria
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_history`
+
+LAW: Record less history: a superseded fact written in prose is indistinguishable from a live citation.
+
+USUAL SHAPE: YES when the text writes a superseded fact (an old filename, a former count, a retired name) into prose as history no decision needs. NO otherwise.
+
+## Items
+
+{"pair_id": "train-d_history-11602", "original": "⟦Before onboarding this host reported 4639 tokens under hash `b583ffaa`, a figure the spec still quotes.⟧ All three profiles now report 3845 tokens under hash `9b554ef6`, and the operator check reports each of them as current. Identical hashes are the evidence that the compile reached every profile, since a partial run would leave at least one of them different. The retired paragraph is gone from all three profiles; a grep for its heading returns nothing in any of them.", "substituted": "⟦After onboarding this host reports 3845 tokens under hash `9b554ef6`, the figure the spec should quote.⟧ All three profiles now report 3845 tokens under hash `9b554ef6`, and the operator check reports each of them as current. Identical hashes are the evidence that the compile reached every profile, since a partial run would leave at least one of them different. The retired paragraph is gone from all three profiles; a grep for its heading returns nothing in any of them."}
+{"pair_id": "train-d_history-7024", "original": "⟦Until the buffer refactor, the tool returned up to 4,000 lines inline before truncating.⟧ The full text of a test run or a broad grep now lands in a named buffer, and the reply carries the first 40 lines. The AI queries the buffer with a range or a pattern when it needs more. I confirmed this by reading a 2000-line file: the reply was 41 lines and the buffer held all 2000. Context stays small because reply size no longer depends on output size.", "substituted": "⟦The tool returns a handle plus a short preview instead of the raw output.⟧ The full text of a test run or a broad grep now lands in a named buffer, and the reply carries the first 40 lines. The AI queries the buffer with a range or a pattern when it needs more. I confirmed this by reading a 2000-line file: the reply was 41 lines and the buffer held all 2000. Context stays small because reply size no longer depends on output size."}
+{"pair_id": "train-d_history-8669", "original": "This spec leaves the id derivation alone. Switching from absolute to relative paths would rewrite the primary key in every table that references an artifact, so it needs its own migration and its own review. The entry-graph work does not depend on it: edges are keyed by slug, and slugs are minted on first use. ⟦The id column was called art_key in the old schema and held 40-character hashes before it became artifact_id.⟧ Existing file-level edges keep resolving through the current id, which I confirmed by running the lookup against a copy of the catalog and comparing row counts before and after.", "substituted": "This spec leaves the id derivation alone. Switching from absolute to relative paths would rewrite the primary key in every table that references an artifact, so it needs its own migration and its own review. The entry-graph work does not depend on it: edges are keyed by slug, and slugs are minted on first use. ⟦The id column is artifact_id and holds 64-character hex hashes.⟧ Existing file-level edges keep resolving through the current id, which I confirmed by running the lookup against a copy of the catalog and comparing row counts before and after."}
+{"pair_id": "train-d_history-7045", "original": "Each chunk is turned into a vector by the configured embedding model, and similar text lands in nearby directions. Onboarding picks the model from the hardware it detects: an Ollama model when the server is reachable, otherwise a local CPU model. I verified the choice by running onboarding on a machine with Ollama stopped, and the config file named the local model. Vectors are written to a single database under the project's data directory. ⟦The default used to be `mxbai-embed-large` before the switch to nomic.⟧", "substituted": "Each chunk is turned into a vector by the configured embedding model, and similar text lands in nearby directions. Onboarding picks the model from the hardware it detects: an Ollama model when the server is reachable, otherwise a local CPU model. I verified the choice by running onboarding on a machine with Ollama stopped, and the config file named the local model. Vectors are written to a single database under the project's data directory. ⟦The default is `nomic-embed-text` whenever Ollama is running.⟧"}
+{"pair_id": "train-d_history-6846", "original": "A deletion note claims a file is safe to remove because it can be restored. That holds only if the path is tracked in some reachable commit and the working copy is not the sole holder of its current content. The guard script walks the index and then asks the commit graph for the path, so both conditions are tested. A dirty tracked file gets its own message, because a checkout would restore the committed bytes and discard the edits. ⟦The script was previously named `safe-rm-check` and used to list 212 paths as restorable.⟧ Running it on the handoff branch flagged 9 dirty files and no untracked ones.", "substituted": "A deletion note claims a file is safe to remove because it can be restored. That holds only if the path is tracked in some reachable commit and the working copy is not the sole holder of its current content. The guard script walks the index and then asks the commit graph for the path, so both conditions are tested. A dirty tracked file gets its own message, because a checkout would restore the committed bytes and discard the edits. ⟦The script, `restore-guard`, lists a path as restorable only after both checks pass.⟧ Running it on the handoff branch flagged 9 dirty files and no untracked ones."}
+{"pair_id": "train-d_history-9461", "original": "The write-block on the second project came from a default, not a fault. Activating the plugins repo without passing a mode flag returned a read-only state. The workspace guide says the first project opened in a session is home and writable, while any later activation of a different path is foreign and read-only unless the flag is set explicitly. ⟦Before the guide was rewritten, the section was titled \"Project roles\" and called the two states primary and secondary.⟧ The session's home project defaulted to writable, as the guide predicts. Re-activating the plugins repo with the flag set to false flipped the hint from browsing to switched-project, which confirms the default was the only cause.", "substituted": "The write-block on the second project came from a default, not a fault. Activating the plugins repo without passing a mode flag returned a read-only state. The workspace guide says the first project opened in a session is home and writable, while any later activation of a different path is foreign and read-only unless the flag is set explicitly. ⟦In the guide, the section is titled \"The home/foreign distinction\" and calls the two states home and foreign.⟧ The session's home project defaulted to writable, as the guide predicts. Re-activating the plugins repo with the flag set to false flipped the hint from browsing to switched-project, which confirms the default was the only cause."}
+{"pair_id": "train-d_history-4541", "original": "⟦The threshold was 0.65 in the first draft and 0.4 for one afternoon before it settled.⟧ The scoped-miss diagnosis now scores with a substring alignment normalised by the anchor's length, not by the whole joined window. A 60-char anchor sitting verbatim in a 460-char line used to come back as no match at ratio 0.130; it now scores 1.0. The DP table is the same single table as before, so cost stays O(window x anchor) and no search dimension is added. A control with unrelated content still declines, and it ships alongside the change.", "substituted": "⟦The threshold is 0.5, and the control test pins that value.⟧ The scoped-miss diagnosis now scores with a substring alignment normalised by the anchor's length, not by the whole joined window. A 60-char anchor sitting verbatim in a 460-char line used to come back as no match at ratio 0.130; it now scores 1.0. The DP table is the same single table as before, so cost stays O(window x anchor) and no search dimension is added. A control with unrelated content still declines, and it ships alongside the change."}
+{"pair_id": "train-d_history-787", "original": "A test that resolves a binary by path and returns early on absence turns an environment change into silent coverage loss. The doc check avoids this: when the binary is missing it fails loudly, and that failure is how the multi-session defect surfaced. Adding a skip-if-absent guard would make the trap silent, so the strictness stays. ⟦The test used to look for the binary under target/debug/cli before it moved to the release path in July.⟧", "substituted": "A test that resolves a binary by path and returns early on absence turns an environment change into silent coverage loss. The doc check avoids this: when the binary is missing it fails loudly, and that failure is how the multi-session defect surfaced. Adding a skip-if-absent guard would make the trap silent, so the strictness stays. ⟦The test looks for the binary at the release path and fails when it is missing.⟧"}
+codex
+{"pair_id":"train-d_history-11602","a":"yes","b":"yes","c":"no","note":"The original preserves a superseded token count and hash; the fix states current values."}
+{"pair_id":"train-d_history-7024","a":"yes","b":"yes","c":"no","note":"The original records the retired inline-output limit; the fix describes current output behavior."}
+{"pair_id":"train-d_history-8669","a":"yes","b":"yes","c":"no","note":"The original records an obsolete column name and hash length; the fix supplies the current schema."}
+{"pair_id":"train-d_history-7045","a":"yes","b":"yes","c":"no","note":"The original names the superseded default model; the fix names the current default."}
+{"pair_id":"train-d_history-6846","a":"yes","b":"yes","c":"no","note":"The original preserves a retired script name and former count; the fix describes the current script and checks."}
+{"pair_id":"train-d_history-9461","a":"yes","b":"yes","c":"no","note":"The original preserves an obsolete section title and terminology; the fix uses current names. Other sentences establish the diagnosis."}
+{"pair_id":"train-d_history-4541","a":"yes","b":"yes","c":"yes","note":"The fix removes obsolete thresholds, but another sentence preserves the superseded no-match result and ratio of 0.130."}
+{"pair_id":"train-d_history-787","a":"yes","b":"yes","c":"no","note":"The original records an obsolete binary path and migration timing; the fix states current lookup and failure behavior."}
+tokens used
+5,704

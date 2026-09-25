@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-d_mutation-6251", "a": "yes", "b": "yes", "c": "no", "note": "Only the function handler was mutated, yet both checks are marked tested. The fix limits the claim to the function check."}
+{"pair_id": "tsyn-cross-d_mutation-6314", "a": "yes", "b": "yes", "c": "no", "note": "Only the hook was mutated, yet coverage is certified for the hook and merge guards. The fix limits it to the hook."}
+{"pair_id": "tsyn-cross-d_mutation-4606", "a": "yes", "b": "yes", "c": "no", "note": "Only the registry filter was mutated, yet both filters are claimed covered. The fix limits the claim to the registry filter."}
+{"pair_id": "tsyn-cross-d_mutation-5029", "a": "yes", "b": "yes", "c": "no", "note": "Only the commit hook was mutated, yet both safeguards are claimed covered. The fix scopes the claim to the commit hook."}
+{"pair_id": "tsyn-cross-d_mutation-3316", "a": "yes", "b": "yes", "c": "no", "note": "Only the startup guard was mutated, yet both guards are claimed covered. The fix limits the claim to the startup guard."}
+{"pair_id": "tsyn-cross-d_mutation-8202", "a": "yes", "b": "yes", "c": "no", "note": "Only the resume guard was mutated, yet both identity guards are claimed covered. The fix limits the claim to resume."}
+{"pair_id": "tsyn-cross-d_mutation-7040", "a": "yes", "b": "yes", "c": "no", "note": "Only the startup branch was mutated, yet both guards are claimed covered. The other failure sentence is scoped to startup only."}
+{"pair_id": "tsyn-cross-d_mutation-5058", "a": "yes", "b": "yes", "c": "no", "note": "Only the interactive formatter was mutated, yet both entry points are claimed done. The fix limits the claim to that formatter."}

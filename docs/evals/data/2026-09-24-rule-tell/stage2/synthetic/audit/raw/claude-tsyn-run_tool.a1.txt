@@ -1,0 +1,7 @@
+{"pair_id":"tsyn-in-run_tool-1604","a":"yes","b":"yes","c":"no","note":"Original relies on a docstring for error behavior; replacement reports an actual call and observed result."}
+{"pair_id":"tsyn-in-run_tool-7086","a":"yes","b":"yes","c":"no","note":"Original asserts untested output and exit status; replacement describes the handler's control flow rather than runtime output."}
+{"pair_id":"tsyn-in-run_tool-6926","a":"yes","b":"no","c":"no","note":"Replacement still infers runtime behavior with a missing store from source alone, explicitly without launching the helper."}
+{"pair_id":"tsyn-in-run_tool-1516","a":"yes","b":"no","c":"no","note":"Replacement claims a run, but the unchanged paragraph says the next spawn will be the first live exposure to this build."}
+{"pair_id":"tsyn-in-run_tool-2912","a":"yes","b":"yes","c":"no","note":"Original bases a universal runtime claim on help text; replacement limits the claim to the observed run."}
+{"pair_id":"tsyn-in-run_tool-8295","a":"yes","b":"yes","c":"no","note":"Original claims untested payload and exit behavior; replacement describes the handler's flag-copying logic."}
+{"pair_id":"tsyn-in-run_tool-3657","a":"yes","b":"yes","c":"no","note":"Original relies on a doc comment for exit behavior; replacement reports running the edit tool and reading its status and error."}

@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-count_unit-6813","a":"no","b":"yes","c":"no","note":"Rows supplies the unit, recorder replay supplies the derivation, and surrounding text identifies the population."}
+{"pair_id":"tsyn-in-count_unit-8297","a":"yes","b":"no","c":"no","note":"The original omits the unit. The fix supplies lines but still gives no derivation for 400."}
+{"pair_id":"tsyn-in-count_unit-9412","a":"yes","b":"yes","c":"no","note":"The twelve-line decrease lacks derivation. The replacement uses the explicitly measured byte difference."}
+{"pair_id":"tsyn-in-count_unit-365","a":"yes","b":"no","c":"no","note":"Times leaves the counting unit ambiguous. Assistant turns clarifies the unit, but neither version explains how twelve was derived."}
+{"pair_id":"tsyn-in-count_unit-3689","a":"yes","b":"yes","c":"no","note":"The original leaves 119 unitless. The replacement identifies unpushed commits observed in the log."}
+{"pair_id":"tsyn-in-count_unit-7702","a":"yes","b":"yes","c":"yes","note":"A dozen exposed checkouts is unsupported by the inspection. The fix ties exposure to listed checkouts. Another sentence leaves 75 without a unit."}
+{"pair_id":"tsyn-in-count_unit-5169","a":"yes","b":"yes","c":"no","note":"The original omits what forty counts. The fix identifies results and derives the count from the sample run."}
+{"pair_id":"tsyn-in-count_unit-1373","a":"yes","b":"yes","c":"no","note":"The original leaves three unitless. The fix identifies lock-timeout errors observed in the backend log during the specified week."}

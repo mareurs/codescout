@@ -1,0 +1,89 @@
+{"pair_id":"train-closed_population-7812","a":"yes","b":"yes","c":"no","note":"The original includes all future tests; the fix limits the claim to tests in this change."}
+{"pair_id":"train-closed_population-12087","a":"yes","b":"yes","c":"no","note":"The original generalizes over an unbounded set of error hints; the fix identifies the single kind rejection hint."}
+{"pair_id":"train-closed_population-4348","a":"yes","b":"yes","c":"no","note":"Future dispatched subagents form an open population; the fix names the three tested subagents."}
+{"pair_id":"train-closed_population-3192","a":"yes","b":"yes","c":"no","note":"The original guarantees behavior for future tests; the fix bounds the population to today's suite."}
+{"pair_id":"train-closed_population-10879","a":"yes","b":"yes","c":"no","note":"The original covers every future declaration pass; the fix restricts the claim to this sweep's thirteen entries."}
+{"pair_id":"train-closed_population-7449","a":"yes","b":"yes","c":"no","note":"The original asserts an enduring property of future plans; the fix concerns the two plans for the migration scenario."}
+{"pair_id":"train-closed_population-11498","a":"yes","b":"yes","c":"no","note":"The original guarantees all future fixtures and bug outcomes; the fix states a recommendation without assuming universal compliance."}
+{"pair_id":"train-closed_population-5534","a":"yes","b":"yes","c":"yes","note":"The fix bounds the marked claim to six sessions, but the separate claim about anyone re-deriving the theory also generalizes over future people."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+2026-09-25T05:25:46.433436Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-1hkagcga
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d706-dd41-7970-bf5a-89f86d836261
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-1hkagcga
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `closed_population`
+
+LAW: Ask whether the population is closed.
+
+USUAL SHAPE: YES when the text claims all / every / none over a set that can gain members (future entries, other sessions, new files, later callers) as though the set were fixed. NO when the set is explicitly fixed or listed.
+
+## Items
+
+{"pair_id": "train-closed_population-7812", "original": "The change is four small refactors to the server config, the manager, the mux CLI, and the project config, followed by flipping a single flag in the servers module. Tests live as unit tests under the mux directory so they can share a cfg(test) support module. That is a minor departure from the spec, which put them in the top-level tests folder, because integration tests there cannot reach crate-private test-only code. ⟦Every test that anyone adds to this feature later will therefore be a unit test too, since integration tests can never use the support module.⟧", "substituted": "The change is four small refactors to the server config, the manager, the mux CLI, and the project config, followed by flipping a single flag in the servers module. Tests live as unit tests under the mux directory so they can share a cfg(test) support module. That is a minor departure from the spec, which put them in the top-level tests folder, because integration tests there cannot reach crate-private test-only code. ⟦Every test in this change is therefore a unit test, since integration tests cannot reach the support module.⟧"}
+{"pair_id": "train-closed_population-12087", "original": "The proposed reconcile-through-update route was tried on a file with no frontmatter. Setting status and title worked, because update synthesizes a block when none exists. Setting kind failed: patch does not accept it, and extra rejects it as schema-modelled. The rejection hint tells callers to pass kind as a separate parameter, and update does not read such a parameter; following the hint returns a missing-field error for patch. ⟦All error hints in this tool point to parameters that update does not read.⟧ So the proposal covers two of the three fields and needs a separate path for kind.", "substituted": "The proposed reconcile-through-update route was tried on a file with no frontmatter. Setting status and title worked, because update synthesizes a block when none exists. Setting kind failed: patch does not accept it, and extra rejects it as schema-modelled. The rejection hint tells callers to pass kind as a separate parameter, and update does not read such a parameter; following the hint returns a missing-field error for patch. ⟦The kind rejection hint points to a parameter that update does not read.⟧ So the proposal covers two of the three fields and needs a separate path for kind."}
+{"pair_id": "train-closed_population-4348", "original": "The subagent brief now tells the agent to fetch its own guides, because the auto-inject does not fire for subagents; I confirmed this by dispatching three test subagents and checking that none received an injected body. The static slice in the server instructions changed by two characters, and the size test still passes under the 1900-character budget. The bootstrap guide got the same inversion. ⟦Every subagent that gets dispatched from now on will fetch the guide correctly, since the brief wording is unambiguous.⟧ The repeat-fetch note in the guide tool is now context-neutral and says the body may have gone to a different agent.", "substituted": "The subagent brief now tells the agent to fetch its own guides, because the auto-inject does not fire for subagents; I confirmed this by dispatching three test subagents and checking that none received an injected body. The static slice in the server instructions changed by two characters, and the size test still passes under the 1900-character budget. The bootstrap guide got the same inversion. ⟦Each of the three test subagents dispatched after the change fetched the guide correctly, since the brief wording is unambiguous.⟧ The repeat-fetch note in the guide tool is now context-neutral and says the body may have gone to a different agent."}
+{"pair_id": "train-closed_population-3192", "original": "The wiring between the index tools and the real OS lock has no unit test, and that gap is deliberate. Both peek and acquire resolve the per-user runtime directory from an environment variable. Redirecting it inside a test would mean mutating the environment while other threads may read it, which the linked issue documents as undefined behavior. A search of the test modules for the runtime-dir function returns only the scratch helper and one guard test asserting the real directory stays untouched. ⟦Every test anyone adds later will stay out of the real runtime dir, because the convention forbids writing there.⟧ Coverage comes from the live reproduction below, the same evidence the original bug report relied on.", "substituted": "The wiring between the index tools and the real OS lock has no unit test, and that gap is deliberate. Both peek and acquire resolve the per-user runtime directory from an environment variable. Redirecting it inside a test would mean mutating the environment while other threads may read it, which the linked issue documents as undefined behavior. A search of the test modules for the runtime-dir function returns only the scratch helper and one guard test asserting the real directory stays untouched. ⟦Every test in the suite today stays out of the real runtime dir, because the convention forbids writing there.⟧ Coverage comes from the live reproduction below, the same evidence the original bug report relied on."}
+{"pair_id": "train-closed_population-10879", "original": "Thirteen entries were declared in one sweep, each by reading the entry's own prose. That method is reasonable, and it is also what carried one entry's verb across unexamined: the prose said \"detects\" and the declaration copied it, though the code only counts matches. A transcription is not a judgement. ⟦Every bulk declaration pass anyone runs on this registry in the future will copy verbs the same way, so all such passes need a second reader on the verbs.⟧", "substituted": "Thirteen entries were declared in one sweep, each by reading the entry's own prose. That method is reasonable, and it is also what carried one entry's verb across unexamined: the prose said \"detects\" and the declaration copied it, though the code only counts matches. A transcription is not a judgement. ⟦This sweep copied verbs from prose without checking them, so its thirteen entries need a second reader on the verbs.⟧"}
+{"pair_id": "train-closed_population-7449", "original": "Our fixture plans for the migration scenario were written by hand, and the baseline cost looked low. When we regenerated the plan with the planning skill and reran, the agent spent about 1.8x more tokens on execution, so the hand-written plan had understated the baseline. The plan we wrote was shorter and cleaner, with fewer ambiguous steps. ⟦Hand-written plans will always differ from generated ones in ways nobody has listed, so every future scenario should use a generated plan.⟧ Until then, the recorded baseline numbers stay marked as provisional in the results table.", "substituted": "Our fixture plans for the migration scenario were written by hand, and the baseline cost looked low. When we regenerated the plan with the planning skill and reran, the agent spent about 1.8x more tokens on execution, so the hand-written plan had understated the baseline. The plan we wrote was shorter and cleaner, with fewer ambiguous steps. ⟦The hand-written plan differed from the generated one in ways nobody had listed, so the migration scenario should use a generated plan.⟧ Until then, the recorded baseline numbers stay marked as provisional in the results table."}
+{"pair_id": "train-closed_population-11498", "original": "The pagination change added a cap of fifty results, and its test fixture held a single record. That fixture passed, but it only shows that the empty and one-item paths work; it says nothing about truncation. Running the call against the live tree returned two hundred entries and made the gap obvious, which is a separate step from the gate itself. ⟦The lesson for reviews: every fixture written for a capped function will exceed the cap, so no truncation bug can reach the live tree unnoticed.⟧", "substituted": "The pagination change added a cap of fifty results, and its test fixture held a single record. That fixture passed, but it only shows that the empty and one-item paths work; it says nothing about truncation. Running the call against the live tree returned two hundred entries and made the gap obvious, which is a separate step from the gate itself. ⟦The lesson for reviews: a fixture for a capped function should exceed the cap, or truncation bugs can reach the live tree unnoticed.⟧"}
+{"pair_id": "train-closed_population-5534", "original": "⟦Every session that skips the claim step has already been shown the instruction.⟧ I checked the transcripts of the six sessions that skipped it last week, and the instruction sat in the served text of each one, unprompted. That makes the obvious remedy, moving the instruction onto the always-served surface, a cheap documentation edit that cannot work. Anyone who re-derives the audience theory would ship it, see no change in claiming, and have nothing to explain why. The theory stays in the notes for that reason.", "substituted": "⟦Each of the six sessions that skipped the claim step had already been shown the instruction.⟧ I checked the transcripts of the six sessions that skipped it last week, and the instruction sat in the served text of each one, unprompted. That makes the obvious remedy, moving the instruction onto the always-served surface, a cheap documentation edit that cannot work. Anyone who re-derives the audience theory would ship it, see no change in claiming, and have nothing to explain why. The theory stays in the notes for that reason."}
+codex
+{"pair_id":"train-closed_population-7812","a":"yes","b":"yes","c":"no","note":"The original includes all future tests; the fix limits the claim to tests in this change."}
+{"pair_id":"train-closed_population-12087","a":"yes","b":"yes","c":"no","note":"The original generalizes over an unbounded set of error hints; the fix identifies the single kind rejection hint."}
+{"pair_id":"train-closed_population-4348","a":"yes","b":"yes","c":"no","note":"Future dispatched subagents form an open population; the fix names the three tested subagents."}
+{"pair_id":"train-closed_population-3192","a":"yes","b":"yes","c":"no","note":"The original guarantees behavior for future tests; the fix bounds the population to today's suite."}
+{"pair_id":"train-closed_population-10879","a":"yes","b":"yes","c":"no","note":"The original covers every future declaration pass; the fix restricts the claim to this sweep's thirteen entries."}
+{"pair_id":"train-closed_population-7449","a":"yes","b":"yes","c":"no","note":"The original asserts an enduring property of future plans; the fix concerns the two plans for the migration scenario."}
+{"pair_id":"train-closed_population-11498","a":"yes","b":"yes","c":"no","note":"The original guarantees all future fixtures and bug outcomes; the fix states a recommendation without assuming universal compliance."}
+{"pair_id":"train-closed_population-5534","a":"yes","b":"yes","c":"yes","note":"The fix bounds the marked claim to six sessions, but the separate claim about anyone re-deriving the theory also generalizes over future people."}
+tokens used
+5,892

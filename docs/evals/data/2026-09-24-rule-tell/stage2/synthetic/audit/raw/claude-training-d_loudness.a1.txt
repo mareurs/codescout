@@ -1,0 +1,8 @@
+{"pair_id":"train-d_loudness-4374","a":"yes","b":"yes","c":"no","note":"No scheduled job reaches the alarm; the fix acknowledges this and calls for a manual recheck."}
+{"pair_id":"train-d_loudness-7309","a":"yes","b":"yes","c":"no","note":"Every CI build excludes the test, so it cannot guard pushes. The fix states that limitation."}
+{"pair_id":"train-d_loudness-5382","a":"no","b":"yes","c":"no","note":"The next peer's build reaches the lint, the peer sees the error, and reverting restores the build. Author notification is inaccurately claimed."}
+{"pair_id":"train-d_loudness-6957","a":"yes","b":"yes","c":"no","note":"The failure neither blocks merging nor reaches an observer. The fix withdraws the protection claim."}
+{"pair_id":"train-d_loudness-6407","a":"yes","b":"yes","c":"no","note":"Stored stderr has no reachable reader for failed count queries. The fix acknowledges the missing observation path."}
+{"pair_id":"train-d_loudness-336","a":"yes","b":"yes","c":"no","note":"The original warning is discarded. The fix routes the failure through the results table read by the analysis script."}
+{"pair_id":"train-d_loudness-5423","a":"yes","b":"yes","c":"no","note":"The timeout emits an unobserved log line despite the protection claim. The fix explicitly acknowledges silent termination."}
+{"pair_id":"train-d_loudness-3759","a":"yes","b":"yes","c":"no","note":"Memory calls never reach the router's error guard because they lack selectors. The fix makes that unreachable path explicit."}

@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-d_adjacency-571","a":"yes","b":"yes","c":"no","note":"Original infers authorship from sibling-section activity; fix identifies Ravi through blame for the specific line."}
+{"pair_id":"tsyn-in-d_adjacency-811","a":"yes","b":"yes","c":"no","note":"Original attributes the revision through nearby log edits; fix identifies Tomas on the revision's commit."}
+{"pair_id":"tsyn-in-d_adjacency-6896","a":"yes","b":"yes","c":"no","note":"Original attributes the reset through directory activity; fix identifies Omar's commit adding the responsible server poll."}
+{"pair_id":"tsyn-in-d_adjacency-1269","a":"yes","b":"yes","c":"no","note":"Original infers authorship from neighboring test work; fix identifies Omar through the commit adding the hint."}
+{"pair_id":"tsyn-in-d_adjacency-9023","a":"yes","b":"yes","c":"no","note":"Original relies on a branch involving a neighboring file; fix identifies Priya's merge commit introducing the relevant change."}
+{"pair_id":"tsyn-in-d_adjacency-374","a":"yes","b":"yes","c":"no","note":"Original infers authorship from neighboring registry edits; fix cites blame identifying Dana's commit on the flag's lines."}
+{"pair_id":"tsyn-in-d_adjacency-6571","a":"yes","b":"yes","c":"no","note":"Original relies on contemporaneous tokenizer editing; fix identifies Dana's specific commit adding the trim call."}
+{"pair_id":"tsyn-in-d_adjacency-9479","a":"yes","b":"yes","c":"no","note":"Original infers authorship from directory activity; fix positively identifies Sam through the entry's Author field and commit signature."}

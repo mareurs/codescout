@@ -1,0 +1,8 @@
+{"pair_id":"train-open_artifact-4218","a":"yes","b":"yes","c":"no","note":"Original relies on the PR description for gating intent; replacement grounds the gating claim in code."}
+{"pair_id":"train-open_artifact-10084","a":"yes","b":"yes","c":"no","note":"Original infers file-list contents from a handoff note; replacement opens the file list directly."}
+{"pair_id":"train-open_artifact-6008","a":"yes","b":"yes","c":"no","note":"Original infers commit behavior from the design note; replacement cites the commit diff."}
+{"pair_id":"train-open_artifact-12237","a":"yes","b":"yes","c":"no","note":"Original relies on memory of the patch; replacement grounds the claim in the patch diff."}
+{"pair_id":"train-open_artifact-7240","a":"yes","b":"yes","c":"no","note":"Original relies on the changelog for script behavior; replacement cites the script's export line."}
+{"pair_id":"train-open_artifact-1392","a":"yes","b":"yes","c":"no","note":"Original relies on the design note for handler behavior; replacement explicitly reads the old handler."}
+{"pair_id":"train-open_artifact-6051","a":"yes","b":"yes","c":"no","note":"Original infers handler behavior from a bug entry; replacement uses executed test results. Sufficiency of that evidence is outside this rule."}
+{"pair_id":"train-open_artifact-9032","a":"yes","b":"yes","c":"no","note":"Original relies on the design doc for hook behavior; replacement grounds the claim in call_content's control flow."}

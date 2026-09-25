@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-d_adjacency-4517", "a": "yes", "b": "yes", "c": "no", "note": "Original credits the name check to Leah because of her adjacent test edit. The fix credits only her signed parameter-test change."}
+{"pair_id": "tsyn-cross-d_adjacency-6506", "a": "yes", "b": "yes", "c": "no", "note": "Original assigns the hint to Nia from her nearby statement edit. The fix attributes only the statement, which the history names her for."}
+{"pair_id": "tsyn-cross-d_adjacency-1072", "a": "yes", "b": "yes", "c": "no", "note": "Original assigns the Markdown gate via the neighboring dispatch edit. The fix attributes only the dispatch edit, which the recorded change identifies."}
+{"pair_id": "tsyn-cross-d_adjacency-3019", "a": "yes", "b": "yes", "c": "no", "note": "Original credits the guard to Mira from her neighboring check. The fix credits only the check her signed patch adds."}
+{"pair_id": "tsyn-cross-d_adjacency-9023", "a": "yes", "b": "yes", "c": "no", "note": "Original makes Lea author of the branch from an adjacent comment edit. The fix attributes only the comment; the 'but' does not reassign the branch."}
+{"pair_id": "tsyn-cross-d_adjacency-4413", "a": "yes", "b": "yes", "c": "no", "note": "Original credits the helper change from a same-afternoon caller edit. The fix credits only the caller edit, which the excerpt identifies."}
+{"pair_id": "tsyn-cross-d_adjacency-5521", "a": "yes", "b": "yes", "c": "no", "note": "Original infers the assertion's author from the edit directly above it. The fix attributes only the recorded entry above."}
+{"pair_id": "tsyn-cross-d_adjacency-571", "a": "yes", "b": "yes", "c": "no", "note": "Original credits the assessment from a preceding-section edit. The fix states only the documented preceding-section edit."}

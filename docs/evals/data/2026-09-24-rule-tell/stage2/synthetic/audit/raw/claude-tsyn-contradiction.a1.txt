@@ -1,0 +1,6 @@
+{"pair_id":"tsyn-in-contradiction-1165","a":"yes","b":"yes","c":"yes","note":"The marked denial contradicts both automatic inlining for small results and the observed body. The fix reconciles these statements."}
+{"pair_id":"tsyn-in-contradiction-3425","a":"no","b":"yes","c":"no","note":"Different binaries can have different compiled-in defaults; falling back to those defaults is consistent with the observed protocol split."}
+{"pair_id":"tsyn-in-contradiction-1651","a":"yes","b":"yes","c":"yes","note":"The marked sentence contradicts earlier claims that comparisons handle separators correctly and only stringification was faulty. The fix restores consistency."}
+{"pair_id":"tsyn-in-contradiction-7296","a":"yes","b":"yes","c":"yes","note":"Claiming live parity runs every build conflicts with the contract test standing in for it. The fix makes the replacement consistent."}
+{"pair_id":"tsyn-in-contradiction-6604","a":"yes","b":"yes","c":"yes","note":"The acknowledgement bypass contradicts the earlier explicit prohibition of acknowledgement variables. The fix agrees with that prohibition."}
+{"pair_id":"tsyn-in-contradiction-8412","a":"yes","b":"yes","c":"yes","note":"Fatal abortion on cache write failure contradicts the earlier statement that the call continues. The fix removes that contradiction."}

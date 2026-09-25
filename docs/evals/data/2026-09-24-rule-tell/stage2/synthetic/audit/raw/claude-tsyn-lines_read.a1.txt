@@ -1,0 +1,6 @@
+{"pair_id":"tsyn-in-lines_read-8366","a":"yes","b":"yes","c":"no","note":"Original infers handler behavior from search matches alone; replacement reports opening all eight write handlers."}
+{"pair_id":"tsyn-in-lines_read-11914","a":"yes","b":"yes","c":"no","note":"Original treats a field-name match as proof of consumption; replacement establishes behavior by reading the parser."}
+{"pair_id":"tsyn-in-lines_read-7581","a":"yes","b":"yes","c":"no","note":"Original infers portrait construction from grep counts; replacement limits the finding to five opened portrait scripts."}
+{"pair_id":"tsyn-in-lines_read-4609","a":"yes","b":"yes","c":"no","note":"Original infers cleanup ordering from three search hits; replacement explicitly reports reading all three call sites."}
+{"pair_id":"tsyn-in-lines_read-8061","a":"yes","b":"yes","c":"no","note":"Original establishes behavior from a matching comment; replacement reports reading the function body and its comparison."}
+{"pair_id":"tsyn-in-lines_read-8919","a":"yes","b":"yes","c":"no","note":"Original classifies all twelve files from grep matches; replacement limits classification to the four files actually read."}

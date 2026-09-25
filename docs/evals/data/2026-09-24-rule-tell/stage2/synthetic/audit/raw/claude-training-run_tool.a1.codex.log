@@ -1,0 +1,88 @@
+{"pair_id":"train-run_tool-2684","a":"yes","b":"no","c":"no","note":"The fix still predicts runtime output from the README without running the fenced-reference case; expressing expectation does not supply runtime evidence."}
+{"pair_id":"train-run_tool-2625","a":"yes","b":"yes","c":"no","note":"The original infers stderr and exit status from source; the fix reports triggering the gate and observing both."}
+{"pair_id":"train-run_tool-12127","a":"yes","b":"yes","c":"no","note":"The original asserts runtime failure from source; the fix describes source assignments and control flow without claiming observed runtime behavior."}
+{"pair_id":"train-run_tool-7463","a":"yes","b":"yes","c":"no","note":"The original infers output shape from the prompt template; the fix grounds that shape in actual run logs."}
+{"pair_id":"train-run_tool-9895","a":"yes","b":"yes","c":"no","note":"The original uses documentation to dismiss an observed exit status; the fix accepts the runtime result and identifies the documentation discrepancy."}
+{"pair_id":"train-run_tool-587","a":"yes","b":"yes","c":"no","note":"The original claims push behavior from its man page; the fix reports a scratch-remote run and its observed status and output."}
+{"pair_id":"train-run_tool-6547","a":"yes","b":"yes","c":"no","note":"The original derives jobctl's exit status from source alone; the fix reports running that command and observing its exit status."}
+{"pair_id":"train-run_tool-923","a":"yes","b":"yes","c":"no","note":"The original explicitly claims formatter output without executing it; the fix reports execution on both endpoints and inspection of the output."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-t7ngwn4l
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d708-2a5f-7622-a9b5-1c7e923135d9
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-t7ngwn4l
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `run_tool`
+
+LAW: A claim about how a tool behaves needs the call run once and the real output read; reading the source alone misses runtime shape.
+
+USUAL SHAPE: YES when the text asserts how a tool, command or API behaves at RUNTIME (its output, error, exit status) AND the text says or shows the basis was reading its source or docs rather than running it. NO when no basis is stated, when the text reports running it, or when it describes what a piece of code computes rather than a tool's runtime behaviour.
+
+## Items
+
+{"pair_id": "train-run_tool-2684", "original": "The doc-ref checker flagged our handoff note last week, so I traced why. The two bare-basename refs in the note both came back as file_missing with medium confidence, because the scanner only looks under the scoped directory and neither file lives there. Running the scanner against the scoped form of the same ref returned resolved with low confidence, which matches what I expected. ⟦For the fenced-block variant, the scanner's README says it skips fenced code, so it will exit 0 and print an empty findings table when pointed at a file that contains only fenced refs.⟧ I have not launched it on such a file yet. The inline form is therefore the one to use in the note.", "substituted": "The doc-ref checker flagged our handoff note last week, so I traced why. The two bare-basename refs in the note both came back as file_missing with medium confidence, because the scanner only looks under the scoped directory and neither file lives there. Running the scanner against the scoped form of the same ref returned resolved with low confidence, which matches what I expected. ⟦For the fenced-block variant, the scanner's README says it skips fenced code, so I expect exit 0 and an empty table, but I have not yet run it on such a file.⟧ I have not launched it on such a file yet. The inline form is therefore the one to use in the note."}
+{"pair_id": "train-run_tool-2625", "original": "The measured frequency is one confirmed mangled message in 9,790 calls. That is low because the house habit of writing the message to a file and committing from it already avoids the problem; the habit, not the tool, has been doing the protecting. ⟦From the gate's source, it prints the remedy hint to stderr and exits 1 on a mangled message.⟧ The gate's value is that safety no longer depends on every author remembering the habit. The hint is easy to word too, since the safe pattern is what 97% of the sampled calls already use.", "substituted": "The measured frequency is one confirmed mangled message in 9,790 calls. That is low because the house habit of writing the message to a file and committing from it already avoids the problem; the habit, not the tool, has been doing the protecting. ⟦Triggering it once with a mangled message, it printed the remedy hint to stderr and exited 1.⟧ The gate's value is that safety no longer depends on every author remembering the habit. The hint is easy to word too, since the safe pattern is what 97% of the sampled calls already use."}
+{"pair_id": "train-run_tool-12127", "original": "Guessing field names costs the same in tool output as in tracker text. The link_scan tool calls the cited token raw in its dangling list and token in its ambiguous list. A filter I wrote against a guessed ok verdict printed resolved refs as problems, because audit_doc_refs returns resolved, missing, resolved_basename, file_missing, or unknown. I saw this by running the audit on a sample doc and reading the verdict column. Both mistakes were made hours apart on 2026-08-17. ⟦From reading the audit source, an unrecognised reference makes the tool exit with status 2 and print a traceback.⟧ The tool-side naming split is filed as a separate issue.", "substituted": "Guessing field names costs the same in tool output as in tracker text. The link_scan tool calls the cited token raw in its dangling list and token in its ambiguous list. A filter I wrote against a guessed ok verdict printed resolved refs as problems, because audit_doc_refs returns resolved, missing, resolved_basename, file_missing, or unknown. I saw this by running the audit on a sample doc and reading the verdict column. Both mistakes were made hours apart on 2026-08-17. ⟦In the audit source, an unrecognised reference is assigned the unknown verdict, with no exit call on that path.⟧ The tool-side naming split is filed as a separate issue."}
+{"pair_id": "train-run_tool-7463", "original": "Handoff note on the acceptance-criteria grader. I ran the scenario suite twice against the Codex harness and both runs failed the same criterion, the one demanding a native skill invocation. The transcript shows Codex opening the skill file through a shell grep, so the criterion rejects a legitimate path. The severity-floor check held up: a minor style comment never counted as a finding in either run. ⟦From reading the grader's prompt template, the semantic grader returns a bare PASS or FAIL string with no reasoning field when a criterion is rejected.⟧ Next step is to widen the criterion so it accepts either loading method.", "substituted": "Handoff note on the acceptance-criteria grader. I ran the scenario suite twice against the Codex harness and both runs failed the same criterion, the one demanding a native skill invocation. The transcript shows Codex opening the skill file through a shell grep, so the criterion rejects a legitimate path. The severity-floor check held up: a minor style comment never counted as a finding in either run. ⟦In the run logs, the semantic grader returned a bare PASS or FAIL string with no reasoning field when it rejected a criterion.⟧ Next step is to widen the criterion so it accepts either loading method."}
+{"pair_id": "train-run_tool-9895", "original": "The gate comment justified deleting the inline arm with a dated snapshot: no bug file carried a flow-style cluster tag, so the corpus check would stay green. That snapshot went stale within two days, when a file was created with a flow-style tag. Today three files carry one. I ran the corpus check against a branch with the inline arm deleted and it printed three changed counts and exited 1. ⟦The gate's parser docs say a changed count only warns and never sets a nonzero exit status, so the red exit is presumably impossible for this check.⟧ The conclusion in the comment therefore inverted, from invisible mutation to a mutation that reds the shared gate.", "substituted": "The gate comment justified deleting the inline arm with a dated snapshot: no bug file carried a flow-style cluster tag, so the corpus check would stay green. That snapshot went stale within two days, when a file was created with a flow-style tag. Today three files carry one. I ran the corpus check against a branch with the inline arm deleted and it printed three changed counts and exited 1. ⟦The gate's parser docs say a changed count only warns, yet the run above exited 1, so the docs understate what the check does at runtime.⟧ The conclusion in the comment therefore inverted, from invisible mutation to a mutation that reds the shared gate."}
+{"pair_id": "train-run_tool-587", "original": "Handoff note on the authorisation audit. The open question was whether git can record who approved a push. ⟦Reading the git-push man page, I concluded that `git push` exits nonzero and prints a clear error when a commit lacks an approval trailer, so the hook can rely on that failure.⟧ To check the storage side, I listed trailers, notes, and refs on the three affected commits and found none carrying an approval marker. That absence is confirmed for this repository. The recurrence claim is separate: at filing there was one occurrence, and a second appeared the next day, so it is now supported by two cases.", "substituted": "Handoff note on the authorisation audit. The open question was whether git can record who approved a push. ⟦Running `git push` against a scratch remote with a commit lacking an approval trailer, I saw it exit zero and print no error, so the hook cannot rely on failure.⟧ To check the storage side, I listed trailers, notes, and refs on the three affected commits and found none carrying an approval marker. That absence is confirmed for this repository. The recurrence claim is separate: at filing there was one occurrence, and a second appeared the next day, so it is now supported by two cases."}
+{"pair_id": "train-run_tool-6547", "original": "The supervisor task now holds the Child handle for the job's whole life, so nothing is dropped early. I started the runner with a sleep 30 child and sent SIGTERM from a second shell; the log showed one exit record and ps showed no orphan. ⟦From reading the supervisor source alone, `jobctl wait` exits 137 when the child dies from a signal.⟧ The old guard type is deleted and the build passes without it. Nobody needs to hold a bare pid anymore, since the status arrives over the supervisor channel.", "substituted": "The supervisor task now holds the Child handle for the job's whole life, so nothing is dropped early. I started the runner with a sleep 30 child and sent SIGTERM from a second shell; the log showed one exit record and ps showed no orphan. ⟦Running `jobctl wait` once on the SIGTERM-killed child showed it exit 137.⟧ The old guard type is deleted and the build passes without it. Nobody needs to hold a bare pid anymore, since the status arrives over the supervisor channel."}
+{"pair_id": "train-run_tool-923", "original": "The suite is red in both lanes because a docs-reference test fails at line 202 of the probes document. That failure names a docs line, so whoever runs the suite next will read it as a dead tool cited in their own edit, whatever their diff contains. For the window, I pulled the commit timestamps from the git log on both endpoints and a second reviewer derived them separately; both of us got the same pair. ⟦I did not execute git's date formatter, but from its man page `git log -1 --format=%cI` prints the committer date in strict ISO 8601 with a colon in the offset, so the values above are in that shape.⟧", "substituted": "The suite is red in both lanes because a docs-reference test fails at line 202 of the probes document. That failure names a docs line, so whoever runs the suite next will read it as a dead tool cited in their own edit, whatever their diff contains. For the window, I pulled the commit timestamps from the git log on both endpoints and a second reviewer derived them separately; both of us got the same pair. ⟦I ran git's date formatter on both endpoints, and `git log -1 --format=%cI` printed the committer date in strict ISO 8601 with a colon in the offset, matching the values above.⟧"}
+codex
+{"pair_id":"train-run_tool-2684","a":"yes","b":"no","c":"no","note":"The fix still predicts runtime output from the README without running the fenced-reference case; expressing expectation does not supply runtime evidence."}
+{"pair_id":"train-run_tool-2625","a":"yes","b":"yes","c":"no","note":"The original infers stderr and exit status from source; the fix reports triggering the gate and observing both."}
+{"pair_id":"train-run_tool-12127","a":"yes","b":"yes","c":"no","note":"The original asserts runtime failure from source; the fix describes source assignments and control flow without claiming observed runtime behavior."}
+{"pair_id":"train-run_tool-7463","a":"yes","b":"yes","c":"no","note":"The original infers output shape from the prompt template; the fix grounds that shape in actual run logs."}
+{"pair_id":"train-run_tool-9895","a":"yes","b":"yes","c":"no","note":"The original uses documentation to dismiss an observed exit status; the fix accepts the runtime result and identifies the documentation discrepancy."}
+{"pair_id":"train-run_tool-587","a":"yes","b":"yes","c":"no","note":"The original claims push behavior from its man page; the fix reports a scratch-remote run and its observed status and output."}
+{"pair_id":"train-run_tool-6547","a":"yes","b":"yes","c":"no","note":"The original derives jobctl's exit status from source alone; the fix reports running that command and observing its exit status."}
+{"pair_id":"train-run_tool-923","a":"yes","b":"yes","c":"no","note":"The original explicitly claims formatter output without executing it; the fix reports execution on both endpoints and inspection of the output."}
+tokens used
+5,973

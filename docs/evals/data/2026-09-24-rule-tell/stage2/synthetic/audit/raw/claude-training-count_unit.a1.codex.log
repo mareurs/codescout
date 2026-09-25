@@ -1,0 +1,88 @@
+{"pair_id":"train-count_unit-10363","a":"yes","b":"yes","c":"no","note":"The original omits what the additional 14 count; the fix identifies files."}
+{"pair_id":"train-count_unit-2810","a":"yes","b":"yes","c":"no","note":"The original carries forward a cited count; the fix derives the ledger-file count from today's directory listing."}
+{"pair_id":"train-count_unit-1641","a":"yes","b":"yes","c":"no","note":"The original gives 40 without a unit; the fix names entries in the policy file."}
+{"pair_id":"train-count_unit-9312","a":"no","b":"yes","c":"no","note":"Rebuilds already names the counted unit, and the last phase identifies the population; release builds adds specificity."}
+{"pair_id":"train-count_unit-3151","a":"yes","b":"yes","c":"no","note":"The original imports a unitless ceiling from a handoff; the fix identifies self-citations and derives the ceiling from today's dry run."}
+{"pair_id":"train-count_unit-9036","a":"yes","b":"yes","c":"no","note":"The original leaves 112 unitless; the fix identifies pipe-gate refusals observed in the replay window."}
+{"pair_id":"train-count_unit-1700","a":"yes","b":"yes","c":"no","note":"The original omits the unit for 100; the fix identifies reindex runs within the described reproduction."}
+{"pair_id":"train-count_unit-7765","a":"yes","b":"yes","c":"no","note":"The original leaves 23 unitless; the fix names tools, with the preceding listing and matching process establishing derivation."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-vjxavj77
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d707-1dc6-7402-8b45-0e5a0e368df6
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-vjxavj77
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `count_unit`
+
+LAW: A count of a population must arrive with its unit or not at all. Derive it, don't cite it.
+
+USUAL SHAPE: YES when the text states a count of some population without naming what is counted, or with a unit that could be read two ways, or quotes a count from elsewhere as a current fact without saying how it was derived. NO when the number names its unit and population.
+
+## Items
+
+{"pair_id": "train-count_unit-10363", "original": "The git add command writes to a single index per checkout, so a commit with no pathspec takes everything staged, not just my path. I staged one file, printed the cached name list, and it showed only my file. A peer staged more in the gap before my commit ran. ⟦The resulting commit contained 14 more than I intended, all from the peer's entry.⟧ The check ran and changed nothing, because it was not part of the same atomic step as the commit.", "substituted": "The git add command writes to a single index per checkout, so a commit with no pathspec takes everything staged, not just my path. I staged one file, printed the cached name list, and it showed only my file. A peer staged more in the gap before my commit ran. ⟦The resulting commit contained 14 files I never intended, all from the peer's entry.⟧ The check ran and changed nothing, because it was not part of the same atomic step as the commit."}
+{"pair_id": "train-count_unit-2810", "original": "Template validation would not have helped here. A grep for the render call shows three callers, and only one of them writes a body; the other two feed a context bundle and a test. That one template keys rows by file and symbol, so no template emits entry-token bodies, and validating templates would have made no entry citable. ⟦The design doc says 40 ledgers are hand-maintained, so the write-path change reaches all of them.⟧ The change therefore lands at the write path, where the tool asks the maintainer for a heading instead of a row.", "substituted": "Template validation would not have helped here. A grep for the render call shows three callers, and only one of them writes a body; the other two feed a context bundle and a test. That one template keys rows by file and symbol, so no template emits entry-token bodies, and validating templates would have made no entry citable. ⟦A listing of the ledger directory today shows 40 hand-maintained ledger files, so the write-path change reaches all of them.⟧ The change therefore lands at the write path, where the tool asks the maintainer for a heading instead of a row."}
+{"pair_id": "train-count_unit-1641", "original": "The linter skipped one of the path-matching entries in the policy file and still enforced the others. I first suspected this was deliberate, so I read the error-handling section of the design spec again. It only describes what happens when an entire query fails, such as a missing catalog, and then the tool injects nothing. It says nothing about a single entry with a malformed glob. Running the linter on the policy file with the bad glob confirmed the behaviour: the broken entry produced no findings and no warning, while its neighbours fired as usual. ⟦There are 40 in the file, and only that one went silent.⟧ This is a gap in the spec, not a documented choice.", "substituted": "The linter skipped one of the path-matching entries in the policy file and still enforced the others. I first suspected this was deliberate, so I read the error-handling section of the design spec again. It only describes what happens when an entire query fails, such as a missing catalog, and then the tool injects nothing. It says nothing about a single entry with a malformed glob. Running the linter on the policy file with the bad glob confirmed the behaviour: the broken entry produced no findings and no warning, while its neighbours fired as usual. ⟦There are 40 entries in the file, and only that one went silent.⟧ This is a gap in the spec, not a documented choice."}
+{"pair_id": "train-count_unit-9312", "original": "Handoff for the tool-deployment work. The dev-versus-release gap bit us again: dev tests passed while the installed binary still served the old behavior, and one live tool call exposed it in seconds. So for anything touching tool behavior, run the dev tests and then make one live call against the deployed path. For multi-task phases, build release once at the end rather than after each task. Users must be told to reload the server connection explicitly, because the docs never mention it and nothing detects it. ⟦The last phase needed 3 rebuilds before the live call finally matched, which is why the bundling advice matters.⟧", "substituted": "Handoff for the tool-deployment work. The dev-versus-release gap bit us again: dev tests passed while the installed binary still served the old behavior, and one live tool call exposed it in seconds. So for anything touching tool behavior, run the dev tests and then make one live call against the deployed path. For multi-task phases, build release once at the end rather than after each task. Users must be told to reload the server connection explicitly, because the docs never mention it and nothing detects it. ⟦The last phase needed 3 release builds before the live call finally matched, which is why the bundling advice matters.⟧"}
+{"pair_id": "train-count_unit-3151", "original": "The self-cite estimate needs a ceiling before we promise any recovery. A project-scoped dry run today reported 4053 citations, of which about a fifth resolved as self-citations. That figure overstates recoverable edges, because citations in preambles attach to no entry and duplicate source-destination pairs collapse into a single citation. ⟦The last handoff put the ceiling at 867, and I carried that into the estimate.⟧", "substituted": "The self-cite estimate needs a ceiling before we promise any recovery. A project-scoped dry run today reported 4053 citations, of which about a fifth resolved as self-citations. That figure overstates recoverable edges, because citations in preambles attach to no entry and duplicate source-destination pairs collapse into a single citation. ⟦Today's dry run put the ceiling at 867 self-citations, and I carried that into the estimate.⟧"}
+{"pair_id": "train-count_unit-9036", "original": "The git carve-out shipped and was replayed against the same seven-day window of agent sessions. Restoring git to the unbounded list turned the five positive tests red, so the predicate is doing the work and not a coincidence of sample inputs. The cargo refusals stay, since test output there is unbounded and the structured envelope already exists. The repeat-call control stayed at zero percent, so the guard holds. ⟦After the change the same window showed 112 for the pipe gate.⟧", "substituted": "The git carve-out shipped and was replayed against the same seven-day window of agent sessions. Restoring git to the unbounded list turned the five positive tests red, so the predicate is doing the work and not a coincidence of sample inputs. The cargo refusals stay, since test output there is unbounded and the structured envelope already exists. The repeat-call control stayed at zero percent, so the guard holds. ⟦After the change the same window showed 112 refusals for the pipe gate.⟧"}
+{"pair_id": "train-count_unit-1700", "original": "The empty results for the Mercury BOM document now have a mechanism that accounts for them. Every reindex rebuilds the lookup table from scratch, and the BOM's heading key collides with an older key, so the newer record is dropped. I reproduced it by triggering a reindex, then running find and get, and both came back empty each time. The earlier rename and restart-revert theory may still describe real, separate behaviour, but this collision alone is sufficient for the current symptom. ⟦It was reproduced across 100 after each reindex, and the outcome never varied.⟧ No other document shares that heading key, which is why only this one disappears.", "substituted": "The empty results for the Mercury BOM document now have a mechanism that accounts for them. Every reindex rebuilds the lookup table from scratch, and the BOM's heading key collides with an older key, so the newer record is dropped. I reproduced it by triggering a reindex, then running find and get, and both came back empty each time. The earlier rename and restart-revert theory may still describe real, separate behaviour, but this collision alone is sufficient for the current symptom. ⟦It was reproduced across 100 reindex runs, and the outcome never varied.⟧ No other document shares that heading key, which is why only this one disappears."}
+{"pair_id": "train-count_unit-7765", "original": "We restructured the agent guide so a new reader hits the essentials in order. The opening keeps the tagline and the subagent reminder verbatim. Next come the three non-negotiable laws, then a chooser with two tables, one keyed by knowledge level and one by task. The tool reference groups every tool under a heading, and I checked it by listing the registered tool names from the server and matching each against a heading, with no orphans left over. ⟦The reference now lists 23 in seven groups, from File I/O through Project & Libraries.⟧ The output section follows, then project management, then a closing list of one-liners that restate the laws.", "substituted": "We restructured the agent guide so a new reader hits the essentials in order. The opening keeps the tagline and the subagent reminder verbatim. Next come the three non-negotiable laws, then a chooser with two tables, one keyed by knowledge level and one by task. The tool reference groups every tool under a heading, and I checked it by listing the registered tool names from the server and matching each against a heading, with no orphans left over. ⟦The reference now lists 23 tools in seven groups, from File I/O through Project & Libraries.⟧ The output section follows, then project management, then a closing list of one-liners that restate the laws."}
+codex
+{"pair_id":"train-count_unit-10363","a":"yes","b":"yes","c":"no","note":"The original omits what the additional 14 count; the fix identifies files."}
+{"pair_id":"train-count_unit-2810","a":"yes","b":"yes","c":"no","note":"The original carries forward a cited count; the fix derives the ledger-file count from today's directory listing."}
+{"pair_id":"train-count_unit-1641","a":"yes","b":"yes","c":"no","note":"The original gives 40 without a unit; the fix names entries in the policy file."}
+{"pair_id":"train-count_unit-9312","a":"no","b":"yes","c":"no","note":"Rebuilds already names the counted unit, and the last phase identifies the population; release builds adds specificity."}
+{"pair_id":"train-count_unit-3151","a":"yes","b":"yes","c":"no","note":"The original imports a unitless ceiling from a handoff; the fix identifies self-citations and derives the ceiling from today's dry run."}
+{"pair_id":"train-count_unit-9036","a":"yes","b":"yes","c":"no","note":"The original leaves 112 unitless; the fix identifies pipe-gate refusals observed in the replay window."}
+{"pair_id":"train-count_unit-1700","a":"yes","b":"yes","c":"no","note":"The original omits the unit for 100; the fix identifies reindex runs within the described reproduction."}
+{"pair_id":"train-count_unit-7765","a":"yes","b":"yes","c":"no","note":"The original leaves 23 unitless; the fix names tools, with the preceding listing and matching process establishing derivation."}
+tokens used
+5,777

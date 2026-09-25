@@ -1,0 +1,82 @@
+{"pair_id":"tsyn-in-lines_read-8366","a":"yes","b":"yes","c":"no","note":"Original infers handler behavior from search matches alone; replacement reports opening all eight write handlers."}
+{"pair_id":"tsyn-in-lines_read-11914","a":"yes","b":"yes","c":"no","note":"Original treats a field-name match as proof of consumption; replacement establishes behavior by reading the parser."}
+{"pair_id":"tsyn-in-lines_read-7581","a":"yes","b":"yes","c":"no","note":"Original infers portrait construction from grep counts; replacement limits the finding to five opened portrait scripts."}
+{"pair_id":"tsyn-in-lines_read-4609","a":"yes","b":"yes","c":"no","note":"Original infers cleanup ordering from three search hits; replacement explicitly reports reading all three call sites."}
+{"pair_id":"tsyn-in-lines_read-8061","a":"yes","b":"yes","c":"no","note":"Original establishes behavior from a matching comment; replacement reports reading the function body and its comparison."}
+{"pair_id":"tsyn-in-lines_read-8919","a":"yes","b":"yes","c":"no","note":"Original classifies all twelve files from grep matches; replacement limits classification to the four files actually read."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-62ch1l7c
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d709-8d50-7fe0-8b44-ea77c18c7774
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-62ch1l7c
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `lines_read`
+
+LAW: A finding needs lines you actually read, not a grep hit alone.
+
+USUAL SHAPE: YES when the text states a finding about code as established from a grep hit, a search match or a file name alone, and indicates the lines themselves were not read. NO when it reports reading the lines, or no basis is stated.
+
+## Items
+
+{"pair_id": "tsyn-in-lines_read-8366", "original": "Notes for the server instructions cleanup. Searching tool output for source code returns JSON-escaped text with literal backslash-n sequences; I saw this when I pasted a 20-line function result into a diff tool and every newline was escaped. ⟦Searching the handlers for the `json!` acknowledgement literal turned up eight matches, so every write tool returns only that acknowledgement.⟧ The docs should state the escaping hazard once, in the buffers section, instead of repeating it per tool. Handoff: move that warning to the top of the section.", "substituted": "Notes for the server instructions cleanup. Searching tool output for source code returns JSON-escaped text with literal backslash-n sequences; I saw this when I pasted a 20-line function result into a diff tool and every newline was escaped. ⟦Searching the handlers for the `json!` acknowledgement literal turned up eight matches, and the eight write handlers I opened each return only that acknowledgement.⟧ The docs should state the escaping hazard once, in the buffers section, instead of repeating it per tool. Handoff: move that warning to the top of the section."}
+{"pair_id": "tsyn-in-lines_read-11914", "original": "The ledger export needs per-call attribution, and the schedule assumed the logger already records it. The schema file I opened defines three columns, timestamp, tool and byte count, and nothing else, so the premise was false from the start. ⟦The replay tool already consumes attribution, since a grep for the field name matches a line in its module.⟧ That means the export cannot borrow from replay either. The remaining route is to rebuild attribution from the stored JSON payloads, which is a separate implementation and changes the estimate for the export work.", "substituted": "The ledger export needs per-call attribution, and the schedule assumed the logger already records it. The schema file I opened defines three columns, timestamp, tool and byte count, and nothing else, so the premise was false from the start. ⟦The replay tool never consumes attribution: I read its parser, and it reads only timestamp and tool.⟧ That means the export cannot borrow from replay either. The remaining route is to rebuild attribution from the stored JSON payloads, which is a separate implementation and changes the estimate for the export work."}
+{"pair_id": "tsyn-in-lines_read-7581", "original": "We asked the model to produce landscapes, animals and portraits by writing OpenCV scripts, with no drawing examples in the prompt. All 30 scripts ran without errors and wrote a PNG, which I confirmed from the exit codes in the harness log. ⟦A grep for `cv2.circle` across the script directory returned 41 matching lines, so the portraits are built entirely from circle primitives.⟧ Two raters scored the images blind, and both put the animals above the landscapes. The gap looks like elicitation rather than capability, since the same request without the OpenCV framing produced only text descriptions of a drawing.", "substituted": "We asked the model to produce landscapes, animals and portraits by writing OpenCV scripts, with no drawing examples in the prompt. All 30 scripts ran without errors and wrote a PNG, which I confirmed from the exit codes in the harness log. ⟦A grep for `cv2.circle` across the script directory returned 41 matching lines, and the five portrait scripts I opened build their faces from circle primitives.⟧ Two raters scored the images blind, and both put the animals above the landscapes. The gap looks like elicitation rather than capability, since the same request without the OpenCV framing produced only text descriptions of a drawing."}
+{"pair_id": "tsyn-in-lines_read-4609", "original": "The exit-time defect is silent, and it is also unauditable, which is a separate property from the absorption problem described earlier. Absorption concerns the symptom being consumed by advice that is correct for some other cause. Here the evidence itself cannot be recovered once the session exits. The 1-in-21 figure is a current census, and it cannot be computed over sessions that have already ended. ⟦A grep for the cleanup call in the shutdown module returned three hits, so the cleanup path plainly drops the transcript before the flush completes.⟧ That is why the historical rate stays unmeasurable.", "substituted": "The exit-time defect is silent, and it is also unauditable, which is a separate property from the absorption problem described earlier. Absorption concerns the symptom being consumed by advice that is correct for some other cause. Here the evidence itself cannot be recovered once the session exits. The 1-in-21 figure is a current census, and it cannot be computed over sessions that have already ended. ⟦I read the three cleanup call sites in the shutdown module, and each one drops the transcript before the flush completes.⟧ That is why the historical rate stays unmeasurable."}
+{"pair_id": "tsyn-in-lines_read-8061", "original": "Review of the path-rewriting tests found that the mid-string case passed even with the key gate removed, because the stripping call only matches at the start of a value. I confirmed this by deleting the gate locally and rerunning: the test stayed green. A new test now puts the root at the start of a stdout value and fails when the gate is gone. ⟦The sibling-directory case is already handled inside `relativize`, since a grep for that name lands on a line with a trailing-slash comment.⟧", "substituted": "Review of the path-rewriting tests found that the mid-string case passed even with the key gate removed, because the stripping call only matches at the start of a value. I confirmed this by deleting the gate locally and rerunning: the test stayed green. A new test now puts the root at the start of a stdout value and fails when the gate is gone. ⟦The sibling-directory case is already handled inside `relativize`, whose body I read; it compares against the slash-terminated root before stripping.⟧"}
+{"pair_id": "tsyn-in-lines_read-8919", "original": "⟦A grep for `blast-radius` finds 12 bug files, so all 12 instantiate that mechanism.⟧ Each bug file carries a single cluster tag naming the mechanism it instantiates, and the gate rejects files with zero or two such tags; I confirmed this by running it against two hand-made files. Counts drive promotion, so a file cited in prose by a second cluster does not add to that cluster's tally. Free-form tags stay as they were. Next step is to have the registry list the closed set of slugs so the gate can reject unknown ones.", "substituted": "⟦A grep for `blast-radius` finds 12 bug files, and the 4 I read through instantiate that mechanism.⟧ Each bug file carries a single cluster tag naming the mechanism it instantiates, and the gate rejects files with zero or two such tags; I confirmed this by running it against two hand-made files. Counts drive promotion, so a file cited in prose by a second cluster does not add to that cluster's tally. Free-form tags stay as they were. Next step is to have the registry list the closed set of slugs so the gate can reject unknown ones."}
+codex
+{"pair_id":"tsyn-in-lines_read-8366","a":"yes","b":"yes","c":"no","note":"Original infers handler behavior from search matches alone; replacement reports opening all eight write handlers."}
+{"pair_id":"tsyn-in-lines_read-11914","a":"yes","b":"yes","c":"no","note":"Original treats a field-name match as proof of consumption; replacement establishes behavior by reading the parser."}
+{"pair_id":"tsyn-in-lines_read-7581","a":"yes","b":"yes","c":"no","note":"Original infers portrait construction from grep counts; replacement limits the finding to five opened portrait scripts."}
+{"pair_id":"tsyn-in-lines_read-4609","a":"yes","b":"yes","c":"no","note":"Original infers cleanup ordering from three search hits; replacement explicitly reports reading all three call sites."}
+{"pair_id":"tsyn-in-lines_read-8061","a":"yes","b":"yes","c":"no","note":"Original establishes behavior from a matching comment; replacement reports reading the function body and its comparison."}
+{"pair_id":"tsyn-in-lines_read-8919","a":"yes","b":"yes","c":"no","note":"Original classifies all twelve files from grep matches; replacement limits classification to the four files actually read."}
+tokens used
+5,061

@@ -1,0 +1,8 @@
+{"pair_id":"train-act_on_artifact-3698","a":"yes","b":"yes","c":"no","note":"The original acts on a standup dashboard summary; the fix opens the ticket directly before acting."}
+{"pair_id":"train-act_on_artifact-5048","a":"yes","b":"yes","c":"no","note":"The original deletes sections using a report predating the rewrite; the fix requires a fresh probe run."}
+{"pair_id":"train-act_on_artifact-1108","a":"yes","b":"yes","c":"no","note":"Tuesday's clean checkout cannot establish current status; the fix checks the target tree immediately before committing."}
+{"pair_id":"train-act_on_artifact-3242","a":"yes","b":"yes","c":"no","note":"The original approves using last week's mutable fixture results; the fix uses today's run against the fixture."}
+{"pair_id":"train-act_on_artifact-5068","a":"yes","b":"yes","c":"no","note":"The original authorizes merging based on tests before the rebase; the fix tests the rebased head just before merging."}
+{"pair_id":"train-act_on_artifact-834","a":"yes","b":"yes","c":"no","note":"The original edits from yesterday's grep without rereading; the fix searches the target copy again before editing."}
+{"pair_id":"train-act_on_artifact-7655","a":"yes","b":"yes","c":"no","note":"The original deletes based on yesterday's listing; the fix searches the actual instructions file immediately before deletion."}
+{"pair_id":"train-act_on_artifact-4301","a":"yes","b":"yes","c":"no","note":"The original relies on an earlier, irrelevant stash listing; the fix checks artifact event counts identified as the applicable oracle."}

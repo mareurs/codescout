@@ -1,0 +1,8 @@
+{"pair_id":"train-d_sessionid-9326","a":"yes","b":"yes","c":"no","note":"Original credits a registry name; substitution credits a sessionId. No other sentence violates the rule."}
+{"pair_id":"train-d_sessionid-1936","a":"yes","b":"yes","c":"no","note":"Original attributes the config edit by session name; substitution uses its sessionId. No other attribution breaches the rule."}
+{"pair_id":"train-d_sessionid-10521","a":"yes","b":"yes","c":"no","note":"Original credits the citation count to a registered name; substitution identifies the sessionId. Other sentences contain no name-based attribution."}
+{"pair_id":"train-d_sessionid-11309","a":"yes","b":"yes","c":"no","note":"Original attributes the edit by registered name despite later sessionId evidence. Substitution uses the sessionId; other sentences do not breach the rule."}
+{"pair_id":"train-d_sessionid-6871","a":"yes","b":"yes","c":"no","note":"Original blames a self-reported session name; substitution attributes responsibility by sessionId. No other sentence breaks the rule."}
+{"pair_id":"train-d_sessionid-10042","a":"yes","b":"yes","c":"no","note":"Original attributes the clash to a session label; substitution uses a sessionId. Other sentences do not attribute work by session name."}
+{"pair_id":"train-d_sessionid-9316","a":"yes","b":"yes","c":"no","note":"Original credits the partial close to a registered session name; substitution credits a sessionId. No other sentence violates the rule."}
+{"pair_id":"train-d_sessionid-11493","a":"yes","b":"yes","c":"no","note":"Original attributes the regression to a registered session name; substitution uses an explicit sessionId. Other sentences contain no name-based session attribution."}

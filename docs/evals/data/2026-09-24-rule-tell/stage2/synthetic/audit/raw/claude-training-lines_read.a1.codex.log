@@ -1,0 +1,88 @@
+{"pair_id":"train-lines_read-5899","a":"yes","b":"yes","c":"no","note":"Search matches cannot establish side effects; the fix leaves counter behavior pending inspection."}
+{"pair_id":"train-lines_read-6263","a":"yes","b":"yes","c":"no","note":"The original locates the clamp from an unopened grep hit; the fix reports reading the relevant lines."}
+{"pair_id":"train-lines_read-8737","a":"yes","b":"yes","c":"no","note":"A filename cannot establish uniform key handling; the fix explicitly bases the finding on reading the helper body."}
+{"pair_id":"train-lines_read-43","a":"yes","b":"no","c":"yes","note":"Unread hits are treated as declarations. The earlier claim that nine logs declare F remains despite the fix calling some declarations unchecked."}
+{"pair_id":"train-lines_read-6662","a":"yes","b":"yes","c":"no","note":"The original infers table selection from a filename without inspection; the fix reports reading the table-setting line."}
+{"pair_id":"train-lines_read-9217","a":"yes","b":"yes","c":"no","note":"A single search match does not establish caller safety; the fix reports reading the definition and call sites."}
+{"pair_id":"train-lines_read-10035","a":"yes","b":"yes","c":"no","note":"The original identifies a leak from a helper-name match alone; the fix treats the matching file as an investigation starting point."}
+{"pair_id":"train-lines_read-8726","a":"yes","b":"yes","c":"no","note":"The original establishes causation from a search match; the fix reports reading the helper and its relevant branch condition."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-le9l_4n4
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d707-d041-7011-a32a-8e0923430250
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-le9l_4n4
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `lines_read`
+
+LAW: A finding needs lines you actually read, not a grep hit alone.
+
+USUAL SHAPE: YES when the text states a finding about code as established from a grep hit, a search match or a file name alone, and indicates the lines themselves were not read. NO when it reports reading the lines, or no basis is stated.
+
+## Items
+
+{"pair_id": "train-lines_read-5899", "original": "Handoff on the push-guard message change. The counter `foreign_pre_ack_n` now increments in the branch that handles a session id different from the current one, before the acknowledgement check, which gives three message arms. With a zero count the existing wording stays. With an empty foreign report the text says the ack authorised commits by another session, and adds that it records only the pusher's operator's decision and leaves the authors' commits uncleared. The suite landed at 116 passed and 0 failed. ⟦The helper `acked` is defined in the shared library, and a search for its name shows it only in that file and this hook, so it has no side effects on the counter, though I never opened the library.⟧", "substituted": "Handoff on the push-guard message change. The counter `foreign_pre_ack_n` now increments in the branch that handles a session id different from the current one, before the acknowledgement check, which gives three message arms. With a zero count the existing wording stays. With an empty foreign report the text says the ack authorised commits by another session, and adds that it records only the pusher's operator's decision and leaves the authors' commits uncleared. The suite landed at 116 passed and 0 failed. ⟦The helper `acked` is defined in the shared library, and a search for its name shows it only in that file and this hook, so I still need to open the library to see whether it touches the counter.⟧"}
+{"pair_id": "train-lines_read-6263", "original": "Repro on the three recorded sessions: the verdict came back MINE every time, while the hidden-write count, once I printed it, was 2, 0 and 4. The cause is the window, since a discarded write dated before the commit falls outside the cutoff and is never counted. Dropping the cutoff and rerunning turned the first session to SHARED, which confirms it. ⟦The clamp itself sits in `verdict.py`, because that file matched the grep for `commit_time` and I have not opened it.⟧ The next step is to make unbounded the default and keep `--since` as an opt-in.", "substituted": "Repro on the three recorded sessions: the verdict came back MINE every time, while the hidden-write count, once I printed it, was 2, 0 and 4. The cause is the window, since a discarded write dated before the commit falls outside the cutoff and is never counted. Dropping the cutoff and rerunning turned the first session to SHARED, which confirms it. ⟦The clamp itself sits in `verdict.py`, where I read the lines that subtract `commit_time` from the window start.⟧ The next step is to make unbounded the default and keep `--since` as an opt-in."}
+{"pair_id": "train-lines_read-8737", "original": "The revisit-when check for the argument-key list came out in favor of keeping the boundary. The list has 15 names, which exceeds the dozen mentioned in the design section, but the trigger needs both size and a missing shared convention. I counted the names directly: eleven follow the path or _path shape, and the rest are file, file_path, directory and two collection keys. The keys form a real category, so the boundary stands. ⟦The helper that consumes these keys never treats them differently, judging by the filename key_normalizer.py, so no per-key handling needs review.⟧", "substituted": "The revisit-when check for the argument-key list came out in favor of keeping the boundary. The list has 15 names, which exceeds the dozen mentioned in the design section, but the trigger needs both size and a missing shared convention. I counted the names directly: eleven follow the path or _path shape, and the rest are file, file_path, directory and two collection keys. The keys form a real category, so the boundary stands. ⟦The helper that consumes these keys never treats them differently, judging by its body in key_normalizer.py, which I read through, so no per-key handling needs review.⟧"}
+{"pair_id": "train-lines_read-43", "original": "The tracker prefix audit turned up a mismatch with the design note. A count over the session logs found nine that declare the F prefix in their front matter, and we re-ran it after the latest merge to confirm the number held. Of those nine, the ones I opened all list F alongside W, so the F/W row in the design note is stale. ⟦The remaining hits came back from a search on the string `entry_prefix` in the tracker directory, and those files were never opened, so each of them is presumably the same declaration.⟧ Nothing has been edited yet. The next step is to decide whether the note or the corpus should change, before more logs get added.", "substituted": "The tracker prefix audit turned up a mismatch with the design note. A count over the session logs found nine that declare the F prefix in their front matter, and we re-ran it after the latest merge to confirm the number held. Of those nine, the ones I opened all list F alongside W, so the F/W row in the design note is stale. ⟦The remaining hits came back from a search on the string `entry_prefix` in the tracker directory, and those files were never opened, so their declarations are still unchecked.⟧ Nothing has been edited yet. The next step is to decide whether the note or the corpus should change, before more logs get added."}
+{"pair_id": "train-lines_read-6662", "original": "The count of 41 is an exact count of a different set: it covers rows in `archive_jobs`, not `live_jobs`. I ran the same query against both tables and got 41 and 187, so the instrument saw everything it was pointed at. Running it longer or wider would not change the number, because nothing was missed. ⟦The query gets pointed at the archive table in `export_live.py`, going by the filename in the directory listing; I have not looked inside.⟧", "substituted": "The count of 41 is an exact count of a different set: it covers rows in `archive_jobs`, not `live_jobs`. I ran the same query against both tables and got 41 and 187, so the instrument saw everything it was pointed at. Running it longer or wider would not change the number, because nothing was missed. ⟦The query gets pointed at the archive table in `export_live.py`, where I read the line that sets the table name.⟧"}
+{"pair_id": "train-lines_read-9217", "original": "Handoff note on the axis tracker. The catalog dump from W-2 showed that `kind` already encodes what the fourth axis was meant to carry, so the 5-axis schema was redundant from the start. A backfill PR against that schema would have added a column needing a follow-up migration. ⟦I searched the repo for the constant name, and the single match in the config module confirms that the const change is safe for every caller.⟧ The change that shipped is one line, far smaller than any schema proposal we weighed, and the tracker entries citing the 5-axis layout now need their axis references updated.", "substituted": "Handoff note on the axis tracker. The catalog dump from W-2 showed that `kind` already encodes what the fourth axis was meant to carry, so the 5-axis schema was redundant from the start. A backfill PR against that schema would have added a column needing a follow-up migration. ⟦I read the constant's definition and each of its call sites in the config module, and all of them tolerate the const change.⟧ The change that shipped is one line, far smaller than any schema proposal we weighed, and the tracker entries citing the 5-axis layout now need their axis references updated."}
+{"pair_id": "train-lines_read-10035", "original": "Handoff note on the evidence policy for outcome records. Pre-action fields stay frozen once the result is visible; later information goes into a dated outcome update. Reclassifications carry their evidence and the previous label. I opened the export script line by line and confirmed it writes only a sanitized excerpt and a hash, never the raw transcript. ⟦Searching the repo for the name of the usage database dump helper shows one file matching it, so that helper is what leaks raw usage rows into committed evidence.⟧ Until that is settled, treat process-local buffers as perishable and save sanitized content before they expire.", "substituted": "Handoff note on the evidence policy for outcome records. Pre-action fields stay frozen once the result is visible; later information goes into a dated outcome update. Reclassifications carry their evidence and the previous label. I opened the export script line by line and confirmed it writes only a sanitized excerpt and a hash, never the raw transcript. ⟦Searching the repo for the name of the usage database dump helper shows one file matching it, so that file is the first place to read for raw usage rows reaching committed evidence.⟧ Until that is settled, treat process-local buffers as perishable and save sanitized content before they expire."}
+{"pair_id": "train-lines_read-8726", "original": "Notes on the path-scrubbing transform, after the second leak audit. Of the leaks measured across 12 sessions, most came from serialized buffers, where a newline appears as a backslash followed by the letter n; I traced this by stepping through the lookbehind on three captured payloads and watching it treat that n as a path character. The quoted-literal case is separate and comes from a preceding double quote being read as a value boundary. ⟦For the bare-root branch, a search for the root-collapse helper turned up one match in the tree formatter, so the collapse to an empty string is certainly caused by the tree branch condition.⟧ Once the buffer case is patched, I will rerun the audit on the same sessions.", "substituted": "Notes on the path-scrubbing transform, after the second leak audit. Of the leaks measured across 12 sessions, most came from serialized buffers, where a newline appears as a backslash followed by the letter n; I traced this by stepping through the lookbehind on three captured payloads and watching it treat that n as a path character. The quoted-literal case is separate and comes from a preceding double quote being read as a value boundary. ⟦For the bare-root branch, I read the root-collapse helper in the tree formatter, and its branch condition returns an empty string whenever the value equals the root.⟧ Once the buffer case is patched, I will rerun the audit on the same sessions."}
+codex
+{"pair_id":"train-lines_read-5899","a":"yes","b":"yes","c":"no","note":"Search matches cannot establish side effects; the fix leaves counter behavior pending inspection."}
+{"pair_id":"train-lines_read-6263","a":"yes","b":"yes","c":"no","note":"The original locates the clamp from an unopened grep hit; the fix reports reading the relevant lines."}
+{"pair_id":"train-lines_read-8737","a":"yes","b":"yes","c":"no","note":"A filename cannot establish uniform key handling; the fix explicitly bases the finding on reading the helper body."}
+{"pair_id":"train-lines_read-43","a":"yes","b":"no","c":"yes","note":"Unread hits are treated as declarations. The earlier claim that nine logs declare F remains despite the fix calling some declarations unchecked."}
+{"pair_id":"train-lines_read-6662","a":"yes","b":"yes","c":"no","note":"The original infers table selection from a filename without inspection; the fix reports reading the table-setting line."}
+{"pair_id":"train-lines_read-9217","a":"yes","b":"yes","c":"no","note":"A single search match does not establish caller safety; the fix reports reading the definition and call sites."}
+{"pair_id":"train-lines_read-10035","a":"yes","b":"yes","c":"no","note":"The original identifies a leak from a helper-name match alone; the fix treats the matching file as an investigation starting point."}
+{"pair_id":"train-lines_read-8726","a":"yes","b":"yes","c":"no","note":"The original establishes causation from a search match; the fix reports reading the helper and its relevant branch condition."}
+tokens used
+6,036

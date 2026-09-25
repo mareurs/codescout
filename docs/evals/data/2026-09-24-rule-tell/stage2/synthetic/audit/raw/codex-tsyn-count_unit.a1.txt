@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-count_unit-6813", "a": "yes", "b": "yes", "c": "no", "note": "Bare '9' has no unit. The fix names invocations, which matches the 4+5 grouping derivation."}
+{"pair_id": "tsyn-cross-count_unit-7702", "a": "yes", "b": "yes", "c": "no", "note": "'12' has no unit. The fix names tracked files, which matches the 7+5 index counts."}
+{"pair_id": "tsyn-cross-count_unit-4036", "a": "yes", "b": "yes", "c": "no", "note": "'7' is ambiguous because topic and section entries were counted separately. The fix specifies topic entries."}
+{"pair_id": "tsyn-cross-count_unit-6123", "a": "yes", "b": "yes", "c": "no", "note": "'4' is ambiguous between table rows and scan invocations. The fix names distinct file paths, which equal the rows."}
+{"pair_id": "tsyn-cross-count_unit-2661", "a": "yes", "b": "yes", "c": "no", "note": "'5' has no counted population. The fix names unindexed issue files, which matches the unmatched source paths."}
+{"pair_id": "tsyn-cross-count_unit-8297", "a": "yes", "b": "yes", "c": "no", "note": "'Additions' is a vague unit. The fix names sections, which matches the heading-based derivation."}
+{"pair_id": "tsyn-cross-count_unit-118", "a": "yes", "b": "yes", "c": "no", "note": "'6' is ambiguous between socket entries and sessions. The fix names live sessions, consistent with the grouping."}
+{"pair_id": "tsyn-cross-count_unit-5216", "a": "yes", "b": "no", "c": "no", "note": "The fix counts 'relocation messages', but the derivation selected catalog rows. The unit contradicts the population counted."}

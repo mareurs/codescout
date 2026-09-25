@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-closed_population-9345", "a": "yes", "b": "yes", "c": "no", "note": "Future community reports form an open set. The fix limits the claim to the twelve reports archived at the cutoff."}
+{"pair_id": "tsyn-cross-closed_population-4207", "a": "yes", "b": "no", "c": "no", "note": "The fix says 'the archive', not the four examined responses. The archive could hold or gain unexamined responses, so the set stays open."}
+{"pair_id": "tsyn-cross-closed_population-2905", "a": "yes", "b": "yes", "c": "no", "note": "Future ledgers form an open set. The fix limits the claim to the frozen export of seven ledgers."}
+{"pair_id": "tsyn-cross-closed_population-2396", "a": "yes", "b": "yes", "c": "no", "note": "'Every later indexing job' is open. The fix limits the claim to the single completed check."}
+{"pair_id": "tsyn-cross-closed_population-7810", "a": "yes", "b": "yes", "c": "no", "note": "Subsequent sessions form an open set. The fix limits the claim to the three recorded sessions."}
+{"pair_id": "tsyn-cross-closed_population-377", "a": "yes", "b": "yes", "c": "no", "note": "Future judge responses form an open set. The fix limits the claim to the frozen batch of twelve."}
+{"pair_id": "tsyn-cross-closed_population-7698", "a": "yes", "b": "yes", "c": "no", "note": "Later-release consumers form an open set. The fix limits the claim to the two inspected consumers."}
+{"pair_id": "tsyn-cross-closed_population-5497", "a": "yes", "b": "yes", "c": "no", "note": "The investigation is still open, so its contributions are open. The fix limits the claim to the frozen six-item list."}

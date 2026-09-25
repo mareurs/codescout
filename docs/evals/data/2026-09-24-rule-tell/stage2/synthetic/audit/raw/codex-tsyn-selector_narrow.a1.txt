@@ -1,0 +1,8 @@
+{"pair_id": "tsyn-cross-selector_narrow-814", "a": "yes", "b": "yes", "c": "no", "note": "The query covered only dynamic exports, but the claim covers every symbol in the binary; the fix limits the claim to dynamic exports."}
+{"pair_id": "tsyn-cross-selector_narrow-5646", "a": "yes", "b": "yes", "c": "no", "note": "The scan selected only .sample names, but the claim covers every file; the fix limits it to sample files."}
+{"pair_id": "tsyn-cross-selector_narrow-8640", "a": "yes", "b": "yes", "c": "no", "note": "The native filter returned two clients, but the claim covers all four; the fix limits it to the audited pair."}
+{"pair_id": "tsyn-cross-selector_narrow-7597", "a": "yes", "b": "yes", "c": "no", "note": "The retry tag selected six of twenty records, but the claim covers the whole archive; the fix limits it to the reviewed selection."}
+{"pair_id": "tsyn-cross-selector_narrow-979", "a": "yes", "b": "yes", "c": "no", "note": "The projection returned only the ownership column, but the claim covers all columns; the fix names the ownership column."}
+{"pair_id": "tsyn-cross-selector_narrow-4949", "a": "yes", "b": "yes", "c": "no", "note": "The search excluded comments, which hold five more annotations, yet the claim covers the repository; the fix limits it to executable runtime annotations."}
+{"pair_id": "tsyn-cross-selector_narrow-249", "a": "yes", "b": "yes", "c": "no", "note": "The filter kept only tracked modifications, but the claim covers all pending changes; the fix limits it to tracked modifications."}
+{"pair_id": "tsyn-cross-selector_narrow-3254", "a": "yes", "b": "yes", "c": "no", "note": "The project filter selected only Cedar, but the claim covers every project; the fix names Cedar."}

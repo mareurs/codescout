@@ -1,0 +1,90 @@
+{"pair_id":"train-cannot_happen-2966","a":"yes","b":"yes","c":"no","note":"House style cannot guarantee future contents; the fix limits the claim to the 33 checked occurrences."}
+{"pair_id":"train-cannot_happen-10531","a":"yes","b":"yes","c":"no","note":"Shared script provenance does not establish impossibility; the fix reports a member-by-member check of the remaining tables."}
+{"pair_id":"train-cannot_happen-910","a":"yes","b":"yes","c":"no","note":"The original relies on current routing structure; the fix identifies and checks all three write calls. The other exclusion uses observed evidence."}
+{"pair_id":"train-cannot_happen-10477","a":"yes","b":"yes","c":"yes","note":"The fix scopes capability compliance to checked variants and sessions. The opening sentence separately claims free-text authority never occurs because of union typing."}
+{"pair_id":"train-cannot_happen-10926","a":"yes","b":"yes","c":"no","note":"Shared guards cannot prevent future unguarded paths; the fix describes coverage of the three existing paths."}
+{"pair_id":"train-cannot_happen-290","a":"yes","b":"yes","c":"no","note":"The original makes an unlimited claim about other tests; the fix limits coverage to tests found by a directory search."}
+{"pair_id":"train-cannot_happen-1287","a":"yes","b":"yes","c":"no","note":"Current parser structure cannot guarantee against regression; the fix identifies two call sites and their test coverage."}
+{"pair_id":"train-cannot_happen-8754","a":"yes","b":"yes","c":"no","note":"Server-generated identifiers do not establish perpetual impossibility; the fix allows inheritance conditionally and explicitly acknowledges an unchecked possibility."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+2026-09-25T05:25:41.374377Z ERROR codex_skills_extension::host_service: failed to install system skills: io error while remove existing system skills dir: Directory not empty (os error 39)
+2026-09-25T05:25:46.415114Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-p_z0tsbj
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d706-dd2f-72f0-ab74-310778451abe
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-p_z0tsbj
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `cannot_happen`
+
+LAW: 'It cannot happen' is a claim about today's corpus and decays with it.
+
+USUAL SHAPE: YES when the text asserts that something cannot happen, is impossible, or will never occur, resting on the current structure without enumerating the sites or showing a check. NO when the impossibility is scoped to named, enumerated sites or is hedged.
+
+## Items
+
+{"pair_id": "train-cannot_happen-2966", "original": "The finding that prompted this was 33 cited and 9 uncited references on the provenance tracker. I read every occurrence instead of trusting the count. They are prose forms such as a bare ticket id in parentheses or a possessive use naming a labelling population. All 33 are genuine citations, and none is a syntax example or sits in inline code. ⟦Because the tracker follows the house style, a syntax example can never appear in it, so the count will stay clean as the file grows.⟧", "substituted": "The finding that prompted this was 33 cited and 9 uncited references on the provenance tracker. I read every occurrence instead of trusting the count. They are prose forms such as a bare ticket id in parentheses or a possessive use naming a labelling population. All 33 are genuine citations, and none is a syntax example or sits in inline code. ⟦Because the tracker follows the house style, no syntax example appears in it as of this read, so the count is clean for the 33 occurrences checked.⟧"}
+{"pair_id": "train-cannot_happen-10531", "original": "The audit of the routing list found that two membership errors offset each other. One column had an extra entry and another was missing one, so the total still matched the expected count and seemed to confirm the list. We checked each member against its column individually and found both mistakes. ⟦It is impossible for a mismatch to hide behind a matching total in the remaining two tables, because they were built by the same script as the first.⟧ The lesson recorded in the bug log is to verify membership per item, and the aggregate is now treated as a secondary signal only.", "substituted": "The audit of the routing list found that two membership errors offset each other. One column had an extra entry and another was missing one, so the total still matched the expected count and seemed to confirm the list. We checked each member against its column individually and found both mistakes. ⟦No mismatch hides behind a matching total in the remaining two tables, because we checked each member against its column.⟧ The lesson recorded in the bug log is to verify membership per item, and the aggregate is now treated as a secondary signal only."}
+{"pair_id": "train-cannot_happen-910", "original": "The catalog holds 42 rows, all with June timestamps and non-empty params, and it matches the June snapshot row for row when diffed. That rules out a partial re-attach, because a re-attach from the sidecar yields empty params. ⟦The nightly migration job cannot have modified the catalog, since nothing in the current code path points it at anything but staging.⟧ So the open question is who restored the snapshot. I am checking the restore audit log next.", "substituted": "The catalog holds 42 rows, all with June timestamps and non-empty params, and it matches the June snapshot row for row when diffed. That rules out a partial re-attach, because a re-attach from the sidecar yields empty params. ⟦A grep of the job's three write calls shows each targets the staging table, so it did not modify the catalog.⟧ So the open question is who restored the snapshot. I am checking the restore audit log next."}
+{"pair_id": "train-cannot_happen-10477", "original": "The decision object is a typed union, so a model reply is never taken as free text authority. The broker validates schema, phase and capability before anything runs, and the journal writes the proposed and accepted decision ahead of any side effect; we confirmed the ordering by replaying three recorded sessions and checking timestamps. Model output carries labels, rankings and cited spans. A worker's next step is a typed tool call with an expected revision, or a stop. ⟦Because every variant of the union is validated by the broker today, an accepted decision can never exceed its capability profile, whatever variants get added later.⟧", "substituted": "The decision object is a typed union, so a model reply is never taken as free text authority. The broker validates schema, phase and capability before anything runs, and the journal writes the proposed and accepted decision ahead of any side effect; we confirmed the ordering by replaying three recorded sessions and checking timestamps. Model output carries labels, rankings and cited spans. A worker's next step is a typed tool call with an expected revision, or a stop. ⟦Because each of the six current variants is validated by the broker, no accepted decision in the replayed sessions exceeded its capability profile.⟧"}
+{"pair_id": "train-cannot_happen-10926", "original": "Two guards were written to the reproduction instead of the underlying condition. The guard on edit_file covered one write path out of three, and the guard on update_entry tested that entry was present and fields absent, so sending both let entry through again. The other session caught both. A table-driven test should include a row that passed before the change, which shows the table discriminates instead of rejecting everything. ⟦Now that the guards are shared, a third unguarded write path can never appear in this module.⟧", "substituted": "Two guards were written to the reproduction instead of the underlying condition. The guard on edit_file covered one write path out of three, and the guard on update_entry tested that entry was present and fields absent, so sending both let entry through again. The other session caught both. A table-driven test should include a row that passed before the change, which shows the table discriminates instead of rejecting everything. ⟦Now that the guards are shared, the three write paths in this module all go through them.⟧"}
+{"pair_id": "train-cannot_happen-290", "original": "The flaky config test failed twice in CI this week, both times on the runner with the most parallelism. I reproduced it locally by running the suite with eight threads: 11 failures in 40 runs, versus zero in 40 with a single thread. The failing assertion reads a locale variable that a sibling test overwrites through set_var, and the environment is shared by the whole process. I put a serialization attribute on the two tests I found writing it. ⟦No other test can ever touch that variable, so the lock is enough.⟧", "substituted": "The flaky config test failed twice in CI this week, both times on the runner with the most parallelism. I reproduced it locally by running the suite with eight threads: 11 failures in 40 runs, versus zero in 40 with a single thread. The failing assertion reads a locale variable that a sibling test overwrites through set_var, and the environment is shared by the whole process. I put a serialization attribute on the two tests I found writing it. ⟦A grep of the tests directory turned up only those two tests touching that variable, so the lock covers them.⟧"}
+{"pair_id": "train-cannot_happen-1287", "original": "The ambient-module change is on the experiments branch and not yet on master; git log on master shows no commit for it. It ships alongside the nested-type change through the usual sequence, and the tracker entry moves to the archive once the master-side SHA exists. ⟦The ambient-module handling cannot regress, because the parser has no other code path for it.⟧ Open follow-ups, not done: abstract default exports and deeply nested namespaces still need checking.", "substituted": "The ambient-module change is on the experiments branch and not yet on master; git log on master shows no commit for it. It ships alongside the nested-type change through the usual sequence, and the tracker entry moves to the archive once the master-side SHA exists. ⟦The ambient-module handling has two call sites, and the new parser tests exercise both.⟧ Open follow-ups, not done: abstract default exports and deeply nested namespaces still need checking."}
+{"pair_id": "train-cannot_happen-8754", "original": "The guide ledger keeps a set of delivered topic names per session, and the tool-response layer consults it before attaching a guide body. Reading the ledger's persistence path, we saw that a reloaded ledger is written to disk once at shutdown and read once at startup, so a restart restores exactly what was saved. That part behaves as designed. The other half of the bug is the withholding: a fresh conversation gets no guide even though its topic is marked delivered. ⟦Since every session id is generated by the server at connect time, a new conversation can never inherit a ledger entry from an old one.⟧ The log lines from 2026-08-18 show a new session receiving zero guide bytes on its first touch of the librarian topic, which is what prompted the investigation.", "substituted": "The guide ledger keeps a set of delivered topic names per session, and the tool-response layer consults it before attaching a guide body. Reading the ledger's persistence path, we saw that a reloaded ledger is written to disk once at shutdown and read once at startup, so a restart restores exactly what was saved. That part behaves as designed. The other half of the bug is the withholding: a fresh conversation gets no guide even though its topic is marked delivered. ⟦Since every session id is generated by the server at connect time, a new conversation inherits a ledger entry from an old one only if a client supplies its own id, which we have not yet checked.⟧ The log lines from 2026-08-18 show a new session receiving zero guide bytes on its first touch of the librarian topic, which is what prompted the investigation."}
+codex
+{"pair_id":"train-cannot_happen-2966","a":"yes","b":"yes","c":"no","note":"House style cannot guarantee future contents; the fix limits the claim to the 33 checked occurrences."}
+{"pair_id":"train-cannot_happen-10531","a":"yes","b":"yes","c":"no","note":"Shared script provenance does not establish impossibility; the fix reports a member-by-member check of the remaining tables."}
+{"pair_id":"train-cannot_happen-910","a":"yes","b":"yes","c":"no","note":"The original relies on current routing structure; the fix identifies and checks all three write calls. The other exclusion uses observed evidence."}
+{"pair_id":"train-cannot_happen-10477","a":"yes","b":"yes","c":"yes","note":"The fix scopes capability compliance to checked variants and sessions. The opening sentence separately claims free-text authority never occurs because of union typing."}
+{"pair_id":"train-cannot_happen-10926","a":"yes","b":"yes","c":"no","note":"Shared guards cannot prevent future unguarded paths; the fix describes coverage of the three existing paths."}
+{"pair_id":"train-cannot_happen-290","a":"yes","b":"yes","c":"no","note":"The original makes an unlimited claim about other tests; the fix limits coverage to tests found by a directory search."}
+{"pair_id":"train-cannot_happen-1287","a":"yes","b":"yes","c":"no","note":"Current parser structure cannot guarantee against regression; the fix identifies two call sites and their test coverage."}
+{"pair_id":"train-cannot_happen-8754","a":"yes","b":"yes","c":"no","note":"Server-generated identifiers do not establish perpetual impossibility; the fix allows inheritance conditionally and explicitly acknowledges an unchecked possibility."}
+tokens used
+5,814

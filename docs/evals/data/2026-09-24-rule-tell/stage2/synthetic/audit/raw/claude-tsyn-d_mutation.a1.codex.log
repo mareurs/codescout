@@ -1,0 +1,91 @@
+{"pair_id":"tsyn-in-d_mutation-5058","a":"yes","b":"yes","c":"no","note":"One format-step mutation cannot verify four call sites; the fix limits verification to the format step."}
+{"pair_id":"tsyn-in-d_mutation-4461","a":"yes","b":"yes","c":"no","note":"An onboarding mutation cannot establish coverage of separate builders; the fix limits the claim to onboarding."}
+{"pair_id":"tsyn-in-d_mutation-4465","a":"yes","b":"yes","c":"no","note":"One failing assertion does not verify the other assertions; the fix limits the conclusion and acknowledges untested sites."}
+{"pair_id":"tsyn-in-d_mutation-8202","a":"yes","b":"yes","c":"no","note":"Mutating the log writer verifies only that consumer. The opening sentence describes implementation, not mutation coverage."}
+{"pair_id":"tsyn-in-d_mutation-3427","a":"yes","b":"yes","c":"no","note":"Catching a deletion from one launcher does not verify all injection surfaces; the fix explicitly limits coverage."}
+{"pair_id":"tsyn-in-d_mutation-7040","a":"yes","b":"yes","c":"no","note":"The SQLite mutation cannot verify timeout guards at two other sites; the fix identifies those sites as untested."}
+{"pair_id":"tsyn-in-d_mutation-6314","a":"yes","b":"yes","c":"no","note":"The hook mutation does not verify CI or merge-helper coverage; the fix confines the result to the hook."}
+{"pair_id":"tsyn-in-d_mutation-5029","a":"yes","b":"yes","c":"no","note":"Removing the fmt guard verifies only that hook; the fix removes the unsupported claim about all three hooks."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-t9t0hv_w
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d709-3eeb-76d3-88e7-2122aec8743e
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+codex
+I’ll read task.md and follow its instructions.
+
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-t9t0hv_w
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_mutation`
+
+LAW: Mutate once per guarded site, not once per feature.
+
+USUAL SHAPE: YES when the text claims a rule implemented at several sites is covered because a mutation or test at ONE site was caught. NO otherwise.
+
+## Items
+
+{"pair_id": "tsyn-in-d_mutation-5058", "original": "⟦Because the formatter wrapper's attribution check was mutated and caught, every step of the gate now refuses peers' files.⟧ The gate has four steps that each filter their paths through the same attribution helper: format, lint, test-select, and stage. I inverted the filter in the format step, and the wrapper's test rejected the run. The other three call sites have had no mutation run against them. The gate script invokes the format step first today, which I checked by reading the script's step list.", "substituted": "⟦Because the formatter wrapper's attribution check was mutated and caught, the format step now refuses peers' files.⟧ The gate has four steps that each filter their paths through the same attribution helper: format, lint, test-select, and stage. I inverted the filter in the format step, and the wrapper's test rejected the run. The other three call sites have had no mutation run against them. The gate script invokes the format step first today, which I checked by reading the script's step list."}
+{"pair_id": "tsyn-in-d_mutation-4461", "original": "⟦Planting a bogus parameter in the onboarding prompt made the gate fail, so all four surfaces are guarded.⟧ The surfaces come from separate builders: the instructions constant, the onboarding prompt, the draft, and the status segments builder. The status builder shares no code with the other three, as its imports show, and it is the one that shipped the original defect. No plant has been made there yet, so the gate has never been seen to fire on that builder's output.", "substituted": "⟦Planting a bogus parameter in the onboarding prompt made the gate fail, so the onboarding surface is guarded.⟧ The surfaces come from separate builders: the instructions constant, the onboarding prompt, the draft, and the status segments builder. The status builder shares no code with the other three, as its imports show, and it is the one that shipped the original defect. No plant has been made there yet, so the gate has never been seen to fire on that builder's output."}
+{"pair_id": "tsyn-in-d_mutation-4465", "original": "The sentence naming the project parameter is asserted in three tests across two files. The old assertion in the workspace test used a substring check that both spellings satisfied, as the diff shows, so it passed for three months while the defect shipped. I tightened it to require the new spelling and confirmed it fails against the old text. The other two assertions are plain contains checks, written by hand in the same style. ⟦Watching the workspace test fail shows every test asserting that sentence is now strict.⟧", "substituted": "The sentence naming the project parameter is asserted in three tests across two files. The old assertion in the workspace test used a substring check that both spellings satisfied, as the diff shows, so it passed for three months while the defect shipped. I tightened it to require the new spelling and confirmed it fails against the old text. The other two assertions are plain contains checks, written by hand in the same style. ⟦Watching the workspace test fail shows that test is now strict; the other two were never run against the old text.⟧"}
+{"pair_id": "tsyn-in-d_mutation-8202", "original": "Attribution by sessionId is enforced at every consumer: the log writer, the dashboard grouping, and the alert router all key on it. ⟦I mutated the log writer to key on the derived name, and the compaction-rename test failed, which shows all three consumers reject name-keyed attribution.⟧ The name is re-minted on resume, so the mutated writer produced two entries for one session, exactly what the test asserts. The pid was left alone because the OS reuses it, and the socket path follows the pid.", "substituted": "Attribution by sessionId is enforced at every consumer: the log writer, the dashboard grouping, and the alert router all key on it. ⟦I mutated the log writer to key on the derived name, and the compaction-rename test failed, which shows the log writer rejects name-keyed attribution.⟧ The name is re-minted on resume, so the mutated writer produced two entries for one session, exactly what the test asserts. The pid was left alone because the OS reuses it, and the socket path follows the pid."}
+{"pair_id": "tsyn-in-d_mutation-3427", "original": "The census script compares the two env keys across every running server. Four config surfaces can inject them: the user-level file, the project file, the sdd launcher, and the kat launcher. To check that the script has teeth, I deleted one key from the sdd launcher, and the census flagged that pid group in a single run. ⟦Because that deletion was caught, a key stripped from any of the four surfaces would be caught.⟧ The flagged output named the pid group and the missing key, so the report format leaves no room for misreading.", "substituted": "The census script compares the two env keys across every running server. Four config surfaces can inject them: the user-level file, the project file, the sdd launcher, and the kat launcher. To check that the script has teeth, I deleted one key from the sdd launcher, and the census flagged that pid group in a single run. ⟦Because that deletion was caught, a key stripped from the sdd launcher would be caught; the other three surfaces are unmutated.⟧ The flagged output named the pid group and the missing key, so the report format leaves no room for misreading."}
+{"pair_id": "tsyn-in-d_mutation-7040", "original": "The session-start hook touches codescout in three places: it opens the embeddings SQLite file to compare index age, it shells out to the CLI to start a background reindex, and it pastes the generated system-prompt file into the agent context. Each of the three is wrapped in a two-second timeout guard. To check the guard, I removed the timeout from the SQLite read and pointed it at a locked database; the hook hung and the test suite failed within seconds. ⟦The timeout guard is therefore verified at all three sites.⟧", "substituted": "The session-start hook touches codescout in three places: it opens the embeddings SQLite file to compare index age, it shells out to the CLI to start a background reindex, and it pastes the generated system-prompt file into the agent context. Each of the three is wrapped in a two-second timeout guard. To check the guard, I removed the timeout from the SQLite read and pointed it at a locked database; the hook hung and the test suite failed within seconds. ⟦The timeout guard is therefore verified at the SQLite read; the CLI call and the prompt-file injection are untested.⟧"}
+{"pair_id": "tsyn-in-d_mutation-6314", "original": "A bare commit would have taken the bug file and its class file under an unrelated message, since another session had staged both; the seventh session spotted this in the cached diff and committed by pathspec instead. The coupling check that requires a bug file and its member line to land together runs in the pre-commit hook, the CI job, and the merge helper. I removed the pairing test from the hook and the hook's own suite went red. ⟦That red result means the coupling check is guarded in the hook, the CI job, and the merge helper alike.⟧ The pathspec commit held exactly one file, which git show confirms.", "substituted": "A bare commit would have taken the bug file and its class file under an unrelated message, since another session had staged both; the seventh session spotted this in the cached diff and committed by pathspec instead. The coupling check that requires a bug file and its member line to land together runs in the pre-commit hook, the CI job, and the merge helper. I removed the pairing test from the hook and the hook's own suite went red. ⟦That red result means the coupling check is guarded in the hook, though the CI job and merge helper are untested.⟧ The pathspec commit held exactly one file, which git show confirms."}
+{"pair_id": "tsyn-in-d_mutation-5029", "original": "Staging remains the cheapest mitigation, and it works because the stash step only touches unstaged content; I confirmed this by staging a file, running a peer's edit cycle, and diffing the bytes afterward, which were identical. The guard that refuses to proceed with dirty unstaged files is copied into three hooks: fmt, lint, and typecheck. I deleted the guard from the fmt hook and its test failed with the expected message. ⟦With that one removal caught, the unstaged-changes guard is verified across all three hooks.⟧ None of this changes the larger point that staging protects one session, not the tree.", "substituted": "Staging remains the cheapest mitigation, and it works because the stash step only touches unstaged content; I confirmed this by staging a file, running a peer's edit cycle, and diffing the bytes afterward, which were identical. The guard that refuses to proceed with dirty unstaged files is copied into three hooks: fmt, lint, and typecheck. I deleted the guard from the fmt hook and its test failed with the expected message. ⟦With that one removal caught, the unstaged-changes guard is verified in the fmt hook.⟧ None of this changes the larger point that staging protects one session, not the tree."}
+codex
+{"pair_id":"tsyn-in-d_mutation-5058","a":"yes","b":"yes","c":"no","note":"One format-step mutation cannot verify four call sites; the fix limits verification to the format step."}
+{"pair_id":"tsyn-in-d_mutation-4461","a":"yes","b":"yes","c":"no","note":"An onboarding mutation cannot establish coverage of separate builders; the fix limits the claim to onboarding."}
+{"pair_id":"tsyn-in-d_mutation-4465","a":"yes","b":"yes","c":"no","note":"One failing assertion does not verify the other assertions; the fix limits the conclusion and acknowledges untested sites."}
+{"pair_id":"tsyn-in-d_mutation-8202","a":"yes","b":"yes","c":"no","note":"Mutating the log writer verifies only that consumer. The opening sentence describes implementation, not mutation coverage."}
+{"pair_id":"tsyn-in-d_mutation-3427","a":"yes","b":"yes","c":"no","note":"Catching a deletion from one launcher does not verify all injection surfaces; the fix explicitly limits coverage."}
+{"pair_id":"tsyn-in-d_mutation-7040","a":"yes","b":"yes","c":"no","note":"The SQLite mutation cannot verify timeout guards at two other sites; the fix identifies those sites as untested."}
+{"pair_id":"tsyn-in-d_mutation-6314","a":"yes","b":"yes","c":"no","note":"The hook mutation does not verify CI or merge-helper coverage; the fix confines the result to the hook."}
+{"pair_id":"tsyn-in-d_mutation-5029","a":"yes","b":"yes","c":"no","note":"Removing the fmt guard verifies only that hook; the fix removes the unsupported claim about all three hooks."}
+tokens used
+5,766

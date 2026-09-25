@@ -1,0 +1,8 @@
+{"pair_id":"train-d_red-514","a":"yes","b":"yes","c":"no","note":"The original transfers the strict assertion's red to the loosened assertion; the fix observes a new red."}
+{"pair_id":"train-d_red-9609","a":"yes","b":"yes","c":"no","note":"The original credits a compile failure to the changed method assertion; the fix reruns that assertion and observes failure."}
+{"pair_id":"train-d_red-6062","a":"yes","b":"yes","c":"no","note":"The original carries the equal-sha red over to the edited assertion; the fix re-observes red for the edited assertion."}
+{"pair_id":"train-d_red-5824","a":"yes","b":"yes","c":"no","note":"The original reuses the count assertion's red for the set assertion; the fix observes the set assertion fail against the old collector."}
+{"pair_id":"train-d_red-1553","a":"yes","b":"yes","c":"no","note":"The original reuses the five-second assertion's failure for the eight-second assertion; the fix reruns the revised assertion and observes failure."}
+{"pair_id":"train-d_red-6868","a":"yes","b":"yes","c":"no","note":"The original transfers failure evidence across changed reference IDs; the fix observes the revised check fail with the old slot."}
+{"pair_id":"train-d_red-9971","a":"yes","b":"yes","c":"no","note":"The original credits the 500 assertion's red to the 503 assertion; the fix reruns and observes the 503 assertion go red."}
+{"pair_id":"train-d_red-8309","a":"yes","b":"yes","c":"no","note":"The original transfers the ten-second failure to the widened check; the fix observes the widened check fail with heartbeat disabled."}

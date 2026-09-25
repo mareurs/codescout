@@ -1,0 +1,88 @@
+{"pair_id":"train-question_asked-5527","a":"yes","b":"yes","c":"yes","note":"Fresh-path tests do not establish rename correctness. A destination blob hash also does not establish that the recorder recognized the rename."}
+{"pair_id":"train-question_asked-5765","a":"yes","b":"yes","c":"no","note":"Nonempty-message assertions do not check an addressee; inspecting the rendered message directly checks that claim."}
+{"pair_id":"train-question_asked-7650","a":"yes","b":"yes","c":"yes","note":"Loopback tests cannot establish network safety. Sanitizing thirty strings also does not establish that the injection path is closed."}
+{"pair_id":"train-question_asked-288","a":"yes","b":"yes","c":"no","note":"Passing under advisory locks does not establish state isolation; the replacement explicitly acknowledges this limitation."}
+{"pair_id":"train-question_asked-1580","a":"yes","b":"yes","c":"no","note":"Loader unit tests establish error handling for payload shapes, not agents' successful recovery through the MCP server."}
+{"pair_id":"train-question_asked-974","a":"yes","b":"no","c":"no","note":"Restricting the claim to Linux does not resolve the mismatch: the required ownership-check correction is still explicitly unfinished."}
+{"pair_id":"train-question_asked-6345","a":"yes","b":"yes","c":"no","note":"A green suite does not establish coverage of both branches; the failing mutation directly establishes exercise of the detached default."}
+{"pair_id":"train-question_asked-11539","a":"yes","b":"yes","c":"no","note":"Passing tests do not establish absence of production callers; a source-tree search addresses that question directly."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-w7ktytfu
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d708-2588-7b91-b02d-41c0a24eb00c
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-w7ktytfu
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `question_asked`
+
+LAW: The instrument must answer the question you actually have, not a neighbouring one.
+
+USUAL SHAPE: YES when the text offers the result of a check or measurement as the answer to a question it does not actually measure (a compile or a green test cited as proof something is used, reached or correct in a way the check never exercised). NO when the cited check measures the claim it supports, or no check is cited.
+
+## Items
+
+{"pair_id": "train-question_asked-5527", "original": "A rename in the staging area produced no stage-log row under its new path. Line 14 of the log carries the destination blob hash, which shows the recorder ran and saw this rename. Its test suite is green on this branch, but every case in it adds a brand-new file at a fresh path and never moves an existing one. ⟦The recorder therefore handles renames correctly, since its suite is green.⟧", "substituted": "A rename in the staging area produced no stage-log row under its new path. Line 14 of the log carries the destination blob hash, which shows the recorder ran and saw this rename. Its test suite is green on this branch, but every case in it adds a brand-new file at a fresh path and never moves an existing one. ⟦The recorder therefore handles fresh-path adds correctly, since its suite is green.⟧"}
+{"pair_id": "train-question_asked-5765", "original": "The defect sits in an error message that told the reader a file was not theirs without saying who else owned it. Pinning exact prose would fail on every rewording, so the existing test only asserts that the message is non-empty and carries the error variant. After the edit that test is green. ⟦The green run confirms the message now names a second addressee.⟧ No new assertion is added, because the next task in the plan deletes this test outright.", "substituted": "The defect sits in an error message that told the reader a file was not theirs without saying who else owned it. Pinning exact prose would fail on every rewording, so the existing test only asserts that the message is non-empty and carries the error variant. After the edit that test is green. ⟦Printing the rendered message shows it now names a second addressee.⟧ No new assertion is added, because the next task in the plan deletes this test outright."}
+{"pair_id": "train-question_asked-7650", "original": "⟦The dashboard's test suite is green, so the --host option is safe to leave open on team networks.⟧ Every test in that suite connects over 127.0.0.1 from inside the same process, and none sends a request from another machine. Separately, I checked sanitize_topic by feeding it thirty hostile strings, and each one came back stripped down to letters, digits and a few punctuation marks. That closes the injection path through topic names. How severe the dashboard finding is still depends on the intended deployment, and the owner has not answered that question yet.", "substituted": "⟦The dashboard's test suite is green, but it only exercises 127.0.0.1, so it says nothing about team networks.⟧ Every test in that suite connects over 127.0.0.1 from inside the same process, and none sends a request from another machine. Separately, I checked sanitize_topic by feeding it thirty hostile strings, and each one came back stripped down to letters, digits and a few punctuation marks. That closes the injection path through topic names. How severe the dashboard finding is still depends on the intended deployment, and the owner has not answered that question yet."}
+{"pair_id": "train-question_asked-288", "original": "The flaky catalog tests traced back to one test helper. It returned a temp directory plus a server object, which looked self-contained, but the agent inside read its database path from a process environment variable and fell back to a shared default under the user data directory. Two parallel tests that both hit the fallback opened the same file. ⟦On Linux the advisory locks mostly masked this, so the suite passed on every CI run we did there, which shows the helper never shared state across tests.⟧ On Windows the mandatory locks deadlocked within seconds, and that is how we first saw it. We now set the variable per test from the temp directory.", "substituted": "The flaky catalog tests traced back to one test helper. It returned a temp directory plus a server object, which looked self-contained, but the agent inside read its database path from a process environment variable and fell back to a shared default under the user data directory. Two parallel tests that both hit the fallback opened the same file. ⟦On Linux the advisory locks mostly masked this, so the suite passed on every CI run we did there, which says nothing about whether the helper shared state across tests.⟧ On Windows the mandatory locks deadlocked within seconds, and that is how we first saw it. We now set the variable per test from the temp directory."}
+{"pair_id": "train-question_asked-1580", "original": "The params loader in the augment tool now rejects payloads that are not JSON objects. After the parse step, an `is_object()` check runs, and an array, string, number, boolean or null payload returns a recoverable error that names the actual shape and suggests wrapping the value under the collection key. We kept it recoverable so the caller can retry with an edited file instead of failing hard. ⟦The unit tests pass for all five non-object shapes, so agents calling this tool through the MCP server now recover from a bad params file on the first retry.⟧ The object case is untouched and still flows into the merge code as before.", "substituted": "The params loader in the augment tool now rejects payloads that are not JSON objects. After the parse step, an `is_object()` check runs, and an array, string, number, boolean or null payload returns a recoverable error that names the actual shape and suggests wrapping the value under the collection key. We kept it recoverable so the caller can retry with an edited file instead of failing hard. ⟦The unit tests pass for all five non-object shapes, so each one now returns the recoverable error naming its shape and the wrapping hint.⟧ The object case is untouched and still flows into the merge code as before."}
+{"pair_id": "train-question_asked-974", "original": "The Windows refusal on ledger updates turned out to be a re-send problem, not an edit problem. Any update to a ledger that declares an entry prefix is rejected with a message saying the prefix is already owned by the ledger itself. The update call re-sends the entire extra blob, so the prefix check fires even when the edit touches an unrelated key. I reproduced it by changing only a description field on a prefixed ledger and got the same refusal. ⟦The regression test we added passes on Linux CI, so the ownership check is now confirmed working on every platform we ship.⟧ The remaining work is to skip the check when the prefix value is unchanged.", "substituted": "The Windows refusal on ledger updates turned out to be a re-send problem, not an edit problem. Any update to a ledger that declares an entry prefix is rejected with a message saying the prefix is already owned by the ledger itself. The update call re-sends the entire extra blob, so the prefix check fires even when the edit touches an unrelated key. I reproduced it by changing only a description field on a prefixed ledger and got the same refusal. ⟦The regression test we added passes on Linux CI, so the ownership check is now confirmed working on Linux, though Windows is still unchecked.⟧ The remaining work is to skip the check when the prefix value is unchanged."}
+{"pair_id": "train-question_asked-6345", "original": "⟦Both defaulting sites are now covered, because the suite stayed green after the change to the detached-output branch.⟧ The detached branch reads its status from a stored record, and the mutation that put 0 back there turned the new test red, which shows that guard is exercised. The inline branch has the same default call, but no test builds an inline result lacking a status, and I did not mutate it. Inline results always carry an exit code today, so nothing reaches that default yet. Whoever touches the inline path next should add a test.", "substituted": "⟦The detached-output site is now covered, because the suite turned red when its default was mutated back to 0.⟧ The detached branch reads its status from a stored record, and the mutation that put 0 back there turned the new test red, which shows that guard is exercised. The inline branch has the same default call, but no test builds an inline result lacking a status, and I did not mutate it. Inline results always carry an exit code today, so nothing reaches that default yet. Whoever touches the inline path next should add a test."}
+{"pair_id": "train-question_asked-11539", "original": "Two findings came up in both independent reviews. The first is that the summary total no longer equals the sum of the by_check counts: the values at lines 200 and 272 add to 41, while the header reports 43. The second concerns posix_tokenize. ⟦Both reviewers reported no production callers, and the green test suite confirms nothing in shipped code uses it.⟧ Removing it should be routine once the two test imports are dropped, and the arithmetic mismatch can be handled in the same change.", "substituted": "Two findings came up in both independent reviews. The first is that the summary total no longer equals the sum of the by_check counts: the values at lines 200 and 272 add to 41, while the header reports 43. The second concerns posix_tokenize. ⟦Both reviewers reported no production callers, and a source-tree grep confirms nothing in shipped code uses it.⟧ Removing it should be routine once the two test imports are dropped, and the arithmetic mismatch can be handled in the same change."}
+codex
+{"pair_id":"train-question_asked-5527","a":"yes","b":"yes","c":"yes","note":"Fresh-path tests do not establish rename correctness. A destination blob hash also does not establish that the recorder recognized the rename."}
+{"pair_id":"train-question_asked-5765","a":"yes","b":"yes","c":"no","note":"Nonempty-message assertions do not check an addressee; inspecting the rendered message directly checks that claim."}
+{"pair_id":"train-question_asked-7650","a":"yes","b":"yes","c":"yes","note":"Loopback tests cannot establish network safety. Sanitizing thirty strings also does not establish that the injection path is closed."}
+{"pair_id":"train-question_asked-288","a":"yes","b":"yes","c":"no","note":"Passing under advisory locks does not establish state isolation; the replacement explicitly acknowledges this limitation."}
+{"pair_id":"train-question_asked-1580","a":"yes","b":"yes","c":"no","note":"Loader unit tests establish error handling for payload shapes, not agents' successful recovery through the MCP server."}
+{"pair_id":"train-question_asked-974","a":"yes","b":"no","c":"no","note":"Restricting the claim to Linux does not resolve the mismatch: the required ownership-check correction is still explicitly unfinished."}
+{"pair_id":"train-question_asked-6345","a":"yes","b":"yes","c":"no","note":"A green suite does not establish coverage of both branches; the failing mutation directly establishes exercise of the detached default."}
+{"pair_id":"train-question_asked-11539","a":"yes","b":"yes","c":"no","note":"Passing tests do not establish absence of production callers; a source-tree search addresses that question directly."}
+tokens used
+5,773

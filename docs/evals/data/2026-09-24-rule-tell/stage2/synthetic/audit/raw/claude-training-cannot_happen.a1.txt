@@ -1,0 +1,8 @@
+{"pair_id":"train-cannot_happen-2966","a":"yes","b":"yes","c":"no","note":"House style cannot guarantee future contents; the fix limits the claim to the 33 checked occurrences."}
+{"pair_id":"train-cannot_happen-10531","a":"yes","b":"yes","c":"no","note":"Shared script provenance does not establish impossibility; the fix reports a member-by-member check of the remaining tables."}
+{"pair_id":"train-cannot_happen-910","a":"yes","b":"yes","c":"no","note":"The original relies on current routing structure; the fix identifies and checks all three write calls. The other exclusion uses observed evidence."}
+{"pair_id":"train-cannot_happen-10477","a":"yes","b":"yes","c":"yes","note":"The fix scopes capability compliance to checked variants and sessions. The opening sentence separately claims free-text authority never occurs because of union typing."}
+{"pair_id":"train-cannot_happen-10926","a":"yes","b":"yes","c":"no","note":"Shared guards cannot prevent future unguarded paths; the fix describes coverage of the three existing paths."}
+{"pair_id":"train-cannot_happen-290","a":"yes","b":"yes","c":"no","note":"The original makes an unlimited claim about other tests; the fix limits coverage to tests found by a directory search."}
+{"pair_id":"train-cannot_happen-1287","a":"yes","b":"yes","c":"no","note":"Current parser structure cannot guarantee against regression; the fix identifies two call sites and their test coverage."}
+{"pair_id":"train-cannot_happen-8754","a":"yes","b":"yes","c":"no","note":"Server-generated identifiers do not establish perpetual impossibility; the fix allows inheritance conditionally and explicitly acknowledges an unchecked possibility."}

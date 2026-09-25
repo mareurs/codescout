@@ -1,0 +1,8 @@
+{"pair_id":"train-d_fixture-1496","a":"yes","b":"yes","c":"no","note":"The triggering hash line was unannotated; the fix tags that line with its role in truncation."}
+{"pair_id":"train-d_fixture-9841","a":"yes","b":"yes","c":"no","note":"The stale model must differ from the live model; the fix records that requirement on the fixture line."}
+{"pair_id":"train-d_fixture-6370","a":"yes","b":"yes","c":"no","note":"Reducing the fixture below the cutoff removes its load-bearing property; the fix preserves and annotates the above-cutoff size."}
+{"pair_id":"train-d_fixture-1173","a":"yes","b":"yes","c":"no","note":"The boundary-sensitive seed size lacks a comment; the fix annotates its position just below the cutoff."}
+{"pair_id":"train-d_fixture-4293","a":"yes","b":"yes","c":"no","note":"Removing the timestamp comment leaves the eviction prerequisite unannotated; the fix explains the TTL requirement inline."}
+{"pair_id":"train-d_fixture-8176","a":"yes","b":"yes","c":"no","note":"The essential stored-path mismatch lacks a fixture-line annotation; the fix adds one explaining its role in the orphan test."}
+{"pair_id":"train-d_fixture-11033","a":"yes","b":"yes","c":"no","note":"Collapsing distinct counters removes load-bearing markers; the fix retains them and annotates their purpose in detecting sibling resets."}
+{"pair_id":"train-d_fixture-10694","a":"yes","b":"yes","c":"no","note":"The trailer drives the publish check but lacks an annotation; the fix marks its role at the setup location."}

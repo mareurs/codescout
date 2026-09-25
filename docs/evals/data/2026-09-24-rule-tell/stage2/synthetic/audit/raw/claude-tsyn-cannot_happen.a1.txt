@@ -1,0 +1,8 @@
+{"pair_id":"tsyn-in-cannot_happen-7569","a":"yes","b":"yes","c":"no","note":"Archiving cannot guarantee future scores never mislead; the fix limits its claim to current dashboard reporting."}
+{"pair_id":"tsyn-in-cannot_happen-3438","a":"yes","b":"yes","c":"no","note":"The original generalizes today's writer behavior to every writer forever; the fix describes the current writer and untested execution."}
+{"pair_id":"tsyn-in-cannot_happen-270","a":"yes","b":"yes","c":"no","note":"Current field presence does not establish permanent agreement; the fix reports agreement only for the twelve sampled entries."}
+{"pair_id":"tsyn-in-cannot_happen-1141","a":"yes","b":"yes","c":"no","note":"Canonicalization does not establish impossibility forever; the fix scopes the claim to the three current symbol tests."}
+{"pair_id":"tsyn-in-cannot_happen-9426","a":"yes","b":"yes","c":"no","note":"The original extends protection to all prompt text; the fix confines protection to the guard's three listed surfaces."}
+{"pair_id":"tsyn-in-cannot_happen-117","a":"yes","b":"yes","c":"no","note":"Four inspected tools cannot guarantee future tools' behavior; the fix explicitly limits the claim to those four current tools."}
+{"pair_id":"tsyn-in-cannot_happen-297","a":"yes","b":"yes","c":"no","note":"Test names do not establish that shadowing is impossible; the fix acknowledges that auth guard coverage remains unchecked."}
+{"pair_id":"tsyn-in-cannot_happen-2695","a":"yes","b":"yes","c":"no","note":"Reporting a count cannot guarantee someone notices every no-match edit; the fix describes only the proposed reply value."}

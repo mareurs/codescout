@@ -1,0 +1,8 @@
+{"pair_id":"train-closed_population-7812","a":"yes","b":"yes","c":"no","note":"The original includes all future tests; the fix limits the claim to tests in this change."}
+{"pair_id":"train-closed_population-12087","a":"yes","b":"yes","c":"no","note":"The original generalizes over an unbounded set of error hints; the fix identifies the single kind rejection hint."}
+{"pair_id":"train-closed_population-4348","a":"yes","b":"yes","c":"no","note":"Future dispatched subagents form an open population; the fix names the three tested subagents."}
+{"pair_id":"train-closed_population-3192","a":"yes","b":"yes","c":"no","note":"The original guarantees behavior for future tests; the fix bounds the population to today's suite."}
+{"pair_id":"train-closed_population-10879","a":"yes","b":"yes","c":"no","note":"The original covers every future declaration pass; the fix restricts the claim to this sweep's thirteen entries."}
+{"pair_id":"train-closed_population-7449","a":"yes","b":"yes","c":"no","note":"The original asserts an enduring property of future plans; the fix concerns the two plans for the migration scenario."}
+{"pair_id":"train-closed_population-11498","a":"yes","b":"yes","c":"no","note":"The original guarantees all future fixtures and bug outcomes; the fix states a recommendation without assuming universal compliance."}
+{"pair_id":"train-closed_population-5534","a":"yes","b":"yes","c":"yes","note":"The fix bounds the marked claim to six sessions, but the separate claim about anyone re-deriving the theory also generalizes over future people."}

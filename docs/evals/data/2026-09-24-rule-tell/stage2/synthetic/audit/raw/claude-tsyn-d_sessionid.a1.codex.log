@@ -1,0 +1,88 @@
+{"pair_id":"tsyn-in-d_sessionid-5643","a":"yes","b":"yes","c":"no","note":"Original attributes authorship by self-reported name; replacement uses the sessionId. No other sentence violates the rule."}
+{"pair_id":"tsyn-in-d_sessionid-8470","a":"yes","b":"yes","c":"no","note":"Original credits work to a self-reported session name; replacement credits sessionId 5b07e9d2. No other breach appears."}
+{"pair_id":"tsyn-in-d_sessionid-7832","a":"yes","b":"yes","c":"no","note":"Original attributes the handler to a registered session name; replacement uses the commit trailer's sessionId. Other sentences contain no breach."}
+{"pair_id":"tsyn-in-d_sessionid-9347","a":"yes","b":"yes","c":"no","note":"Original assigns filing and follow-up ownership by session name; replacement uses sessionId c21e6a94. No other sentence breaches the rule."}
+{"pair_id":"tsyn-in-d_sessionid-7737","a":"yes","b":"yes","c":"no","note":"The nearby sessionId does not excuse attribution by self-reported name. Replacement attributes by sessionId; remaining sentences comply."}
+{"pair_id":"tsyn-in-d_sessionid-8115","a":"yes","b":"yes","c":"no","note":"Original attributes sign-off by registered agent name; replacement uses sessionId a83d10c6. No other attribution violates the rule."}
+{"pair_id":"tsyn-in-d_sessionid-7576","a":"yes","b":"yes","c":"no","note":"Original credits runs by session label; replacement uses sessionId c40b77aa. The other attribution already uses a sessionId."}
+{"pair_id":"tsyn-in-d_sessionid-4579","a":"yes","b":"yes","c":"no","note":"Original attributes work by registered session name; replacement uses sessionId 8c41e0d7. No other sentence breaks the rule."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-x77nk26x"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-h2ty6qvz
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d709-69f0-7ad3-8074-0041d223481a
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-h2ty6qvz
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_sessionid`
+
+LAW: Attribute by sessionId, never by a self-reported session name.
+
+USUAL SHAPE: YES when the text attributes work to a session by its self-reported or registry NAME rather than its sessionId. NO otherwise.
+
+## Items
+
+{"pair_id": "tsyn-in-d_sessionid-5643", "original": "⟦The status tool was written by the session that called itself \"hook-doctor\", so that is where the gap originated.⟧ Its commit trailer carries id 51be7a09. It prints four ok lines and exits 0, which is exactly what a healthy checkout looks like, so it reassures more than having no tool would. It never lists the pre-push hook, though listing the hooks directory shows that state is fully knowable. This is an unexamined-subset problem, not an unknowable-total one.", "substituted": "⟦The status tool was written in session 51be7a09, so that is where the gap originated.⟧ Its commit trailer carries id 51be7a09. It prints four ok lines and exits 0, which is exactly what a healthy checkout looks like, so it reassures more than having no tool would. It never lists the pre-push hook, though listing the hooks directory shows that state is fully knowable. This is an unexamined-subset problem, not an unknowable-total one."}
+{"pair_id": "tsyn-in-d_sessionid-8470", "original": "The nav eval build is split into nine ordered steps. The fixture crate skeleton comes first, followed by about twelve fixture files, one per catalogue row. Types for Case, Expected and Verdict sit in the types module, and the per-tool matchers build on them. The harness test is marked ignore so that ordinary runs skip it, and it asserts the hard gates when invoked explicitly. ⟦Every step up to the report renderer was produced by the session that calls itself 'lattice-worker', so questions about those matchers go to it.⟧ The first round-1 verdict file and the CHANGELOG entry close out the list.", "substituted": "The nav eval build is split into nine ordered steps. The fixture crate skeleton comes first, followed by about twelve fixture files, one per catalogue row. Types for Case, Expected and Verdict sit in the types module, and the per-tool matchers build on them. The harness test is marked ignore so that ordinary runs skip it, and it asserts the hard gates when invoked explicitly. ⟦Every step up to the report renderer was produced by session 5b07e9d2, so questions about those matchers go to it.⟧ The first round-1 verdict file and the CHANGELOG entry close out the list."}
+{"pair_id": "tsyn-in-d_sessionid-7832", "original": "The augmentation work landed across several parallel sessions, and the merge log lets us trace each piece. The table and row CRUD came first, with the schema migration verified by a round-trip test on an empty database. The refresh tool and its commit step followed, and the commit step's no-op path was confirmed by calling it twice on the same artifact and diffing the metadata. ⟦Session 'blue-heron' wrote the merge-patch handler for parameter updates, according to the name it registered at startup.⟧ Unknown gather sources now produce a warning instead of an error, which the new unit test asserts directly by passing a bogus source name.", "substituted": "The augmentation work landed across several parallel sessions, and the merge log lets us trace each piece. The table and row CRUD came first, with the schema migration verified by a round-trip test on an empty database. The refresh tool and its commit step followed, and the commit step's no-op path was confirmed by calling it twice on the same artifact and diffing the metadata. ⟦Session 4f9c2e71 wrote the merge-patch handler for parameter updates, according to the sessionId on its commit trailer.⟧ Unknown gather sources now produce a warning instead of an error, which the new unit test asserts directly by passing a bogus source name."}
+{"pair_id": "tsyn-in-d_sessionid-9347", "original": "The session log template is meant for work streams that span several sessions. Copy it into the trackers directory at the first reconnaissance pass, then append friction and win entries as they occur. Each entry gets a row in the matching index table, since the indexes are the eval surface and the sections are the evidence. Entries marked open carry forward until their promotion criteria fire. ⟦In the current log, friction F-3 was filed by the session labelled 'scout-2' in its own header field, so it owns the follow-up.⟧ When the work stream wraps, the file moves to the archive folder.", "substituted": "The session log template is meant for work streams that span several sessions. Copy it into the trackers directory at the first reconnaissance pass, then append friction and win entries as they occur. Each entry gets a row in the matching index table, since the indexes are the eval surface and the sections are the evidence. Entries marked open carry forward until their promotion criteria fire. ⟦In the current log, friction F-3 was filed by session c21e6a94, recorded in its entry header, so it owns the follow-up.⟧ When the work stream wraps, the file moves to the archive folder."}
+{"pair_id": "tsyn-in-d_sessionid-7737", "original": "The store gets unit coverage for creation, lookup, removal, id generation and the capacity limit. Integration cases start with cat echoing a line back, then a Python REPL that must report not alive after exit. A process exiting during the settle window must be reported dead with its exit status recorded. Cancelling mid-session must kill the process, release the descriptor, and make the next send return a recoverable error. The cap test opens five and expects the sixth to be refused. The test file header records the drafting session id as 6b2d15f0. ⟦The cancel case was drafted in the session that named itself \"reaper\", so questions go to it.⟧", "substituted": "The store gets unit coverage for creation, lookup, removal, id generation and the capacity limit. Integration cases start with cat echoing a line back, then a Python REPL that must report not alive after exit. A process exiting during the settle window must be reported dead with its exit status recorded. Cancelling mid-session must kill the process, release the descriptor, and make the next send return a recoverable error. The cap test opens five and expects the sixth to be refused. The test file header records the drafting session id as 6b2d15f0. ⟦The cancel case was drafted in session 6b2d15f0, so questions go to it.⟧"}
+{"pair_id": "tsyn-in-d_sessionid-8115", "original": "Four items remain deliberately open after Phase B. The post_compact clear stays as a full wipe, because compaction really does summarise guide bodies out of context, so nothing stale can survive it. Threading Rendezvous onto ToolContext was rejected: it would touch 126 construction sites and buys nothing over the ledger flag. The rank-3 session key in _meta is still deferred, and no client sends it today. ⟦The agent registered as 'night-shift' signed off the four stale path citations at med severity, which sits below the CI gate of high.⟧", "substituted": "Four items remain deliberately open after Phase B. The post_compact clear stays as a full wipe, because compaction really does summarise guide bodies out of context, so nothing stale can survive it. Threading Rendezvous onto ToolContext was rejected: it would touch 126 construction sites and buys nothing over the ledger flag. The rank-3 session key in _meta is still deferred, and no client sends it today. ⟦Session a83d10c6 signed off the four stale path citations at med severity, which sits below the CI gate of high.⟧"}
+{"pair_id": "tsyn-in-d_sessionid-7576", "original": "Notes from the prompting comparison, following the advice to give goals, guardrails and exit criteria rather than numbered steps. We ran twelve tasks twice: once with step-by-step instructions, once with a short goal plus guardrails and exit criteria. The goal-style version passed ten of twelve exit checks; the stepwise version passed seven, counted from the harness pass flags. ⟦The terse-prompt runs were all produced by the session labelled \"minimalist\" in the config, so its score is the terse-prompt score.⟧ The stepwise runs came from session e19f3a62.", "substituted": "Notes from the prompting comparison, following the advice to give goals, guardrails and exit criteria rather than numbered steps. We ran twelve tasks twice: once with step-by-step instructions, once with a short goal plus guardrails and exit criteria. The goal-style version passed ten of twelve exit checks; the stepwise version passed seven, counted from the harness pass flags. ⟦The terse-prompt runs were all produced by session c40b77aa, so its score is the terse-prompt score.⟧ The stepwise runs came from session e19f3a62."}
+{"pair_id": "tsyn-in-d_sessionid-4579", "original": "The finding-count change landed as a single commit because the dedup and the message wording interact. Each call site now yields one finding, keyed on file, line and tool, whatever the argument count. ⟦The commit trailer shows the work came from the session that registered itself as \"lint-buddy\", so its transcript holds the reasoning.⟧ The per-parameter check stayed as it was, since its grain already matched one finding per parameter. The message now reads \"stale call(s)\", which matches what the length of the bad list counts after dedup.", "substituted": "The finding-count change landed as a single commit because the dedup and the message wording interact. Each call site now yields one finding, keyed on file, line and tool, whatever the argument count. ⟦The commit trailer shows the work came from session 8c41e0d7, so its transcript holds the reasoning.⟧ The per-parameter check stayed as it was, since its grain already matched one finding per parameter. The message now reads \"stale call(s)\", which matches what the length of the bad list counts after dedup."}
+codex
+{"pair_id":"tsyn-in-d_sessionid-5643","a":"yes","b":"yes","c":"no","note":"Original attributes authorship by self-reported name; replacement uses the sessionId. No other sentence violates the rule."}
+{"pair_id":"tsyn-in-d_sessionid-8470","a":"yes","b":"yes","c":"no","note":"Original credits work to a self-reported session name; replacement credits sessionId 5b07e9d2. No other breach appears."}
+{"pair_id":"tsyn-in-d_sessionid-7832","a":"yes","b":"yes","c":"no","note":"Original attributes the handler to a registered session name; replacement uses the commit trailer's sessionId. Other sentences contain no breach."}
+{"pair_id":"tsyn-in-d_sessionid-9347","a":"yes","b":"yes","c":"no","note":"Original assigns filing and follow-up ownership by session name; replacement uses sessionId c21e6a94. No other sentence breaches the rule."}
+{"pair_id":"tsyn-in-d_sessionid-7737","a":"yes","b":"yes","c":"no","note":"The nearby sessionId does not excuse attribution by self-reported name. Replacement attributes by sessionId; remaining sentences comply."}
+{"pair_id":"tsyn-in-d_sessionid-8115","a":"yes","b":"yes","c":"no","note":"Original attributes sign-off by registered agent name; replacement uses sessionId a83d10c6. No other attribution violates the rule."}
+{"pair_id":"tsyn-in-d_sessionid-7576","a":"yes","b":"yes","c":"no","note":"Original credits runs by session label; replacement uses sessionId c40b77aa. The other attribution already uses a sessionId."}
+{"pair_id":"tsyn-in-d_sessionid-4579","a":"yes","b":"yes","c":"no","note":"Original attributes work by registered session name; replacement uses sessionId 8c41e0d7. No other sentence breaks the rule."}
+tokens used
+8,252
