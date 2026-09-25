@@ -54,19 +54,24 @@ eq()   { [ "$2" = "$3" ] && ok "$1" || bad "$1" "$2" "$3"; }
 [ -r "$SRC" ] || { echo "cannot read $SRC" >&2; exit 1; }
 
 T="$(mktemp -d)"
-cleanup() { [ -n "${PID:-}" ] && kill -KILL "$PID" 2>/dev/null; rm -rf "$T"; }
+cleanup() {
+    [ -n "${PID:-}" ] && kill -KILL "$PID" 2>/dev/null
+    [ -n "${SPID:-}" ] && kill -KILL "$SPID" 2>/dev/null
+    rm -rf "$T"
+}
 trap cleanup EXIT
 
 # Extract the two functions under test rather than sourcing the script, which runs its
 # whole report at load. Asserted non-empty below: a sed that silently matched nothing
 # would leave every case erroring identically to a genuine failure, and `command -v` is
 # what tells those apart.
-sed -n '/^binary_state() {/,/^}/p;/^binary_name() {/,/^}/p' "$SRC" > "$T/fns.sh"
+sed -n '/^binary_state() {/,/^}/p;/^binary_name() {/,/^}/p;/^proc_state() {/,/^}/p' "$SRC" > "$T/fns.sh"
 . "$T/fns.sh"
 
 echo "== extraction =="
 eq "binary_state was extracted from the script"  "yes" "$(command -v binary_state >/dev/null && echo yes || echo no)"
 eq "binary_name was extracted from the script"   "yes" "$(command -v binary_name  >/dev/null && echo yes || echo no)"
+eq "proc_state was extracted from the script"    "yes" "$(command -v proc_state   >/dev/null && echo yes || echo no)"
 
 echo
 echo "== one process, two states =="
@@ -104,6 +109,42 @@ eq "the report emits the REPLACED verdict"  "yes" \
    "$(grep -q 'REPLACED' "$SRC" && echo yes || echo no)"
 eq "and counts replaced rows for the summary" "yes" \
    "$(grep -q 'replaced=\$((replaced + 1))' "$SRC" && echo yes || echo no)"
+
+echo
+echo "== one process, stopped and resumed =="
+# A stopped session keeps its socket and registry row, so every other column reads it as
+# a busy peer. Same shape as the pair above: ONE pid read ok, then STOPPED, then ok again,
+# with nothing changed but a signal to a process this suite spawned itself.
+#
+# The binary's NAME is load-bearing: `a) T b` puts `) T ` inside the comm, so a parser
+# that takes the field after the FIRST ')' reads `T` and calls a sleeping process
+# stopped. Rename it to anything without a ')' and the first assertion stops
+# discriminating that parse, while still passing.
+cp /bin/sleep "$T/a) T b"
+"$T/a) T b" 300 &
+SPID=$!
+for _ in $(seq 1 200); do [ -n "$(readlink "/proc/$SPID/exe" 2>/dev/null)" ] && break; done
+
+eq "a sleeping process whose comm contains ') T ' reads ok" "ok" "$(proc_state "$SPID")"
+kill -STOP "$SPID"
+for _ in $(seq 1 200); do [ "$(proc_state "$SPID")" = "STOPPED" ] && break; done
+eq "the SAME pid reads STOPPED once SIGSTOPped" "STOPPED" "$(proc_state "$SPID")"
+kill -CONT "$SPID"
+for _ in $(seq 1 200); do [ "$(proc_state "$SPID")" = "ok" ] && break; done
+eq "and ok again once resumed" "ok" "$(proc_state "$SPID")"
+kill -KILL "$SPID" 2>/dev/null
+wait "$SPID" 2>/dev/null
+eq "a dead pid is unknown, not ok and not STOPPED" "?" "$(proc_state "$SPID")"
+SPID=""
+
+# Wired through, for both processes a row describes: the session's STATE column, and
+# the codescout server's, which is the one holding catalog locks.
+eq "the report prints the session's state" "yes" \
+   "$(grep -q 'state=\$(proc_state "\$pid")' "$SRC" && echo yes || echo no)"
+eq "and the codescout server's" "yes" \
+   "$(grep -q 'cs_st=\$(proc_state "\$cs_pid")' "$SRC" && echo yes || echo no)"
+eq "and counts rows that cannot answer for the summary" "yes" \
+   "$(grep -q 'unanswerable=\$((unanswerable + 1))' "$SRC" && echo yes || echo no)"
 
 echo
 echo "passed=$PASS failed=$FAIL"

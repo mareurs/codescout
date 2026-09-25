@@ -131,6 +131,29 @@ binary_name() {
     basename "${_bn% (deleted)}"
 }
 
+# Whether a process can ANSWER at all, which no other column says. A session in state T
+# (SIGSTOPped) keeps its socket and its registry row, so it is listed, addressable and
+# LISTED=yes exactly like a busy peer. But it cannot read a message, and any lock it or
+# its codescout server holds stays held until it resumes. Measured 2026-09-14: a session
+# stopped for four days held a SHARED lock on the production catalog while this table
+# offered it as a peer to ask
+# (docs/issues/2026-09-14-a-stopped-session-holds-a-catalog-lock-and-reads-as-a-live-peer.md).
+#
+# The state is the first field after the LAST ')' of /proc/<pid>/stat, never the third
+# whitespace field: field 2 is the comm in parentheses, and a comm may itself contain
+# spaces and ')'. A process named `a) T b` has a naive third field of `T` while it sleeps.
+proc_state() {
+    _ps=$(cat "/proc/$1/stat" 2>/dev/null) || { echo "?"; return; }
+    [ -z "$_ps" ] && { echo "?"; return; }
+    _ps=${_ps##*) }
+    case "${_ps%% *}" in
+        T | t) echo "STOPPED" ;;
+        Z | X) echo "ZOMBIE" ;;
+        R | S | D | I | W | P | K) echo "ok" ;;
+        *) echo "?" ;;
+    esac
+}
+
 # The codescout MCP server is a CHILD of the session process, so its freshness is
 # a DIFFERENT question from the session's own — and it is the one that moves,
 # because codescout is rebuilt many times a day while `claude` upgrades rarely.
@@ -158,21 +181,22 @@ if [ -n "$self_pid" ]; then
     self_profile=$(profile_of "$self_pid")
 fi
 
-printf '%-9s %-4s %-13s %-6s %-40s %-24s %s\n' PID SELF PROFILE LISTED CWD STARTED BINARIES
+printf '%-9s %-4s %-8s %-13s %-6s %-40s %-24s %s\n' PID SELF STATE PROFILE LISTED CWD STARTED BINARIES
 live=0
 stale=0
 matched=0
 blind=0
 visible=0
 replaced=0
+unanswerable=0
 for sock in "$SOCK_DIR"/*.sock; do
     [ -e "$sock" ] || continue
     pid=$(basename "$sock" .sock)
 
     if [ ! -d "/proc/$pid" ]; then
         stale=$((stale + 1))
-        printf '%-9s %-4s %-13s %-6s %-40s %-24s %s\n' \
-            "$pid" "" "?" "?" "" "" "stale socket (no process)"
+        printf '%-9s %-4s %-8s %-13s %-6s %-40s %-24s %s\n' \
+            "$pid" "" "?" "?" "?" "" "" "stale socket (no process)"
         continue
     fi
 
@@ -215,14 +239,21 @@ for sock in "$SOCK_DIR"/*.sock; do
     cs_pid="${CS_OF_SESSION[$pid]:-}"
     if [ -n "$cs_pid" ]; then
         cs_show="cs $(binary_state "$cs_pid")"
+        # The server is the one that holds catalog locks, and it stops with its session,
+        # so its state is reported beside its freshness rather than folded into STATE.
+        cs_st=$(proc_state "$cs_pid")
+        [ "$cs_st" = "ok" ] || cs_show="$cs_show $cs_st"
     else
         cs_show="cs none"
     fi
     binaries="$cc_show / $cs_show"
     case "$binaries" in *REPLACED*) replaced=$((replaced + 1)) ;; esac
 
-    printf '%-9s %-4s %-13s %-6s %-40s %-24s %s\n' \
-        "$pid" "$mark" "$prof" "$vis" "$cwd" "$started" "$binaries"
+    state=$(proc_state "$pid")
+    case "$state $cs_show" in *STOPPED* | *ZOMBIE*) unanswerable=$((unanswerable + 1)) ;; esac
+
+    printf '%-9s %-4s %-8s %-13s %-6s %-40s %-24s %s\n' \
+        "$pid" "$mark" "$state" "$prof" "$vis" "$cwd" "$started" "$binaries"
 done
 
 echo
@@ -276,6 +307,15 @@ else
 fi
 
 echo
+if [ "$unanswerable" -gt 0 ]; then
+    echo "$unanswerable of the $matched row(s) above cannot answer: the session, or the codescout"
+    echo "server it owns, is STOPPED (state T) or a ZOMBIE. It keeps its socket and its registry"
+    echo "row, so everything else here lists it like a busy peer, but a message to it is queued"
+    echo "and never read, and a lock it holds stays held until it resumes. Do not wait on it, and"
+    echo "do not signal another session's process yourself: resuming it (SIGCONT) or ending it is"
+    echo "its operator's call, and the operator is the one to ask."
+    echo
+fi
 echo "Any pid above is addressable whether or not ListAgents lists it:"
 echo "  SendMessage(to: \"uds:$SOCK_DIR/<pid>.sock\", …)"
 echo

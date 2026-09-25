@@ -1,13 +1,14 @@
 ---
 kind: bug
-status: open
+status: mitigated
 tags:
 - cluster/shared-resource-carries-no-owner
-closed: null
+closed: 2026-09-25
 opened: 2026-09-14
 owner: marius
 related: []
 severity: medium
+unverified: 'TRACKED 85bb41bcd8e93d2c — the lock hold itself: a stopped holder still holds its SHARED lock (a busy_timeout stall and blocked checkpoints on this WAL catalog). Isolation is IC-17''s remedy; only the listing was fixed here.'
 ---
 
 # BUG: a SIGSTOPped session holds a catalog lock indefinitely, and every instrument reports it as a live peer
@@ -125,28 +126,36 @@ will never answer, and reports it in the same shape as one that will.
 
 ## Fix
 
-Not implemented, and the first step is not a code change.
+**E2 fixed 2026-09-25: the first candidate, the liveness column.** `scripts/peer-sessions.sh` now has a `STATE`
+column (`ok` / `STOPPED` / `ZOMBIE` / `?`) read by a new `proc_state`. It also marks the session's codescout
+server `STOPPED` in the BINARIES column, because the server is the one that holds catalog locks. When any row
+cannot answer, the report prints a summary naming the next action and a party who can take it: resuming or ending
+a stopped session is its operator's call, not a peer's. The state is parsed after the LAST `)` of
+`/proc/<pid>/stat`, because a comm may contain spaces and `)`.
 
-**The stopped session is the operator's call and nobody else's.** Resuming it (`SIGCONT`) or
-ending it are both fine; signalling another session's processes is not something a peer session
-may decide, and this corpus already paid for recommending exactly that
-(`bug-fix-session-log:F-140`). The question is answerable in one word, which is why it goes to
-a person: *resume it, or kill it?*
+**The lock hold itself is NOT addressed, and this file is `mitigated`, not `fixed`, for that reason.** A stopped
+holder still holds its SHARED lock. On this WAL catalog that costs a busy_timeout stall and blocked checkpoints
+rather than a wedge (see the 2026-09-25 re-verification above). The class-level remedy is isolation, which `IC-17`
+names and which this change does not attempt: IC-17's own reading is *isolate the resource, do not improve the
+listing*, and this change improves the listing. What it buys is that the listing no longer tells a reader that a
+party who cannot answer is askable.
 
-Two candidate durable changes, neither argued enough to build:
-
-- **A liveness column in `scripts/peer-sessions.sh`.** `ps -o stat=` on the pid it already has
-  distinguishes `T` from `S` for free. Cheap, and it closes E2 rather than the lock hold.
-- **Isolation.** A per-session or per-test catalog would make one stopped session unable to
-  constrain anyone. This is the remedy `IC-17` names, and the larger of the two.
-
-Fix SHA: *(not yet fixed)*
-Patch-id: *(not yet fixed)*
+Fix SHA: *(recorded when archived)*
+Patch-id: *(recorded when archived)*
 
 ## Tests added
 
-None. Nothing here is fixed yet, and both candidate fixes above are unargued — a test now would
-pin a shape nobody has chosen.
+`tests/peer-sessions.sh` § *one process, stopped and resumed*: ONE pid read `ok`, then `STOPPED` after SIGSTOP,
+then `ok` after SIGCONT, and `?` once dead. The fixture binary is named `a) T b`, so a first-`)` parse reads `T`
+from a sleeping process. There are also three wiring checks. Suite at 18/0. Mutations via `scripts/mutation-probe.sh`,
+each killed:
+
+- a first-`)` parse: 2 assertions;
+- `T` read as `ok`: the STOPPED assertion;
+- the server's state unwired: its wiring check.
+
+The wiring checks are text greps, the suite's existing ceiling. The table reads the real
+`/run/user/<uid>/cc-socks`, and a test cannot inject a session there.
 
 ## Workarounds
 
@@ -157,22 +166,8 @@ is what *blocked* and *unblocked-and-busy* both look like (`F-140`).
 
 ## Resume
 
-**Ask the operator about session `0e6223f0-d37e-48ee-9b46-4ca973fe8c8c` (pid 3031162, profile
-`~/.claude`, stopped since 2026-09-10 08:38:32) before anything else.** Everything below is
-downstream of that answer, and the lock cannot be cleared without it.
-
-Then, to establish the mechanism the § Root cause leaves open — the missing observation is a
-**blocked writer**, not more lock counting:
-
-1. Reproduce a stall (two `cargo test --workspace` runs), and while it is stalled read
-   `ps -o stat=,wchan= ` on the stalled process. `D` or a futex wchan is the discriminator; a
-   lock count is not, per E1.
-2. Check whether the test binaries open the production catalog at all —
-   `ls -l /proc/<test-pid>/fd | grep catalog`. Today's snapshot says the 24 holders are all MCP
-   servers, so this is genuinely open.
-
-Do not re-derive the lock table expecting it to answer the question. It has now been read twice
-and discriminated nothing.
+The instance has cleared (pids 3031436 and 3031162 are gone), so the operator question this section used to lead
+with is moot. Nothing further is owed here. The lock-hold class is `IC-17`'s.
 
 ## References
 
