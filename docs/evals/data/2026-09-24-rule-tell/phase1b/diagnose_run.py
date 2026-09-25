@@ -44,8 +44,10 @@ def main() -> int:
     menu, temps = cal["menu"], cal["temperatures"]
     thr = json.loads((run / "thresholds.json").read_text())
     log = [json.loads(line) for line in (run / "log.jsonl").read_text().splitlines()]
+    start = next(e for e in log if e["event"] == "start")
+    recipe = start.get("recipe", "phase1")   # the run's own encoding and feature handling
 
-    model = ta.Arm(args.arm, len(menu), args.device)
+    model = ta.Arm(args.arm, len(menu), args.device, recipe)
     state = torch.load(run / "best.pt")
     got = model.load_state_dict(state, strict=False)
     absent = sorted(set(state) - set(model.state_dict()))
@@ -77,9 +79,9 @@ def main() -> int:
         ys = [y for rr, y, _ in own if rr == r]
         zs = [z for rr, _, z in own if rr == r]
         per_rule_auc[r] = roc_auc_score(ys, zs)
-    start = next(e for e in log if e["event"] == "start")
     result = {
         "run_dir": str(run),
+        "recipe": recipe,
         "seed": start.get("seed"),
         "permute_labels": start.get("permute_labels", False),
         "val_loss_by_epoch": [[e["epoch"], e["val_loss"]] for e in log if e["event"] == "val"],
@@ -91,9 +93,11 @@ def main() -> int:
         "other_rule_cells_fired": other,
         "other_rule_total": [sum(v[0] for v in other.values()), sum(v[1] for v in other.values())],
     }
+    epochs = [e for e in log if e["event"] == "epoch"]
+    result["final_epoch_train_loss"] = epochs[-1]["train_loss"] if epochs else None
     args.out.write_text(json.dumps(result, indent=1))
     o = result["other_rule_total"]
-    print(f"{run}: seed {result['seed']} permute {result['permute_labels']}")
+    print(f"{run}: recipe {recipe} seed {result['seed']} permute {result['permute_labels']}")
     print(f"  val loss by epoch {result['val_loss_by_epoch']}  selected {result['selected']}")
     print(f"  pooled val AUC {result['pooled_val_auc']:.3f}  per-rule min/median/max "
           f"{min(per_rule_auc.values()):.3f}/{sorted(per_rule_auc.values())[len(menu) // 2]:.3f}/"

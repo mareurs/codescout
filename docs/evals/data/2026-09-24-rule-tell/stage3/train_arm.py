@@ -54,6 +54,22 @@ T_BOUNDS = (0.25, 10.0)     # per-rule temperature search range; a fit at a boun
 PREC_TARGET = 0.9           # precision-oriented threshold (L1/L2 standalone)
 REC_TARGET = 0.9            # C1 first-stage threshold
 
+# Training recipes. "phase1" is phase 1's registered recipe and the default; its values come from
+# ARMS and the constants above, and every other key is off, so phase-1 runs reproduce exactly.
+# The others are registered in the phase-1b pre-registration, Stage 1, before they run. None of
+# their values was tuned; each comes from docs/research/2026-09-25-phase1-training-research-synthesis.md.
+RECIPES = {
+    "phase1": dict(lr_body=None, lr_head=None, epochs=None, accum=ACCUM, warmup=WARMUP,
+                   space_fix=False, norm_feature=False, pair_windows=False, sep_clip=False),
+    # head at the body's lr; 10% warmup; 1,120 optimizer steps (5 epochs at accumulation 8);
+    # both texts of a pair in one accumulation window; head and body clipped separately.
+    "s1-r1": dict(lr_body=1e-4, lr_head=1e-4, epochs=5, accum=8, warmup=0.10,
+                  space_fix=True, norm_feature=False, pair_windows=True, sep_clip=True),
+    # s1-r1 plus a parameter-free LayerNorm on the marker feature before the head.
+    "s1-r2": dict(lr_body=1e-4, lr_head=1e-4, epochs=5, accum=8, warmup=0.10,
+                  space_fix=True, norm_feature=True, pair_windows=True, sep_clip=True),
+}
+
 
 def load_rows(name: str) -> list[dict]:
     if name not in READABLE:
@@ -73,24 +89,36 @@ class Encoded:
     units: list[str]
 
 
-def encode_units(units: list[str], tok, marker_id: int, bos: list[int], eos: list[int]) -> Encoded:
+def encode_units(units: list[str], tok, marker_id: int, bos: list[int], eos: list[int],
+                 space_fix: bool = False, first_index: int = 0) -> Encoded:
+    """Units joined by marker tokens. With `space_fix`, every unit after the draft's first is
+    tokenised with its leading space, as it appears in running text. Without it, a sentence starts
+    `Nobody` where running text has `ĠNobody`
+    (docs/issues/2026-09-25-encode-units-drops-sentence-leading-space.md). Phase 1's registered
+    recipe ran without it. `first_index` is the draft index of `units[0]`, for windows."""
     ids, markers = list(bos), []
-    for u in units:
-        ids.extend(tok(u, add_special_tokens=False)["input_ids"])
+    for k, u in enumerate(units):
+        text = " " + u if space_fix and first_index + k > 0 else u
+        ids.extend(tok(text, add_special_tokens=False)["input_ids"])
         markers.append(len(ids))
         ids.append(marker_id)
     ids.extend(eos)
     return Encoded(ids, markers, units)
 
 
-def chunks(units: list[str], tok, marker_id, bos, eos, max_len: int | None) -> list[tuple[int, Encoded]]:
+def chunks(units: list[str], tok, marker_id, bos, eos, max_len: int | None,
+           space_fix: bool = False) -> list[tuple[int, Encoded]]:
     """(first unit index, encoding) windows. One window when the draft fits; otherwise windows of
     whole units with half-window overlap, so a unit near a cut is also seen with context on both
     sides. A unit's score is its maximum over the windows containing it (Stage 3, L1)."""
-    whole = encode_units(units, tok, marker_id, bos, eos)
+    whole = encode_units(units, tok, marker_id, bos, eos, space_fix)
     if max_len is None or len(whole.ids) <= max_len:
         return [(0, whole)]
-    lens = [len(tok(u, add_special_tokens=False)["input_ids"]) + 1 for u in units]
+
+    def text(i: int) -> str:
+        return " " + units[i] if space_fix and i > 0 else units[i]
+
+    lens = [len(tok(text(i), add_special_tokens=False)["input_ids"]) + 1 for i in range(len(units))]
     budget = max_len - len(bos) - len(eos)
     out, start = [], 0
     while start < len(units):
@@ -99,12 +127,12 @@ def chunks(units: list[str], tok, marker_id, bos, eos, max_len: int | None) -> l
             used += lens[end]
             end += 1
         if end == start:                      # a single unit longer than the window: truncate it
-            ids = tok(units[start], add_special_tokens=False)["input_ids"][: budget - 1]
+            ids = tok(text(start), add_special_tokens=False)["input_ids"][: budget - 1]
             enc = Encoded(list(bos) + ids + [marker_id] + list(eos), [len(bos) + len(ids)], [units[start]])
             out.append((start, enc))
             start += 1
             continue
-        out.append((start, encode_units(units[start:end], tok, marker_id, bos, eos)))
+        out.append((start, encode_units(units[start:end], tok, marker_id, bos, eos, space_fix, start)))
         if end == len(units):
             break
         start = max(start + 1, start + (end - start) // 2)
@@ -112,11 +140,13 @@ def chunks(units: list[str], tok, marker_id, bos, eos, max_len: int | None) -> l
 
 
 class Arm(nn.Module):
-    def __init__(self, arm: str, n_rules: int, device: str):
+    def __init__(self, arm: str, n_rules: int, device: str, recipe: str = "phase1"):
         super().__init__()
         from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
         cfg = ARMS[arm]
         self.arm, self.cfg = arm, cfg
+        self.space_fix = RECIPES[recipe]["space_fix"]
+        self.norm_feature = RECIPES[recipe]["norm_feature"]
         self.tok = AutoTokenizer.from_pretrained(cfg["model"])
         self.marker_id = self.tok.convert_tokens_to_ids(cfg["marker"])
         assert self.marker_id is not None and self.marker_id != self.tok.unk_token_id, cfg["marker"]
@@ -146,12 +176,15 @@ class Arm(nn.Module):
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             out = self.body(input_ids=ids, attention_mask=torch.ones_like(ids))
         h = out.last_hidden_state[0, enc.markers].float()
+        if self.norm_feature:          # parameter-free: the head reads a unit-scale, centred feature
+            h = F.layer_norm(h, (h.shape[-1],))
         return self.head(h)
 
     def unit_logits(self, units: list[str]) -> torch.Tensor:
         """[n_units, n_rules]: each unit's maximum over the windows that contain it."""
         best = None
-        for start, enc in chunks(units, self.tok, self.marker_id, self.bos, self.eos, self.cfg["max_len"]):
+        for start, enc in chunks(units, self.tok, self.marker_id, self.bos, self.eos, self.cfg["max_len"],
+                                 self.space_fix):
             lg = self.logits_for(enc)
             if best is None:
                 best = torch.full((len(units), lg.shape[1]), -math.inf, device=lg.device)
@@ -267,6 +300,8 @@ def main():
     ap.add_argument("--arm", choices=sorted(ARMS), required=True)
     ap.add_argument("--out", type=Path, required=True, help="run directory, outside the repo")
     ap.add_argument("--device", default="cuda:0")
+    ap.add_argument("--recipe", choices=sorted(RECIPES), default="phase1",
+                    help="training recipe; phase1 is phase 1's registered recipe (the default)")
     ap.add_argument("--seed", type=int, default=SEED,
                     help="training seed; the registered arm uses the default. Others are diagnostics")
     ap.add_argument("--permute-labels", action="store_true",
@@ -302,44 +337,78 @@ def main():
                 train[i] = {**train[i], "label": y}
     pw = pos_weights(train, menu)
     cfg = ARMS[args.arm]
-    epochs = cfg["epochs"]
+    rec = RECIPES[args.recipe]
+    lr_body = rec["lr_body"] if rec["lr_body"] is not None else cfg["lr_body"]
+    lr_head = rec["lr_head"] if rec["lr_head"] is not None else cfg["lr_head"]
+    epochs = rec["epochs"] if rec["epochs"] is not None else cfg["epochs"]
+    accum, warmup = rec["accum"], rec["warmup"]
     if args.smoke:
         train, epochs = train[: args.smoke], 1
 
-    model = Arm(args.arm, len(menu), args.device)
+    model = Arm(args.arm, len(menu), args.device, args.recipe)
     body_p, head_p = model.trainable()
     emit(event="start", arm=args.arm, device=args.device, backend=("rocm" if torch.version.hip else "cuda"),
          torch=torch.__version__, gpu=torch.cuda.get_device_name(args.device), menu=menu, pos_weight=pw,
          trainable_body=sum(p.numel() for p in body_p), smoke=args.smoke, seed=args.seed,
-         permute_labels=args.permute_labels, cfg=cfg)
+         permute_labels=args.permute_labels, cfg=cfg, recipe=args.recipe,
+         resolved=dict(rec, lr_body=lr_body, lr_head=lr_head, epochs=epochs))
 
     opt = torch.optim.AdamW([
-        {"params": body_p, "lr": cfg["lr_body"], "weight_decay": WEIGHT_DECAY},
-        {"params": head_p, "lr": cfg["lr_head"], "weight_decay": 0.0},
+        {"params": body_p, "lr": lr_body, "weight_decay": WEIGHT_DECAY},
+        {"params": head_p, "lr": lr_head, "weight_decay": 0.0},
     ])
-    steps = math.ceil(len(train) / ACCUM) * epochs
-    warm = max(1, int(WARMUP * steps))
+    steps = math.ceil(len(train) / accum) * epochs
+    warm = max(1, int(warmup * steps))
     sched = torch.optim.lr_scheduler.LambdaLR(     # linear warmup, then linear decay to 0
         opt, lambda s: (s + 1) / warm if s < warm else max(0.0, (steps - s) / max(1, steps - warm)))
 
+    def epoch_order(ep: int) -> list[int]:
+        if not rec["pair_windows"]:
+            order = list(range(len(train)))
+            random.Random(args.seed + ep).shuffle(order)
+            return order
+        # Both texts of a pair adjacent, so they share an accumulation window: their shared feature
+        # then cancels in the head's gradient. Unpaired rows go last, so no pair straddles a window
+        # boundary (accum is even).
+        groups: dict[str, list[int]] = {}
+        for i, r in enumerate(train):
+            groups.setdefault(r["id"].rpartition(":")[0], []).append(i)
+        pairs = [g for g in groups.values() if len(g) == 2]
+        rest = [i for g in groups.values() if len(g) != 2 for i in g]
+        random.Random(args.seed + ep).shuffle(pairs)
+        return [i for g in pairs for i in g] + rest
+
     val = [] if args.smoke else load_rows("val")
     best = (math.inf, -1)
+    step, win_z = 0, []
     for ep in range(epochs):
         model.train()
-        order = list(range(len(train)))
-        random.Random(args.seed + ep).shuffle(order)
+        order = epoch_order(ep)
         run, n = 0.0, 0
         for i, j in enumerate(order):
             r = train[j]
-            loss = weighted_bce(cell_logit(model, r, rule_idx), r["label"], pw[r["rule"]])
-            (loss / ACCUM).backward()
+            z = cell_logit(model, r, rule_idx)
+            loss = weighted_bce(z, r["label"], pw[r["rule"]])
+            (loss / accum).backward()
             run += loss.item()
+            win_z.append(z.item())
             n += 1
-            if (i + 1) % ACCUM == 0 or i + 1 == len(order):
-                torch.nn.utils.clip_grad_norm_(body_p + head_p, CLIP)
+            if (i + 1) % accum == 0 or i + 1 == len(order):
+                if rec["sep_clip"]:
+                    torch.nn.utils.clip_grad_norm_(body_p, CLIP)
+                    torch.nn.utils.clip_grad_norm_(head_p, CLIP)
+                else:
+                    torch.nn.utils.clip_grad_norm_(body_p + head_p, CLIP)
                 opt.step()
                 sched.step()
                 opt.zero_grad(set_to_none=True)
+                step += 1
+                if step % 50 == 0:     # the head-step mechanism, observed rather than inferred
+                    emit(event="steplog", step=step, lr_head=sched.get_last_lr()[1],
+                         head_weight_norm=round(model.head.weight.norm().item(), 4),
+                         mean_logit=round(sum(win_z) / len(win_z), 4),
+                         mean_abs_logit=round(sum(abs(v) for v in win_z) / len(win_z), 4))
+                    win_z = []
             if (i + 1) % 200 == 0:
                 emit(event="progress", epoch=ep, rows=i + 1, train_loss=run / n,
                      max_mem_gb=round(torch.cuda.max_memory_allocated(args.device) / 2**30, 2))
@@ -362,13 +431,20 @@ def main():
     cal = load_rows("cal")
     cz = fold_logits(model, cal, rule_idx)
     vz = fold_logits(model, val, rule_idx)
+
+    def sig(x: float) -> float:        # phase 1's formula, guarded only where it would overflow
+        try:
+            return 1 / (1 + math.exp(-x))
+        except OverflowError:
+            return 0.0
+
     temps, thr = {}, {}
     for rule in menu:
         ci = [i for i, r in enumerate(cal) if r["rule"] == rule]
         T, at_bound = fit_temperature([cz[i] for i in ci], [cal[i]["label"] for i in ci])
         temps[rule] = dict(T=T, at_bound=at_bound, cal_n=len(ci), cal_pos=sum(cal[i]["label"] for i in ci))
         vi = [i for i, r in enumerate(val) if r["rule"] == rule]
-        vp = [1 / (1 + math.exp(-vz[i] / T)) for i in vi]
+        vp = [sig(vz[i] / T) for i in vi]
         thr[rule] = thresholds(vp, [val[i]["label"] for i in vi])
     (args.out / "calibration.json").write_text(json.dumps(dict(menu=menu, temperatures=temps), indent=1))
     (args.out / "thresholds.json").write_text(json.dumps(thr, indent=1))

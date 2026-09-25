@@ -15,7 +15,9 @@ tags:
 
 **Valid:** dated 2026-09-25
 
-**Status: DRAFT, not yet registered.** Registration is the commit that changes this line to `registered`. Nothing below runs before that commit.
+**Status: Stage 1 registered by the commit that adds its section below; Stages 2 and later are DRAFT and not registered.**
+- **Stage 1,** a stable training recipe, runs after that commit.
+- **The sections from "Step 1 — the cross-rule audit" onward** are the Stage-2+ draft. They will be revised in light of Stage 1 and of `docs/research/2026-09-25-phase1-training-research-synthesis.md`: rule-conditioned formulation, cue-balanced training rows, all-cells validation, and failure rates over all seeds in place of the "learned-only" causal reading, which the research showed to be selection after treatment. Each stage is registered before it runs.
 
 ## Why this exists
 
@@ -63,6 +65,62 @@ Registered in phase 1 (§ *Diagnostics after the stop*) before they ran. **Phase
 2. **Open, and blocking registration: the recipe itself.** With one of two seeds learning, phase 1b's gate would partly test training stability, not cross-rule negatives. There are two ways forward; the operator decides between them before this draft is registered.
    - **Keep the recipe and add seeds:** train three or more seeds per configuration, and read the causal claim only over the checkpoints that learned. It is cheaper to design, and runs may be wasted.
    - **Stabilise the recipe first:** select the recipe on val, on the phase-1 objective without cross-rule negatives, over a small registered grid (for example, peak learning rates for the body and head), two seeds per cell, choosing the cell with the best worst-seed pooled val AUC. Then retrain **both** D and L2-1b with that recipe, two seeds each, so the causal comparison is one recipe, with and without the negatives. This costs more GPU time, and the comparison is cleaner.
+
+## Stage 1 — a stable training recipe, 2026-09-25 (registered before it runs)
+
+**Why first.** The phase-1 recipe learned at one seed of two, and both seeds' train loss rose above chance after warmup. The research synthesis traces that to the optimiser setup:
+- a head learning rate of 1e-3 on a marker feature of L2 ≈ 155, most of it one shared direction;
+- 336 optimizer steps, against the documented thousands;
+- a 20-step warmup.
+
+Until a recipe learns reliably, a gate result partly measures training luck, so every later stage waits on this one.
+
+**What changes, and what does not.** The **objective is phase 1's**, unchanged: the same frozen train, val and cal; per-rule heads; one labelled cell per row, with every other cell masked. Only the recipe changes, so Stage 1 isolates optimisation. T, the T-syn sets and the gate texts are not read.
+
+**Code:** `train_arm.py`, `--recipe`. `phase1` stays the default and takes phase 1's path. Every value below comes from the research synthesis, and none was tuned:
+
+| | phase1 (reference) | s1-r1 | s1-r2 |
+|---|---|---|---|
+| LoRA / head lr | 2e-4 / 1e-3 | **1e-4 / 1e-4** | 1e-4 / 1e-4 |
+| optimizer steps | 336 (3 epochs × accum 16) | **1,120** (5 epochs × accum 8) | 1,120 |
+| warmup | 6% | **10%** | 10% |
+| leading-space fix | no | **yes** | yes |
+| pair in one accumulation window | no | **yes** | yes |
+| head and body clipped separately | no | **yes** | yes |
+| LayerNorm (no affine) on the marker feature | no | no | **yes** |
+
+Common to all three: JevK5 with LoRA r16/α32/dropout 0.05 on all linear projections (the DeltaNet `in_proj_a`/`in_proj_b` question is left open), a zero-initialised head, AdamW with default betas, weight decay 0.01 on the body, bf16 autocast, and the A5000.
+
+**Seeds:** 20260935, 20260937 and 20260940. That is three per recipe, six runs. The literature uses 5 to 25; three is a cost-bounded floor, disclosed as one, and the decision below needs 3 of 3.
+
+**Runs are not bit-reproducible, measured.** Two 64-row smoke runs of the same code and seed gave train losses of 1.50213 and 1.50289. So a seed labels a run and does not reproduce it, and recipes are judged by counts over runs.
+
+**Measured per run:**
+- **From `phase1b/diagnose_run.py` on the selected checkpoint:** pooled and per-rule val AUC over own cells, and cross-rule firing on val.
+- **From the run's own log:** val loss by epoch, the selected epoch, the final-epoch train loss, and a step log every 50 optimizer steps (head weight norm, mean logit, mean |logit|). The step log lets the step-size mechanism be observed rather than inferred.
+
+**Definitions, fixed now:**
+- **learned:** pooled own-cell val AUC at least **0.80**;
+- **failed:** pooled val AUC inside the null band [0.45, 0.55], or final-epoch train loss at least **0.65**;
+- **weak:** neither; reported.
+
+**Decision:**
+- A recipe is **stable** if all three of its seeds learned.
+- **If both recipes are stable,** the one with the higher worst-seed pooled val AUC is carried forward. A difference under 0.005 counts as a tie, which goes to `s1-r1`, the one with fewer changes.
+- **If exactly one is stable,** it is carried forward.
+- **If neither is stable,** Stage 1 fails, and phase 1b stops before Stage 2 with the failure counts reported. The next attempt changes the formulation, for example JevK5's own answer tokens with the rule in the prompt, under a new registration.
+- The chosen recipe goes into Stage 2 unchanged.
+
+**Reported, not gating:** each recipe's failure count, with Wilson 95% intervals; and cross-rule firing on val per learned run. Stage 1 does not touch the over-firing mechanism, so this is Stage 2's baseline.
+
+**Hardware and cost:** the A5000, with two runs at a time and three per lane in sequence, about 8.7 GB each. Roughly 4–5 hours.
+
+**Predictions:**
+1. `s1-r1` learns at 3 of 3 seeds.
+2. `s1-r2` learns at 3 of 3 seeds.
+3. **No Stage-1 run shows the overshoot signature,** a running train loss above 0.75 in epoch 0. Phase 1's two seeds reached 0.925 and 1.316.
+4. The chosen recipe's worst-seed pooled val AUC is at least 0.90.
+5. **Cross-rule firing on val stays at 25% or more in every learned run.** Fixing the recipe does not fix over-firing; that is Stage 2's target.
 
 ## Step 1 — the cross-rule audit (decides which cells become negatives)
 
