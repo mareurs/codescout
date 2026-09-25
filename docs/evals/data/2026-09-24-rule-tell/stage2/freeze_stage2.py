@@ -61,29 +61,22 @@ def check_menu_positives(train_rows: list[dict], menu: list[str], target: int = 
         raise AssertionError(f"menu rules under {target} positive train rows: {short}")
     return pos
 
-def main() -> int:
+def paras(p):
+    """A synthetic pair's two paragraphs: as generated, and with the fix substituted."""
+    return p["paragraph"], p["paragraph"].replace(p["violating_sentence"], p["fixed_sentence"], 1)
+
+
+def held_out_shingles() -> set:
+    """H, the 8-token shingle set every training-side item is filtered against: phase 1's
+    held-out texts (mine_pairs.held_out: eval pairs, gate, span gate, controls, fork drafts),
+    every field of the mined T rows, both paragraphs of every T-syn pair, and the S seeds T-syn
+    was generated from. phase1b/mine_counterexamples.py filters on the same set, so the two
+    filters cannot drift apart."""
     mp = gs.mp
-    trainable = json.loads((HERE / "trainable.json").read_text())
-    menu = trainable["trainable"]
     rows = load(HERE / "mined-candidates.jsonl")
     split = {r["id"]: r["split"] for r in load(HERE / "t-split.jsonl")}
-    lab = {r["id"]: r["label"] for r in load(HERE / "agent-labels.jsonl")}
-    fold_of = {r["group"]: r["fold"] for r in load(HERE / "fold-assignment.jsonl")}
     manifest = load(HERE / "seed-manifest.jsonl")
-    r1 = json.loads((SYN / "audit/decisions.json").read_text())["cells"]
-    rel = json.loads((SYN / "audit-contradiction-relational/decisions.json").read_text())["cells"]
-    r2 = json.loads((SYN / "audit-r2/decisions.json").read_text())["cells"]
-    a1 = load(SYN / "audit/audit.jsonl")
-    arel = load(SYN / "audit-contradiction-relational/audit.jsonl")
-    a2 = load(SYN / "audit-r2/audit.jsonl")
-    v1_contra = {a["pair_id"] for a in a1 if a["rule"] == "contradiction"}
-    rel_dis = {a["pair_id"] for a in arel if a["disagree"]}
-    quarantine = {a["pair_id"] for a in a1 + arel + a2 if a["disagree"]} - (v1_contra - rel_dis)
     tsyn = load(SYN / "tsyn-in/pairs.jsonl") + load(SYN / "tsyn-cross/pairs.jsonl")
-
-    def paras(p):
-        return p["paragraph"], p["paragraph"].replace(p["violating_sentence"], p["fixed_sentence"], 1)
-
     H = set().union(*mp.held_out().values())
     for i, s in split.items():
         if s == "T":
@@ -96,6 +89,28 @@ def main() -> int:
     for m in manifest:
         if m["use"] and m["use"].startswith("tsyn:"):
             H |= mp.shingles(m["text"])
+    return H
+
+def main() -> int:
+    mp = gs.mp
+    trainable = json.loads((HERE / "trainable.json").read_text())
+    menu = trainable["trainable"]
+    rows = load(HERE / "mined-candidates.jsonl")
+    split = {r["id"]: r["split"] for r in load(HERE / "t-split.jsonl")}
+    lab = {r["id"]: r["label"] for r in load(HERE / "agent-labels.jsonl")}
+    fold_of = {r["group"]: r["fold"] for r in load(HERE / "fold-assignment.jsonl")}
+    r1 = json.loads((SYN / "audit/decisions.json").read_text())["cells"]
+    rel = json.loads((SYN / "audit-contradiction-relational/decisions.json").read_text())["cells"]
+    r2 = json.loads((SYN / "audit-r2/decisions.json").read_text())["cells"]
+    a1 = load(SYN / "audit/audit.jsonl")
+    arel = load(SYN / "audit-contradiction-relational/audit.jsonl")
+    a2 = load(SYN / "audit-r2/audit.jsonl")
+    v1_contra = {a["pair_id"] for a in a1 if a["rule"] == "contradiction"}
+    rel_dis = {a["pair_id"] for a in arel if a["disagree"]}
+    quarantine = {a["pair_id"] for a in a1 + arel + a2 if a["disagree"]} - (v1_contra - rel_dis)
+    tsyn = load(SYN / "tsyn-in/pairs.jsonl") + load(SYN / "tsyn-cross/pairs.jsonl")
+
+    H = held_out_shingles()
 
     def cell_kept(p, rnd, side):
         key = f"{p['generator']}|{side}|{p['rule']}"
