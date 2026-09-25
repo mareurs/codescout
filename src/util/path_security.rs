@@ -799,6 +799,33 @@ fn shell_tokens(cmd: &str) -> Vec<String> {
         .unwrap_or_else(|_| cmd.split_whitespace().map(str::to_string).collect())
 }
 
+/// The words of the command a shell segment actually EXECUTES: `shell_tokens` sliced at
+/// [`producer_index`], so both gates classify a segment by the same head.
+///
+/// The one thing an index cannot express is grouping glued to a word — `(cat src/x.rs)`
+/// tokenizes as `(cat` — so a leading `(`/`{` is stripped from the head and the skip re-runs,
+/// which also catches `( FOO=1 cat …)`. Trailing `)` / `}` are left in place: they follow the
+/// command's words and no caller reads them as the head.
+/// BUG docs/issues/2026-09-24-source-gate-is-bypassed-by-a-keyword-or-group-prefix.md
+fn executed_command(mut tokens: Vec<String>) -> Vec<String> {
+    loop {
+        let i = producer_index(&tokens).min(tokens.len());
+        tokens.drain(..i);
+        let Some(head) = tokens.first() else {
+            return tokens;
+        };
+        let bare = head.trim_start_matches(['(', '{']);
+        if bare.len() == head.len() {
+            return tokens;
+        }
+        if bare.is_empty() {
+            tokens.remove(0);
+        } else {
+            tokens[0] = bare.to_string();
+        }
+    }
+}
+
 /// Check if a command matches a dangerous pattern.
 ///
 /// Returns the matched pattern description if dangerous, `None` if safe.
@@ -1232,7 +1259,10 @@ pub fn detect_il3_violation(command: &str) -> Option<String> {
          `git` is unbounded ONLY without an output limiter: `git log -3`,\n\
          `git status --short`, `git show --stat` are bounded and may be piped;\n\
          `--oneline` is not a limiter (it bounds width, not line count).\n\
-         Single-line plumbing (rev-parse, patch-id, merge-base, describe) is always bounded.\n\n\
+         Single-line plumbing (rev-parse, patch-id, merge-base, describe) is always bounded,\n\
+         as is plumbing bounded by its argument count (check-ignore without --stdin,\n\
+         cat-file -t/-s/-e). One path does NOT bound `git diff -- <file>` or\n\
+         `git ls-files <path>` — a pathspec expands and a single diff has no size limit.\n\n\
          Rerun the command bare and query the returned @cmd_* buffer."
     ))
 }
@@ -1392,20 +1422,28 @@ fn grep_is_counting(stage: &str) -> bool {
 }
 
 /// Index of the token that names the program a pipeline segment actually runs, skipping what
-/// the shell or a wrapper consumes first: leading `NAME=value` assignments, and a closed set of
+/// the shell or a wrapper consumes first: leading `NAME=value` assignments, a closed set of
 /// wrappers that exec their argument — `env` (plus its own assignments/flags), `nice [-n N]`,
-/// `timeout [flags] DURATION`, `nohup`, `time`, `command`.
+/// `timeout [flags] DURATION`, `nohup`, `time`, `command`, `stdbuf` — and the compound-command
+/// keywords and grouping tokens that introduce a command (`do`, `then`, `else`, `elif`, `!`,
+/// `(`, `{`).
 ///
 /// Without it the first token was the head, so `FOO=1 cargo test | grep` read as the unknown
 /// command `FOO=1`, fell to "ambiguous -> bounded", and the pipe masked cargo's exit status —
 /// the harm IL-3 exists for, reproduced by exactly the `CARGO_TARGET_DIR=` prefix
 /// `scripts/gate.sh` sets. docs/issues/archive/2026-09-24-il3-unbounded-pipe-block-is-bypassed-by-a-leading-env-assignment.md
+/// The keywords and grouping are the source gate's half of the same premise: `do cat x`,
+/// `( cat x )` and `{ cat x; }` read project source unchecked.
+/// docs/issues/2026-09-24-source-gate-is-bypassed-by-a-keyword-or-group-prefix.md
 ///
 /// **A closed wrapper list, and the limit is stated rather than hidden:** a wrapper not named
-/// here (`stdbuf`, `ionice`, a shell function) still reads as its own name and falls to
-/// bounded — the module's documented false-negative direction, one unbuffered pipe, never a
-/// refusal of something legitimate. The CALLER must slice the token list at this index, not
-/// merely take its head: later checks read positions (`git`'s subcommand is `tokens[1]`).
+/// here (`ionice`, a shell function) still reads as its own name and falls to bounded — the
+/// module's documented false-negative direction, one unbuffered pipe, never a refusal of
+/// something legitimate. `command` is on the list although `command -v cargo` is a one-line
+/// lookup, so that one spelling is over-refused. The CALLER must slice the token list at this
+/// index, not merely take its head: later checks read positions (`git`'s subcommand is
+/// `tokens[1]`). Grouping glued to a word (`(cat`) cannot be skipped by index; see
+/// [`executed_command`].
 fn producer_index(tokens: &[String]) -> usize {
     fn is_assignment(t: &str) -> bool {
         let Some((name, _)) = t.split_once('=') else {
@@ -1415,27 +1453,33 @@ fn producer_index(tokens: &[String]) -> usize {
         matches!(chars.next(), Some(c) if c == '_' || c.is_ascii_alphabetic())
             && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
     }
+    // Options that take their value as the NEXT token. An option not listed is skipped alone,
+    // and `-` counts as an option (`env -` is "empty environment", not a command).
+    fn takes_value(wrapper: &str, opt: &str) -> bool {
+        let valued: &[&str] = match wrapper {
+            "env" => &["-u", "--unset", "-C", "--chdir", "-S", "--split-string"],
+            "nice" => &["-n", "--adjustment"],
+            "timeout" => &["-k", "-s", "--kill-after", "--signal"],
+            "stdbuf" => &["-i", "-o", "-e", "--input", "--output", "--error"],
+            _ => &[],
+        };
+        valued.contains(&opt)
+    }
     let mut i = 0;
     while let Some(t) = tokens.get(i).map(String::as_str) {
-        if is_assignment(t) {
+        if is_assignment(t) || matches!(t, "do" | "then" | "else" | "elif" | "!" | "(" | "{") {
             i += 1;
             continue;
         }
         match t {
-            "env" | "nohup" | "time" | "command" | "nice" => {
+            "env" | "nohup" | "time" | "command" | "nice" | "timeout" | "stdbuf" => {
                 i += 1;
-                // The wrapper's own options: `-n 5` takes a value; `-i`, `-p` do not.
                 while let Some(opt) = tokens.get(i).filter(|o| o.starts_with('-')) {
-                    i += if t == "nice" && opt == "-n" { 2 } else { 1 };
+                    i += if takes_value(t, opt) { 2 } else { 1 };
                 }
-            }
-            "timeout" => {
-                i += 1;
-                // `-k DUR` and `-s SIG` take a value; then exactly one DURATION.
-                while let Some(opt) = tokens.get(i).filter(|o| o.starts_with('-')) {
-                    i += if opt == "-k" || opt == "-s" { 2 } else { 1 };
+                if t == "timeout" {
+                    i += 1; // exactly one DURATION precedes the command
                 }
-                i += 1;
             }
             _ => return i,
         }
@@ -1457,9 +1501,9 @@ fn producer_index(tokens: &[String]) -> usize {
 /// a file literally named `-maxdepth` — which is accepted: IL3 governs output
 /// size, not safety, and the cost is one unbuffered pipe.
 fn is_unbounded_lhs(lhs: &str) -> bool {
-    let all = shell_tokens(lhs);
-    // Sliced, not just re-headed: the branches below read positions.
-    let tokens = &all[producer_index(&all).min(all.len())..];
+    // Sliced at the producer, not just re-headed: the branches below read positions
+    // (`git`'s subcommand is tokens[1]). `executed_command` is that slice plus glued grouping.
+    let tokens = executed_command(shell_tokens(lhs));
     let head = match tokens.first() {
         Some(h) => h.as_str(),
         None => return false,
@@ -1492,7 +1536,7 @@ fn is_unbounded_lhs(lhs: &str) -> bool {
     // See [`git_output_is_bounded`] for the token set and why `--oneline` is
     // not in it.
     if head == "git" {
-        return !git_output_is_bounded(tokens);
+        return !git_output_is_bounded(&tokens);
     }
 
     false
@@ -1555,6 +1599,34 @@ fn git_subcommand_is_single_line(tokens: &[String]) -> bool {
     }
 }
 
+/// True if this `git` subcommand emits at most one line *per argument*, so the
+/// command line itself bounds the output: `git check-ignore -v a b c` prints at most
+/// three lines, and there is no limiter flag for it to carry either.
+///
+/// Deliberately narrow. The report that prompted it proposed "any single-path query",
+/// and one path bounds neither `git diff -- <file>` (one file's diff has no size limit)
+/// nor `git ls-files <dir>` (a pathspec expands; measured 2026-09-24,
+/// `git ls-files --error-unmatch src` printed 340 lines). The modes that read stdin or
+/// print object content are excluded by flag.
+/// BUG docs/issues/2026-09-24-il3-refuses-git-plumbing-bounded-by-its-arguments.md
+fn git_subcommand_is_argument_bounded(tokens: &[String]) -> bool {
+    let Some(sub) = tokens.get(1) else {
+        return false;
+    };
+    let has = |pred: &dyn Fn(&str) -> bool| tokens.iter().skip(2).any(|tok| pred(tok));
+    match sub.as_str() {
+        // One line per path; `--stdin` reads the paths from an unbounded stream.
+        "check-ignore" => !has(&|t| t == "--stdin"),
+        // `-t` / `-s` / `-e` answer about one object. Requiring one of them is the whole
+        // check: cat-file's modes are mutually exclusive, so `-p`, `<type> <obj>` and the
+        // `--batch*` family (which print content or stream from stdin) never carry one.
+        // An explicit exclusion list was tried and removed — a mutation run showed it
+        // could not fire without this requirement already having refused.
+        "cat-file" => has(&|t| matches!(t, "-t" | "-s" | "-e")),
+        _ => false,
+    }
+}
+
 /// True if a `git` command line carries an explicit output limiter, making its
 /// output bounded for IL3 purposes.
 ///
@@ -1585,7 +1657,7 @@ fn git_subcommand_is_single_line(tokens: &[String]) -> bool {
 fn git_output_is_bounded(tokens: &[String]) -> bool {
     // Checked first: a subcommand that emits one line by construction carries no
     // limiter flag, so the token scan below can only ever return false for it.
-    if git_subcommand_is_single_line(tokens) {
+    if git_subcommand_is_single_line(tokens) || git_subcommand_is_argument_bounded(tokens) {
         return true;
     }
     // skip(1): the head is `git` itself; a limiter is always an argument.
@@ -1781,7 +1853,10 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     // construction" assumption, now written down as state instead of assumed.
     let mut cwd = Cwd::At(project_root.to_path_buf());
     let mut blocked: Option<String> = None;
-    'runs: for run in &runs {
+    // Every run holding an offender, not just the first: the rerun offered below must
+    // not carry a second blocked clause, or it is refused on its first use.
+    let mut offending_runs: Vec<usize> = Vec::new();
+    for (run_idx, run) in runs.iter().enumerate() {
         let stages = split_outside_quotes(run, &["|"]);
         // Only a `cd` that is a whole run moves the shell for later runs.
         if stages.len() == 1 {
@@ -1795,22 +1870,27 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
             // Matching against the first token (not the full segment string) prevents
             // false positives from quoted arguments containing command names, e.g.:
             //   git commit -m "feat: tail-50 of log, output_buffer.rs"
-            let first_token = shell_tokens(seg).into_iter().next().unwrap_or_default();
+            // The executed command, not the first word: `do cat x` and `( cat x )` read x.
+            let first_token = executed_command(shell_tokens(seg))
+                .into_iter()
+                .next()
+                .unwrap_or_default();
             if !cmd_re.is_match(&first_token) {
                 continue;
             }
             // The file must live inside the project, because the hint routes to
             // symbols/read_file and those resolve against the active project.
             if segment_reads_project_source(seg, ext_re, project_root, &cwd) {
-                blocked = Some(seg.clone());
-                break 'runs;
+                blocked.get_or_insert_with(|| seg.clone());
+                offending_runs.push(run_idx);
+                break;
             }
         }
     }
     let blocked = blocked?;
 
     // Derive the hint from the specific command that triggered the block.
-    let first_cmd = shell_tokens(blocked.as_str())
+    let first_cmd = executed_command(shell_tokens(blocked.as_str()))
         .into_iter()
         .next()
         .unwrap_or_default();
@@ -1869,7 +1949,91 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
         String::new()
     };
 
-    Some(format!("{clause_note}{unresolved_note}{remedy}"))
+    let rerun_note = rerun_without_offenders(command, &stripped, &runs, &offending_runs);
+
+    Some(format!(
+        "{clause_note}{rerun_note}{unresolved_note}{remedy}"
+    ))
+}
+
+/// The part of the source gate's refusal that hands back what it did NOT block: the
+/// command minus every offending run, ready to re-run — or, where dropping a clause
+/// could change what the others do, the reason no rewrite is offered.
+///
+/// The refusal itself stays whole (see the clause note in `check_source_file_access`).
+/// A rewrite is only sound for a flat `;`/newline sequence, because `split_outside_quotes`
+/// drops the separators: re-joining `test -f x && rm y` with `;` would make the `rm`
+/// unconditional, and a `;` inside a loop, `if`, `( … )` or `{ … }` is not a top-level
+/// separator at all.
+/// BUG docs/issues/2026-09-24-source-gate-refusal-discards-the-clauses-it-did-not-block.md
+fn rerun_without_offenders(
+    command: &str,
+    stripped: &str,
+    runs: &[String],
+    offending_runs: &[usize],
+) -> String {
+    let kept: Vec<&str> = runs
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !offending_runs.contains(i))
+        .map(|(_, run)| run.trim())
+        .collect();
+    if kept.is_empty() {
+        // Every clause is blocked (or the command was one clause): nothing to hand back.
+        return String::new();
+    }
+    // Checked against the ORIGINAL command: the gate strips heredoc bodies before the
+    // split, so a rewrite built from `stripped` would silently lose the body.
+    if command.contains("<<") {
+        return "No rerun offered: the command has a heredoc, and a rewrite would drop its \
+                body. "
+            .to_string();
+    }
+    if split_outside_quotes(stripped, &["&&", "||"]).len() > 1 {
+        return "No rerun offered: the clauses are joined by && or ||, so dropping one would \
+                change which of the others run. "
+            .to_string();
+    }
+    const COMPOUND_KEYWORDS: &[&str] = &[
+        "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac",
+        "select", "function", "!",
+    ];
+    let compound = runs.iter().any(|run| {
+        has_unquoted_grouping(run)
+            || shell_tokens(run)
+                .first()
+                .is_some_and(|head| COMPOUND_KEYWORDS.contains(&head.as_str()))
+    });
+    if compound {
+        return "No rerun offered: the command uses a loop, conditional or group, where `;` is \
+                not a top-level separator. "
+            .to_string();
+    }
+    format!("Re-run the rest as: `{}`. ", kept.join("; "))
+}
+
+/// True if `s` holds an unquoted `(`, `)`, `{`, `}` or backtick — a subshell, group,
+/// brace expansion or command substitution, inside which `;` does not separate the
+/// command's top-level clauses. Quoted text is skipped for the same reason
+/// `split_outside_quotes` skips it: a `;` in quotes never became a run boundary, so
+/// grouping there cannot have been cut. That also keeps `awk '{print $1}'`, common in
+/// compound commands, from suppressing the rerun.
+fn has_unquoted_grouping(s: &str) -> bool {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if !in_single => {
+                chars.next();
+            }
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '(' | ')' | '{' | '}' | '`' if !in_single && !in_double => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 /// The shell's working directory for a segment, as far as the gate can tell.
@@ -3625,6 +3789,166 @@ mod tests {
         );
     }
 
+    // BUG docs/issues/2026-09-24-source-gate-refusal-discards-the-clauses-it-did-not-block.md
+    // The refusal stays whole (running the permitted clauses would leave the caller
+    // unable to tell which side effects happened); what it owes is the command minus the
+    // blocked clauses, ready to re-run — and only where dropping a clause cannot change
+    // what the others do.
+
+    fn rerun_of(hint: &str) -> Option<&str> {
+        let tail = hint.split_once("Re-run the rest as: `")?.1;
+        tail.split_once('`').map(|(cmd, _)| cmd)
+    }
+
+    #[test]
+    fn source_gate_offers_the_permitted_clauses_as_a_rerun() {
+        let hint = check_source_file_access_at_root(
+            "echo one; ls src; sed -n '1,3p' src/lib.rs; echo three",
+        )
+        .expect("the sed clause reads project source");
+        assert_eq!(
+            rerun_of(&hint),
+            Some("echo one; ls src; echo three"),
+            "{hint}"
+        );
+    }
+
+    #[test]
+    fn source_gate_rerun_drops_the_whole_pipeline_holding_the_offender() {
+        // A stage cannot be cut out of a pipeline without changing what the next stage
+        // reads, so the run it sits in goes with it.
+        let hint = check_source_file_access_at_root("echo a; cat src/main.rs | grep fn; echo b")
+            .expect("blocks");
+        assert_eq!(rerun_of(&hint), Some("echo a; echo b"), "{hint}");
+    }
+
+    #[test]
+    fn source_gate_rerun_removes_every_offender_not_only_the_first() {
+        // Load-bearing: the detection loop used to stop at the first offender. A rerun
+        // built from that would carry the second `cat` and be refused again.
+        let hint = check_source_file_access_at_root("cat src/main.rs; echo mid; cat src/lib.rs")
+            .expect("blocks");
+        assert_eq!(rerun_of(&hint), Some("echo mid"), "{hint}");
+    }
+
+    #[test]
+    fn source_gate_does_not_rewrite_a_conditional_chain() {
+        // Re-joining `test -f x && ...` with `;` would make what follows unconditional.
+        let hint =
+            check_source_file_access_at_root("test -f Cargo.toml && cat src/main.rs; echo z")
+                .expect("blocks");
+        assert_eq!(rerun_of(&hint), None, "{hint}");
+        assert!(
+            hint.contains("&&"),
+            "must say WHY there is no rerun: {hint}"
+        );
+    }
+
+    #[test]
+    fn source_gate_does_not_rewrite_around_a_heredoc() {
+        // The gate strips heredoc bodies before splitting; a rerun built from the
+        // stripped text would silently lose the body.
+        let hint =
+            check_source_file_access_at_root("cat src/main.rs; python3 - <<'EOF'\nprint(1)\nEOF")
+                .expect("blocks");
+        assert_eq!(rerun_of(&hint), None, "{hint}");
+        assert!(
+            hint.contains("heredoc"),
+            "must say WHY there is no rerun: {hint}"
+        );
+    }
+
+    #[test]
+    fn source_gate_does_not_rewrite_inside_a_compound_construct() {
+        // `;` inside a loop, conditional or group is not a top-level separator; cutting
+        // on it can break the construct's syntax. The first fixture puts the reader
+        // directly behind `do`, which only reaches this code since the gate learned to
+        // see through keyword prefixes (docs/issues/2026-09-24-source-gate-is-bypassed-
+        // by-a-keyword-or-group-prefix.md); the others put it in a run of its own.
+        for cmd in [
+            "for f in a; do cat src/main.rs; done",
+            "for f in a; do echo $f; cat src/main.rs; done",
+            "if true; then echo x; cat src/main.rs; fi",
+            "( echo x; cat src/main.rs )",
+            "{ echo x; cat src/main.rs; }",
+        ] {
+            let hint = check_source_file_access_at_root(cmd).expect("blocks");
+            assert_eq!(rerun_of(&hint), None, "`{cmd}` → {hint}");
+        }
+    }
+
+    #[test]
+    fn source_gate_rerun_survives_quoted_braces_and_parens() {
+        // Load-bearing: the grouping check must skip QUOTED text. An unquoted-only scan
+        // is the difference between offering this rerun and silently refusing every
+        // compound command that contains an awk program.
+        let hint = check_source_file_access_at_root(
+            "echo a; awk '{print $1}' Cargo.toml; echo \"(x)\"; cat src/main.rs",
+        )
+        .expect("blocks");
+        assert_eq!(
+            rerun_of(&hint),
+            Some("echo a; awk '{print $1}' Cargo.toml; echo \"(x)\""),
+            "{hint}"
+        );
+    }
+
+    #[test]
+    fn source_gate_offers_no_rerun_when_every_clause_is_blocked() {
+        let hint =
+            check_source_file_access_at_root("cat src/main.rs; cat src/lib.rs").expect("blocks");
+        assert_eq!(rerun_of(&hint), None, "{hint}");
+    }
+
+    // BUG docs/issues/2026-09-24-source-gate-is-bypassed-by-a-keyword-or-group-prefix.md
+    #[test]
+    fn source_gate_sees_through_keyword_group_and_assignment_prefixes() {
+        for cmd in [
+            "for f in a; do cat src/main.rs; done",
+            "if true; then cat src/main.rs; fi",
+            "if false; then :; else cat src/main.rs; fi",
+            "( cat src/main.rs )",
+            "(cat src/main.rs)",
+            "{ cat src/main.rs; }",
+            "! cat src/main.rs",
+            "FOO=1 cat src/main.rs",
+            "env cat src/main.rs",
+            "time cat src/main.rs",
+        ] {
+            assert!(
+                check_source_file_access_at_root(cmd).is_some(),
+                "must block: `{cmd}`"
+            );
+        }
+    }
+
+    #[test]
+    fn source_gate_prefix_stripping_does_not_invent_readers() {
+        // Stripping exposes the real command; a non-reader behind a keyword stays allowed.
+        for cmd in [
+            "for f in a; do echo src/main.rs; done",
+            "if true; then ls src; fi",
+            "( git log -3 -- src/main.rs )",
+        ] {
+            assert!(
+                check_source_file_access_at_root(cmd).is_none(),
+                "must allow: `{cmd}`"
+            );
+        }
+    }
+
+    #[test]
+    fn source_gate_remedy_is_chosen_from_the_executed_command() {
+        // The remedy text branches on the reader (`sed`/`awk` get the grep suggestion).
+        // Picked from the raw first token, a `do sed …` clause got the `cat` remedy.
+        let hint = check_source_file_access_at_root("for f in a; do sed -n 1p src/main.rs; done")
+            .expect("blocks");
+        assert!(
+            hint.contains("grep(regex)"),
+            "sed's remedy names grep: {hint}"
+        );
+    }
+
     #[test]
     fn source_file_access_omits_the_sibling_note_for_a_single_clause() {
         let hint = check_source_file_access_at_root("cat src/main.rs").expect("must still block");
@@ -4187,6 +4511,41 @@ mod tests {
         }
     }
 
+    /// The prefixes `producer_index` gained beyond the assignment/wrapper set pinned by
+    /// `il3_sees_the_producer_behind_assignments_and_wrappers`: value-taking options, `env -`,
+    /// `stdbuf`, and grouping — the last shared with the source gate.
+    #[test]
+    fn il3_sees_through_valued_options_stdbuf_and_grouping() {
+        for cmd in [
+            "env -i PATH=/usr/bin cargo test | tail",
+            "env -u HOME cargo test | tail",
+            // Load-bearing: a bare `-` is env's "empty environment" option. Read as the
+            // end of the options, it becomes the head and the pipe is waved through.
+            "env - cargo test | tail",
+            "time -p cargo build | tail",
+            "timeout -s KILL 60 cargo test | tail",
+            "stdbuf -oL cargo test | grep FAIL",
+            "stdbuf -o L cargo test | grep FAIL",
+            "( cargo test ) | tail",
+            "(cargo test) | tail",
+        ] {
+            assert!(detect_il3_violation(cmd).is_some(), "must block: `{cmd}`");
+        }
+    }
+
+    /// Over-reach controls beyond `il3_skipping_a_prefix_keeps_bounded_producers_bounded`:
+    /// a limiter flag on the producer is still read after the prefix is skipped.
+    #[test]
+    fn il3_prefix_skipping_still_reads_the_producers_limiter() {
+        for cmd in [
+            "LC_ALL=C git status --short | head",
+            "timeout 5 git log -3 | head",
+            "stdbuf -oL git log -3 | head",
+        ] {
+            assert!(detect_il3_violation(cmd).is_none(), "must allow: `{cmd}`");
+        }
+    }
+
     #[test]
     fn il3_allows_buffer_op_grep_cmd_sort() {
         assert!(detect_il3_violation("grep -c EnterWorktree @cmd_3b8e6cc5 | sort -u").is_none());
@@ -4733,6 +5092,43 @@ EOF"#;
         // its single-value spelling.
         assert!(detect_il3_violation("git rev-parse --all | head -20").is_some());
     }
+
+    // BUG docs/issues/2026-09-24-il3-refuses-git-plumbing-bounded-by-its-arguments.md
+    #[test]
+    fn il3_allows_git_plumbing_bounded_by_its_argument_count() {
+        // At most one line per argument, and the arguments are on the command line.
+        assert!(detect_il3_violation("git check-ignore -v target Cargo.toml | tail -1").is_none());
+        assert!(detect_il3_violation("git check-ignore .worktrees | head -1").is_none());
+        assert!(detect_il3_violation("git cat-file -t HEAD | head -1").is_none());
+        assert!(detect_il3_violation("git cat-file -s HEAD:Cargo.toml | head -1").is_none());
+    }
+
+    #[test]
+    fn il3_still_blocks_per_argument_plumbing_in_its_unbounded_modes() {
+        // Each of these reads an unbounded input or prints unbounded content, so the
+        // argument count no longer bounds the output.
+        assert!(detect_il3_violation("git check-ignore --stdin < paths | head -5").is_some());
+        assert!(detect_il3_violation("git cat-file -p HEAD:Cargo.toml | head -5").is_some());
+        assert!(detect_il3_violation("git cat-file blob HEAD:Cargo.toml | head -5").is_some());
+        assert!(detect_il3_violation("git cat-file --batch < ids | head -5").is_some());
+        assert!(
+            detect_il3_violation("git cat-file --batch-all-objects --batch-check | head -5")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn il3_still_blocks_single_path_git_commands_that_are_not_argument_bounded() {
+        // The source report proposed treating any `git <cmd> -- <one path>` as bounded.
+        // One path does not bound these: a single file's diff has no size limit, and
+        // `ls-files` expands a directory pathspec (measured 2026-09-24:
+        // `git ls-files --error-unmatch src | wc -l` -> 340).
+        assert!(detect_il3_violation("git diff HEAD~3..HEAD -- Cargo.toml | head -3").is_some());
+        assert!(detect_il3_violation("git ls-files --error-unmatch src | tail -2").is_some());
+    }
+
+
+
 
     #[test]
     fn il3_still_blocks_git_config_listing_the_whole_file() {

@@ -5,6 +5,7 @@
 //! configured, and as a complement to LSP for fast structural analysis.
 
 pub mod parser;
+pub mod python_ranges;
 
 use anyhow::Result;
 use std::path::Path;
