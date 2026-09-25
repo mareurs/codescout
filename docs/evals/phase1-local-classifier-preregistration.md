@@ -1047,3 +1047,49 @@ If condition 1 fails, the agent labels are not admitted and Stage 2's mined rout
 **The claim above, corrected:** the item counts equal `trainable.json`, and the written positive rows are 1 or 2 lower for 4 rules (`closed_population` 51, `d_adjacency` 54, `d_sessionid` 70, `question_asked` 76). All 14 menu rules are at or above 50 as rows.
 
 **A limit for Stage 3, from the same review:** calibration is thin for two menu rules, `member_vs_population` and `d_semicolon`, with **4 positives each in `cal`**. A per-rule temperature fitted on 4 positives is fragile. Changing the calibration method would be a Stage 3 amendment. It is recorded here and not changed.
+
+## Amendment — Stage 3 execution: code, fixed hyperparameters, thresholds and calibration bounds, 2026-09-25 (registered before either arm trains)
+
+Stage 3 above fixes the arms, the head, the loss, the selection and the calibration method. It leaves the numbers open. They are fixed here, before any val or cal row is read, and none is tuned.
+
+**Code:** `docs/evals/data/2026-09-24-rule-tell/stage3/train_arm.py`, one script for both arms. It refuses to read any frozen file other than `train`, `val` and `cal`.
+
+**Input.** The draft's `segment()` units, each followed by a marker token: `[SEP]` for L1, `<|box_end|>` (an existing special token) for L2. The marker's final hidden state feeds the linear head, one logit per menu rule. Units are already whitespace-normalised, and each is a substring of the whitespace-normalised draft, so the argmax unit passes `verify_span` as registered.
+
+**Fixed settings:**
+
+| | L1-MBERT | L2-QWEN |
+|---|---|---|
+| weights | `answerdotai/ModernBERT-large`, fp32 master | `alibiserikbay/JevK5`, bf16 frozen, `lm_head` dropped |
+| trained | all 395M parameters | LoRA r16, α 32, dropout 0.05, all linear projections (32.5M) |
+| learning rate, body / head | 3e-5 / 1e-3 | 2e-4 / 1e-3 |
+| epochs | 5 | 3 |
+| context | 8,192, then half-overlapping unit windows, max per unit | whole draft, one pass |
+
+**Both arms:**
+- AdamW with weight decay 0.01, none on the head.
+- Batch 1 with 16-step accumulation, 6% linear warmup then linear decay, gradient clip 1.0, bf16 autocast.
+- Seed 20260935, one seed per arm as registered.
+- **The head is zero-initialised,** so every cell starts at p = 0.5. This was decided from a 64-row train-only smoke run, which started at loss 2.10 with default init. No val or cal row was read.
+- **Positive-class weight** is neg/pos per rule in train: 1.0 for every rule, except `question_asked` at 1.013.
+
+**Selection:** after each epoch, the validation-fold loss (the same weighted BCE as training) over every val row. The lowest wins, and ties go to the earlier epoch.
+
+**Calibration:** as registered, one temperature per rule, fitted on that rule's cal cells only. The search runs over T in [0.25, 10] (grid, then golden section). **A fit that lands on a bound is reported as such.** With 4 positives and 4 negatives, `member_vs_population` and `d_semicolon` can be perfectly separated on cal, which drives T to the lower bound. The method is kept, and this limit is disclosed, not repaired.
+
+**Thresholds, per rule, on the validation fold over calibrated probabilities:**
+- **Precision-oriented (L1/L2 standalone):** the smallest t at which firing on p ≥ t gives precision ≥ 0.9 with at least 1 true positive. If no t reaches that, the t maximising F0.5 (ties go to the higher t), and the fallback is reported.
+- **Recall ≥ 0.9 (C1 first stage):** the largest t with val recall ≥ 0.9.
+
+**Hardware and backends:** both arms train on the RTX A5000 (CUDA, torch 2.14.0+cu130) in the Stage 1 venv plus `peft` 0.21.0.
+- A ROCm venv (torch 2.14.0+rocm7.2, same transformers 5.17.0) was built for the RX 7800 XT, and it passed the same L1 smoke run.
+- **It is not used for training.** That card also hosts the codescout embedder, and L1's 7.5 GB would leave it about 1.5 GB of headroom. It is reserved for Stage 4 scoring. If an arm is ever scored on it, the backend is recorded beside the score.
+
+**Disclosed properties of the data, not choices:**
+- Every train, val and cal row is at most 468 Qwen tokens, and the median is about 123. L1's chunking therefore never runs in training, and long drafts are met first at Stage 4 (known risk 3).
+- L2 is causal: its marker for a unit sees only the units before it. L1 sees both directions.
+
+**Predictions:**
+1. L1's selected epoch is 0, 1 or 2 of 0–4 (small data; later epochs overfit).
+2. At least one per-rule temperature lands on the 0.25 bound in at least one arm.
+3. L2's selected validation loss is lower than L1's.
