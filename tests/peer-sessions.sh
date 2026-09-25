@@ -57,6 +57,7 @@ T="$(mktemp -d)"
 cleanup() {
     [ -n "${PID:-}" ] && kill -KILL "$PID" 2>/dev/null
     [ -n "${SPID:-}" ] && kill -KILL "$SPID" 2>/dev/null
+    for _k in "${OLD:-}" "${NEW:-}" "${FAKE:-}"; do [ -n "$_k" ] && kill -KILL "$_k" 2>/dev/null; done
     rm -rf "$T"
 }
 trap cleanup EXIT
@@ -65,13 +66,14 @@ trap cleanup EXIT
 # whole report at load. Asserted non-empty below: a sed that silently matched nothing
 # would leave every case erroring identically to a genuine failure, and `command -v` is
 # what tells those apart.
-sed -n '/^binary_state() {/,/^}/p;/^binary_name() {/,/^}/p;/^proc_state() {/,/^}/p' "$SRC" > "$T/fns.sh"
+sed -n '/^binary_state() {/,/^}/p;/^binary_name() {/,/^}/p;/^proc_state() {/,/^}/p;/^scan_cs_children() {/,/^}/p' "$SRC" > "$T/fns.sh"
 . "$T/fns.sh"
 
 echo "== extraction =="
 eq "binary_state was extracted from the script"  "yes" "$(command -v binary_state >/dev/null && echo yes || echo no)"
 eq "binary_name was extracted from the script"   "yes" "$(command -v binary_name  >/dev/null && echo yes || echo no)"
 eq "proc_state was extracted from the script"    "yes" "$(command -v proc_state   >/dev/null && echo yes || echo no)"
+eq "scan_cs_children was extracted from the script" "yes" "$(command -v scan_cs_children >/dev/null && echo yes || echo no)"
 
 echo
 echo "== one process, two states =="
@@ -145,6 +147,37 @@ eq "and the codescout server's" "yes" \
    "$(grep -q 'cs_st=\$(proc_state "\$cs_pid")' "$SRC" && echo yes || echo no)"
 eq "and counts rows that cannot answer for the summary" "yes" \
    "$(grep -q 'unanswerable=\$((unanswerable + 1))' "$SRC" && echo yes || echo no)"
+
+echo
+echo "== a session with two codescout children =="
+# A /mcp can leave the replaced server alive beside its replacement
+# (docs/issues/2026-09-25-mcp-reconnect-can-leave-the-replaced-server-connected.md). The
+# stand-in session is a subshell whose two children are a copy of sleep named `codescout`,
+# the second started at least one clock tick after the first. The real scan runs over
+# the real /proc, and its entries for this subshell's pid are ours alone.
+#
+# WHAT THIS CANNOT DISCRIMINATE, stated so nobody credits it: the NEWER child also has
+# the higher pid here, with the same digit count, so "the last child the lexical glob
+# visits" and "the newest" pick the same one, and a scan that just kept the last visited
+# passes the first assertion. The field case that broke it was a newer server with a
+# lexically SMALLER pid, which only pid wrap produces, and no test can arrange that. The
+# superseded count is what this fixture does guard.
+cp /bin/sleep "$T/codescout"
+( "$T/codescout" 300 & echo $! > "$T/old"; sleep 0.05; "$T/codescout" 300 & echo $! > "$T/new"; wait ) &
+FAKE=$!
+for _ in $(seq 1 500); do
+    [ -s "$T/new" ] && [ -n "$(readlink "/proc/$(cat "$T/new")/exe" 2>/dev/null)" ] && break
+    sleep 0.01
+done
+OLD=$(cat "$T/old"); NEW=$(cat "$T/new")
+declare -A CS_OF_SESSION CS_START CS_EXTRA
+scan_cs_children
+eq "the newest codescout child is the one reported" "$NEW" "${CS_OF_SESSION[$FAKE]:-}"
+eq "and the older one is counted as superseded"     "1"    "${CS_EXTRA[$FAKE]:-0}"
+eq "the report prints the superseded count" "yes" \
+   "$(grep -q ' superseded"' "$SRC" && echo yes || echo no)"
+kill -KILL "$OLD" "$NEW" "$FAKE" 2>/dev/null
+OLD=""; NEW=""; FAKE=""
 
 echo
 echo "passed=$PASS failed=$FAIL"

@@ -60,10 +60,32 @@
 #
 # TEST SEAMS
 #   --classify        read one cmdline per line on stdin, print `server` or `mux` per line
-#   --remedy N M      print the remedy for N stale servers and M stale muxes
-#   Both exist so `tests/stale-servers.sh` can drive the real classifier and the real
-#   remedy text without needing live processes of either kind — a mux exists only while a
-#   language server is warm, which is exactly why this defect was absent from most runs.
+#   --conn            read `pid|ppid|start|kind|parent` lines on stdin, print `pid|CONN`
+#   --remedy N M [K]  print the remedy for N reconnectable stale servers, M stale muxes
+#                     and K superseded servers
+#   All three exist so `tests/stale-servers.sh` can drive the real classifiers and the real
+#   remedy text without live processes of any kind: a mux exists only while a language
+#   server is warm, which is exactly why the mux defect was absent from most runs, and a
+#   superseded server exists only after a /mcp the harness failed to close.
+#
+# THE SECOND AXIS: CONN, whether anything still TALKS to a server (added 2026-09-25)
+#   STATUS answers "is this the binary on disk?". It cannot answer "is anyone connected?",
+#   and the two come apart. A `/mcp` spawns a new server, but the harness does not always
+#   close the old one's stdin, so the old process lives on with nobody to send it a request
+#   (docs/issues/2026-09-25-mcp-reconnect-can-leave-the-replaced-server-connected.md). On a
+#   live binary it read `current` here, the one label guaranteed to stop a reader looking.
+#   CONN marks a server:
+#     live        the NEWEST server under a Claude Code session: the one it talks to
+#     SUPERSEDED  an older server under the same session. A newer one replaced it.
+#     NO-PARENT   its parent process no longer exists
+#     -           a mux, or a parent that is not a Claude Code session
+#   "Newest is the one it talks to" holds by construction of /mcp, which spawns the
+#   replacement, and was observed directly: workspace(status) named the newest of three.
+#   It is NOT applied to other parents. A codex process has been seen running four
+#   servers at once, and nothing here says it uses only one, so those rows get `-`.
+#   A session is recognised by its socket in cc-socks, never by `comm`: a version-pinned
+#   install names its binary after the version, so its comm is `2.1.258`, not `claude`.
+#   Starts are compared as NUMBERS (clock ticks), because the text "1000" sorts before "999".
 #
 # Reports only; never gates. Always exits 0.
 
@@ -92,19 +114,74 @@ cmdline_of() {
     tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null
 }
 
+SOCK_DIR="/run/user/$(id -u)/cc-socks"
+
+# `session` / `other` / `gone`. /proc first: a dead session can leave its socket file behind,
+# and a socket with no process is not a session anyone is in.
+parent_kind() {
+    if [ ! -d "/proc/$1" ]; then
+        echo gone
+    elif [ -S "$SOCK_DIR/$1.sock" ]; then
+        echo session
+    else
+        echo other
+    fi
+}
+
+# Start time in clock ticks since boot: /proc/<pid>/stat field 22, read after the LAST ')'
+# because a comm may contain spaces and ')'. Finer than `etimes`, whose one-second
+# resolution ties a server with its replacement when /mcp runs twice in a second.
+start_ticks() {
+    _st=$(cat "/proc/$1/stat" 2>/dev/null) || { echo 0; return; }
+    _st=${_st##*) }
+    awk '{ print $20 }' <<< "$_st"
+}
+
+# The CONN axis, over the whole population at once, because "superseded" is a property of
+# a server RELATIVE to its siblings and no per-process test can see it. Reads
+# `pid|ppid|start|kind|parent` lines; prints `pid|CONN` in input order.
+mark_superseded() {
+    awk -F'|' '
+        {
+            pid[NR] = $1; pp[NR] = $2; st[NR] = $3 + 0; kd[NR] = $4; par[NR] = $5
+            if ($4 == "server" && $5 == "session" && (!($2 in newest) || $3 + 0 > newest[$2]))
+                newest[$2] = $3 + 0
+        }
+        END {
+            for (i = 1; i <= NR; i++) {
+                if (kd[i] != "server")          c = "-"
+                else if (par[i] == "gone")      c = "NO-PARENT"
+                else if (par[i] != "session")   c = "-"
+                else if (st[i] < newest[pp[i]]) c = "SUPERSEDED"
+                else                            c = "live"
+                print pid[i] "|" c
+            }
+        }'
+}
+
 # Split by addressee, because the two populations' correct next actions are opposite and a
 # reader who follows the wrong one either hunts a session that does not exist or leaves a
 # process running that will never recycle on its own. Each branch is emitted only when its
 # own population is non-empty, so the message never names an action with nobody to perform
 # it — the failure CLAUDE.md § Testing Discipline names as the untested half of a guard.
 remedy() {
-    local stale_servers="$1" stale_muxes="$2"
-    [ "$stale_servers" -eq 0 ] && [ "$stale_muxes" -eq 0 ] && return 0
+    local stale_servers="$1" stale_muxes="$2" superseded="${3:-0}"
+    [ "$stale_servers" -eq 0 ] && [ "$stale_muxes" -eq 0 ] && [ "$superseded" -eq 0 ] && return 0
     echo
     if [ "$stale_servers" -gt 0 ]; then
         echo "SERVERS: a stale server serves the guides, prompt surfaces and guide routing of"
         echo "the build it started from, and never recycles: 'codescout start' takes no"
         echo "idle-timeout. Reconnect those sessions (/mcp) to pick up the current binary."
+    fi
+    if [ "$superseded" -gt 0 ]; then
+        # Its own branch because the SERVERS remedy is wrong for it: /mcp is what left it.
+        echo "SUPERSEDED: a newer server under the same session replaced this one on a /mcp, and"
+        echo "nothing will send it a request again, whatever its STATUS says. /mcp does not reap"
+        echo "it, because /mcp is what left it. Nor does SIGTERM (measured 2026-09-25); SIGKILL"
+        echo "does, and the session's live server is unaffected. Killing one is the operator's"
+        echo "call for that session. Before doing it, check that its stdin peer is still the"
+        echo "session's claude process and that a newer server is live:"
+        echo "docs/issues/2026-09-25-mcp-reconnect-can-leave-the-replaced-server-connected.md."
     fi
     if [ "$stale_muxes" -gt 0 ]; then
         echo "MUXES: no action, and there is no session to reconnect. A mux is spawned by a"
@@ -119,13 +196,18 @@ case "${1-}" in
         while IFS= read -r line; do kind_of_cmdline "$line"; done
         exit 0
         ;;
+    --conn)
+        mark_superseded
+        exit 0
+        ;;
     --remedy)
-        remedy "${2-0}" "${3-0}"
+        remedy "${2-0}" "${3-0}" "${4-0}"
         exit 0
         ;;
 esac
 
 rows=""
+conn_in=""
 n_server=0
 n_mux=0
 stale_server=0
@@ -153,19 +235,39 @@ for p in $(pgrep -x codescout 2>/dev/null); do
     ppid=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
     started=$(ps -o lstart= -p "$p" 2>/dev/null)
     rows="${rows}${etimes:-999999999}|${p}|${ppid}|${kind}|${flag}|${started}"$'\n'
+    conn_in="${conn_in}${p}|${ppid}|$(start_ticks "$p")|${kind}|$(parent_kind "${ppid:-0}")"$'\n'
 done
 
-printf '%-10s %-9s %-9s %-7s %-8s %s\n' AGE_SEC PID PPID KIND STATUS STARTED
+declare -A CONN
+while IFS='|' read -r cp cc; do
+    [ -n "${cp:-}" ] && CONN[$cp]=$cc
+done < <(printf '%s' "$conn_in" | mark_superseded)
+
+# A superseded server is counted out of the SERVERS remedy even when it is stale: telling
+# its session to /mcp is the one instruction that cannot help it.
+superseded=0
+stale_live=0
+for cp in "${!CONN[@]}"; do
+    [ "${CONN[$cp]}" = SUPERSEDED ] && superseded=$((superseded + 1))
+done
+while IFS='|' read -r _e pid _pp kd fl _st; do
+    [ -n "${pid:-}" ] || continue
+    [ "$kd" = server ] && [ "$fl" = STALE ] && [ "${CONN[$pid]:-}" != SUPERSEDED ] &&
+        stale_live=$((stale_live + 1))
+done <<< "$rows"
+
+printf '%-10s %-9s %-9s %-7s %-8s %-11s %s\n' AGE_SEC PID PPID KIND STATUS CONN STARTED
 printf '%s' "$rows" | sort -n -t'|' -k1 | while IFS='|' read -r e pid pp kd fl st; do
     [ -n "${pid:-}" ] || continue
-    printf '%-10s %-9s %-9s %-7s %-8s %s\n' "$e" "$pid" "$pp" "$kd" "$fl" "$st"
+    printf '%-10s %-9s %-9s %-7s %-8s %-11s %s\n' "$e" "$pid" "$pp" "$kd" "$fl" "${CONN[$pid]:-?}" "$st"
 done
 
 echo
 # One line per population, and no combined figure. A `total=` here would be the exact
 # mixed unit this script was fixed to stop printing.
-printf 'servers=%-4s stale=%-4s current=%s\n' "$n_server" "$stale_server" "$((n_server - stale_server))"
+printf 'servers=%-4s stale=%-4s current=%-4s superseded=%s\n' \
+    "$n_server" "$stale_server" "$((n_server - stale_server))" "$superseded"
 printf 'muxes=%-6s stale=%-4s current=%s\n'   "$n_mux"    "$stale_mux"    "$((n_mux - stale_mux))"
 
-remedy "$stale_server" "$stale_mux"
+remedy "$stale_live" "$stale_mux" "$superseded"
 exit 0

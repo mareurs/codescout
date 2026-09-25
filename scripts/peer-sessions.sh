@@ -166,15 +166,35 @@ proc_state() {
 # One pass over /proc rather than one scan per session. Processes exit while the
 # glob is being walked, so every read is guarded: an unreadable entry is a race,
 # not an error, and letting it reach stderr would put noise above the table.
-declare -A CS_OF_SESSION
+#
+# A session can have MORE THAN ONE codescout child: a /mcp spawns a replacement and the
+# harness does not always close the old one, which lives on with nobody talking to it
+# (docs/issues/2026-09-25-mcp-reconnect-can-leave-the-replaced-server-connected.md). The
+# session talks to the NEWEST, so that is the one reported, by start time. Until
+# 2026-09-25 this kept whichever child the glob visited last. The glob sorts lexically, so
+# a leaked stale server with a longer pid masked a current one, and the row read
+# `cs REPLACED` for a session whose live server was fine. The older ones are counted and
+# shown as `+N superseded`; `scripts/stale-servers.sh` lists them by pid.
+declare -A CS_OF_SESSION CS_START CS_EXTRA
+scan_cs_children() {
 for _stat in /proc/[0-9]*/stat; do
     _cp=${_stat#/proc/}; _cp=${_cp%/stat}
     [ -r "/proc/$_cp/comm" ] || continue
     [ "$(tr -d '\0' < "/proc/$_cp/comm" 2>/dev/null || true)" = "codescout" ] || continue
-    [ -r "$_stat" ] || continue
-    _cpp=$(awk '{print $4}' "$_stat" 2>/dev/null || true)
-    [ -n "$_cpp" ] && CS_OF_SESSION[$_cpp]=$_cp
+    _sl=$(cat "$_stat" 2>/dev/null) || continue
+    # After the LAST ')': field 4 (ppid) is the 2nd there and field 22 (start ticks) the 20th.
+    _sl=${_sl##*) }
+    read -r _cpp _cst < <(awk '{ print $2, $20 }' <<< "$_sl")
+    [ -n "${_cpp:-}" ] && [ -n "${_cst:-}" ] || continue
+    if [ -n "${CS_OF_SESSION[$_cpp]:-}" ]; then
+        CS_EXTRA[$_cpp]=$(( ${CS_EXTRA[$_cpp]:-0} + 1 ))
+        [ "$_cst" -gt "${CS_START[$_cpp]}" ] || continue
+    fi
+    CS_OF_SESSION[$_cpp]=$_cp
+    CS_START[$_cpp]=$_cst
 done
+}
+scan_cs_children
 
 self_profile="?"
 if [ -n "$self_pid" ]; then
@@ -243,6 +263,8 @@ for sock in "$SOCK_DIR"/*.sock; do
         # so its state is reported beside its freshness rather than folded into STATE.
         cs_st=$(proc_state "$cs_pid")
         [ "$cs_st" = "ok" ] || cs_show="$cs_show $cs_st"
+        _extra="${CS_EXTRA[$pid]:-0}"
+        [ "$_extra" -gt 0 ] && cs_show="$cs_show +$_extra superseded"
     else
         cs_show="cs none"
     fi

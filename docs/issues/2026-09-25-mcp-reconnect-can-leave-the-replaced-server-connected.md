@@ -1,17 +1,18 @@
 ---
 id: '177695780d080014'
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: /mcp can replace a server without closing the old one''s stdin, so the old process lives on — and stale-servers.sh calls it current'
 tags:
 - cluster/selector-narrower-than-its-population
 - harness
 - mcp-reconnect
 - stale-servers
-closed: null
+closed: 2026-09-25
 opened: 2026-09-25
 owner: marius
 severity: low
+unverified: The leak itself is the harness's (Claude Code) and is unaddressed. An upstream report is drafted in § Upstream report and NOT filed, pending the operator. Only the codescout-side instrument half is fixed.
 ---
 
 # BUG: `/mcp` can replace a server without closing the old one's stdin, so the old process lives on — and `stale-servers.sh` calls it `current`
@@ -101,17 +102,91 @@ does not explain both.
 
 ## Fix
 
-Not designed. Two halves, and they are independent:
+Two halves, independent.
 
-1. **Harness (not ours):** close the replaced server's stdio on reconnect. Report upstream with the socket-peer
-   evidence.
-2. **Instrument (ours):** teach `stale-servers.sh` a second axis — a server whose parent's current connection
-   is a different child is an orphan whatever its build — and make its remedy say that `/mcp` may not reap it.
-   The discriminator is observable without cooperation (`ss -xpn` + the parent's other children).
+1. **Harness (not ours): close the replaced server's stdio on reconnect.** Not fixable here. The upstream report
+   below is drafted; filing it is outward-facing, and waits on the operator.
+2. **Instrument (ours): BUILT 2026-09-25.** `scripts/stale-servers.sh` has a second axis, `CONN`, computed over the
+   whole population by one pure `mark_superseded`:
+   - `live`: the NEWEST server under a Claude Code session;
+   - `SUPERSEDED`: an older one with a newer sibling under the same session;
+   - `NO-PARENT`: its parent process no longer exists;
+   - `-`: a mux, or a parent that is not a Claude Code session.
+
+   Its remedy has its own `SUPERSEDED` branch: `/mcp` does not reap such a server, SIGTERM does not either, and
+   killing it is the operator's call. The `SERVERS` remedy now counts only the servers a `/mcp` can help. Design
+   choices, each written into the script's header:
+   - A session is recognised by its cc-socks socket, never by `comm`: a version-pinned install has
+     `comm=2.1.258`.
+   - Starts are compared as numbers of clock ticks.
+   - The rule is not applied to codex parents: one has been seen running four servers, and nothing says it uses
+     only one.
+   - "The session talks to the newest" holds by construction of `/mcp`, and was observed: `workspace(status)`
+     named the newest of three.
+
+   **The same gap was in `scripts/peer-sessions.sh`, and is fixed in the same commit.** It kept whichever codescout
+   child the lexical `/proc` glob visited last, so session 1194273 read `cs REPLACED` while its live server was
+   current. It now reports the newest child by start time, plus `+N superseded`.
+
+Fix SHA: *(recorded in the archive or status commit)*
+Patch-id: *(recorded in the archive or status commit)*
+
+
+## Upstream report (draft, NOT filed)
+
+For `anthropics/claude-code`. It is written to stand alone for a reader outside this repo, with no internal paths
+or session ids. Filing it publishes it, so it waits on the operator.
+
+> **`/mcp` reconnect sometimes leaves the replaced stdio MCP server connected and running**
+>
+> **Environment:** Claude Code 2.1.281 and 2.1.282, Linux, one stdio MCP server (a long-running Rust binary started
+> as `<server> start`).
+>
+> **What happens:** running `/mcp` to reconnect a stdio server spawns a new server process, but on some reconnects
+> the previous one is not shut down, and its stdin socket is not closed. The old process stays alive indefinitely,
+> because a stdio server has no reason to exit while its stdin is open. It is still `ESTAB` to the `claude` process:
+>
+> ```
+> ss -xpn  # the old server's fd 0 and its peer
+> u_str ESTAB ... 289175550 ... 289175551 users:(("<server>",pid=3543619,fd=0))
+> u_str ESTAB ... 289175551 ... 289175550 users:(("claude",pid=2834158,fd=16))
+> ```
+>
+> **Measured in one session, 2026-09-24/25:**
+> - 6 reconnects; 4 closed the old connection cleanly and 2 did not.
+> - The 2 leaked connections were never closed by any LATER reconnect. One outlived four more reconnects, holding
+>   ~320 MB RSS.
+> - Killing the leaked process with SIGKILL makes `claude` close its end of the socket immediately, and the live
+>   server is unaffected. So the harness appears to keep the fd only because nothing closes it.
+> - On the same machine, one other session (Claude Code 2.1.281) showed the same shape at two readings hours
+>   apart: a live server plus an older, still-running sibling of the same stdio server.
+>
+> **Not established:** what distinguishes a leaking reconnect from a clean one. It was not deterministic, and no
+> correlation was found. One leaked server's life included an MCP call the harness moved to the background, and the
+> other's did not.
+>
+> **Expected:** on reconnect, close the replaced server's stdio (and terminate it after a grace period), so exactly
+> one server process per configured stdio server remains.
+>
+> **Repro sketch:** run `/mcp` several times against a stdio server. After each, list the `claude` process's
+> children, and for each server child resolve its stdin peer with `ss -xpn`. A leaked child's peer is the `claude`
+> process itself.
 
 ## Tests added
 
-None yet.
+- **`tests/stale-servers.sh` § *the second axis: CONN*** (32/0). It drives `--conn` and the three-argument
+  `--remedy`, which are the same functions the live loop calls. Six mutations, each killed by the case written for it:
+  - a lexical start compare, by the 999/1000 fixture;
+  - the session gate dropped, by the codex-parent case;
+  - the kind filter dropped, by the newer-mux case;
+  - the gone branch dropped, by the NO-PARENT case;
+  - the SUPERSEDED remedy branch removed, by its 3 cases;
+  - "last row wins", by input order.
+- **`tests/peer-sessions.sh` § *a session with two codescout children*** (22/0). A stand-in session with two
+  real `codescout`-named children, run through the real `scan_cs_children`.
+  - Removing the superseded count is killed, and so is "first visited wins".
+  - **"Last visited wins" SURVIVES, by construction, and the fixture says so.** The newer child also has the
+    higher pid, so both rules pick it. Only pid wrap produces the field case, and no test can arrange that.
 
 ## Workarounds
 

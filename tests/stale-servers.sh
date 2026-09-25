@@ -108,11 +108,54 @@ eq "both populations stale names both branches" "yes" \
 eq "neither stale says nothing at all"          "" "$(bash "$SRC" --remedy 0 0)"
 
 echo
+echo "== the second axis: CONN =="
+# docs/issues/2026-09-25-mcp-reconnect-can-leave-the-replaced-server-connected.md. A /mcp
+# can leave the replaced server alive with its stdin open and nobody sending requests.
+# STATUS is about the binary, so on a live binary it said `current`. Driven through
+# `--conn`, which calls the same mark_superseded the live loop does. Input lines are
+# `pid|ppid|start|kind|parent`, with start in clock ticks.
+conn() { printf '%s\n' "$@" | bash "$SRC" --conn | tr '\n' ' ' | sed 's/ $//'; }
+
+eq "under one session, the older server is SUPERSEDED and the newer live" \
+   "10|SUPERSEDED 11|live" \
+   "$(conn '10|500|100|server|session' '11|500|200|server|session')"
+# Kills a rule that marks by input position ("all but the last row") rather than by start.
+eq "and input order does not change which one" "11|live 10|SUPERSEDED" \
+   "$(conn '11|500|200|server|session' '10|500|100|server|session')"
+# The starts differ in DIGIT COUNT on purpose: the text "1000" sorts before "999", so a
+# comparison that went lexical would call the newer one superseded. Give both starts the
+# same number of digits and this case stops discriminating that, while still passing.
+eq "starts compare as numbers, so 1000 is newer than 999" "20|SUPERSEDED 21|live" \
+   "$(conn '20|600|999|server|session' '21|600|1000|server|session')"
+eq "a lone server under a session is live"     "30|live" "$(conn '30|700|100|server|session')"
+# The rule is not applied where it was never shown to hold. A codex process has been seen
+# running four servers at once, and nothing here says it uses only one.
+eq "under a non-session parent, no server is judged" "40|- 41|-" \
+   "$(conn '40|800|100|server|other' '41|800|200|server|other')"
+# A mux started later must not supersede the server beside it. Muxes are children of
+# servers in practice; sharing the ppid here isolates the kind filter from the parentage.
+eq "a newer mux never supersedes a server"     "50|live 51|-" \
+   "$(conn '50|900|100|server|session' '51|900|900|mux|session')"
+eq "a server whose parent is gone is NO-PARENT" "60|NO-PARENT" "$(conn '60|999999|100|server|gone')"
+eq "two sessions' servers never compete"       "70|live 71|live" \
+   "$(conn '70|1001|100|server|session' '71|1002|900|server|session')"
+
+# The remedy for a superseded server is its OWN branch. The SERVERS one sends its session
+# to /mcp, which is the act that produced it.
+SUPERSEDED_ONLY="$(bash "$SRC" --remedy 0 0 2)"
+eq "superseded servers get their own remedy"   "yes" "$(has 'SUPERSEDED:' "$SUPERSEDED_ONLY")"
+eq "which says /mcp does not reap them"        "yes" "$(has '/mcp does not reap' "$SUPERSEDED_ONLY")"
+eq "and names who decides"                     "yes" "$(has "operator's" "$SUPERSEDED_ONLY")"
+eq "and does NOT tell them to reconnect"       "no"  "$(has 'Reconnect those sessions' "$SUPERSEDED_ONLY")"
+
+echo
 echo "== the summary names its population =="
 # Population-independent: on a runner with no codescout process at all the rows are empty
 # and both counters print zero, so these hold in CI and on a loaded workstation alike.
 LIVE="$(bash "$SRC")"
 eq "the table carries a KIND column"            "yes" "$(has 'KIND' "$LIVE")"
+eq "and a CONN column"                          "yes" "$(has 'CONN' "$LIVE")"
+eq "superseded servers are counted"             "yes" "$(has 'superseded=' "$LIVE")"
 eq "servers are counted under their own name"   "yes" "$(has 'servers=' "$LIVE")"
 eq "muxes are counted under theirs"             "yes" "$(has 'muxes=' "$LIVE")"
 # ABSENCE ASSERTION, monotone under removal — deleting the whole summary satisfies it. The
