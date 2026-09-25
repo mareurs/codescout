@@ -58,8 +58,9 @@ def cues_for(rows: list[dict]) -> list[dict]:
     return [{"feature": str(names[i]), "coef": round(float(coef[i]), 4)} for i in top]
 
 
-def training_side_units() -> list[tuple[str, str]]:
-    """(fold, unit text) for every unit of every training-side manifest paragraph."""
+def training_side_paragraphs() -> list[tuple[dict, str]]:
+    """(manifest row, paragraph text) for every training-side paragraph of the registered seed
+    manifest, re-read from git at the manifest's commit and checked against its sha1."""
     man = [json.loads(line) for line in (STAGE2 / "seed-manifest.jsonl").read_text().splitlines()]
     by_path = collections.defaultdict(list)
     for m in man:
@@ -72,8 +73,13 @@ def training_side_units() -> list[tuple[str, str]]:
             p = paras[m["para"]]
             if hashlib.sha1(p.encode()).hexdigest() != m["sha1"]:
                 raise SystemExit(f"manifest sha1 mismatch: {path} paragraph {m['para']}")
-            out.extend((m["fold"], u) for u in ta.segment(p))
+            out.append((m, p))
     return out
+
+
+def training_side_units() -> list[tuple[str, str]]:
+    """(fold, unit text) for every unit of every training-side manifest paragraph."""
+    return [(m["fold"], u) for m, p in training_side_paragraphs() for u in ta.segment(p)]
 
 
 def main() -> int:
