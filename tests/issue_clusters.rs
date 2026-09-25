@@ -1852,6 +1852,58 @@ fn the_hook_script_agrees_on_the_cluster_parsers() {
     }
 }
 
+/// The hook script must never let `subprocess` decode git's output, on any `--source`.
+///
+/// `text=True` decodes with the LOCALE's encoding: cp1252 on the Windows runners, where
+/// CPython decodes a pipe inside `Popen._readerthread` and swallows the error, so `stdout`
+/// comes back `None` with `returncode == 0`. `read()` took that for "file absent", so the
+/// two class files holding a byte cp1252 leaves undefined (`0x9d`, in IC-14 and IC-5)
+/// vanished from the ledger on Windows only. The parity test above then reddened there
+/// with those two clusters missing from the script's side (`05959bffb7b4fd7d`).
+///
+/// The parity test cannot catch the cause on Linux: this host's locale is UTF-8, so both
+/// sides agree. This one asserts the INVARIANT instead, which holds or fails on every
+/// platform. The guard refuses any text-mode `Popen` the script constructs. It does not
+/// depend on the corpus containing a bad byte, which a tidy-up could remove.
+#[test]
+fn the_hook_script_decodes_git_output_itself_never_through_the_locale() {
+    // Refuse every text-mode Popen. `run`, `check_output` and friends all construct one,
+    // and `subprocess.run` looks `Popen` up in its own module at call time.
+    const GUARD: &str = r#"
+import runpy, subprocess, sys
+_Popen = subprocess.Popen
+class _NoTextMode(_Popen):
+    def __init__(self, *a, **k):
+        if any(k.get(f) for f in ("text", "universal_newlines", "encoding", "errors")):
+            raise SystemExit("TEXT-MODE SUBPROCESS: %r" % (a[0] if a else k.get("args"),))
+        super().__init__(*a, **k)
+subprocess.Popen = _NoTextMode
+script = sys.argv[1]
+sys.argv = [script, *sys.argv[2:]]
+runpy.run_path(script, run_name="__main__")
+"#;
+    for source in ["--source=index", "--source=head", "--source=worktree"] {
+        let out = Command::new("python3")
+            .args([
+                "-c",
+                GUARD,
+                "scripts/pre-commit-ledger-counts.py",
+                source,
+                "--json",
+            ])
+            .current_dir(repo_root())
+            .output()
+            .expect("python3 failed to run");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            out.status.success() && !stderr.contains("TEXT-MODE SUBPROCESS"),
+            "{source}: the hook script let subprocess decode git's output with the locale \
+             encoding (exit {:?}): {stderr}",
+            out.status.code()
+        );
+    }
+}
+
 /// The Index table stores no count — every row is title, slug, verdict, mechanism, and nothing
 /// derived.
 ///
@@ -2776,6 +2828,10 @@ const NOT_HOOK_OWED: &[(&str, &str)] = &[
     (
         "the_hook_script_agrees_on_the_cluster_parsers",
         "cross-language parser parity over the live corpus; a test OF the hook",
+    ),
+    (
+        "the_hook_script_decodes_git_output_itself_never_through_the_locale",
+        "asserts the hook script never lets subprocess decode git output; a test OF the hook",
     ),
     (
         "the_hook_script_agrees_on_the_index_mechanism_scan",

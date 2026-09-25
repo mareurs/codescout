@@ -109,8 +109,29 @@ LEDGER_DIR = "docs/trackers/issue-clusters"
 _SOURCE: str | None = None
 
 
+def _run_git(args: list[str]) -> subprocess.CompletedProcess:
+    """`git <args>`, with its output decoded as UTF-8 HERE, never by `text=True`.
+
+    `text=True` decodes with the LOCALE's encoding, which is cp1252 on the Windows runners.
+    Windows CPython also decodes a pipe inside a reader thread (`Popen._readerthread`), where a
+    decode error is printed and swallowed: `stdout` comes back `None` with `returncode == 0`.
+    `read()` took that for "file absent", so the two class files holding a byte cp1252 leaves
+    undefined (`0x9d`) vanished from the ledger, and their clusters from every count, on
+    Windows only (`05959bffb7b4fd7d`). Decoding bytes in this thread behaves the same on every
+    platform. `"replace"` matches `_prime_index`, so the per-file fallback decodes exactly what
+    the batch path would, which its docstring's "costs speed, never correctness" requires.
+    """
+    r = subprocess.run(["git", *args], capture_output=True)
+    return subprocess.CompletedProcess(
+        r.args,
+        r.returncode,
+        r.stdout.decode("utf-8", "replace"),
+        r.stderr.decode("utf-8", "replace"),
+    )
+
+
 def _git(*args: str) -> str:
-    r = subprocess.run(["git", *args], capture_output=True, text=True)
+    r = _run_git(list(args))
     if r.returncode != 0:
         raise SystemExit(f"git {' '.join(args)} failed: {r.stderr.strip()}")
     return r.stdout
@@ -259,12 +280,12 @@ def read(path: str, source: str) -> str | None:
     correctness.
     """
     if source == "head":
-        r = subprocess.run(["git", "show", f"HEAD:{path}"], capture_output=True, text=True)
+        r = _run_git(["show", f"HEAD:{path}"])
         return r.stdout if r.returncode == 0 else None
     if source == "index":
         if _INDEX_BLOBS is not None and path in _INDEX_BLOBS:
             return _INDEX_BLOBS[path]
-        r = subprocess.run(["git", "show", f":{path}"], capture_output=True, text=True)
+        r = _run_git(["show", f":{path}"])
         return r.stdout if r.returncode == 0 else None
     try:
         with open(path, encoding="utf-8") as fh:
@@ -705,11 +726,7 @@ def _corpus_paths_diverged() -> list[str]:
     verdict is already on stderr by the time this runs.
     """
     try:
-        r = subprocess.run(
-            ["git", "diff", "--name-only", "--", LEDGER, LEDGER_DIR, "docs/issues"],
-            capture_output=True,
-            text=True,
-        )
+        r = _run_git(["diff", "--name-only", "--", LEDGER, LEDGER_DIR, "docs/issues"])
     except OSError:
         return []
     if r.returncode != 0:

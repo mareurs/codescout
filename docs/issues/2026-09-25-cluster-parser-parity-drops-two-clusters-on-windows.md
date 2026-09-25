@@ -1,12 +1,14 @@
 ---
 id: '05959bffb7b4fd7d'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: on Windows the cluster-parser parity test finds guard-narrower-than-its-name and repro-env-diverges-from-gate-env missing from one side'
 owners:
 - marius
 tags:
 - cluster/unclassified
+claimed_at: 2026-09-25
+claimed_by: ebf651ec-5ab7-42d9-a526-dcf9758692e1
 opened: 2026-09-25
 severity: medium
 ---
@@ -41,10 +43,32 @@ Native `windows-latest` CI lanes. It is not in the wine lane's results, because 
 
 ## Root cause
 
-Unknown. The shape is two clusters missing whole, not miscounted, which points at a whole class file or section that one parser does not read on Windows.
+**Measured 2026-09-25, in three steps that close the chain.**
 
-**Candidate, not verified:** in `scripts/pre-commit-ledger-counts.py`, `_git()` (`:113`) and `read()`'s per-file fallbacks (`git show HEAD:path` at `:262`, `git show :path` at `:267`) call `subprocess.run(…, capture_output=True, text=True)` with no `encoding=`. On Windows that decodes with the locale codepage (cp1252), not UTF-8. The worktree `open()` at `:270` passes `encoding="utf-8"` explicitly. The absence of `encoding=` at those three lines is confirmed. Whether either fallback is reached for these two slugs, and whether their files hold bytes that cp1252 decodes differently, is **not** known. Candidate raised by session `938e2953`.
+1. **The cluster files always take the encoding-free fallback, on every platform.** A run with `subprocess.run` forced to cp1252 wherever `text=True` gives no `encoding=` crashed at `read_ledger` → `read()` → the `git show :path` fallback. So class files are not in `_prime_index`'s cache: its one caller, the member-count loop, primes `bug_files()` only, and every class file reaches the `text=True` fallback.
+2. **Exactly the two missing clusters are the only files that decode differently.** Scanning every class file's index bytes for the five bytes cp1252 leaves undefined (`0x81 0x8D 0x8F 0x90 0x9D`): 2 of 24 contain one, `IC-14-guard-narrower-than-its-name.md` (`0x9d`, strict decode fails at byte 27720) and `IC-5-repro-env-diverges-from-gate-env.md` (`0x9d`, at 16265). Those are precisely the two slugs Windows drops.
+3. **Why Windows exits 0 where Linux would crash.** This is read from CPython's own `subprocess.py` (3.14, whose `_mswindows` branch ships in the same file). On Windows, `text=True` wraps the pipe in a `TextIOWrapper` using the locale encoding. `communicate()` reads it in `_readerthread` (`buffer.append(fh.read())`), and a decode error raised there is printed by the thread excepthook, never re-raised. `_communicate` then returns `stdout = stdout[0] if stdout else None`, so `None`, while `git` itself exited 0. `read()` returns `r.stdout`, which is `None`, and `read_ledger` skips a `None` without a word. The class text for IC-14 and IC-5 never enters the ledger, so their slugs are not valid and neither is counted. On POSIX the decode runs in the calling thread and raises, which is why Linux shows nothing: its locale is UTF-8 and never reaches this.
+
+Step 3 is established by reading the interpreter, not by running Windows Python. The CI result after the fix is the confirmation owed.
+
+The defect is therefore two things: a locale-dependent decode, and a read path that turns "could not decode" into "absent" silently.
+
+## Fix
+
+`scripts/pre-commit-ledger-counts.py`: a new `_run_git(args)` captures bytes and decodes them in the calling thread with `"utf-8", "replace"`, the same call `_prime_index` makes, so the fallback decodes exactly what the fast path would. It replaces every `text=True` call: `_git()` (path lists), `read()`'s `HEAD:` and index fallbacks (file bodies, the defect), and `_corpus_paths_diverged` (path list, refusal path only). `stdout` can no longer be `None`, so the silent "absent" arm cannot be reached by a decode failure.
+
+On Linux the change is behaviour-neutral. The committed script and the fixed one, run back-to-back on the same tree, give byte-identical `--json` in `index`, `head` and `worktree` modes. The cp1252 simulation that crashed before the fix gives the same output as a normal run after it.
+
+Test: `tests/issue_clusters.rs` `the_hook_script_decodes_git_output_itself_never_through_the_locale` runs the script in all three modes under a guard that refuses any text-mode `Popen`. It asserts the invariant, so it holds or fails on every platform and does not depend on the corpus containing a bad byte.
 
 ## Resume
 
-Unowned. Test the candidate in Root cause first. Run `python3 scripts/pre-commit-ledger-counts.py --source=index --json` with `PYTHONUTF8=0` and a cp1252 locale (or on Windows), and see whether passing `encoding="utf-8"` at `:113`/`:262`/`:267` restores the two slugs.
+**Mutation results, 2026-09-25**, through `scripts/mutation-probe.sh` against `the_hook_script_decodes_git_output_itself_never_through_the_locale`:
+
+- P1, `_run_git` back to `text=True` (the whole pre-fix behaviour, so this is the observed red): **KILLED**. `--source=index` refused `git show :docs/trackers/issue-clusters.md`.
+- P2, the `read()` `HEAD:` fallback restored: **KILLED**, in `--source=head`.
+- P3, the `read()` index fallback restored (the site the Windows bug went through): **KILLED**.
+- P4, the `_git()` text-mode call restored: **KILLED**, on `git ls-files docs/trackers/issue-clusters`.
+- P5, the `_corpus_paths_diverged` text-mode call restored: **SURVIVED**, because a `--json` run never reaches it. That function runs only when the hook refuses, to annotate the refusal. It is changed for uniformity, and it is the lowest-risk of the five: it decodes a `git diff --name-only` path list, and git quotes non-ASCII paths by default (`core.quotepath`). No test covers it.
+
+**Owed:** CI's native Windows lanes going green on `the_hook_script_agrees_on_the_cluster_parsers`. That is the confirmation of Root cause step 3, which was read from the interpreter rather than run.
