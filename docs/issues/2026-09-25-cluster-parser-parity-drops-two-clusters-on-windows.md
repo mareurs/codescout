@@ -72,3 +72,12 @@ Test: `tests/issue_clusters.rs` `the_hook_script_decodes_git_output_itself_never
 - P5, the `_corpus_paths_diverged` text-mode call restored: **SURVIVED**, because a `--json` run never reaches it. That function runs only when the hook refuses, to annotate the refusal. It is changed for uniformity, and it is the lowest-risk of the five: it decodes a `git diff --name-only` path list, and git quotes non-ASCII paths by default (`core.quotepath`). No test covers it.
 
 **Owed:** CI's native Windows lanes going green on `the_hook_script_agrees_on_the_cluster_parsers`. That is the confirmation of Root cause step 3, which was read from the interpreter rather than run.
+
+## Fix provenance
+
+- **SHA:** `23027269` (on `experiments`). Positional, so it does not survive a rebase of `experiments`.
+- **patch-id:** `9c6a6924f64741365c07f18406b6a68a304e712b`. A content hash of the diff, so it survives rebase and cherry-pick.
+
+`fix(ledger-counts): decode git output as UTF-8 in-thread, never via text=True, so Windows stops dropping two clusters`
+
+**Archive when** a CI native Windows lane runs `23027269` or later with `the_hook_script_agrees_on_the_cluster_parsers` green.
