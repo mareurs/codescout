@@ -1158,3 +1158,40 @@ Neither check read a val or cal row, and no setting changed. This is the registe
 1. **L1 fails the gate.** Its outputs carry no signal, and its thresholds sit near 0.5. Seven of its 14 rules use the F0.5 fallback threshold, set between 0.491 and 0.502, so at least one clean text fires.
 2. **L2 passes the span gate** (both texts on target). Both are plain `d_sessionid` and `d_semicolon` shapes, and the claim is sentence-level.
 3. **L2's gate is uncertain, and no pass is predicted.** Its clean texts are short, but four precision thresholds sit within 1e-3 of 0 (`d_adjacency`, `d_semicolon`, `d_sessionid`, `member_vs_population`), so one weak activation on a clean text is enough to fire.
+
+## Stage 4 — gate results: no trained arm passes, and the local route stops, 2026-09-25
+
+Run from commit `2a600b5d` on the RTX A5000. Transcripts and every row's probability are in `docs/evals/data/2026-09-24-rule-tell/stage4/`. Both arms were deterministic (max |Δz| = 0 on the neutral text), so each ran once, labelled as such.
+
+| | L1-MBERT | L2-QWEN |
+|---|---|---|
+| gate, 8 applicable texts | **1/8, fail** | **3/8, fail** |
+| gate positives hit (`semicolon`, `sessionid`, `member`) | 1 of 3 | 3 of 3 |
+| clean texts firing nothing | 0 of 5 | 0 of 5 |
+| span gate | 0/2, fail | 2/2, pass |
+| errored rows | 0 | 0 |
+
+**The stopping rule applies:** *"No trained arm passes the Stage-4 gate: the route is recorded as failed at this data volume. Neither thresholds nor heads are re-tuned against gate texts. A new attempt is a new registration."*
+- C1 needs a gate-passing L-arm, so it does not run. Neither does Score B.
+- **T, `tsyn-in` and `tsyn-cross` were never read.** A failing arm is not scored further, so all three stay unread for a future registration.
+
+**Why L2 fails: a diagnostic, not a rescue.** Nothing below changes the outcome, and nothing was re-tuned.
+
+1. **It is not the saturated thresholds.** On clean texts L2 is confident. `d_sessionid` has p = 0.79–0.99 on all five, and `d_semicolon` p = 0.42–0.97. Even a flat 0.5 threshold would fail every clean text.
+2. **The heads fire on other rules' texts, in-distribution.** `stage4/cross_rule_firing.py` scores every val text's target unit with all 14 heads, at their precision thresholds. Val was already consumed by Stage 3; the output is `stage4/qwen-cross-rule-firing.txt`.
+   - On their own rule's negatives, heads fire at 0–10%.
+   - On other rules' texts, they fire at **2,614/6,773 (39%)**: `d_semicolon` 479/479, `d_sessionid` 470/471 and `d_adjacency` 336/469.
+   - Val matches train in length and style, so this is not the shift from paragraphs to short gate texts.
+3. **The mechanism.** A frozen row labels one cell. Every other rule's cell on that text was masked, because the unknown-cell audit was not run (freeze choice 1). So each head only ever saw near-miss pairs about its own rule, and nothing taught it to say NO to text about something else. **Selection and thresholds were computed over own-rule cells only**, which is why the validation loss (0.231) could not see this.
+
+**L1** carries no signal (Stage 3), and its gate result is that.
+
+**What a new registration would need,** recorded as direction and not decided here:
+- negatives for each head from outside its own rule, which is what the skipped unknown-cell audit would have supplied;
+- validation over all 14 cells per text, not one;
+- a check of cross-rule firing on val before any gate.
+
+**Predictions:**
+1. L1 fails the gate: **held** (1/8).
+2. L2 passes the span gate: **held** (2/2).
+3. L2's gate is uncertain, and no pass was predicted: it failed, 3/8. The reason given in the prediction, near-zero thresholds, was **wrong**: the model fires with high probability, and the diagnostic above locates the cause elsewhere.

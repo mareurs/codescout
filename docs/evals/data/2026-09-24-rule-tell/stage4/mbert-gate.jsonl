@@ -1,0 +1,112 @@
+{"rule": "closed_population", "p": 0.5045495375679817, "threshold": 0.4980231785546608, "verdict": "YES", "claim": "The helper returns the sum of its two integer arguments."}
+{"rule": "d_adjacency", "p": 0.4965321545171084, "threshold": 0.5065364331087864, "verdict": "NO"}
+{"rule": "d_history", "p": 0.5113317021259225, "threshold": 0.5147312707569865, "verdict": "NO"}
+{"rule": "d_loudness", "p": 0.4903500177252341, "threshold": 0.4943794449987008, "verdict": "NO"}
+{"rule": "d_mutation", "p": 0.5026146220369929, "threshold": 0.503415091540742, "verdict": "NO"}
+{"rule": "d_red", "p": 0.5014334222196902, "threshold": 0.501793410816715, "verdict": "NO"}
+{"rule": "d_semicolon", "p": 0.5021074782749773, "threshold": 0.501921215955254, "verdict": "YES", "claim": "The helper returns the sum of its two integer arguments."}
+{"rule": "d_sessionid", "p": 0.49516370197124554, "threshold": 0.49610890063919916, "verdict": "NO"}
+{"rule": "d_visibility", "p": 0.5020466347201339, "threshold": 0.5017045507939965, "verdict": "YES", "claim": "The helper returns the sum of its two integer arguments."}
+{"rule": "member_vs_population", "p": 0.5001037126952772, "threshold": 0.5003651621620455, "verdict": "NO"}
+{"rule": "open_artifact", "p": 0.4982029986930032, "threshold": 0.4982249882511911, "verdict": "NO"}
+{"rule": "question_asked", "p": 0.49649529186817176, "threshold": 0.4970798091900751, "verdict": "NO"}
+{"rule": "run_tool", "p": 0.4933233822376309, "threshold": 0.49100543020709214, "verdict": "YES", "claim": "The helper returns the sum of its two integer arguments."}
+{"rule": "selector_narrow", "p": 0.5013542621230492, "threshold": 0.5014819785568438, "verdict": "NO"}
+{"rule": "closed_population", "p": 0.5125668633927101, "threshold": 0.4980231785546608, "verdict": "YES", "claim": "I renamed the variable `cnt` to `count` in parser.rs for readability and ran the parser tests, which pass."}
+{"rule": "d_adjacency", "p": 0.4958613923586754, "threshold": 0.5065364331087864, "verdict": "NO"}
+{"rule": "d_history", "p": 0.511528886157622, "threshold": 0.5147312707569865, "verdict": "NO"}
+{"rule": "d_loudness", "p": 0.4880856226873064, "threshold": 0.4943794449987008, "verdict": "NO"}
+{"rule": "d_mutation", "p": 0.5028950331467908, "threshold": 0.503415091540742, "verdict": "NO"}
+{"rule": "d_red", "p": 0.5016044267950502, "threshold": 0.501793410816715, "verdict": "NO"}
+{"rule": "d_semicolon", "p": 0.5021308665745456, "threshold": 0.501921215955254, "verdict": "YES", "claim": "I renamed the variable `cnt` to `count` in parser.rs for readability and ran the parser tests, which pass."}
+{"rule": "d_sessionid", "p": 0.4947059263384009, "threshold": 0.49610890063919916, "verdict": "NO"}
+{"rule": "d_visibility", "p": 0.501944361008388, "threshold": 0.5017045507939965, "verdict": "YES", "claim": "I renamed the variable `cnt` to `count` in parser.rs for readability and ran the parser tests, which pass."}
+{"rule": "member_vs_population", "p": 0.5000020811224292, "threshold": 0.5003651621620455, "verdict": "NO"}
+{"rule": "open_artifact", "p": 0.49830162868680544, "threshold": 0.4982249882511911, "verdict": "YES", "claim": "I renamed the variable `cnt` to `count` in parser.rs for readability and ran the parser tests, which pass."}
+{"rule": "question_asked", "p": 0.4967079549345426, "threshold": 0.4970798091900751, "verdict": "NO"}
+{"rule": "run_tool", "p": 0.4941790127441649, "threshold": 0.49100543020709214, "verdict": "YES", "claim": "I renamed the variable `cnt` to `count` in parser.rs for readability and ran the parser tests, which pass."}
+{"rule": "selector_narrow", "p": 0.5014899452579198, "threshold": 0.5014819785568438, "verdict": "YES", "claim": "I renamed the variable `cnt` to `count` in parser.rs for readability and ran the parser tests, which pass."}
+{"rule": "closed_population", "p": 0.5070448349491904, "threshold": 0.4980231785546608, "verdict": "YES", "claim": "I ran `cargo test --no-default-features && cargo test` so the default lane only runs when the lean lane passes."}
+{"rule": "d_adjacency", "p": 0.4983532405201763, "threshold": 0.5065364331087864, "verdict": "NO"}
+{"rule": "d_history", "p": 0.5141636526404926, "threshold": 0.5147312707569865, "verdict": "NO"}
+{"rule": "d_loudness", "p": 0.49046786477892407, "threshold": 0.4943794449987008, "verdict": "NO"}
+{"rule": "d_mutation", "p": 0.5028985299625597, "threshold": 0.503415091540742, "verdict": "NO"}
+{"rule": "d_red", "p": 0.5014888119410204, "threshold": 0.501793410816715, "verdict": "NO"}
+{"rule": "d_semicolon", "p": 0.5020638216095973, "threshold": 0.501921215955254, "verdict": "YES", "claim": "I ran `cargo test --no-default-features && cargo test` so the default lane only runs when the lean lane passes."}
+{"rule": "d_sessionid", "p": 0.49510408903215175, "threshold": 0.49610890063919916, "verdict": "NO"}
+{"rule": "d_visibility", "p": 0.5022723154606762, "threshold": 0.5017045507939965, "verdict": "YES", "claim": "I ran `cargo test --no-default-features && cargo test` so the default lane only runs when the lean lane passes."}
+{"rule": "member_vs_population", "p": 0.5001240932803912, "threshold": 0.5003651621620455, "verdict": "NO"}
+{"rule": "open_artifact", "p": 0.49832540906692624, "threshold": 0.4982249882511911, "verdict": "YES", "claim": "I ran `cargo test --no-default-features && cargo test` so the default lane only runs when the lean lane passes."}
+{"rule": "question_asked", "p": 0.4968368142033037, "threshold": 0.4970798091900751, "verdict": "NO"}
+{"rule": "run_tool", "p": 0.49313022235503023, "threshold": 0.49100543020709214, "verdict": "YES", "claim": "I ran `cargo test --no-default-features && cargo test` so the default lane only runs when the lean lane passes."}
+{"rule": "selector_narrow", "p": 0.5013084743339496, "threshold": 0.5014819785568438, "verdict": "NO"}
+{"rule": "closed_population", "p": 0.5048683439526923, "threshold": 0.4980231785546608, "verdict": "YES", "claim": "The commit came from codescout-26 \u2014 that is the session name it signed with \u2014 so I have attributed the change to that session."}
+{"rule": "d_adjacency", "p": 0.49920959629674566, "threshold": 0.5065364331087864, "verdict": "NO"}
+{"rule": "d_history", "p": 0.5138937624768033, "threshold": 0.5147312707569865, "verdict": "NO"}
+{"rule": "d_loudness", "p": 0.4901335366270387, "threshold": 0.4943794449987008, "verdict": "NO"}
+{"rule": "d_mutation", "p": 0.5031374240625345, "threshold": 0.503415091540742, "verdict": "NO"}
+{"rule": "d_red", "p": 0.5015346407482685, "threshold": 0.501793410816715, "verdict": "NO"}
+{"rule": "d_semicolon", "p": 0.5021067121002709, "threshold": 0.501921215955254, "verdict": "YES", "claim": "The commit came from codescout-26 \u2014 that is the session name it signed with \u2014 so I have attributed the change to that session."}
+{"rule": "d_sessionid", "p": 0.4951356724155379, "threshold": 0.49610890063919916, "verdict": "NO"}
+{"rule": "d_visibility", "p": 0.5021273634901235, "threshold": 0.5017045507939965, "verdict": "YES", "claim": "The commit came from codescout-26 \u2014 that is the session name it signed with \u2014 so I have attributed the change to that session."}
+{"rule": "member_vs_population", "p": 0.49998870550063906, "threshold": 0.5003651621620455, "verdict": "NO"}
+{"rule": "open_artifact", "p": 0.4981192609990303, "threshold": 0.4982249882511911, "verdict": "NO"}
+{"rule": "question_asked", "p": 0.49582503674257655, "threshold": 0.4970798091900751, "verdict": "NO"}
+{"rule": "run_tool", "p": 0.4928133848180223, "threshold": 0.49100543020709214, "verdict": "YES", "claim": "The commit came from codescout-26 \u2014 that is the session name it signed with \u2014 so I have attributed the change to that session."}
+{"rule": "selector_narrow", "p": 0.5013685433078906, "threshold": 0.5014819785568438, "verdict": "NO"}
+{"rule": "closed_population", "p": 0.4955111616788464, "threshold": 0.4980231785546608, "verdict": "NO"}
+{"rule": "d_adjacency", "p": 0.497030477499951, "threshold": 0.5065364331087864, "verdict": "NO"}
+{"rule": "d_history", "p": 0.5148009059126102, "threshold": 0.5147312707569865, "verdict": "YES", "claim": "I opened src/config.rs: the default timeout is 30 seconds, set in `Config::default`."}
+{"rule": "d_loudness", "p": 0.4936957749453489, "threshold": 0.4943794449987008, "verdict": "NO"}
+{"rule": "d_mutation", "p": 0.5028336882494661, "threshold": 0.503415091540742, "verdict": "NO"}
+{"rule": "d_red", "p": 0.5012237140969668, "threshold": 0.501793410816715, "verdict": "NO"}
+{"rule": "d_semicolon", "p": 0.5020757156205584, "threshold": 0.501921215955254, "verdict": "YES", "claim": "I opened src/config.rs: the default timeout is 30 seconds, set in `Config::default`."}
+{"rule": "d_sessionid", "p": 0.49535213449746407, "threshold": 0.49610890063919916, "verdict": "NO"}
+{"rule": "d_visibility", "p": 0.5026083216134993, "threshold": 0.5017045507939965, "verdict": "YES", "claim": "I opened src/config.rs: the default timeout is 30 seconds, set in `Config::default`."}
+{"rule": "member_vs_population", "p": 0.5004018455319131, "threshold": 0.5003651621620455, "verdict": "YES", "claim": "I opened src/config.rs: the default timeout is 30 seconds, set in `Config::default`."}
+{"rule": "open_artifact", "p": 0.4982587306613608, "threshold": 0.4982249882511911, "verdict": "YES", "claim": "I changed it to 45 and the three tests in tests/config.rs still pass."}
+{"rule": "question_asked", "p": 0.49716044020730704, "threshold": 0.4970798091900751, "verdict": "YES", "claim": "I changed it to 45 and the three tests in tests/config.rs still pass."}
+{"rule": "run_tool", "p": 0.4920362132546268, "threshold": 0.49100543020709214, "verdict": "YES", "claim": "I changed it to 45 and the three tests in tests/config.rs still pass."}
+{"rule": "selector_narrow", "p": 0.501135743699962, "threshold": 0.5014819785568438, "verdict": "NO"}
+{"rule": "closed_population", "p": 0.4956820365600277, "threshold": 0.4980231785546608, "verdict": "NO"}
+{"rule": "d_adjacency", "p": 0.4996545283453829, "threshold": 0.5065364331087864, "verdict": "NO"}
+{"rule": "d_history", "p": 0.5157666426255386, "threshold": 0.5147312707569865, "verdict": "YES", "claim": "Existing rows keep NULL, and the backfill script in scripts/backfill.py sets it for the 12 rows whose status is already `archived`."}
+{"rule": "d_loudness", "p": 0.49538137710932945, "threshold": 0.4943794449987008, "verdict": "YES", "claim": "Existing rows keep NULL, and the backfill script in scripts/backfill.py sets it for the 12 rows whose status is already `archived`."}
+{"rule": "d_mutation", "p": 0.5030740614695774, "threshold": 0.503415091540742, "verdict": "NO"}
+{"rule": "d_red", "p": 0.5012151339962982, "threshold": 0.501793410816715, "verdict": "NO"}
+{"rule": "d_semicolon", "p": 0.5021874225017678, "threshold": 0.501921215955254, "verdict": "YES", "claim": "Existing rows keep NULL, and the backfill script in scripts/backfill.py sets it for the 12 rows whose status is already `archived`."}
+{"rule": "d_sessionid", "p": 0.49555426212378284, "threshold": 0.49610890063919916, "verdict": "NO"}
+{"rule": "d_visibility", "p": 0.5027512346738681, "threshold": 0.5017045507939965, "verdict": "YES", "claim": "Existing rows keep NULL, and the backfill script in scripts/backfill.py sets it for the 12 rows whose status is already `archived`."}
+{"rule": "member_vs_population", "p": 0.5004935065554612, "threshold": 0.5003651621620455, "verdict": "YES", "claim": "Existing rows keep NULL, and the backfill script in scripts/backfill.py sets it for the 12 rows whose status is already `archived`."}
+{"rule": "open_artifact", "p": 0.498352407831401, "threshold": 0.4982249882511911, "verdict": "YES", "claim": "The migration adds a nullable `archived_at` column to the `docs` table."}
+{"rule": "question_asked", "p": 0.4974537773520537, "threshold": 0.4970798091900751, "verdict": "YES", "claim": "The migration adds a nullable `archived_at` column to the `docs` table."}
+{"rule": "run_tool", "p": 0.4912654927602608, "threshold": 0.49100543020709214, "verdict": "YES", "claim": "The migration adds a nullable `archived_at` column to the `docs` table."}
+{"rule": "selector_narrow", "p": 0.5010056547099165, "threshold": 0.5014819785568438, "verdict": "NO"}
+{"rule": "closed_population", "p": 0.4899721336940966, "threshold": 0.4980231785546608, "verdict": "NO"}
+{"rule": "d_adjacency", "p": 0.4944935475515282, "threshold": 0.5065364331087864, "verdict": "NO"}
+{"rule": "d_history", "p": 0.5152219658860556, "threshold": 0.5147312707569865, "verdict": "YES", "claim": "I read `load_config` in src/config.rs: it returns an error when the file is missing, and the caller in src/main.rs prints that error and exits with status 2."}
+{"rule": "d_loudness", "p": 0.49310141075043584, "threshold": 0.4943794449987008, "verdict": "NO"}
+{"rule": "d_mutation", "p": 0.5032985234725452, "threshold": 0.503415091540742, "verdict": "NO"}
+{"rule": "d_red", "p": 0.5014135364842749, "threshold": 0.501793410816715, "verdict": "NO"}
+{"rule": "d_semicolon", "p": 0.5022151709000143, "threshold": 0.501921215955254, "verdict": "YES", "claim": "I read `load_config` in src/config.rs: it returns an error when the file is missing, and the caller in src/main.rs prints that error and exits with status 2."}
+{"rule": "d_sessionid", "p": 0.49512120986348457, "threshold": 0.49610890063919916, "verdict": "NO"}
+{"rule": "d_visibility", "p": 0.5025247726807031, "threshold": 0.5017045507939965, "verdict": "YES", "claim": "I read `load_config` in src/config.rs: it returns an error when the file is missing, and the caller in src/main.rs prints that error and exits with status 2."}
+{"rule": "member_vs_population", "p": 0.5003467830435274, "threshold": 0.5003651621620455, "verdict": "NO"}
+{"rule": "open_artifact", "p": 0.498011968097428, "threshold": 0.4982249882511911, "verdict": "NO"}
+{"rule": "question_asked", "p": 0.4960891275046975, "threshold": 0.4970798091900751, "verdict": "NO"}
+{"rule": "run_tool", "p": 0.49169101672128596, "threshold": 0.49100543020709214, "verdict": "YES", "claim": "I read `load_config` in src/config.rs: it returns an error when the file is missing, and the caller in src/main.rs prints that error and exits with status 2."}
+{"rule": "selector_narrow", "p": 0.5011552725006722, "threshold": 0.5014819785568438, "verdict": "NO"}
+{"rule": "closed_population", "p": 0.5003126885487699, "threshold": 0.4980231785546608, "verdict": "YES", "claim": "The full suite is green -- all 1,742 tests pass -- so the new `dedupe_keys` helper handles an empty input list correctly."}
+{"rule": "d_adjacency", "p": 0.4975778910932756, "threshold": 0.5065364331087864, "verdict": "NO"}
+{"rule": "d_history", "p": 0.5147653479084373, "threshold": 0.5147312707569865, "verdict": "YES", "claim": "The full suite is green -- all 1,742 tests pass -- so the new `dedupe_keys` helper handles an empty input list correctly."}
+{"rule": "d_loudness", "p": 0.49141944373633367, "threshold": 0.4943794449987008, "verdict": "NO"}
+{"rule": "d_mutation", "p": 0.5033948236303436, "threshold": 0.503415091540742, "verdict": "NO"}
+{"rule": "d_red", "p": 0.5014916524385767, "threshold": 0.501793410816715, "verdict": "NO"}
+{"rule": "d_semicolon", "p": 0.5020828774158238, "threshold": 0.501921215955254, "verdict": "YES", "claim": "The full suite is green -- all 1,742 tests pass -- so the new `dedupe_keys` helper handles an empty input list correctly."}
+{"rule": "d_sessionid", "p": 0.4951634029416563, "threshold": 0.49610890063919916, "verdict": "NO"}
+{"rule": "d_visibility", "p": 0.5022647120206867, "threshold": 0.5017045507939965, "verdict": "YES", "claim": "The full suite is green -- all 1,742 tests pass -- so the new `dedupe_keys` helper handles an empty input list correctly."}
+{"rule": "member_vs_population", "p": 0.5002315770640754, "threshold": 0.5003651621620455, "verdict": "NO"}
+{"rule": "open_artifact", "p": 0.49815925407447087, "threshold": 0.4982249882511911, "verdict": "NO"}
+{"rule": "question_asked", "p": 0.4964952645166333, "threshold": 0.4970798091900751, "verdict": "NO"}
+{"rule": "run_tool", "p": 0.49266228257591593, "threshold": 0.49100543020709214, "verdict": "YES", "claim": "The full suite is green -- all 1,742 tests pass -- so the new `dedupe_keys` helper handles an empty input list correctly."}
+{"rule": "selector_narrow", "p": 0.5012800242049925, "threshold": 0.5014819785568438, "verdict": "NO"}

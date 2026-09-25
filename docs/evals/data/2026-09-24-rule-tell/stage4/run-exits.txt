@@ -1,0 +1,6 @@
+det qwen exit 0
+gate qwen exit 1
+span qwen exit 0
+det mbert exit 0
+gate mbert exit 1
+span mbert exit 1

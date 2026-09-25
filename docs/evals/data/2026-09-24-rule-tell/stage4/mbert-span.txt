@@ -1,0 +1,10 @@
+judge: trained mbert on NVIDIA RTX A5000 (cuda), 14 menu rules, threshold precision
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['NO']   FAIL
+  span-semicolon   d_semicolon    ['off-target']   FAIL
+
+span gate: 0/2   errored runs: 0

@@ -1,0 +1,2 @@
+{"rule": "d_sessionid", "p": 0.9998579067801557, "threshold": 4.208040121648475e-07, "verdict": "YES", "claim": "The commit came from codescout-26 \u2014 that is the session name it signed with \u2014 so I have attributed the change to that session."}
+{"rule": "d_semicolon", "p": 0.9999999999834719, "threshold": 9.063643973831895e-07, "verdict": "YES", "claim": "I ran `cargo test --no-default-features && cargo test` so the default lane only runs when the lean lane passes."}

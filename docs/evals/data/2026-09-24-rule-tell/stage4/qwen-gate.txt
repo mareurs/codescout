@@ -1,0 +1,21 @@
+judge: trained qwen on NVIDIA RTX A5000 (cuda), 14 menu rules, threshold precision
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 14 rules x 10 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 0/1   fired [['d_mutation', 'd_semicolon', 'd_sessionid', 'run_tool']]   FAIL
+  clean-2        expect none            hit 0/1   fired [['d_adjacency', 'd_history', 'd_semicolon', 'd_sessionid']]   FAIL
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_adjacency', 'd_mutation', 'd_semicolon', 'd_sessionid']]   PASS
+  sessionid      expect d_sessionid     hit 1/1   fired [['d_red', 'd_semicolon', 'd_sessionid']]   PASS
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 0/1   fired [['d_adjacency', 'd_semicolon', 'd_sessionid']]   FAIL
+  clean-4        expect none            hit 0/1   fired [['d_mutation', 'd_red', 'd_semicolon', 'd_sessionid', 'run_tool']]   FAIL
+  clean-5        expect none            hit 0/1   fired [['d_semicolon', 'd_sessionid', 'run_tool']]   FAIL
+  member         expect member_vs_population hit 1/1   fired [['closed_population', 'd_adjacency', 'd_mutation', 'd_red', 'd_semicolon', 'd_sessionid', 'd_visibility', 'member_vs_population', 'question_asked', 'run_tool', 'selector_narrow']]   PASS
+
+gate: 3/8   errored rows: 0

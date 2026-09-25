@@ -1,0 +1,2 @@
+judge: trained qwen on NVIDIA RTX A5000 (cuda), 14 menu rules, threshold precision
+determinism on neutral: max |dz| over 28 cells = 0.00e+00

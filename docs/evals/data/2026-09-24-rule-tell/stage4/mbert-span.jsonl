@@ -1,0 +1,2 @@
+{"rule": "d_sessionid", "p": 0.495336125882212, "threshold": 0.49610890063919916, "verdict": "NO"}
+{"rule": "d_semicolon", "p": 0.5021898763483147, "threshold": 0.501921215955254, "verdict": "YES", "claim": "Both lanes share one target directory."}
