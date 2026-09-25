@@ -120,6 +120,18 @@ child: that pair is what makes it unreachable. Never kill on a `STALE` flag alon
 binary was replaced, not that nobody is talking to the process, and that is how a live server of another
 session gets shot.
 
+
+**Applied 2026-09-25 about 08:05 +03:00, at the operator's instruction, to 3543619 and 2826596.** Both conditions were
+re-checked first against live state:
+- the start times were unchanged, so the PIDs had not been reused;
+- each stdin peer was still `claude` 2834158 (fds 16 and 21);
+- 2834158's newer child 2291837 was `ESTAB` on fd 26.
+
+SIGTERM ended neither: both were still `Sl+` after 3 s. SIGKILL, behind a start-time guard, reaped both. `claude`
+then closed fds 16 and 21 by itself, and the live server 2291837 kept serving: the next tool call went through
+it. So killing a leaked server does not disturb the harness's current connection. The SIGTERM result matches
+`0db9597a451ba41e`'s claim for stale servers generally.
+
 ## Resume
 
 Decide whether (2) is worth building now; it is the only half this repo can change.

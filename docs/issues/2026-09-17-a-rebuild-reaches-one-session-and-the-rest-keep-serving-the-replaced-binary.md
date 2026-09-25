@@ -44,8 +44,10 @@ session, not the sessions still on old code, not `/mcp`, not the gate.
   a stale server, but nothing under `src/librarian` checks `exe_deleted`, so § *Why this is more than…*'s
   `doc(action="move")` exposure has no guard.
 - **§ Workarounds miscounts.** Its one-liner counts muxes as servers: 7 current today, which is 5 servers plus 2 muxes.
-- **Not re-verified.** The SIGTERM-immunity and respawn-on-current claims would need signals sent to other sessions'
-  processes.
+- **SIGTERM immunity re-verified, respawn not.** Re-verified the same day on the coordinating session's own two
+  leaked servers (3543619 and 2826596, killed at the operator's instruction; see `177695780d080014`). Both were
+  still alive 3 s after SIGTERM, and SIGKILL reaped them. The respawn-on-current claim was not re-tested, since
+  it needs a killed server whose session is still in use.
 
 ## Symptom (Effect)
 
