@@ -811,3 +811,32 @@ If condition 1 fails, the agent labels are not admitted and Stage 2's mined rout
 - Codex output is kept out of training.
 
 **The seed counts will be re-derived by the committed extractor, not taken from the review.**
+
+**Pre-pilot tooling, committed before the pilot (`9ec5f07e`):**
+
+- `segment.py`, the Stage 3 segmenter.
+- `extract_seeds.py`, which writes `seed-manifest.jsonl`, `fold-assignment.jsonl` and `seed-manifest-summary.txt`:
+  - 12,273 eligible paragraphs, 9,644 training-side and 2,629 on S;
+  - every draw at full size;
+  - byte-identical on a re-run.
+- `synthetic-audit-prompt.md`.
+- `generate_synthetic.py`, whose construction checks are tested in `tests/test_stage2_synthetic.py`. Each of the 10 checks was killed by its own mutation.
+
+**Pilot result, 2026-09-25:** 22 calls, 110 pairs, Claude Sonnet 5 on `judge-config-main`. Output in `synthetic/pilot/`. **All 110 are retired.**
+
+- **46 of 110 pass the construction checks.**
+- **Failures:**
+  - 54 share an 8-token shingle with their seed.
+  - 5 have a missing field: `closed_population` dropped `rule` from every object.
+  - 5 seeds are missing from the output: the `scope_instant` call answered its first seed only.
+  - 3 contain a banned word.
+- **The seed-shingle failures are two kinds.** Most are real copying: the top 20 pairs share 13–67 shingles, with whole seed sentences reused. A minority share 1–2 shingles on domain phrases (a `cargo` command line, "the on-disk YAML agrees with the catalog row") that the prompt invited by saying "take its topic, names and vocabulary". **The check is kept as registered.**
+- **The passing pairs show the corrected prompt working on its target cue:**
+  - median fixed-to-violating length ratio 1.00, with 1 of 46 above 1.5;
+  - hedge words in 0 violating and 1 fixed sentence.
+- **The one post-pilot revision** targets only the defects the pilot showed:
+  - no run of 8 words from a seed, commands, paths and code included, with single names and terms allowed;
+  - exactly one object per seed, in order, with no notes, extra keys or repeats;
+  - all six fields, `rule` included.
+
+  No other part of the prompt changed. This was the last permitted change.

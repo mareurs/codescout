@@ -1,0 +1,24 @@
+set pilot  generator claude:claude-sonnet-5  calls 22  pairs 110  ok 46
+failures: {"shares an 8-token shingle with its seed": 54, "missing or mistyped field": 5, "seed missing from output": 5, "banned word": 3}
+  act_on_artifact        3/5
+  cannot_happen          1/5
+  closed_population      0/5
+  contradiction          3/5
+  count_unit             0/5
+  d_adjacency            3/5
+  d_fixture              2/5
+  d_history              0/5
+  d_loudness             3/5
+  d_mutation             5/5
+  d_red                  5/5
+  d_semicolon            1/5
+  d_sessionid            3/5
+  d_visibility           1/5
+  lines_read             2/5
+  member_vs_population   1/5
+  monotone_absence       4/5
+  open_artifact          1/5
+  question_asked         4/5
+  run_tool               3/5
+  scope_instant          0/5
+  selector_narrow        1/5

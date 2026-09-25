@@ -33,8 +33,10 @@ pair.
   CONFIDENT, unhedged claim whose basis the paragraph shows. The violating sentence need not
   be the most confident one; where the law allows, it may itself be hedged.
 - Put the violating sentence at different positions across pairs: first, middle, last.
-- Do not copy 8 or more consecutive words from a seed. Take its topic, names and vocabulary,
-  not its sentences.
+- Write every sentence fresh. Never reuse 8 or more consecutive words from a seed, and that
+  includes commands, file paths, code, and long names: rename them, shorten them, or describe
+  them instead. You may reuse single names and terms from the seed, but not runs of words. A
+  pair that shares any 8 consecutive words with its seed is discarded.
 - Never name the rule, and never use the words `violation`, `violates`, `rule`, `incorrect`,
   `correction`, `corrected`, `wrong` or `fix` in `paragraph` or in either sentence.
 - The fixed sentence must not simply delete the claim. It must still say something the
@@ -42,6 +44,8 @@ pair.
 
 ## Output
 
-One JSON object per seed, one per line, nothing else:
+One JSON object per seed, one per line, nothing else. Write exactly one object for EVERY seed
+you were given, in the order given; do not stop early, do not add notes, commentary or extra
+keys, and do not repeat an object. Every object has all six fields, `rule` included:
 
     {"seed_id": <seed id>, "rule": "<rule key>", "paragraph": "...", "violating_sentence": "...", "fixed_sentence": "...", "why": "..."}
