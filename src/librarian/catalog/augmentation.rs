@@ -1381,7 +1381,11 @@ pub(crate) fn refuse_taken_prefixes(
     let root = crate::librarian::current_project::lookup_git_root(dir)
         .unwrap_or_else(|| dir.to_path_buf());
     let owners = prefix_owners_under(conn, &root)?;
-    let me = declaring.to_string_lossy();
+    // The catalog's WRITE normalization, so any spelling a caller passes compares equal to
+    // the stored row. Raw `to_string_lossy` was native on Windows (`C:\…\docs/x.md`)
+    // against an all-forward-slash `abs_path`, and refused an owner as a conflict with
+    // itself. docs/issues/2026-09-24-prefix-owner-check-compares-path-spellings-as-text.md
+    let me = crate::util::fs::RepoPath::from(declaring);
 
     // Refused before ownership, because a free-but-uncitable prefix is the worse outcome: a
     // taken one at least collides where a scan can see it, while this one allocates, commits
@@ -1430,7 +1434,11 @@ pub(crate) fn refuse_taken_prefixes(
     let taken: Vec<(&String, Vec<&String>)> = claimed
         .into_iter()
         .filter_map(|p| {
-            let others: Vec<&String> = owners.get(p)?.iter().filter(|o| o.as_str() != me).collect();
+            let others: Vec<&String> = owners
+                .get(p)?
+                .iter()
+                .filter(|o| o.as_str() != me.as_str())
+                .collect();
             (!others.is_empty()).then_some((p, others))
         })
         .collect();
@@ -2930,6 +2938,33 @@ mod tests {
             &prefixes(&["R"]),
         )
         .expect("the owner re-declaring its own prefix must pass");
+    }
+
+    /// The owner is recognized under ANY spelling of its path that the catalog's own
+    /// write normalization (`RepoPath`, i.e. `to_forward_slash`) maps onto the stored one.
+    ///
+    /// The Windows shape of this bug: `tmp.path().join("docs/trackers/recon.md")` is
+    /// `C:\…\docs/trackers/recon.md` there, the stored row is all-forward-slash, and a raw
+    /// text comparison refused the owner as a conflict with itself (c6cff39d, first seen on
+    /// the wine lane). The sibling test above only reds on Windows. This one reds
+    /// everywhere, because `to_forward_slash` rewrites `\` on every platform. On Linux,
+    /// `trackers\recon.md` is ONE filename component, so this path names no real file. It
+    /// exists only as a second spelling of the stored path, which is exactly what
+    /// `declaring` is on Windows.
+    #[test]
+    fn the_owner_is_recognized_under_a_backslash_spelling_of_its_own_path() {
+        let (tmp, cat) = repo_with(&[(
+            "docs/trackers/recon.md",
+            "---\nkind: tracker\nentry_prefix: R\n---\n",
+        )]);
+        refuse_taken_prefixes(
+            &cat.conn,
+            // Load-bearing: the last separator is a BACKSLASH. With `/` this is the
+            // byte-identical spelling and the test passes whether or not `me` is normalized.
+            &tmp.path().join("docs").join("trackers\\recon.md"),
+            &prefixes(&["R"]),
+        )
+        .expect("a second spelling of the owner's own path must not read as another owner");
     }
 
     /// The one shared family. Load-bearing: the declarer here would be refused for `R` in the
