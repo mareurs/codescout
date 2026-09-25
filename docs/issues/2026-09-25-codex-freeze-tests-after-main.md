@@ -1,10 +1,11 @@
 ---
 id: '5d4e9ab75d686fed'
 kind: bug
-status: open
+status: fixed
 title: 'Codex: direct test runner skips FreezeMenuGuard regressions'
 tags:
 - cluster/declared-not-wired
+closed: 2026-09-25
 opened: 2026-09-25
 owner: marius
 severity: low
@@ -25,3 +26,14 @@ This does not dispute the other session's reported 21-test run or its mutation k
 ## Expected correction
 
 Move the existing `if __name__ == '__main__': unittest.main()` after all test definitions. No fix applied in this review. Related: docs/issues/2026-09-25-codex-freeze-positive-count-guard.md. Cluster classification pending.
+
+## Fix
+
+**Fixed in `f0125e0e`, patch-id `f57b7cf16581abab25e3ae878ee25dc8cd7fe146`.** That commit also carries the review file and a pre-registration correction, so the patch-id hashes more than the test move.
+
+- The `if __name__ == "__main__": unittest.main()` guard moved below the last `TestCase`, with a comment saying why it must stay last.
+- **Observed before:** `python3 tests/test_stage2_synthetic.py` gave `Ran 16 tests ... OK`.
+- **Observed after:** the direct run gives `Ran 21 tests ... OK`, and `python3 -m pytest tests/test_stage2_synthetic.py -q` gives `21 passed`.
+- Class: IC-3, `declared-not-wired`, whose members line names this file.
+
+**Not added:** a guard that fails when a direct run and discovery disagree on the test count. The fix makes the two agree today; nothing stops a future class being appended below the guard again, apart from the comment.
