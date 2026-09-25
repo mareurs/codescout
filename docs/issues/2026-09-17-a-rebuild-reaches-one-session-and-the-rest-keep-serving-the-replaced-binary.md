@@ -23,6 +23,30 @@ One session rebuilds and reconnects. Every other session keeps the pre-rebuild b
 indefinitely, and **no instrument anywhere reports the split** — not the rebuilding
 session, not the sessions still on old code, not `/mcp`, not the gate.
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `8e274b32`) — still live, claim narrowed.**
+- **Still live.** `scripts/stale-servers.sh` (read-only) was run by the verifier and then by the coordinator, with
+  identical counts, against a binary rebuilt 2026-09-24 23:50:57: `servers=30 stale=25 current=5`, `muxes=2 stale=0`.
+  Control: all 5 current servers started after the rebuild, and every stale one before it (the oldest 2026-09-18
+  11:02:59).
+- **This bug's shape.** 23 of the 25 stale servers sit under 20 parents that hold no current server:
+  - Three of those parents are `codex` processes (`4057660` alone holds 4 stale servers), which `/mcp` guidance
+    never reaches.
+  - One parent (`1180549`) no longer exists, so its server outlived its session.
+- **Sibling `177695780d080014`'s shape.** The other 2 stale servers sit under parents that also hold a current server:
+  a replaced server lingering after `/mcp`. One of those parents, `2834158`, is the coordinating session's own
+  `claude` process. Related, not merged: that bug's trigger is this bug's remedy.
+- **Narrowed: "no instrument anywhere reports the split" was false when this file was written.**
+  - `workspace(action="status")` has returned `server.exe_deleted` and `build_id` since `fbd7f348` (2026-08-28),
+    which is § candidate 1.
+  - `scripts/stale-servers.sh` predates this file.
+  - What is missing is push: `scripts/rb.sh` still runs no fleet check (candidate 2).
+- **The move exposure is still unguarded.** `guard_stale_binary` (`src/retrieval/sync.rs:94`) refuses index sync from
+  a stale server, but nothing under `src/librarian` checks `exe_deleted`, so § *Why this is more than…*'s
+  `doc(action="move")` exposure has no guard.
+- **§ Workarounds miscounts.** Its one-liner counts muxes as servers: 7 current today, which is 5 servers plus 2 muxes.
+- **Not re-verified.** The SIGTERM-immunity and respawn-on-current claims would need signals sent to other sessions'
+  processes.
+
 ## Symptom (Effect)
 
 A fix is "shipped" from its author's vantage point and absent for everyone else. Each of

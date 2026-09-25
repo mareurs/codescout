@@ -25,6 +25,22 @@ Fix one of:
 The second form is stripped out of the command string **before the hook runs**,
 so the hook judges a bare `git push` and refuses again.
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `8e274b32`) — not reproducible here: dormant, not fixed.**
+- **Unreachable today.** Native `Bash` is in `permissions.deny` on all three profiles (`~/.claude`, `~/.claude-sdd`,
+  `~/.claude-kat`), and the guard matches `Bash` only (`git-worktree-guard.mjs:87`, `claude-plugins` repo). So
+  neither the harness strip nor this refusal can be reached.
+- **Nothing changed.** The remedy line is unchanged since `claude-plugins:15fa367`.
+- **The guard's own half still holds.** The guard was run on synthetic PreToolUse JSON:
+  - `cd <checkout> && git push --dry-run …` is exempt.
+  - A bare `git push --dry-run …` is denied.
+  - The exemption is text-only: `cd <nonexistent path> && git commit` is exempted too.
+  The strip itself stays untested.
+- **The discriminating test's target is gone.** `codescout.worktrees/check-codescout-integration` no longer exists;
+  only `mutation-slot-0` remains. The test stays unrun.
+- **Unexplained, and not investigated: the 2026-09-22 recurrence below came through `Bash`,** after the 2026-09-20
+  deny date `CLAUDE.md` gives. When the deny actually took effect was not established.
+- **If `Bash` is re-allowed,** re-probe the strip before trusting the remedy text.
+
 ## Reproduction
 
 Three calls from a `Bash` tool whose CC PWD is `/home/marius/work/claude/codescout`

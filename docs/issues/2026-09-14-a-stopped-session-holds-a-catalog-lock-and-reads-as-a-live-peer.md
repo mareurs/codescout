@@ -21,6 +21,24 @@ lock; the hold is unbounded. `scripts/peer-sessions.sh` lists it as a reachable 
 live socket, and nothing in the socket table, `ListAgents`, or the lock table distinguishes it
 from a session that is merely busy.
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `8e274b32`) — still live (E2), claim narrowed; the instance
+has cleared.**
+- **The instance has cleared.** § Reproduction was re-run at 07:31 +03:00. It never opens the catalog: `stat` plus
+  `/proc/locks`. Pids 3031436 and 3031162 and their socket are gone, and no process on the machine is in state `T`.
+  The 30 SHARED locks all belong to `Sl`/`Sl+` codescout servers, which is the baseline E1 describes.
+- **E2 stands, by inspection.** `scripts/peer-sessions.sh:161` still prints no process-state column, and the script
+  has had no commit since 2026-09-14.
+- **Narrowed: § Root cause's "no writer can complete" does not hold for this catalog, which is WAL**
+  (`PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000` at `src/librarian/catalog/mod.rs:601` and `:638`). A
+  throwaway-DB probe used Python's `sqlite3`, not codescout's build, and sent SIGSTOP only to its own child. It
+  measured three cases:
+  - A stopped *idle* connection costs nothing.
+  - A reader stopped *mid-transaction* makes the next writer wait one busy_timeout and then succeed, and blocks
+    `wal_checkpoint(TRUNCATE)`, so the WAL grows.
+  - Only rollback-journal (DELETE) mode reproduces "database is locked".
+- **Narrowed: "stopped since Thu Sep 10 08:38:32" is the process START time.** That session's transcript has entries
+  until 15:03:59 +03:00 the same day, so the stop instant was never measured.
+
 ## Symptom (Effect)
 
 Two `cargo test --workspace` runs on this checkout stalled on 2026-09-13; one was killed to

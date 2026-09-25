@@ -38,6 +38,27 @@ pathspec.
 This is not specific to `docs/trackers/issue-clusters.md` or to counts. It would be true of a
 single-class ledger, and of any workflow that stages, checks something, then commits.
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `8e274b32`) — still live, claim narrowed.** Run in
+throwaway repos with the real recorder and guards.
+- **Still live.** After a peer's `git restore --staged` of one of your two staged paths, a bare commit and
+  `scripts/commit-mine.sh` both commit the remainder silently: `rc=0`, and `commit-mine` prints only a path count.
+  `commit-mine` addresses capture, not loss.
+- **Now loud on the pathspec route.** The documented pathspec form refuses through unreviewed-content, although the
+  message frames it as "content you never staged" rather than as a peer unstaging your path.
+- **Silent-orphan route closed.** A pathspec commit over a staged-then-rewritten file is refused, which closes
+  § *The bypassed version is orphaned* on this checkout.
+- **`restore --staged` has no guard.** `scripts/git-safe-reset.sh` (`40273a16`, patch-id
+  `e110c5a8acfbe97497cf5f7447efc87e5c1a6388`) covers `git reset` only.
+- **Archive-move case covered for helper users.** `commit-mine` refuses a staged rename whose halves have different
+  owners (read, `scripts/commit-mine.sh:97-104`), which is § *2026-09-13*'s archive-move case.
+- **Stale sections of this file:**
+  - Fix item 3 was decided index-ward at `a27b3988`, so § Resume's "decide item 3" is done.
+  - § Fix item 1 and § Workarounds still prescribe the single-call `add && commit --` form, which the served
+    commit-sequence tail (step 4) says must be SEPARATE calls.
+  - The Reproduction's "or any pre-commit run" contradicts Hypothesis 1, and has been false since `074b749e`
+    removed the pre-commit stash.
+  - The `post-index-change-stage-log.sh:250-255` citation now sits at `:279-281` and `:394-399`.
+
 ## Symptom (Effect)
 
 Timeline, from this session's own shell history, HEAD `e158d4a7`:

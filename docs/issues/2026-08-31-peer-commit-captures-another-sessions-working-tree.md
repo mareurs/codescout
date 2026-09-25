@@ -19,6 +19,28 @@ severity: medium
 
 # A peer session's commit captured this session's in-flight working-tree changes, filing them under an unrelated message
 
+**Re-verified 2026-09-25 (medium-tier sweep, `experiments` @ `8e274b32`) — partially fixed.** Run in throwaway repos with
+the real recorder and guards.
+- **Closed, for `scripts/commit-mine.sh` users: index capture** (Instances 7, 9, 12, 17, 18). The helper is
+  `d859d04b`, patch-id `4b8dc425cc40fc65c42e148f5d5029d11eb5c4b8`.
+  - A peer's staged path stays staged and out of your commit.
+  - A bare commit in the same state is refused by foreign-index.
+  - By inspection, the helper's private index (`scripts/commit-mine.sh:116-135`) also closes the hook-to-commit race
+    of Instances 17 and 18, for helper users only.
+- **Fixed: the read-side twin** (§ *The read-side twin*), at `074b749e`, patch-id
+  `4c3958557408b19cdf60354a5f8288167e4342e4`. The hook now runs `scripts/pre-commit-run.sh`, with no stash.
+- **Still live: same-file capture** (Instances 4, 5, 10, 11, 13, 14, 16). `git add f.txt` followed by `commit-mine`
+  committed a peer's unstaged hunk in `f.txt` with `rc=0`. The helper documents this at `scripts/commit-mine.sh:32`
+  as a case it does not solve.
+- **Still live: `git commit -a`** (Instances 1-3), and both guards pass it. A peer's never-staged edit to a tracked
+  file was committed with `rc=0` and nothing printed. The coordinator reproduced this independently, with a control
+  arm. The hooks see `.git/index.lock`, which neither guard reads as a staging record. Filed as
+  `docs/issues/2026-09-25-git-commit-a-sweeps-a-peers-edit-past-both-ownership-guards.md`.
+- **Mitigated: `git add -A` / `git add .`.** Swept pairs are stamped `-`/`unnamed`, so both commit forms refuse. The
+  refusal is loud, and it over-refuses the sweeper's own file too.
+- **Routing.** The served commit-sequence tail (step 4) still prescribes the pathspec commit. `commit-mine` is
+  reached from foreign-index's refusal and from the convention's empty-intersection section.
+
 ## What happened
 
 Two Claude Code sessions worked the same checkout. This session made two tracker writes
