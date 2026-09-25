@@ -1,0 +1,33 @@
+{"event": "start", "arm": "qwen", "device": "cuda:0", "backend": "cuda", "torch": "2.14.0+cu130", "gpu": "NVIDIA RTX A5000", "menu": ["closed_population", "d_adjacency", "d_history", "d_loudness", "d_mutation", "d_red", "d_semicolon", "d_sessionid", "d_visibility", "member_vs_population", "open_artifact", "question_asked", "run_tool", "selector_narrow"], "pos_weight": {"closed_population": 1.0, "d_adjacency": 1.0, "d_history": 1.0, "d_loudness": 1.0, "d_mutation": 1.0, "d_red": 1.0, "d_semicolon": 1.0, "d_sessionid": 1.0, "d_visibility": 1.0, "member_vs_population": 1.0, "open_artifact": 1.0, "question_asked": 1.013157894736842, "run_tool": 1.0, "selector_narrow": 1.0}, "trainable_body": 32464896, "smoke": 0, "seed": 20260935, "cfg": {"model": "alibiserikbay/JevK5", "marker": "<|box_end|>", "max_len": null, "epochs": 3, "lr_body": 0.0002, "lr_head": 0.001, "lora": true}, "t": 1790326013.9}
+{"event": "progress", "epoch": 0, "rows": 200, "train_loss": 0.8290921360999346, "max_mem_gb": 8.67, "t": 1790326109.7}
+{"event": "progress", "epoch": 0, "rows": 400, "train_loss": 0.8472247575689107, "max_mem_gb": 8.67, "t": 1790326207.1}
+{"event": "progress", "epoch": 0, "rows": 600, "train_loss": 0.9184676357669135, "max_mem_gb": 8.67, "t": 1790326305.9}
+{"event": "progress", "epoch": 0, "rows": 800, "train_loss": 0.9249013230502169, "max_mem_gb": 8.67, "t": 1790326406.3}
+{"event": "progress", "epoch": 0, "rows": 1000, "train_loss": 0.876763034951, "max_mem_gb": 8.67, "t": 1790326504.3}
+{"event": "progress", "epoch": 0, "rows": 1200, "train_loss": 0.8424848859418126, "max_mem_gb": 8.67, "t": 1790326602.0}
+{"event": "progress", "epoch": 0, "rows": 1400, "train_loss": 0.8028682121149924, "max_mem_gb": 8.67, "t": 1790326699.6}
+{"event": "progress", "epoch": 0, "rows": 1600, "train_loss": 0.7573967209218864, "max_mem_gb": 8.67, "t": 1790326797.6}
+{"event": "epoch", "epoch": 0, "train_loss": 0.7145143928573313, "t": 1790326889.9}
+{"event": "val", "epoch": 0, "val_loss": 0.35290639017066305, "t": 1790326953.0}
+{"event": "progress", "epoch": 1, "rows": 200, "train_loss": 0.34996934204020363, "max_mem_gb": 8.67, "t": 1790327050.4}
+{"event": "progress", "epoch": 1, "rows": 400, "train_loss": 0.3573879440276421, "max_mem_gb": 8.67, "t": 1790327148.1}
+{"event": "progress", "epoch": 1, "rows": 600, "train_loss": 0.3821602638579576, "max_mem_gb": 8.67, "t": 1790327243.4}
+{"event": "progress", "epoch": 1, "rows": 800, "train_loss": 0.3669788903859867, "max_mem_gb": 8.67, "t": 1790327339.2}
+{"event": "progress", "epoch": 1, "rows": 1000, "train_loss": 0.3543847279915837, "max_mem_gb": 8.67, "t": 1790327434.1}
+{"event": "progress", "epoch": 1, "rows": 1200, "train_loss": 0.33551569808076026, "max_mem_gb": 8.67, "t": 1790327530.2}
+{"event": "progress", "epoch": 1, "rows": 1400, "train_loss": 0.32767839536480253, "max_mem_gb": 8.67, "t": 1790327625.6}
+{"event": "progress", "epoch": 1, "rows": 1600, "train_loss": 0.31926130434196276, "max_mem_gb": 8.67, "t": 1790327722.5}
+{"event": "epoch", "epoch": 1, "train_loss": 0.31065781534980386, "t": 1790327815.5}
+{"event": "val", "epoch": 1, "val_loss": 0.23077894889142944, "t": 1790327869.4}
+{"event": "progress", "epoch": 2, "rows": 200, "train_loss": 0.11786669712918382, "max_mem_gb": 8.67, "t": 1790327966.2}
+{"event": "progress", "epoch": 2, "rows": 400, "train_loss": 0.09940154244329459, "max_mem_gb": 8.67, "t": 1790328062.5}
+{"event": "progress", "epoch": 2, "rows": 600, "train_loss": 0.08957325379746102, "max_mem_gb": 8.67, "t": 1790328160.2}
+{"event": "progress", "epoch": 2, "rows": 800, "train_loss": 0.09078920382095329, "max_mem_gb": 8.67, "t": 1790328258.0}
+{"event": "progress", "epoch": 2, "rows": 1000, "train_loss": 0.08954557351153937, "max_mem_gb": 8.67, "t": 1790328353.4}
+{"event": "progress", "epoch": 2, "rows": 1200, "train_loss": 0.08817757882098816, "max_mem_gb": 8.67, "t": 1790328448.1}
+{"event": "progress", "epoch": 2, "rows": 1400, "train_loss": 0.08951364392565192, "max_mem_gb": 8.67, "t": 1790328540.1}
+{"event": "progress", "epoch": 2, "rows": 1600, "train_loss": 0.08865533679953269, "max_mem_gb": 8.67, "t": 1790328632.6}
+{"event": "epoch", "epoch": 2, "train_loss": 0.09417447678424373, "t": 1790328721.1}
+{"event": "val", "epoch": 2, "val_loss": 0.2979100350647668, "t": 1790328772.4}
+{"event": "selected", "epoch": 1, "val_loss": 0.23077894889142944, "t": 1790328772.4}
+{"event": "done", "selected_epoch": 1, "val_loss": 0.23077894889142944, "temps_at_bound": ["closed_population", "d_adjacency", "d_semicolon", "d_sessionid", "member_vs_population"], "t": 1790328860.1}

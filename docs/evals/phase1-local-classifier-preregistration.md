@@ -1093,3 +1093,41 @@ Stage 3 above fixes the arms, the head, the loss, the selection and the calibrat
 1. L1's selected epoch is 0, 1 or 2 of 0–4 (small data; later epochs overfit).
 2. At least one per-rule temperature lands on the 0.25 bound in at least one arm.
 3. L2's selected validation loss is lower than L1's.
+
+## Stage 3 — training results, 2026-09-25 (results under the execution amendment)
+
+Both arms trained once each, as registered, from commit `3a4dd230`, on the RTX A5000 at the same time. The small outputs are in `docs/evals/data/2026-09-24-rule-tell/stage3/results/{mbert,qwen}/`: the event log, per-rule temperatures, thresholds, and val and cal logits by row id. The checkpoints stay outside the repo:
+
+| arm | checkpoint sha256 |
+|---|---|
+| L1-MBERT, all parameters | `8b9de74e756a5edeeb076084a45590b183cedf5cf7a9e7bfe20a6da16c6d44a1` |
+| L2-QWEN, LoRA plus head | `db18339dbeb2f92f70aa6f46da7539e83baa3a975dcf513170510c643bda2bc4` |
+
+**Validation loss per epoch.** Chance, an output of 0.5 everywhere, is 0.693.
+
+| epoch | L1-MBERT | L2-QWEN |
+|---|---|---|
+| 0 | 0.6952 | 0.3529 |
+| 1 | 0.6975 | **0.2308** (selected) |
+| 2 | 0.6950 | 0.2979 |
+| 3 | 0.6939 | — |
+| 4 | **0.6938** (selected) | — |
+
+**L1-MBERT learned nothing that transfers, and did not fit train either:** its train loss ended at 0.696. Its thresholds all sit at about 0.5. Two checks, on train rows only, rule out an engineering cause:
+- **An overfit check:** 32 train rows, the registered head learning rate, 15 passes. The loss went to 0.001 and accuracy to 100%. So gradients flow and the head can separate examples.
+- **Pair alignment:** in 881 of the 895 train pairs, the positive and negative texts differ in exactly the target unit. The other 14 are mined pairs whose context windows differ more widely. So the labels point where they should.
+
+Neither check read a val or cal row, and no setting changed. This is the registered L1 result: full fine-tuning of ModernBERT-large on about 64 pairs per rule does not learn these rules. It still goes to the Stage-4 gate, as registered.
+
+**L2-QWEN learned.** Epoch 1 was selected, and epoch 2 overfitted (train 0.094, val 0.298). At its precision thresholds, most rules have 1–2 false positives on val. **Those counts are optimistic,** because val chose the thresholds. T is the test.
+
+**Temperatures landing on a bound:**
+- L2: 5 rules at 0.25 — `closed_population`, `d_adjacency`, `d_semicolon`, `d_sessionid` and `member_vs_population`.
+- L1: 2 rules at 0.25 (`closed_population`, `d_adjacency`) and 3 at 10 (`d_semicolon`, `member_vs_population`, `selector_narrow`). On L1's uninformative logits these fits carry no meaning.
+
+**A property to carry into Stage 4.** At T = 0.25, calibrated probabilities saturate. Several L2 thresholds therefore sit at probabilities within about 1e-3 of 0 or 1: the precision threshold for `d_adjacency`, `d_semicolon`, `d_sessionid` and `member_vs_population`, and the recall threshold for `d_adjacency`, `d_semicolon` and `d_sessionid`. A threshold there is the registered rule working as written. It is also where a shift from paragraphs to whole drafts is most likely to move a decision. It is recorded, not changed.
+
+**Predictions:**
+1. L1's selected epoch is 0, 1 or 2: **failed.** Epoch 4 was selected, on a curve flat at chance.
+2. At least one temperature lands on 0.25: **held**, 5 in L2 and 2 in L1.
+3. L2's selected validation loss is lower than L1's: **held**, 0.231 against 0.694.

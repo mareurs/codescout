@@ -1,0 +1,104 @@
+{
+ "menu": [
+  "closed_population",
+  "d_adjacency",
+  "d_history",
+  "d_loudness",
+  "d_mutation",
+  "d_red",
+  "d_semicolon",
+  "d_sessionid",
+  "d_visibility",
+  "member_vs_population",
+  "open_artifact",
+  "question_asked",
+  "run_tool",
+  "selector_narrow"
+ ],
+ "temperatures": {
+  "closed_population": {
+   "T": 0.25000058114528595,
+   "at_bound": true,
+   "cal_n": 32,
+   "cal_pos": 16
+  },
+  "d_adjacency": {
+   "T": 0.2500000447034835,
+   "at_bound": true,
+   "cal_n": 30,
+   "cal_pos": 15
+  },
+  "d_history": {
+   "T": 0.8053175508975947,
+   "at_bound": false,
+   "cal_n": 16,
+   "cal_pos": 8
+  },
+  "d_loudness": {
+   "T": 1.4163131117820733,
+   "at_bound": false,
+   "cal_n": 18,
+   "cal_pos": 9
+  },
+  "d_mutation": {
+   "T": 1.5541281104087779,
+   "at_bound": false,
+   "cal_n": 24,
+   "cal_pos": 12
+  },
+  "d_red": {
+   "T": 1.6873517632484363,
+   "at_bound": false,
+   "cal_n": 20,
+   "cal_pos": 10
+  },
+  "d_semicolon": {
+   "T": 0.2500000447034835,
+   "at_bound": true,
+   "cal_n": 8,
+   "cal_pos": 4
+  },
+  "d_sessionid": {
+   "T": 0.2500000447034835,
+   "at_bound": true,
+   "cal_n": 24,
+   "cal_pos": 12
+  },
+  "d_visibility": {
+   "T": 3.726495623588564,
+   "at_bound": false,
+   "cal_n": 26,
+   "cal_pos": 13
+  },
+  "member_vs_population": {
+   "T": 0.2500003129243847,
+   "at_bound": true,
+   "cal_n": 8,
+   "cal_pos": 4
+  },
+  "open_artifact": {
+   "T": 0.699070721864701,
+   "at_bound": false,
+   "cal_n": 26,
+   "cal_pos": 13
+  },
+  "question_asked": {
+   "T": 1.9458292126655552,
+   "at_bound": false,
+   "cal_n": 46,
+   "cal_pos": 23
+  },
+  "run_tool": {
+   "T": 0.9431416094303139,
+   "at_bound": false,
+   "cal_n": 40,
+   "cal_pos": 20
+  },
+  "selector_narrow": {
+   "T": 0.896961480379102,
+   "at_bound": false,
+   "cal_n": 41,
+   "cal_pos": 20
+  }
+ }
+}
