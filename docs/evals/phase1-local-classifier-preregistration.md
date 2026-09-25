@@ -1131,3 +1131,30 @@ Neither check read a val or cal row, and no setting changed. This is the registe
 1. L1's selected epoch is 0, 1 or 2: **failed.** Epoch 4 was selected, on a curve flat at chance.
 2. At least one temperature lands on 0.25: **held**, 5 in L2 and 2 in L1.
 3. L2's selected validation loss is lower than L1's: **held**, 0.231 against 0.694.
+
+## Amendment — Stage 4 execution: the trained arms at the gate, 2026-09-25 (registered before either gate runs)
+
+**Code:** `scripts/phase1-local-trained.py`. Like `scripts/phase1-local-l0.py`, it loads `scripts/phase1-span-selector.py` and replaces its `judge_rule`, so the gate texts, pass criteria, span check and claim-on-target check are the code S0 and L0 were scored by.
+
+**Two further substitutions, disclosed:**
+- **`JUDGED` is the 14-rule local menu.** The gate's own code reports a positive for a rule the run does not judge as `n/a`, never as a pass or failure. So 8 of the 10 gate texts apply: `clean-1` to `clean-5` must fire no menu rule, and `semicolon`, `sessionid` and `member` must fire their own. `cannot` and `contradiction` are Haiku-only.
+- **The span gate keeps its 2 menu texts,** `span-sessionid` and `span-semicolon`. `span-cannot` is `cannot_happen`, which is Haiku-only.
+
+**Per (text, rule):**
+- The text's `segment()` units are scored once.
+- **Candidates are units at least `MIN_SPAN` (12 characters) long,** the only claims `verify_span` can accept. L0 applied the same filter.
+- P(rule) = max over candidates of sigmoid(z / T_rule). The rule fires when P ≥ its **precision-oriented** val threshold, the registered standalone threshold.
+- The claim is the argmax unit, verbatim. A `verify_span` failure is raised as an error row, never downgraded.
+
+**Checks already run, reading only val (which Stage 3 consumed):**
+- **Checkpoint parity on the A5000:** each arm's `best.pt` (sha256 as recorded) was loaded fresh, and every val logit recomputed. Max |Δz| against the committed `fold-logits.json` is **0.000** for both arms. So the checkpoint load worked, calibration used the selected epochs, and scoring is bit-deterministic.
+- **Backend parity for L1 on the RX 7800 XT (ROCm):** max |Δz| 6.9e-3 and mean 2.7e-4, yet **13 of 521 val decisions flipped** at the precision threshold. L1's logits sit near 0 and its thresholds near 0.5, so backend noise alone changes verdicts.
+
+**So both arms are scored on the A5000 only,** the backend they were calibrated on. The ROCm card is not used for Stage 4 scoring. That reverses the Stage 3 amendment's plan to reserve it for this, and is recorded as a measured reason, not a preference.
+
+**Runs:** each arm is deterministic (shown by the parity check, and re-checked by `--check-determinism` before its gate). So the registered 3 runs is **one run, labelled as such**, and "≥ 2 of 3" reads 1/1. The gate needs every applicable text passing and 0 errored rows; the span gate needs both texts on target. **An arm that fails either is not scored further** (Stage 4).
+
+**Predictions:**
+1. **L1 fails the gate.** Its outputs carry no signal, and its thresholds sit near 0.5. Seven of its 14 rules use the F0.5 fallback threshold, set between 0.491 and 0.502, so at least one clean text fires.
+2. **L2 passes the span gate** (both texts on target). Both are plain `d_sessionid` and `d_semicolon` shapes, and the claim is sentence-level.
+3. **L2's gate is uncertain, and no pass is predicted.** Its clean texts are short, but four precision thresholds sit within 1e-3 of 0 (`d_adjacency`, `d_semicolon`, `d_sessionid`, `member_vs_population`), so one weak activation on a clean text is enough to fire.
