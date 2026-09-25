@@ -10,7 +10,7 @@ tags:
 - context
 topic: deep-agent-observation
 time_scope: '2026-09-18_to_2026-10-02'
-entry_high_water_DCX: 2
+entry_high_water_DCX: 3
 entry_prefix:
 - DCX
 snapshot_anchor: '| ID | Date UTC | Sampling | Capture key | Observation |'
@@ -83,6 +83,7 @@ Group by canonical incident, session/task and source lineage. First report cover
 |---|---|---|---|---|
 | DCX-1 | 2026-09-18 | historical-seed | seed-context-injection-W3 | Recipient-specific guide delivery |
 | DCX-2 | 2026-09-24 | routine-first | sebf651ec-open-bug-verify-sweep-brief | verifier brief contents for 34-bug sweep |
+| DCX-3 | 2026-09-25 | routine-first | se4fbc7ef-medium-tier-verify-brief | Verifier brief for the 18-bug medium-tier re-verification |
 
 ## DCX-1 — Historical seed — recipient-specific guide delivery
 
@@ -117,6 +118,27 @@ Group by canonical incident, session/task and source lineage. First report cover
 **Context decision:** include in each brief: the bug id/path list for its batch; the doctor-cited source files per bug; the two-failure-mode lesson (verify every claimed mode, not only the headline); where fixes hide (sibling archived bug files, `git log -S`, `git log --since=<opened> -- <cited paths>`); read-only limits (no edits, no git index/HEAD moves, no `--no-default-features` builds, no mutations in the shared tree); patch-id recipe; the verdict vocabulary. Told to fetch `get_guide("tracker-conventions")` themselves if needed. **Not included:** the full doctor output and unrelated open bugs. Intended next action: dispatch.
 
 **Observed sequence:** the briefs were delivered at dispatch; all four agents stayed read-only; no edits or git state changes were reported or observed. The two-mode lesson was visibly used: batch C split `f47274c1` into three modes with separate verdicts, and batch A split `523233935` A/B and found B recurring on a branch the earlier fix did not cover. Guide delivery to the recipients was **not** as intended: two of the four verifiers were silently starved of `symbol-navigation` by the race filed as `c161cc27ddff5672`, while a third got it three times. **Outcome / basis:** mixed. The brief context was useful (per-mode verdicts observed), but the auto-delivered context was misrouted; delivery outcome `absent` for 2 of 4 recipients. **Counterfactual / missingness:** no alternative brief was tried. Whether the starved verifiers' reports suffered is not established; batch C's report was solid, and its work leaned on scripts rather than symbol navigation. **Rests on / related:** `DWF-7`, `c161cc27ddff5672`.
+
+## DCX-3 — Verifier brief for the 18-bug medium-tier re-verification: read-only limits, pin the workspace, fetch guides explicitly
+
+**Status:** pending-outcome
+**Valid:** dated 2026-09-25
+
+**Sampling / capture mode:** routine-first / prospective. The first context decision this session captured before its dependent action. An earlier one — which sections of the six high-severity bug files to read before re-verifying them — was not captured and is declared missed in this session's DCS receipt.
+
+**Identity / capture key:** session `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92` (collector and coordinator), model Opus 5.5; recipients four general-purpose subagents on Opus. Key `se4fbc7ef-medium-tier-verify-brief`.
+
+**Time / substrate:** decided and captured ~2026-09-24T21:35Z; HEAD at or after `a3781d2a` on `experiments`, main checkout shared with 6+ live sessions; a `scripts/gate.sh` run in flight in a leased slot.
+
+**Objective / trigger:** re-verify the 18 open medium-severity bugs a live session does not hold, before choosing any fix — the same method this session applied to the six highs (`DWF-9`). Iron Law 6: delegates see only their brief.
+
+**Pre-action evidence:** the coordinator holds the refreshed medium list (status, id, class per file), `DCX-2`'s outcome (per-mode verdicts paid off; auto-delivered guides reached 2 of 4 recipients), this session's measured hazards (MCP respawns drop activation and pre-restart buffers; a peer's in-flight `.rs` reds `FMT` in the gate; `fmt-mine` / shared `target/` hazards), and the house rule "run the reproduction before reading the fix plan".
+
+**Context decision:** each brief carries its batch's id/path list; the read-only limits (no edits, no git index/HEAD moves, no cargo in the shared `target/` — `scripts/with-slot.sh` if a run is essential — no mutations in the shared tree); pin `workspace=` on every call because the server can respawn under them; verify EVERY failure mode a file claims; where fixes hide (`git log --since=<opened>` over cited paths, archived siblings, `-S` on a symbol); the verdict vocabulary; and an explicit instruction to FETCH `get_guide("symbol-navigation")` and, only if needed, `get_guide("tracker-conventions")`, rather than rely on auto-delivery — the `DCX-2` lesson. **Not included:** the other 83 open bugs, the session's commit history. Intended next action: dispatch four batches in parallel.
+
+**Observed sequence:** (2026-09-25, coordinator's reading of the returns plus its own spot-checks) Four batches dispatched in parallel. **Batches B, C, D returned** and stayed inside the read-only limits: at return the shared index held no staged path of theirs. `git worktree list` showed only the pooled `mutation-slot-0`, which predates the sweep and is re-synced by `mutation-probe.sh`, so a probe run cannot be ruled out from that listing alone, and none was reported. Their returns reported fetching `symbol-navigation` explicitly rather than relying on auto-delivery, which is the brief's `DCX-2` provision working as intended. One recipient (batch D) followed the brief over a conflicting startup-hook suggestion, which is the precedence the brief intended but did not state. The coordinator spot-checked each return before writing notes, and **narrowed one over-read claim**: the reindex-in-a-worktree `unverified:` caveat. A return read the guarded worktree skip (`indexer.rs:291-297`) as resolving it, but the skip explains the zero-file walk and not the caveat's actual question (why another worktree has rows). The note records it as NARROWED, not resolved. 13 notes landed in `3db91b2e`. **Batch A (5 bugs) was lost to an API 429** mid-run (its last line: "Now I'll run the reproduction for bug 4"), and nothing of its work was returned. **Re-dispatched 2026-09-25 at HEAD `9ec5f07e` as ONE agent** rather than several, to lower 429 exposure, with the brief **revised at the point of failure**. Bug 4 is about a stopped session holding a catalog lock, so the re-brief adds: never signal a process you did not spawn, and never lock or open-for-write the shared `catalog.db` (a throwaway catalog via a code-confirmed override, or no reproduction). It also forbids `cargo rb` and `rb.sh` (bug 5 concerns rebuilds), and it passes this session's `commit-mine.sh` (`d859d04b`) and the lingering-server bug (`177695780d080014`) as prior results, so they are not re-discovered. Outcome for batch A: pending.
+
+**Rests on / related:** `DWF-9`, `DCX-2`.
 
 ## Template for new entries
 

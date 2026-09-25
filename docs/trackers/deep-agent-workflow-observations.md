@@ -15,7 +15,7 @@ entry_prefix:
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
 entry_high_water_DWF: 10
-entry_high_water_DCS: 8
+entry_high_water_DCS: 9
 ---
 
 # Deep-agent workflow observations and session coverage
@@ -103,6 +103,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DWF-9 | 2026-09-24 | workflow | routine-first | e4fbc7ef/high-severity-bug-reverify |
 | DWF-10 | 2026-09-24 | workflow | enrichment | 571eb3d6/review-model-vs-context |
 | DCS-8 | 2026-09-24 | coverage | session-receipt | 938e2953/gate-cache-disk |
+| DCS-9 | 2026-09-25 | coverage | session-receipt | e4fbc7ef/whole-session |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -523,6 +524,22 @@ the mechanism stays an untested hypothesis with its test named in the bug file.
 | Native / delegated / unobserved gaps | No subagents were dispatched after compaction. All shell work went through `run_command`, so it appears in usage.db. The 26-mutation run was a background script, visible only as its log |
 | Collection overhead | This receipt: 1 append call, plus 2 reads of the ledger's recipe sections. Not measured in time |
 | Unresolved pending | none |
+
+## DCS-9 — Session e4fbc7ef — high-severity re-verify and fixes, the MCP env experiment, the medium-tier sweep, spanning one compaction
+
+**Valid:** dated 2026-09-25
+
+| field | value |
+|---|---|
+| Session / principal / collector | session `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`, profile `~/.claude-sdd`. The operator is the principal via this coordinating session, which was also the collector. Model Opus 5.5 |
+| Observed interval (UTC) | 2026-09-24 19:13:54Z, the first transcript record, to about 04:35Z on 2026-09-25, when this receipt was written. It spans **one** compaction, at 04:18:29Z. Timestamps, tool-use counts, dispatches and `append_entry` results were **re-derived from the session transcript** by a bounded extraction, not recalled. The pre-compaction narrative rests on the compaction summary |
+| Workspace | `/home/marius/work/claude/codescout`, branch `experiments`, a shared checkout with 6+ live sessions. Also `claude-plugins` for the peer-table skill (`91b3205`, `aa5efd7`) |
+| Coverage | `complete-observed-session` for the interval above: selection and capture happened in real time, before compaction. It is not complete at the machine level; see gaps |
+| DWF routine / enrichment | routine-first **DWF-9** (re-verify the six high-severity bugs before choosing any fix), captured prospectively at 19:20Z and now `observed`. **No enrichment opened.** The later substantive episodes live in DWF-9's outcome updates and their canonical bug files, not in new DWF rows. They are: the commit-my-subset helper `d859d04b`; the red-commit and LAUNCH-CWD rulings `052a099b`; the MCP env-deletion experiment `1c5e106ee122f582`; the lingering-server filing `177695780d080014`; and the medium-tier sweep `3db91b2e` |
+| DCX routine / enrichment | **DCX-3** (the medium-tier verifier brief), captured prospectively at 21:30Z. **Missed capture, declared rather than backfilled:** the session's first eligible context decision, which sections of the six high-severity bug files to read before re-verifying them, was acted on without a snapshot. So DCX-3 is the first *captured* decision, not the first eligible one, and says so itself. The batch A re-brief, revised where the first run failed, is recorded inside DCX-3 rather than as an enrichment |
+| Native / delegated / unobserved gaps | **5 dispatches**, all `general-purpose` on Opus: 4 parallel verifiers at 21:31Z, and 1 re-dispatch at 04:21Z. Principals are observable only as CC agent ids, and task transcripts are process-local and not retained. **Batch A's first run died on an API 429 with no return**, so its actions are unobserved. At the notes commit the index held exactly the 13 files the coordinator wrote, and `git worktree list` showed only the pooled `mutation-slot-0`. **MCP respawns** (a peer's `cargo rb` and the operator's `/mcp` during the env experiment) dropped activation and every `@cmd_*` or `@tool_*` handle several times. One ledger write was refused, the first DWF-9 append ("activate not called"), before any id was allocated, and lost buffers were re-queried. The operator's `/mcp` reconnects are harness actions and do not appear in usage.db. All shell went through `run_command` |
+| Collection overhead | From the transcript at about 04:23Z: DWF ledger 3 gets, 2 appends (1 refused) and 3 updates; DCX ledger 4 gets, 1 append and 2 updates; 4 bounded transcript extractions for this receipt; plus this append. About 20 of roughly 385 tool calls. Not measured in time |
+| Unresolved pending | **DCX-3's batch A outcome**: re-dispatched 04:21Z at HEAD `9ec5f07e`. On return, update DCX-3's observed sequence and this row |
 
 ## Template for new entries
 
