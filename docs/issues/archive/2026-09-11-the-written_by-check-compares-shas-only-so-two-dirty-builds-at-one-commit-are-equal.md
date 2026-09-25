@@ -373,6 +373,9 @@ Gate green: FMT 0, CLIPPY 0, LEAN 0, DEFAULT 0. The new tests appear by name in 
 
 **Not seen live, and why that is not a caveat:** the bug's own case, equal SHAs with different build ids, needs two different builds at one commit reading each other's sidecar. It is covered by `equal_shas_with_different_build_ids_report` and by M1/M2. Staging it live would mean arming a second binary on the shared checkout for no information the unit test lacks.
 
+
+**Round trip observed live 2026-09-25 (server pid 2307745, `git_sha` `34ef7b50`).** The sidecar had been rewritten by the previous post-fix build (`89581c6f`), which stamped `build_id` `642898d4…` itself. The next build read it with `reading_build_id` `42246300…` (equal to `sha256sum /proc/2307745/exe`). Both sides carried ids, so the comparison went through the build-id arm: the M1/M2 site, previously exercised only by unit tests. Write, persist and read-back are therefore all confirmed on real binaries. The SHAs also differ in this pair, so it is still not the equal-SHA case, which stays covered by `equal_shas_with_different_build_ids_report`.
+
 ## Resume
 
 Found during a post-rebuild reconnaissance, from a peer's self-correction rather than from the
