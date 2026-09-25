@@ -18,11 +18,13 @@
 #
 # WHAT IT CHECKS
 # --------------
-# Only pathspec commits are examined — an ordinary `git add` + `git commit` commits
-# the index, which is by definition what you staged and could review. A pathspec
-# commit is identified by git handing the hook a temporary index named
-# `next-index-<pid>.lock` rather than `.git/index` (verified 2026-08-31, and the
-# pre-commit framework preserves the variable).
+# Only commits that stage working-tree content THEMSELVES are examined: pathspec commits
+# (`-- <paths>`, `-o`) and `-a` / `-i` commits. An ordinary `git add` + `git commit`
+# commits the index, which is by definition what you staged and could review. Each form
+# is identified by the temporary index git hands the hook in place of `.git/index`:
+# `next-index-<pid>.lock` for a pathspec commit (verified 2026-08-31) and `index.lock`
+# for `-a` / `-i` (verified 2026-09-25; see the case block below). The pre-commit
+# framework preserves the variable.
 #
 # For each path in such a commit, the blob being committed is compared against the
 # blob in the real index. They match only if what is about to be committed is exactly
@@ -91,9 +93,20 @@
 
 set -uo pipefail
 
+# Two temporary indexes, one per way a commit can stage WORKING-TREE content itself. Both
+# were measured 2026-09-25 on git 2.55 by echoing GIT_INDEX_FILE from a real hook:
+#   next-index-<pid>.lock   `-o` / `-- <paths>`: the named paths, from the working tree
+#   index.lock              `-a`, `-i <paths>`, `--amend -a`: every modified tracked file
+#                           (for -a), staged into the real index's lock as part of the commit
+# A bare commit and `--amend` hand the hook `.git/index` itself and are never examined.
+# `index.lock` went unexamined until 2026-09-25, and that was not a judgement: the stage
+# log never records staging into it either, so `git commit -a` swept a peer's unstaged
+# edit past BOTH ownership guards with rc=0
+# (docs/issues/2026-09-25-git-commit-a-sweeps-a-peers-edit-past-both-ownership-guards.md).
 idx="${GIT_INDEX_FILE:-}"
 case "${idx##*/}" in
-    next-index-*) ;;
+    next-index-*) form=pathspec ;;
+    index.lock) form=all ;;
     *) exit 0 ;;
 esac
 
@@ -112,20 +125,41 @@ done < <(GIT_INDEX_FILE="$idx" git diff-index --cached --name-only HEAD)
 
 {
     echo
-    echo "Refusing a pathspec commit that carries content you never staged:"
+    if [ "$form" = all ]; then
+        echo "Refusing a \`git commit -a\` / \`-i\` that carries content you never staged:"
+    else
+        echo "Refusing a pathspec commit that carries content you never staged:"
+    fi
     echo
     for path in "${unreviewed[@]}"; do
         echo "    $path"
     done
     echo
-    echo "\`git commit -- <paths>\` commits the WORKING TREE at those paths, not the index."
-    echo "On this shared checkout that includes anything a concurrent session wrote to the"
-    echo "same file since you last looked. Such captures are recorded in"
-    echo "docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md."
-    echo
-    echo "Do this instead — FOUR SEPARATE calls. Not one batched command:"
-    echo
-    echo "    git add ${unreviewed[*]}"
+    if [ "$form" = all ]; then
+        echo "\`-a\` stages EVERY modified tracked file from the WORKING TREE as part of the commit"
+        echo "(\`-i <paths>\` does the same for the paths it names). On this shared checkout that"
+        echo "includes files another session is editing, and the foreign-index guard cannot see"
+        echo "it: git stages them into a private index.lock, which the stage log never records."
+        echo "Recorded in docs/issues/2026-09-25-git-commit-a-sweeps-a-peers-edit-past-both-ownership-guards.md."
+        echo
+        # The list above is every path the commit would sweep, so it can name a PEER's file.
+        # The pathspec branch prints `git add <the list>` because there the list is paths the
+        # caller named; here the same line would stage someone else's work for them.
+        echo "The list above is everything -a would sweep, so it can include a PEER'S files."
+        echo "Do not copy it into \`git add\`. Stage only the paths YOU changed — FOUR SEPARATE"
+        echo "calls, not one batched command, and no -a:"
+        echo
+        echo "    git add <only the paths you changed>"
+    else
+        echo "\`git commit -- <paths>\` commits the WORKING TREE at those paths, not the index."
+        echo "On this shared checkout that includes anything a concurrent session wrote to the"
+        echo "same file since you last looked. Such captures are recorded in"
+        echo "docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md."
+        echo
+        echo "Do this instead — FOUR SEPARATE calls. Not one batched command:"
+        echo
+        echo "    git add ${unreviewed[*]}"
+    fi
     echo "    git diff --cached --name-only   # <- the index is SHARED: confirm these are all yours"
     echo "    git diff --cached               # <- read the content; that is the whole point"
     echo "    git commit"

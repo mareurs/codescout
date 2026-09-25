@@ -1,16 +1,19 @@
 ---
 id: '3c394db3801157d0'
 kind: bug
-status: open
+status: taken
 title: git commit -a sweeps a peer's unstaged edit into your commit, and both ownership guards pass it
 tags:
 - cluster/gate-keyed-on-unobservable-event
+claimed_at: 2026-09-25
+claimed_by: e4fbc7ef-27b7-4707-8469-ccdffa8e4e92
 closed: null
 opened: 2026-09-25
 owner: marius
 related:
 - docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md
 severity: medium
+unverified: '`git commit -p` / `--interactive` were not probed: they need a TTY, and a scripted `script(1)` probe hung on the prompt. They likely take `index.lock` (the -a/-i route), which the guard now examines, but that is unmeasured.'
 ---
 
 # BUG: `git commit -a` sweeps a peer's unstaged edit into your commit, and both ownership guards pass it
@@ -95,24 +98,50 @@ The reproduction above, plus the three line ranges cited in § Summary, read at 
 
 ## Fix
 
-Not implemented. Candidates, neither built:
+**Built 2026-09-25: the first candidate.** `scripts/pre-commit-unreviewed-content.sh` now examines `index.lock`
+as well as `next-index-*`, with the same per-path blob comparison against `.git/index`. Its refusal is
+form-aware, and the `-a` branch's remedy deliberately does **not** print `git add <the list>` as the pathspec
+branch does: for `-a` the list is every path the commit would sweep, so that line would stage a peer's file for
+them.
 
-- **Extend unreviewed-content to `index.lock`.** Any path whose entry in the hook's
-  `index.lock` differs from `.git/index` was staged by the commit itself, so its content was
-  never reviewed. That is the same comparison the guard already makes for `next-index-*`
-  (`:104-109`). A bare commit's hooks see `.git/index` (arm 2), so this does not reach the
-  ordinary commit form. `--include` and `--interactive` commits likely take the same route and
-  should be probed before relying on it.
-- **Make foreign-index refuse, not default, when the hook's index is not `.git/index`.** This
-  is weaker: it would also refuse A's own `-a` over files only A touched.
+Which index each form hands the hook was measured on git 2.55 before the change, by echoing `GIT_INDEX_FILE` from
+a real hook:
 
-Fix SHA: *(not yet fixed)*
-Patch-id: *(not yet fixed)*
+| form | hook's index | examined |
+|---|---|---|
+| bare `commit`, `--amend` | `.git/index` | no, and inert if examined: an index compared with itself finds nothing |
+| `-a`, `-i <paths>`, `--amend -a` | `index.lock` | **yes, since this fix** |
+| `-o <paths>`, `-- <paths>` | `next-index-<pid>.lock` | yes, as before |
+
+**Foreign-index is unchanged, deliberately.** The second candidate would also refuse A's own `-a` over files only
+A touched. Now that unreviewed-content refuses any `-a` that sweeps unstaged content, it would add nothing.
+
+`scripts/pre-commit-run.sh`'s comment on which index each shape uses was corrected in the same commit. Its run
+label (*refuse a pathspec commit carrying unstaged content*) was kept verbatim, because about ten records quote
+it as a name.
+
+Fix SHA: *(recorded when archived)*
+Patch-id: *(recorded when archived)*
 
 ## Tests added
 
-None yet. The reproduction's two arms are the shape a regression test in `tests/commit-mine.sh`
-(or a sibling suite) would take. Arm 2 is the control that makes arm 1 non-vacuous.
+`tests/hooks-discrimination.sh` § 4b (the section heading is "== -a / -i commits (index.lock)"). It has 12
+assertions, driven through REAL commits and a pre-commit shim, because the defect was the guard not recognising the
+index name git actually uses. A hand-copied `index.lock` would pass whether or not git still used that name. Suite
+at 163/0.
+
+Each bound was mutated with `scripts/mutation-probe.sh`, reading the suite's own `passed=/failed=` line:
+
+| mutation | killed by |
+|---|---|
+| M1: delete the `index.lock` arm (the fix reverted; the observed red) | 6 cases: the `-a` sweep refusal, its file name, HEAD unchanged, the peer warning, and the `-i` refusal and its file name |
+| M2: restore the pathspec remedy in the `-a` branch | `-a remedy does not tell you to stage the swept list` |
+| M3: drop the blob comparison, refusing every temporary-index commit | the fully-staged control (2 assertions) |
+| M4: `*) exit 0` to examine every index | `no GIT_INDEX_FILE -> silent` |
+
+**M4 first SURVIVED.** The bare-commit case alone cannot kill it, because git hands a bare commit `.git/index`, and
+an index compared with itself finds nothing. The unset-variable case was added to kill it, and the bare case's
+comment now says it guards behaviour, not that arm. All four were re-run after that edit.
 
 ## Workarounds
 
@@ -121,8 +150,8 @@ commit by pathspec, or with `scripts/commit-mine.sh` (which refuses `-a`).
 
 ## Resume
 
-Build the first candidate in § Fix, with arms 1 and 2 as its test. Probe `--include` and
-`--interactive` first, since they may share `index.lock`.
+Archive once the gate is green, recording the fix SHA and patch-id, and repoint the citations of this path: the
+guard's header and refusal text, the test comment, and `e421be689a23ae2a`'s re-verification note.
 
 ## References
 

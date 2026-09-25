@@ -108,9 +108,9 @@ else
 fi
 
 # The paths this commit will contain. `git diff --cached` follows GIT_INDEX_FILE, which
-# git points at a temporary `next-index-<pid>.lock` for a pathspec commit and at the real
-# index otherwise — so this is the committed set under both shapes, and it is read from
-# an index rather than from disk.
+# git points at a temporary `next-index-<pid>.lock` for a pathspec commit, at
+# `index.lock` for `-a` / `-i`, and at the real index for a bare commit — so this is the
+# committed set under all three shapes, and it is read from an index rather than from disk.
 paths="$(git diff --cached --name-only --diff-filter=ACMR "$against" 2>/dev/null)"
 
 status=0

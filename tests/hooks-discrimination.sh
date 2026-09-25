@@ -40,6 +40,7 @@ no() {
 }
 eq() { [ "$2" = "$3" ] && ok "$1" || no "$1" "want '$3' got '$2'"; }
 has() { printf '%s' "$2" | grep -qF "$3" && ok "$1" || no "$1" "missing: $3"; }
+hasnt() { printf '%s' "$2" | grep -qF "$3" && no "$1" "must NOT contain: $3" || ok "$1"; }
 
 # Assert the stage log is THERE, before a case that reads it after deliberately removing
 # it. Nothing here recreates that file directly: `post-index-change` fires on index
@@ -387,6 +388,84 @@ out="$(GIT_INDEX_FILE=".git/next-index-9.lock" \
     bash "$SRC/pre-commit-unreviewed-content.sh" 2>&1; echo "EXIT=$?")"
 has "working tree moved after staging -> refuse" "$out" "EXIT=1"
 has "names the file" "$out" "f.txt"
+rm -rf "$T"
+
+# ------------------------- 4b. `-a` / `-i` stage the working tree into index.lock
+# git hands an `-a` / `-i` commit's hooks `.git/index.lock`, not `next-index-*`, and until
+# 2026-09-25 this guard examined only the latter. So `git commit -a` swept a peer's
+# unstaged edit past it with rc=0 (and past foreign-index too, since the stage log never
+# records staging into index.lock):
+# docs/issues/2026-09-25-git-commit-a-sweeps-a-peers-edit-past-both-ownership-guards.md.
+# These cases drive REAL commits through a pre-commit shim instead of handing the guard a
+# hand-named index as section 4 does. The defect was the guard not recognising the name
+# git actually uses, and a copied `index.lock` would pass whether or not git still used it.
+echo "== -a / -i commits (index.lock)"
+unreviewed_repo() {
+    new_repo
+    echo base > a.txt
+    echo base > b.txt
+    git add a.txt b.txt > /dev/null 2>&1
+    git commit -qm base
+    # Installed AFTER the base commit, so the base is never judged.
+    cat > .git/hooks/pre-commit <<SHIM
+#!/usr/bin/env bash
+exec bash "$SRC/pre-commit-unreviewed-content.sh"
+SHIM
+    chmod +x .git/hooks/pre-commit
+}
+
+unreviewed_repo
+echo mine > a.txt
+# A peer's edit, never staged: the load-bearing detail. Staged, it would be foreign-index's case.
+echo "THEIR LINE" > b.txt
+out="$(git commit -a -qm sweep 2>&1; echo "EXIT=$?")"
+has "-a sweeping a peer's unstaged file -> refuse" "$out" "EXIT=1"
+has "-a refusal names the swept file" "$out" "    b.txt"
+eq "-a refused: nothing reached HEAD" "$(git log -1 --format=%s)" "base"
+# The pathspec branch prints `git add <the list>`; here that line would stage the peer's file.
+hasnt "-a remedy does not tell you to stage the swept list" "$out" "git add a.txt b.txt"
+has "-a remedy warns the list can hold a peer's files" "$out" "can include a PEER'S files"
+rm -rf "$T"
+
+# The over-refusal control. Every change is already staged, so index.lock and .git/index
+# agree on every blob and there is nothing unreviewed. A guard that refused every
+# index.lock commit would pass the case above and fail this one.
+unreviewed_repo
+echo mine > a.txt
+git add a.txt
+out="$(git commit -a -qm staged-first 2>&1; echo "EXIT=$?")"
+has "-a over fully-staged changes -> allowed" "$out" "EXIT=0"
+eq "-a over fully-staged changes: committed" "$(git log -1 --format=%s)" "staged-first"
+rm -rf "$T"
+
+# `-i <path>` takes the same index.lock route for the path it names.
+unreviewed_repo
+echo mine > a.txt
+git add a.txt
+echo "mine + THEIR LINE" > a.txt
+out="$(git commit -i a.txt -qm include 2>&1; echo "EXIT=$?")"
+has "-i over a file that moved after staging -> refuse" "$out" "EXIT=1"
+has "-i refusal names the file" "$out" "    a.txt"
+rm -rf "$T"
+
+# The widening must stop at the two temporary indexes. Two cases, because they guard
+# different things (measured 2026-09-25 by mutating `*) exit 0` to examine everything):
+#  - A bare commit hands the hook `.git/index` ITSELF, and comparing an index with itself
+#    finds nothing, so this case holds whatever the `*)` arm does. It guards BEHAVIOUR: a
+#    peer's unstaged edit elsewhere is not in a bare commit and must not be refused as if
+#    it were. It does NOT guard the arm. That mutation survives it.
+#  - With GIT_INDEX_FILE UNSET (a direct call, and this suite's own model of a bare commit
+#    for foreign-index), the `*)` arm is all that stands between the guard and an empty
+#    index, where every tracked path reads as unreviewed. That mutation dies here only.
+unreviewed_repo
+echo mine > a.txt
+git add a.txt
+echo "THEIR LINE" > b.txt
+out="$(git commit -qm bare 2>&1; echo "EXIT=$?")"
+has "bare commit beside a peer's unstaged edit -> allowed" "$out" "EXIT=0"
+eq "bare commit took only the index" "$(git show --name-only --format= HEAD)" "a.txt"
+out="$(env -u GIT_INDEX_FILE bash "$SRC/pre-commit-unreviewed-content.sh" 2>&1; echo "EXIT=$?")"
+has "no GIT_INDEX_FILE -> silent, not an empty-index refusal" "$out" "EXIT=0"
 rm -rf "$T"
 
 # ------------------------------- 5. the JOINT predicate and CODESCOUT_INDEX_ACK
@@ -890,7 +969,6 @@ blob_of() {
     git diff --cached --raw |
         awk -F'\t' -v p="$1" '$2 == p { split($1, x, " "); print x[4]; exit }'
 }
-hasnt() { printf '%s' "$2" | grep -qF "$3" && no "$1" "must NOT contain: $3" || ok "$1"; }
 
 S_A=route-sess-A
 
