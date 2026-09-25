@@ -3039,6 +3039,7 @@ mod tests {
         let (_dir, server) = make_server().await;
         let mut undeclared: Vec<String> = Vec::new();
         let mut under_reported: Vec<String> = Vec::new();
+        let mut long_docs_under_reported: Vec<String> = Vec::new();
         let mut thematic_but_complete: Vec<String> = Vec::new();
 
         for t in &server.tools {
@@ -3062,6 +3063,26 @@ mod tests {
                 .copied()
                 .filter(|a| !names_action(d, a))
                 .collect();
+            let long_docs_missing = t
+                .long_docs()
+                .map(|docs| {
+                    actions
+                        .iter()
+                        .copied()
+                        .filter(|a| !names_action(docs, a))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if matches!(action_contract(t.name()), Some(ActionContract::Inventory))
+                && !long_docs_missing.is_empty()
+            {
+                long_docs_under_reported.push(format!(
+                    "{} omits {:?} of {}",
+                    t.name(),
+                    long_docs_missing,
+                    actions.len()
+                ));
+            }
 
             match action_contract(t.name()) {
                 None => undeclared.push(format!("{} (enum: {})", t.name(), actions.join(", "))),
@@ -3098,6 +3119,13 @@ mod tests {
              re-declare the tool `Thematic` in `action_contract` if it no longer \
              enumerates. Mind `TOOL_SURFACE_CHAR_BUDGET`.",
             under_reported.join("; ")
+        );
+        assert!(
+            long_docs_under_reported.is_empty(),
+            "these long docs promise an inventory of their `action` enum and are short: {}.\n\
+             An agent reads the long docs before its first call, so an omitted action is \
+             one it never learns exists. Add the missing action(s) to the long docs.",
+            long_docs_under_reported.join("; ")
         );
         assert!(
             thematic_but_complete.is_empty(),
