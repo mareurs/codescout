@@ -1195,3 +1195,27 @@ Run from commit `2a600b5d` on the RTX A5000. Transcripts and every row's probabi
 1. L1 fails the gate: **held** (1/8).
 2. L2 passes the span gate: **held** (2/2).
 3. L2's gate is uncertain, and no pass was predicted: it failed, 3/8. The reason given in the prediction, near-zero thresholds, was **wrong**: the model fires with high probability, and the diagnostic above locates the cause elsewhere.
+
+### Correction after a cold Codex review of Stages 3 and 4, 2026-09-25 (outcomes unchanged, two claims narrowed)
+
+**The review:** `docs/research/2026-09-25-codex-stage3-stage4-review.md`, at `805c2a83`. It reran no training or inference.
+
+**What it confirmed offline:** the saved losses and thresholds reproduce; L1's gate is 1/8 and L2's is 3/8; and even at a flat 0.5 threshold both arms fire on all five clean texts. It also confirmed that the freeze correction fixes the reported defect. **Stopping the route stands.**
+
+**One defect, fixed:** `docs/issues/2026-09-25-codex-freeze-tests-after-main.md`, class IC-3.
+- `tests/test_stage2_synthetic.py` defined the five `FreezeMenuGuard` regressions below its `unittest.main()` guard. So `python3 tests/test_stage2_synthetic.py` ran 16 tests and exited 0.
+- The 21 passes and mutation kills recorded earlier came from pytest discovery, which reaches all 21, and they stand.
+- The guard now comes last. A direct run reports 21 tests, and pytest reports 21 passed.
+
+**Two claims above were stronger than their evidence. Corrected:**
+
+1. **L1: "Two checks rule out an engineering cause."** They rule out **two named causes:**
+   - gradients that do not flow, or a head that cannot separate examples (the 32-row overfit);
+   - labels pointing at the wrong unit (pair alignment).
+
+   **They do not rule out every engineering cause.** Memorising 32 rows shows the pipeline can fit that subset, nothing more. Settings the amendment fixed without testing, such as the learning rate, schedule, epoch count or the `[SEP]` marker, could still account for it. So the finding is narrower: **under these registered settings**, L1 did not learn. It does not show that ModernBERT-large cannot learn these rules from this data.
+
+2. **L2: the 39%, and "the mechanism".** 2,614/6,773 is the rate at which heads fire on **unlabelled** cells: val texts from other rules, scored by a head no row labelled them for. **It is not a demonstrated false-positive rate**, because some of those texts may genuinely break the head's rule.
+   - The demonstrated false positives are the gate's clean texts, which are clean by construction: 5 of 5 fire, for both arms.
+   - For `d_semicolon` (479/479) and `d_sessionid` (470/471) to be mostly true positives, nearly every val text would have to contain that shape. That is implausible, but no label checks it.
+   - **Missing negatives from outside each rule remain a plausible explanation that fits the evidence. It has not been causally tested.** The causal test is to retrain with such negatives, which would be a new registration.
