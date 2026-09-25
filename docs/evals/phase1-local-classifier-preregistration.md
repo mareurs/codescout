@@ -1026,3 +1026,24 @@ If condition 1 fails, the agent labels are not admitted and Stage 2's mined rout
 3. **Targets that are not one segmenter unit are dropped:** 11 in train, 3 in val, 7 in cal, **15 in T**. The mined contexts are windows, and the miner's sentence split does not always match the segmenter's. T keeps 18 of its 27 positives. **T's per-rule claims were already withheld**, so no registered claim changes. That T shrank further is recorded here as a fact about it.
 
 **What Stage 3 may read:** `train`, and `val` and `cal` for selection and calibration as registered. It does not read `T`, `tsyn-in` or `tsyn-cross` until every choice is fixed (amendment 1).
+
+### Correction after a cold Codex review of the freeze, 2026-09-25 (the data is unchanged)
+
+**The review:** `docs/research/2026-09-25-codex-stage2-freeze-review.md`, at `d643c001`. It confirmed the hashes, the row targets and labels against their sources, the quarantine, and the top-up and re-audit selections. It found no source-group or 8-token overlap between train and the other sets.
+
+**One defect, verified by reproduction:** `docs/issues/2026-09-25-codex-freeze-positive-count-guard.md`, class IC-24.
+
+- **What was wrong:** the freeze's assertion compared train-fold positive **items**, counted before rows are built, with `trainable.json`. This section described it as verifying frozen positive **rows**.
+- **The reproduction:** a probe that removed every positive train row in memory still exited 0, with **0** train positives written.
+
+**The fix:**
+
+- `check_menu_positives` asserts that every menu rule has at least 50 positive rows in what is actually written to train.
+- Per rule, emitted rows = items − positive rows dropped as not one unit.
+- Both run before any file is written. The same probe is now refused, naming every emptied rule.
+- Regression cases are in `tests/test_stage2_synthetic.py`.
+- **A re-run reproduces every hash above, byte for byte.** The data and the menu are unchanged.
+
+**The claim above, corrected:** the item counts equal `trainable.json`, and the written positive rows are 1 or 2 lower for 4 rules (`closed_population` 51, `d_adjacency` 54, `d_sessionid` 70, `question_asked` 76). All 14 menu rules are at or above 50 as rows.
+
+**A limit for Stage 3, from the same review:** calibration is thin for two menu rules, `member_vs_population` and `d_semicolon`, with **4 positives each in `cal`**. A per-rule temperature fitted on 4 positives is fragile. Changing the calibration method would be a Stage 3 amendment. It is recorded here and not changed.

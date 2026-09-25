@@ -108,3 +108,34 @@ class Segmenter(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+fz = _load("freeze_stage2")
+
+
+def _rows(rule, pos, neg=0):
+    return [{"rule": rule, "label": 1}] * pos + [{"rule": rule, "label": 0}] * neg
+
+
+class FreezeMenuGuard(unittest.TestCase):
+    """check_menu_positives counts WRITTEN train rows (docs/issues/2026-09-25-codex-freeze-positive-count-guard.md)."""
+
+    def test_exactly_the_target_passes(self):
+        self.assertEqual(fz.check_menu_positives(_rows("a", 50), ["a"]), {"a": 50})
+
+    def test_one_under_the_target_raises(self):
+        with self.assertRaises(AssertionError):
+            fz.check_menu_positives(_rows("a", 50) + _rows("b", 49), ["a", "b"])
+
+    def test_menu_rule_with_no_rows_raises(self):
+        # the probe the review ran: every positive train row gone
+        with self.assertRaises(AssertionError):
+            fz.check_menu_positives(_rows("a", 0, neg=60), ["a"])
+
+    def test_negatives_do_not_count(self):
+        with self.assertRaises(AssertionError):
+            fz.check_menu_positives(_rows("a", 49, neg=10), ["a"])
+
+    def test_off_menu_positives_do_not_count(self):
+        with self.assertRaises(AssertionError):
+            fz.check_menu_positives(_rows("a", 49) + _rows("z", 10), ["a"])

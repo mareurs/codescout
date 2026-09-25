@@ -17,7 +17,9 @@ Sets and what enters them, reusing count_trainable.py's rules exactly:
                      train-fold items colliding with val/cal are DROPPED (what the count assumed).
   T                  mined T rows with an admitted rule label (all 22 rules; claims withheld).
   tsyn-in, tsyn-cross  construction-passing pairs from kept T-syn cells, not quarantined.
-Asserts the frozen train-fold positives equal trainable.json per trainable rule.
+Asserts, before writing anything: the train-fold positive ITEMS equal trainable.json per menu
+rule; every menu rule has >= 50 positive ROWS actually written to train (check_menu_positives);
+and, per rule, emitted positive rows = items - positive rows rejected as not one unit.
 """
 import collections, hashlib, json, pathlib, sys
 
@@ -45,6 +47,19 @@ def row(set_, fold, source, gen, rule, text, sentence, label, rid, n):
             "claude_generated": gen.startswith("claude"), "rule": rule, "text": text,
             "target": units.index(s), "label": label}
 
+
+def check_menu_positives(train_rows: list[dict], menu: list[str], target: int = 50) -> dict[str, int]:
+    """Positive rows per menu rule in the rows ACTUALLY WRITTEN to train, raising if any is
+    under `target`. The earlier assertion compared pre-row item counts, so a row filter that
+    emptied train still passed (docs/issues/2026-09-25-codex-freeze-positive-count-guard.md)."""
+    pos = {r: 0 for r in menu}
+    for x in train_rows:
+        if x["label"] == 1 and x["rule"] in pos:
+            pos[x["rule"]] += 1
+    short = {r: n for r, n in pos.items() if n < target}
+    if short:
+        raise AssertionError(f"menu rules under {target} positive train rows: {short}")
+    return pos
 
 def main() -> int:
     mp = gs.mp
@@ -110,6 +125,7 @@ def main() -> int:
 
     sets = collections.defaultdict(list)
     count = collections.Counter()
+    pos_dropped = collections.Counter()         # train positives rejected by row() (target not one unit)
     for f, obj, sh, kind, rule in items:
         if f == "train" and sh & other:
             n["train: cross-fold collision dropped"] += 1; continue
@@ -126,6 +142,8 @@ def main() -> int:
             pair = [row(f, f, "mined", "mined", rule, r["context_before"], r["positive"], 1, f"mined-{i}:pos", n)]
             if r.get("twin"):
                 pair.append(row(f, f, "mined", "mined", rule, r["context_after"], r["twin"], 0, f"mined-{i}:neg", n))
+        if f == "train" and pair[0] is None:
+            pos_dropped[rule] += 1
         sets[f].extend(x for x in pair if x)
 
     for i, r in enumerate(rows):
@@ -145,6 +163,9 @@ def main() -> int:
 
     for rule in menu:
         assert count[rule] == trainable["counts"][rule], (rule, count[rule], trainable["counts"][rule])
+    emitted = check_menu_positives(sets["train"], menu)
+    for rule in menu:                            # reconcile: items = emitted positive rows + positive drops
+        assert emitted[rule] == count[rule] - pos_dropped[rule], (rule, emitted[rule], count[rule], pos_dropped[rule])
 
     OUT.mkdir(exist_ok=True)
     files = {}
