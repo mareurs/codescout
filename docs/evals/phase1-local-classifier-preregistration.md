@@ -898,3 +898,56 @@ If condition 1 fails, the agent labels are not admitted and Stage 2's mined rout
 1. **A top-up round** from the unused training-side seeds (about 7,780, by the manifest). It would be sized from the measured yield, and it needs a fresh draw committed before it runs.
 2. **A corrected audit question for two-sentence rules**, with `contradiction` re-audited under it, disclosed as following the reading above.
 3. Leave Stage 3 unrun, and record the local route as data-limited at this generation volume.
+
+## Amendment — item quarantine, a relational audit question, and a top-up sized from measured survival, 2026-09-25 (registered before any of it runs)
+
+**Operator decision, 2026-09-25:** register the three changes a Codex review of the results asked for (`docs/research/2026-09-25-codex-synthetic-results-review.md`, committed in `149976e1`). All three findings were checked against the data and hold. **Where this and earlier text disagree, this wins.**
+
+**1. Item-level quarantine.**
+
+- **Every audited pair with a disagreement** under the question that applies to its rule is excluded from training and from T-syn scoring. **Nothing is relabelled.**
+- Cell and source decisions keep their round-1 measurements. This is a disposition of known items, not a re-scoring.
+- **Round 1 outside `contradiction`:** 8 training-side pairs (4 train, 2 validation, 2 calibration) and 5 T-syn pairs. Among the 4 train pairs, three dispute the target itself: `d_loudness` (a = no), and `lines_read` and `member_vs_population` (b = no).
+- `contradiction`'s pairs are decided by change 2.
+
+**2. A relational audit question for `contradiction`.**
+
+- **The file:** `synthetic-audit-prompt-relational.md`.
+- **Scope:** `contradiction` only. It is the one rule whose law relates two statements ("two passages of the same text state things that cannot both be true"). Every other law is about a single claim.
+- **What it changes:** question (c) asks for a *separate, independent* breach, leaving aside the statement the target contradicts. Question (b) asks whether the substitution removes the breach in context.
+- **Re-audit:** **the same round-1 sampled pairs** (8 Claude training-side, 6 Claude T-syn, 8 Codex T-syn), with the same auditors. Only the question differs.
+- **Decisions:** v1's `contradiction` decisions are void. The re-audit's cells take the 20% drop rule, and its disagreements take change 1's quarantine.
+- **Disclosed:** this follows reading round 1's auditor notes (7 of 8 answered a = yes, b = yes, c = yes). A pair is restored only if the new question passes it.
+
+**3. A top-up sized from measured survival.**
+
+- **The script:** `plan_topup.py`, committed here, needs no model calls. It applies changes 1 and 2 and **the final filter, run now as it will run at freeze**: correction 2's held-out collisions, and amendment 3's cross-fold collisions counted as train losses, which is conservative.
+- **Measured on round 1:**
+  - fold share f = 0.684;
+  - filter survival s = 0.954, an approximation, stated as one;
+  - losses: 8 quarantined, 24 synthetic and 10 mined held-out collisions, 2 cross-fold.
+- **Per rule:** seeds = min(300, ⌈1.3 × (50 − current) / (yield × f × audit × s)⌉). `contradiction`'s audit factor is the source rate, since its v1 rate is void. The output is `topup-plan.json` and `topup-plan.txt`. **2,483 seeds in total**, from 23 (`d_fixture`) to 300 (`scope_instant`, capped).
+- **The draw:**
+  - `random.Random(20260933).sample` over the manifest's training-side ids with no prior use, rules in sorted order, at the planned count;
+  - seed text re-extracted from `3cfda138` by `extract_seeds.paragraphs` and checked against each manifest row's sha1;
+  - written to `seed-topup.jsonl`, and committed before generation.
+- **Generation:** the frozen prompt, unchanged; the same generator, channel and construction checks.
+- **Audit:**
+  - Round-2 pairs form **their own cells** (generator, training, rule, round 2), with the same size and drop rules, under `random.Random(20260934)`.
+  - `contradiction` uses the relational question.
+  - Round-1 decisions stand for round-1 pairs.
+  - **A rule dropped in round 1 re-enters training only through round-2 pairs whose cell passes.** Disclosed: those three rules failed at 3 to 4 of 8, and the same prompt may fail them again.
+- **After the top-up:** trainability is recomputed at freeze with the same final filter. A rule still under 50 stays Haiku-only. **No further top-up under this amendment.**
+
+**4. Unchanged, restated:**
+
+- No T-syn result revises a prompt or chooses an arm.
+- Prompt and audit versions are named per file.
+
+**Cost:** about 497 Sonnet calls for generation, 22 Codex calls for the round-2 audit, and 3 calls for the `contradiction` re-audit.
+
+**Predictions:**
+
+- `contradiction` passes the relational re-audit, at 20% or less on its training cell.
+- At least 2 of the 3 round-1-dropped rules fail their round-2 cell again.
+- At least 15 of the 22 rules reach 50 at freeze.

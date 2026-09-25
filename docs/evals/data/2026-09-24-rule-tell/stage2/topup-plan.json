@@ -1,0 +1,166 @@
+{
+ "f": 0.6835227272727272,
+ "s": 0.9538188277087034,
+ "losses": {
+  "quarantined": 8,
+  "held-out collision (synthetic)": 24,
+  "held-out collision (mined)": 10,
+  "cross-fold collision (synthetic)": 2
+ },
+ "rules": {
+  "act_on_artifact": {
+   "current": 28,
+   "need": 22,
+   "yield": 0.5,
+   "audit": 1.0,
+   "seeds": 88
+  },
+  "cannot_happen": {
+   "current": 29,
+   "need": 21,
+   "yield": 0.45,
+   "audit": 0.875,
+   "seeds": 107
+  },
+  "closed_population": {
+   "current": 31,
+   "need": 19,
+   "yield": 0.562,
+   "audit": 0.875,
+   "seeds": 77
+  },
+  "contradiction": {
+   "current": 44,
+   "need": 6,
+   "yield": 0.6,
+   "audit": 0.852,
+   "seeds": 24
+  },
+  "count_unit": {
+   "current": 41,
+   "need": 9,
+   "yield": 0.6,
+   "audit": 0.875,
+   "seeds": 35
+  },
+  "d_adjacency": {
+   "current": 16,
+   "need": 34,
+   "yield": 0.362,
+   "audit": 1.0,
+   "seeds": 188
+  },
+  "d_fixture": {
+   "current": 41,
+   "need": 9,
+   "yield": 0.812,
+   "audit": 1.0,
+   "seeds": 23
+  },
+  "d_history": {
+   "current": 29,
+   "need": 21,
+   "yield": 0.438,
+   "audit": 0.875,
+   "seeds": 110
+  },
+  "d_loudness": {
+   "current": 30,
+   "need": 20,
+   "yield": 0.537,
+   "audit": 0.875,
+   "seeds": 85
+  },
+  "d_mutation": {
+   "current": 38,
+   "need": 12,
+   "yield": 0.662,
+   "audit": 1.0,
+   "seeds": 37
+  },
+  "d_red": {
+   "current": 34,
+   "need": 16,
+   "yield": 0.7,
+   "audit": 1.0,
+   "seeds": 46
+  },
+  "d_semicolon": {
+   "current": 29,
+   "need": 21,
+   "yield": 0.825,
+   "audit": 1.0,
+   "seeds": 51
+  },
+  "d_sessionid": {
+   "current": 23,
+   "need": 27,
+   "yield": 0.4,
+   "audit": 1.0,
+   "seeds": 135
+  },
+  "d_visibility": {
+   "current": 15,
+   "need": 35,
+   "yield": 0.438,
+   "audit": 1.0,
+   "seeds": 160
+  },
+  "lines_read": {
+   "current": 27,
+   "need": 23,
+   "yield": 0.412,
+   "audit": 0.875,
+   "seeds": 128
+  },
+  "member_vs_population": {
+   "current": 36,
+   "need": 14,
+   "yield": 0.562,
+   "audit": 0.875,
+   "seeds": 57
+  },
+  "monotone_absence": {
+   "current": 35,
+   "need": 15,
+   "yield": 0.562,
+   "audit": 1.0,
+   "seeds": 54
+  },
+  "open_artifact": {
+   "current": 30,
+   "need": 20,
+   "yield": 0.425,
+   "audit": 1.0,
+   "seeds": 94
+  },
+  "question_asked": {
+   "current": 4,
+   "need": 46,
+   "yield": 0.55,
+   "audit": 0.625,
+   "seeds": 267
+  },
+  "run_tool": {
+   "current": 23,
+   "need": 27,
+   "yield": 0.412,
+   "audit": 0.875,
+   "seeds": 150
+  },
+  "scope_instant": {
+   "current": 7,
+   "need": 43,
+   "yield": 0.35,
+   "audit": 0.5,
+   "seeds": 300
+  },
+  "selector_narrow": {
+   "current": 2,
+   "need": 48,
+   "yield": 0.575,
+   "audit": 0.625,
+   "seeds": 267
+  }
+ }
+}
