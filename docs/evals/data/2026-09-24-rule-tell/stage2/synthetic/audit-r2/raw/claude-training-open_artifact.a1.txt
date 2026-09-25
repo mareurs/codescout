@@ -1,0 +1,8 @@
+{"pair_id":"topup-open_artifact-1931","a":"yes","b":"yes","c":"no","note":"The original relies on onboarding documentation for launcher behavior; the fix explicitly opens the launcher script."}
+{"pair_id":"topup-open_artifact-9319","a":"yes","b":"yes","c":"no","note":"The original attributes binary behavior to the changelog; the fix attributes it to a live run."}
+{"pair_id":"topup-open_artifact-8952","a":"yes","b":"yes","c":"no","note":"The original explicitly relies on memory; the fix describes the committed artifact, which the paragraph says was printed and reread."}
+{"pair_id":"topup-open_artifact-1196","a":"yes","b":"yes","c":"no","note":"The original relies on the architecture document for code behavior; the fix grounds the claim in server source."}
+{"pair_id":"topup-open_artifact-9790","a":"yes","b":"yes","c":"no","note":"The original infers scanning behavior from the README; the fix is supported by the reported command run and schema."}
+{"pair_id":"topup-open_artifact-76","a":"yes","b":"yes","c":"no","note":"The original relies on remembered design notes; the fix reports execution, with further command results supplied in context."}
+{"pair_id":"topup-open_artifact-4309","a":"yes","b":"yes","c":"no","note":"The original relies on memory of the design; the fix explicitly cites the newly opened catalog schema."}
+{"pair_id":"topup-open_artifact-8236","a":"yes","b":"yes","c":"no","note":"The original relies on a remembered handoff; the fix locates the behavior in the emitted-set check without invoking a secondary basis."}

@@ -951,3 +951,43 @@ If condition 1 fails, the agent labels are not admitted and Stage 2's mined rout
 - `contradiction` passes the relational re-audit, at 20% or less on its training cell.
 - At least 2 of the 3 round-1-dropped rules fail their round-2 cell again.
 - At least 15 of the 22 rules reach 50 at freeze.
+
+## Stage 2 — top-up, re-audit and trainable rules, 2026-09-25 (results under the top-up amendment)
+
+**The runs.** All exited 0. The files are in `synthetic/audit-contradiction-relational/`, `synthetic/topup/` and `synthetic/audit-r2/`. The count is in `count_trainable.py`, committed before it ran (`c92b51da`), with its output in `trainable.json` and `trainable.txt`.
+
+- **The relational re-audit of `contradiction`** used the same 22 pairs and the same auditors. Training was 1/8, Claude T-syn 1/6 and Codex T-syn 0/8, so **all three cells are kept**. The one training dispute is the pair that failed (b) in round 1 too, and it is quarantined.
+- **The top-up:** 504 calls, **1,210 of 2,483 pairs passing construction (49%)**.
+- **The round-2 audit** had 192 audited pairs, all training-side, and 0 invalid answers.
+  - **Source:** 32/192 = 16.7%, Wilson [12.1%, 22.6%], so kept.
+  - **8 round-2 training cells are dropped:** `act_on_artifact` 3/8, `cannot_happen` 2/8, `contradiction` 2/8, `count_unit` 3/8, `d_fixture` 3/8, `lines_read` 3/8, `monotone_absence` 2/8, `scope_instant` 6/12.
+  - At n = 8, two disagreements (25%) cross the 20% line, where one does not.
+
+**Trainable rules at freeze, by the registered count:**
+
+| | rules |
+|---|---|
+| **trainable, ≥ 50 train-fold positives (14)** | `closed_population` 52, `d_adjacency` 55, `d_history` 75, `d_loudness` 74, `d_mutation` 53, `d_red` 52, `d_semicolon` 56, `d_sessionid` 72, `d_visibility` 52, `member_vs_population` 55, `open_artifact` 63, `question_asked` 78, `run_tool` 62, `selector_narrow` 102 |
+| **Haiku-only (8)** | `contradiction` 43, `count_unit` 41, `d_fixture` 41, `monotone_absence` 35, `cannot_happen` 29, `act_on_artifact` 28, `lines_read` 27, `scope_instant` 7 |
+
+**Losses along the way:**
+
+- cells dropped: 118 round-1 pairs and 333 round-2 pairs;
+- quarantined: 9 round-1 and 8 round-2 pairs;
+- held-out collisions: 41 synthetic and 10 mined;
+- cross-fold collisions: 18 synthetic.
+
+**A cross-check, from a second script.** For every rule whose round-2 cell was dropped, the count equals `plan_topup.py`'s independent round-1 figure: `d_fixture` 41, `count_unit` 41, `act_on_artifact` 28, `lines_read` 27, `monotone_absence` 35. `contradiction` went from 44 to 43, which is the pair the relational re-audit quarantined.
+
+**Against the registered predictions:**
+
+- **`contradiction` passes the relational re-audit: held,** at 1/8. Its round-2 cell then failed at 2/8, so its trainability rests on round 1 alone, and at 43 it falls short.
+- **At least 2 of the 3 round-1-dropped rules fail again: failed.** Only `scope_instant` failed again (6/12). `question_asked` and `selector_narrow` re-entered through round 2 and are trainable.
+- **At least 15 of 22 rules reach 50: failed, at 14.**
+- **The sizing's own assumption did not hold.** `plan_topup.py` used each rule's round-1 audit survival. In round 2, 8 cells failed where round 1 had failed 4, and 6 of those 8 had passed round 1 (7, counting `contradiction`'s relational re-audit). At n = 8 per cell, one disagreement decides a cell, so a cell's pass in one round predicts little about the next.
+
+**No further top-up under this amendment**, as registered. The next step is Stage 2's freeze, which needs its own amendment:
+
+- the train, validation and calibration folds, T, T-syn-in and T-syn-cross written as JSONL, with their hashes;
+- the 14-rule menu for the local arms;
+- the 8 Haiku-only rules listed.

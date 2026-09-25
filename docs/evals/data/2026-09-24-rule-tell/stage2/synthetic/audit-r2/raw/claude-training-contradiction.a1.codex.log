@@ -1,0 +1,96 @@
+{"pair_id":"topup-contradiction-6554","a":"yes","b":"yes","c":"no","note":"The target says no further remedy is needed, while the final sentence requires a separate patch and regression test."}
+{"pair_id":"topup-contradiction-4596","a":"no","b":"yes","c":"no","note":"Reporting that the guard claims availability does not assert actual availability; misleading advice and reset failures can coexist."}
+{"pair_id":"topup-contradiction-1408","a":"yes","b":"yes","c":"no","note":"The refactor is both rejected as a cause and identified as the most likely cause. The replacement resolves this."}
+{"pair_id":"topup-contradiction-8398","a":"yes","b":"yes","c":"no","note":"The target limits events to manual actions while including automatic save triggers. Removing watchers and hooks resolves the contradiction."}
+{"pair_id":"topup-contradiction-10995","a":"yes","b":"yes","c":"no","note":"The guard both requires an anchor on every insert and never demands one. The replacement consistently requires anchors."}
+{"pair_id":"topup-contradiction-2180","a":"yes","b":"yes","c":"no","note":"Walking every chunk contradicts never touching the chunk store. The replacement removes that conflict."}
+{"pair_id":"topup-contradiction-611","a":"yes","b":"yes","c":"no","note":"Exactly one operator consultation contradicts no operator contact during the audit. The replacement allows the recorded consultation."}
+{"pair_id":"topup-contradiction-10245","a":"no","b":"yes","c":"no","note":"Restricting the query population does not prohibit tagging older files. Permission to retro-tag and exclusion from query results can coexist."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+2026-09-25T07:37:30.878034Z ERROR codex_skills_extension::host_service: failed to install system skills: io error while remove existing system skills dir: Directory not empty (os error 39)
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-o2qst0pu
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d77f-7b27-7f72-b3cc-911b0c261fb7
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-o2qst0pu
+ succeeded in 0ms:
+# Synthetic pair audit prompt, relational v2 — for rules whose breach relates two statements (fixed; registered in the top-up amendment)
+
+Use this version, not `synthetic-audit-prompt.md`, for `contradiction`. Its law is about two
+statements that cannot both hold, so the sentence a marked target contradicts is PART of the
+breach, not a second breach. Version 1's question (c) counted it as one.
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec is guidance; where they disagree, the law wins. Judge only
+from what is shown.
+
+## Answer three questions per item
+
+- `a` — In `original`, does the marked sentence take part in a breach of the rule? For a
+  contradiction: is there another statement in the paragraph that it cannot both hold with?
+  `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is that breach gone? `yes` if replacing the marked
+  sentence removed it in context, `no` if the same breach remains.
+- `c` — Leaving aside the breach the marked sentence takes part in (and the statement it
+  contradicts), is there a SEPARATE, independent breach of this rule anywhere in `original`?
+  `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `contradiction`
+
+LAW: Two passages of the same text state things that cannot both be true.
+
+USUAL SHAPE: YES when two statements in the text cannot both be true of the same subject at the same time. NO when they concern different subjects, scopes or times.
+
+## Items
+
+{"pair_id": "topup-contradiction-6554", "original": "This is the second time in a day that we have found this split in the corpus, and the two cases sit in unrelated subsystems. The earlier one was a search tool that expanded escaped newlines before matching while the file reader did not, so a single buffer handle denoted two different line spaces. The new case is different in surface: two fields of one response disagree about the same document. Neither is reachable from the other's tests. ⟦Because the two share one cause, the remedy for the earlier one also settles the new one, and nothing more is needed here.⟧ The new case needs its own patch and its own regression test.", "substituted": "This is the second time in a day that we have found this split in the corpus, and the two cases sit in unrelated subsystems. The earlier one was a search tool that expanded escaped newlines before matching while the file reader did not, so a single buffer handle denoted two different line spaces. The new case is different in surface: two fields of one response disagree about the same document. Neither is reachable from the other's tests. ⟦Because the two share one shape, the remedy for the earlier one leaves the new one untouched, and something more is needed here.⟧ The new case needs its own patch and its own regression test."}
+{"pair_id": "topup-contradiction-4596", "original": "The guard on the shared index refuses to proceed when it finds staged entries from another session, and its message names a single way out: run the reset subcommand. That advice suits the case the guard was designed for, an entangled index during ordinary work. During the merge-in-progress repro, though, the reset subcommand exited with an error every time, because git refuses a reset while a merge is unresolved. ⟦The guard's message says the reset route is always available, so an agent that follows it in that state has nowhere to go.⟧ The guard does not test for a merge in progress, and the message never mentions one.", "substituted": "The guard on the shared index refuses to proceed when it finds staged entries from another session, and its message names a single way out: run the reset subcommand. That advice suits the case the guard was designed for, an entangled index during ordinary work. During the merge-in-progress repro, though, the reset subcommand exited with an error every time, because git refuses a reset while a merge is unresolved. ⟦The guard's message offers the reset route without conditions, so an agent that follows it in that state has nowhere to go.⟧ The guard does not test for a merge in progress, and the message never mentions one."}
+{"pair_id": "topup-contradiction-1408", "original": "The failing reranker test passes when the host env vars are cleared and fails when they are set, with the same binary. Hypothesis 1, a leak from a concurrent test, is rejected because the test also fails alone in a single thread. Hypothesis 2, the refactor, is rejected because the diff against master shows the reranker source and the test untouched. ⟦The refactor is the most likely cause of the failure, and its eight commits should be reviewed first.⟧ Hypothesis 3, inheriting the machine's reranker env vars, is confirmed by the clear-env pass. The error direction from the serde parse is still unexplained and is left for the next person.", "substituted": "The failing reranker test passes when the host env vars are cleared and fails when they are set, with the same binary. Hypothesis 1, a leak from a concurrent test, is rejected because the test also fails alone in a single thread. Hypothesis 2, the refactor, is rejected because the diff against master shows the reranker source and the test untouched. ⟦The env inheritance is the cause of the failure, and the test setup should clear those variables first.⟧ Hypothesis 3, inheriting the machine's reranker env vars, is confirmed by the clear-env pass. The error direction from the serde parse is still unexplained and is left for the next person."}
+{"pair_id": "topup-contradiction-8398", "original": "Scope for the first version of the event log is deliberately narrow. File-content versioning is out, since git already covers it. ⟦Change detection is manual: events come only from explicit tool calls or from Claude writing them on a prompt, and the design includes file watchers and commit hooks that fire events on every save.⟧ Existing observation rows stay in their current table, and new code writes only to the events table. References in an intent's inputs are soft in v1, with no hard validation. The timeline web UI is future work, and code-symbol nodes are tracked as a separate pivot rather than designed here.", "substituted": "Scope for the first version of the event log is deliberately narrow. File-content versioning is out, since git already covers it. ⟦Change detection is manual: events come only from explicit tool calls or from Claude writing them on a prompt, and the design includes no file watchers or commit hooks.⟧ Existing observation rows stay in their current table, and new code writes only to the events table. References in an intent's inputs are soft in v1, with no hard validation. The timeline web UI is future work, and code-symbol nodes are tracked as a separate pivot rather than designed here."}
+{"pair_id": "topup-contradiction-10995", "original": "The anchor field currently forces callers to name a heading, which breaks appends to the end of a note. The proposal is to accept an explicit end-of-body sentinel, such as a value of \"$end\" in the heading field, so placement stays caller-stated instead of inferred. The schema description for this field already runs to 466 characters, so documenting a sentinel would cost about 40 more. The trio guard requires an anchor on every insert, and that guard is why the sentinel has to live in the anchor field. ⟦The guard is optional and never demands an anchor, so callers can omit it entirely.⟧ The earlier F-1 change shipped a similar path, and it is the model to follow.", "substituted": "The anchor field currently forces callers to name a heading, which breaks appends to the end of a note. The proposal is to accept an explicit end-of-body sentinel, such as a value of \"$end\" in the heading field, so placement stays caller-stated instead of inferred. The schema description for this field already runs to 466 characters, so documenting a sentinel would cost about 40 more. The trio guard requires an anchor on every insert, and that guard is why the sentinel has to live in the anchor field. ⟦The guard is strict and always demands an anchor, so callers cannot omit it entirely.⟧ The earlier F-1 change shipped a similar path, and it is the model to follow."}
+{"pair_id": "topup-contradiction-2180", "original": "The slow project-status call is the leading suspect, though we have not yet confirmed it. `check_has_index` answered a yes/no question by walking every chunk in the corpus, so its cost grows with corpus size. In the profile, latency stayed flat at about 900 ms whether `limit` was 1 or 500, which fits a cost driven by corpus size and not by result count. ⟦The call never touches the chunk store at all, only a one-row metadata table.⟧ Two sibling helpers in the same commit also fetched full payloads on scrolls that needed one or two keys, so the same habit shows up in several places.", "substituted": "The slow project-status call is the leading suspect, though we have not yet confirmed it. `check_has_index` answered a yes/no question by walking every chunk in the corpus, so its cost grows with corpus size. In the profile, latency stayed flat at about 900 ms whether `limit` was 1 or 500, which fits a cost driven by corpus size and not by result count. ⟦The call touches the chunk store on every invocation, not a one-row metadata table.⟧ Two sibling helpers in the same commit also fetched full payloads on scrolls that needed one or two keys, so the same habit shows up in several places."}
+{"pair_id": "topup-contradiction-611", "original": "The audit asked four sessions the same question: is anything of yours withheld? All four answered accurately, and none of them could have answered the publication question, because only an operator can authorise release. The log shows exactly one operator consultation across the four runs, triggered when a session found its own state ambiguous. That is why the ratio describes the question rather than the sessions. ⟦Every session stayed inside its own layer, and no operator was contacted at any point in the audit.⟧", "substituted": "The audit asked four sessions the same question: is anything of yours withheld? All four answered accurately, and none of them could have answered the publication question, because only an operator can authorise release. The log shows exactly one operator consultation across the four runs, triggered when a session found its own state ambiguous. That is why the ratio describes the question rather than the sessions. ⟦Three sessions stayed inside their own layer, and only one operator was contacted during the audit.⟧"}
+{"pair_id": "topup-contradiction-10245", "original": "The cluster query reports how many archived files carry an issue tag, and a rerun refreshes that count without widening the population it draws from. The population is bounded by the test module's header, which fixes it at the files written after the tagging convention began. An audit last month measured 29.5% tagged, read it as convention drift, and nearly launched a retro-tagging campaign over the whole archive. ⟦That campaign would have been consistent with the bound, since the header allows retro-tagging of every older file.⟧ The figure was correct for its scope, and the mistake was reading it outside that scope.", "substituted": "The cluster query reports how many archived files carry an issue tag, and a rerun refreshes that count without widening the population it draws from. The population is bounded by the test module's header, which fixes it at the files written after the tagging convention began. An audit last month measured 29.5% tagged, read it as convention drift, and nearly launched a retro-tagging campaign over the whole archive. ⟦That campaign would have broken the bound, since the header excludes every file older than the convention.⟧ The figure was correct for its scope, and the mistake was reading it outside that scope."}
+codex
+{"pair_id":"topup-contradiction-6554","a":"yes","b":"yes","c":"no","note":"The target says no further remedy is needed, while the final sentence requires a separate patch and regression test."}
+{"pair_id":"topup-contradiction-4596","a":"no","b":"yes","c":"no","note":"Reporting that the guard claims availability does not assert actual availability; misleading advice and reset failures can coexist."}
+{"pair_id":"topup-contradiction-1408","a":"yes","b":"yes","c":"no","note":"The refactor is both rejected as a cause and identified as the most likely cause. The replacement resolves this."}
+{"pair_id":"topup-contradiction-8398","a":"yes","b":"yes","c":"no","note":"The target limits events to manual actions while including automatic save triggers. Removing watchers and hooks resolves the contradiction."}
+{"pair_id":"topup-contradiction-10995","a":"yes","b":"yes","c":"no","note":"The guard both requires an anchor on every insert and never demands one. The replacement consistently requires anchors."}
+{"pair_id":"topup-contradiction-2180","a":"yes","b":"yes","c":"no","note":"Walking every chunk contradicts never touching the chunk store. The replacement removes that conflict."}
+{"pair_id":"topup-contradiction-611","a":"yes","b":"yes","c":"no","note":"Exactly one operator consultation contradicts no operator contact during the audit. The replacement allows the recorded consultation."}
+{"pair_id":"topup-contradiction-10245","a":"no","b":"yes","c":"no","note":"Restricting the query population does not prohibit tagging older files. Permission to retro-tag and exclusion from query results can coexist."}
+tokens used
+6,276

@@ -1,0 +1,88 @@
+{"pair_id":"topup-d_adjacency-10984","a":"yes","b":"yes","c":"no","note":"Directory activity cannot establish authorship; reservation author fields positively identify Tomas."}
+{"pair_id":"topup-d_adjacency-3090","a":"yes","b":"yes","c":"no","note":"Neighboring file activity supplies the original attribution; the fix identifies Priya through the commit creating the arm."}
+{"pair_id":"topup-d_adjacency-10100","a":"yes","b":"yes","c":"no","note":"Editing a neighboring module does not identify a ticket's author; the reporter field supplies positive attribution."}
+{"pair_id":"topup-d_adjacency-5560","a":"yes","b":"yes","c":"no","note":"Nearby helper commits do not establish assertion authorship; the fix cites the commit that added the assertion."}
+{"pair_id":"topup-d_adjacency-9921","a":"yes","b":"yes","c":"no","note":"Recent checkout activity does not identify the merge writer; the session identifier in its commit trailer does."}
+{"pair_id":"topup-d_adjacency-9084","a":"yes","b":"yes","c":"no","note":"Concurrent recorder edits are adjacency evidence; the rows' writer metadata provides positive attribution."}
+{"pair_id":"topup-d_adjacency-10491","a":"yes","b":"yes","c":"no","note":"Adjacent refactoring does not identify the regression author; the fix links Keiko to the specific commit isolated by bisect."}
+{"pair_id":"topup-d_adjacency-8544","a":"yes","b":"yes","c":"no","note":"Same-directory commits do not establish builder authorship; the builder's commit history positively identifies Mira."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-o54r7k6d
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d77f-e071-72e1-a559-f192d4a853f9
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-o54r7k6d
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_adjacency`
+
+LAW: Never route by adjacency: attribute a write positively, not by who touched the file nearby.
+
+USUAL SHAPE: YES when the text attributes a change or file to an author because they touched the same or a nearby file, or were active nearby, without identifying the author positively. NO otherwise.
+
+## Items
+
+{"pair_id": "topup-d_adjacency-10984", "original": "Ledger audits from this work stream turned up a consistent pattern. Thirteen ledgers across five repos carried entries whose body never defines them, the largest at 64 of 68. One namespace resolved to nothing against 117 live citations. The reserve-then-hand-write path is where these orphans come from, since the tool's follow-up hint appears only after the reservation has already been made. ⟦The orphaned entries in the payments ledger are Tomas's, because he was the only one working in that repo's docs directory during the month they were created.⟧ Each of the other ledgers shows the same reserved-but-undefined shape.", "substituted": "Ledger audits from this work stream turned up a consistent pattern. Thirteen ledgers across five repos carried entries whose body never defines them, the largest at 64 of 68. One namespace resolved to nothing against 117 live citations. The reserve-then-hand-write path is where these orphans come from, since the tool's follow-up hint appears only after the reservation has already been made. ⟦The orphaned entries in the payments ledger are Tomas's, because the author field on each reservation record carries his handle.⟧ Each of the other ledgers shows the same reserved-but-undefined shape."}
+{"pair_id": "topup-d_adjacency-3090", "original": "The ordering of the error-family matchers needs care. The message about an artifact lacking augmentation also contains the substring that the not-augmented family matches on. The right family is the undeclared-ledger one, since the repair is to declare the ledger, so that arm sits first and a test fails if the order flips. It claims 5 rows, while the not-augmented family keeps 1. ⟦Whoever added the original not-augmented arm probably also introduced the substring overlap, and that was Priya, who was working in the neighbouring classifier file then.⟧", "substituted": "The ordering of the error-family matchers needs care. The message about an artifact lacking augmentation also contains the substring that the not-augmented family matches on. The right family is the undeclared-ledger one, since the repair is to declare the ledger, so that arm sits first and a test fails if the order flips. It claims 5 rows, while the not-augmented family keeps 1. ⟦Whoever added the original not-augmented arm also introduced the substring overlap, and that was Priya, per the commit that created the arm.⟧"}
+{"pair_id": "topup-d_adjacency-10100", "original": "Item #9 should not block the pipeline plan. The foreground exec path already has nine branches, and adding a tenth for `pipeline=` would make the dispatch hard to read. The cleaner scope is a small extraction that returns either a completed output or a timeout. Response formatting stays out of it, because the pipeline needs different hint text than the foreground path. ⟦The original ticket for the timeout hint was almost certainly filed by Dana, since she was the last person to edit the neighboring formatter module.⟧ Once the extraction lands, `pipeline=` can call it directly and the tenth branch never appears.", "substituted": "Item #9 should not block the pipeline plan. The foreground exec path already has nine branches, and adding a tenth for `pipeline=` would make the dispatch hard to read. The cleaner scope is a small extraction that returns either a completed output or a timeout. Response formatting stays out of it, because the pipeline needs different hint text than the foreground path. ⟦The original ticket for the timeout hint was filed by Dana, per the reporter field on the tracker entry for the formatter module.⟧ Once the extraction lands, `pipeline=` can call it directly and the tenth branch never appears."}
+{"pair_id": "topup-d_adjacency-5560", "original": "The two contention tests take the flock directly instead of calling `acquire()`. That function writes a holder record on success, which would send the contender down the named branch and never reach the anonymous one under test. The absent-holder test also asserts that the sidecar file does not exist, as a control: if `open_lock_file` quietly created it, the test would degrade into a copy of its sibling. Both tests pass on the current tree, and the control fails when I make `open_lock_file` create the sidecar. ⟦The control assertion is Priya's work, as she was the one committing to the neighbouring lock-file helpers around then.⟧", "substituted": "The two contention tests take the flock directly instead of calling `acquire()`. That function writes a holder record on success, which would send the contender down the named branch and never reach the anonymous one under test. The absent-holder test also asserts that the sidecar file does not exist, as a control: if `open_lock_file` quietly created it, the test would degrade into a copy of its sibling. Both tests pass on the current tree, and the control fails when I make `open_lock_file` create the sidecar. ⟦The control assertion is Priya's work, as the commit that added it carries her name.⟧"}
+{"pair_id": "topup-d_adjacency-9921", "original": "Session listing is limited to peers on the same config profile, and three profiles run on this machine. I confirmed this by starting one session under each and comparing what the listing returned: a single entry every time. All sessions commit under the same git author name, so the author field cannot separate them. Commit trailers do carry a session id, though. ⟦The session that was last active in the checkout before the bad merge must be the one that wrote it.⟧", "substituted": "Session listing is limited to peers on the same config profile, and three profiles run on this machine. I confirmed this by starting one session under each and comparing what the listing returned: a single entry every time. All sessions commit under the same git author name, so the author field cannot separate them. Commit trailers do carry a session id, though. ⟦The session id in the bad merge's commit trailer names the session that wrote it.⟧"}
+{"pair_id": "topup-d_adjacency-9084", "original": "The control that settled it used A's handle only as a search pattern against a tiny file. The search found nothing yet exited cleanly, and the log still listed A among the inputs that had been read. A clean exit plus a recorded link therefore does not show the content was delivered. Controls with a different buffer, and with delayed or partial reads of A, returned the expected distinct content. ⟦The stray linkage rows in the debug-off runs appear to belong to Priya, since she was editing the recorder module the same afternoon.⟧ Payloads were absent when debug was off, and older fixture rows stayed NULL.", "substituted": "The control that settled it used A's handle only as a search pattern against a tiny file. The search found nothing yet exited cleanly, and the log still listed A among the inputs that had been read. A clean exit plus a recorded link therefore does not show the content was delivered. Controls with a different buffer, and with delayed or partial reads of A, returned the expected distinct content. ⟦The stray linkage rows in the debug-off runs carry writer id 'priya-dev' in their metadata column, so they belong to Priya.⟧ Payloads were absent when debug was off, and older fixture rows stayed NULL."}
+{"pair_id": "topup-d_adjacency-10491", "original": "⟦The regression in the timing arm traces to Keiko, who was refactoring the adjacent scorer module that same week.⟧ Reruns at matched token budgets show injections falling from 41 to 17 per hundred windows, while eligible no-trigger windows held at 212. Bisecting over six commits isolated the one that lowered the window threshold, and reverting it restored 41. The context-only arm did not move, so retrieval is not implicated.", "substituted": "⟦The regression in the timing arm traces to Keiko, whose commit carries the threshold change the bisect isolated.⟧ Reruns at matched token budgets show injections falling from 41 to 17 per hundred windows, while eligible no-trigger windows held at 212. Bisecting over six commits isolated the one that lowered the window threshold, and reverting it restored 41. The context-only arm did not move, so retrieval is not implicated."}
+{"pair_id": "topup-d_adjacency-8544", "original": "Replacing cmd.exe with direct exec is out of scope, because the agent's commands use pipes, redirects and ampersand chaining that direct exec cannot parse. We borrow only the shared builder from the central process abstraction and leave every spawn site as it is. Each site keeps its own timeout handling, which we confirmed by reading all eleven call sites. ⟦The shared builder in the spawn module must be Mira's work, since she committed to several files in the same directory.⟧", "substituted": "Replacing cmd.exe with direct exec is out of scope, because the agent's commands use pipes, redirects and ampersand chaining that direct exec cannot parse. We borrow only the shared builder from the central process abstraction and leave every spawn site as it is. Each site keeps its own timeout handling, which we confirmed by reading all eleven call sites. ⟦The shared builder in the spawn module is Mira's work, as its commit history shows her as sole author.⟧"}
+codex
+{"pair_id":"topup-d_adjacency-10984","a":"yes","b":"yes","c":"no","note":"Directory activity cannot establish authorship; reservation author fields positively identify Tomas."}
+{"pair_id":"topup-d_adjacency-3090","a":"yes","b":"yes","c":"no","note":"Neighboring file activity supplies the original attribution; the fix identifies Priya through the commit creating the arm."}
+{"pair_id":"topup-d_adjacency-10100","a":"yes","b":"yes","c":"no","note":"Editing a neighboring module does not identify a ticket's author; the reporter field supplies positive attribution."}
+{"pair_id":"topup-d_adjacency-5560","a":"yes","b":"yes","c":"no","note":"Nearby helper commits do not establish assertion authorship; the fix cites the commit that added the assertion."}
+{"pair_id":"topup-d_adjacency-9921","a":"yes","b":"yes","c":"no","note":"Recent checkout activity does not identify the merge writer; the session identifier in its commit trailer does."}
+{"pair_id":"topup-d_adjacency-9084","a":"yes","b":"yes","c":"no","note":"Concurrent recorder edits are adjacency evidence; the rows' writer metadata provides positive attribution."}
+{"pair_id":"topup-d_adjacency-10491","a":"yes","b":"yes","c":"no","note":"Adjacent refactoring does not identify the regression author; the fix links Keiko to the specific commit isolated by bisect."}
+{"pair_id":"topup-d_adjacency-8544","a":"yes","b":"yes","c":"no","note":"Same-directory commits do not establish builder authorship; the builder's commit history positively identifies Mira."}
+tokens used
+5,782

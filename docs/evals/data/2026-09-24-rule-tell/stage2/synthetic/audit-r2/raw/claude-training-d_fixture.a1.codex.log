@@ -1,0 +1,88 @@
+{"pair_id":"topup-d_fixture-51","a":"yes","b":"yes","c":"yes","note":"The third citer gains an inline explanation, but the separately described single-citer fixture also lacks an annotation of its required count."}
+{"pair_id":"topup-d_fixture-1082","a":"yes","b":"yes","c":"yes","note":"The large fixture gains its threshold annotation; the companion twelve-byte fixture still leaves its load-bearing size unannotated."}
+{"pair_id":"topup-d_fixture-9993","a":"yes","b":"yes","c":"no","note":"The stub handle name determines the tested matcher gap; the fix explains that choice on its line."}
+{"pair_id":"topup-d_fixture-12071","a":"yes","b":"yes","c":"no","note":"The function placement controls refusal, and the fix annotates the required overlap on line 44."}
+{"pair_id":"topup-d_fixture-12196","a":"yes","b":"no","c":"no","note":"Merging removes the required collision. The replacement preserves both entries but supplies no annotation on their fixture lines."}
+{"pair_id":"topup-d_fixture-11995","a":"yes","b":"yes","c":"no","note":"Removing the comment leaves the deliberately absent tool unexplained; the fix retains that explanation beside the entry."}
+{"pair_id":"topup-d_fixture-9167","a":"yes","b":"yes","c":"no","note":"The deliberately mismatched mark and table row need annotations; the fix comments both."}
+{"pair_id":"topup-d_fixture-9442","a":"yes","b":"yes","c":"no","note":"The uninjected read drives the counter assertion; the fix tags that transcript line with its purpose."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-1hniovk5
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d77f-e3cf-7883-9278-3cabc228ec13
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-1hniovk5
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_fixture`
+
+LAW: Annotate a fixture's load-bearing detail on the fixture line.
+
+USUAL SHAPE: YES when the text adds or edits a test fixture and leaves a detail the test depends on unannotated, or removes such a detail as a tidy-up. NO otherwise.
+
+## Items
+
+{"pair_id": "topup-d_fixture-51", "original": "The staleness check flags an undeclared entry only when at least three other files cite it. To test that, I built a small docs tree in the setup helper: `notes/a.md` has no validity line, and `b.md` and `c.md` link to it. ⟦The setup gained one more line, `write_file(\"notes/d.md\", \"see a.md\")`, carrying no comment.⟧ With that line the test sees a flag on `a.md`; I ran it with the line removed and the flag never appeared, so the third citer is what makes the assertion pass. A second case keeps only `b.md` linking to `a.md` and asserts silence, which passed on the first run.", "substituted": "The staleness check flags an undeclared entry only when at least three other files cite it. To test that, I built a small docs tree in the setup helper: `notes/a.md` has no validity line, and `b.md` and `c.md` link to it. ⟦The setup gained one more line, `write_file(\"notes/d.md\", \"see a.md\")  # third citer; flag needs 3`, which states why it exists.⟧ With that line the test sees a flag on `a.md`; I ran it with the line removed and the flag never appeared, so the third citer is what makes the assertion pass. A second case keeps only `b.md` linking to `a.md` and asserts silence, which passed on the first run."}
+{"pair_id": "topup-d_fixture-1082", "original": "The bypass proposal lets a pipe through when the left side produces fewer than 64 bytes, and the detector must still block anything larger. ⟦The new case starts from `big.log = \"x\" * 200`, then runs `cat big.log | head` through `detect_il3_violation`.⟧ The expected verdict is blocked, and the run on the current branch returned exactly that. A companion case uses `tiny.txt` holding twelve bytes and expects a pass, which also held.", "substituted": "The bypass proposal lets a pipe through when the left side produces fewer than 64 bytes, and the detector must still block anything larger. ⟦The new case starts from `big.log = \"x\" * 200  # must exceed 64 bytes`, then runs `cat big.log | head` through `detect_il3_violation`.⟧ The expected verdict is blocked, and the run on the current branch returned exactly that. A companion case uses `tiny.txt` holding twelve bytes and expects a pass, which also held."}
+{"pair_id": "topup-d_fixture-9993", "original": "The worktree guard's matcher alternates over four handles that no longer exist, and I confirmed it by comparing the alternation against the registered handle list: zero overlap. Modern write calls therefore pass the guard without a block. The test I wrote asserts exactly that gap, so it expects a pass-through today and will need flipping once the matcher is repaired. ⟦I added a stub payload named for the consolidated write handle, and its line carries no note about why that name.⟧", "substituted": "The worktree guard's matcher alternates over four handles that no longer exist, and I confirmed it by comparing the alternation against the registered handle list: zero overlap. Modern write calls therefore pass the guard without a block. The test I wrote asserts exactly that gap, so it expects a pass-through today and will need flipping once the matcher is repaired. ⟦I added a stub payload named for the consolidated write handle, and its line notes the matcher lacks that name by design.⟧"}
+{"pair_id": "topup-d_fixture-12071", "original": "⟦I added `sample_module.py` to the eval directory, with its `parse_header` function sitting on lines 44-52.⟧ Every prompt asks for lines 40-55, and the gate refuses only when that range overlaps a symbol, so the placement decides whether a run is refused. The old fixture had no function in that range, and all ten arm-A runs returned content with no refusal, as the logs show. Any edit that moves `parse_header` out of those lines would turn the eval into a test of nothing.", "substituted": "⟦I added `sample_module.py` to the eval directory, with its `parse_header` function on lines 44-52 (comment on line 44: must overlap the 40-55 request).⟧ Every prompt asks for lines 40-55, and the gate refuses only when that range overlaps a symbol, so the placement decides whether a run is refused. The old fixture had no function in that range, and all ten arm-A runs returned content with no refusal, as the logs show. Any edit that moves `parse_header` out of those lines would turn the eval into a test of nothing."}
+{"pair_id": "topup-d_fixture-12196", "original": "The Stage 2 ID test loads a small catalog and checks that `append_entry` assigns distinct IDs to entries whose titles collide. Stage 2 makes IDs globally unique, and the test asserts this by comparing the IDs of the two `weekly` entries after a write. Those entries sit under different paths, so they are the only collision case in the catalog; with a single one, no two titles ever collide. ⟦Then I merged the two `weekly` entries into one to shorten the catalog.⟧", "substituted": "The Stage 2 ID test loads a small catalog and checks that `append_entry` assigns distinct IDs to entries whose titles collide. Stage 2 makes IDs globally unique, and the test asserts this by comparing the IDs of the two `weekly` entries after a write. Those entries sit under different paths, so they are the only collision case in the catalog; with a single one, no two titles ever collide. ⟦Then I trimmed the unused `archive` entries from the catalog and kept both `weekly` entries, whose shared title is the collision case.⟧"}
+{"pair_id": "topup-d_fixture-11995", "original": "The drift gate test builds its surface list from a small stub registry rather than the live one. The gate test asserts that exactly one name in the list is rejected, and `ghost_tool` is the only name absent from the real tool table, which I confirmed by diffing the two lists line by line. ⟦While tidying the stub registry I dropped the comment beside the `ghost_tool` entry as leftover scratch text.⟧ The other two entries are real tools and pass, so the count of three is stable until someone adds a surface.", "substituted": "The drift gate test builds its surface list from a small stub registry rather than the live one. The gate test asserts that exactly one name in the list is rejected, and `ghost_tool` is the only name absent from the real tool table, which I confirmed by diffing the two lists line by line. ⟦While tidying the stub registry I dropped the stale TODO beside the `ghost_tool` entry and kept its comment saying the name is absent from the real table on purpose.⟧ The other two entries are real tools and pass, so the count of three is stable until someone adds a surface."}
+{"pair_id": "topup-d_fixture-9167", "original": "The mark-below-count check needs a regression test, so I built a small namespace sample under tests/data. Running the allocator over the real issue-clusters file gives 24 claimed indices against a stored mark of 23, which reproduces the mismatch from the audit. The sample copies that shape: three definition rows, one index-table row, and a stored mark of 3. ⟦I added `sample_ns.md` with its stored mark of 3 and a fourth index-table row, both left as bare lines.⟧ The link scanner's definition regex matches the three definition lines and skips the table row, and I confirmed that by running it on the sample, which listed exactly three.", "substituted": "The mark-below-count check needs a regression test, so I built a small namespace sample under tests/data. Running the allocator over the real issue-clusters file gives 24 claimed indices against a stored mark of 23, which reproduces the mismatch from the audit. The sample copies that shape: three definition rows, one index-table row, and a stored mark of 3. ⟦I added `sample_ns.md` with its stored mark of 3 and a fourth index-table row, each tagged in a comment as the deliberate mismatch.⟧ The link scanner's definition regex matches the three definition lines and skips the table row, and I confirmed that by running it on the sample, which listed exactly three."}
+{"pair_id": "topup-d_fixture-9442", "original": "⟦I added a synthetic transcript to the retrieval tests, with a single symbol read that was never injected, written as an ordinary line.⟧ The unsourced-symbol counter reads 1 of 1 on it, and the assertion checks exactly that. Real sessions show the unsourced share climbing from 3.6% to 23.8% as context grows, so the counter has to fire on this shape. Its code path is short: it takes the set difference of symbols read minus symbols injected, and I traced it by hand on three samples.", "substituted": "⟦I added a synthetic transcript to the retrieval tests, with a single symbol read that was never injected, written as a line tagged \"uninjected on purpose; counter test depends on it\".⟧ The unsourced-symbol counter reads 1 of 1 on it, and the assertion checks exactly that. Real sessions show the unsourced share climbing from 3.6% to 23.8% as context grows, so the counter has to fire on this shape. Its code path is short: it takes the set difference of symbols read minus symbols injected, and I traced it by hand on three samples."}
+codex
+{"pair_id":"topup-d_fixture-51","a":"yes","b":"yes","c":"yes","note":"The third citer gains an inline explanation, but the separately described single-citer fixture also lacks an annotation of its required count."}
+{"pair_id":"topup-d_fixture-1082","a":"yes","b":"yes","c":"yes","note":"The large fixture gains its threshold annotation; the companion twelve-byte fixture still leaves its load-bearing size unannotated."}
+{"pair_id":"topup-d_fixture-9993","a":"yes","b":"yes","c":"no","note":"The stub handle name determines the tested matcher gap; the fix explains that choice on its line."}
+{"pair_id":"topup-d_fixture-12071","a":"yes","b":"yes","c":"no","note":"The function placement controls refusal, and the fix annotates the required overlap on line 44."}
+{"pair_id":"topup-d_fixture-12196","a":"yes","b":"no","c":"no","note":"Merging removes the required collision. The replacement preserves both entries but supplies no annotation on their fixture lines."}
+{"pair_id":"topup-d_fixture-11995","a":"yes","b":"yes","c":"no","note":"Removing the comment leaves the deliberately absent tool unexplained; the fix retains that explanation beside the entry."}
+{"pair_id":"topup-d_fixture-9167","a":"yes","b":"yes","c":"no","note":"The deliberately mismatched mark and table row need annotations; the fix comments both."}
+{"pair_id":"topup-d_fixture-9442","a":"yes","b":"yes","c":"no","note":"The uninjected read drives the counter assertion; the fix tags that transcript line with its purpose."}
+tokens used
+5,980

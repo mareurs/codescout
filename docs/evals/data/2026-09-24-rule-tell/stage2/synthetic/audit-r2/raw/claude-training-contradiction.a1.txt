@@ -1,0 +1,8 @@
+{"pair_id":"topup-contradiction-6554","a":"yes","b":"yes","c":"no","note":"The target says no further remedy is needed, while the final sentence requires a separate patch and regression test."}
+{"pair_id":"topup-contradiction-4596","a":"no","b":"yes","c":"no","note":"Reporting that the guard claims availability does not assert actual availability; misleading advice and reset failures can coexist."}
+{"pair_id":"topup-contradiction-1408","a":"yes","b":"yes","c":"no","note":"The refactor is both rejected as a cause and identified as the most likely cause. The replacement resolves this."}
+{"pair_id":"topup-contradiction-8398","a":"yes","b":"yes","c":"no","note":"The target limits events to manual actions while including automatic save triggers. Removing watchers and hooks resolves the contradiction."}
+{"pair_id":"topup-contradiction-10995","a":"yes","b":"yes","c":"no","note":"The guard both requires an anchor on every insert and never demands one. The replacement consistently requires anchors."}
+{"pair_id":"topup-contradiction-2180","a":"yes","b":"yes","c":"no","note":"Walking every chunk contradicts never touching the chunk store. The replacement removes that conflict."}
+{"pair_id":"topup-contradiction-611","a":"yes","b":"yes","c":"no","note":"Exactly one operator consultation contradicts no operator contact during the audit. The replacement allows the recorded consultation."}
+{"pair_id":"topup-contradiction-10245","a":"no","b":"yes","c":"no","note":"Restricting the query population does not prohibit tagging older files. Permission to retro-tag and exclusion from query results can coexist."}

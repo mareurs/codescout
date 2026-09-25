@@ -1,0 +1,88 @@
+{"pair_id":"topup-lines_read-9039","a":"yes","b":"yes","c":"no","note":"The original infers behavior from an unopened file's grep match; the fix explicitly reads the refusal handler."}
+{"pair_id":"topup-lines_read-4561","a":"yes","b":"yes","c":"no","note":"The helper's name alone supports the original inference; the fix leaves its unread behavior unchecked."}
+{"pair_id":"topup-lines_read-4171","a":"yes","b":"yes","c":"no","note":"Reading one counter loop does not establish every script's behavior. The fix reports reading all three matching scripts."}
+{"pair_id":"topup-lines_read-10818","a":"no","b":"yes","c":"no","note":"All three helper pairs were already read line by line. The original inference contradicts those observations but does not lack reading."}
+{"pair_id":"topup-lines_read-2935","a":"no","b":"yes","c":"no","note":"The paragraph explicitly reports reading the alias table and loader, establishing the collision's cause beyond the grep match."}
+{"pair_id":"topup-lines_read-3493","a":"yes","b":"yes","c":"no","note":"The grep match alone does not establish unconditional deletion; the fix explicitly reads the handler body and checks for guards."}
+{"pair_id":"topup-lines_read-10233","a":"no","b":"yes","c":"no","note":"The relevant files were opened and the verb entries inspected; the finding therefore has evidence beyond grep."}
+{"pair_id":"topup-lines_read-10622","a":"yes","b":"yes","c":"no","note":"The original treats a strategy-name match as proof of a retired claim; the fix presents an unverified possibility pending reading."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-blon5ufw
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d780-9243-7f62-a776-1a6b6fbc7759
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-blon5ufw
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `lines_read`
+
+LAW: A finding needs lines you actually read, not a grep hit alone.
+
+USUAL SHAPE: YES when the text states a finding about code as established from a grep hit, a search match or a file name alone, and indicates the lines themselves were not read. NO when it reports reading the lines, or no basis is stated.
+
+## Items
+
+{"pair_id": "topup-lines_read-9039", "original": "Audit of push triggers for the `get_guide` topics. I opened each of the ten topic files and counted which contain a trigger block: six do, four do not. Of the twelve push sites, nine name `progressive-disclosure`, which I tallied by reading each call line. The base-arm query on re-pushing after a refusal came back at 38 to 71 percent across four families, so the no-ship hypothesis is refuted. ⟦A grep for `get_guide(` matched in `session.rs`, so the refusal handler evidently re-pushes the same topic after a denial, though I never opened that file.⟧", "substituted": "Audit of push triggers for the `get_guide` topics. I opened each of the ten topic files and counted which contain a trigger block: six do, four do not. Of the twelve push sites, nine name `progressive-disclosure`, which I tallied by reading each call line. The base-arm query on re-pushing after a refusal came back at 38 to 71 percent across four families, so the no-ship hypothesis is refuted. ⟦The match for `get_guide(` in `session.rs` sits inside the refusal handler, which I read: it re-pushes the same topic after a denial.⟧"}
+{"pair_id": "topup-lines_read-4561", "original": "Notes on the bug-ledger count gate. When the gate goes red, check `git status --short` on the issues directory before touching the ledger. A `D` or `??` entry on a bug file means the count reflects a peer's uncommitted work, so wait. I confirmed this on Tuesday by reading the gate script end to end: it counts files on disk, not files in the index. ⟦The helper that formats the failure message is named `ledger_count_report`, so it evidently also reads the ledger cell and compares it against the on-disk count.⟧", "substituted": "Notes on the bug-ledger count gate. When the gate goes red, check `git status --short` on the issues directory before touching the ledger. A `D` or `??` entry on a bug file means the count reflects a peer's uncommitted work, so wait. I confirmed this on Tuesday by reading the gate script end to end: it counts files on disk, not files in the index. ⟦The helper that formats the failure message is named `ledger_count_report`; I have not read its body, so what it compares is unchecked.⟧"}
+{"pair_id": "topup-lines_read-4171", "original": "The commit-time counter script and the list builder disagree about which content they inspect. I opened the counter script and read its main loop, lines 40 to 88. It calls `git show` with a colon-path for each entry, so it sees staged content only. The list builder does the opposite and reads the working tree. ⟦A grep for \"cached\" across the ledger tooling returns three hits, so every ledger script must read the index only.⟧ The mismatch is therefore a divergence between two implementations, not a missing capability. Aligning the list builder means swapping its file read for the same per-entry index lookup.", "substituted": "The commit-time counter script and the list builder disagree about which content they inspect. I opened the counter script and read its main loop, lines 40 to 88. It calls `git show` with a colon-path for each entry, so it sees staged content only. The list builder does the opposite and reads the working tree. ⟦I read the three ledger scripts that match \"cached\", and each takes its content from the index only.⟧ The mismatch is therefore a divergence between two implementations, not a missing capability. Aligning the list builder means swapping its file read for the same per-entry index lookup."}
+{"pair_id": "topup-lines_read-10818", "original": "The duplicate-helper audit turned up a pattern that cuts against the earlier note on the topic. That note assumed the root copy of each helper was the stale one, so deleting it looked safe. I opened all three pairs on 2026-08-30 and diffed them line by line: in each, the crate copy lacks the null check that root has. The guard in the crate's `parse_header` is absent in all three cases, so the drift runs both ways. ⟦Grepping for `fn parse_header` shows a definition in the crate, so the crate's version is evidently the intact one.⟧ That makes the per-pair audit caveat the part that matters, not a footnote.", "substituted": "The duplicate-helper audit turned up a pattern that cuts against the earlier note on the topic. That note assumed the root copy of each helper was the stale one, so deleting it looked safe. I opened all three pairs on 2026-08-30 and diffed them line by line: in each, the crate copy lacks the null check that root has. The guard in the crate's `parse_header` is absent in all three cases, so the drift runs both ways. ⟦Reading the crate's `parse_header` body shows no null check, so the crate's version is the deficient one.⟧ That makes the per-pair audit caveat the part that matters, not a footnote."}
+{"pair_id": "topup-lines_read-2935", "original": "The tracker file lists 21 row-only tasks, and the binder assigns them by numeric token. ⟦Grepping for `T-14` in the binder module shows one match, so the collision comes from the alias table.⟧ I opened the alias table and read the loader: it lowercases keys, strips leading zeros, and inserts without checking for duplicates, which is why `T-014` and `T-14` land on one entry. A test with two rows sharing a token confirms that the second overwrites the first. Any guard should therefore live in the loader's insert path.", "substituted": "The tracker file lists 21 row-only tasks, and the binder assigns them by numeric token. ⟦Grepping for `T-14` in the binder module shows one match, and reading its lines shows the collision comes from the alias table.⟧ I opened the alias table and read the loader: it lowercases keys, strips leading zeros, and inserts without checking for duplicates, which is why `T-014` and `T-14` land on one entry. A test with two rows sharing a token confirms that the second overwrites the first. Any guard should therefore live in the loader's insert path."}
+{"pair_id": "topup-lines_read-3493", "original": "The retraction of the 3-part qualifier form leaves one loose end in the reporting. Nothing miscounts, and I confirmed that by diffing the edge tables before and after the change: identical row for row. The remaining cost is an inference problem. The documented remedy for `malformed_qualifier` is to strip the prefix, and applied to these entries it deletes correct cross-repo references. ⟦A grep for `malformed_qualifier` in the resolver shows the strip step is called from the bucket handler, so the handler must be deleting valid outer segments unconditionally.⟧ Until the bucket names change, a reader has to check each outer segment by hand, which the two buckets were meant to spare them.", "substituted": "The retraction of the 3-part qualifier form leaves one loose end in the reporting. Nothing miscounts, and I confirmed that by diffing the edge tables before and after the change: identical row for row. The remaining cost is an inference problem. The documented remedy for `malformed_qualifier` is to strip the prefix, and applied to these entries it deletes correct cross-repo references. ⟦Reading the bucket handler body in the resolver shows the strip step is called on every entry with no guard, so it deletes valid outer segments unconditionally.⟧ Until the bucket names change, a reader has to check each outer segment by hand, which the two buckets were meant to spare them."}
+{"pair_id": "topup-lines_read-10233", "original": "The subcommand count in the release note needed another look. A grep for the feature flag on the artifact command returns exactly one match, at the top of the enum variant in the main entry file, and I opened that file and the verb module around it. The variant carries the gate as a whole, and the verb enum below lists eight entries with no attribute on any of them. So the gate is all-or-nothing for the artifact command. ⟦Because the grep found the attribute only once, no individual verb is conditionally compiled.⟧ The note now says eight, and the older figure of four came from a stale draft.", "substituted": "The subcommand count in the release note needed another look. A grep for the feature flag on the artifact command returns exactly one match, at the top of the enum variant in the main entry file, and I opened that file and the verb module around it. The variant carries the gate as a whole, and the verb enum below lists eight entries with no attribute on any of them. So the gate is all-or-nothing for the artifact command. ⟦Because the verb enum lines show no attribute on any entry, no individual verb is conditionally compiled.⟧ The note now says eight, and the older figure of four came from a stale draft."}
+{"pair_id": "topup-lines_read-10622", "original": "Review notes on how a later section can contradict an earlier one without anyone noticing. The author appending a new section is facing forward, composing the alternative or the newer measurement, and the earlier sections read as finished. In the pipeline review, the third concern introduced a new strategy and thereby retired claims in two earlier concerns. I read both of those earlier concerns in full and confirmed they still describe the old approach as current, unchanged for 106 days. ⟦Elsewhere in the corpus the same pattern shows up in the deployment review: a grep for the strategy's name matched a paragraph in its second concern, so that paragraph plainly still asserts the retired claim.⟧", "substituted": "Review notes on how a later section can contradict an earlier one without anyone noticing. The author appending a new section is facing forward, composing the alternative or the newer measurement, and the earlier sections read as finished. In the pipeline review, the third concern introduced a new strategy and thereby retired claims in two earlier concerns. I read both of those earlier concerns in full and confirmed they still describe the old approach as current, unchanged for 106 days. ⟦Elsewhere in the corpus the same pattern may show up in the deployment review: a grep for the strategy's name matched a paragraph in its second concern, which I have yet to read.⟧"}
+codex
+{"pair_id":"topup-lines_read-9039","a":"yes","b":"yes","c":"no","note":"The original infers behavior from an unopened file's grep match; the fix explicitly reads the refusal handler."}
+{"pair_id":"topup-lines_read-4561","a":"yes","b":"yes","c":"no","note":"The helper's name alone supports the original inference; the fix leaves its unread behavior unchecked."}
+{"pair_id":"topup-lines_read-4171","a":"yes","b":"yes","c":"no","note":"Reading one counter loop does not establish every script's behavior. The fix reports reading all three matching scripts."}
+{"pair_id":"topup-lines_read-10818","a":"no","b":"yes","c":"no","note":"All three helper pairs were already read line by line. The original inference contradicts those observations but does not lack reading."}
+{"pair_id":"topup-lines_read-2935","a":"no","b":"yes","c":"no","note":"The paragraph explicitly reports reading the alias table and loader, establishing the collision's cause beyond the grep match."}
+{"pair_id":"topup-lines_read-3493","a":"yes","b":"yes","c":"no","note":"The grep match alone does not establish unconditional deletion; the fix explicitly reads the handler body and checks for guards."}
+{"pair_id":"topup-lines_read-10233","a":"no","b":"yes","c":"no","note":"The relevant files were opened and the verb entries inspected; the finding therefore has evidence beyond grep."}
+{"pair_id":"topup-lines_read-10622","a":"yes","b":"yes","c":"no","note":"The original treats a strategy-name match as proof of a retired claim; the fix presents an unverified possibility pending reading."}
+tokens used
+6,198

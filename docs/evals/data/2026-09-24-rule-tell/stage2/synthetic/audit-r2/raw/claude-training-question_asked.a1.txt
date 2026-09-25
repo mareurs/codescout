@@ -1,0 +1,13 @@
+{"pair_id":"topup-question_asked-8006","a":"yes","b":"yes","c":"no","note":"Type checking supports interface compatibility, not exhaustive overlap detection behavior."}
+{"pair_id":"topup-question_asked-3247","a":"yes","b":"yes","c":"yes","note":"Repeated passes cannot establish race safety. The separate caller grep also overclaims that nothing runs concurrently."}
+{"pair_id":"topup-question_asked-11199","a":"yes","b":"yes","c":"no","note":"The checker sees attempted calls, not execution results; the fix respects that distinction."}
+{"pair_id":"topup-question_asked-9040","a":"yes","b":"yes","c":"no","note":"A passing single-file job does not measure thousand-file startup cost; the fix removes that inference."}
+{"pair_id":"topup-question_asked-4829","a":"yes","b":"yes","c":"no","note":"The hook checks ledger counts, not contributor understanding; the fix limits the claim to checked content."}
+{"pair_id":"topup-question_asked-4398","a":"yes","b":"yes","c":"no","note":"A filtered scan cannot establish status accuracy across the entire tracker; the fix acknowledges excluded records."}
+{"pair_id":"topup-question_asked-10645","a":"yes","b":"no","c":"no","note":"Lint does not measure decision balance, and no stated lint check establishes that every kickoff document contains the question."}
+{"pair_id":"topup-question_asked-7408","a":"yes","b":"yes","c":"no","note":"Token presence does not establish correct annotation placement; the fix reports only token presence."}
+{"pair_id":"topup-question_asked-10142","a":"yes","b":"yes","c":"no","note":"An absent string does not establish absent migration code; the fix limits the conclusion to the literal."}
+{"pair_id":"topup-question_asked-7678","a":"yes","b":"yes","c":"no","note":"Compilation covers built configurations; searching workspace call sites directly addresses project usage."}
+{"pair_id":"topup-question_asked-2803","a":"yes","b":"yes","c":"no","note":"The resolver skips undefined prefixes; the fix restricts its conclusion to the population actually checked."}
+{"pair_id":"topup-question_asked-8009","a":"yes","b":"yes","c":"no","note":"General suite success does not establish this output equivalence; the replacement cites a direct comparison for the relevant case."}
+{"pair_id":"topup-question_asked-1317","a":"yes","b":"yes","c":"no","note":"Building does not measure write frequency; a project sync test counting writes measures the claimed behavior."}

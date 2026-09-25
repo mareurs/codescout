@@ -1,0 +1,51 @@
+{
+ "losses": {
+  "round 1: quarantined": 9,
+  "held-out collision (synthetic)": 41,
+  "round 1: cell dropped": 118,
+  "round 2: cell dropped": 333,
+  "round 2: quarantined": 8,
+  "held-out collision (mined)": 10,
+  "cross-fold collision (synthetic)": 18
+ },
+ "counts": {
+  "act_on_artifact": 28,
+  "cannot_happen": 29,
+  "closed_population": 52,
+  "contradiction": 43,
+  "count_unit": 41,
+  "d_adjacency": 55,
+  "d_fixture": 41,
+  "d_history": 75,
+  "d_loudness": 74,
+  "d_mutation": 53,
+  "d_red": 52,
+  "d_semicolon": 56,
+  "d_sessionid": 72,
+  "d_visibility": 52,
+  "lines_read": 27,
+  "member_vs_population": 55,
+  "monotone_absence": 35,
+  "open_artifact": 63,
+  "question_asked": 78,
+  "run_tool": 62,
+  "scope_instant": 7,
+  "selector_narrow": 102
+ },
+ "trainable": [
+  "closed_population",
+  "d_adjacency",
+  "d_history",
+  "d_loudness",
+  "d_mutation",
+  "d_red",
+  "d_semicolon",
+  "d_sessionid",
+  "d_visibility",
+  "member_vs_population",
+  "open_artifact",
+  "question_asked",
+  "run_tool",
+  "selector_narrow"
+ ]
+}

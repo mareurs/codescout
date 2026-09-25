@@ -1,0 +1,91 @@
+{"pair_id":"topup-monotone_absence-6361","a":"yes","b":"yes","c":"no","note":"Zero failures cannot establish test soundness; the fix reports its lack of reaction. Other tests demonstrably failed under mutation."}
+{"pair_id":"topup-monotone_absence-667","a":"yes","b":"no","c":"no","note":"The fix still infers universal compliance from zero query results. Testing the gate does not establish that the audit query detects violations."}
+{"pair_id":"topup-monotone_absence-6494","a":"yes","b":"yes","c":"no","note":"The name match cannot detect surviving harnesses. The fix merely reports two empty checks without concluding that no harness existed."}
+{"pair_id":"topup-monotone_absence-8591","a":"yes","b":"no","c":"no","note":"The fix still treats missing log entries as proof of absent behavior; recorded symbols calls do not validate shell logging."}
+{"pair_id":"topup-monotone_absence-7231","a":"yes","b":"yes","c":"no","note":"Silent warnings do not establish correct operation. The fix adds positive evidence from the resolved configuration dump."}
+{"pair_id":"topup-monotone_absence-3925","a":"yes","b":"yes","c":"no","note":"No warnings cannot demonstrate successful inner-block handling. The fix explains that unparsed blocks cannot generate warnings; the earlier query returns generated keys."}
+{"pair_id":"topup-monotone_absence-12194","a":"yes","b":"yes","c":"no","note":"No stale-entry reports cannot prove clean ledgers. The fix reports silence alongside non-invocation without claiming cleanliness."}
+{"pair_id":"topup-monotone_absence-8885","a":"yes","b":"yes","c":"no","note":"Empty routing logs cannot prove working routing. The fix explicitly preserves the possibility of disconnection; the other causal claim uses a measured intervention."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-ymuf4mwe
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d780-d338-7980-87eb-bc38686d49ed
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+codex
+I’ll read task.md and follow its instructions.
+
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-ymuf4mwe
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `monotone_absence`
+
+LAW: Absence assertions are monotone under removal: a dead mechanism produces exactly the silence they assert.
+
+USUAL SHAPE: YES when the text treats an absence, silence or zero (no errors, an empty result, zero samples, nothing found) as proof that something works or as proof of a particular cause, where a broken or disconnected mechanism would produce the same silence. NO when the absence is reported only as an absence, or a positive control is reported.
+
+## Items
+
+{"pair_id": "topup-monotone_absence-6361", "original": "This case put the mutation in output.rs and the test in tests.rs. Two of the day's runs kept the test inside the mutated file, and there the test went red the moment the mutation landed, which shows those two were sound. ⟦The cross-file run stayed green with zero failures after the mutation, so its test is sound as well.⟧ Committing the test first costs one commit on every run, so the cost is better billed only to cross-file cases, one run in three here.", "substituted": "This case put the mutation in output.rs and the test in tests.rs. Two of the day's runs kept the test inside the mutated file, and there the test went red the moment the mutation landed, which shows those two were sound. ⟦The cross-file run stayed green with zero failures after the mutation, so its test never reacted to it.⟧ Committing the test first costs one commit on every run, so the cost is better billed only to cross-file cases, one run in three here."}
+{"pair_id": "topup-monotone_absence-667", "original": "The deploy gate needs to know who approved a release, but git only records who authored the commit. The audit log copies the author field and has no approver column at all. Adding a column is the obvious remedy, though it would only help if the gate reads it. ⟦The audit query for unauthorized deploys returned zero rows, so nobody deployed without approval.⟧ Authorship looks like an owner field, which is why the gap is easy to miss when reviewing the log. The gate's allow-list, by contrast, is checked against the author string on every deploy, and that check is covered by a passing test.", "substituted": "The deploy gate needs to know who approved a release, but git only records who authored the commit. The audit log copies the author field and has no approver column at all. Adding a column is the obvious remedy, though it would only help if the gate reads it. ⟦The audit query for deploys by authors missing from the allow-list returned zero rows, so every deploy author was listed.⟧ Authorship looks like an owner field, which is why the gap is easy to miss when reviewing the log. The gate's allow-list, by contrast, is checked against the author string on every deploy, and that check is covered by a passing test."}
+{"pair_id": "topup-monotone_absence-6494", "original": "The lock check before a gate run on the shared checkout kept reporting that the machine was free, and I traced why. The check matches on process name with an exact-match flag, so it sees only real cargo processes; running it while a gate was live returned that process's PID, which confirms it can return a hit. The nightly harness is a different case: it can outlive its cargo parent, and the name match cannot see it. ⟦On three consecutive mornings the name match printed nothing, so no harness process was left over from the night before.⟧ I then killed the shared runner by hand for a second-order cleanup, and the checkout stayed clean afterward.", "substituted": "The lock check before a gate run on the shared checkout kept reporting that the machine was free, and I traced why. The check matches on process name with an exact-match flag, so it sees only real cargo processes; running it while a gate was live returned that process's PID, which confirms it can return a hit. The nightly harness is a different case: it can outlive its cargo parent, and the name match cannot see it. ⟦On three consecutive mornings the name match printed nothing, and a scan of the deps directory path found no leftover harness process either.⟧ I then killed the shared runner by hand for a second-order cleanup, and the checkout stayed clean afterward."}
+{"pair_id": "topup-monotone_absence-8591", "original": "Handoff on tool routing after last week's eval. We reviewed 40 agent transcripts from the run. Symbol overviews now go through the symbols tool, and bodies through the same tool with the body flag; in every transcript that touched source, at least one such call appears. The shell tool is reserved for tests, git and build steps. ⟦The audit log for the shell tool shows zero source-reading commands across all 40 runs, so the tool description steering agents away from raw grep is working.⟧ Edits split between the structural editor for code and the text editor for everything else, and new files always use the write tool.", "substituted": "Handoff on tool routing after last week's eval. We reviewed 40 agent transcripts from the run. Symbol overviews now go through the symbols tool, and bodies through the same tool with the body flag; in every transcript that touched source, at least one such call appears. The shell tool is reserved for tests, git and build steps. ⟦The audit log for the shell tool shows zero source-reading commands across all 40 runs, so agents in this sample did not read source through the shell.⟧ Edits split between the structural editor for code and the text editor for everything else, and new files always use the write tool."}
+{"pair_id": "topup-monotone_absence-7231", "original": "Two settings structs now carry the embedding configuration, and they have drifted. The global section is already four fields behind the project section, which a field-by-field diff of the two definitions shows. Bug aae547c917c329b5 came from a second embedder reading the environment inside its own constructor, and I reproduced it by setting a different value in the process environment and watching the constructor ignore the loaded config. ⟦The startup dotenv loader logged no warnings when the machine value overrode the project value, so the override path is working as intended.⟧ Adding a new setting today means editing both structs.", "substituted": "Two settings structs now carry the embedding configuration, and they have drifted. The global section is already four fields behind the project section, which a field-by-field diff of the two definitions shows. Bug aae547c917c329b5 came from a second embedder reading the environment inside its own constructor, and I reproduced it by setting a different value in the process environment and watching the constructor ignore the loaded config. ⟦The startup dotenv loader logged no warnings when the machine value overrode the project value, and the resolved config dump showed the machine value winning.⟧ Adding a new setting today means editing both structs."}
+{"pair_id": "topup-monotone_absence-3925", "original": "The create and update actions of the artifact tool paste the caller's body under the frontmatter they generate. A body that opens with its own delimited block therefore ends up holding a second frontmatter block, which the catalog never parses. We confirmed this by creating a file with such a body and running a find query on a key from the inner block: the query returned the file's generated keys only. ⟦The nightly indexer log for the affected folder shows zero parse warnings for the past week, so the indexer has evidently handled these inner blocks without trouble.⟧ Humans and agents opening the file still see the inner block and read it as authoritative.", "substituted": "The create and update actions of the artifact tool paste the caller's body under the frontmatter they generate. A body that opens with its own delimited block therefore ends up holding a second frontmatter block, which the catalog never parses. We confirmed this by creating a file with such a body and running a find query on a key from the inner block: the query returned the file's generated keys only. ⟦The nightly indexer log for the affected folder shows zero parse warnings for the past week, but the indexer never parses inner blocks, so it could not warn about them.⟧ Humans and agents opening the file still see the inner block and read it as authoritative."}
+{"pair_id": "topup-monotone_absence-12194", "original": "Decision recorded on 2026-07-17: the weak form is accepted. Atomic per-entry appends are required wherever dual-write remains, while render-from-store stays the target for registry-style ledgers without being mandated everywhere. Of the four detectors that need a manual pull, the usage counters show refresh and doctor invoked zero times in the last quarter. ⟦Hygiene has not reported a single stale entry since March, which shows the ledgers it covers are now clean.⟧ Triggers such as the post-commit hook and the session banner matter more than adding new mechanism.", "substituted": "Decision recorded on 2026-07-17: the weak form is accepted. Atomic per-entry appends are required wherever dual-write remains, while render-from-store stays the target for registry-style ledgers without being mandated everywhere. Of the four detectors that need a manual pull, the usage counters show refresh and doctor invoked zero times in the last quarter. ⟦Hygiene has not reported a single stale entry since March, and nobody has invoked it manually since either.⟧ Triggers such as the post-commit hook and the session banner matter more than adding new mechanism."}
+{"pair_id": "topup-monotone_absence-8885", "original": "The routing review for the profile loader ran on 2026-08-28. We diffed the profile text with and without the two `triggered` sections, `OP-2` and `OP-3`, and the removal recovered three of the seven lost cases in `OP-1`'s measured effect, so those sections are resident and costing us. Phase 2 therefore goes first. ⟦The routing log from the last week of runs contains no entries for `triggered` rules, so the routing path is evidently working and nothing needs to be re-sequenced.⟧ Retiring the two sections now would be cheaper, but neither has a measured replacement, so their guidance would go undelivered until routing exists.", "substituted": "The routing review for the profile loader ran on 2026-08-28. We diffed the profile text with and without the two `triggered` sections, `OP-2` and `OP-3`, and the removal recovered three of the seven lost cases in `OP-1`'s measured effect, so those sections are resident and costing us. Phase 2 therefore goes first. ⟦The routing log from the last week of runs contains no entries for `triggered` rules, so we cannot yet tell whether routing works or is disconnected, and the sequencing stays open.⟧ Retiring the two sections now would be cheaper, but neither has a measured replacement, so their guidance would go undelivered until routing exists."}
+codex
+{"pair_id":"topup-monotone_absence-6361","a":"yes","b":"yes","c":"no","note":"Zero failures cannot establish test soundness; the fix reports its lack of reaction. Other tests demonstrably failed under mutation."}
+{"pair_id":"topup-monotone_absence-667","a":"yes","b":"no","c":"no","note":"The fix still infers universal compliance from zero query results. Testing the gate does not establish that the audit query detects violations."}
+{"pair_id":"topup-monotone_absence-6494","a":"yes","b":"yes","c":"no","note":"The name match cannot detect surviving harnesses. The fix merely reports two empty checks without concluding that no harness existed."}
+{"pair_id":"topup-monotone_absence-8591","a":"yes","b":"no","c":"no","note":"The fix still treats missing log entries as proof of absent behavior; recorded symbols calls do not validate shell logging."}
+{"pair_id":"topup-monotone_absence-7231","a":"yes","b":"yes","c":"no","note":"Silent warnings do not establish correct operation. The fix adds positive evidence from the resolved configuration dump."}
+{"pair_id":"topup-monotone_absence-3925","a":"yes","b":"yes","c":"no","note":"No warnings cannot demonstrate successful inner-block handling. The fix explains that unparsed blocks cannot generate warnings; the earlier query returns generated keys."}
+{"pair_id":"topup-monotone_absence-12194","a":"yes","b":"yes","c":"no","note":"No stale-entry reports cannot prove clean ledgers. The fix reports silence alongside non-invocation without claiming cleanliness."}
+{"pair_id":"topup-monotone_absence-8885","a":"yes","b":"yes","c":"no","note":"Empty routing logs cannot prove working routing. The fix explicitly preserves the possibility of disconnection; the other causal claim uses a measured intervention."}
+tokens used
+6,320

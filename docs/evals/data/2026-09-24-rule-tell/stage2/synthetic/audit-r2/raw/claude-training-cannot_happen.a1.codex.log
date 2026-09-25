@@ -1,0 +1,89 @@
+{"pair_id":"topup-cannot_happen-5576","a":"no","b":"yes","c":"no","note":"The preceding sentence enumerates all four unsafe blocks and reports checking each against its comment, grounding the claim in today's corpus."}
+{"pair_id":"topup-cannot_happen-6177","a":"yes","b":"yes","c":"no","note":"Manifest membership does not establish permanent index coverage. The replacement limits its claim to three queried crates."}
+{"pair_id":"topup-cannot_happen-11754","a":"yes","b":"yes","c":"no","note":"The original asserts unrestricted impossibility; the replacement reports observations limited to three roster dumps."}
+{"pair_id":"topup-cannot_happen-2594","a":"yes","b":"yes","c":"no","note":"The original guarantees against truncation for every tracker shape. The replacement reports results for specified tested shapes."}
+{"pair_id":"topup-cannot_happen-2055","a":"yes","b":"yes","c":"no","note":"Current query locations cannot guarantee future absence elsewhere. The replacement supplies a repository search and explicitly limits the conclusion to today."}
+{"pair_id":"topup-cannot_happen-442","a":"yes","b":"yes","c":"no","note":"The original rules out all other paths without checking them. The replacement limits its claim to reproduced entries."}
+{"pair_id":"topup-cannot_happen-9182","a":"yes","b":"no","c":"no","note":"The replacement still infers absence of dangling edges solely from internal targets, without enumerating or checking whether those targets exist."}
+{"pair_id":"topup-cannot_happen-3199","a":"yes","b":"yes","c":"no","note":"The original extends envelope structure into a universal guarantee. The replacement grounds its conclusion in the named boundary and JSON-containing tests."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+2026-09-25T07:37:35.919470Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-uclnccrj
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d77f-8daf-7750-adaa-44b0075c0296
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-uclnccrj
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `cannot_happen`
+
+LAW: 'It cannot happen' is a claim about today's corpus and decays with it.
+
+USUAL SHAPE: YES when the text asserts that something cannot happen, is impossible, or will never occur, resting on the current structure without enumerating the sites or showing a check. NO when the impossibility is scoped to named, enumerated sites or is hedged.
+
+## Items
+
+{"pair_id": "topup-cannot_happen-5576", "original": "Handoff note on the LSP cleanup: the destructor on the client carried a five-line safety comment describing a raw-pointer cast the code stopped performing months ago. I searched the crate for unsafe blocks and found four, all in lsp/client.rs and lsp/transport.rs, and read each against its comment; three still match, and the stale one was the destructor. ⟦Orphaned justifications cannot occur in this crate, since every unsafe block sits directly beside its comment.⟧ The stale block is deleted in the commit that removes the cast. Reviewers should check whether the remaining three comments name the call they now sit above, because adjacency alone will not tell them.", "substituted": "Handoff note on the LSP cleanup: the destructor on the client carried a five-line safety comment describing a raw-pointer cast the code stopped performing months ago. I searched the crate for unsafe blocks and found four, all in lsp/client.rs and lsp/transport.rs, and read each against its comment; three still match, and the stale one was the destructor. ⟦No orphaned justification remains among those four unsafe blocks, each of which was read against its comment.⟧ The stale block is deleted in the commit that removes the cast. Reviewers should check whether the remaining three comments name the call they now sit above, because adjacency alone will not tell them."}
+{"pair_id": "topup-cannot_happen-6177", "original": "The nested-root exclusion was meant to predict where the language server stays silent, and the warm run shows it does not. rust-analyzer was up the whole time: a hover on the frontmatter module returned a definition and a type. Even so, workspace/symbol came back empty for eight names in that same module. The exclusion list therefore undercounts the gap, since it only covers directories with their own manifest. ⟦Because every crate in the workspace is listed in the top-level manifest, a symbol inside a listed crate can never be missing from the index.⟧ Coverage is a smaller set than the complement of nested roots, and we should measure it directly.", "substituted": "The nested-root exclusion was meant to predict where the language server stays silent, and the warm run shows it does not. rust-analyzer was up the whole time: a hover on the frontmatter module returned a definition and a type. Even so, workspace/symbol came back empty for eight names in that same module. The exclusion list therefore undercounts the gap, since it only covers directories with their own manifest. ⟦Because every crate in the workspace is listed in the top-level manifest, a symbol inside a listed crate was present in the index in the three crates we queried.⟧ Coverage is a smaller set than the complement of nested roots, and we should measure it directly."}
+{"pair_id": "topup-cannot_happen-11754", "original": "The roster count looked inflated after the compaction rollout, so I traced where the extra entries came from. Each resumed session reopens the agent's socket under a fresh id, while the earlier socket entry lingers until its listener closes. That explains the doubles: one lineage, two sockets. A raw socket count is exact for sockets, but deriving independent work streams from it over-counts by the number of compacted-then-resumed sessions. ⟦A socket can never be shared by two live processes, so the roster cannot double-count a process.⟧ Only the session's own reload header carries the lineage field that would resolve the ambiguity.", "substituted": "The roster count looked inflated after the compaction rollout, so I traced where the extra entries came from. Each resumed session reopens the agent's socket under a fresh id, while the earlier socket entry lingers until its listener closes. That explains the doubles: one lineage, two sockets. A raw socket count is exact for sockets, but deriving independent work streams from it over-counts by the number of compacted-then-resumed sessions. ⟦In the three roster dumps I read, no socket was shared by two live processes, so none double-counted a process.⟧ Only the session's own reload header carries the lineage field that would resolve the ambiguity."}
+{"pair_id": "topup-cannot_happen-2594", "original": "Use append_entry for adding rows; it takes one row and writes it at the end, with no list argument. Editing a row is different: the caller sends the whole entry array, so a partial list truncates the tracker, which is what happened on 2026-08-16. Read the array first with a filtered get and patch the returned list before sending it back. Keep a rendered snapshot of the entry table in the artifact body so git tracks the rows. ⟦Nothing can ever truncate a tracker through append_entry, whatever shape the tracker has.⟧", "substituted": "Use append_entry for adding rows; it takes one row and writes it at the end, with no list argument. Editing a row is different: the caller sends the whole entry array, so a partial list truncates the tracker, which is what happened on 2026-08-16. Read the array first with a filtered get and patch the returned list before sending it back. Keep a rendered snapshot of the entry table in the artifact body so git tracks the rows. ⟦The append_entry tests on empty, single-row and large trackers all kept the original rows intact.⟧"}
+{"pair_id": "topup-cannot_happen-2055", "original": "The status default now depends on kind. `create.rs` resolves status through a helper: bug entries default to open and everything else to draft. The earlier hypothesis held, because the old line fell back to draft without looking at kind at all. Bug statuses outside the closed vocabulary are refused, and the error lists the six valid ones. Tracker statuses are left unvalidated on purpose, since the guide says unrecognised values show up as active. The documented query is now fixed in the three files that tell readers to run it. ⟦Because the query text lives only in those places, a stale copy can never turn up anywhere else in the repo.⟧", "substituted": "The status default now depends on kind. `create.rs` resolves status through a helper: bug entries default to open and everything else to draft. The earlier hypothesis held, because the old line fell back to draft without looking at kind at all. Bug statuses outside the closed vocabulary are refused, and the error lists the six valid ones. Tracker statuses are left unvalidated on purpose, since the guide says unrecognised values show up as active. The documented query is now fixed in the three files that tell readers to run it. ⟦A grep for the query text across the repo found it only in those three files, so no stale copy remains today.⟧"}
+{"pair_id": "topup-cannot_happen-442", "original": "Stale environment keys kept reaching spawned workers after we deleted them from the config file. We reproduced it three times: remove `FEATURE_X` from the file, restart a worker, and `FEATURE_X` still shows up in its environment. Changing a value, by contrast, always took effect on the next spawn. That pattern fits a merge over a cached map. ⟦Since the loader only ever adds or overwrites keys, a leftover entry can never reach a worker from any other path.⟧ Until the harness source is available, the workaround is to set the removed key to an empty string before deleting it.", "substituted": "Stale environment keys kept reaching spawned workers after we deleted them from the config file. We reproduced it three times: remove `FEATURE_X` from the file, restart a worker, and `FEATURE_X` still shows up in its environment. Changing a value, by contrast, always took effect on the next spawn. That pattern fits a merge over a cached map. ⟦Since the loader only ever adds or overwrites keys, the merge path is the one leftover entries we reproduced came through.⟧ Until the harness source is available, the workaround is to set the removed key to an empty string before deleting it."}
+{"pair_id": "topup-cannot_happen-9182", "original": "We considered letting doc edges target code symbols and decided against it. Every rename, move, or delete in the code repo would then either orphan the edge or force a paired update in the docs repo, which is the same shared-resource fault line we logged earlier, one layer up. Today the edges only join documents, so the audit scan needs to check just heading anchors and file paths. ⟦A dangling edge cannot occur in this design, because nothing in the link table refers to anything outside the docs.⟧ Had we allowed symbol targets, the integrity check would have to become a pre-commit gate, and each refactor would carry a maintenance cost proportional to the number of linked symbols.", "substituted": "We considered letting doc edges target code symbols and decided against it. Every rename, move, or delete in the code repo would then either orphan the edge or force a paired update in the docs repo, which is the same shared-resource fault line we logged earlier, one layer up. Today the edges only join documents, so the audit scan needs to check just heading anchors and file paths. ⟦No dangling edge exists in the current link table, because every row refers only to headings and files inside the docs.⟧ Had we allowed symbol targets, the integrity check would have to become a pre-commit gate, and each refactor would carry a maintenance cost proportional to the number of linked symbols."}
+{"pair_id": "topup-cannot_happen-3199", "original": "The new tests cover the CLI error envelope gate. One test is parametrised over both arms and uses the exact body that both hidden-native runs produced; it deliberately skips the gt_file fixture, which shows the gate returns before the ground-truth check. A second test covers the boundary, where real prose that omits the findings block stays arm-accountable. A third confirms that an answer merely containing JSON is still scored. The rescore-path test builds its input through the facts markers with a real six-line tail. ⟦Because the gate keys on the envelope shape, it is impossible for a genuine answer to be classed as indeterminate.⟧", "substituted": "The new tests cover the CLI error envelope gate. One test is parametrised over both arms and uses the exact body that both hidden-native runs produced; it deliberately skips the gt_file fixture, which shows the gate returns before the ground-truth check. A second test covers the boundary, where real prose that omits the findings block stays arm-accountable. A third confirms that an answer merely containing JSON is still scored. The rescore-path test builds its input through the facts markers with a real six-line tail. ⟦Because the gate keys on the envelope shape, the boundary and JSON-containing tests show a genuine answer is not classed as indeterminate.⟧"}
+codex
+{"pair_id":"topup-cannot_happen-5576","a":"no","b":"yes","c":"no","note":"The preceding sentence enumerates all four unsafe blocks and reports checking each against its comment, grounding the claim in today's corpus."}
+{"pair_id":"topup-cannot_happen-6177","a":"yes","b":"yes","c":"no","note":"Manifest membership does not establish permanent index coverage. The replacement limits its claim to three queried crates."}
+{"pair_id":"topup-cannot_happen-11754","a":"yes","b":"yes","c":"no","note":"The original asserts unrestricted impossibility; the replacement reports observations limited to three roster dumps."}
+{"pair_id":"topup-cannot_happen-2594","a":"yes","b":"yes","c":"no","note":"The original guarantees against truncation for every tracker shape. The replacement reports results for specified tested shapes."}
+{"pair_id":"topup-cannot_happen-2055","a":"yes","b":"yes","c":"no","note":"Current query locations cannot guarantee future absence elsewhere. The replacement supplies a repository search and explicitly limits the conclusion to today."}
+{"pair_id":"topup-cannot_happen-442","a":"yes","b":"yes","c":"no","note":"The original rules out all other paths without checking them. The replacement limits its claim to reproduced entries."}
+{"pair_id":"topup-cannot_happen-9182","a":"yes","b":"no","c":"no","note":"The replacement still infers absence of dangling edges solely from internal targets, without enumerating or checking whether those targets exist."}
+{"pair_id":"topup-cannot_happen-3199","a":"yes","b":"yes","c":"no","note":"The original extends envelope structure into a universal guarantee. The replacement grounds its conclusion in the named boundary and JSON-containing tests."}
+tokens used
+6,243

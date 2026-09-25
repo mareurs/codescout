@@ -1,0 +1,8 @@
+{"pair_id":"topup-member_vs_population-3709","a":"yes","b":"yes","c":"no","note":"Workspace success does not establish the specific activation behavior; the replacement test directly asserts it."}
+{"pair_id":"topup-member_vs_population-129","a":"yes","b":"yes","c":"no","note":"Overall CI success cannot verify untested forwarding attribution. The replacement explicitly acknowledges the coverage gap."}
+{"pair_id":"topup-member_vs_population-12023","a":"yes","b":"yes","c":"no","note":"A green resolver module does not establish coverage of this heading. The replacement directly tests the specified heading and fixture."}
+{"pair_id":"topup-member_vs_population-849","a":"yes","b":"yes","c":"no","note":"The checker never examines index rows. The replacement limits its conclusion to the headings actually checked."}
+{"pair_id":"topup-member_vs_population-7780","a":"yes","b":"yes","c":"no","note":"Workspace success cannot establish library hits for find_references. The replacement grounds its conclusion in the tool's discarded scope."}
+{"pair_id":"topup-member_vs_population-4826","a":"yes","b":"yes","c":"no","note":"Crash-free replay does not establish acceptance of a particular commit. The replacement cites refusal outcomes for the relevant prose-quoting messages."}
+{"pair_id":"topup-member_vs_population-6445","a":"yes","b":"yes","c":"no","note":"Component test success cannot verify docs-job wiring. The replacement confines its claim to the components exercised in isolation."}
+{"pair_id":"topup-member_vs_population-9635","a":"yes","b":"yes","c":"no","note":"Overall test success cannot establish a particular assertion's correctness. The replacement reports only the observed absence of test failures."}

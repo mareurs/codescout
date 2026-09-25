@@ -1,0 +1,8 @@
+{"pair_id":"topup-d_adjacency-10984","a":"yes","b":"yes","c":"no","note":"Directory activity cannot establish authorship; reservation author fields positively identify Tomas."}
+{"pair_id":"topup-d_adjacency-3090","a":"yes","b":"yes","c":"no","note":"Neighboring file activity supplies the original attribution; the fix identifies Priya through the commit creating the arm."}
+{"pair_id":"topup-d_adjacency-10100","a":"yes","b":"yes","c":"no","note":"Editing a neighboring module does not identify a ticket's author; the reporter field supplies positive attribution."}
+{"pair_id":"topup-d_adjacency-5560","a":"yes","b":"yes","c":"no","note":"Nearby helper commits do not establish assertion authorship; the fix cites the commit that added the assertion."}
+{"pair_id":"topup-d_adjacency-9921","a":"yes","b":"yes","c":"no","note":"Recent checkout activity does not identify the merge writer; the session identifier in its commit trailer does."}
+{"pair_id":"topup-d_adjacency-9084","a":"yes","b":"yes","c":"no","note":"Concurrent recorder edits are adjacency evidence; the rows' writer metadata provides positive attribution."}
+{"pair_id":"topup-d_adjacency-10491","a":"yes","b":"yes","c":"no","note":"Adjacent refactoring does not identify the regression author; the fix links Keiko to the specific commit isolated by bisect."}
+{"pair_id":"topup-d_adjacency-8544","a":"yes","b":"yes","c":"no","note":"Same-directory commits do not establish builder authorship; the builder's commit history positively identifies Mira."}

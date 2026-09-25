@@ -1,0 +1,8 @@
+{"pair_id":"topup-count_unit-1842","a":"yes","b":"yes","c":"no","note":"The original omits what 40 counts; the fix identifies notes carrying quoted dates."}
+{"pair_id":"topup-count_unit-6514","a":"yes","b":"yes","c":"no","note":"The original gives 212 without a unit; the fix identifies matched files returned by the selector."}
+{"pair_id":"topup-count_unit-10568","a":"yes","b":"yes","c":"no","note":"The original adopts a design note's count; the fix uses the directly derived grep count."}
+{"pair_id":"topup-count_unit-8624","a":"no","b":"no","c":"no","note":"The original names users relying on warn. The replacement cites marketplace installs without deriving the count."}
+{"pair_id":"topup-count_unit-701","a":"yes","b":"yes","c":"no","note":"The original omits the counted unit; the fix names tools, with the count derived from comparing listings."}
+{"pair_id":"topup-count_unit-1776","a":"yes","b":"yes","c":"no","note":"The original leaves 3 without a unit; the fix specifies test functions in the suite."}
+{"pair_id":"topup-count_unit-11440","a":"no","b":"yes","c":"no","note":"The number describes elapsed time, not a population count, so the original does not violate this rule."}
+{"pair_id":"topup-count_unit-9373","a":"no","b":"yes","c":"no","note":"The original counts early-return occurrences explicitly. The replacement identifies log records and clarifies one early return per session."}

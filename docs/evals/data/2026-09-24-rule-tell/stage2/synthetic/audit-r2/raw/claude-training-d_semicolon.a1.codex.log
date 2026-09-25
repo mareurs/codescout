@@ -1,0 +1,88 @@
+{"pair_id":"topup-d_semicolon-5953","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"topup-d_semicolon-11315","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"topup-d_semicolon-10679","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"topup-d_semicolon-8509","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"topup-d_semicolon-3038","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"topup-d_semicolon-5994","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"topup-d_semicolon-7335","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"topup-d_semicolon-4557","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-4102e_fa
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d780-53a4-7be2-9775-01820f676921
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-4102e_fa
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_semicolon`
+
+LAW: Chain the two test lanes with ';', never '&&'.
+
+USUAL SHAPE: YES when the text runs or describes running the two cargo test lanes chained with `&&`. NO otherwise.
+
+## Items
+
+{"pair_id": "topup-d_semicolon-5953", "original": "The shrink guard is wired into three edit surfaces but not into the code editor, so a whole-file overwrite there can silently drop most of a file. I confirmed this by reading the call sites: three modules import the guard and the symbol editor does not. The regression test I added truncates a fixture to a tenth of its size and expects a refusal from each surface. ⟦Before pushing, I ran `cargo test && cargo test --features librarian` from the repo root to cover both lanes.⟧", "substituted": "The shrink guard is wired into three edit surfaces but not into the code editor, so a whole-file overwrite there can silently drop most of a file. I confirmed this by reading the call sites: three modules import the guard and the symbol editor does not. The regression test I added truncates a fixture to a tenth of its size and expects a refusal from each surface. ⟦Before pushing, I ran `cargo test ; cargo test --features librarian` from the repo root to cover both lanes.⟧"}
+{"pair_id": "topup-d_semicolon-11315", "original": "Severity: high, because every M-series metric reads from the vocabulary file. The contamination added tokens from the probe's own scratch output to one of the eight repos, which inflated its identifier counts. An unrelated ratio looked implausible, and that is the only reason it surfaced. ⟦The regression guard now runs both lanes as `cargo test --lib && cargo test --test vocab` before each metric job.⟧ The scratch directory is excluded from the scan, and a rerun dropped the count from 4,210 to 3,870.", "substituted": "Severity: high, because every M-series metric reads from the vocabulary file. The contamination added tokens from the probe's own scratch output to one of the eight repos, which inflated its identifier counts. An unrelated ratio looked implausible, and that is the only reason it surfaced. ⟦The regression guard now runs both lanes as `cargo test --lib ; cargo test --test vocab` before each metric job.⟧ The scratch directory is excluded from the scan, and a rerun dropped the count from 4,210 to 3,870."}
+{"pair_id": "topup-d_semicolon-10679", "original": "The freeze note for the mirror repo is now closed out. A freeze only sets timing for parties who all plan to publish, so it gave no protection against the contributor who never intended to. ⟦Before lifting it, the handoff script ran both lanes with `cargo test --lib && cargo test --test integration` and printed a green banner.⟧ That banner alone convinced two reviewers the mirror was safe, which is the false belief a freeze manufactures. Timing was the only thing the freeze controlled; the log shows the release tag landing eleven minutes after the lift, with the full test output attached.", "substituted": "The freeze note for the mirror repo is now closed out. A freeze only sets timing for parties who all plan to publish, so it gave no protection against the contributor who never intended to. ⟦Before lifting it, the handoff script ran both lanes with `cargo test --lib ; cargo test --test integration` and printed a green banner.⟧ That banner alone convinced two reviewers the mirror was safe, which is the false belief a freeze manufactures. Timing was the only thing the freeze controlled; the log shows the release tag landing eleven minutes after the lift, with the full test output attached."}
+{"pair_id": "topup-d_semicolon-8509", "original": "⟦The handoff script runs both test lanes as `cargo test --lib && cargo test --test scan_flow` before any change to the pika reply templates ships.⟧ I checked the templates by reading the emitted strings against the two prompt variants in the notes, and each contains the bound and the call count. The report variant lists the active filter, and its table view is covered by a snapshot test that passed on my machine. Nothing else in the script touches the observation table, so a template edit cannot alter stored rows.", "substituted": "⟦The handoff script runs both test lanes as `cargo test --lib; cargo test --test scan_flow` before any change to the pika reply templates ships.⟧ I checked the templates by reading the emitted strings against the two prompt variants in the notes, and each contains the bound and the call count. The report variant lists the active filter, and its table view is covered by a snapshot test that passed on my machine. Nothing else in the script touches the observation table, so a template edit cannot alter stored rows."}
+{"pair_id": "topup-d_semicolon-3038", "original": "⟦Reproducing on Windows CI meant running `cargo test --lib && cargo test --test cfg_paths` as a single step.⟧ Three config tests hand a `/tmp/...` path to the global dir helper. The helper keeps only paths where is_absolute() is true, and on Windows a bare slash-rooted path lacks a drive letter or UNC prefix, so it counts as rooted but not absolute. The filter drops it, the home fallback is also None in these tests, and the unwrap panics.", "substituted": "⟦Reproducing on Windows CI meant running `cargo test --lib; cargo test --test cfg_paths` as a single step.⟧ Three config tests hand a `/tmp/...` path to the global dir helper. The helper keeps only paths where is_absolute() is true, and on Windows a bare slash-rooted path lacks a drive letter or UNC prefix, so it counts as rooted but not absolute. The filter drops it, the home fallback is also None in these tests, and the unwrap panics."}
+{"pair_id": "topup-d_semicolon-5994", "original": "⟦For this advisory patch the handoff check is `cargo test && cargo test --features lsp`, with both summaries pasted into the ticket.⟧ The bug itself is narrow: the error router reads the advisory wrapper only in its last branch, so the LSP-transient arm builds its message from the raw error string and discards the alias note. I confirmed it by reading the three branches in order and by a test that sends an aliased call through a stubbed cold-index failure. The test now asserts that the advisory text appears in the response body.", "substituted": "⟦For this advisory patch the handoff check is `cargo test ; cargo test --features lsp`, with both summaries pasted into the ticket.⟧ The bug itself is narrow: the error router reads the advisory wrapper only in its last branch, so the LSP-transient arm builds its message from the raw error string and discards the alias note. I confirmed it by reading the three branches in order and by a test that sends an aliased call through a stubbed cold-index failure. The test now asserts that the advisory text appears in the response body."}
+{"pair_id": "topup-d_semicolon-7335", "original": "The review package collected 14 commits when only one was mine, so I now identify my work by the `Session-Id:` trailer and never by a range. After committing I verify the index directly, since a retry loop that exhausted its attempts looks the same as one that succeeded. ⟦Before handing off, I run `cargo test && cargo test --features local-embed` on the shared checkout.⟧ Then `git show --stat HEAD` confirms that the commit contains only the paths I named, and nothing another session left behind.", "substituted": "The review package collected 14 commits when only one was mine, so I now identify my work by the `Session-Id:` trailer and never by a range. After committing I verify the index directly, since a retry loop that exhausted its attempts looks the same as one that succeeded. ⟦Before handing off, I run `cargo test ; cargo test --features local-embed` on the shared checkout.⟧ Then `git show --stat HEAD` confirms that the commit contains only the paths I named, and nothing another session left behind."}
+{"pair_id": "topup-d_semicolon-4557", "original": "The count comparison is gone. Commit 1b3ac36b stopped the ledger from storing derived counts, so no stored cell can disagree with the corpus any more. The surviving check reads the index rather than the worktree, so a tracked file deleted from the worktree is read normally. ⟦After the change I ran both lanes from the repo root with `cargo test && cargo test -- --ignored`.⟧ The ignored lane holds the peer-mid-move case, and it passes with no warning emitted, which is what we expect once the blindness is unreachable.", "substituted": "The count comparison is gone. Commit 1b3ac36b stopped the ledger from storing derived counts, so no stored cell can disagree with the corpus any more. The surviving check reads the index rather than the worktree, so a tracked file deleted from the worktree is read normally. ⟦After the change I ran both lanes from the repo root with `cargo test; cargo test -- --ignored`.⟧ The ignored lane holds the peer-mid-move case, and it passes with no warning emitted, which is what we expect once the blindness is unreachable."}
+codex
+{"pair_id":"topup-d_semicolon-5953","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"topup-d_semicolon-11315","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"topup-d_semicolon-10679","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"topup-d_semicolon-8509","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"topup-d_semicolon-3038","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"topup-d_semicolon-5994","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"topup-d_semicolon-7335","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+{"pair_id":"topup-d_semicolon-4557","a":"yes","b":"yes","c":"no","note":"The original chains both test lanes with &&; the fix uses a semicolon. No other sentence breaks the rule."}
+tokens used
+5,653

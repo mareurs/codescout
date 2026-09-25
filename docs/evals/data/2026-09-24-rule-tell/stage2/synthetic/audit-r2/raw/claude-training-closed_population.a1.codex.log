@@ -1,0 +1,89 @@
+{"pair_id":"topup-closed_population-3187","a":"yes","b":"yes","c":"yes","note":"The fix limits callers to six polls, but another sentence universally covers every later status call until a fresh build."}
+{"pair_id":"topup-closed_population-3469","a":"yes","b":"yes","c":"no","note":"The original extends today's template to all future messages; the fix restricts the claim to messages producible today."}
+{"pair_id":"topup-closed_population-4543","a":"yes","b":"yes","c":"no","note":"The original generalizes twelve checked records to an open population; the fix explicitly limits the claim to those twelve."}
+{"pair_id":"topup-closed_population-8524","a":"yes","b":"yes","c":"no","note":"The original guarantees coverage for future operators; the fix limits coverage to operators listed today."}
+{"pair_id":"topup-closed_population-1900","a":"yes","b":"yes","c":"no","note":"The original covers every future update regardless of artifact contents; the fix covers only completed updates on this draft entry."}
+{"pair_id":"topup-closed_population-9717","a":"yes","b":"yes","c":"no","note":"The original guarantees detection of every later truncation; the fix reports this detection and prescribes review without guaranteeing future outcomes."}
+{"pair_id":"topup-closed_population-9457","a":"yes","b":"yes","c":"no","note":"The original quantifies over all future source reads; the fix describes averages within three fixed March bands."}
+{"pair_id":"topup-closed_population-9620","a":"yes","b":"yes","c":"no","note":"The original extends current initializer coverage to all future tests; the fix confines its claim to twelve existing initializers."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+2026-09-25T07:37:35.919487Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-w87miyzx
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d77f-8daf-7090-8c9e-6665e8c2dd87
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-w87miyzx
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `closed_population`
+
+LAW: Ask whether the population is closed.
+
+USUAL SHAPE: YES when the text claims all / every / none over a set that can gain members (future entries, other sessions, new files, later callers) as though the set were fixed. NO when the set is explicitly fixed or listed.
+
+## Items
+
+{"pair_id": "topup-closed_population-3187", "original": "The stuck status reproduces with two sessions. Session A starts a build and holds the project's index lock while it works. Session B calls the build action and immediately gets a started reply, because the work runs in a spawned background task rather than inline. That task tries to take the exclusive lock, fails, and stores the error string in the agent's indexing state. Every later status call returns that stored failure until a fresh build overwrites it, which we confirmed by polling status six times over two minutes while session A kept indexing. ⟦Since the stored value is only ever written by build tasks, no caller will ever see a status that reflects the real lock holder.⟧", "substituted": "The stuck status reproduces with two sessions. Session A starts a build and holds the project's index lock while it works. Session B calls the build action and immediately gets a started reply, because the work runs in a spawned background task rather than inline. That task tries to take the exclusive lock, fails, and stores the error string in the agent's indexing state. Every later status call returns that stored failure until a fresh build overwrites it, which we confirmed by polling status six times over two minutes while session A kept indexing. ⟦Since the stored value is only ever written by build tasks, none of the six polls in this run showed a status that reflects the real lock holder.⟧"}
+{"pair_id": "topup-closed_population-3469", "original": "Heading lookups now carry their discriminant on the error itself. The duplicate-heading error attaches an ambiguity flag and an occurrence count through the existing chainable extras mechanism, and the lookup function returns that error instead of an Option. A small helper reads the extras back out. We considered parsing the message text, but the message is prose written for humans, and reworded strings would silently break any parser. ⟦Every message the lookup can produce today follows the same template, so all future messages will keep matching a pattern-based parser too.⟧", "substituted": "Heading lookups now carry their discriminant on the error itself. The duplicate-heading error attaches an ambiguity flag and an occurrence count through the existing chainable extras mechanism, and the lookup function returns that error instead of an Option. A small helper reads the extras back out. We considered parsing the message text, but the message is prose written for humans, and reworded strings would silently break any parser. ⟦Every message the lookup can produce today follows the same template, so a pattern-based parser would match all of them at present.⟧"}
+{"pair_id": "topup-closed_population-4543", "original": "Handoff note on the anchor check. The doctor check flagged record 0417 because its hash sat in running text, where the parser cannot see it. I moved the SHA and the patch-id into the structured header, then reran the check, which passed on all twelve records in the directory. ⟦Since it passed on those twelve today, no record will read as anchored without resolving.⟧ The SHA resolves, and git confirms it sits under the experiments branch. I also recomputed the patch-id from the diff and it matches the stored value. The SHA breaks on the next rebase while the patch-id survives it, so both stay.", "substituted": "Handoff note on the anchor check. The doctor check flagged record 0417 because its hash sat in running text, where the parser cannot see it. I moved the SHA and the patch-id into the structured header, then reran the check, which passed on all twelve records in the directory. ⟦Since it passed on those twelve today, none of those twelve reads as anchored without resolving.⟧ The SHA resolves, and git confirms it sits under the experiments branch. I also recomputed the patch-id from the diff and it matches the stored value. The SHA breaks on the next rebase while the patch-id survives it, so both stay."}
+{"pair_id": "topup-closed_population-8524", "original": "Test plan for the filter engine. The main guard is a dual-engine consistency test: the same fixture objects are loaded into a temp SQLite table and kept as JSON, then a battery of filter nodes runs through the SQL compiler and through eval, and the matching id sets must be identical. Where the two type systems cannot align, the table in the design section is canonical. Each row of that table gets a per-op unit test, plus a missing-field case. Integration tests cover augmented and non-augmented trackers and a missing collection key. ⟦Since the engine reads params fresh on every call, all future filter operators added to the table will be covered by these tests without any new cases.⟧", "substituted": "Test plan for the filter engine. The main guard is a dual-engine consistency test: the same fixture objects are loaded into a temp SQLite table and kept as JSON, then a battery of filter nodes runs through the SQL compiler and through eval, and the matching id sets must be identical. Where the two type systems cannot align, the table in the design section is canonical. Each row of that table gets a per-op unit test, plus a missing-field case. Integration tests cover augmented and non-augmented trackers and a missing collection key. ⟦Since the engine reads params fresh on every call, the operators listed in the table today are covered by these tests without extra cache cases.⟧"}
+{"pair_id": "topup-closed_population-1900", "original": "The dropped-write bug reproduces on draft artifacts. I ran the status update against a draft entry, and the call returned updated: true with the body edits applied. A follow-up get still showed draft, and reading the first lines of the file showed the same frontmatter, so the catalog and the file agree and the write itself was lost. Sending the status as a top-level patch field flipped it correctly in catalog and frontmatter. ⟦Every future status update through the body_edits path will therefore drop its status change, whatever the artifact contains.⟧", "substituted": "The dropped-write bug reproduces on draft artifacts. I ran the status update against a draft entry, and the call returned updated: true with the body edits applied. A follow-up get still showed draft, and reading the first lines of the file showed the same frontmatter, so the catalog and the file agree and the write itself was lost. Sending the status as a top-level patch field flipped it correctly in catalog and frontmatter. ⟦Every status update through the body_edits path that I ran on this draft entry dropped its status change.⟧"}
+{"pair_id": "topup-closed_population-9717", "original": "While updating four test bodies, I read lines 605 to 735 in one call. The window ended one line before the function did, and I took the last visible assertion, on the commit flag, as the end. My replacement body stopped there and silently dropped the timestamp assertion that followed. The git diff after the edit showed a deleted line with no matching addition, which is how I saw it, before compiling or running tests. ⟦Diff review will catch every truncation in later edits, so window size needs no further care.⟧", "substituted": "While updating four test bodies, I read lines 605 to 735 in one call. The window ended one line before the function did, and I took the last visible assertion, on the commit flag, as the end. My replacement body stopped there and silently dropped the timestamp assertion that followed. The git diff after the edit showed a deleted line with no matching addition, which is how I saw it, before compiling or running tests. ⟦Diff review caught this truncation, and it stays a required step before each commit.⟧"}
+{"pair_id": "topup-closed_population-9457", "original": "We re-cut the file_read numbers by path class across the five context bands in the March export, which holds 212 sessions. Source-file utilisation climbs from 59% in the smallest band to 84% in the largest, so the earlier decline was not about how source reads are used. External paths (lockfiles, logs, bundles) drop from 51% to under 8% over the same bands and account for most of the tokens. ⟦Every source file the agent reads, at any context size, will be used at 80% or better.⟧ The pooled figure of 35% hid all this because external reads dominate the volume. The granularity proposal therefore loses its main support.", "substituted": "We re-cut the file_read numbers by path class across the five context bands in the March export, which holds 212 sessions. Source-file utilisation climbs from 59% in the smallest band to 84% in the largest, so the earlier decline was not about how source reads are used. External paths (lockfiles, logs, bundles) drop from 51% to under 8% over the same bands and account for most of the tokens. ⟦Source-file reads in the three largest March bands averaged above 80% utilisation.⟧ The pooled figure of 35% hid all this because external reads dominate the volume. The granularity proposal therefore loses its main support."}
+{"pair_id": "topup-closed_population-9620", "original": "The committed tree fails to build: with my working changes stashed, clippy reports a missing-field error for the new hint-tracking member of ToolContext, raised in the run_command test module. The member arrived with the guide-hint commit, but the tests' setup code was left behind. My uncommitted diff adds the member at twelve initializer sites, which restores the build rather than adding behaviour. ⟦Every ToolContext initializer now includes the field, so no future test can trip this error again.⟧ Keep these edits in the same commit as the hint work.", "substituted": "The committed tree fails to build: with my working changes stashed, clippy reports a missing-field error for the new hint-tracking member of ToolContext, raised in the run_command test module. The member arrived with the guide-hint commit, but the tests' setup code was left behind. My uncommitted diff adds the member at twelve initializer sites, which restores the build rather than adding behaviour. ⟦All twelve initializers in the run_command tests now include the field.⟧ Keep these edits in the same commit as the hint work."}
+codex
+{"pair_id":"topup-closed_population-3187","a":"yes","b":"yes","c":"yes","note":"The fix limits callers to six polls, but another sentence universally covers every later status call until a fresh build."}
+{"pair_id":"topup-closed_population-3469","a":"yes","b":"yes","c":"no","note":"The original extends today's template to all future messages; the fix restricts the claim to messages producible today."}
+{"pair_id":"topup-closed_population-4543","a":"yes","b":"yes","c":"no","note":"The original generalizes twelve checked records to an open population; the fix explicitly limits the claim to those twelve."}
+{"pair_id":"topup-closed_population-8524","a":"yes","b":"yes","c":"no","note":"The original guarantees coverage for future operators; the fix limits coverage to operators listed today."}
+{"pair_id":"topup-closed_population-1900","a":"yes","b":"yes","c":"no","note":"The original covers every future update regardless of artifact contents; the fix covers only completed updates on this draft entry."}
+{"pair_id":"topup-closed_population-9717","a":"yes","b":"yes","c":"no","note":"The original guarantees detection of every later truncation; the fix reports this detection and prescribes review without guaranteeing future outcomes."}
+{"pair_id":"topup-closed_population-9457","a":"yes","b":"yes","c":"no","note":"The original quantifies over all future source reads; the fix describes averages within three fixed March bands."}
+{"pair_id":"topup-closed_population-9620","a":"yes","b":"yes","c":"no","note":"The original extends current initializer coverage to all future tests; the fix confines its claim to twelve existing initializers."}
+tokens used
+6,088

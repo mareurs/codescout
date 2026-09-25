@@ -1,0 +1,8 @@
+{"pair_id":"topup-run_tool-3196","a":"yes","b":"yes","c":"no","note":"Original infers exit status from source; replacement reports an executed bad-key call and observed results."}
+{"pair_id":"topup-run_tool-11540","a":"yes","b":"yes","c":"no","note":"Original asserts runtime quote stripping without execution; replacement tests a quoted path and reads the result."}
+{"pair_id":"topup-run_tool-7658","a":"yes","b":"yes","c":"no","note":"Original predicts status output from source alone; replacement describes source logic and explicitly leaves the missing-file runtime case untested."}
+{"pair_id":"topup-run_tool-3365","a":"yes","b":"yes","c":"no","note":"Original asserts overflow output from documentation without calling; replacement reports live output. Other source observations describe code structure."}
+{"pair_id":"topup-run_tool-6155","a":"yes","b":"yes","c":"no","note":"Original bases stderr behavior on source; replacement reports stderr observed in the executed background run."}
+{"pair_id":"topup-run_tool-9263","a":"yes","b":"yes","c":"no","note":"Original infers tool output from resolver source; replacement describes internal collection logic. The separate qualified-path behavior was tested."}
+{"pair_id":"topup-run_tool-592","a":"yes","b":"yes","c":"no","note":"Original claims exit status and permission error from source; replacement reports an executed call's status and output."}
+{"pair_id":"topup-run_tool-10109","a":"yes","b":"yes","c":"no","note":"Original derives clean-case exit status and output from source; replacement reports both from an actual run."}

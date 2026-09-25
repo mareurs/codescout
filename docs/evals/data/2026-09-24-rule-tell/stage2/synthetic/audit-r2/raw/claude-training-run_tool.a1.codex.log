@@ -1,0 +1,88 @@
+{"pair_id":"topup-run_tool-3196","a":"yes","b":"yes","c":"no","note":"Original infers exit status from source; replacement reports an executed bad-key call and observed results."}
+{"pair_id":"topup-run_tool-11540","a":"yes","b":"yes","c":"no","note":"Original asserts runtime quote stripping without execution; replacement tests a quoted path and reads the result."}
+{"pair_id":"topup-run_tool-7658","a":"yes","b":"yes","c":"no","note":"Original predicts status output from source alone; replacement describes source logic and explicitly leaves the missing-file runtime case untested."}
+{"pair_id":"topup-run_tool-3365","a":"yes","b":"yes","c":"no","note":"Original asserts overflow output from documentation without calling; replacement reports live output. Other source observations describe code structure."}
+{"pair_id":"topup-run_tool-6155","a":"yes","b":"yes","c":"no","note":"Original bases stderr behavior on source; replacement reports stderr observed in the executed background run."}
+{"pair_id":"topup-run_tool-9263","a":"yes","b":"yes","c":"no","note":"Original infers tool output from resolver source; replacement describes internal collection logic. The separate qualified-path behavior was tested."}
+{"pair_id":"topup-run_tool-592","a":"yes","b":"yes","c":"no","note":"Original claims exit status and permission error from source; replacement reports an executed call's status and output."}
+{"pair_id":"topup-run_tool-10109","a":"yes","b":"yes","c":"no","note":"Original derives clean-case exit status and output from source; replacement reports both from an actual run."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-m3rjfty4
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d780-f5e5-73a2-ab3e-ad8d2bf1bcf5
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-m3rjfty4
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `run_tool`
+
+LAW: A claim about how a tool behaves needs the call run once and the real output read; reading the source alone misses runtime shape.
+
+USUAL SHAPE: YES when the text asserts how a tool, command or API behaves at RUNTIME (its output, error, exit status) AND the text says or shows the basis was reading its source or docs rather than running it. NO when no basis is stated, when the text reports running it, or when it describes what a piece of code computes rather than a tool's runtime behaviour.
+
+## Items
+
+{"pair_id": "topup-run_tool-3196", "original": "During the pilot, one arm scored as an empty search when it had never actually started. The checker parsed the CLI's error envelope as if it were a model answer, found no findings block, and counted the run as a legitimate zero. ⟦I read the CLI's bundled source and concluded it always exits with status 0 when auth fails, even though the envelope carries an error flag.⟧ The pilot logs show that same arm with zero tokens and zero cost across all twelve tasks, which is the signature of a call that never left the machine. Dropping envelopes with the error flag set before scoring is the next change.", "substituted": "During the pilot, one arm scored as an empty search when it had never actually started. The checker parsed the CLI's error envelope as if it were a model answer, found no findings block, and counted the run as a legitimate zero. ⟦I ran the CLI once with a bad key and read its output: it exited with status 0 on auth failure, though the envelope carries an error flag.⟧ The pilot logs show that same arm with zero tokens and zero cost across all twelve tasks, which is the signature of a call that never left the machine. Dropping envelopes with the error flag set before scoring is the next change."}
+{"pair_id": "topup-run_tool-11540", "original": "The refutation passes killed real candidates. One was a premise the controller seeded itself: that the temp-path strings mismatch on form. ⟦The reviewer read the tokenizer's source and concluded that shell_words strips quotes at runtime, so the match survives, without feeding it a single quoted path.⟧ Another candidate, that the doctor count derives from truncated rows, died when the reviewer ran doctor on a 300-row fixture and saw the count read 300 while only the total was cut at 200. Three findings were also duplicated across independent reviewers.", "substituted": "The refutation passes killed real candidates. One was a premise the controller seeded itself: that the temp-path strings mismatch on form. ⟦The reviewer fed shell_words one quoted path, saw the quotes come back stripped, and concluded the match survives.⟧ Another candidate, that the doctor count derives from truncated rows, died when the reviewer ran doctor on a 300-row fixture and saw the count read 300 while only the total was cut at 200. Three findings were also duplicated across independent reviewers."}
+{"pair_id": "topup-run_tool-7658", "original": "⟦From the loader's source alone, the status call will return an empty system_prompt string when the markdown file is missing.⟧ I did run the status call against the sample project, and its system_prompt field held the full 412-line file, so the happy path is confirmed. What remains open is sanitization: nothing in the read path strips angle-bracket directives, as the loader function shows line by line. That gap is what sets the exploitability score for S1. The second open question is who can write the preferences bucket, which needs a separate answer from the maintainers.", "substituted": "⟦The loader's source falls back to an empty string when the markdown file is missing; I have not run the status call without the file.⟧ I did run the status call against the sample project, and its system_prompt field held the full 412-line file, so the happy path is confirmed. What remains open is sanitization: nothing in the read path strips angle-bracket directives, as the loader function shows line by line. That gap is what sets the exploitability score for S1. The second open question is who can write the preferences bucket, which needs a separate answer from the maintainers."}
+{"pair_id": "topup-run_tool-3365", "original": "⟦Going by the docs page for run_command, it returns the buffer reference under a single shared key in every overflow case, and I have not called it.⟧ A repo-wide grep for assignments that attach a secondary buffer reference returned exactly one hit, in the output module of that tool. The buffered-bytes field is built in one place, inside the shared content method that every other tool's overflow envelope passes through. The one hit bypasses that method entirely. It is therefore not an instance of a widespread pattern but the single counterexample to what the project assumes holds everywhere.", "substituted": "⟦A live run_command call with a noisy command returned the buffer reference under a separate key, unfiltered_output, in the overflow case.⟧ A repo-wide grep for assignments that attach a secondary buffer reference returned exactly one hit, in the output module of that tool. The buffered-bytes field is built in one place, inside the shared content method that every other tool's overflow envelope passes through. The one hit bypasses that method entirely. It is therefore not an instance of a widespread pattern but the single counterexample to what the project assumes holds everywhere."}
+{"pair_id": "topup-run_tool-6155", "original": "The timeout handoff changes how we read this bug. A gate that runs past two minutes gets moved to the background by the wrapper, and we had assumed that meant the hook would never see its exit. I ran the long gate once with a sleep of 150 seconds and read the hook log: the status and the attribution both arrived intact. ⟦From the wrapper's source, the background path also forwards stderr to the hook unchanged, so the failure text will show up in the hook log verbatim.⟧ Duration is therefore not a cause of the lost attribution. The remaining defect is confined to the short-envelope case in row 1, which a second session reproduced on a plain workspace test run.", "substituted": "The timeout handoff changes how we read this bug. A gate that runs past two minutes gets moved to the background by the wrapper, and we had assumed that meant the hook would never see its exit. I ran the long gate once with a sleep of 150 seconds and read the hook log: the status and the attribution both arrived intact. ⟦In the 150-second run, the background path also forwarded stderr to the hook unchanged, so the failure text showed up in the hook log verbatim.⟧ Duration is therefore not a cause of the lost attribution. The remaining defect is confined to the short-envelope case in row 1, which a second session reproduced on a plain workspace test run."}
+{"pair_id": "topup-run_tool-9263", "original": "⟦Reading the resolver source, edit_code on an ambiguous bare name returns a candidate list instead of failing.⟧ I called it with the qualified path for the Display impl's fmt method, and it returned exactly one symbol and edited the body in place. That means the two earlier relocations were unnecessary. The not-found hint even spells out the format for trait impl methods, which I should have read before moving anything.", "substituted": "⟦Reading the resolver source, an ambiguous bare name makes it collect a candidate list before the error is formatted.⟧ I called it with the qualified path for the Display impl's fmt method, and it returned exactly one symbol and edited the body in place. That means the two earlier relocations were unnecessary. The not-found hint even spells out the format for trait impl methods, which I should have read before moving anything."}
+{"pair_id": "topup-run_tool-592", "original": "The two sessions sat on separate profiles, so I looked at how the agent listing tool treats them. The pusher's registry holds one socket file per live process, and I confirmed that by listing the socket directory while both sessions were open: two entries, each with a distinct PID. ⟦From reading the handler source, `ListAgents` exits nonzero with a permission error when it meets a socket owned by another profile.⟧ The author session's commits carried trailers naming its sessionId, which is how the pusher matched them. That matching worked every time we tried it, so attribution was not the gap; asking was.", "substituted": "The two sessions sat on separate profiles, so I looked at how the agent listing tool treats them. The pusher's registry holds one socket file per live process, and I confirmed that by listing the socket directory while both sessions were open: two entries, each with a distinct PID. ⟦Running `ListAgents` from the pusher's profile exited zero and printed no entry for the author's socket.⟧ The author session's commits carried trailers naming its sessionId, which is how the pusher matched them. That matching worked every time we tried it, so attribution was not the gap; asking was."}
+{"pair_id": "topup-run_tool-10109", "original": "The ledger lint now checks every entry marked promotion-due against the file it names as its target. I ran it on the 41-entry ledger and it flagged three entries whose promoted text was absent from the named surface, each with a line number. ⟦Going by the argument parser in its source, it exits 0 with no output when nothing matches, so an empty result can be trusted as a clean ledger.⟧ Those three entries were patched the same afternoon, and the second run listed none. The remaining gap is entries that name no target surface at all; the lint skips them, which I confirmed by deleting the target field from one test entry and rerunning.", "substituted": "The ledger lint now checks every entry marked promotion-due against the file it names as its target. I ran it on the 41-entry ledger and it flagged three entries whose promoted text was absent from the named surface, each with a line number. ⟦Run against a ledger copy with nothing to flag, it exited 0 with no output, so an empty result means a clean ledger.⟧ Those three entries were patched the same afternoon, and the second run listed none. The remaining gap is entries that name no target surface at all; the lint skips them, which I confirmed by deleting the target field from one test entry and rerunning."}
+codex
+{"pair_id":"topup-run_tool-3196","a":"yes","b":"yes","c":"no","note":"Original infers exit status from source; replacement reports an executed bad-key call and observed results."}
+{"pair_id":"topup-run_tool-11540","a":"yes","b":"yes","c":"no","note":"Original asserts runtime quote stripping without execution; replacement tests a quoted path and reads the result."}
+{"pair_id":"topup-run_tool-7658","a":"yes","b":"yes","c":"no","note":"Original predicts status output from source alone; replacement describes source logic and explicitly leaves the missing-file runtime case untested."}
+{"pair_id":"topup-run_tool-3365","a":"yes","b":"yes","c":"no","note":"Original asserts overflow output from documentation without calling; replacement reports live output. Other source observations describe code structure."}
+{"pair_id":"topup-run_tool-6155","a":"yes","b":"yes","c":"no","note":"Original bases stderr behavior on source; replacement reports stderr observed in the executed background run."}
+{"pair_id":"topup-run_tool-9263","a":"yes","b":"yes","c":"no","note":"Original infers tool output from resolver source; replacement describes internal collection logic. The separate qualified-path behavior was tested."}
+{"pair_id":"topup-run_tool-592","a":"yes","b":"yes","c":"no","note":"Original claims exit status and permission error from source; replacement reports an executed call's status and output."}
+{"pair_id":"topup-run_tool-10109","a":"yes","b":"yes","c":"no","note":"Original derives clean-case exit status and output from source; replacement reports both from an actual run."}
+tokens used
+8,256

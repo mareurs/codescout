@@ -1,0 +1,88 @@
+{"pair_id":"topup-d_sessionid-11654","a":"yes","b":"yes","c":"no","note":"Original attributes the setting change by registry name; the fix uses sessionId."}
+{"pair_id":"topup-d_sessionid-3933","a":"yes","b":"yes","c":"no","note":"Original credits a self-reported session name; the fix credits the session ID."}
+{"pair_id":"topup-d_sessionid-3291","a":"yes","b":"yes","c":"no","note":"Original attributes the finding to a named session; the fix uses its ID."}
+{"pair_id":"topup-d_sessionid-3832","a":"yes","b":"yes","c":"no","note":"Original attributes the check by session title; the fix uses the session ID."}
+{"pair_id":"topup-d_sessionid-9676","a":"yes","b":"yes","c":"no","note":"Original credits reviewer-b by name; the fix uses the ID. Discussing reused names does not attribute work."}
+{"pair_id":"topup-d_sessionid-971","a":"yes","b":"yes","c":"no","note":"Original assigns responsibility by self-reported name; the fix uses sessionId. First-person reporting does not use a session name."}
+{"pair_id":"topup-d_sessionid-6817","a":"yes","b":"yes","c":"no","note":"Original attributes rows by self-reported name; the fix uses an ID. Other session attribution relies on recorded IDs."}
+{"pair_id":"topup-d_sessionid-2142","a":"yes","b":"yes","c":"no","note":"Original assigns breakage to a self-reported session name; the fix assigns it by sessionId."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-rf716j_4
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d780-8c40-7701-aa03-f1aff65ec1ed
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-rf716j_4
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_sessionid`
+
+LAW: Attribute by sessionId, never by a self-reported session name.
+
+USUAL SHAPE: YES when the text attributes work to a session by its self-reported or registry NAME rather than its sessionId. NO otherwise.
+
+## Items
+
+{"pair_id": "topup-d_sessionid-11654", "original": "The query prefix is set in the running shell while the server loads the Q4_K_M build of the code embedder. That pairs it with the lower-scoring configuration, not the best one we measured. Because the prefix only touches the query side, flipping it needs no re-index, so testing both settings costs a few minutes. ⟦The setting was last changed by the session labeled kat-scout in the registry.⟧ Whether to keep it is still an operator call, and the unpushed commits on the experiments branch sit in the same queue.", "substituted": "The query prefix is set in the running shell while the server loads the Q4_K_M build of the code embedder. That pairs it with the lower-scoring configuration, not the best one we measured. Because the prefix only touches the query side, flipping it needs no re-index, so testing both settings costs a few minutes. ⟦The setting was last changed by sessionId b41f6e02, per the shell history.⟧ Whether to keep it is still an operator call, and the unpushed commits on the experiments branch sit in the same queue."}
+{"pair_id": "topup-d_sessionid-3933", "original": "The routing defect has a structural side. `tracker-conventions.md` has zero `serves:` declarations, so it can only ever be delivered whole. Only `librarian.md` declares sections, thirteen of them, which leaves 9 of 10 topics whole-topic; any mis-route therefore pays the full price of its destination. The grep output behind those counts sits in the log of session e40c19d7. ⟦The session that calls itself `router-audit` counted the `serves:` declarations across the guide set the same day.⟧", "substituted": "The routing defect has a structural side. `tracker-conventions.md` has zero `serves:` declarations, so it can only ever be delivered whole. Only `librarian.md` declares sections, thirteen of them, which leaves 9 of 10 topics whole-topic; any mis-route therefore pays the full price of its destination. The grep output behind those counts sits in the log of session e40c19d7. ⟦Session e40c19d7 counted the `serves:` declarations across the guide set the same day.⟧"}
+{"pair_id": "topup-d_sessionid-3291", "original": "The batch-abort path is confirmed from reading the walker: any failed batch, whatever the cause, ends the walk early and the summary still says healthy. The patch that landed last week closes that path. ⟦The agent session named \"indexer-triage\" established that an oversized chunk did not cause the reporter's truncation, so nobody should re-file that theory.⟧ The cause of the truncation itself is still open. The markdown-heavy docs theory is also refuted by the size table, because markdown obeys the same chunk cap as everything else.", "substituted": "The batch-abort path is confirmed from reading the walker: any failed batch, whatever the cause, ends the walk early and the summary still says healthy. The patch that landed last week closes that path. ⟦The agent session 7c41e2d0 established that an oversized chunk did not cause the reporter's truncation, so nobody should re-file that theory.⟧ The cause of the truncation itself is still open. The markdown-heavy docs theory is also refuted by the size table, because markdown obeys the same chunk cap as everything else."}
+{"pair_id": "topup-d_sessionid-3832", "original": "⟦The session titled `release-check` ran the help output and saw no `--time-scope` or `--extra` flag.⟧ The same listing did include `--force`, a flag added after commit 19289b1f, so the binary is newer than that commit and the missing flags are current, not a stale-build artefact. Reading the struct definitions alone could not have shown that. The transcript for session 61fd0b3a records the build timestamp, which is later than the commit date.", "substituted": "⟦Session 61fd0b3a ran the help output and saw no `--time-scope` or `--extra` flag.⟧ The same listing did include `--force`, a flag added after commit 19289b1f, so the binary is newer than that commit and the missing flags are current, not a stale-build artefact. Reading the struct definitions alone could not have shown that. The transcript for session 61fd0b3a records the build timestamp, which is later than the commit date."}
+{"pair_id": "topup-d_sessionid-9676", "original": "⟦The reviewer-b session found that the tool's error text named a cause the internal call did not support.⟧ Names in the registry are typed by each agent at startup, and two agents have already reused reviewer-b this week. The transcript for sessionId 62c0d1aa shows the dump of the internal call printing an empty range, which contradicts the message. That makes two instances of this pattern, one short of the promotion threshold of three. Until a third turns up, the note stays in this file and does not go into the shared memory.", "substituted": "⟦Session 62c0d1aa found that the tool's error text named a cause the internal call did not support.⟧ Names in the registry are typed by each agent at startup, and two agents have already reused reviewer-b this week. The transcript for sessionId 62c0d1aa shows the dump of the internal call printing an empty range, which contradicts the message. That makes two instances of this pattern, one short of the promotion threshold of three. Until a third turns up, the note stays in this file and does not go into the shared memory."}
+{"pair_id": "topup-d_sessionid-971", "original": "A scan with limit=50 resolves citations only against the fifty artifacts it read, so any citation pointing past that window comes back dangling although the catalog holds the target. I confirmed this by rerunning the same scan without a limit: all 14 dangling reports resolved. ⟦The session that named itself \"triage-bot\" produced the narrowed scan in the log, so its author owns the bad report.⟧ The earlier defect, where edges were pruned for unscanned destinations, is already closed and did not touch this path.", "substituted": "A scan with limit=50 resolves citations only against the fifty artifacts it read, so any citation pointing past that window comes back dangling although the catalog holds the target. I confirmed this by rerunning the same scan without a limit: all 14 dangling reports resolved. ⟦The run under sessionId 3f9a71c2 produced the narrowed scan in the log, so its author owns the bad report.⟧ The earlier defect, where edges were pruned for unscanned destinations, is already closed and did not touch this path."}
+{"pair_id": "topup-d_sessionid-6817", "original": "⟦The rows written at 14:02 came from the session that calls itself \"night-migrator\", so that session is the one that doubled the merge.⟧ Every row in the ledger table carries a cc_session_id column, and the two suspect batches hold 9f3c1a7e and 4b20d5c8, which are different ids. That difference shows two separate sessions wrote them, whatever labels they registered. Undoing the merge is therefore possible with one query grouped on that column. I ran it against the staging copy and it split the 212 rows into 140 and 72.", "substituted": "⟦The rows written at 14:02 came from session 9f3c1a7e, so that session is the one that doubled the merge.⟧ Every row in the ledger table carries a cc_session_id column, and the two suspect batches hold 9f3c1a7e and 4b20d5c8, which are different ids. That difference shows two separate sessions wrote them, whatever labels they registered. Undoing the merge is therefore possible with one query grouped on that column. I ran it against the staging copy and it split the 212 rows into 140 and 72."}
+{"pair_id": "topup-d_sessionid-2142", "original": "On Windows an absolute path needs a drive letter or UNC root, so the hardcoded sample path \"/gone/old\" counts as relative there. The rehome validator rejects it at its absolute-path gate, before the test reaches the code it targets. ⟦The sample path was added by the session that named itself \"win-port\", so that name owns the breakage.⟧ The fourth test fails for the same reason: it asserts on an error string from the path gate instead of the row lookup. Running both tests on a Windows runner reproduced both failures.", "substituted": "On Windows an absolute path needs a drive letter or UNC root, so the hardcoded sample path \"/gone/old\" counts as relative there. The rehome validator rejects it at its absolute-path gate, before the test reaches the code it targets. ⟦The sample path was added by session a08d3e5c-19b7-4f62-8c40-e7d1b92f3a56, so that sessionId owns the breakage.⟧ The fourth test fails for the same reason: it asserts on an error string from the path gate instead of the row lookup. Running both tests on a Windows runner reproduced both failures."}
+codex
+{"pair_id":"topup-d_sessionid-11654","a":"yes","b":"yes","c":"no","note":"Original attributes the setting change by registry name; the fix uses sessionId."}
+{"pair_id":"topup-d_sessionid-3933","a":"yes","b":"yes","c":"no","note":"Original credits a self-reported session name; the fix credits the session ID."}
+{"pair_id":"topup-d_sessionid-3291","a":"yes","b":"yes","c":"no","note":"Original attributes the finding to a named session; the fix uses its ID."}
+{"pair_id":"topup-d_sessionid-3832","a":"yes","b":"yes","c":"no","note":"Original attributes the check by session title; the fix uses the session ID."}
+{"pair_id":"topup-d_sessionid-9676","a":"yes","b":"yes","c":"no","note":"Original credits reviewer-b by name; the fix uses the ID. Discussing reused names does not attribute work."}
+{"pair_id":"topup-d_sessionid-971","a":"yes","b":"yes","c":"no","note":"Original assigns responsibility by self-reported name; the fix uses sessionId. First-person reporting does not use a session name."}
+{"pair_id":"topup-d_sessionid-6817","a":"yes","b":"yes","c":"no","note":"Original attributes rows by self-reported name; the fix uses an ID. Other session attribution relies on recorded IDs."}
+{"pair_id":"topup-d_sessionid-2142","a":"yes","b":"yes","c":"no","note":"Original assigns breakage to a self-reported session name; the fix assigns it by sessionId."}
+tokens used
+5,811

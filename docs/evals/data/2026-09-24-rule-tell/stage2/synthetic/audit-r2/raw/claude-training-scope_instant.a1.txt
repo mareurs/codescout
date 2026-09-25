@@ -1,0 +1,12 @@
+{"pair_id":"topup-scope_instant-9625","a":"yes","b":"no","c":"no","note":"The fix names the module and tools but does not stamp the search instant."}
+{"pair_id":"topup-scope_instant-11368","a":"yes","b":"no","c":"no","note":"Both versions omit the search instant; narrowing the corpus to 40 sampled sessions fixes only scope."}
+{"pair_id":"topup-scope_instant-1722","a":"yes","b":"yes","c":"no","note":"The fix names tickets, scopes the count to the tracker export, and anchors it to this morning."}
+{"pair_id":"topup-scope_instant-228","a":"yes","b":"yes","c":"no","note":"The fix supplies the searched population, buffer unit, and 14:10 UTC timestamp."}
+{"pair_id":"topup-scope_instant-10851","a":"yes","b":"yes","c":"no","note":"The original claims an unscoped absence of further blockers; the fix reports resolution of the specific known blocker."}
+{"pair_id":"topup-scope_instant-8439","a":"no","b":"yes","c":"no","note":"The original names the guide, counts mentions outside Impact Analysis, and anchors the count to completion of the edits."}
+{"pair_id":"topup-scope_instant-8254","a":"yes","b":"no","c":"no","note":"The fix identifies the searched module and row unit but supplies no search instant."}
+{"pair_id":"topup-scope_instant-10135","a":"yes","b":"no","c":"yes","note":"The fix supplies scope but no instant. The separate scout-output sentence also reports enumeration results without an instant."}
+{"pair_id":"topup-scope_instant-7654","a":"yes","b":"yes","c":"no","note":"Currently lacks a concrete timestamp; the fix identifies the listing, memory-entry unit, and observation date."}
+{"pair_id":"topup-scope_instant-7999","a":"yes","b":"no","c":"no","note":"The fix scopes the caller search to the librarian module but omits when the grep occurred."}
+{"pair_id":"topup-scope_instant-3188","a":"yes","b":"yes","c":"no","note":"The fix identifies the lock file as the observation scope, holders as the unit, and 14:05 UTC as the instant."}
+{"pair_id":"topup-scope_instant-2110","a":"yes","b":"yes","c":"no","note":"The fix identifies repository-wide git status, modified files as the unit, and the post-revert observation as the instant."}

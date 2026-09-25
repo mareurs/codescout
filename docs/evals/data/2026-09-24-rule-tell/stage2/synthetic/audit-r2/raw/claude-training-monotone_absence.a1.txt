@@ -1,0 +1,8 @@
+{"pair_id":"topup-monotone_absence-6361","a":"yes","b":"yes","c":"no","note":"Zero failures cannot establish test soundness; the fix reports its lack of reaction. Other tests demonstrably failed under mutation."}
+{"pair_id":"topup-monotone_absence-667","a":"yes","b":"no","c":"no","note":"The fix still infers universal compliance from zero query results. Testing the gate does not establish that the audit query detects violations."}
+{"pair_id":"topup-monotone_absence-6494","a":"yes","b":"yes","c":"no","note":"The name match cannot detect surviving harnesses. The fix merely reports two empty checks without concluding that no harness existed."}
+{"pair_id":"topup-monotone_absence-8591","a":"yes","b":"no","c":"no","note":"The fix still treats missing log entries as proof of absent behavior; recorded symbols calls do not validate shell logging."}
+{"pair_id":"topup-monotone_absence-7231","a":"yes","b":"yes","c":"no","note":"Silent warnings do not establish correct operation. The fix adds positive evidence from the resolved configuration dump."}
+{"pair_id":"topup-monotone_absence-3925","a":"yes","b":"yes","c":"no","note":"No warnings cannot demonstrate successful inner-block handling. The fix explains that unparsed blocks cannot generate warnings; the earlier query returns generated keys."}
+{"pair_id":"topup-monotone_absence-12194","a":"yes","b":"yes","c":"no","note":"No stale-entry reports cannot prove clean ledgers. The fix reports silence alongside non-invocation without claiming cleanliness."}
+{"pair_id":"topup-monotone_absence-8885","a":"yes","b":"yes","c":"no","note":"Empty routing logs cannot prove working routing. The fix explicitly preserves the possibility of disconnection; the other causal claim uses a measured intervention."}

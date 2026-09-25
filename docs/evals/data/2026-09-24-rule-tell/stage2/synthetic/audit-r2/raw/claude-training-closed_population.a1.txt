@@ -1,0 +1,8 @@
+{"pair_id":"topup-closed_population-3187","a":"yes","b":"yes","c":"yes","note":"The fix limits callers to six polls, but another sentence universally covers every later status call until a fresh build."}
+{"pair_id":"topup-closed_population-3469","a":"yes","b":"yes","c":"no","note":"The original extends today's template to all future messages; the fix restricts the claim to messages producible today."}
+{"pair_id":"topup-closed_population-4543","a":"yes","b":"yes","c":"no","note":"The original generalizes twelve checked records to an open population; the fix explicitly limits the claim to those twelve."}
+{"pair_id":"topup-closed_population-8524","a":"yes","b":"yes","c":"no","note":"The original guarantees coverage for future operators; the fix limits coverage to operators listed today."}
+{"pair_id":"topup-closed_population-1900","a":"yes","b":"yes","c":"no","note":"The original covers every future update regardless of artifact contents; the fix covers only completed updates on this draft entry."}
+{"pair_id":"topup-closed_population-9717","a":"yes","b":"yes","c":"no","note":"The original guarantees detection of every later truncation; the fix reports this detection and prescribes review without guaranteeing future outcomes."}
+{"pair_id":"topup-closed_population-9457","a":"yes","b":"yes","c":"no","note":"The original quantifies over all future source reads; the fix describes averages within three fixed March bands."}
+{"pair_id":"topup-closed_population-9620","a":"yes","b":"yes","c":"no","note":"The original extends current initializer coverage to all future tests; the fix confines its claim to twelve existing initializers."}

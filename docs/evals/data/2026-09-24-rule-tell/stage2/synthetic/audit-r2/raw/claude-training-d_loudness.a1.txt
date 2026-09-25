@@ -1,0 +1,8 @@
+{"pair_id":"topup-d_loudness-11757","a":"yes","b":"yes","c":"no","note":"The sweep cannot detect writes through extra directories; the fix limits its claim to the cwd it actually checks."}
+{"pair_id":"topup-d_loudness-5594","a":"yes","b":"yes","c":"no","note":"Editor pushes never reach the guard. The fix limits protection to shell pushes, where the guard's refusal was observed."}
+{"pair_id":"topup-d_loudness-9210","a":"yes","b":"yes","c":"no","note":"The default filter hides the error event. The fix explicitly acknowledges that nobody sees it."}
+{"pair_id":"topup-d_loudness-5371","a":"yes","b":"yes","c":"no","note":"The fallback claims protection despite an unread failure log. The fix describes the unobserved output without claiming it protects users."}
+{"pair_id":"topup-d_loudness-11799","a":"yes","b":"yes","c":"no","note":"Cron suppresses notification, so failure can go unnoticed. The fix distinguishes stopping installation from notifying an observer."}
+{"pair_id":"topup-d_loudness-12241","a":"yes","b":"yes","c":"no","note":"The wrapper discards the assertion's failure status. The fix acknowledges that hidden failure instead of claiming it stops deletions."}
+{"pair_id":"topup-d_loudness-6291","a":"yes","b":"yes","c":"no","note":"Neither automated caller runs the ignored assertion. The fix identifies manual execution as the path that could expose a regression."}
+{"pair_id":"topup-d_loudness-2237","a":"yes","b":"yes","c":"no","note":"CI excludes the assertion, defeating guaranteed detection. The fix conditions coverage on someone running it manually."}

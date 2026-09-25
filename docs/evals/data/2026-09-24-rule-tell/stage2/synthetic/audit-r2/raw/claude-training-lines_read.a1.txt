@@ -1,0 +1,8 @@
+{"pair_id":"topup-lines_read-9039","a":"yes","b":"yes","c":"no","note":"The original infers behavior from an unopened file's grep match; the fix explicitly reads the refusal handler."}
+{"pair_id":"topup-lines_read-4561","a":"yes","b":"yes","c":"no","note":"The helper's name alone supports the original inference; the fix leaves its unread behavior unchecked."}
+{"pair_id":"topup-lines_read-4171","a":"yes","b":"yes","c":"no","note":"Reading one counter loop does not establish every script's behavior. The fix reports reading all three matching scripts."}
+{"pair_id":"topup-lines_read-10818","a":"no","b":"yes","c":"no","note":"All three helper pairs were already read line by line. The original inference contradicts those observations but does not lack reading."}
+{"pair_id":"topup-lines_read-2935","a":"no","b":"yes","c":"no","note":"The paragraph explicitly reports reading the alias table and loader, establishing the collision's cause beyond the grep match."}
+{"pair_id":"topup-lines_read-3493","a":"yes","b":"yes","c":"no","note":"The grep match alone does not establish unconditional deletion; the fix explicitly reads the handler body and checks for guards."}
+{"pair_id":"topup-lines_read-10233","a":"no","b":"yes","c":"no","note":"The relevant files were opened and the verb entries inspected; the finding therefore has evidence beyond grep."}
+{"pair_id":"topup-lines_read-10622","a":"yes","b":"yes","c":"no","note":"The original treats a strategy-name match as proof of a retired claim; the fix presents an unverified possibility pending reading."}

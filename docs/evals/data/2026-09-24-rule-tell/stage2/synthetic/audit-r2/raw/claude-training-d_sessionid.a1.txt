@@ -1,0 +1,8 @@
+{"pair_id":"topup-d_sessionid-11654","a":"yes","b":"yes","c":"no","note":"Original attributes the setting change by registry name; the fix uses sessionId."}
+{"pair_id":"topup-d_sessionid-3933","a":"yes","b":"yes","c":"no","note":"Original credits a self-reported session name; the fix credits the session ID."}
+{"pair_id":"topup-d_sessionid-3291","a":"yes","b":"yes","c":"no","note":"Original attributes the finding to a named session; the fix uses its ID."}
+{"pair_id":"topup-d_sessionid-3832","a":"yes","b":"yes","c":"no","note":"Original attributes the check by session title; the fix uses the session ID."}
+{"pair_id":"topup-d_sessionid-9676","a":"yes","b":"yes","c":"no","note":"Original credits reviewer-b by name; the fix uses the ID. Discussing reused names does not attribute work."}
+{"pair_id":"topup-d_sessionid-971","a":"yes","b":"yes","c":"no","note":"Original assigns responsibility by self-reported name; the fix uses sessionId. First-person reporting does not use a session name."}
+{"pair_id":"topup-d_sessionid-6817","a":"yes","b":"yes","c":"no","note":"Original attributes rows by self-reported name; the fix uses an ID. Other session attribution relies on recorded IDs."}
+{"pair_id":"topup-d_sessionid-2142","a":"yes","b":"yes","c":"no","note":"Original assigns breakage to a self-reported session name; the fix assigns it by sessionId."}

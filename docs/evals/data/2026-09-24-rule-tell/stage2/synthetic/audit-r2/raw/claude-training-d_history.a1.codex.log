@@ -1,0 +1,88 @@
+{"pair_id":"topup-d_history-9627","a":"yes","b":"yes","c":"no","note":"The old help values and closed bug reference are superseded history; the replacement states current behavior."}
+{"pair_id":"topup-d_history-1133","a":"yes","b":"yes","c":"no","note":"The former five-name gate is unnecessary history. The footer removal explains the current implementation decision."}
+{"pair_id":"topup-d_history-4830","a":"yes","b":"yes","c":"no","note":"The former definition count is superseded. The remaining sentences explain the evidence needed to evaluate an absence claim."}
+{"pair_id":"topup-d_history-5607","a":"yes","b":"yes","c":"no","note":"The earlier 50-line cap is superseded history; the replacement describes the current cap and missing count."}
+{"pair_id":"topup-d_history-7975","a":"yes","b":"yes","c":"no","note":"The retired control-arm name is unnecessary history; the replacement gives only its current invocation."}
+{"pair_id":"topup-d_history-1052","a":"yes","b":"yes","c":"no","note":"The retired field name and former display behavior are superseded; the replacement states the current field and behavior."}
+{"pair_id":"topup-d_history-10841","a":"yes","b":"no","c":"yes","note":"The following sentence retains the superseded params state through 'that middle state,' preserving the historical reference after substitution."}
+{"pair_id":"topup-d_history-10270","a":"yes","b":"yes","c":"no","note":"The earlier allocator name and counter count are superseded history. The remaining reproduction supports the current closure decision."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-6qqnf6gw
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d77f-ecd5-7f72-ab04-495991fc15bf
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-6qqnf6gw
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_history`
+
+LAW: Record less history: a superseded fact written in prose is indistinguishable from a live citation.
+
+USUAL SHAPE: YES when the text writes a superseded fact (an old filename, a former count, a retired name) into prose as history no decision needs. NO otherwise.
+
+## Items
+
+{"pair_id": "topup-d_history-9627", "original": "The audit command now reads its allowed levels from one shared list, `FAIL_ON_VALUES`, so the CLI and engine cannot drift apart. ⟦The help text used to name only `high`, `any` and `never`, and it pointed readers at a closed bug labelled F-9.⟧ On the release binary, `--help` prints all five values: high, med, low, any, never. Exit codes on the release notes doc are 0 for high, 1 for med, 1 for low, 1 for any, 0 for never. CI's repo-wide run with high still exits 0.", "substituted": "The audit command now reads its allowed levels from one shared list, `FAIL_ON_VALUES`, so the CLI and engine cannot drift apart. ⟦The help text names all five values and points at no bug tracker entry.⟧ On the release binary, `--help` prints all five values: high, med, low, any, never. Exit codes on the release notes doc are 0 for high, 1 for med, 1 for low, 1 for any, 0 for never. CI's repo-wide run with high still exits 0."}
+{"pair_id": "topup-d_history-1133", "original": "The post-processing step now leaves shell output alone. In the server module, the strip is gated on the tool name, so `run_command` stdout passes through verbatim while structured tools such as `read_file` and `tree` still lose the redundant root path. ⟦The gate was originally a list of five tool names before the list was collapsed to a single comparison.⟧ The disambiguation footer is unreachable for shell output, so its entry was dropped from the note list to avoid dead code. The doc comment on the step records the exemption.", "substituted": "The post-processing step now leaves shell output alone. In the server module, the strip is gated on the tool name, so `run_command` stdout passes through verbatim while structured tools such as `read_file` and `tree` still lose the redundant root path. ⟦The gate is a single comparison on the tool name.⟧ The disambiguation footer is unreachable for shell output, so its entry was dropped from the note list to avoid dead code. The doc comment on the step records the exemption."}
+{"pair_id": "topup-d_history-4830", "original": "⟦The bug file originally counted two definitions of `bare` before a third surface turned up.⟧ The claim under review, \"nothing defines bare\", is an absence claim, and it was checked by reading one surface out of three. Grepping the other two took under a minute and found a definition on each. An absence claim holds only after every surface that could carry the definition has been searched.", "substituted": "⟦The bug file counts three definitions of `bare`, one on each surface.⟧ The claim under review, \"nothing defines bare\", is an absence claim, and it was checked by reading one surface out of three. Grepping the other two took under a minute and found a definition on each. An absence claim holds only after every surface that could carry the definition has been searched."}
+{"pair_id": "topup-d_history-5607", "original": "The renderer stops after `MAX_RENDERED` entries, and nothing records that it stopped. The loop hits `break`, the join serialises the survivors, and no counter of dropped entries is ever computed. ⟦An earlier draft capped output at 50 lines before the limit was lowered to 20, and that draft also dropped the count.⟧ So the notice builder has nothing to report. Any disclosure needs its own field, populated at the point where the cut happens.", "substituted": "The renderer stops after `MAX_RENDERED` entries, and nothing records that it stopped. The loop hits `break`, the join serialises the survivors, and no counter of dropped entries is ever computed. ⟦The cap is 20 lines, and the loop drops the count the same way.⟧ So the notice builder has nothing to report. Any disclosure needs its own field, populated at the point where the cut happens."}
+{"pair_id": "topup-d_history-7975", "original": "The coverage map for the eval plan ties each spec item to a task. Append-shape and snapshot-shape scenarios land in Tasks 4 and 5, and I confirmed both by opening the task files and finding a scenario block in each. ⟦The control arm was previously named --strip-arm, and Task 6 Step 4 now calls it --ablate.⟧ The run settings of ten runs per arm on the sonnet model come from the harness config, which I read directly. Every spec item has at least one task attached.", "substituted": "The coverage map for the eval plan ties each spec item to a task. Append-shape and snapshot-shape scenarios land in Tasks 4 and 5, and I confirmed both by opening the task files and finding a scenario block in each. ⟦The control arm is invoked as --ablate in Task 6 Step 4.⟧ The run settings of ten runs per arm on the sonnet model come from the harness config, which I read directly. Every spec item has at least one task attached."}
+{"pair_id": "topup-d_history-1052", "original": "Display for RecoverableError now appends the attached guidance after the message, separated by a dash and the field name. The MCP JSON output is untouched because it goes through serde, not Display, so nothing renders twice. ⟦Before the rename, the field was called hint_text and the display dropped it.⟧ I searched the test suite for assertions on the exact string and found one, the canary test on the message; I updated it to expect the appended text. The other tests match on substrings and pass unchanged.", "substituted": "Display for RecoverableError now appends the attached guidance after the message, separated by a dash and the field name. The MCP JSON output is untouched because it goes through serde, not Display, so nothing renders twice. ⟦The field is called guidance, and the display now includes it.⟧ I searched the test suite for assertions on the exact string and found one, the canary test on the message; I updated it to expect the appended text. The other tests match on substrings and pass unchanged."}
+{"pair_id": "topup-d_history-10841", "original": "This entry left the queue table today because the Status column now projects from params. ⟦The old table showed the row as \"parked\" from June until August, then \"dropped\" until the move.⟧ Its params status still held that middle state, since nobody moved it forward after the entry was reopened and shipped, so I set it to partial, the queue's value for landed work whose claim stands. That makes this the fourth stale status in this class of entry.", "substituted": "This entry left the queue table today because the Status column now projects from params. ⟦The Status column now shows this row as partial, matching its params value.⟧ Its params status still held that middle state, since nobody moved it forward after the entry was reopened and shipped, so I set it to partial, the queue's value for landed work whose claim stands. That makes this the fourth stale status in this class of entry."}
+{"pair_id": "topup-d_history-10270", "original": "Reverting a ledger file with git leaves the catalog reservation in place, so the next entry skips an id. I reproduced it by reserving GG-10, appending, then checking out the file: the following append received GG-11. The allocator takes the highest of three counters and adds one, and the catalog counter survives the checkout. ⟦Earlier drafts of this note called the allocator `next_entry_slot` and said it read two counters.⟧ A code comment states that gaps are acceptable, so I am closing this as by-design instead of filing a defect. Nothing an agent could do would repair the gap, so a warning would only invite futile edits.", "substituted": "Reverting a ledger file with git leaves the catalog reservation in place, so the next entry skips an id. I reproduced it by reserving GG-10, appending, then checking out the file: the following append received GG-11. The allocator takes the highest of three counters and adds one, and the catalog counter survives the checkout. ⟦The allocator is `append_entry`, and the reservation counter it reads lives in the catalog, not the file.⟧ A code comment states that gaps are acceptable, so I am closing this as by-design instead of filing a defect. Nothing an agent could do would repair the gap, so a warning would only invite futile edits."}
+codex
+{"pair_id":"topup-d_history-9627","a":"yes","b":"yes","c":"no","note":"The old help values and closed bug reference are superseded history; the replacement states current behavior."}
+{"pair_id":"topup-d_history-1133","a":"yes","b":"yes","c":"no","note":"The former five-name gate is unnecessary history. The footer removal explains the current implementation decision."}
+{"pair_id":"topup-d_history-4830","a":"yes","b":"yes","c":"no","note":"The former definition count is superseded. The remaining sentences explain the evidence needed to evaluate an absence claim."}
+{"pair_id":"topup-d_history-5607","a":"yes","b":"yes","c":"no","note":"The earlier 50-line cap is superseded history; the replacement describes the current cap and missing count."}
+{"pair_id":"topup-d_history-7975","a":"yes","b":"yes","c":"no","note":"The retired control-arm name is unnecessary history; the replacement gives only its current invocation."}
+{"pair_id":"topup-d_history-1052","a":"yes","b":"yes","c":"no","note":"The retired field name and former display behavior are superseded; the replacement states the current field and behavior."}
+{"pair_id":"topup-d_history-10841","a":"yes","b":"no","c":"yes","note":"The following sentence retains the superseded params state through 'that middle state,' preserving the historical reference after substitution."}
+{"pair_id":"topup-d_history-10270","a":"yes","b":"yes","c":"no","note":"The earlier allocator name and counter count are superseded history. The remaining reproduction supports the current closure decision."}
+tokens used
+5,703

@@ -1,0 +1,15 @@
+{"pair_id":"topup-selector_narrow-7871","a":"yes","b":"no","c":"no","note":"The fix narrows the directory scope, but absence of the literal string still does not cover every possible artifact lookup command."}
+{"pair_id":"topup-selector_narrow-7441","a":"yes","b":"yes","c":"no","note":"The fix limits the consistency claim to the six stories actually re-graded."}
+{"pair_id":"topup-selector_narrow-7508","a":"yes","b":"yes","c":"no","note":"The fix limits the reported result to retrieval-tagged entries."}
+{"pair_id":"topup-selector_narrow-5111","a":"yes","b":"yes","c":"no","note":"The fix describes the nine matched identifiers rather than claiming coverage of all identifiers."}
+{"pair_id":"topup-selector_narrow-2386","a":"yes","b":"no","c":"no","note":"The audit scans a fixed file list and only resolves checkout-local paths; narrowing the claim to docs still overstates coverage."}
+{"pair_id":"topup-selector_narrow-11552","a":"yes","b":"yes","c":"no","note":"The fix restricts the label claim to the three inspected files."}
+{"pair_id":"topup-selector_narrow-11679","a":"yes","b":"yes","c":"no","note":"The fix reports only the two sections selected by the heading filter."}
+{"pair_id":"topup-selector_narrow-3","a":"yes","b":"yes","c":"no","note":"The fix limits the count to integration tests, excluding the separately built unit tests."}
+{"pair_id":"topup-selector_narrow-3793","a":"yes","b":"yes","c":"no","note":"The fix limits coverage to scenarios whose test names contain timeout."}
+{"pair_id":"topup-selector_narrow-9539","a":"yes","b":"yes","c":"no","note":"The fix limits the claim to sessions containing the searched phrase."}
+{"pair_id":"topup-selector_narrow-7748","a":"yes","b":"no","c":"no","note":"The fix corrects environment and time scope, but matching one error phrase still does not cover all staging evictions."}
+{"pair_id":"topup-selector_narrow-5934","a":"yes","b":"yes","c":"no","note":"The fix limits the absence claim to the directory searched."}
+{"pair_id":"topup-selector_narrow-12159","a":"yes","b":"yes","c":"no","note":"The fix limits the claim to the twelve matched items; the contradictory BL-45 status is a separate issue."}
+{"pair_id":"topup-selector_narrow-253","a":"yes","b":"yes","c":"no","note":"The fix counts only restored verbs taking a path, matching the filter."}
+{"pair_id":"topup-selector_narrow-1815","a":"yes","b":"yes","c":"no","note":"The fix limits the conclusion to checked-in config files covered by the query."}

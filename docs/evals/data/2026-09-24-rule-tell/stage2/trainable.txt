@@ -1,0 +1,24 @@
+losses: {"round 1: quarantined": 9, "held-out collision (synthetic)": 41, "round 1: cell dropped": 118, "round 2: cell dropped": 333, "round 2: quarantined": 8, "held-out collision (mined)": 10, "cross-fold collision (synthetic)": 18}
+trainable (>= 50 train-fold positives): 14 of 22: ['closed_population', 'd_adjacency', 'd_history', 'd_loudness', 'd_mutation', 'd_red', 'd_semicolon', 'd_sessionid', 'd_visibility', 'member_vs_population', 'open_artifact', 'question_asked', 'run_tool', 'selector_narrow']
+  act_on_artifact          28  (synthetic 27, mined 1) Haiku-only
+  cannot_happen            29  (synthetic 23, mined 6) Haiku-only
+  closed_population        52  (synthetic 51, mined 1) TRAINABLE
+  contradiction            43  (synthetic 37, mined 6) Haiku-only
+  count_unit               41  (synthetic 33, mined 8) Haiku-only
+  d_adjacency              55  (synthetic 52, mined 3) TRAINABLE
+  d_fixture                41  (synthetic 41, mined 0) Haiku-only
+  d_history                75  (synthetic 73, mined 2) TRAINABLE
+  d_loudness               74  (synthetic 74, mined 0) TRAINABLE
+  d_mutation               53  (synthetic 53, mined 0) TRAINABLE
+  d_red                    52  (synthetic 52, mined 0) TRAINABLE
+  d_semicolon              56  (synthetic 56, mined 0) TRAINABLE
+  d_sessionid              72  (synthetic 68, mined 4) TRAINABLE
+  d_visibility             52  (synthetic 52, mined 0) TRAINABLE
+  lines_read               27  (synthetic 22, mined 5) Haiku-only
+  member_vs_population     55  (synthetic 55, mined 0) TRAINABLE
+  monotone_absence         35  (synthetic 33, mined 2) Haiku-only
+  open_artifact            63  (synthetic 62, mined 1) TRAINABLE
+  question_asked           78  (synthetic 74, mined 4) TRAINABLE
+  run_tool                 62  (synthetic 59, mined 3) TRAINABLE
+  scope_instant             7  (synthetic 0, mined 7) Haiku-only
+  selector_narrow         102  (synthetic 100, mined 2) TRAINABLE

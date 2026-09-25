@@ -1,0 +1,8 @@
+{"pair_id":"topup-d_fixture-51","a":"yes","b":"yes","c":"yes","note":"The third citer gains an inline explanation, but the separately described single-citer fixture also lacks an annotation of its required count."}
+{"pair_id":"topup-d_fixture-1082","a":"yes","b":"yes","c":"yes","note":"The large fixture gains its threshold annotation; the companion twelve-byte fixture still leaves its load-bearing size unannotated."}
+{"pair_id":"topup-d_fixture-9993","a":"yes","b":"yes","c":"no","note":"The stub handle name determines the tested matcher gap; the fix explains that choice on its line."}
+{"pair_id":"topup-d_fixture-12071","a":"yes","b":"yes","c":"no","note":"The function placement controls refusal, and the fix annotates the required overlap on line 44."}
+{"pair_id":"topup-d_fixture-12196","a":"yes","b":"no","c":"no","note":"Merging removes the required collision. The replacement preserves both entries but supplies no annotation on their fixture lines."}
+{"pair_id":"topup-d_fixture-11995","a":"yes","b":"yes","c":"no","note":"Removing the comment leaves the deliberately absent tool unexplained; the fix retains that explanation beside the entry."}
+{"pair_id":"topup-d_fixture-9167","a":"yes","b":"yes","c":"no","note":"The deliberately mismatched mark and table row need annotations; the fix comments both."}
+{"pair_id":"topup-d_fixture-9442","a":"yes","b":"yes","c":"no","note":"The uninjected read drives the counter assertion; the fix tags that transcript line with its purpose."}

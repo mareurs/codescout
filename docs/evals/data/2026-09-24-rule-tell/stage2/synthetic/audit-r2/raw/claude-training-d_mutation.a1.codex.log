@@ -1,0 +1,91 @@
+{"pair_id":"topup-d_mutation-5422","a":"yes","b":"yes","c":"no","note":"One parser mutation cannot establish coverage of six separate guards; the fix limits coverage to the parser."}
+{"pair_id":"topup-d_mutation-8539","a":"no","b":"yes","c":"no","note":"Different whitespace inputs and window positions do not establish separate guarded implementation sites; the paragraph describes one shared trimming operation."}
+{"pair_id":"topup-d_mutation-10176","a":"yes","b":"yes","c":"no","note":"The scanner mutant establishes coverage only at the scanner, as the fix states."}
+{"pair_id":"topup-d_mutation-11143","a":"yes","b":"yes","c":"no","note":"Killing the ledger mutant does not cover separate comparisons in the other loaders; the fix restricts the claim."}
+{"pair_id":"topup-d_mutation-4404","a":"yes","b":"yes","c":"no","note":"Exercising Remedy cannot establish coverage of two separate branches; the fix acknowledges that only Remedy was exercised."}
+{"pair_id":"topup-d_mutation-7690","a":"yes","b":"yes","c":"no","note":"The read validator mutation cannot establish coverage at write and glob sites; the fix claims only read coverage."}
+{"pair_id":"topup-d_mutation-1213","a":"yes","b":"yes","c":"no","note":"A system-directory mutation does not establish guards in the other directory functions; the fix limits its conclusion to that function."}
+{"pair_id":"topup-d_mutation-1635","a":"yes","b":"yes","c":"no","note":"The original extrapolates one table mutation to four copies; the fix mutates each copy separately and reports every mutant caught."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-d9_ejsld
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d780-3b50-70e2-aa20-9f3c7d3c47c7
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+codex
+I’ll read task.md and follow its instructions.
+
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-d9_ejsld
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_mutation`
+
+LAW: Mutate once per guarded site, not once per feature.
+
+USUAL SHAPE: YES when the text claims a rule implemented at several sites is covered because a mutation or test at ONE site was caught. NO otherwise.
+
+## Items
+
+{"pair_id": "topup-d_mutation-5422", "original": "A kept worktree pays its 87 s build once and then reruns the suite in 11 s, against 13.8 s in the shared checkout, so it is cheaper per run. That speed made a sweep affordable. The timeout guard is written separately in six crates: parser, index, store, sync, cli and daemon. ⟦I mutated the guard in the parser crate and the suite failed there in 11 s, so the timeout guard is covered in all six crates.⟧ The other five crates each define their own constant and their own check, and none was touched.", "substituted": "A kept worktree pays its 87 s build once and then reruns the suite in 11 s, against 13.8 s in the shared checkout, so it is cheaper per run. That speed made a sweep affordable. The timeout guard is written separately in six crates: parser, index, store, sync, cli and daemon. ⟦I mutated the guard in the parser crate and the suite failed there in 11 s, so the timeout guard is covered in the parser crate.⟧ The other five crates each define their own constant and their own check, and none was touched."}
+{"pair_id": "topup-d_mutation-8539", "original": "The matcher compares lines after trimming, which strips leading and trailing whitespace including carriage returns and leaves inner content untouched. It slides a window of the old block's length over the file's lines and records every start index where all lines agree. Because it returns the full set rather than the first hit, the caller can detect ambiguity. ⟦I checked the trimming by adding a stray tab to one line of the old block; the test failed, so the matcher ignores whitespace differences everywhere, including at the window's first and last lines and in CRLF files.⟧", "substituted": "The matcher compares lines after trimming, which strips leading and trailing whitespace including carriage returns and leaves inner content untouched. It slides a window of the old block's length over the file's lines and records every start index where all lines agree. Because it returns the full set rather than the first hit, the caller can detect ambiguity. ⟦I checked the trimming by adding a stray tab to one line of the old block; the test failed, so the matcher ignores whitespace differences on interior lines.⟧"}
+{"pair_id": "topup-d_mutation-10176", "original": "The docs linter refuses repo-rooted citations at three sites: the markdown scanner, the frontmatter reader, and the index builder. I deleted the refusal branch in the scanner, and the linter suite went red with one failing case, so that site is guarded. ⟦Since that mutant died, the repo-rooted ban is covered at all three sites.⟧ The other two branches still sit untouched in the tree, and no test has been pointed at either. A grep of the tests directory shows 4 test inputs with repo-rooted paths, and every one of them feeds the scanner only.", "substituted": "The docs linter refuses repo-rooted citations at three sites: the markdown scanner, the frontmatter reader, and the index builder. I deleted the refusal branch in the scanner, and the linter suite went red with one failing case, so that site is guarded. ⟦Since that mutant died, the scanner's refusal of repo-rooted paths is covered.⟧ The other two branches still sit untouched in the tree, and no test has been pointed at either. A grep of the tests directory shows 4 test inputs with repo-rooted paths, and every one of them feeds the scanner only."}
+{"pair_id": "topup-d_mutation-11143", "original": "The timestamp-ordering check lives in three loaders under scenarios/: ledger, events, and snapshots. Collect-only output lists 408 ids, all under tests/, and zero from scenarios/, because testpaths points at tests/ alone. I broke the ordering check in the ledger loader, and one test in tests/ turned red. ⟦That single kill shows the ordering check is exercised in all three loaders.⟧ The events and snapshots loaders each contain a separate copy of the comparison, and I left both as they were.", "substituted": "The timestamp-ordering check lives in three loaders under scenarios/: ledger, events, and snapshots. Collect-only output lists 408 ids, all under tests/, and zero from scenarios/, because testpaths points at tests/ alone. I broke the ordering check in the ledger loader, and one test in tests/ turned red. ⟦That single kill shows the ordering check is exercised in the ledger loader.⟧ The events and snapshots loaders each contain a separate copy of the comparison, and I left both as they were."}
+{"pair_id": "topup-d_mutation-4404", "original": "The staleness detector scans an incident record for patch-ids under three headings: Remedy, Resolution and Rollback. Each heading is handled by its own branch in the scanner. I put a patch-id under Remedy in this file while its status was open, and the detector flagged it within one run. After I set the status to closed in the same commit, the detector went silent, as the closing logic requires. ⟦That flag shows the Remedy branch works, and so the Resolution and Rollback branches are covered too.⟧", "substituted": "The staleness detector scans an incident record for patch-ids under three headings: Remedy, Resolution and Rollback. Each heading is handled by its own branch in the scanner. I put a patch-id under Remedy in this file while its status was open, and the detector flagged it within one run. After I set the status to closed in the same commit, the detector went silent, as the closing logic requires. ⟦That flag shows the Remedy branch works, and only that branch has been exercised so far.⟧"}
+{"pair_id": "topup-d_mutation-7690", "original": "The deny-list check is called from three validators: one for reads, one for writes and one for glob expansion. Each validator carries its own call, visible in the source as a separate line. ⟦Emptying the deny-list in the read validator failed a test, so deny-list enforcement is covered on every path entry point.⟧ The read test opens a known secret location and expects a refusal, and it passed again once the list was restored. No equivalent mutation has been run against the write or glob validators, whose tests were written earlier by a different author.", "substituted": "The deny-list check is called from three validators: one for reads, one for writes and one for glob expansion. Each validator carries its own call, visible in the source as a separate line. ⟦Emptying the deny-list in the read validator failed a test, so deny-list enforcement is covered on the read entry point.⟧ The read test opens a known secret location and expects a refusal, and it passed again once the list was restored. No equivalent mutation has been run against the write or glob validators, whose tests were written earlier by a different author."}
+{"pair_id": "topup-d_mutation-1213", "original": "The Kotlin launcher aliased workspaces because it used one fixed system directory for every root. The new per-workspace test failed against that old code and passes now, so the aliasing bug itself is closed. The launcher derives three directories, each in its own function: the system dir, the log dir, and the index cache dir. ⟦Reverting to the fixed path in the system-dir function turned the per-workspace test red, so every per-workspace directory the launcher derives is guarded.⟧ Two worktrees of one repo share the Gradle home yet get distinct system dirs, which the linked-worktree test shows directly.", "substituted": "The Kotlin launcher aliased workspaces because it used one fixed system directory for every root. The new per-workspace test failed against that old code and passes now, so the aliasing bug itself is closed. The launcher derives three directories, each in its own function: the system dir, the log dir, and the index cache dir. ⟦Reverting to the fixed path in the system-dir function turned the per-workspace test red, so the system-dir derivation is guarded.⟧ Two worktrees of one repo share the Gradle home yet get distinct system dirs, which the linked-worktree test shows directly."}
+{"pair_id": "topup-d_mutation-1635", "original": "The lost augmentation on the tool-usage tracker looks like a one-time migration side effect. Its state shows `augmentation: null`, an empty events list, and a `created_at` of 2026-06-02 that survived, which rules out a delete and recreate. Three trackers augmented after the migration ran kept their data, while the one augmented before it lost its data. That split matches a single wipe at migration time. ⟦The migration copies four tables (artifacts, links, tags, events) with the same re-insert pattern, and we broke the artifacts copy on purpose by dropping its re-insert step; the repro test failed, so all four table copies are now confirmed to preserve their rows.⟧", "substituted": "The lost augmentation on the tool-usage tracker looks like a one-time migration side effect. Its state shows `augmentation: null`, an empty events list, and a `created_at` of 2026-06-02 that survived, which rules out a delete and recreate. Three trackers augmented after the migration ran kept their data, while the one augmented before it lost its data. That split matches a single wipe at migration time. ⟦The migration copies four tables (artifacts, links, tags, events) with the same re-insert pattern, and we broke each copy in turn by dropping its re-insert step; the repro test failed every time, so all four table copies are now confirmed to preserve their rows.⟧"}
+codex
+{"pair_id":"topup-d_mutation-5422","a":"yes","b":"yes","c":"no","note":"One parser mutation cannot establish coverage of six separate guards; the fix limits coverage to the parser."}
+{"pair_id":"topup-d_mutation-8539","a":"no","b":"yes","c":"no","note":"Different whitespace inputs and window positions do not establish separate guarded implementation sites; the paragraph describes one shared trimming operation."}
+{"pair_id":"topup-d_mutation-10176","a":"yes","b":"yes","c":"no","note":"The scanner mutant establishes coverage only at the scanner, as the fix states."}
+{"pair_id":"topup-d_mutation-11143","a":"yes","b":"yes","c":"no","note":"Killing the ledger mutant does not cover separate comparisons in the other loaders; the fix restricts the claim."}
+{"pair_id":"topup-d_mutation-4404","a":"yes","b":"yes","c":"no","note":"Exercising Remedy cannot establish coverage of two separate branches; the fix acknowledges that only Remedy was exercised."}
+{"pair_id":"topup-d_mutation-7690","a":"yes","b":"yes","c":"no","note":"The read validator mutation cannot establish coverage at write and glob sites; the fix claims only read coverage."}
+{"pair_id":"topup-d_mutation-1213","a":"yes","b":"yes","c":"no","note":"A system-directory mutation does not establish guards in the other directory functions; the fix limits its conclusion to that function."}
+{"pair_id":"topup-d_mutation-1635","a":"yes","b":"yes","c":"no","note":"The original extrapolates one table mutation to four copies; the fix mutates each copy separately and reports every mutant caught."}
+tokens used
+5,914

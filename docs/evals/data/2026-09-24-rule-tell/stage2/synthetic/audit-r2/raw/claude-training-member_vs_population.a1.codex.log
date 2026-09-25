@@ -1,0 +1,88 @@
+{"pair_id":"topup-member_vs_population-3709","a":"yes","b":"yes","c":"no","note":"Workspace success does not establish the specific activation behavior; the replacement test directly asserts it."}
+{"pair_id":"topup-member_vs_population-129","a":"yes","b":"yes","c":"no","note":"Overall CI success cannot verify untested forwarding attribution. The replacement explicitly acknowledges the coverage gap."}
+{"pair_id":"topup-member_vs_population-12023","a":"yes","b":"yes","c":"no","note":"A green resolver module does not establish coverage of this heading. The replacement directly tests the specified heading and fixture."}
+{"pair_id":"topup-member_vs_population-849","a":"yes","b":"yes","c":"no","note":"The checker never examines index rows. The replacement limits its conclusion to the headings actually checked."}
+{"pair_id":"topup-member_vs_population-7780","a":"yes","b":"yes","c":"no","note":"Workspace success cannot establish library hits for find_references. The replacement grounds its conclusion in the tool's discarded scope."}
+{"pair_id":"topup-member_vs_population-4826","a":"yes","b":"yes","c":"no","note":"Crash-free replay does not establish acceptance of a particular commit. The replacement cites refusal outcomes for the relevant prose-quoting messages."}
+{"pair_id":"topup-member_vs_population-6445","a":"yes","b":"yes","c":"no","note":"Component test success cannot verify docs-job wiring. The replacement confines its claim to the components exercised in isolation."}
+{"pair_id":"topup-member_vs_population-9635","a":"yes","b":"yes","c":"no","note":"Overall test success cannot establish a particular assertion's correctness. The replacement reports only the observed absence of test failures."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-z1ts4vt1
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d780-9c00-7311-8bea-246b6e0041ae
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-z1ts4vt1
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `member_vs_population`
+
+LAW: An assertion computed over a population cannot verify a claim about a member.
+
+USUAL SHAPE: YES when the text uses an aggregate (a total, a whole suite being green, an average, "all tests pass") as proof of a claim about ONE specific item that the aggregate is not shown to exercise -- for example the full suite passing offered as proof that one particular function handles one particular case. NO when the evidence is about that item itself, or when the check plainly exercises the change it is cited for (running a module's own tests after a local edit to that module).
+
+## Items
+
+{"pair_id": "topup-member_vs_population-3709", "original": "The flush path should prewarm only the languages it drained, not everything in the global list. Widening that list would change activation for every project, and nobody has asked for that policy change. Restricting to drained languages needs shutdown_all to return the names it stopped. Today it returns unit, and the trait has nine implementors, so each one had to be touched. I made the edit on all nine and the compiler accepted every impl. ⟦The whole workspace suite passed after the edit, which shows that activating a project with no running servers leaves rust-analyzer stopped.⟧", "substituted": "The flush path should prewarm only the languages it drained, not everything in the global list. Widening that list would change activation for every project, and nobody has asked for that policy change. Restricting to drained languages needs shutdown_all to return the names it stopped. Today it returns unit, and the trait has nine implementors, so each one had to be touched. I made the edit on all nine and the compiler accepted every impl. ⟦The activation test for a project with no running servers passed after the edit, and it asserts that rust-analyzer stays stopped.⟧"}
+{"pair_id": "topup-member_vs_population-129", "original": "The client half of the principal-forwarding change landed on Tuesday, and the server half followed two commits later. A grep for the new header constant returned only its definition and two test fixtures, so no request handler read it during that window. ⟦The CI run on the second commit was fully green, 1,412 tests passed, and that result confirms the forwarding path correctly attributes each call to its caller.⟧ We only saw real attribution once the handler was wired up and a manual call showed the caller's name in the audit log.", "substituted": "The client half of the principal-forwarding change landed on Tuesday, and the server half followed two commits later. A grep for the new header constant returned only its definition and two test fixtures, so no request handler read it during that window. ⟦The CI run on the second commit was fully green, 1,412 tests passed, though none of them touched the forwarding path or its attribution of callers.⟧ We only saw real attribution once the handler was wired up and a manual call showed the caller's name in the audit log."}
+{"pair_id": "topup-member_vs_population-12023", "original": "The mining pass found seven heading lookups against the numbered-section tracker that returned nothing, each flagged `heading_missing: true` with no error. `get.rs` uses a bespoke exact-match matcher, while `read_markdown` and `edit_markdown` go through the shared four-tier fuzzy resolver. So this is a consistency gap in the prompt surface, not a caller error. ⟦The resolver's test module is green, which shows that `heading=\"## SI-33\"` resolves to the right section under the fuzzy cascade.⟧", "substituted": "The mining pass found seven heading lookups against the numbered-section tracker that returned nothing, each flagged `heading_missing: true` with no error. `get.rs` uses a bespoke exact-match matcher, while `read_markdown` and `edit_markdown` go through the shared four-tier fuzzy resolver. So this is a consistency gap in the prompt surface, not a caller error. ⟦A resolver test that feeds `heading=\"## SI-33\"` against the tracker fixture returns the right section under the fuzzy cascade.⟧"}
+{"pair_id": "topup-member_vs_population-849", "original": "⟦The checker passed all 170 entries, so the F-168 index row shows the new status.⟧ It compares each section heading against its title and never opens the index table. I opened the table directly and found the F-168 row still reading open, while the section itself says closed. The edit was addressed by heading, so it reached the section and returned updated true, leaving the row untouched. Rows and sections sit under different headings in this ledger.", "substituted": "⟦The checker passed all 170 entries, which covers section headings and says nothing about the F-168 index row.⟧ It compares each section heading against its title and never opens the index table. I opened the table directly and found the F-168 row still reading open, while the section itself says closed. The edit was addressed by heading, so it reached the section and returned updated true, leaving the row untouched. Rows and sections sit under different headings in this ledger."}
+{"pair_id": "topup-member_vs_population-7780", "original": "The library scope work is mostly wiring. The registry already tracks external roots, and the scope enum already parses the scope string, because both have unit tests that pass and that I read through today. The three symbol tools currently discard the parsed value into an unused binding, so none of them can see library files. The plan is to extract one helper that resolves search directories for a scope, then have each tool's search loop use it. ⟦The full workspace test run finished green, so the find_references tool already returns hits under library roots.⟧ Library paths will be displayed with a lib: prefix followed by the library name.", "substituted": "The library scope work is mostly wiring. The registry already tracks external roots, and the scope enum already parses the scope string, because both have unit tests that pass and that I read through today. The three symbol tools currently discard the parsed value into an unused binding, so none of them can see library files. The plan is to extract one helper that resolves search directories for a scope, then have each tool's search loop use it. ⟦The full workspace test run finished green, but find_references discards the parsed scope, so it still returns hits only under the project root.⟧ Library paths will be displayed with a lib: prefix followed by the library name."}
+{"pair_id": "topup-member_vs_population-4826", "original": "The token check was rewritten this week to key on the trailer line instead of anywhere in the message. I replayed the 212 archived commit messages through it, and refusals dropped from 19 to 11. The eight messages that stopped being refused all quote the token in explanatory prose, which I confirmed by opening each one. ⟦The replay finished with no crashes across all 212 messages, so the check now lets through the commit that quotes the token in its own prose.⟧ The remaining 11 refusals carry the token as a real trailer, and each of those is still blocked.", "substituted": "The token check was rewritten this week to key on the trailer line instead of anywhere in the message. I replayed the 212 archived commit messages through it, and refusals dropped from 19 to 11. The eight messages that stopped being refused all quote the token in explanatory prose, which I confirmed by opening each one. ⟦The replay of those eight prose-quoting messages finished with no refusals, so the check now lets through a commit that quotes the token in its own prose.⟧ The remaining 11 refusals carry the token as a real trailer, and each of those is still blocked."}
+{"pair_id": "topup-member_vs_population-6445", "original": "The empty-table change means a missing catalog now disables the check instead of marking every citation dead, and that removes the false reds we saw last week. The remaining defect is in the wiring. The gate is registered on the docs job, which is the one job it was built for, and it never fires there. ⟦The parser, the resolver, the severity chain and the fail threshold each have unit tests, and all forty of them pass, so the step that runs in the docs job reads the catalog correctly.⟧ Nothing in the job configuration hands the catalog path to that step.", "substituted": "The empty-table change means a missing catalog now disables the check instead of marking every citation dead, and that removes the false reds we saw last week. The remaining defect is in the wiring. The gate is registered on the docs job, which is the one job it was built for, and it never fires there. ⟦The parser, the resolver, the severity chain and the fail threshold each have unit tests, and all forty of them pass, so those four components behave correctly in isolation.⟧ Nothing in the job configuration hands the catalog path to that step."}
+{"pair_id": "topup-member_vs_population-9635", "original": "Two cross-platform CI failures have now come from asserting on serialized text. In both, a Windows runner produced backslashes and CRLF line endings, and the JSON escaping doubled the backslashes, so string comparisons failed. Parsing the response and asserting on the data field removed the failure in each case, which I checked by rerunning both jobs. The promotion threshold is a third case. ⟦The whole test tree passed on all three platforms after the second change, so the path-handling test in the export module is asserting correctly on drive letters.⟧ That test still compares against the raw serialized string.", "substituted": "Two cross-platform CI failures have now come from asserting on serialized text. In both, a Windows runner produced backslashes and CRLF line endings, and the JSON escaping doubled the backslashes, so string comparisons failed. Parsing the response and asserting on the data field removed the failure in each case, which I checked by rerunning both jobs. The promotion threshold is a third case. ⟦The whole test tree passed on all three platforms after the second change, so no test in it still fails on the platform quirks seen so far.⟧ That test still compares against the raw serialized string."}
+codex
+{"pair_id":"topup-member_vs_population-3709","a":"yes","b":"yes","c":"no","note":"Workspace success does not establish the specific activation behavior; the replacement test directly asserts it."}
+{"pair_id":"topup-member_vs_population-129","a":"yes","b":"yes","c":"no","note":"Overall CI success cannot verify untested forwarding attribution. The replacement explicitly acknowledges the coverage gap."}
+{"pair_id":"topup-member_vs_population-12023","a":"yes","b":"yes","c":"no","note":"A green resolver module does not establish coverage of this heading. The replacement directly tests the specified heading and fixture."}
+{"pair_id":"topup-member_vs_population-849","a":"yes","b":"yes","c":"no","note":"The checker never examines index rows. The replacement limits its conclusion to the headings actually checked."}
+{"pair_id":"topup-member_vs_population-7780","a":"yes","b":"yes","c":"no","note":"Workspace success cannot establish library hits for find_references. The replacement grounds its conclusion in the tool's discarded scope."}
+{"pair_id":"topup-member_vs_population-4826","a":"yes","b":"yes","c":"no","note":"Crash-free replay does not establish acceptance of a particular commit. The replacement cites refusal outcomes for the relevant prose-quoting messages."}
+{"pair_id":"topup-member_vs_population-6445","a":"yes","b":"yes","c":"no","note":"Component test success cannot verify docs-job wiring. The replacement confines its claim to the components exercised in isolation."}
+{"pair_id":"topup-member_vs_population-9635","a":"yes","b":"yes","c":"no","note":"Overall test success cannot establish a particular assertion's correctness. The replacement reports only the observed absence of test failures."}
+tokens used
+8,227

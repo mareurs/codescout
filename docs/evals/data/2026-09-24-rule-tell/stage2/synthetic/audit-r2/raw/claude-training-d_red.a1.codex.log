@@ -1,0 +1,88 @@
+{"pair_id":"topup-d_red-6855","a":"yes","b":"yes","c":"no","note":"The original transfers the old failure to a narrowed assertion; the fix observes the narrowed assertion fail."}
+{"pair_id":"topup-d_red-6085","a":"yes","b":"yes","c":"no","note":"The original credits a loosened comparison with the original red; the fix reruns the loosened check and observes failure."}
+{"pair_id":"topup-d_red-6818","a":"yes","b":"yes","c":"no","note":"The original uses the earlier count failure to validate a rewritten assertion; the fix reports a fresh red from that assertion."}
+{"pair_id":"topup-d_red-3853","a":"yes","b":"yes","c":"no","note":"The original treats a missing-directory failure as proof for a different comparison; the fix reruns the new comparison and observes failure."}
+{"pair_id":"topup-d_red-8585","a":"yes","b":"yes","c":"no","note":"The original transfers an id-based failure to a timestamp join; the fix runs the timestamp version and observes zero matches."}
+{"pair_id":"topup-d_red-9060","a":"yes","b":"yes","c":"no","note":"The original credits changed acceptance criteria with an earlier red; the fix observes the revised test reject a malformed entry."}
+{"pair_id":"topup-d_red-8419","a":"yes","b":"yes","c":"no","note":"The original validates rewritten tool and path assertions using an earlier failure; the fix confirms the rewritten test fails against the stale arm."}
+{"pair_id":"topup-d_red-11545","a":"yes","b":"yes","c":"no","note":"The original transfers a nine-character token failure to a twelve-character token assertion; the fix reports a fresh red after the rewrite."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-x4sbfy1p
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d780-3e91-77e0-b757-84d806901e25
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-x4sbfy1p
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_red`
+
+LAW: A red is evidence for the assertion that produced it and for no other; re-observe the red after editing an assertion.
+
+USUAL SHAPE: YES when the text edits an assertion after watching it fail and treats that earlier failure as evidence for the edited version without re-observing a failure. NO otherwise.
+
+## Items
+
+{"pair_id": "topup-d_red-6855", "original": "The scan-prune test failed on Tuesday: after a write-mode link_scan, the count of origin='write' rows for the probe entry dropped from 3 to 0. The prune query filters on origin, and the diff shows the scan path passing ORIGIN_SCAN, so the deleting code sits in the older graft path. Nothing rebuilds write rows afterward, so a single failure of this kind means permanent loss, and the handoff should say so. ⟦I then narrowed the assertion to check the entry id and origin together, and because the old version was red on Tuesday, the narrowed version is confirmed as catching the deletion.⟧", "substituted": "The scan-prune test failed on Tuesday: after a write-mode link_scan, the count of origin='write' rows for the probe entry dropped from 3 to 0. The prune query filters on origin, and the diff shows the scan path passing ORIGIN_SCAN, so the deleting code sits in the older graft path. Nothing rebuilds write rows afterward, so a single failure of this kind means permanent loss, and the handoff should say so. ⟦I then narrowed the assertion to check the entry id and origin together, and reran it on the Tuesday build, where it went red with 0 rows left.⟧"}
+{"pair_id": "topup-d_red-6085", "original": "A commit that added a slug with no matching Index row went through the commit path and turned the cluster test red for a colleague sharing the checkout. The failing assertion compared the Index row count to the number of slugs, and it printed 4 rows against 5 slugs. I then loosened it to compare against the number of slug headers only in files touched by the commit. ⟦The red from the original comparison shows the loosened check catches a missing Index row.⟧ The commit path itself never runs that test, which is why the commit passed; I confirmed this by reading the hook script, which lists only the formatter and the linter.", "substituted": "A commit that added a slug with no matching Index row went through the commit path and turned the cluster test red for a colleague sharing the checkout. The failing assertion compared the Index row count to the number of slugs, and it printed 4 rows against 5 slugs. I then loosened it to compare against the number of slug headers only in files touched by the commit. ⟦Deleting the Index row again and rerunning turned the loosened check red on the missing row.⟧ The commit path itself never runs that test, which is why the commit passed; I confirmed this by reading the hook script, which lists only the formatter and the linter."}
+{"pair_id": "topup-d_red-6818", "original": "The grouping check failed on the fixture: it expected 64 distinct values in the session column and saw 71. Composed tokens account for the gap, since seven rows carry a parent id joined to a subagent suffix. I rewrote the assertion to strip the suffix before counting. ⟦The earlier red on the 64 figure shows the stripped count will catch any composed token that slips through.⟧ Splitting the column into two is still the real repair, because the name states only one of its two meanings.", "substituted": "The grouping check failed on the fixture: it expected 64 distinct values in the session column and saw 71. Composed tokens account for the gap, since seven rows carry a parent id joined to a subagent suffix. I rewrote the assertion to strip the suffix before counting. ⟦Feeding one unstripped composed token through the rewritten assertion turned it red, so it catches such tokens.⟧ Splitting the column into two is still the real repair, because the name states only one of its two meanings."}
+{"pair_id": "topup-d_red-3853", "original": "The hook failure after the directory rename traces to a stored absolute path. `core.hooksPath` holds the full location, so renaming the parent directory leaves it pointing at nothing. I confirmed this by reading the value with `git config --get` in the renamed checkout: it printed the old directory name. The first version of the regression test asserted that the hook path resolved to an existing directory, and it failed with a missing-path error. ⟦I then changed the assertion to compare the stored value against the checkout's current toplevel, and since the earlier run had already failed, I counted that failure as proof the new comparison catches the stale path.⟧ The setup script now rewrites the value after any move.", "substituted": "The hook failure after the directory rename traces to a stored absolute path. `core.hooksPath` holds the full location, so renaming the parent directory leaves it pointing at nothing. I confirmed this by reading the value with `git config --get` in the renamed checkout: it printed the old directory name. The first version of the regression test asserted that the hook path resolved to an existing directory, and it failed with a missing-path error. ⟦I then changed the assertion to compare the stored value against the checkout's current toplevel, and reran it on the renamed checkout, where it failed on the stale path.⟧ The setup script now rewrites the value after any move."}
+{"pair_id": "topup-d_red-8585", "original": "The token-cost question splits into what exists and what must be built. Per-session context around a tool call is already covered: `cc.py trace --slim` shows the neighbouring messages, and the tool-call listing gives the sequence, so I ran both on session 41 and read the output side by side. The aggregate cost per tool under compression is the one new slice, and it can be grouped by `tool_use.name` on the wire. My first join test asserted that every MCP call row matches a usage row by id, and it failed with zero matches. ⟦I loosened it to match on timestamp within two seconds, and because the id-based version had failed, the timestamp join counts as shown to be unworkable, so we defer it.⟧", "substituted": "The token-cost question splits into what exists and what must be built. Per-session context around a tool call is already covered: `cc.py trace --slim` shows the neighbouring messages, and the tool-call listing gives the sequence, so I ran both on session 41 and read the output side by side. The aggregate cost per tool under compression is the one new slice, and it can be grouped by `tool_use.name` on the wire. My first join test asserted that every MCP call row matches a usage row by id, and it failed with zero matches. ⟦I loosened it to match on timestamp within two seconds and ran it, and it also returned zero matches, so we defer it.⟧"}
+{"pair_id": "topup-d_red-9060", "original": "Four instances of one defect class landed in one evening, and every author was actively writing about that class at the time; a standing mechanism caught one and the written guidance caught none. That is why the mechanisms carry the weight here: the four-command gate, the CI tests over frontmatter, and server-side id allocation all act without anyone remembering them. The frontmatter test, for instance, rejected 11 of 11 seeded malformed entries in the last CI run. ⟦The frontmatter test was reworded to accept a missing status field after it went red on legacy entries, and that red on the old wording counts as evidence the new wording still rejects malformed entries.⟧", "substituted": "Four instances of one defect class landed in one evening, and every author was actively writing about that class at the time; a standing mechanism caught one and the written guidance caught none. That is why the mechanisms carry the weight here: the four-command gate, the CI tests over frontmatter, and server-side id allocation all act without anyone remembering them. The frontmatter test, for instance, rejected 11 of 11 seeded malformed entries in the last CI run. ⟦The frontmatter test was reworded to accept a missing status field after it went red on legacy entries, and the reworded test still went red on a malformed entry with its id line removed.⟧"}
+{"pair_id": "topup-d_red-8419", "original": "The tool consolidation touches the registry, the prompts, and the path guard. After merging the old finders into five tools, I added a test asserting that the write-tool match arm in the access check rejects `edit_file` outside the project root. It failed, as expected, because the arm still listed the old names. I then rewrote the assertion to use the new tool name `edit` and to expect a rejection for a path under `/etc`. ⟦Since the earlier run had already shown this test failing against the stale arm, the rewritten test is confirmed to catch a missing update, and I moved on to bumping the onboarding version.⟧ The registry test, by contrast, was run against a build that returned four tools and reported 4 != 5 before I added the fifth.", "substituted": "The tool consolidation touches the registry, the prompts, and the path guard. After merging the old finders into five tools, I added a test asserting that the write-tool match arm in the access check rejects `edit_file` outside the project root. It failed, as expected, because the arm still listed the old names. I then rewrote the assertion to use the new tool name `edit` and to expect a rejection for a path under `/etc`. ⟦Since the rewritten test has not yet been run against the stale arm, I reverted the arm and confirmed it fails, then moved on to bumping the onboarding version.⟧ The registry test, by contrast, was run against a build that returned four tools and reported 4 != 5 before I added the fifth."}
+{"pair_id": "topup-d_red-11545", "original": "The secret-guard extension passed all twelve of its own tests, so I wrote a separate probe of nine inputs and ran it against the same code. Six secrets slipped through, and three harmless strings were blocked. The first assertion, that a nine-character token is caught, went red with the guard returning allow. ⟦After I rewrote that assertion to use a twelve-character token, the red from the nine-character run still counts as proof the guard misses it.⟧ The other eight inputs were run once each with their output printed, and every divergence appears in the log next to its input. That log is why I call the guard unreliable: nine of nine probe cases disagreed with the expected verdict.", "substituted": "The secret-guard extension passed all twelve of its own tests, so I wrote a separate probe of nine inputs and ran it against the same code. Six secrets slipped through, and three harmless strings were blocked. The first assertion, that a nine-character token is caught, went red with the guard returning allow. ⟦After I rewrote that assertion to use a twelve-character token, the rerun went red too, proving the guard misses it.⟧ The other eight inputs were run once each with their output printed, and every divergence appears in the log next to its input. That log is why I call the guard unreliable: nine of nine probe cases disagreed with the expected verdict."}
+codex
+{"pair_id":"topup-d_red-6855","a":"yes","b":"yes","c":"no","note":"The original transfers the old failure to a narrowed assertion; the fix observes the narrowed assertion fail."}
+{"pair_id":"topup-d_red-6085","a":"yes","b":"yes","c":"no","note":"The original credits a loosened comparison with the original red; the fix reruns the loosened check and observes failure."}
+{"pair_id":"topup-d_red-6818","a":"yes","b":"yes","c":"no","note":"The original uses the earlier count failure to validate a rewritten assertion; the fix reports a fresh red from that assertion."}
+{"pair_id":"topup-d_red-3853","a":"yes","b":"yes","c":"no","note":"The original treats a missing-directory failure as proof for a different comparison; the fix reruns the new comparison and observes failure."}
+{"pair_id":"topup-d_red-8585","a":"yes","b":"yes","c":"no","note":"The original transfers an id-based failure to a timestamp join; the fix runs the timestamp version and observes zero matches."}
+{"pair_id":"topup-d_red-9060","a":"yes","b":"yes","c":"no","note":"The original credits changed acceptance criteria with an earlier red; the fix observes the revised test reject a malformed entry."}
+{"pair_id":"topup-d_red-8419","a":"yes","b":"yes","c":"no","note":"The original validates rewritten tool and path assertions using an earlier failure; the fix confirms the rewritten test fails against the stale arm."}
+{"pair_id":"topup-d_red-11545","a":"yes","b":"yes","c":"no","note":"The original transfers a nine-character token failure to a twelve-character token assertion; the fix reports a fresh red after the rewrite."}
+tokens used
+6,178

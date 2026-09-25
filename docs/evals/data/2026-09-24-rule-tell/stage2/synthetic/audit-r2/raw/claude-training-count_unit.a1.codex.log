@@ -1,0 +1,88 @@
+{"pair_id":"topup-count_unit-1842","a":"yes","b":"yes","c":"no","note":"The original omits what 40 counts; the fix identifies notes carrying quoted dates."}
+{"pair_id":"topup-count_unit-6514","a":"yes","b":"yes","c":"no","note":"The original gives 212 without a unit; the fix identifies matched files returned by the selector."}
+{"pair_id":"topup-count_unit-10568","a":"yes","b":"yes","c":"no","note":"The original adopts a design note's count; the fix uses the directly derived grep count."}
+{"pair_id":"topup-count_unit-8624","a":"no","b":"no","c":"no","note":"The original names users relying on warn. The replacement cites marketplace installs without deriving the count."}
+{"pair_id":"topup-count_unit-701","a":"yes","b":"yes","c":"no","note":"The original omits the counted unit; the fix names tools, with the count derived from comparing listings."}
+{"pair_id":"topup-count_unit-1776","a":"yes","b":"yes","c":"no","note":"The original leaves 3 without a unit; the fix specifies test functions in the suite."}
+{"pair_id":"topup-count_unit-11440","a":"no","b":"yes","c":"no","note":"The number describes elapsed time, not a population count, so the original does not violate this rule."}
+{"pair_id":"topup-count_unit-9373","a":"no","b":"yes","c":"no","note":"The original counts early-return occurrences explicitly. The replacement identifies log records and clarifies one early return per session."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-p4g2shat
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d77f-df36-74a1-ac36-27d6f180e67f
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-p4g2shat
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `count_unit`
+
+LAW: A count of a population must arrive with its unit or not at all. Derive it, don't cite it.
+
+USUAL SHAPE: YES when the text states a count of some population without naming what is counted, or with a unit that could be read two ways, or quotes a count from elsewhere as a current fact without saying how it was derived. NO when the number names its unit and population.
+
+## Items
+
+{"pair_id": "topup-count_unit-1842", "original": "⟦Roughly 40 are affected in the vault today.⟧ The artifact create path stores extra fields as quoted strings, so the sweep date lands in the file wrapped in quotes and the hook, which reads raw text, mis-parses it without any error. Writing the same fields through edit_markdown frontmatter set produces a bare scalar, which I confirmed by reading the file back after each write. So the two write paths disagree on quoting, and other raw-text consumers may hit the same problem.", "substituted": "⟦Roughly 40 notes in the vault carry quoted dates today.⟧ The artifact create path stores extra fields as quoted strings, so the sweep date lands in the file wrapped in quotes and the hook, which reads raw text, mis-parses it without any error. Writing the same fields through edit_markdown frontmatter set produces a bare scalar, which I confirmed by reading the file back after each write. So the two write paths disagree on quoting, and other raw-text consumers may hit the same problem."}
+{"pair_id": "topup-count_unit-6514", "original": "The audit selector is named for hooks, but the walk showed it also matches scripts under the tools directory. That is a naming gap, not a loss: every match is a real entry and nothing is missing from the output. ⟦The selector returns 212 for the nightly corpus.⟧ I listed the first forty matches by hand and each was a genuine shell entry point, so the extras are legitimate hits under a name that is too narrow. Renaming the selector to entrypoints closes the gap without touching what it returns.", "substituted": "The audit selector is named for hooks, but the walk showed it also matches scripts under the tools directory. That is a naming gap, not a loss: every match is a real entry and nothing is missing from the output. ⟦The selector returns 212 matched files from the nightly corpus.⟧ I listed the first forty matches by hand and each was a genuine shell entry point, so the extras are legitimate hits under a name that is too narrow. Renaming the selector to entrypoints closes the gap without touching what it returns."}
+{"pair_id": "topup-count_unit-10568", "original": "Each scanner function can emit several check names, so a per-function ran flag is too coarse. I counted by grepping the emit calls: 18 functions emit 25 distinct names across 27 call sites. One function alone emits five names. A flag set on entry would mark all five live when only one branch executed. ⟦The old design note says there are 30 checks, so the table needs that many rows.⟧", "substituted": "Each scanner function can emit several check names, so a per-function ran flag is too coarse. I counted by grepping the emit calls: 18 functions emit 25 distinct names across 27 call sites. One function alone emits five names. A flag set on entry would mark all five live when only one branch executed. ⟦The grep counted 25 distinct check names, so the table needs that many rows.⟧"}
+{"pair_id": "topup-count_unit-8624", "original": "⟦About 200 users rely on the warn action, so changing its behavior would be disruptive.⟧ I checked whether the existing hookify plugin already covers this need. It offers two actions: warn shows a message to the human in the terminal only, and block issues a generic deny. Only a deny reason reaches the agent, because the failed tool call returns the reason string as content; a denied shell call changed the next tool the model picked during this design's research session. Extending the plugin would mean forking it in practice, so this design adds a narrow new hook instead.", "substituted": "⟦The marketplace page showed 200 installs when I opened it today, so changing warn would be disruptive.⟧ I checked whether the existing hookify plugin already covers this need. It offers two actions: warn shows a message to the human in the terminal only, and block issues a generic deny. Only a deny reason reaches the agent, because the failed tool call returns the reason string as content; a denied shell call changed the next tool the model picked during this design's research session. Extending the plugin would mean forking it in practice, so this design adds a narrow new hook instead."}
+{"pair_id": "topup-count_unit-701", "original": "Second report from the reconnect check. I called the tool listing before and after the profile switch and diffed the two outputs. The server process stayed up throughout, confirmed by its heartbeat log advancing every 30 seconds. ⟦After the switch, 9 were missing from the list, and every one of them appeared in the redirect messages for source files.⟧ So the footer's claim that the server is disconnected is contradicted by the heartbeat, and the missing entries follow the redirect names, not chance. The next step is to key the footer on those specific entries.", "substituted": "Second report from the reconnect check. I called the tool listing before and after the profile switch and diffed the two outputs. The server process stayed up throughout, confirmed by its heartbeat log advancing every 30 seconds. ⟦After the switch, 9 tools were missing from the list, and every one of them appeared in the redirect messages for source files.⟧ So the footer's claim that the server is disconnected is contradicted by the heartbeat, and the missing entries follow the redirect names, not chance. The next step is to key the footer on those specific entries."}
+{"pair_id": "topup-count_unit-1776", "original": "The regression test for topic search builds its context with the embedder left unset, then asserts that the response holds the matching artifacts instead of an empty bundle. That pins the LIKE fallback, so no new test is needed. ⟦Search fallback is touched by 3 in the whole suite.⟧ Anyone without an embedder can still reach keyword discovery through the artifact find action with a contains filter, which never calls the embedding service.", "substituted": "The regression test for topic search builds its context with the embedder left unset, then asserts that the response holds the matching artifacts instead of an empty bundle. That pins the LIKE fallback, so no new test is needed. ⟦Search fallback is touched by 3 test functions in the whole suite.⟧ Anyone without an embedder can still reach keyword discovery through the artifact find action with a contains filter, which never calls the embedding service."}
+{"pair_id": "topup-count_unit-11440", "original": "While debugging the stuck release run, we pulled logs straight from the jobs endpoint instead of waiting on the run summary. The summary command declines to print anything until every job has finished, so one hung job hides all the others. ⟦The cross-compile job for Windows was the culprit: it stayed on its toolchain install step for 41 before someone cancelled it.⟧ The raw job log showed the apt step had completed and the wine download was retrying. Once we re-ran with a pinned mirror the job finished normally, and the remaining logs matched what the endpoint had shown live.", "substituted": "While debugging the stuck release run, we pulled logs straight from the jobs endpoint instead of waiting on the run summary. The summary command declines to print anything until every job has finished, so one hung job hides all the others. ⟦The cross-compile job for Windows was the culprit: it stayed on its toolchain install step for 41 minutes before someone cancelled it.⟧ The raw job log showed the apt step had completed and the wine download was retrying. Once we re-ran with a pinned mirror the job finished normally, and the remaining logs matched what the endpoint had shown live."}
+{"pair_id": "topup-count_unit-9373", "original": "The adapter's default tool-name label is the server name, not none, as its source at v2.11.0 shows. Every direct tool therefore registers under a server-qualified name, never as the bare name. The presence checks for the bare names always evaluated false, so the session start handler returned early and the active-tools call never ran. Native edit stayed enabled the whole time, with no error and no crash. ⟦Since rollout the early return has fired 300 times.⟧", "substituted": "The adapter's default tool-name label is the server name, not none, as its source at v2.11.0 shows. Every direct tool therefore registers under a server-qualified name, never as the bare name. The presence checks for the bare names always evaluated false, so the session start handler returned early and the active-tools call never ran. Native edit stayed enabled the whole time, with no error and no crash. ⟦The start log records 300 early returns, one per session, since rollout.⟧"}
+codex
+{"pair_id":"topup-count_unit-1842","a":"yes","b":"yes","c":"no","note":"The original omits what 40 counts; the fix identifies notes carrying quoted dates."}
+{"pair_id":"topup-count_unit-6514","a":"yes","b":"yes","c":"no","note":"The original gives 212 without a unit; the fix identifies matched files returned by the selector."}
+{"pair_id":"topup-count_unit-10568","a":"yes","b":"yes","c":"no","note":"The original adopts a design note's count; the fix uses the directly derived grep count."}
+{"pair_id":"topup-count_unit-8624","a":"no","b":"no","c":"no","note":"The original names users relying on warn. The replacement cites marketplace installs without deriving the count."}
+{"pair_id":"topup-count_unit-701","a":"yes","b":"yes","c":"no","note":"The original omits the counted unit; the fix names tools, with the count derived from comparing listings."}
+{"pair_id":"topup-count_unit-1776","a":"yes","b":"yes","c":"no","note":"The original leaves 3 without a unit; the fix specifies test functions in the suite."}
+{"pair_id":"topup-count_unit-11440","a":"no","b":"yes","c":"no","note":"The number describes elapsed time, not a population count, so the original does not violate this rule."}
+{"pair_id":"topup-count_unit-9373","a":"no","b":"yes","c":"no","note":"The original counts early-return occurrences explicitly. The replacement identifies log records and clarifies one early return per session."}
+tokens used
+5,698

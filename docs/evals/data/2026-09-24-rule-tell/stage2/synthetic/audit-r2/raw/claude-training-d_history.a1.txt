@@ -1,0 +1,8 @@
+{"pair_id":"topup-d_history-9627","a":"yes","b":"yes","c":"no","note":"The old help values and closed bug reference are superseded history; the replacement states current behavior."}
+{"pair_id":"topup-d_history-1133","a":"yes","b":"yes","c":"no","note":"The former five-name gate is unnecessary history. The footer removal explains the current implementation decision."}
+{"pair_id":"topup-d_history-4830","a":"yes","b":"yes","c":"no","note":"The former definition count is superseded. The remaining sentences explain the evidence needed to evaluate an absence claim."}
+{"pair_id":"topup-d_history-5607","a":"yes","b":"yes","c":"no","note":"The earlier 50-line cap is superseded history; the replacement describes the current cap and missing count."}
+{"pair_id":"topup-d_history-7975","a":"yes","b":"yes","c":"no","note":"The retired control-arm name is unnecessary history; the replacement gives only its current invocation."}
+{"pair_id":"topup-d_history-1052","a":"yes","b":"yes","c":"no","note":"The retired field name and former display behavior are superseded; the replacement states the current field and behavior."}
+{"pair_id":"topup-d_history-10841","a":"yes","b":"no","c":"yes","note":"The following sentence retains the superseded params state through 'that middle state,' preserving the historical reference after substitution."}
+{"pair_id":"topup-d_history-10270","a":"yes","b":"yes","c":"no","note":"The earlier allocator name and counter count are superseded history. The remaining reproduction supports the current closure decision."}

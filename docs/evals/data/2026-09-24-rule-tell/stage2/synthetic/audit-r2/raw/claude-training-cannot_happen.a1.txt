@@ -1,0 +1,8 @@
+{"pair_id":"topup-cannot_happen-5576","a":"no","b":"yes","c":"no","note":"The preceding sentence enumerates all four unsafe blocks and reports checking each against its comment, grounding the claim in today's corpus."}
+{"pair_id":"topup-cannot_happen-6177","a":"yes","b":"yes","c":"no","note":"Manifest membership does not establish permanent index coverage. The replacement limits its claim to three queried crates."}
+{"pair_id":"topup-cannot_happen-11754","a":"yes","b":"yes","c":"no","note":"The original asserts unrestricted impossibility; the replacement reports observations limited to three roster dumps."}
+{"pair_id":"topup-cannot_happen-2594","a":"yes","b":"yes","c":"no","note":"The original guarantees against truncation for every tracker shape. The replacement reports results for specified tested shapes."}
+{"pair_id":"topup-cannot_happen-2055","a":"yes","b":"yes","c":"no","note":"Current query locations cannot guarantee future absence elsewhere. The replacement supplies a repository search and explicitly limits the conclusion to today."}
+{"pair_id":"topup-cannot_happen-442","a":"yes","b":"yes","c":"no","note":"The original rules out all other paths without checking them. The replacement limits its claim to reproduced entries."}
+{"pair_id":"topup-cannot_happen-9182","a":"yes","b":"no","c":"no","note":"The replacement still infers absence of dangling edges solely from internal targets, without enumerating or checking whether those targets exist."}
+{"pair_id":"topup-cannot_happen-3199","a":"yes","b":"yes","c":"no","note":"The original extends envelope structure into a universal guarantee. The replacement grounds its conclusion in the named boundary and JSON-containing tests."}

@@ -1,0 +1,88 @@
+{"pair_id":"topup-d_loudness-11757","a":"yes","b":"yes","c":"no","note":"The sweep cannot detect writes through extra directories; the fix limits its claim to the cwd it actually checks."}
+{"pair_id":"topup-d_loudness-5594","a":"yes","b":"yes","c":"no","note":"Editor pushes never reach the guard. The fix limits protection to shell pushes, where the guard's refusal was observed."}
+{"pair_id":"topup-d_loudness-9210","a":"yes","b":"yes","c":"no","note":"The default filter hides the error event. The fix explicitly acknowledges that nobody sees it."}
+{"pair_id":"topup-d_loudness-5371","a":"yes","b":"yes","c":"no","note":"The fallback claims protection despite an unread failure log. The fix describes the unobserved output without claiming it protects users."}
+{"pair_id":"topup-d_loudness-11799","a":"yes","b":"yes","c":"no","note":"Cron suppresses notification, so failure can go unnoticed. The fix distinguishes stopping installation from notifying an observer."}
+{"pair_id":"topup-d_loudness-12241","a":"yes","b":"yes","c":"no","note":"The wrapper discards the assertion's failure status. The fix acknowledges that hidden failure instead of claiming it stops deletions."}
+{"pair_id":"topup-d_loudness-6291","a":"yes","b":"yes","c":"no","note":"Neither automated caller runs the ignored assertion. The fix identifies manual execution as the path that could expose a regression."}
+{"pair_id":"topup-d_loudness-2237","a":"yes","b":"yes","c":"no","note":"CI excludes the assertion, defeating guaranteed detection. The fix conditions coverage on someone running it manually."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-y5fui9xg
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d780-2967-75b1-9b1b-bea95f68f4d3
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-y5fui9xg
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `d_loudness`
+
+LAW: Loudness is a property of a path: name the caller that reaches a guard and the observer who acts on it.
+
+USUAL SHAPE: YES when the text relies on a guard, alarm, error or panic as protection while the text itself indicates nothing reaches it or nobody sees what it emits. NO otherwise.
+
+## Items
+
+{"pair_id": "topup-d_loudness-11757", "original": "⟦The sweep's cwd check would flag any session that writes into another session's directory.⟧ The peer-sessions script prints exactly one cwd per session and never lists the extra working directories a session was granted. Across 14 sessions all 14 cwds were distinct, and the output was clean. Two sessions had a shared docs folder in their extra list, found only by opening their launch configs by hand. So a clean sweep tells us where sessions stand, not where they can write.", "substituted": "⟦The sweep's cwd check would flag any session that stands in another session's directory.⟧ The peer-sessions script prints exactly one cwd per session and never lists the extra working directories a session was granted. Across 14 sessions all 14 cwds were distinct, and the output was clean. Two sessions had a shared docs folder in their extra list, found only by opening their launch configs by hand. So a clean sweep tells us where sessions stand, not where they can write."}
+{"pair_id": "topup-d_loudness-5594", "original": "The push went through even though the ledger listed six unacknowledged commits, so I checked the obvious causes. The hook file exists under the git hooks directory and is executable, and invoking the guard directly from the shell refuses on the same range. The six ids I acknowledged were pasted from the refusal text the guard printed a few minutes before, so the list matches. The range was not empty either: I used the true pre-push base in both runs. The remaining gap is that the push was issued through the editor's built-in git client, which never spawns hooks. ⟦That client's output goes to a panel nobody had open, so the guard is protecting every push in this repo.⟧", "substituted": "The push went through even though the ledger listed six unacknowledged commits, so I checked the obvious causes. The hook file exists under the git hooks directory and is executable, and invoking the guard directly from the shell refuses on the same range. The six ids I acknowledged were pasted from the refusal text the guard printed a few minutes before, so the list matches. The range was not empty either: I used the true pre-push base in both runs. The remaining gap is that the push was issued through the editor's built-in git client, which never spawns hooks. ⟦That client's output goes to a panel nobody had open, so the guard protects only pushes made from the shell.⟧"}
+{"pair_id": "topup-d_loudness-9210", "original": "The editor reported a bare disconnect when opening a Rust project. The rustup shim was on the path, but the analyzer component was missing for the active toolchain, so the shim exited 1 and printed an unknown-binary message to stderr. The launcher records the disconnect and drops that stderr entirely. ⟦The launcher's error event guarantees the missing component gets noticed, since it is emitted on every failed start.⟧ I checked the tracing setup: the event is logged at debug level, and the default filter in the plugin passes only warnings and above. Reproducing on a clean profile showed nothing in the output panel.", "substituted": "The editor reported a bare disconnect when opening a Rust project. The rustup shim was on the path, but the analyzer component was missing for the active toolchain, so the shim exited 1 and printed an unknown-binary message to stderr. The launcher records the disconnect and drops that stderr entirely. ⟦The launcher's error event is emitted on every failed start, but at debug level, so nobody sees it under the default filter.⟧ I checked the tracing setup: the event is logged at debug level, and the default filter in the plugin passes only warnings and above. Reproducing on a clean profile showed nothing in the output panel."}
+{"pair_id": "topup-d_loudness-5371", "original": "The provenance probe was meant to attribute every red test to the session that dirtied the tree. Before wiring it in, I ran it by hand against the current checkout, and it returned UNKNOWN for every modified file, including a note I had written through the doc helper a few minutes earlier. So the probe cannot see this tree's writers at all. ⟦The plan's fallback is that an UNKNOWN author trips the attribution assertion, which will stop the run before anyone is misled.⟧ That assertion is only ever evaluated inside the failure handler, and the handler writes to a log file that no dashboard or reviewer reads. I would not ship the wiring until the probe resolves at least one known file.", "substituted": "The provenance probe was meant to attribute every red test to the session that dirtied the tree. Before wiring it in, I ran it by hand against the current checkout, and it returned UNKNOWN for every modified file, including a note I had written through the doc helper a few minutes earlier. So the probe cannot see this tree's writers at all. ⟦The plan's fallback is that an UNKNOWN author trips the attribution assertion, which writes a line to a log nobody reads.⟧ That assertion is only ever evaluated inside the failure handler, and the handler writes to a log file that no dashboard or reviewer reads. I would not ship the wiring until the probe resolves at least one known file."}
+{"pair_id": "topup-d_loudness-11799", "original": "Truncated downloads used to slip through because pipefail was never set and the last stage, tar, exited 0. The new wrapper reads PIPESTATUS and treats 141 on an early stage as success when the final stage returned 0. Any other nonzero stage code makes the wrapper exit 1, which I confirmed by feeding it a half-downloaded archive. The nightly launcher runs the wrapper from cron with MAILTO empty and both output streams sent to /dev/null. ⟦So the exit-1 path guarantees a bad archive never goes unnoticed.⟧", "substituted": "Truncated downloads used to slip through because pipefail was never set and the last stage, tar, exited 0. The new wrapper reads PIPESTATUS and treats 141 on an early stage as success when the final stage returned 0. Any other nonzero stage code makes the wrapper exit 1, which I confirmed by feeding it a half-downloaded archive. The nightly launcher runs the wrapper from cron with MAILTO empty and both output streams sent to /dev/null. ⟦So the exit-1 path stops a bad archive from being installed, though nobody is told.⟧"}
+{"pair_id": "topup-d_loudness-12241", "original": "We verified the corpus at commit ede25e69 by set difference: 851 tracked paths, and comm -23 printed zero tracked-but-absent entries. The earlier count-based check had reported fewer files present than tracked, because the pruned directory held tracked paths; that was a counting artefact, not damage. The cleanup script ends with an assertion that exits nonzero on any missing path. The wrapper that runs the script discards the exit status and reports success to the scheduler. ⟦That assertion is what stops the deletions if the corpus is ever damaged.⟧ The safety of these deletions rests on the set-difference result, not on that assertion.", "substituted": "We verified the corpus at commit ede25e69 by set difference: 851 tracked paths, and comm -23 printed zero tracked-but-absent entries. The earlier count-based check had reported fewer files present than tracked, because the pruned directory held tracked paths; that was a counting artefact, not damage. The cleanup script ends with an assertion that exits nonzero on any missing path. The wrapper that runs the script discards the exit status and reports success to the scheduler. ⟦That assertion exits nonzero if the corpus is ever damaged, though the wrapper hides it.⟧ The safety of these deletions rests on the set-difference result, not on that assertion."}
+{"pair_id": "topup-d_loudness-6291", "original": "I ran the reproduction before touching the plan. The scan greps the file stem as a plain substring, and for dated-slug names the stem is the slug. A new test seeds a citer containing only a bare slug and asserts it is found; it passes on current source with no production change. The test carries an ignore attribute, and neither CI nor the pre-push hook passes the flag that runs ignored tests. ⟦A regression in the scan will trip that assertion and alert the maintainers.⟧", "substituted": "I ran the reproduction before touching the plan. The scan greps the file stem as a plain substring, and for dated-slug names the stem is the slug. A new test seeds a citer containing only a bare slug and asserts it is found; it passes on current source with no production change. The test carries an ignore attribute, and neither CI nor the pre-push hook passes the flag that runs ignored tests. ⟦A regression in the scan would trip that assertion only for someone running ignored tests by hand.⟧"}
+{"pair_id": "topup-d_loudness-2237", "original": "⟦The ack-handle assertion guards this path against regressions, so any future breakage will be caught.⟧ The ignore attribute on it keeps it out of the default test set that CI runs. The commit adding the ack handle is dated 2026-06-27 and is an ancestor of the SHA the note cites, so the mechanism was already present when the note was written. The git log over the write and edit directories since the filing date is empty, which means nothing changed in between and a later repair cannot explain the difference.", "substituted": "⟦The ack-handle assertion covers this path against regressions, though only when someone runs it by hand.⟧ The ignore attribute on it keeps it out of the default test set that CI runs. The commit adding the ack handle is dated 2026-06-27 and is an ancestor of the SHA the note cites, so the mechanism was already present when the note was written. The git log over the write and edit directories since the filing date is empty, which means nothing changed in between and a later repair cannot explain the difference."}
+codex
+{"pair_id":"topup-d_loudness-11757","a":"yes","b":"yes","c":"no","note":"The sweep cannot detect writes through extra directories; the fix limits its claim to the cwd it actually checks."}
+{"pair_id":"topup-d_loudness-5594","a":"yes","b":"yes","c":"no","note":"Editor pushes never reach the guard. The fix limits protection to shell pushes, where the guard's refusal was observed."}
+{"pair_id":"topup-d_loudness-9210","a":"yes","b":"yes","c":"no","note":"The default filter hides the error event. The fix explicitly acknowledges that nobody sees it."}
+{"pair_id":"topup-d_loudness-5371","a":"yes","b":"yes","c":"no","note":"The fallback claims protection despite an unread failure log. The fix describes the unobserved output without claiming it protects users."}
+{"pair_id":"topup-d_loudness-11799","a":"yes","b":"yes","c":"no","note":"Cron suppresses notification, so failure can go unnoticed. The fix distinguishes stopping installation from notifying an observer."}
+{"pair_id":"topup-d_loudness-12241","a":"yes","b":"yes","c":"no","note":"The wrapper discards the assertion's failure status. The fix acknowledges that hidden failure instead of claiming it stops deletions."}
+{"pair_id":"topup-d_loudness-6291","a":"yes","b":"yes","c":"no","note":"Neither automated caller runs the ignored assertion. The fix identifies manual execution as the path that could expose a regression."}
+{"pair_id":"topup-d_loudness-2237","a":"yes","b":"yes","c":"no","note":"CI excludes the assertion, defeating guaranteed detection. The fix conditions coverage on someone running it manually."}
+tokens used
+6,006

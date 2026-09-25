@@ -1,0 +1,8 @@
+{"pair_id":"topup-act_on_artifact-1172","a":"yes","b":"yes","c":"no","note":"The original relies on Monday's listing; the replacement searches the documentation now before completing the sweep."}
+{"pair_id":"topup-act_on_artifact-1699","a":"yes","b":"yes","c":"yes","note":"The fix checks current catalog ids. Elsewhere, cleanup deletes rows using absence from a filtered walk as a proxy for missing files."}
+{"pair_id":"topup-act_on_artifact-11705","a":"yes","b":"yes","c":"no","note":"The original releases handles using last week's dry run; the fix reruns the inspection immediately before acting."}
+{"pair_id":"topup-act_on_artifact-6963","a":"yes","b":"yes","c":"no","note":"The original relies on a run preceding install-script changes; the fix uses the run for the current branch head."}
+{"pair_id":"topup-act_on_artifact-11859","a":"yes","b":"yes","c":"no","note":"Yesterday's listing may be outdated by retention. The replacement queries the current listing before deletion."}
+{"pair_id":"topup-act_on_artifact-9911","a":"yes","b":"no","c":"no","note":"A fresh registry grep still substitutes registration status for inspecting the stub files and their uses before deleting them."}
+{"pair_id":"topup-act_on_artifact-2069","a":"yes","b":"no","c":"no","note":"Checking the merge commit fixes temporal staleness, but a passing status remains an unreliable proxy because degraded scans can report green."}
+{"pair_id":"topup-act_on_artifact-4618","a":"yes","b":"yes","c":"no","note":"The original schedules migration from last week's dump; the replacement sizes it using a current schema dump."}

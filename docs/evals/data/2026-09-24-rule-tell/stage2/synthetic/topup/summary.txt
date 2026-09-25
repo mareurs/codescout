@@ -1,0 +1,24 @@
+set topup  generator claude:claude-sonnet-5  calls 504  pairs 2483  ok 1210
+failures: {"shares an 8-token shingle with its seed": 1128, "banned word": 224, "seed missing from output": 43, "paragraph length outside 60-200 words": 7, "violating sentence is not one segmenter unit": 7, "fixed sentence is not one segmenter unit": 8, "call failed": 10, "fixed sentence equals violating sentence": 2, "violating sentence not exactly once in paragraph": 2}
+  act_on_artifact        39/88
+  cannot_happen          42/107
+  closed_population      40/77
+  contradiction          11/24
+  count_unit             25/35
+  d_adjacency            80/188
+  d_fixture              22/23
+  d_history              60/110
+  d_loudness             57/85
+  d_mutation             27/37
+  d_red                  23/46
+  d_semicolon            41/51
+  d_sessionid            74/135
+  d_visibility           53/160
+  lines_read             59/128
+  member_vs_population   26/57
+  monotone_absence       22/54
+  open_artifact          53/94
+  question_asked         127/267
+  run_tool               66/150
+  scope_instant          113/300
+  selector_narrow        150/267

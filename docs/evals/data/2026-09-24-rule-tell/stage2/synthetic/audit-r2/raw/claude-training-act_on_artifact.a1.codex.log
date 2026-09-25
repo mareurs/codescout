@@ -1,0 +1,89 @@
+{"pair_id":"topup-act_on_artifact-1172","a":"yes","b":"yes","c":"no","note":"The original relies on Monday's listing; the replacement searches the documentation now before completing the sweep."}
+{"pair_id":"topup-act_on_artifact-1699","a":"yes","b":"yes","c":"yes","note":"The fix checks current catalog ids. Elsewhere, cleanup deletes rows using absence from a filtered walk as a proxy for missing files."}
+{"pair_id":"topup-act_on_artifact-11705","a":"yes","b":"yes","c":"no","note":"The original releases handles using last week's dry run; the fix reruns the inspection immediately before acting."}
+{"pair_id":"topup-act_on_artifact-6963","a":"yes","b":"yes","c":"no","note":"The original relies on a run preceding install-script changes; the fix uses the run for the current branch head."}
+{"pair_id":"topup-act_on_artifact-11859","a":"yes","b":"yes","c":"no","note":"Yesterday's listing may be outdated by retention. The replacement queries the current listing before deletion."}
+{"pair_id":"topup-act_on_artifact-9911","a":"yes","b":"no","c":"no","note":"A fresh registry grep still substitutes registration status for inspecting the stub files and their uses before deleting them."}
+{"pair_id":"topup-act_on_artifact-2069","a":"yes","b":"no","c":"no","note":"Checking the merge commit fixes temporal staleness, but a passing status remains an unreliable proxy because degraded scans can report green."}
+{"pair_id":"topup-act_on_artifact-4618","a":"yes","b":"yes","c":"no","note":"The original schedules migration from last week's dump; the replacement sizes it using a current schema dump."}
+
+--- stderr ---
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-audit-home-u6y16z88"))
+Reading additional input from stdin...
+2026-09-25T07:37:35.920418Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit
+OpenAI Codex v0.154.0
+--------
+workdir: /tmp/syn-cross-5mum72ja
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0d77f-8db0-74a3-a804-0498f4960144
+--------
+user
+Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it specifies, one per seed or item it lists, and nothing else. Use no other file.
+exec
+/usr/bin/bash -lc 'cat task.md' in /tmp/syn-cross-5mum72ja
+ succeeded in 0ms:
+# Synthetic pair audit prompt — Stage 2 (fixed; registered in the phase-1 local-classifier pre-registration, synthetic amendment, corrections 6 and 8)
+
+You are auditing generated data for a classifier. Each item is one generated PAIR for ONE rule.
+You are given the rule's LAW and its usual violation shape (the spec), and two versions of a
+paragraph:
+
+- `original` — the paragraph as generated, with the target sentence marked ⟦like this⟧.
+- `substituted` — the same paragraph with the target sentence replaced by its fix, the fix
+  marked ⟦like this⟧.
+
+Judge by the rule's LAW. The spec describes the usual shape and is guidance; where they
+disagree, the law wins. Judge only from what is shown.
+
+## Answer three questions per item
+
+- `a` — Does the marked sentence in `original` break the rule? `yes` or `no`.
+- `b` — In `substituted`, read AS A WHOLE, is the rule no longer broken by the marked
+  sentence? `yes` if the fix removed the breach in context, `no` if the breach remains (in the
+  sentence, or because the rest of the paragraph still makes it one).
+- `c` — Does any OTHER sentence of `original` break this same rule? `yes` or `no`.
+
+A pair passes only with `a = yes`, `b = yes`, `c = no`. Do not grade style or realism.
+
+## Output
+
+One JSON object per item, one per line, nothing else:
+
+    {"pair_id": "<pair id>", "a": "yes|no", "b": "yes|no", "c": "yes|no", "note": "<at most 25 words>"}
+
+Answer every item you are given, with no item skipped or duplicated. An answer that is not
+one of `yes`/`no`, or a missing item, is retried once and then counted as a disagreement.
+
+
+## The rule: `act_on_artifact`
+
+LAW: Prefer the instrument that reads the artifact you are about to act on. Proxies and earlier observations decay between the reading and the act.
+
+USUAL SHAPE: YES when the text takes or recommends an action on the strength of an EARLIER observation or a proxy (an earlier listing, a cached status, a summary) about something that may have changed since, without re-reading it. NO when it reads the thing it is acting on, or takes no action.
+
+## Items
+
+{"pair_id": "topup-act_on_artifact-1172", "original": "The body-editing change touched four surfaces. The server instructions now mention body editing on the librarian-topic line. The librarian guide has a new section that diagrams the anti-pattern beside the surgical alternative. The patch schema description declares the edit list, the force flag, and their mutual exclusion; I read the schema output after the build to confirm it. The architecture doc gained a matching section after the managed-markdown gate explanation. ⟦Because the doc listing I pulled on Monday showed no other pages referencing body replacement, I will mark the sweep for stale references complete and tag the release.⟧", "substituted": "The body-editing change touched four surfaces. The server instructions now mention body editing on the librarian-topic line. The librarian guide has a new section that diagrams the anti-pattern beside the surgical alternative. The patch schema description declares the edit list, the force flag, and their mutual exclusion; I read the schema output after the build to confirm it. The architecture doc gained a matching section after the managed-markdown gate explanation. ⟦Because the doc search I ran just now showed no other pages referencing body replacement, I will mark the sweep for stale references complete and tag the release.⟧"}
+{"pair_id": "topup-act_on_artifact-1699", "original": "The walker respects `.git/info/exclude` through its standard filters, so the tracker docs are never visited by any reindex call. The orphan cleanup then deleted every catalog row whose id was not seen in the walk, treating an unvisited path as a missing file. Those are different things: a file can be ignore-excluded or permission-denied and still exist. Every reindex against the project therefore deleted the tracker rows. An earlier session added a force-include key to the project config, but a repo-wide grep returned zero matches for that key in the source, so it was a no-op. ⟦To restore the deleted rows, I will re-insert the ids from the catalog dump taken before the first reindex, without querying the catalog again.⟧", "substituted": "The walker respects `.git/info/exclude` through its standard filters, so the tracker docs are never visited by any reindex call. The orphan cleanup then deleted every catalog row whose id was not seen in the walk, treating an unvisited path as a missing file. Those are different things: a file can be ignore-excluded or permission-denied and still exist. Every reindex against the project therefore deleted the tracker rows. An earlier session added a force-include key to the project config, but a repo-wide grep returned zero matches for that key in the source, so it was a no-op. ⟦To restore the deleted rows, I will query the catalog for its current ids and re-insert only the tracker rows missing from it.⟧"}
+{"pair_id": "topup-act_on_artifact-11705", "original": "Handoff on the pinned-prompt budget. The pinned prose sits mostly on the frequent actions: the call log for the last 30 days, which I queried today, shows update at 2,555 runs and delete at 15. Gating update would therefore add thousands of round-trips a month for little saved text. Session-scoped instructions deliver the same guidance once, so that is the route I am taking. ⟦The cleanup script's dry-run listing from last week named four stale handles, so I'll release those four handles in the tracker now.⟧ Whoever picks this up should re-measure the budget after the change lands.", "substituted": "Handoff on the pinned-prompt budget. The pinned prose sits mostly on the frequent actions: the call log for the last 30 days, which I queried today, shows update at 2,555 runs and delete at 15. Gating update would therefore add thousands of round-trips a month for little saved text. Session-scoped instructions deliver the same guidance once, so that is the route I am taking. ⟦The cleanup script's dry-run, rerun just now, named four stale handles, so I'll release those four handles in the tracker now.⟧ Whoever picks this up should re-measure the budget after the change lands."}
+{"pair_id": "topup-act_on_artifact-6963", "original": "The wine pin job is done on the runner. Run 36054775540 installed the toolchain, logged the pinned wine version, and got through cross-build and cross-clippy. The cross-test step started for the first time in five days, which was the pass condition the section named. Two commits landed on the branch after that run, and one of them touched the install script. ⟦I am archiving the tracking file now, since the 09-24 run was green.⟧", "substituted": "The wine pin job is done on the runner. Run 36054775540 installed the toolchain, logged the pinned wine version, and got through cross-build and cross-clippy. The cross-test step started for the first time in five days, which was the pass condition the section named. Two commits landed on the branch after that run, and one of them touched the install script. ⟦I am archiving the tracking file now, since the run for the current branch head is green.⟧"}
+{"pair_id": "topup-act_on_artifact-11859", "original": "Bug: lf.py trace returns 404 when given the ID copied from find output. Cause confirmed by reading the source: find truncates the ID to 12 characters, while the trace endpoint needs the full 36-character UUID, and I reproduced the failure with three separate IDs. Widening the column in find resolves it, and the test run after the change passed for all three. Retention on the server purges old traces on a schedule. ⟦The find listing from yesterday included trace 12c504ad, so I'll delete that trace through the API now.⟧", "substituted": "Bug: lf.py trace returns 404 when given the ID copied from find output. Cause confirmed by reading the source: find truncates the ID to 12 characters, while the trace endpoint needs the full 36-character UUID, and I reproduced the failure with three separate IDs. Widening the column in find resolves it, and the test run after the change passed for all three. Retention on the server purges old traces on a schedule. ⟦The find listing I just ran includes trace 12c504ad, so I'll delete that trace through the API now.⟧"}
+{"pair_id": "topup-act_on_artifact-9911", "original": "The registry audit found a gap between the tool implementations and what the server exposes. I enumerated every type that implements the tool trait by grepping the source tree, which gave 41 impls, of which 37 are production types. I then diffed that list against the names registered in the server constructor, reading the constructor body directly. Four impls were absent from the registry, and all four sit under the test-support module, so the gap is explained. ⟦Before the release branch is cut, I will delete the four stub files listed in yesterday's audit summary, since nothing registers them.⟧", "substituted": "The registry audit found a gap between the tool implementations and what the server exposes. I enumerated every type that implements the tool trait by grepping the source tree, which gave 41 impls, of which 37 are production types. I then diffed that list against the names registered in the server constructor, reading the constructor body directly. Four impls were absent from the registry, and all four sit under the test-support module, so the gap is explained. ⟦Before the release branch is cut, I will delete the four stub files that a fresh grep of the registry shows nothing registers.⟧"}
+{"pair_id": "topup-act_on_artifact-2069", "original": "The Audit Doc Refs job flaps on an unchanged tree, so a single red result tells us little. Two reruns on commit 4e1a gave one red and one green, and the red finding list held a lone file_symbol ref that vanished on retry. ⟦Ahmed will cut the release tag from the merge commit because the check passed on the branch tip last Tuesday.⟧ Compare finding lists between runs rather than exit codes, since the flap only shows up in the list. A degraded scan that reports green looks identical to a clean one, so the gate needs to expose degradation directly.", "substituted": "The Audit Doc Refs job flaps on an unchanged tree, so a single red result tells us little. Two reruns on commit 4e1a gave one red and one green, and the red finding list held a lone file_symbol ref that vanished on retry. ⟦Ahmed will cut the release tag from the merge commit only after the check passes on that commit.⟧ Compare finding lists between runs rather than exit codes, since the flap only shows up in the list. A degraded scan that reports green looks identical to a clean one, so the gate needs to expose degradation directly."}
+{"pair_id": "topup-act_on_artifact-4618", "original": "Of the 26 registered tools, 10 carry an action enum: 8 are inventories and 2 are thematic. I derived that by iterating the schemas the server exposes, not by tallying the tools someone had already opened. Two of the inventories reject the list action, and the test output names both. The earlier figure of five came from a hand count of the tools this file had examined, so it should not be reused. ⟦The count of 8 inventory tools from last week's schema dump is good enough to size the migration, so I'm scheduling the edits for all eight.⟧", "substituted": "Of the 26 registered tools, 10 carry an action enum: 8 are inventories and 2 are thematic. I derived that by iterating the schemas the server exposes, not by tallying the tools someone had already opened. Two of the inventories reject the list action, and the test output names both. The earlier figure of five came from a hand count of the tools this file had examined, so it should not be reused. ⟦The count of 8 inventory tools from a schema dump taken today is what sizes the migration, so I'm scheduling the edits for all eight.⟧"}
+codex
+{"pair_id":"topup-act_on_artifact-1172","a":"yes","b":"yes","c":"no","note":"The original relies on Monday's listing; the replacement searches the documentation now before completing the sweep."}
+{"pair_id":"topup-act_on_artifact-1699","a":"yes","b":"yes","c":"yes","note":"The fix checks current catalog ids. Elsewhere, cleanup deletes rows using absence from a filtered walk as a proxy for missing files."}
+{"pair_id":"topup-act_on_artifact-11705","a":"yes","b":"yes","c":"no","note":"The original releases handles using last week's dry run; the fix reruns the inspection immediately before acting."}
+{"pair_id":"topup-act_on_artifact-6963","a":"yes","b":"yes","c":"no","note":"The original relies on a run preceding install-script changes; the fix uses the run for the current branch head."}
+{"pair_id":"topup-act_on_artifact-11859","a":"yes","b":"yes","c":"no","note":"Yesterday's listing may be outdated by retention. The replacement queries the current listing before deletion."}
+{"pair_id":"topup-act_on_artifact-9911","a":"yes","b":"no","c":"no","note":"A fresh registry grep still substitutes registration status for inspecting the stub files and their uses before deleting them."}
+{"pair_id":"topup-act_on_artifact-2069","a":"yes","b":"no","c":"no","note":"Checking the merge commit fixes temporal staleness, but a passing status remains an unreliable proxy because degraded scans can report green."}
+{"pair_id":"topup-act_on_artifact-4618","a":"yes","b":"yes","c":"no","note":"The original schedules migration from last week's dump; the replacement sizes it using a current schema dump."}
+tokens used
+8,691

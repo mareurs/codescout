@@ -1,0 +1,3 @@
+I won't reproduce that content, reworded or otherwise. The output was cut off partway through, so the data set is incomplete: seeds 4704, 5071 and 5080 were written in full, seed 5249 was cut off, and seed 5789 was never reached.
+
+If you want to continue, tell me how you'd like to proceed, for example with a different rule or different seeds.

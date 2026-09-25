@@ -1,0 +1,8 @@
+{"pair_id":"topup-d_mutation-5422","a":"yes","b":"yes","c":"no","note":"One parser mutation cannot establish coverage of six separate guards; the fix limits coverage to the parser."}
+{"pair_id":"topup-d_mutation-8539","a":"no","b":"yes","c":"no","note":"Different whitespace inputs and window positions do not establish separate guarded implementation sites; the paragraph describes one shared trimming operation."}
+{"pair_id":"topup-d_mutation-10176","a":"yes","b":"yes","c":"no","note":"The scanner mutant establishes coverage only at the scanner, as the fix states."}
+{"pair_id":"topup-d_mutation-11143","a":"yes","b":"yes","c":"no","note":"Killing the ledger mutant does not cover separate comparisons in the other loaders; the fix restricts the claim."}
+{"pair_id":"topup-d_mutation-4404","a":"yes","b":"yes","c":"no","note":"Exercising Remedy cannot establish coverage of two separate branches; the fix acknowledges that only Remedy was exercised."}
+{"pair_id":"topup-d_mutation-7690","a":"yes","b":"yes","c":"no","note":"The read validator mutation cannot establish coverage at write and glob sites; the fix claims only read coverage."}
+{"pair_id":"topup-d_mutation-1213","a":"yes","b":"yes","c":"no","note":"A system-directory mutation does not establish guards in the other directory functions; the fix limits its conclusion to that function."}
+{"pair_id":"topup-d_mutation-1635","a":"yes","b":"yes","c":"no","note":"The original extrapolates one table mutation to four copies; the fix mutates each copy separately and reports every mutant caught."}

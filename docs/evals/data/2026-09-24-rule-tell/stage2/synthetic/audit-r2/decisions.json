@@ -1,0 +1,280 @@
+{
+ "sources": {
+  "claude:claude-sonnet-5": {
+   "audited": 192,
+   "disagree": 32,
+   "rate": 0.167,
+   "wilson95": [
+    0.121,
+    0.226
+   ],
+   "drop": false
+  }
+ },
+ "cells": {
+  "claude:claude-sonnet-5|training|act_on_artifact": {
+   "N": 39,
+   "audited": 8,
+   "disagree": 3,
+   "invalid": 0,
+   "rate": 0.375,
+   "wilson95": [
+    0.137,
+    0.694
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|training|cannot_happen": {
+   "N": 42,
+   "audited": 8,
+   "disagree": 2,
+   "invalid": 0,
+   "rate": 0.25,
+   "wilson95": [
+    0.071,
+    0.591
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|training|closed_population": {
+   "N": 40,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|contradiction": {
+   "N": 11,
+   "audited": 8,
+   "disagree": 2,
+   "invalid": 0,
+   "rate": 0.25,
+   "wilson95": [
+    0.071,
+    0.591
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|training|count_unit": {
+   "N": 25,
+   "audited": 8,
+   "disagree": 3,
+   "invalid": 0,
+   "rate": 0.375,
+   "wilson95": [
+    0.137,
+    0.694
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|training|d_adjacency": {
+   "N": 80,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_fixture": {
+   "N": 22,
+   "audited": 8,
+   "disagree": 3,
+   "invalid": 0,
+   "rate": 0.375,
+   "wilson95": [
+    0.137,
+    0.694
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|training|d_history": {
+   "N": 60,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_loudness": {
+   "N": 57,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_mutation": {
+   "N": 27,
+   "audited": 8,
+   "disagree": 1,
+   "invalid": 0,
+   "rate": 0.125,
+   "wilson95": [
+    0.022,
+    0.471
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_red": {
+   "N": 23,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_semicolon": {
+   "N": 41,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_sessionid": {
+   "N": 74,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|d_visibility": {
+   "N": 53,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|lines_read": {
+   "N": 59,
+   "audited": 8,
+   "disagree": 3,
+   "invalid": 0,
+   "rate": 0.375,
+   "wilson95": [
+    0.137,
+    0.694
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|training|member_vs_population": {
+   "N": 26,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|monotone_absence": {
+   "N": 22,
+   "audited": 8,
+   "disagree": 2,
+   "invalid": 0,
+   "rate": 0.25,
+   "wilson95": [
+    0.071,
+    0.591
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|training|open_artifact": {
+   "N": 53,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|question_asked": {
+   "N": 127,
+   "audited": 13,
+   "disagree": 2,
+   "invalid": 0,
+   "rate": 0.154,
+   "wilson95": [
+    0.043,
+    0.422
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|run_tool": {
+   "N": 66,
+   "audited": 8,
+   "disagree": 0,
+   "invalid": 0,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.324
+   ],
+   "drop": false
+  },
+  "claude:claude-sonnet-5|training|scope_instant": {
+   "N": 113,
+   "audited": 12,
+   "disagree": 6,
+   "invalid": 0,
+   "rate": 0.5,
+   "wilson95": [
+    0.254,
+    0.746
+   ],
+   "drop": true
+  },
+  "claude:claude-sonnet-5|training|selector_narrow": {
+   "N": 150,
+   "audited": 15,
+   "disagree": 3,
+   "invalid": 0,
+   "rate": 0.2,
+   "wilson95": [
+    0.07,
+    0.452
+   ],
+   "drop": false
+  }
+ }
+}

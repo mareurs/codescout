@@ -1,0 +1,8 @@
+{"pair_id":"topup-d_red-6855","a":"yes","b":"yes","c":"no","note":"The original transfers the old failure to a narrowed assertion; the fix observes the narrowed assertion fail."}
+{"pair_id":"topup-d_red-6085","a":"yes","b":"yes","c":"no","note":"The original credits a loosened comparison with the original red; the fix reruns the loosened check and observes failure."}
+{"pair_id":"topup-d_red-6818","a":"yes","b":"yes","c":"no","note":"The original uses the earlier count failure to validate a rewritten assertion; the fix reports a fresh red from that assertion."}
+{"pair_id":"topup-d_red-3853","a":"yes","b":"yes","c":"no","note":"The original treats a missing-directory failure as proof for a different comparison; the fix reruns the new comparison and observes failure."}
+{"pair_id":"topup-d_red-8585","a":"yes","b":"yes","c":"no","note":"The original transfers an id-based failure to a timestamp join; the fix runs the timestamp version and observes zero matches."}
+{"pair_id":"topup-d_red-9060","a":"yes","b":"yes","c":"no","note":"The original credits changed acceptance criteria with an earlier red; the fix observes the revised test reject a malformed entry."}
+{"pair_id":"topup-d_red-8419","a":"yes","b":"yes","c":"no","note":"The original validates rewritten tool and path assertions using an earlier failure; the fix confirms the rewritten test fails against the stale arm."}
+{"pair_id":"topup-d_red-11545","a":"yes","b":"yes","c":"no","note":"The original transfers a nine-character token failure to a twelve-character token assertion; the fix reports a fresh red after the rewrite."}
