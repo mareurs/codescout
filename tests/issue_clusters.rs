@@ -1859,7 +1859,7 @@ fn the_hook_script_agrees_on_the_cluster_parsers() {
 /// comes back `None` with `returncode == 0`. `read()` took that for "file absent", so the
 /// two class files holding a byte cp1252 leaves undefined (`0x9d`, in IC-14 and IC-5)
 /// vanished from the ledger on Windows only. The parity test above then reddened there
-/// with those two clusters missing from the script's side (`05959bffb7b4fd7d`).
+/// with those two clusters missing from the script's side (`8efcf7dba0d8a327`).
 ///
 /// The parity test cannot catch the cause on Linux: this host's locale is UTF-8, so both
 /// sides agree. This one asserts the INVARIANT instead, which holds or fails on every

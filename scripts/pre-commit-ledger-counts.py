@@ -117,7 +117,7 @@ def _run_git(args: list[str]) -> subprocess.CompletedProcess:
     decode error is printed and swallowed: `stdout` comes back `None` with `returncode == 0`.
     `read()` took that for "file absent", so the two class files holding a byte cp1252 leaves
     undefined (`0x9d`) vanished from the ledger, and their clusters from every count, on
-    Windows only (`05959bffb7b4fd7d`). Decoding bytes in this thread behaves the same on every
+    Windows only (`8efcf7dba0d8a327`). Decoding bytes in this thread behaves the same on every
     platform. `"replace"` matches `_prime_index`, so the per-file fallback decodes exactly what
     the batch path would, which its docstring's "costs speed, never correctness" requires.
     """

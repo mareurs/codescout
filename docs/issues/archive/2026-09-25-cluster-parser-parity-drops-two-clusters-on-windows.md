@@ -1,7 +1,7 @@
 ---
-id: '05959bffb7b4fd7d'
+id: 8efcf7dba0d8a327
 kind: bug
-status: fixed
+status: archived
 title: 'BUG: on Windows the cluster-parser parity test finds guard-narrower-than-its-name and repro-env-diverges-from-gate-env missing from one side'
 owners:
 - marius
@@ -71,7 +71,7 @@ Test: `tests/issue_clusters.rs` `the_hook_script_decodes_git_output_itself_never
 - P4, the `_git()` text-mode call restored: **KILLED**, on `git ls-files docs/trackers/issue-clusters`.
 - P5, the `_corpus_paths_diverged` text-mode call restored: **SURVIVED**, because a `--json` run never reaches it. That function runs only when the hook refuses, to annotate the refusal. It is changed for uniformity, and it is the lowest-risk of the five: it decodes a `git diff --name-only` path list, and git quotes non-ASCII paths by default (`core.quotepath`). No test covers it.
 
-**Owed:** CI's native Windows lanes going green on `the_hook_script_agrees_on_the_cluster_parsers`. That is the confirmation of Root cause step 3, which was read from the interpreter rather than run.
+**Confirmed on CI, 2026-09-25, run `36096588131` (head `ffff1dfb`, which contains `23027269`).** In `Test (windows-latest / no-features)` (job `107950021793`), `the_hook_script_agrees_on_the_cluster_parsers ... ok` and `the_hook_script_decodes_git_output_itself_never_through_the_locale ... ok`, with no failing test result in the job. That was the job's first green since 2026-09-17. Root cause step 3, read from the interpreter, is thereby confirmed by the platform it describes.
 
 ## Fix provenance
 
@@ -80,4 +80,4 @@ Test: `tests/issue_clusters.rs` `the_hook_script_decodes_git_output_itself_never
 
 `fix(ledger-counts): decode git output as UTF-8 in-thread, never via text=True, so Windows stops dropping two clusters`
 
-**Archive when** a CI native Windows lane runs `23027269` or later with `the_hook_script_agrees_on_the_cluster_parsers` green.
+**Archived 2026-09-25**, after CI run `36096588131` ran `23027269` with `the_hook_script_agrees_on_the_cluster_parsers` green on native `windows-latest / no-features` (see Resume). The id citations in `scripts/pre-commit-ledger-counts.py`, `tests/issue_clusters.rs` and the archived references bug were re-pointed in the same commit.
