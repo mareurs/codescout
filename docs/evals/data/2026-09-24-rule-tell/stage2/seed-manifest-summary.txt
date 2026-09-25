@@ -1,0 +1,12 @@
+commit 3cfda138
+md files: 1868
+paragraphs >= 60 words: 12747
+dropped: T-row shingle: 238
+dropped: held-out shingle: 236
+excluded: campaign content: 8
+excluded: T doc group: 75
+excluded: campaign path: 41
+eligible paragraphs: 12273 (training side 9644, S 2629)
+groups: 1583 ({'training': 1094, 'S': 414, 'T': 75}); folds {'train': 786, 'cal': 141, 'S': 414, 'val': 167, 'T': 75}
+per rule drawn: pilot 5 (of 5), train 80 (of 80), T-syn 15 (of 15)
+seeds drawn: 2200
