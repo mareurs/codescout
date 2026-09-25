@@ -516,7 +516,13 @@ the mechanism stays an untested hypothesis with its test named in the bug file.
 | field | value |
 |---|---|
 | Session / principal / collector | session `938e2953-de0e-4241-a543-9b761a70326a`, profile `~/.claude-sdd`. The operator is the principal via this coordinating session, which was also the collector. Model claude-opus-5.5 |
-| Observed interval (UTC) | 2026-09-24, about 14:00 to 20:25, approximate. It spans one compaction. The stretch before it is known to this receipt only through the compaction summary |
+| Observed interval (UTC) | 2026-09-24 about 14:00, through 2026-09-25 about 05:15, approximate. It spans one compaction. The stretch before it is known to this receipt only through the compaction summary. **Updated 2026-09-25** when the session resumed, per this ledger's rule that a continuing session updates its receipt rather than adding another. The later work:
+
+- two authorised pushes, `87001799` and then `ffff1dfb`;
+- CI triage of run `36058985076`, which filed `70005375` and sent evidence to the owners of `05959bff` and `c6cff39d`. Run `36096588131` was green, 28/28;
+- a flock-guarded cleanup of the shared `target/debug/incremental` (49G);
+- converting the shared `target/` into a nested subvolume, rehearsed first on a fake tree, where the rehearsal caught a `mv --exchange` bug;
+- removing a merged stray worktree after saving its files, and one dead-session target dir. |
 | Workspace | `/home/marius/work/claude/codescout`, branch `experiments`, shared checkout. Peers ebf651ec, 571eb3d6, 774ba049 and system-cf interacted |
 | Coverage | `partial`. The post-compaction interval was observed directly; the pre-compaction interval was not |
 | DWF routine / enrichment | routine-first **DWF-8** (gate cache disk, per-session target dirs), recorded with its outcome. The later investigation (the pool's size bound, and the hand-reused path) was **not** captured as an enrichment. Its canonical records are bug files `503fa887ab0ec144` and `097aa5ca2222a91d`, fixed in `9d755a16` |
