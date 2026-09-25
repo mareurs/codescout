@@ -1,0 +1,4 @@
+/home/marius/work/claude/rule-tell-runs/phase1b-s1/s1-r2-20260940: recipe s1-r2 seed 20260940 permute False
+  val loss by epoch [[0, 0.3199600710733767], [1, 0.311159131364408], [2, 0.30742090908584147], [3, 0.3201788956240323], [4, 0.3464325073280934]]  selected {'epoch': 2, 'val_loss': 0.30742090908584147}
+  pooled val AUC 0.966  per-rule min/median/max 0.858/1.000/1.000
+  cross-rule firing on val: 3652/6773 (0.54)

@@ -1,0 +1,727 @@
+{
+ "runs": {
+  "s1-r1-20260935": {
+   "recipe": "s1-r1",
+   "seed": 20260935,
+   "selected_epoch": 2,
+   "selected_val_loss": 0.225473646954405,
+   "pooled_val_auc": 0.982257589154141,
+   "per_rule_auc_min": 0.88,
+   "per_rule_auc_upper_median": 1.0,
+   "final_epoch_train_loss": 0.010278635750545054,
+   "epoch0_max_running_train_loss": 0.6917236632108689,
+   "cross_rule_firing_val": [
+    3537,
+    6773
+   ],
+   "temps_at_bound": [
+    "d_red",
+    "d_semicolon",
+    "d_sessionid"
+   ],
+   "cal_own_negatives_fired": [
+    21,
+    180
+   ],
+   "cal_own_positive_recall": [
+    154,
+    179
+   ],
+   "cal_per_rule": {
+    "d_history": {
+     "neg_fired": 1,
+     "neg": 8,
+     "pos_hit": 8,
+     "pos": 8
+    },
+    "run_tool": {
+     "neg_fired": 5,
+     "neg": 20,
+     "pos_hit": 19,
+     "pos": 20
+    },
+    "selector_narrow": {
+     "neg_fired": 2,
+     "neg": 21,
+     "pos_hit": 18,
+     "pos": 20
+    },
+    "closed_population": {
+     "neg_fired": 1,
+     "neg": 16,
+     "pos_hit": 16,
+     "pos": 16
+    },
+    "d_adjacency": {
+     "neg_fired": 0,
+     "neg": 15,
+     "pos_hit": 15,
+     "pos": 15
+    },
+    "d_loudness": {
+     "neg_fired": 0,
+     "neg": 9,
+     "pos_hit": 3,
+     "pos": 9
+    },
+    "d_mutation": {
+     "neg_fired": 2,
+     "neg": 12,
+     "pos_hit": 12,
+     "pos": 12
+    },
+    "d_red": {
+     "neg_fired": 2,
+     "neg": 10,
+     "pos_hit": 10,
+     "pos": 10
+    },
+    "d_semicolon": {
+     "neg_fired": 0,
+     "neg": 4,
+     "pos_hit": 4,
+     "pos": 4
+    },
+    "d_sessionid": {
+     "neg_fired": 1,
+     "neg": 12,
+     "pos_hit": 12,
+     "pos": 12
+    },
+    "d_visibility": {
+     "neg_fired": 0,
+     "neg": 13,
+     "pos_hit": 7,
+     "pos": 13
+    },
+    "member_vs_population": {
+     "neg_fired": 2,
+     "neg": 4,
+     "pos_hit": 4,
+     "pos": 4
+    },
+    "open_artifact": {
+     "neg_fired": 3,
+     "neg": 13,
+     "pos_hit": 13,
+     "pos": 13
+    },
+    "question_asked": {
+     "neg_fired": 2,
+     "neg": 23,
+     "pos_hit": 13,
+     "pos": 23
+    }
+   },
+   "class": "learned"
+  },
+  "s1-r1-20260937": {
+   "recipe": "s1-r1",
+   "seed": 20260937,
+   "selected_epoch": 0,
+   "selected_val_loss": 0.2505282519937465,
+   "pooled_val_auc": 0.9630710285882699,
+   "per_rule_auc_min": 0.7955555555555556,
+   "per_rule_auc_upper_median": 0.9985207100591716,
+   "final_epoch_train_loss": 0.007120379505255468,
+   "epoch0_max_running_train_loss": 0.6917223742604256,
+   "cross_rule_firing_val": [
+    2860,
+    6773
+   ],
+   "temps_at_bound": [
+    "d_semicolon",
+    "d_sessionid"
+   ],
+   "cal_own_negatives_fired": [
+    15,
+    180
+   ],
+   "cal_own_positive_recall": [
+    128,
+    179
+   ],
+   "cal_per_rule": {
+    "d_history": {
+     "neg_fired": 0,
+     "neg": 8,
+     "pos_hit": 7,
+     "pos": 8
+    },
+    "run_tool": {
+     "neg_fired": 3,
+     "neg": 20,
+     "pos_hit": 14,
+     "pos": 20
+    },
+    "selector_narrow": {
+     "neg_fired": 0,
+     "neg": 21,
+     "pos_hit": 13,
+     "pos": 20
+    },
+    "closed_population": {
+     "neg_fired": 3,
+     "neg": 16,
+     "pos_hit": 15,
+     "pos": 16
+    },
+    "d_adjacency": {
+     "neg_fired": 0,
+     "neg": 15,
+     "pos_hit": 15,
+     "pos": 15
+    },
+    "d_loudness": {
+     "neg_fired": 0,
+     "neg": 9,
+     "pos_hit": 0,
+     "pos": 9
+    },
+    "d_mutation": {
+     "neg_fired": 1,
+     "neg": 12,
+     "pos_hit": 12,
+     "pos": 12
+    },
+    "d_red": {
+     "neg_fired": 2,
+     "neg": 10,
+     "pos_hit": 10,
+     "pos": 10
+    },
+    "d_semicolon": {
+     "neg_fired": 0,
+     "neg": 4,
+     "pos_hit": 4,
+     "pos": 4
+    },
+    "d_sessionid": {
+     "neg_fired": 3,
+     "neg": 12,
+     "pos_hit": 12,
+     "pos": 12
+    },
+    "d_visibility": {
+     "neg_fired": 1,
+     "neg": 13,
+     "pos_hit": 5,
+     "pos": 13
+    },
+    "member_vs_population": {
+     "neg_fired": 1,
+     "neg": 4,
+     "pos_hit": 4,
+     "pos": 4
+    },
+    "open_artifact": {
+     "neg_fired": 1,
+     "neg": 13,
+     "pos_hit": 13,
+     "pos": 13
+    },
+    "question_asked": {
+     "neg_fired": 0,
+     "neg": 23,
+     "pos_hit": 4,
+     "pos": 23
+    }
+   },
+   "class": "learned"
+  },
+  "s1-r1-20260940": {
+   "recipe": "s1-r1",
+   "seed": 20260940,
+   "selected_epoch": 0,
+   "selected_val_loss": 0.2940206002104279,
+   "pooled_val_auc": 0.9550987326849396,
+   "per_rule_auc_min": 0.8177777777777778,
+   "per_rule_auc_upper_median": 1.0,
+   "final_epoch_train_loss": 0.009532123594359045,
+   "epoch0_max_running_train_loss": 0.6911572778224945,
+   "cross_rule_firing_val": [
+    2837,
+    6773
+   ],
+   "temps_at_bound": [
+    "d_loudness",
+    "d_semicolon",
+    "d_sessionid"
+   ],
+   "cal_own_negatives_fired": [
+    9,
+    180
+   ],
+   "cal_own_positive_recall": [
+    126,
+    179
+   ],
+   "cal_per_rule": {
+    "d_history": {
+     "neg_fired": 0,
+     "neg": 8,
+     "pos_hit": 7,
+     "pos": 8
+    },
+    "run_tool": {
+     "neg_fired": 3,
+     "neg": 20,
+     "pos_hit": 14,
+     "pos": 20
+    },
+    "selector_narrow": {
+     "neg_fired": 1,
+     "neg": 21,
+     "pos_hit": 15,
+     "pos": 20
+    },
+    "closed_population": {
+     "neg_fired": 0,
+     "neg": 16,
+     "pos_hit": 14,
+     "pos": 16
+    },
+    "d_adjacency": {
+     "neg_fired": 0,
+     "neg": 15,
+     "pos_hit": 15,
+     "pos": 15
+    },
+    "d_loudness": {
+     "neg_fired": 0,
+     "neg": 9,
+     "pos_hit": 1,
+     "pos": 9
+    },
+    "d_mutation": {
+     "neg_fired": 1,
+     "neg": 12,
+     "pos_hit": 11,
+     "pos": 12
+    },
+    "d_red": {
+     "neg_fired": 2,
+     "neg": 10,
+     "pos_hit": 10,
+     "pos": 10
+    },
+    "d_semicolon": {
+     "neg_fired": 0,
+     "neg": 4,
+     "pos_hit": 4,
+     "pos": 4
+    },
+    "d_sessionid": {
+     "neg_fired": 0,
+     "neg": 12,
+     "pos_hit": 12,
+     "pos": 12
+    },
+    "d_visibility": {
+     "neg_fired": 0,
+     "neg": 13,
+     "pos_hit": 1,
+     "pos": 13
+    },
+    "member_vs_population": {
+     "neg_fired": 1,
+     "neg": 4,
+     "pos_hit": 3,
+     "pos": 4
+    },
+    "open_artifact": {
+     "neg_fired": 1,
+     "neg": 13,
+     "pos_hit": 13,
+     "pos": 13
+    },
+    "question_asked": {
+     "neg_fired": 0,
+     "neg": 23,
+     "pos_hit": 6,
+     "pos": 23
+    }
+   },
+   "class": "learned"
+  },
+  "s1-r2-20260935": {
+   "recipe": "s1-r2",
+   "seed": 20260935,
+   "selected_epoch": 2,
+   "selected_val_loss": 0.2537294144718394,
+   "pooled_val_auc": 0.9754494547597996,
+   "per_rule_auc_min": 0.8266666666666667,
+   "per_rule_auc_upper_median": 1.0,
+   "final_epoch_train_loss": 0.010715384526598922,
+   "epoch0_max_running_train_loss": 0.6930466309189797,
+   "cross_rule_firing_val": [
+    3566,
+    6773
+   ],
+   "temps_at_bound": [
+    "d_red",
+    "d_semicolon",
+    "d_sessionid"
+   ],
+   "cal_own_negatives_fired": [
+    12,
+    180
+   ],
+   "cal_own_positive_recall": [
+    139,
+    179
+   ],
+   "cal_per_rule": {
+    "d_history": {
+     "neg_fired": 0,
+     "neg": 8,
+     "pos_hit": 7,
+     "pos": 8
+    },
+    "run_tool": {
+     "neg_fired": 4,
+     "neg": 20,
+     "pos_hit": 17,
+     "pos": 20
+    },
+    "selector_narrow": {
+     "neg_fired": 0,
+     "neg": 21,
+     "pos_hit": 18,
+     "pos": 20
+    },
+    "closed_population": {
+     "neg_fired": 1,
+     "neg": 16,
+     "pos_hit": 15,
+     "pos": 16
+    },
+    "d_adjacency": {
+     "neg_fired": 0,
+     "neg": 15,
+     "pos_hit": 14,
+     "pos": 15
+    },
+    "d_loudness": {
+     "neg_fired": 0,
+     "neg": 9,
+     "pos_hit": 0,
+     "pos": 9
+    },
+    "d_mutation": {
+     "neg_fired": 2,
+     "neg": 12,
+     "pos_hit": 12,
+     "pos": 12
+    },
+    "d_red": {
+     "neg_fired": 2,
+     "neg": 10,
+     "pos_hit": 10,
+     "pos": 10
+    },
+    "d_semicolon": {
+     "neg_fired": 0,
+     "neg": 4,
+     "pos_hit": 4,
+     "pos": 4
+    },
+    "d_sessionid": {
+     "neg_fired": 0,
+     "neg": 12,
+     "pos_hit": 12,
+     "pos": 12
+    },
+    "d_visibility": {
+     "neg_fired": 1,
+     "neg": 13,
+     "pos_hit": 4,
+     "pos": 13
+    },
+    "member_vs_population": {
+     "neg_fired": 1,
+     "neg": 4,
+     "pos_hit": 4,
+     "pos": 4
+    },
+    "open_artifact": {
+     "neg_fired": 1,
+     "neg": 13,
+     "pos_hit": 13,
+     "pos": 13
+    },
+    "question_asked": {
+     "neg_fired": 0,
+     "neg": 23,
+     "pos_hit": 9,
+     "pos": 23
+    }
+   },
+   "class": "learned"
+  },
+  "s1-r2-20260937": {
+   "recipe": "s1-r2",
+   "seed": 20260937,
+   "selected_epoch": 0,
+   "selected_val_loss": 0.29910131888651786,
+   "pooled_val_auc": 0.9521662245800177,
+   "per_rule_auc_min": 0.7777777777777777,
+   "per_rule_auc_upper_median": 0.9952,
+   "final_epoch_train_loss": 0.012392607988954259,
+   "epoch0_max_running_train_loss": 0.692986078262329,
+   "cross_rule_firing_val": [
+    2981,
+    6773
+   ],
+   "temps_at_bound": [
+    "d_semicolon",
+    "d_sessionid",
+    "open_artifact"
+   ],
+   "cal_own_negatives_fired": [
+    13,
+    180
+   ],
+   "cal_own_positive_recall": [
+    128,
+    179
+   ],
+   "cal_per_rule": {
+    "d_history": {
+     "neg_fired": 0,
+     "neg": 8,
+     "pos_hit": 7,
+     "pos": 8
+    },
+    "run_tool": {
+     "neg_fired": 8,
+     "neg": 20,
+     "pos_hit": 18,
+     "pos": 20
+    },
+    "selector_narrow": {
+     "neg_fired": 1,
+     "neg": 21,
+     "pos_hit": 16,
+     "pos": 20
+    },
+    "closed_population": {
+     "neg_fired": 0,
+     "neg": 16,
+     "pos_hit": 15,
+     "pos": 16
+    },
+    "d_adjacency": {
+     "neg_fired": 0,
+     "neg": 15,
+     "pos_hit": 14,
+     "pos": 15
+    },
+    "d_loudness": {
+     "neg_fired": 0,
+     "neg": 9,
+     "pos_hit": 1,
+     "pos": 9
+    },
+    "d_mutation": {
+     "neg_fired": 1,
+     "neg": 12,
+     "pos_hit": 12,
+     "pos": 12
+    },
+    "d_red": {
+     "neg_fired": 2,
+     "neg": 10,
+     "pos_hit": 10,
+     "pos": 10
+    },
+    "d_semicolon": {
+     "neg_fired": 0,
+     "neg": 4,
+     "pos_hit": 4,
+     "pos": 4
+    },
+    "d_sessionid": {
+     "neg_fired": 0,
+     "neg": 12,
+     "pos_hit": 12,
+     "pos": 12
+    },
+    "d_visibility": {
+     "neg_fired": 0,
+     "neg": 13,
+     "pos_hit": 3,
+     "pos": 13
+    },
+    "member_vs_population": {
+     "neg_fired": 0,
+     "neg": 4,
+     "pos_hit": 3,
+     "pos": 4
+    },
+    "open_artifact": {
+     "neg_fired": 1,
+     "neg": 13,
+     "pos_hit": 13,
+     "pos": 13
+    },
+    "question_asked": {
+     "neg_fired": 0,
+     "neg": 23,
+     "pos_hit": 0,
+     "pos": 23
+    }
+   },
+   "class": "learned"
+  },
+  "s1-r2-20260940": {
+   "recipe": "s1-r2",
+   "seed": 20260940,
+   "selected_epoch": 2,
+   "selected_val_loss": 0.30742090908584147,
+   "pooled_val_auc": 0.9664898320070734,
+   "per_rule_auc_min": 0.8583984375,
+   "per_rule_auc_upper_median": 1.0,
+   "final_epoch_train_loss": 0.012282435751858034,
+   "epoch0_max_running_train_loss": 0.6927720540761948,
+   "cross_rule_firing_val": [
+    3652,
+    6773
+   ],
+   "temps_at_bound": [
+    "d_red",
+    "d_semicolon",
+    "d_sessionid"
+   ],
+   "cal_own_negatives_fired": [
+    13,
+    180
+   ],
+   "cal_own_positive_recall": [
+    147,
+    179
+   ],
+   "cal_per_rule": {
+    "d_history": {
+     "neg_fired": 0,
+     "neg": 8,
+     "pos_hit": 7,
+     "pos": 8
+    },
+    "run_tool": {
+     "neg_fired": 5,
+     "neg": 20,
+     "pos_hit": 19,
+     "pos": 20
+    },
+    "selector_narrow": {
+     "neg_fired": 0,
+     "neg": 21,
+     "pos_hit": 17,
+     "pos": 20
+    },
+    "closed_population": {
+     "neg_fired": 0,
+     "neg": 16,
+     "pos_hit": 16,
+     "pos": 16
+    },
+    "d_adjacency": {
+     "neg_fired": 0,
+     "neg": 15,
+     "pos_hit": 15,
+     "pos": 15
+    },
+    "d_loudness": {
+     "neg_fired": 0,
+     "neg": 9,
+     "pos_hit": 3,
+     "pos": 9
+    },
+    "d_mutation": {
+     "neg_fired": 2,
+     "neg": 12,
+     "pos_hit": 12,
+     "pos": 12
+    },
+    "d_red": {
+     "neg_fired": 1,
+     "neg": 10,
+     "pos_hit": 10,
+     "pos": 10
+    },
+    "d_semicolon": {
+     "neg_fired": 0,
+     "neg": 4,
+     "pos_hit": 4,
+     "pos": 4
+    },
+    "d_sessionid": {
+     "neg_fired": 0,
+     "neg": 12,
+     "pos_hit": 12,
+     "pos": 12
+    },
+    "d_visibility": {
+     "neg_fired": 0,
+     "neg": 13,
+     "pos_hit": 4,
+     "pos": 13
+    },
+    "member_vs_population": {
+     "neg_fired": 2,
+     "neg": 4,
+     "pos_hit": 4,
+     "pos": 4
+    },
+    "open_artifact": {
+     "neg_fired": 3,
+     "neg": 13,
+     "pos_hit": 13,
+     "pos": 13
+    },
+    "question_asked": {
+     "neg_fired": 0,
+     "neg": 23,
+     "pos_hit": 11,
+     "pos": 23
+    }
+   },
+   "class": "learned"
+  }
+ },
+ "recipes": {
+  "s1-r1": {
+   "learned": 3,
+   "failed": 0,
+   "n": 3,
+   "stable": true,
+   "learned_wilson95": [
+    0.43849391955098227,
+    1.0
+   ],
+   "failed_wilson95": [
+    0.0,
+    0.5615060804490177
+   ],
+   "worst_seed_auc": 0.9550987326849396
+  },
+  "s1-r2": {
+   "learned": 3,
+   "failed": 0,
+   "n": 3,
+   "stable": true,
+   "learned_wilson95": [
+    0.43849391955098227,
+    1.0
+   ],
+   "failed_wilson95": [
+    0.0,
+    0.5615060804490177
+   ],
+   "worst_seed_auc": 0.9521662245800177
+  }
+ },
+ "carried": "s1-r1",
+ "why": "both stable; worst-seed AUC 0.9551 vs 0.9522 (tie, to s1-r1)"
+}

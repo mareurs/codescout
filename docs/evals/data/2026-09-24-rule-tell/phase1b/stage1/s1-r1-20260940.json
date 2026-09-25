@@ -1,0 +1,170 @@
+{
+ "run_dir": "/home/marius/work/claude/rule-tell-runs/phase1b-s1/s1-r1-20260940",
+ "recipe": "s1-r1",
+ "seed": 20260940,
+ "permute_labels": false,
+ "val_loss_by_epoch": [
+  [
+   0,
+   0.2940206002104279
+  ],
+  [
+   1,
+   0.4164772450170764
+  ],
+  [
+   2,
+   0.2955990321255655
+  ],
+  [
+   3,
+   0.3801437219496058
+  ],
+  [
+   4,
+   0.38351890685025636
+  ]
+ ],
+ "selected": {
+  "epoch": 0,
+  "val_loss": 0.2940206002104279
+ },
+ "pooled_val_auc": 0.9550987326849396,
+ "per_rule_val_auc": {
+  "closed_population": 0.9733333333333334,
+  "d_adjacency": 1.0,
+  "d_history": 1.0,
+  "d_loudness": 0.8533333333333333,
+  "d_mutation": 1.0,
+  "d_red": 1.0,
+  "d_semicolon": 1.0,
+  "d_sessionid": 1.0,
+  "d_visibility": 0.8177777777777778,
+  "member_vs_population": 1.0,
+  "open_artifact": 1.0,
+  "question_asked": 0.8544921875,
+  "run_tool": 0.9750000000000001,
+  "selector_narrow": 0.9260355029585798
+ },
+ "own_negatives_fired": {
+  "closed_population": [
+   1,
+   15
+  ],
+  "d_adjacency": [
+   2,
+   26
+  ],
+  "d_history": [
+   1,
+   13
+  ],
+  "d_loudness": [
+   0,
+   15
+  ],
+  "d_mutation": [
+   1,
+   14
+  ],
+  "d_red": [
+   1,
+   16
+  ],
+  "d_semicolon": [
+   2,
+   21
+  ],
+  "d_sessionid": [
+   2,
+   25
+  ],
+  "d_visibility": [
+   0,
+   15
+  ],
+  "member_vs_population": [
+   1,
+   11
+  ],
+  "open_artifact": [
+   1,
+   11
+  ],
+  "question_asked": [
+   1,
+   32
+  ],
+  "run_tool": [
+   2,
+   20
+  ],
+  "selector_narrow": [
+   2,
+   26
+  ]
+ },
+ "other_rule_cells_fired": {
+  "closed_population": [
+   87,
+   491
+  ],
+  "d_adjacency": [
+   446,
+   469
+  ],
+  "d_history": [
+   51,
+   495
+  ],
+  "d_loudness": [
+   6,
+   491
+  ],
+  "d_mutation": [
+   101,
+   493
+  ],
+  "d_red": [
+   396,
+   489
+  ],
+  "d_semicolon": [
+   479,
+   479
+  ],
+  "d_sessionid": [
+   471,
+   471
+  ],
+  "d_visibility": [
+   0,
+   491
+  ],
+  "member_vs_population": [
+   156,
+   499
+  ],
+  "open_artifact": [
+   285,
+   498
+  ],
+  "question_asked": [
+   38,
+   457
+  ],
+  "run_tool": [
+   174,
+   481
+  ],
+  "selector_narrow": [
+   147,
+   469
+  ]
+ },
+ "other_rule_total": [
+  2837,
+  6773
+ ],
+ "final_epoch_train_loss": 0.009532123594359045
+}

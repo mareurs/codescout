@@ -1,0 +1,10 @@
+run              ep val loss    AUC    min    med ep0 max   final       cross-rule cal own neg cal recall  class
+s1-r1-20260935    2    0.225  0.982  0.880  1.000   0.692  0.0103  3537/6773 (0.52)   21/180    154/179   learned
+s1-r1-20260937    0    0.251  0.963  0.796  0.999   0.692  0.0071  2860/6773 (0.42)   15/180    128/179   learned
+s1-r1-20260940    0    0.294  0.955  0.818  1.000   0.691  0.0095  2837/6773 (0.42)    9/180    126/179   learned
+s1-r2-20260935    2    0.254  0.975  0.827  1.000   0.693  0.0107  3566/6773 (0.53)   12/180    139/179   learned
+s1-r2-20260937    0    0.299  0.952  0.778  0.995   0.693  0.0124  2981/6773 (0.44)   13/180    128/179   learned
+s1-r2-20260940    2    0.307  0.966  0.858  1.000   0.693  0.0123  3652/6773 (0.54)   13/180    147/179   learned
+s1-r1: learned 3/3 (Wilson 95% 0.44-1.00); failed 0/3 (0.00-0.56); worst-seed AUC 0.9551; stable True
+s1-r2: learned 3/3 (Wilson 95% 0.44-1.00); failed 0/3 (0.00-0.56); worst-seed AUC 0.9522; stable True
+carried forward: s1-r1 (both stable; worst-seed AUC 0.9551 vs 0.9522 (tie, to s1-r1))

@@ -15,7 +15,7 @@ tags:
 
 **Valid:** dated 2026-09-25
 
-**Status: Stage 1 registered by the commit that adds its section below; Stages 2 and later are DRAFT and not registered.**
+**Status: Stage 1 registered in `24426921` and complete (§ *Stage 1 results*: both recipes stable; `s1-r1` carried forward). Stage 2 is a DRAFT and not registered.**
 - **Stage 1,** a stable training recipe, runs after that commit.
 - **The sections from "Step 1 — the cross-rule audit" onward** are the Stage-2+ draft. They will be revised in light of Stage 1 and of `docs/research/2026-09-25-phase1-training-research-synthesis.md`: rule-conditioned formulation, cue-balanced training rows, all-cells validation, and failure rates over all seeds in place of the "learned-only" causal reading, which the research showed to be selection after treatment. Each stage is registered before it runs.
 
@@ -122,6 +122,59 @@ Common to all three: JevK5 with LoRA r16/α32/dropout 0.05 on all linear project
 4. The chosen recipe's worst-seed pooled val AUC is at least 0.90.
 5. **Cross-rule firing on val stays at 25% or more in every learned run.** Fixing the recipe does not fix over-firing; that is Stage 2's target.
 
+## Stage 1 results, 2026-09-25
+
+**Run** at `24426921` (the commit recorded in the run root), on the A5000, in two lanes of three runs each, 16:37–20:27 EEST. All six training runs and all six diagnose runs exited 0. The per-run outputs are in `phase1b/stage1/`: the diagnose output as `<recipe>-<seed>.json` and `.txt`, and the table below as `summary.json` and `summary.txt`, from `phase1b/stage1_summary.py`, which applies the registered definitions.
+
+| run | kept epoch | its val loss | pooled val AUC | per-rule min | epoch-0 max running loss | final train loss | cross-rule firing on val | class |
+|---|---|---|---|---|---|---|---|---|
+| s1-r1 · 20260935 | 2 | 0.225 | 0.982 | 0.880 | 0.692 | 0.0103 | 3,537 / 6,773 (52%) | learned |
+| s1-r1 · 20260937 | 0 | 0.251 | 0.963 | 0.796 | 0.692 | 0.0071 | 2,860 / 6,773 (42%) | learned |
+| s1-r1 · 20260940 | 0 | 0.294 | 0.955 | 0.818 | 0.691 | 0.0095 | 2,837 / 6,773 (42%) | learned |
+| s1-r2 · 20260935 | 2 | 0.254 | 0.975 | 0.827 | 0.693 | 0.0107 | 3,566 / 6,773 (53%) | learned |
+| s1-r2 · 20260937 | 0 | 0.299 | 0.952 | 0.778 | 0.693 | 0.0124 | 2,981 / 6,773 (44%) | learned |
+| s1-r2 · 20260940 | 2 | 0.307 | 0.966 | 0.858 | 0.693 | 0.0123 | 3,652 / 6,773 (54%) | learned |
+
+**Decision, as registered:**
+- **Both recipes are stable:** each learned at 3 of 3 seeds, with a Wilson 95% interval of 0.44–1.00, and failed at 0 of 3 (0.00–0.56).
+- **Worst-seed pooled val AUC:** `s1-r1` 0.9551, `s1-r2` 0.9522. The difference, 0.0029, is under 0.005, a tie, which goes to `s1-r1`. `s1-r1` is also the higher of the two, so the tie rule and the plain comparison agree.
+- **`s1-r1` is carried into Stage 2 unchanged.**
+
+**Predictions:**
+1. `s1-r1` learns at 3 of 3 seeds. **Held.**
+2. `s1-r2` learns at 3 of 3 seeds. **Held.**
+3. **No run shows the overshoot signature** (a running train loss above 0.75 in epoch 0). **Held.** Every run's epoch-0 maximum is 0.691–0.693, the loss at initialisation (ln 2 with a zero-initialised head), and it only fell from there. Phase 1's two seeds reached 0.925 and 1.316.
+4. The chosen recipe's worst-seed pooled val AUC is at least 0.90. **Held,** at 0.955.
+5. Cross-rule firing on val stays at 25% or more in every learned run. **Held,** at 42–54%.
+
+**What Stage 1 shows:**
+- **The recipe now learns reliably:** 6 of 6 runs, against the phase-1 recipe's 1 of 2. Three seeds per recipe still bound the failure rate only loosely, at up to 0.56 each.
+- **It did not make the model more accurate.** Pooled own-cell AUC of 0.952–0.982 is the range of phase 1's one learned seed, 0.971. Own-cell AUC is read on twin pairs, which a bag-of-tokens probe separates at 0.9 or more for 12 of 14 rules.
+- **Over-firing is unchanged, as prediction 5 expected.** Cross-rule firing is 42–54%, against phase 1's 39%.
+  - The `d_semicolon` head fires on 479 of 479 other rules' val cells in all six runs.
+  - The `d_sessionid` head fires on 470 or 471 of 471 in five runs, and 182 in the sixth (`s1-r2` · 20260937).
+  - `d_loudness` and `d_visibility` fire on 0–36 of 491 in every run.
+- **The selected epoch depends on the seed.** Three runs kept epoch 0 and three kept epoch 2. Every run overfit after its kept epoch: by the last epoch, train loss was about 0.01 and val loss 0.308–0.384.
+- **Calibration.** In every run, the temperature is at the lower bound, 0.25, for `d_semicolon` and `d_sessionid`. It is also at that bound for `d_red` (3 runs), `d_loudness` (1) and `open_artifact` (1). A temperature at the lower bound means those heads' cal items were perfectly separated, so the fit carries no information for them.
+
+**Reported, not registered:**
+- **Own-negative firing on `cal`** at each head's precision threshold: 9–21 of 180 own negatives (5–12%).
+- **Own-positive recall on `cal`:** 126–154 of 179 (70–86%).
+- Thresholds are chosen on `val`, so the diagnose step's `own_negatives_fired`, counted on `val`, is set by the threshold rule and is not reported (bug `2bac7e0a27fbc392`).
+
+**Checkpoints,** outside the repo under `~/work/claude/rule-tell-runs/phase1b-s1/<run>/best.pt`, by sha256:
+
+| run | sha256 |
+|---|---|
+| s1-r1 · 20260935 | `dd89ea46236173d2fba66616c868aa5a46db4edf5575a262f79a5b1b2f710c05` |
+| s1-r1 · 20260937 | `5fafbcc61569163f9284ce0b5a90d70f35a9e335aaf7b864c44399e60bf387a3` |
+| s1-r1 · 20260940 | `e8690c86cff4fb1607f63c28040f860f487ee21d3348b82dee46c50fff00442f` |
+| s1-r2 · 20260935 | `bd97bb2b0781745ca9ae87e99e284c35b2fe7c418ea6f8cf017e94ba2aa84489` |
+| s1-r2 · 20260937 | `816feb89144e5e5eb73e3d7d9d3b0b3fb9b4d35e35f110593056b97c3440bff2` |
+| s1-r2 · 20260940 | `be99f4c90444f648b26ef7c84363b79343380088f04eb51cd0ecc8389e480ea1` |
+
+The three `s1-r1` checkpoints are Stage 2's arm B.
+
 ## Stage 2 — cross-rule negatives, a draft (not registered)
 
 **Status: draft, written while Stage 1's last seed was training.** It is registered only after § *Stage 1 results* is written and the open decisions below are settled. Steps 1–5 below are Stage 2's steps; this section states what changes in them.
@@ -131,7 +184,7 @@ Common to all three: JevK5 with LoRA r16/α32/dropout 0.05 on all linear project
 2. Does the result pass the gate?
 
 **What Stage 1 settles for Stage 2:**
-- **The recipe:** the recipe Stage 1 carries forward, unchanged. It replaces the phase-1 settings listed in § *Carried unchanged*, and is named here at registration.
+- **The recipe:** `s1-r1`, carried forward by Stage 1's decision rule (§ *Stage 1 results*), unchanged. It replaces the phase-1 settings listed in § *Carried unchanged*.
 - **Seeds:** 20260935, 20260937 and 20260940. Every arm is trained or read at all three.
 - **Runs are not bit-reproducible,** so arms are compared by counts over seeds, never by one run.
 
@@ -139,7 +192,7 @@ Common to all three: JevK5 with LoRA r16/α32/dropout 0.05 on all linear project
 
 | arm | training | trained in | can ship |
 |---|---|---|---|
-| **B** | Stage 1's three checkpoints of the carried recipe, unchanged | Stage 1 | no |
+| **B** | Stage 1's three `s1-r1` checkpoints, unchanged, pinned by sha256 in § *Stage 1 results* | Stage 1 | no |
 | **N** | the same recipe, plus Step 3's cross-rule term | Stage 2 | yes |
 | **NC** | N, plus cue counterexamples | Stage 2, if open decision 1 registers it | yes, if registered |
 
@@ -154,7 +207,7 @@ Common to all three: JevK5 with LoRA r16/α32/dropout 0.05 on all linear project
 5. **Step 5:** every checkpoint of every arm goes through the gate once.
 
 **Measured per run, in addition to Stage 1's measurements:**
-- **All-cells val AUC,** over own cells plus admitted cross cells, pooled and per head. Own-cell AUC cannot see a head that fires on another rule's text. In each of the four Stage 1 runs read when this was drafted, the `d_semicolon` head scored 1.000 on its own pairs and fired on 479 of 479 other rules' val cells. The all-cells AUC falls when that happens.
+- **All-cells val AUC,** over own cells plus admitted cross cells, pooled and per head. Own-cell AUC cannot see a head that fires on another rule's text. In all six Stage 1 runs, the `d_semicolon` head scored 1.000 on its own pairs and fired on 479 of 479 other rules' val cells. The all-cells AUC falls when that happens.
 - **Own-negative firing on `cal`,** not `val`. Thresholds are chosen on `val`, so a count there is set by the threshold rule rather than by the model (bug `2bac7e0a27fbc392`).
 
 **Reading, over every seed.** The research showed that a reading over only the runs that learned is selection after treatment. If the negatives change how often training fails, conditioning on "learned" biases the comparison. So:
