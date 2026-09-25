@@ -1722,12 +1722,14 @@ fn split_outside_quotes(s: &str, seps: &[&str]) -> Vec<String> {
 /// reading. `grep` is no longer blocked here (it has its own MCP tool and is exempted
 /// command-wide, see docs/issues/archive/2026-09-14-il3-grep-remedy-assumes-symbol-lookup-for-identifier-shaped-patterns.md).
 ///
-/// The command name is matched against the segment's first token as the *shell* sees
-/// it ([`shell_tokens`]). This closes a bypass: `'cat' src/main.rs` used to yield the
-/// first token `'cat'` — quotes attached — which matched no blocked command name, so
-/// the block was skipped while the shell happily ran `cat`. The same applies to
-/// `\cat` and `c"at"`. The extension half still scans the whole raw segment, on
-/// purpose, so quoted paths like `cat "src/main.rs"` stay caught.
+/// The command name is matched against the token in command position as the *shell* sees
+/// it ([`shell_tokens`]), after skipping leading assignments and supported wrappers.
+/// This closes a bypass: `'cat' src/main.rs` used to yield the first token `'cat'` —
+/// quotes attached — which matched no blocked command name, so the block was skipped
+/// while the shell happily ran `cat`. The same applies to `\cat` and `c"at"`. It also
+/// avoids treating reader names inside quoted assignment values as commands. The
+/// extension half still scans the whole raw segment, on purpose, so quoted paths like
+/// `cat "src/main.rs"` stay caught.
 ///
 /// Known limits:
 /// - Variable expansion (`cat $FILE`) is undetectable at parse time — accepted.
@@ -1738,11 +1740,7 @@ fn split_outside_quotes(s: &str, seps: &[&str]) -> Vec<String> {
 ///   load-bearing: a `|` inside the body would otherwise cut the body into
 ///   segments that are each read as a command.
 pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<String> {
-    static CMD_RE: std::sync::OnceLock<Option<Regex>> = std::sync::OnceLock::new();
     static EXT_RE: std::sync::OnceLock<Option<Regex>> = std::sync::OnceLock::new();
-    let cmd_re = CMD_RE
-        .get_or_init(|| Regex::new(&format!(r"\b({})\b", SOURCE_ACCESS_COMMANDS.join("|"))).ok())
-        .as_ref()?;
     let ext_re = EXT_RE
         .get_or_init(|| Regex::new(SOURCE_EXTENSIONS).ok())
         .as_ref()?;
@@ -1791,12 +1789,15 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
             }
         }
         for seg in &stages {
-            // Only the *first token* of a segment is the actual command being executed.
-            // Matching against the first token (not the full segment string) prevents
-            // false positives from quoted arguments containing command names, e.g.:
-            //   git commit -m "feat: tail-50 of log, output_buffer.rs"
-            let first_token = shell_tokens(seg).into_iter().next().unwrap_or_default();
-            if !cmd_re.is_match(&first_token) {
+            // Only the token in command position is executable syntax. In particular,
+            // a leading assignment value is data, even when it contains a reader name
+            // and a source path: `P="x-tail-y.md src/tools/mod.rs"`.
+            let tokens = shell_tokens(seg);
+            let command_index = producer_index(&tokens);
+            let Some(command) = tokens.get(command_index) else {
+                continue;
+            };
+            if !SOURCE_ACCESS_COMMANDS.contains(&command.as_str()) {
                 continue;
             }
             // The file must live inside the project, because the hint routes to
@@ -1810,11 +1811,12 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     let blocked = blocked?;
 
     // Derive the hint from the specific command that triggered the block.
-    let first_cmd = shell_tokens(blocked.as_str())
-        .into_iter()
-        .next()
+    let blocked_tokens = shell_tokens(blocked.as_str());
+    let first_cmd = blocked_tokens
+        .get(producer_index(&blocked_tokens))
+        .map(String::as_str)
         .unwrap_or_default();
-    let remedy: String = match first_cmd.as_str() {
+    let remedy: String = match first_cmd {
         "sed" | "awk" => "use read_file(path, start_line, end_line), symbols(path), \
                  symbols(name=..., include_body=true), or grep(regex) instead. \
                  Re-run with acknowledge_risk: true if you need raw shell access."
@@ -1834,7 +1836,7 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     // refusals named an out-of-project path). Reuses the predicate that produced the
     // verdict, so the message cannot drift from it.
     // BUG docs/issues/archive/2026-09-10-source-gate-joins-an-unexpanded-var-path-onto-the-project-root.md
-    let unresolved_note = if shell_tokens(blocked.as_str())
+    let unresolved_note = if blocked_tokens
         .iter()
         .any(|t| has_unexpanded_expansion(t))
     {
@@ -3278,6 +3280,25 @@ mod tests {
     #[test]
     fn source_file_access_blocks_tail_on_go() {
         assert!(check_source_file_access_at_root("tail -n 50 server.go").is_some());
+    }
+
+    #[test]
+    fn source_file_access_allows_tail_in_a_quoted_assignment_value() {
+        assert_eq!(
+            check_source_file_access_at_root(
+                r#"P="docs/issues/x-tail-y.md src/tools/mod.rs"; echo assigned"#
+            ),
+            None,
+            "a reader name inside a quoted assignment value is data, not a command"
+        );
+    }
+
+    #[test]
+    fn source_file_access_still_blocks_tail_as_the_command() {
+        assert!(
+            check_source_file_access_at_root("tail src/tools/mod.rs").is_some(),
+            "tail in command position must remain blocked"
+        );
     }
 
     /// Every pre-existing source-access case predates the `project_root`
