@@ -1,0 +1,160 @@
+{
+ "run_dir": "/home/marius/work/claude/rule-tell-runs/phase1b-diag/null",
+ "seed": 20260935,
+ "permute_labels": true,
+ "val_loss_by_epoch": [
+  [
+   0,
+   0.7369439081930611
+  ],
+  [
+   1,
+   0.7055962170383066
+  ],
+  [
+   2,
+   0.7285411364743897
+  ]
+ ],
+ "selected": {
+  "epoch": 1,
+  "val_loss": 0.7055962170383066
+ },
+ "pooled_val_auc": 0.4978485116416151,
+ "per_rule_val_auc": {
+  "closed_population": 0.44888888888888884,
+  "d_adjacency": 0.4630177514792899,
+  "d_history": 0.47337278106508873,
+  "d_loudness": 0.5555555555555556,
+  "d_mutation": 0.5153061224489797,
+  "d_red": 0.48828125,
+  "d_semicolon": 0.49433106575963714,
+  "d_sessionid": 0.48160000000000003,
+  "d_visibility": 0.4844444444444444,
+  "member_vs_population": 0.4793388429752067,
+  "open_artifact": 0.4772727272727273,
+  "question_asked": 0.484375,
+  "run_tool": 0.495,
+  "selector_narrow": 0.5162721893491125
+ },
+ "own_negatives_fired": {
+  "closed_population": [
+   0,
+   15
+  ],
+  "d_adjacency": [
+   25,
+   26
+  ],
+  "d_history": [
+   0,
+   13
+  ],
+  "d_loudness": [
+   8,
+   15
+  ],
+  "d_mutation": [
+   10,
+   14
+  ],
+  "d_red": [
+   13,
+   16
+  ],
+  "d_semicolon": [
+   17,
+   21
+  ],
+  "d_sessionid": [
+   0,
+   25
+  ],
+  "d_visibility": [
+   14,
+   15
+  ],
+  "member_vs_population": [
+   0,
+   11
+  ],
+  "open_artifact": [
+   10,
+   11
+  ],
+  "question_asked": [
+   0,
+   32
+  ],
+  "run_tool": [
+   19,
+   20
+  ],
+  "selector_narrow": [
+   0,
+   26
+  ]
+ },
+ "other_rule_cells_fired": {
+  "closed_population": [
+   27,
+   491
+  ],
+  "d_adjacency": [
+   469,
+   469
+  ],
+  "d_history": [
+   87,
+   495
+  ],
+  "d_loudness": [
+   331,
+   491
+  ],
+  "d_mutation": [
+   363,
+   493
+  ],
+  "d_red": [
+   471,
+   489
+  ],
+  "d_semicolon": [
+   339,
+   479
+  ],
+  "d_sessionid": [
+   2,
+   471
+  ],
+  "d_visibility": [
+   483,
+   491
+  ],
+  "member_vs_population": [
+   40,
+   499
+  ],
+  "open_artifact": [
+   488,
+   498
+  ],
+  "question_asked": [
+   13,
+   457
+  ],
+  "run_tool": [
+   479,
+   481
+  ],
+  "selector_narrow": [
+   0,
+   469
+  ]
+ },
+ "other_rule_total": [
+  3592,
+  6773
+ ]
+}

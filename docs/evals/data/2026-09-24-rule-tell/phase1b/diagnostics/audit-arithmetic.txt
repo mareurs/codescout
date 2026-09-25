@@ -1,0 +1,16 @@
+rows 2671
+closed_population      rows  164  expected audit cells 282  admitted if flagged <= 6 (upper at 6: 0.0456; at 7: 0.0503)
+d_adjacency            rows  190  expected audit cells 279  admitted if flagged <= 6 (upper at 6: 0.0461; at 7: 0.0509)
+d_history              rows  192  expected audit cells 278  admitted if flagged <= 6 (upper at 6: 0.0463; at 7: 0.0511)
+d_loudness             rows  196  expected audit cells 278  admitted if flagged <= 6 (upper at 6: 0.0463; at 7: 0.0511)
+d_mutation             rows  158  expected audit cells 282  admitted if flagged <= 6 (upper at 6: 0.0456; at 7: 0.0503)
+d_red                  rows  156  expected audit cells 282  admitted if flagged <= 6 (upper at 6: 0.0456; at 7: 0.0503)
+d_semicolon            rows  162  expected audit cells 282  admitted if flagged <= 6 (upper at 6: 0.0456; at 7: 0.0503)
+d_sessionid            rows  214  expected audit cells 276  admitted if flagged <= 6 (upper at 6: 0.0466; at 7: 0.0514)
+d_visibility           rows  160  expected audit cells 282  admitted if flagged <= 6 (upper at 6: 0.0456; at 7: 0.0503)
+member_vs_population   rows  140  expected audit cells 284  admitted if flagged <= 7 (upper at 7: 0.0500; at 8: 0.0546)
+open_artifact          rows  175  expected audit cells 280  admitted if flagged <= 6 (upper at 6: 0.0460; at 7: 0.0507)
+question_asked         rows  263  expected audit cells 270  admitted if flagged <= 6 (upper at 6: 0.0476; at 7: 0.0525)
+run_tool               rows  204  expected audit cells 277  admitted if flagged <= 6 (upper at 6: 0.0464; at 7: 0.0512)
+selector_narrow        rows  297  expected audit cells 267  admitted if flagged <= 6 (upper at 6: 0.0482; at 7: 0.0531)
+pairs (positive rows) 1335; expected pairs with both texts drawn: 16.8

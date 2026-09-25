@@ -1255,3 +1255,42 @@ Run from commit `2a600b5d` on the RTX A5000. Transcripts and every row's probabi
 3. S's selected val loss is within 0.05 of phase 1's 0.231.
 4. P: `d_semicolon`'s probe AUC is at least 0.95, and at least 5 of the 14 rules reach 0.9.
 5. P's control has a mean AUC within [0.4, 0.6].
+
+### Diagnostics — results, 2026-09-25
+
+Run from commit `02511d99` on the A5000. The outputs are in `docs/evals/data/2026-09-24-rule-tell/phase1b/diagnostics/`. Checkpoints stay outside the repo: S `f25cdfb33da2d745b46a5fc8b837af94e92e212e316b1a2a8f439762ff2fde35`, N `6a37f4e181bf9ecd97794dfc941f7941240e97ee3e551578844b30342bc1f5c2`.
+
+**Control: passed.** `diagnose_run.py` on the phase-1 checkpoint reproduces 2,614/6,773 exactly. It gives phase 1's baseline: pooled val AUC **0.971**, per rule 0.840–1.000 (median 1.000).
+
+**N, the permutation null: passed.**
+- Pooled val AUC **0.498**, inside [0.45, 0.55], with per-rule values from 0.449 to 0.556.
+- Val loss by epoch 0.737, 0.706 and 0.729, all at least 0.68.
+- **Nothing but the labels links train to val,** at the resolution this test has. So phase 1b's precondition holds.
+
+**S, the seed floor: the phase-1 settings did not learn at seed 20260937.**
+- Val loss by epoch 0.948, 0.725 and 0.694; the selected epoch is 2, at **0.694**.
+- Pooled val AUC **0.525**, inside the null band, with per rule 0.480–0.871 (median 0.628).
+- Cross-rule firing on val is 1,255/6,773 (19%). For a model with no signal, that is a property of degenerate thresholds, not the phase-1 mechanism, and it is not read as either.
+
+**Why the two seeds differ, as far as the logs show.** The runs log the running mean of train loss every 200 rows.
+- **Both seeds' loss rises above chance through epoch 0,** after warmup ends at about row 320: seed 1 to 0.925 by row 800, seed 2 to **1.316** by row 1,200.
+- **Seed 1 recovers inside epoch 0** (0.757 by row 1,600) and ends epoch 2 at 0.089. **Seed 2 does not,** and ends epoch 2 at 0.715.
+- A spike at peak learning rate that one initialisation survives and another does not fits a peak rate too high for this recipe. **That is a hypothesis; no run has tested it.**
+
+**P, the surface probe: 12 of 14 rules are separable by the target unit's tokens alone.**
+- Val AUC is at least 0.9 for 12 of 14 rules; `d_history`, `d_red` and `d_semicolon` reach 1.000. The exceptions are `question_asked` (0.605) and `d_loudness` (0.782).
+- **The control passes:** mean AUC 0.491 over the 14 rules, range 0.267–0.669. At 22 to 64 val rows per rule, single-rule control values are noisy.
+- **Token tally:**
+  - `&&` appears in 77/77 of `d_semicolon`'s positive target units, 0/77 of its negatives, and 0/2,158 of other rules' rows. `;` appears in 0/77 positives and 77/77 negatives.
+  - The word "sessionId" appears in **53/95 of `d_sessionid`'s negatives and 0/95 of its positives**. The fix introduces it, so the negative class carries the correction's vocabulary.
+- **What this shows, and what it does not.** These pairs *allow* a token solution. For `d_semicolon`, `&&` is the rule's own content. The probe does not show that a trained arm uses tokens; the phase-1b swap texts test that.
+- **What it suggests.** "Fire unless the fix's word is present" would fire on nearly any text, consistent with `d_sessionid`'s 470/471 cross-rule firing in phase 1. That is a candidate mechanism, **not tested**.
+
+**Predictions:**
+1. N passes: **held.**
+2. S's cross-rule firing is at least 25%: **failed** (19%). Its premise, that S learns as seed 1 did, failed first.
+3. S's val loss is within 0.05 of 0.231: **failed** (0.694).
+4. `d_semicolon`'s probe AUC is at least 0.95, and at least 5 rules reach 0.9: **held** (1.000; 12 rules).
+5. P's control mean is within [0.4, 0.6]: **held** (0.491).
+
+**What this changes about phase 1's reported result.** Stage 3 reported that L2-QWEN learned (val 0.231). That was one seed. **The identical settings at a second seed did not learn.** So "L2 learns this task under these settings" is not established. What is established: one of the two seeds did.

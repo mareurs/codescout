@@ -41,7 +41,28 @@ Phase 1 (`docs/evals/phase1-local-classifier-preregistration.md`) stopped under 
 
 Registered in phase 1 (§ *Diagnostics after the stop*) before they ran. **Phase 1b is registered only if the permutation null passes.**
 
-**Results: pending.** This section is filled in from those runs before registration, with every number, whichever way it falls.
+**Results, 2026-09-25,** from commit `02511d99`. The detail is in phase 1, § *Diagnostics — results*.
+
+- **The permutation null passes:** pooled val AUC 0.498, and every epoch's val loss is at least 0.68. The split carries no link but the labels, so phase 1b's precondition holds.
+- **The phase-1 recipe is seed-unstable.** At seed 20260937 it did not learn: val loss 0.694, pooled val AUC 0.525, inside the null band. Phase 1's seed learned (0.971).
+  - Both seeds' train loss rises above chance after warmup. One recovers and one does not.
+  - **One of two seeds learned.** A phase-1b run on this recipe can fail from instability alone, whatever the negatives do.
+- **12 of 14 rules are separable by target-unit tokens** (probe val AUC ≥ 0.9).
+  - `&&` marks every `d_semicolon` positive and appears in no other rule's rows, so no cross-rule negative can teach the head that `&&` alone is not the rule. That supports keeping the swap text `clean-12`.
+  - The word "sessionId" marks 53 of 95 `d_sessionid` negatives and no positive. "Fire unless the fix's word is present" is a candidate mechanism for phase 1's clean-text fires. It is not tested.
+- **Audit arithmetic,** from the manifest alone (`phase1b/diagnostics/audit-arithmetic.txt`):
+  - A head gets about 267–284 audit cells, and is admitted only if at most 6 are flagged (7 for `member_vs_population`). That is about 2% under the union rule, so rules whose subject is common in engineering prose may not be admitted.
+  - About 16.8 pairs are expected to contribute both texts to a 300-row sample.
+
+**What these results change in the design:**
+
+1. **A checkpoint must have learned before it counts in the causal comparison.** "Learned" means pooled val AUC over own cells of at least **0.80**, fixed now. Phase 1's seed is at 0.971, and the null band's top is 0.55.
+   - A checkpoint below 0.80 is reported, and excluded from the causal reading. It is neither a pass nor a fail there.
+   - **D2 (S) is at 0.525, so it is excluded.** It would fail the gate because it learned nothing, not because it lacks cross-rule negatives, and counting it as a failing control would inflate the causal claim.
+   - For the ship rule, an L2-1b below 0.80 is recorded as **not learned**. It is not gated, and it counts as a failed attempt.
+2. **Open, and blocking registration: the recipe itself.** With one of two seeds learning, phase 1b's gate would partly test training stability, not cross-rule negatives. There are two ways forward; the operator decides between them before this draft is registered.
+   - **Keep the recipe and add seeds:** train three or more seeds per configuration, and read the causal claim only over the checkpoints that learned. It is cheaper to design, and runs may be wasted.
+   - **Stabilise the recipe first:** select the recipe on val, on the phase-1 objective without cross-rule negatives, over a small registered grid (for example, peak learning rates for the body and head), two seeds per cell, choosing the cell with the best worst-seed pooled val AUC. Then retrain **both** D and L2-1b with that recipe, two seeds each, so the causal comparison is one recipe, with and without the negatives. This costs more GPU time, and the comparison is cleaner.
 
 ## Step 1 — the cross-rule audit (decides which cells become negatives)
 

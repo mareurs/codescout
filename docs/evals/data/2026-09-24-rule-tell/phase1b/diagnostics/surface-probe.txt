@@ -1,0 +1,20 @@
+rule                    train n  val n  probe AUC  control AUC
+closed_population           102     30      0.964        0.267
+d_adjacency                 108     52      0.999        0.503
+d_history                   150     26      1.000        0.669
+d_loudness                  148     30      0.782        0.436
+d_mutation                  106     28      0.918        0.510
+d_red                       104     32      1.000        0.621
+d_semicolon                 112     42      1.000        0.431
+d_sessionid                 140     50      0.995        0.424
+d_visibility                104     30      0.987        0.311
+member_vs_population        110     22      0.926        0.529
+open_artifact               126     23      0.977        0.561
+question_asked              153     64      0.605        0.545
+run_tool                    124     40      0.960        0.550
+selector_narrow             204     52      0.911        0.519
+rules with probe AUC >= 0.9: 12 of 14; control AUC mean 0.491, range 0.267-0.669
+  d_semicolon target units containing '&&': positives 77/77, negatives 0/77, other rules' rows 0/2158
+  d_semicolon target units containing ';': positives 0/77, negatives 77/77, other rules' rows 44/2158
+  d_sessionid target units containing 'a codescout-XX name': positives 1/95, negatives 0/95, other rules' rows 3/2122
+  d_sessionid target units containing 'sessionid': positives 0/95, negatives 53/95, other rules' rows 17/2122

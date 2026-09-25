@@ -1,0 +1,160 @@
+{
+ "run_dir": "/home/marius/work/claude/rule-tell-runs/stage3/qwen",
+ "seed": 20260935,
+ "permute_labels": false,
+ "val_loss_by_epoch": [
+  [
+   0,
+   0.35290639017066305
+  ],
+  [
+   1,
+   0.23077894889142944
+  ],
+  [
+   2,
+   0.2979100350647668
+  ]
+ ],
+ "selected": {
+  "epoch": 1,
+  "val_loss": 0.23077894889142944
+ },
+ "pooled_val_auc": 0.9705570291777188,
+ "per_rule_val_auc": {
+  "closed_population": 0.9866666666666667,
+  "d_adjacency": 1.0,
+  "d_history": 1.0,
+  "d_loudness": 0.84,
+  "d_mutation": 1.0,
+  "d_red": 1.0,
+  "d_semicolon": 1.0,
+  "d_sessionid": 1.0,
+  "d_visibility": 0.9511111111111112,
+  "member_vs_population": 1.0,
+  "open_artifact": 0.9924242424242424,
+  "question_asked": 0.861328125,
+  "run_tool": 0.9325000000000001,
+  "selector_narrow": 0.9497041420118343
+ },
+ "own_negatives_fired": {
+  "closed_population": [
+   1,
+   15
+  ],
+  "d_adjacency": [
+   2,
+   26
+  ],
+  "d_history": [
+   1,
+   13
+  ],
+  "d_loudness": [
+   0,
+   15
+  ],
+  "d_mutation": [
+   1,
+   14
+  ],
+  "d_red": [
+   1,
+   16
+  ],
+  "d_semicolon": [
+   2,
+   21
+  ],
+  "d_sessionid": [
+   2,
+   25
+  ],
+  "d_visibility": [
+   1,
+   15
+  ],
+  "member_vs_population": [
+   1,
+   11
+  ],
+  "open_artifact": [
+   1,
+   11
+  ],
+  "question_asked": [
+   1,
+   32
+  ],
+  "run_tool": [
+   2,
+   20
+  ],
+  "selector_narrow": [
+   2,
+   26
+  ]
+ },
+ "other_rule_cells_fired": {
+  "closed_population": [
+   41,
+   491
+  ],
+  "d_adjacency": [
+   336,
+   469
+  ],
+  "d_history": [
+   155,
+   495
+  ],
+  "d_loudness": [
+   14,
+   491
+  ],
+  "d_mutation": [
+   178,
+   493
+  ],
+  "d_red": [
+   213,
+   489
+  ],
+  "d_semicolon": [
+   479,
+   479
+  ],
+  "d_sessionid": [
+   470,
+   471
+  ],
+  "d_visibility": [
+   119,
+   491
+  ],
+  "member_vs_population": [
+   146,
+   499
+  ],
+  "open_artifact": [
+   106,
+   498
+  ],
+  "question_asked": [
+   44,
+   457
+  ],
+  "run_tool": [
+   184,
+   481
+  ],
+  "selector_narrow": [
+   129,
+   469
+  ]
+ },
+ "other_rule_total": [
+  2614,
+  6773
+ ]
+}

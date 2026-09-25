@@ -1,0 +1,4 @@
+/home/marius/work/claude/rule-tell-runs/phase1b-diag/seed2: seed 20260937 permute False
+  val loss by epoch [[0, 0.9477992804145401], [1, 0.7251953718300744], [2, 0.693963534200489]]  selected {'epoch': 2, 'val_loss': 0.693963534200489}
+  pooled val AUC 0.525  per-rule min/median/max 0.480/0.628/0.871
+  cross-rule firing on val: 1255/6773 (0.19)

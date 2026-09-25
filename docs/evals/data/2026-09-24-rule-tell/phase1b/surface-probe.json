@@ -1,0 +1,146 @@
+{
+ "per_rule": {
+  "closed_population": {
+   "train_n": 102,
+   "val_n": 30,
+   "probe_auc": 0.9644444444444445,
+   "control_auc": 0.2666666666666667
+  },
+  "d_adjacency": {
+   "train_n": 108,
+   "val_n": 52,
+   "probe_auc": 0.9985207100591716,
+   "control_auc": 0.5029585798816568
+  },
+  "d_history": {
+   "train_n": 150,
+   "val_n": 26,
+   "probe_auc": 1.0,
+   "control_auc": 0.6686390532544378
+  },
+  "d_loudness": {
+   "train_n": 148,
+   "val_n": 30,
+   "probe_auc": 0.7822222222222223,
+   "control_auc": 0.4355555555555556
+  },
+  "d_mutation": {
+   "train_n": 106,
+   "val_n": 28,
+   "probe_auc": 0.9183673469387755,
+   "control_auc": 0.5102040816326531
+  },
+  "d_red": {
+   "train_n": 104,
+   "val_n": 32,
+   "probe_auc": 1.0,
+   "control_auc": 0.62109375
+  },
+  "d_semicolon": {
+   "train_n": 112,
+   "val_n": 42,
+   "probe_auc": 1.0,
+   "control_auc": 0.43083900226757366
+  },
+  "d_sessionid": {
+   "train_n": 140,
+   "val_n": 50,
+   "probe_auc": 0.9952000000000001,
+   "control_auc": 0.424
+  },
+  "d_visibility": {
+   "train_n": 104,
+   "val_n": 30,
+   "probe_auc": 0.9866666666666667,
+   "control_auc": 0.31111111111111117
+  },
+  "member_vs_population": {
+   "train_n": 110,
+   "val_n": 22,
+   "probe_auc": 0.9256198347107438,
+   "control_auc": 0.5289256198347108
+  },
+  "open_artifact": {
+   "train_n": 126,
+   "val_n": 23,
+   "probe_auc": 0.9772727272727273,
+   "control_auc": 0.5606060606060607
+  },
+  "question_asked": {
+   "train_n": 153,
+   "val_n": 64,
+   "probe_auc": 0.60546875,
+   "control_auc": 0.544921875
+  },
+  "run_tool": {
+   "train_n": 124,
+   "val_n": 40,
+   "probe_auc": 0.96,
+   "control_auc": 0.55
+  },
+  "selector_narrow": {
+   "train_n": 204,
+   "val_n": 52,
+   "probe_auc": 0.9112426035502958,
+   "control_auc": 0.5192307692307692
+  }
+ },
+ "tally": {
+  "d_semicolon / &&": {
+   "pos": [
+    77,
+    77
+   ],
+   "neg": [
+    0,
+    77
+   ],
+   "other_rules": [
+    0,
+    2158
+   ]
+  },
+  "d_semicolon / ;": {
+   "pos": [
+    0,
+    77
+   ],
+   "neg": [
+    77,
+    77
+   ],
+   "other_rules": [
+    44,
+    2158
+   ]
+  },
+  "d_sessionid / a codescout-XX name": {
+   "pos": [
+    1,
+    95
+   ],
+   "neg": [
+    0,
+    95
+   ],
+   "other_rules": [
+    3,
+    2122
+   ]
+  },
+  "d_sessionid / sessionid": {
+   "pos": [
+    0,
+    95
+   ],
+   "neg": [
+    53,
+    95
+   ],
+   "other_rules": [
+    17,
+    2122
+   ]
+  }
+ }
+}

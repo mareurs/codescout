@@ -1,0 +1,160 @@
+{
+ "run_dir": "/home/marius/work/claude/rule-tell-runs/phase1b-diag/seed2",
+ "seed": 20260937,
+ "permute_labels": false,
+ "val_loss_by_epoch": [
+  [
+   0,
+   0.9477992804145401
+  ],
+  [
+   1,
+   0.7251953718300744
+  ],
+  [
+   2,
+   0.693963534200489
+  ]
+ ],
+ "selected": {
+  "epoch": 2,
+  "val_loss": 0.693963534200489
+ },
+ "pooled_val_auc": 0.5253168287651047,
+ "per_rule_val_auc": {
+  "closed_population": 0.48,
+  "d_adjacency": 0.8284023668639053,
+  "d_history": 0.7100591715976331,
+  "d_loudness": 0.5911111111111111,
+  "d_mutation": 0.6275510204081632,
+  "d_red": 0.65234375,
+  "d_semicolon": 0.8707482993197279,
+  "d_sessionid": 0.8383999999999999,
+  "d_visibility": 0.48000000000000004,
+  "member_vs_population": 0.5289256198347108,
+  "open_artifact": 0.6439393939393939,
+  "question_asked": 0.4814453125,
+  "run_tool": 0.565,
+  "selector_narrow": 0.5384615384615383
+ },
+ "own_negatives_fired": {
+  "closed_population": [
+   0,
+   15
+  ],
+  "d_adjacency": [
+   1,
+   26
+  ],
+  "d_history": [
+   0,
+   13
+  ],
+  "d_loudness": [
+   0,
+   15
+  ],
+  "d_mutation": [
+   4,
+   14
+  ],
+  "d_red": [
+   0,
+   16
+  ],
+  "d_semicolon": [
+   0,
+   21
+  ],
+  "d_sessionid": [
+   1,
+   25
+  ],
+  "d_visibility": [
+   0,
+   15
+  ],
+  "member_vs_population": [
+   8,
+   11
+  ],
+  "open_artifact": [
+   0,
+   11
+  ],
+  "question_asked": [
+   0,
+   32
+  ],
+  "run_tool": [
+   12,
+   20
+  ],
+  "selector_narrow": [
+   0,
+   26
+  ]
+ },
+ "other_rule_cells_fired": {
+  "closed_population": [
+   12,
+   491
+  ],
+  "d_adjacency": [
+   7,
+   469
+  ],
+  "d_history": [
+   6,
+   495
+  ],
+  "d_loudness": [
+   6,
+   491
+  ],
+  "d_mutation": [
+   365,
+   493
+  ],
+  "d_red": [
+   32,
+   489
+  ],
+  "d_semicolon": [
+   26,
+   479
+  ],
+  "d_sessionid": [
+   119,
+   471
+  ],
+  "d_visibility": [
+   14,
+   491
+  ],
+  "member_vs_population": [
+   392,
+   499
+  ],
+  "open_artifact": [
+   30,
+   498
+  ],
+  "question_asked": [
+   0,
+   457
+  ],
+  "run_tool": [
+   243,
+   481
+  ],
+  "selector_narrow": [
+   3,
+   469
+  ]
+ },
+ "other_rule_total": [
+  1255,
+  6773
+ ]
+}

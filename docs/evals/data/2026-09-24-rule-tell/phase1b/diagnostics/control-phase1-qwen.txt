@@ -1,0 +1,4 @@
+/home/marius/work/claude/rule-tell-runs/stage3/qwen: seed 20260935 permute False
+  val loss by epoch [[0, 0.35290639017066305], [1, 0.23077894889142944], [2, 0.2979100350647668]]  selected {'epoch': 1, 'val_loss': 0.23077894889142944}
+  pooled val AUC 0.971  per-rule min/median/max 0.840/1.000/1.000
+  cross-rule firing on val: 2614/6773 (0.39)
