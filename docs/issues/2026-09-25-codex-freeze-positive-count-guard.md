@@ -1,10 +1,11 @@
 ---
 id: '65605f410dde3474'
 kind: bug
-status: open
+status: fixed
 title: 'Codex: Stage 2 freeze asserts pre-segmentation counts instead of emitted positives'
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
+closed: 2026-09-25
 opened: 2026-09-25
 owner: marius
 severity: medium
@@ -32,4 +33,22 @@ Count emitted positive rows after segmentation and assert the minimum per menu r
 
 ## Scope
 
-Review finding only; no fix applied. Cluster classification pending. Related review: docs/research/2026-09-25-codex-stage2-freeze-review.md.
+Found by the review, whose probe was reproduced by the registering session (session `571eb3d6`). Class: IC-24, `value-correct-in-a-frame-its-name-does-not-state`: correct as an item count, published as a row count. Related review: `docs/research/2026-09-25-codex-stage2-freeze-review.md`.
+
+## Fix
+
+**Fixed in `da67db02`, patch-id `99a0f1838c3548255280b22d3ed134fb018fe7e6`.**
+
+- `check_menu_positives` asserts that every menu rule has at least 50 positive rows in what is actually written to train.
+- Per rule, emitted positive rows = items − positive rows dropped as not one unit.
+- Both run before any file is written.
+- The review's probe (every positive train row dropped in memory) is now refused, naming each emptied rule.
+- A normal re-run reproduces all seven frozen hashes byte for byte. The data and the 14-rule menu are unchanged.
+
+## Tests added
+
+`tests/test_stage2_synthetic.py`, class `FreezeMenuGuard`: exactly 50 passes; 49 raises; a menu rule with no positive rows raises; negatives do not count; off-menu positives do not count.
+
+One mutation per guard site, each run in an isolated worktree, each killed: counting negatives (2 fail), moving the boundary by one (3 fail), and counting off-menu rules (1 fail).
+
+**Not unit-tested:** the per-rule reconciliation assert inside `main`. It is exercised only by the real freeze run, which passes it for all 14 menu rules.
