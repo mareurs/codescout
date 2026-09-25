@@ -90,7 +90,8 @@ def main() -> int:
         answers = {}
         for attempt in (1, 2):
             try:
-                raw = gs.codex_complete(pr, home) if gen.startswith("claude") else opus.complete(pr)[0]
+                raw = (gs.codex_complete(pr, home, out / "raw" / f"{cid}.a{attempt}.codex.log")
+                       if gen.startswith("claude") else opus.complete(pr)[0])
             except Exception as e:                       # noqa: BLE001 -- recorded, retried once
                 (out / "raw" / f"{cid}.a{attempt}.err").write_text(str(e)); continue
             (out / "raw" / f"{cid}.a{attempt}.txt").write_text(raw)

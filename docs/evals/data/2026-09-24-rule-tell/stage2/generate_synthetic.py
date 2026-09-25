@@ -92,7 +92,11 @@ class ClaudeGen(sc.SubscriptionJudge):
     SYSTEM = "You write data exactly as instructed. Output only what the instructions ask for."
 
 
-def codex_complete(prompt: str, home: pathlib.Path) -> str:
+def codex_complete(prompt: str, home: pathlib.Path, log_path: pathlib.Path | None = None) -> str:
+    """One `codex exec` call in a throwaway directory. `log_path`, when given, receives the
+    call's full stdout+stderr: the only record of whether Codex ran shell commands, since the
+    directory is deleted and `--ephemeral` keeps no session. The T-syn-cross run of
+    2026-09-25 predates this parameter and has no such record."""
     work = pathlib.Path(tempfile.mkdtemp(prefix="syn-cross-"))
     try:
         (work / "task.md").write_text(prompt)
@@ -102,8 +106,10 @@ def codex_complete(prompt: str, home: pathlib.Path) -> str:
             ["codex", "exec", "--skip-git-repo-check", "--sandbox", "read-only", "-c", "approval_policy=never",
              "-C", str(work), "--ephemeral", "-o", str(work / "last.txt"),
              "Read task.md in this directory and do exactly what it asks. Reply with only the JSON lines it "
-             "specifies, one per seed, and nothing else. Use no other file."],
+             "specifies, one per seed or item it lists, and nothing else. Use no other file."],
             capture_output=True, text=True, timeout=1200, stdin=subprocess.DEVNULL, env=env)
+        if log_path is not None:
+            log_path.write_text(p.stdout + "\n--- stderr ---\n" + p.stderr)
         if p.returncode != 0:
             raise RuntimeError(f"codex exec exit {p.returncode}: {p.stderr.strip()[-200:]}")
         return (work / "last.txt").read_text()
@@ -125,13 +131,13 @@ def main() -> int:
         home = pathlib.Path(tempfile.mkdtemp(prefix="codex-syn-home-"))
         (home / "auth.json").symlink_to(pathlib.Path.home() / ".codex/auth.json")
         (home / "config.toml").write_text(f'model = "{CODEX_MODEL}"\nmodel_reasoning_effort = "{CODEX_EFFORT}"\n')
-        complete, generator = (lambda pr: codex_complete(pr, home)), f"codex:{CODEX_MODEL}/{CODEX_EFFORT}"
+        complete, generator = (lambda pr, cid=None: codex_complete(pr, home, out / "raw" / f"{cid}.codex.log" if cid else None)), f"codex:{CODEX_MODEL}/{CODEX_EFFORT}"
     else:
         cfg = os.environ.get("JUDGE_CONFIG_DIR", "")
         if not cfg or (dirty := sc.dirty_reasons(cfg)):
             sys.exit(f"refused: JUDGE_CONFIG_DIR is not the clean channel ({cfg or 'unset'}: {dirty if cfg else ''})")
         gen = ClaudeGen(CLAUDE_MODEL, cfg, timeout=900)
-        complete, generator = (lambda pr: gen.complete(pr)[0]), f"claude:{CLAUDE_MODEL}"
+        complete, generator = (lambda pr, cid=None: gen.complete(pr)[0]), f"claude:{CLAUDE_MODEL}"
 
     manifest = [json.loads(l) for l in (HERE / "seed-manifest.jsonl").read_text().splitlines()]
     want = SET_USE[a.set]
@@ -157,7 +163,7 @@ def main() -> int:
         pr, got, err = prompt_for(rule, seeds), [], None
         for attempt in (1, 2):
             try:
-                raw = complete(pr)
+                raw = complete(pr, f"{cid}.a{attempt}")
             except Exception as e:                      # noqa: BLE001 -- recorded, then retried once
                 err = f"attempt {attempt}: {e}"; continue
             (out / "raw" / f"{cid}.a{attempt}.txt").write_text(raw)
