@@ -1,0 +1,78 @@
+{
+  "baseline": {
+    "tests": 9,
+    "failures": [],
+    "errors": []
+  },
+  "mutations": {
+    "legacy_ordered_map": {
+      "tests": 9,
+      "failures": [
+        "audit_tests.LabellerMain.test_later_failure_stops_pending_batches_while_first_is_slow",
+        "audit_tests.LabellerMain.test_terminal_failure_cancels_another_batchs_retry"
+      ],
+      "errors": []
+    },
+    "skip_run_reservation": {
+      "tests": 9,
+      "failures": [
+        "audit_tests.LabellerMain.test_previous_artifacts_refuse_before_any_model_call (name='run-header.json')",
+        "audit_tests.LabellerMain.test_previous_artifacts_refuse_before_any_model_call (name='raw')",
+        "audit_tests.LabellerMain.test_previous_artifacts_refuse_before_any_model_call (name='labels-codex.jsonl')"
+      ],
+      "errors": [
+        "audit_tests.LabellerMain.test_in_progress_run_is_already_reserved",
+        "audit_tests.LabellerMain.test_previous_artifacts_refuse_before_any_model_call (name='labels-claude.jsonl')"
+      ]
+    },
+    "nonexclusive_reservation": {
+      "tests": 9,
+      "failures": [],
+      "errors": [
+        "audit_tests.LabellerMain.test_reservation_is_exclusive_even_when_both_prechecks_saw_nothing"
+      ]
+    },
+    "terminal_failure_returns_success": {
+      "tests": 9,
+      "failures": [
+        "audit_tests.LabellerMain.test_later_failure_stops_pending_batches_while_first_is_slow",
+        "audit_tests.LabellerMain.test_terminal_failure_cancels_another_batchs_retry"
+      ],
+      "errors": []
+    },
+    "reverse_output_order": {
+      "tests": 9,
+      "failures": [
+        "audit_tests.LabellerMain.test_success_keeps_item_order_after_out_of_order_completion"
+      ],
+      "errors": []
+    },
+    "retry_cancelled_calls": {
+      "tests": 9,
+      "failures": [],
+      "errors": [
+        "audit_tests.LabellerMain.test_cancellation_is_not_retried_or_recorded_as_a_model_failure"
+      ]
+    },
+    "allow_retry_after_terminal_failure": {
+      "tests": 9,
+      "failures": [
+        "audit_tests.LabellerMain.test_terminal_failure_cancels_another_batchs_retry"
+      ],
+      "errors": []
+    },
+    "late_worker_validation": {
+      "tests": 9,
+      "failures": [
+        "audit_tests.LabellerMain.test_invalid_worker_count_refuses_before_outputs"
+      ],
+      "errors": []
+    }
+  },
+  "survived": [],
+  "source_unchanged": true,
+  "sha256": {
+    "docs/evals/data/2026-09-24-rule-tell/phase1b/run_labellers.py": "3aea5514b41862a7f393434b65adc96f79d48db4e808ca2b864b2db3bc49be21",
+    "tests/test_phase1b_audit.py": "3ceeeeb4bec783ec5688eacce04bc0376c6361a7643fb6b63636c50d391ac814"
+  }
+}

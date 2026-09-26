@@ -1,0 +1,88 @@
+{
+  "data": {
+    "items": 505,
+    "unique_ids": 505,
+    "item_fields": [
+      [
+        "id",
+        "paragraph",
+        "sentence"
+      ]
+    ],
+    "item_key_exact_reconstruction": true,
+    "audit_sample_exact_reconstruction": true,
+    "source_counts": {
+      "audit": 300,
+      "counterexample": 193,
+      "clean": 12
+    },
+    "audit_folds": {
+      "train": 198,
+      "cal": 40,
+      "val": 62
+    },
+    "candidate_head_counts": {
+      "closed_population": 50,
+      "d_adjacency": 2,
+      "d_semicolon": 47,
+      "open_artifact": 44,
+      "run_tool": 50
+    },
+    "items_bytes": 429006
+  },
+  "ordered_stop": {
+    "exit_code": 4,
+    "distinct_batches_started": 21,
+    "total_calls_including_retries": 22,
+    "distinct_batches_started_after_second_failure": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "label_file_exists": false,
+    "previous_raw_overwritten": false,
+    "previous_labels_overwritten": false
+  },
+  "overwrite": {
+    "exit_code": 0,
+    "distinct_batches_started": 21,
+    "total_calls_including_retries": 21,
+    "distinct_batches_started_after_second_failure": [],
+    "label_file_exists": true,
+    "previous_raw_overwritten": true,
+    "previous_labels_overwritten": true
+  },
+  "focused_tests": {
+    "baseline": {
+      "ran": 8,
+      "failures": 0,
+      "errors": 0
+    },
+    "remove_pending_cancellation": {
+      "ran": 8,
+      "failures": 0,
+      "errors": 0
+    },
+    "swallow_stop_as_success": {
+      "ran": 8,
+      "failures": 0,
+      "errors": 0
+    }
+  }
+}

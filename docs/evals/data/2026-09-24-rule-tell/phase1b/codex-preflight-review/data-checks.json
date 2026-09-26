@@ -1,0 +1,18 @@
+{
+  "new_vs_new_distinct_cross_fold_shingles_and_texts": [
+    0,
+    0
+  ],
+  "new_vs_frozen_cross_fold_overlapping_candidates": 0,
+  "codex_clean_log_exec_markers": 1,
+  "codex_clean_input_hash_matches": {
+    "codex-clean-prompt.md": true,
+    "menu.json": true
+  },
+  "live_audit_files": [
+    "items.jsonl",
+    "key.jsonl",
+    "menu.json",
+    "sample.jsonl"
+  ]
+}
