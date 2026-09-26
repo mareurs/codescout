@@ -158,6 +158,41 @@ class Step4CellSets(unittest.TestCase):
         self.assertNotIn("k", res["temperatures"])             # a head Step 1 removed is not calibrated
 
 
+class Saturation(unittest.TestCase):
+    def test_ties_below_the_raw_cutoff_are_counted_per_bound(self):
+        # T given, not fitted, so the cross branch is reachable. At T = 0.25, sigmoid(z / T) is exactly
+        # 1.0 for z above about 9.2: t = 1.0 stands for raw cutoff 12 (the smallest val logit firing).
+        val = [(12.0, 1, "own"), (13.0, 1, "own"), (-12.0, 0, "own")]
+        cal = [(9.5, 0, "cross"),     # p = 1.0 below 12: a flip on the cross bound
+               (10.0, 1, "own"),      # p = 1.0 below 12: a flip on the recall bound
+               (12.0, 1, "own"),      # LOAD-BEARING: at the cutoff, not below it, so no flip
+               (11.0, 0, "own"),      # LOAD-BEARING: an own negative tied below 12, on neither bound
+               (-10.0, 0, "cross")]   # does not fire: no flip whatever its logit
+        self.assertEqual(s4.saturation_ties(val, cal, 0.25, 1.0), dict(raw_cutoff=12.0, cross=1, own_pos=1))
+
+    def test_an_own_positive_tie_through_the_fitted_temperature(self):
+        # The realistic case. A tied cross cell needs a small T despite a confidently wrong cal cell,
+        # which the NLL fit resists (temperature scaling has no bias term), so it is tested above with
+        # T given. An own positive can tie: every cal cell's sign is right, so T runs to 0.25.
+        val = [row(0, "h", 1, 12.0), row(1, "h", 1, 13.0), row(2, "h", 0, -12.0)]
+        cal = [row(10, "h", 1, 10.0), row(11, "h", 1, 12.0), row(12, "h", 0, -10.0)]
+        res = s4.step4(scored(["h"], ["h"], val, [xcell(0, "h", -12.0)], cal,
+                              [xcell(10, "h", -10.0), xcell(11, "h", -11.0)]))
+        self.assertTrue(res["temperatures"]["h"]["at_bound"])
+        self.assertEqual(res["thresholds"]["h"]["precision_t"], 1.0)
+        self.assertEqual(res["saturation"]["h"], dict(raw_cutoff=12.0, cross=0, own_pos=1))
+        # The registered rule still decides: the tied positive counts as a hit, 2 of 2.
+        self.assertEqual((res["pregate"]["h"]["pos_hit"], res["pregate"]["h"]["pos_n"]), (2, 2))
+
+    def test_no_flip_away_from_saturation(self):
+        # Control: the Step4CellSets fixture's logits stay well below saturation at the T it fits.
+        res = s4.step4(Step4CellSets().fixture())
+        self.assertEqual({h: (s["cross"], s["own_pos"]) for h, s in res["saturation"].items()},
+                         {"h": (0, 0), "g": (0, 0)})
+
+
+
+
 class Measurements(unittest.TestCase):
     def fixture(self):
         # LOAD-BEARING: the counterexample's z = 5 is above h's only positive, so counted as an own

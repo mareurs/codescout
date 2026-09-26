@@ -13,6 +13,8 @@ Per admitted head H (a head Step 1 did not admit has already left the local menu
 - the pre-gate check, on cal, at the precision threshold: cross firing <= 5% of H's cal cross
   cells, and own-positive recall >= 0.5. A head failing either leaves the local menu, reported
   with its counts. A head with no cal cross cell or no cal positive cannot be checked and leaves.
+- saturation, reported and never applied: the cal cells that fire at t although their raw logit is
+  below the raw cutoff t stands for, the only decisions float saturation lets T change.
 Then the final menu, and whether the gate can detect anything on it: at least 2 of its 3 menu
 positives, and at least 1 of the span gate's 2 menu texts, must still apply.
 
@@ -89,6 +91,19 @@ def pregate(cal_cells: list, T: float, t: float) -> dict:
     return dict(cross_fired=cf, cross_n=cn, pos_hit=ph, pos_n=pn, passed=not reasons, reasons=reasons)
 
 
+def saturation_ties(val_cells: list, cal_cells: list, T: float, t: float) -> dict:
+    """Decisions the temperature changed. In exact arithmetic the calibrated threshold t is a raw
+    cutoff z_t, the smallest val logit that fires, and T cancels from every decision. In floats,
+    sigmoid(x) is exactly 1.0 for x above about 36.8, so at T = 0.25 every logit above about 9.2
+    ties. Floats merge values and never reorder them, so the only flip is a cal cell that fires
+    although its raw logit is below z_t; counted per pre-gate bound. Zero means the check read raw
+    logits alone. Reported, never applied: the registered rule is the calibrated one."""
+    cutoff = min(z for z, _, _ in val_cells if sig(z / T) >= t)
+    below = [(y, k) for z, y, k in cal_cells if sig(z / T) >= t and z < cutoff]
+    return dict(raw_cutoff=cutoff, cross=sum(k == "cross" for _, k in below),
+                own_pos=sum(k == "own" and y == 1 for y, k in below))
+
+
 def gate_ability(menu: list[str]) -> dict:
     gate = [cid for cid, h in GATE_POSITIVES.items() if h in menu]
     span = [cid for cid, h in SPAN_POSITIVES.items() if h in menu]
@@ -126,7 +141,7 @@ def measure(scored: dict, heads: list[str], temps: dict, thr: dict) -> dict:
 def step4(scored: dict) -> dict:
     menu, admitted = scored["menu"], set(scored["cross"]["admitted"])
     heads = [h for h in menu if h in admitted]
-    temps, thr, pre = {}, {}, {}
+    temps, thr, pre, sat = {}, {}, {}, {}
     for h in heads:
         cal_cells, val_cells = head_cells(scored, "cal", h), head_cells(scored, "val", h)
         T, at_bound = ta.fit_temperature([z for z, _, _ in cal_cells], [y for _, y, _ in cal_cells])
@@ -137,6 +152,7 @@ def step4(scored: dict) -> dict:
                       val_cross=sum(k == "cross" for _, _, k in val_cells),
                       val_counterexamples=sum(k == "counterexample" for _, _, k in val_cells))
         pre[h] = pregate(cal_cells, T, thr[h]["precision_t"])
+        sat[h] = saturation_ties(val_cells, cal_cells, T, thr[h]["precision_t"])
     final = [h for h in heads if pre[h]["passed"]]
     return dict(
         run_dir=scored["run_dir"], arm=scored["arm"], recipe=scored["recipe"], seed=scored["seed"],
@@ -145,7 +161,7 @@ def step4(scored: dict) -> dict:
         removed=dict(step1=[h for h in menu if h not in admitted],
                      step4=[dict(head=h, **pre[h]) for h in heads if not pre[h]["passed"]]),
         gate=gate_ability(final),
-        temperatures=temps, thresholds=thr, pregate=pre,
+        temperatures=temps, thresholds=thr, pregate=pre, saturation=sat,
         measured=measure(scored, heads, temps, thr))
 
 
@@ -179,6 +195,9 @@ def main() -> int:
               f"removed at step 4 {[r['head'] for r in res['removed']['step4']]}; gate-able {res['gate']['gate_able']}")
         print(f"  own-cell val AUC {f4(m['own_cell_val_auc']['pooled'])} (learned {m['learned']}); "
               f"all-cells val AUC {f4(m['all_cells_val_auc']['pooled'])}")
+        flips = {h: s for h, s in res["saturation"].items() if s["cross"] or s["own_pos"]}
+        if flips:
+            print(f"  SATURATION: cal cells firing below the raw cutoff, by head: {flips}")
     args.out.write_text(json.dumps(res, indent=1))
     return 0
 
