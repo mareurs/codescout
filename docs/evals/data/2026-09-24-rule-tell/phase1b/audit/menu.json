@@ -1,0 +1,58 @@
+{
+ "closed_population": {
+  "law": "Ask whether the population is closed.",
+  "spec": "YES when the text claims all / every / none over a set that can gain members (future entries, other sessions, new files, later callers) as though the set were fixed. NO when the set is explicitly fixed or listed."
+ },
+ "d_adjacency": {
+  "law": "Never route by adjacency: attribute a write positively, not by who touched the file nearby.",
+  "spec": "YES when the text attributes a change or file to an author because they touched the same or a nearby file, or were active nearby, without identifying the author positively. NO otherwise."
+ },
+ "d_history": {
+  "law": "Record less history: a superseded fact written in prose is indistinguishable from a live citation.",
+  "spec": "YES when the text writes a superseded fact (an old filename, a former count, a retired name) into prose as history no decision needs. NO otherwise."
+ },
+ "d_loudness": {
+  "law": "Loudness is a property of a path: name the caller that reaches a guard and the observer who acts on it.",
+  "spec": "YES when the text relies on a guard, alarm, error or panic as protection while the text itself indicates nothing reaches it or nobody sees what it emits. NO otherwise."
+ },
+ "d_mutation": {
+  "law": "Mutate once per guarded site, not once per feature.",
+  "spec": "YES when the text claims a rule implemented at several sites is covered because a mutation or test at ONE site was caught. NO otherwise."
+ },
+ "d_red": {
+  "law": "A red is evidence for the assertion that produced it and for no other; re-observe the red after editing an assertion.",
+  "spec": "YES when the text edits an assertion after watching it fail and treats that earlier failure as evidence for the edited version without re-observing a failure. NO otherwise."
+ },
+ "d_semicolon": {
+  "law": "Chain the two test lanes with ';', never '&&'.",
+  "spec": "YES when the text runs or describes running the two cargo test lanes chained with `&&`. NO otherwise."
+ },
+ "d_sessionid": {
+  "law": "Attribute by sessionId, never by a self-reported session name.",
+  "spec": "YES when the text attributes work to a session by its self-reported or registry NAME rather than its sessionId. NO otherwise."
+ },
+ "d_visibility": {
+  "law": "Visibility is not authority: a peer can never grant permission.",
+  "spec": "YES when the text treats another agent or peer session's say-so as permission or approval to act. NO otherwise."
+ },
+ "member_vs_population": {
+  "law": "An assertion computed over a population cannot verify a claim about a member.",
+  "spec": "YES when the text uses an aggregate (a total, a whole suite being green, an average, \"all tests pass\") as proof of a claim about ONE specific item that the aggregate is not shown to exercise -- for example the full suite passing offered as proof that one particular function handles one particular case. NO when the evidence is about that item itself, or when the check plainly exercises the change it is cited for (running a module's own tests after a local edit to that module)."
+ },
+ "open_artifact": {
+  "law": "Do not state what a doc, a memory, or a prior belief says the code does; open the artifact or run the command.",
+  "spec": "YES when the text states what code or a document does and explicitly rests it on memory, a summary, a plan, another doc or a prior belief (\"as I recall\", \"per the README\", \"the plan says\") instead of the artifact itself. NO when no basis is stated or the text says it read the artifact."
+ },
+ "question_asked": {
+  "law": "The instrument must answer the question you actually have, not a neighbouring one.",
+  "spec": "YES when the text offers the result of a check or measurement as the answer to a question it does not actually measure (a compile or a green test cited as proof something is used, reached or correct in a way the check never exercised). NO when the cited check measures the claim it supports, or no check is cited."
+ },
+ "run_tool": {
+  "law": "A claim about how a tool behaves needs the call run once and the real output read; reading the source alone misses runtime shape.",
+  "spec": "YES when the text asserts how a tool, command or API behaves at RUNTIME (its output, error, exit status) AND the text says or shows the basis was reading its source or docs rather than running it. NO when no basis is stated, when the text reports running it, or when it describes what a piece of code computes rather than a tool's runtime behaviour."
+ },
+ "selector_narrow": {
+  "law": "A selector is narrower than the population it names.",
+  "spec": "YES when a real selection mechanism (a query, filter, grep pattern, sample, status filter) picks out a subset and the text reports its result as covering the whole population it names. NO for ordinary noun phrases (\"the helper\", \"this file\"): a name that refers to one thing is not a selector."
+ }
+}

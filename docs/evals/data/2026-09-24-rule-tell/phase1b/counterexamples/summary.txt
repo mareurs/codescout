@@ -1,0 +1,18 @@
+mined cues: {"closed_population": ["future"], "d_adjacency": ["he"], "d_semicolon": ["&&", "&& cargo", "lib &&"], "open_artifact": ["per the"], "run_tool": ["exits"]}
+held-out filter includes the Codex texts: True
+after filters 1-3: 399 distinct manifest paragraphs (398 distinct texts); 64 distinct shingles shared across folds, in 28 distinct texts (filter 4 resolves them)
+closed_population    train found  131  eligible  117  drawn  30  {'dropped: held-out shingle': 12, 'dropped: shingle shared with a candidate in an earlier fold': 2}
+closed_population    val   found   49  eligible   46  drawn  10  {'dropped: held-out shingle': 3}
+closed_population    cal   found   28  eligible   27  drawn  10  {'dropped: held-out shingle': 1}
+d_adjacency          train found    2  eligible    2  drawn   2  {}
+d_adjacency          val   found    0  eligible    0  drawn   0  {}
+d_adjacency          cal   found    0  eligible    0  drawn   0  {}
+d_semicolon          train found   60  eligible   45  drawn  30  {'dropped: held-out shingle': 1, 'dropped: shingle shared with a candidate in an earlier fold': 14}
+d_semicolon          val   found   17  eligible   17  drawn  10  {}
+d_semicolon          cal   found   12  eligible    7  drawn   7  {'dropped: held-out shingle': 1, 'dropped: shingle shared with a candidate in an earlier fold': 4}
+open_artifact        train found   48  eligible   47  drawn  30  {'dropped: held-out shingle': 1}
+open_artifact        val   found    8  eligible    8  drawn   8  {}
+open_artifact        cal   found    7  eligible    6  drawn   6  {'dropped: shingle shared with a candidate in an earlier fold': 1}
+run_tool             train found   49  eligible   47  drawn  30  {'dropped: shingle shared with a candidate in an earlier fold': 2}
+run_tool             val   found   14  eligible   14  drawn  10  {}
+run_tool             cal   found   16  eligible   15  drawn  10  {'dropped: held-out shingle': 1}
