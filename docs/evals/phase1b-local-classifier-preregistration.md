@@ -45,7 +45,7 @@ Registered in phase 1 (§ *Diagnostics after the stop*) before they ran. **Phase
 
 **Results, 2026-09-25,** from commit `02511d99`. The detail is in phase 1, § *Diagnostics — results*.
 
-- **The permutation null passes:** pooled val AUC 0.498, and every epoch's val loss is at least 0.68. The split carries no link but the labels, so phase 1b's precondition holds.
+- **The permutation null passes:** pooled val AUC 0.498, and every epoch's val loss is at least 0.68. *Corrected 2026-09-26, after the Codex review (`docs/research/2026-09-26-codex-phase1b-stage1-review.md`):* this sentence first read "the split carries no link but the labels", which is more than a null can show. A near-chance shuffled-label run shows that this run recovered no held-out label signal once labels were shuffled. It does not certify that every leakage path is absent, and the same recipe sometimes failed to learn real labels. It is a diagnostic that passed its registered band, and phase 1b's precondition is that band.
 - **The phase-1 recipe is seed-unstable.** At seed 20260937 it did not learn: val loss 0.694, pooled val AUC 0.525, inside the null band. Phase 1's seed learned (0.971).
   - Both seeds' train loss rises above chance after warmup. One recovers and one does not.
   - **One of two seeds learned.** A phase-1b run on this recipe can fail from instability alone, whatever the negatives do.
@@ -143,7 +143,7 @@ Common to all three: JevK5 with LoRA r16/α32/dropout 0.05 on all linear project
 **Predictions:**
 1. `s1-r1` learns at 3 of 3 seeds. **Held.**
 2. `s1-r2` learns at 3 of 3 seeds. **Held.**
-3. **No run shows the overshoot signature** (a running train loss above 0.75 in epoch 0). **Held.** Every run's epoch-0 maximum is 0.691–0.693, the loss at initialisation (ln 2 with a zero-initialised head), and it only fell from there. Phase 1's two seeds reached 0.925 and 1.316.
+3. **No run shows the overshoot signature** (a running train loss above 0.75 in epoch 0). **Held.** Running means are logged every 200 rows, so this is read at that resolution, as phase 1's were. In every run the first logged mean, 0.691–0.693, is epoch 0's maximum. That is the loss at initialisation (ln 2 with a zero-initialised head), and no later logged mean in epoch 0 is higher. Phase 1's two seeds reached 0.925 and 1.316.
 4. The chosen recipe's worst-seed pooled val AUC is at least 0.90. **Held,** at 0.955.
 5. Cross-rule firing on val stays at 25% or more in every learned run. **Held,** at 42–54%.
 
@@ -230,14 +230,18 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
        - It selects `&&`, `&& cargo` and `lib &&` for `d_semicolon` (56 train positives carry `&&`, 0 negatives, 0 of 8,761 pool units); `future` for `closed_population` (13 / 0 / 7); `he` for `d_adjacency` (14 / 0 / 2); `exits` for `run_tool` (25 / 2 / 22); and `per the` for `open_artifact` (19 / 1 / 17).
        - The other 29 candidate cues are carried by 45 to 5,831 pool units, and are left to the cross term.
      - *Candidates:* training-side manifest units carrying a mined cue (the manifest already excludes campaign documents, T's groups and held-out shingles), drawn by fixed seed. Up to 30 per head from the train fold, and up to 10 each from val and cal. The corpus holds 89 units with `&&`, 208 with `future`, 79 with `exits`, 63 with `per the` and 2 with `he`.
-     - *Leakage:* each candidate passes the 8-token filter against T, both T-syn sets, S and every gate text, and is dropped, never moved, on a collision.
+     - *Leakage:* each candidate paragraph is checked against T, both T-syn sets, S and every gate text; against frozen rows in another fold; and against frozen rows of its head's own rule. A shared 8-token shingle drops it.
+       - Candidates in different folds that share a shingle with each other are then resolved: val is kept over cal and train, and cal over train. This filter was added after the Codex review of 2026-09-26: the first version compared candidates with frozen data only, and the manifest's source groups cannot see a passage copied into two documents.
+       - A dropped candidate is never moved to another fold.
+       - After the draw, the script refuses to write if any drawn candidate shares a shingle with a frozen row, or with another drawn candidate, in a different fold.
      - *What `clean-12` then measures.* The filter catches copied text, not a shared pattern. A mined `&&` unit that is not a test-lane chain is the same kind of sentence as `clean-12`, by design. Under NC, a pass on `clean-12` shows the counterexamples work on an unseen instance of a pattern training contained. It does not show the head generalises past what it was shown. That is disclosed with the result, and the gate's other swap texts and T carry the rest.
      - *Labels:* candidates go to Step 1's two labellers in the same runs. An unflagged candidate is admitted as a negative for its head alone; a flagged or unsure one is dropped and counted. A Codex verdict can only exclude a candidate, never set a target, which is the audit role Codex holds in Step 1.
      - *Folds:* each candidate keeps its paragraph's fold from the registered seed manifest, so no new split is drawn.
      - *Cost:* three more runs, and a mining script, `phase1b/mine_counterexamples.py`.
        - The script refuses to draw until Step 2's Codex texts exist, because they must be in the held-out filter first.
-       - Its `--count-only` mode draws and writes nothing. Run before registration, with the Codex texts not yet in the filter, it found these eligible candidates (train / val / cal): `closed_population` 119 / 46 / 27; `d_semicolon` 59 / 17 / 11; `run_tool` 49 / 14 / 15; `open_artifact` 47 / 8 / 7; `d_adjacency` 2 / 0 / 0.
-       - Its held-out filter dropped 20 candidates. The cross-fold and own-rule filters dropped none, but they are not idle over the whole population. Of all 9,644 training-side paragraphs, 22 share a shingle with a frozen row in another fold. Own-rule rows match between 1 and 22 paragraphs per rule, 94 paragraph–rule matches in all.
+       - Its `--count-only` mode draws and writes nothing. Run before registration, with the Codex texts not yet in the filter, it found these eligible candidates (train / val / cal): `closed_population` 117 / 46 / 27; `d_semicolon` 45 / 17 / 7; `run_tool` 47 / 14 / 15; `open_artifact` 47 / 8 / 6; `d_adjacency` 2 / 0 / 0.
+       - The held-out filter dropped 20 candidates, and the candidate-versus-candidate filter dropped 23: 18 for `d_semicolon`, 2 for `closed_population`, 2 for `run_tool` and 1 for `open_artifact`. Before that filter, the eligible pool held 64 distinct shingles shared across folds, in 28 of its 399 manifest paragraphs (398 distinct texts), matching the Codex review's count.
+       - The frozen-row cross-fold and own-rule filters dropped none, but they are not idle over the whole population. Of all 9,644 training-side paragraphs, 22 share a shingle with a frozen row in another fold. Own-rule rows match between 1 and 22 paragraphs per rule, 94 paragraph–rule matches in all.
        - `d_adjacency`'s cue therefore has no val or cal candidate, so NC's validation cannot measure it.
      - *Negative-side cues* (such as "sessionid", which marks 53 of 95 `d_sessionid` negatives in train and val) are not mined. The cross-rule term already makes "fire unless the fix's word is present" costly, because every other rule's unit lacking the word becomes a negative for that head.
    - **(b) N only.** Stage 2 stays the clean causal test of the negatives, and its gate likely fails on `clean-12`; counterexamples become Stage 3.
