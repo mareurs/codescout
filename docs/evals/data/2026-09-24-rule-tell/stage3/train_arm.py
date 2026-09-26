@@ -12,11 +12,15 @@ What this implements, each point from `docs/evals/phase1-local-classifier-prereg
 - Calibration: one temperature per rule head, fitted on the calibration fold only.
 - It reads train, val and cal. It refuses any other frozen file (amendment 1: T and the
   T-syn sets are read only after every choice is fixed).
+- Phase 1b Stage 2 adds two options, both off by default so earlier runs take the same path:
+  `--cross` (Step 3's cross-rule term, from Step 1's admission file) and `--extra-rows`
+  (arm NC's counterexample rows). See docs/evals/phase1b-local-classifier-preregistration.md.
 
 Run (CUDA):  ~/work/claude/jevk5/.venv/bin/python -u train_arm.py --arm qwen --out <dir>
 Run (ROCm):  ~/work/claude/rule-tell-rocm/.venv/bin/python -u train_arm.py --arm mbert --out <dir>
 """
 import argparse
+import hashlib
 import json
 import math
 import random
@@ -53,6 +57,7 @@ CLIP = 1.0
 T_BOUNDS = (0.25, 10.0)     # per-rule temperature search range; a fit at a bound is reported
 PREC_TARGET = 0.9           # precision-oriented threshold (L1/L2 standalone)
 REC_TARGET = 0.9            # C1 first-stage threshold
+CROSS_LAMBDA = 1.0          # phase 1b Step 3: weight of the cross-rule term, fixed and not tuned
 
 # Training recipes. "phase1" is phase 1's registered recipe and the default; its values come from
 # ARMS and the constants above, and every other key is off, so phase-1 runs reproduce exactly.
@@ -230,6 +235,92 @@ def fold_loss(logits: list[float], rows: list[dict], pw: dict) -> float:
     for z, r in zip(logits, rows):
         tot += weighted_bce(torch.tensor(z), r["label"], pw[r["rule"]]).item()
     return tot / len(rows)
+@dataclass(frozen=True)
+class Cross:
+    """Phase 1b Step 1's admission: the heads whose cross-rule cells become negatives, and the
+    (unit text, head) cells kept masked everywhere because the audit flagged that text for
+    that head."""
+    admitted: frozenset
+    masked: frozenset
+    sha256: str
+
+
+def load_cross(path: Path, menu: list[str]) -> Cross:
+    """{"admitted": [head, ...], "masked": [{"unit": text, "head": head}, ...]}."""
+    raw = path.read_bytes()
+    d = json.loads(raw)
+    admitted = frozenset(d["admitted"])
+    if not admitted <= set(menu):
+        raise SystemExit(f"--cross admits heads outside the menu: {sorted(admitted - set(menu))}")
+    masked = frozenset((m["unit"], m["head"]) for m in d["masked"])
+    return Cross(admitted, masked, hashlib.sha256(raw).hexdigest())
+
+
+def load_extra_rows(path: Path, menu: list[str], taken: set[str]) -> dict[str, list[dict]]:
+    """Arm NC's counterexample rows, by fold. Each labels one own-rule cell 0 and nothing else."""
+    out: dict[str, list[dict]] = {"train": [], "val": [], "cal": []}
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        r = json.loads(line)
+        if r.get("source") != "counterexample" or r["label"] != 0 or r["rule"] not in menu:
+            raise SystemExit(f"--extra-rows: not a counterexample row: {r.get('id')}")
+        if r["id"] in taken:
+            raise SystemExit(f"--extra-rows: id already used: {r['id']}")
+        if not 0 <= r["target"] < len(segment(r["text"])):
+            raise SystemExit(f"--extra-rows: target outside the text's units: {r['id']}")
+        if r["set"] not in out:
+            raise SystemExit(f"--extra-rows: fold must be train, val or cal: {r['id']}")
+        out[r["set"]].append(r)
+        taken.add(r["id"])
+    return out
+
+
+def cross_cells(row: dict, units: list[str], cross: Cross) -> list[tuple[int, str]]:
+    """A row's admitted cross-rule cells: (unit index, head) for every unit of its text and every
+    admitted head other than its own rule, minus the masked (unit text, head) cells. The row's
+    own rule stays masked on its non-target units. A counterexample row has none: its paragraph
+    is outside the population the audit sampled."""
+    if row.get("source") == "counterexample":
+        return []
+    return [(i, h) for i, u in enumerate(units) for h in sorted(cross.admitted)
+            if h != row["rule"] and (u, h) not in cross.masked]
+
+
+def row_logits(model: Arm, row: dict, rule_idx: dict, cross: Cross) -> tuple[torch.Tensor, torch.Tensor, list]:
+    """The row's own-cell logit, its admitted cross cells' logits, and those cells, from one pass."""
+    units = segment(row["text"])
+    lg = model.unit_logits(units)
+    cells = cross_cells(row, units, cross)
+    zc = lg[[i for i, _ in cells], [rule_idx[h] for _, h in cells]] if cells else lg.new_zeros(0)
+    return lg[row["target"], rule_idx[row["rule"]]], zc, cells
+
+
+def cross_loss(zc: torch.Tensor) -> torch.Tensor:
+    """Mean BCE of a row's cross cells toward 0; zero for a row with none."""
+    return F.binary_cross_entropy_with_logits(zc, torch.zeros_like(zc)) if zc.numel() else zc.new_zeros(())
+
+
+@torch.no_grad()
+def fold_eval(model: Arm, rows: list[dict], rule_idx: dict, cross: Cross) -> tuple[list[float], list[list]]:
+    """Per row: the own-cell logit, and [(unit index, head, logit)] for its admitted cross cells."""
+    model.eval()
+    own, cr = [], []
+    for r in rows:
+        z, zc, cells = row_logits(model, r, rule_idx, cross)
+        own.append(z.item())
+        cr.append([(i, h, v) for (i, h), v in zip(cells, zc.tolist())])
+    return own, cr
+
+
+def fold_loss_cross(own: list[float], cr: list[list], rows: list[dict], pw: dict) -> float:
+    """Step 3's L on a fold: fold_loss's own term plus CROSS_LAMBDA x each row's cross term."""
+    tot = 0.0
+    for z, c, r in zip(own, cr, rows):
+        tot += weighted_bce(torch.tensor(z), r["label"], pw[r["rule"]]).item()
+        if c:
+            tot += CROSS_LAMBDA * cross_loss(torch.tensor([v for _, _, v in c])).item()
+    return tot / len(rows)
 
 
 def fit_temperature(z: list[float], y: list[int]) -> tuple[float, bool]:
@@ -295,6 +386,33 @@ def thresholds(p: list[float], y: list[int]) -> dict:
                 recall90_t=rec_t, val_tp_at_recall90=tpr, val_fp_at_recall90=fpr, val_pos=npos, val_n=len(y))
 
 
+def epoch_order(train: list[dict], seed: int, ep: int, pair_windows: bool) -> list[int]:
+    """The order of train rows in epoch `ep`."""
+    if not pair_windows:
+        order = list(range(len(train)))
+        random.Random(seed + ep).shuffle(order)
+        return order
+    # Both texts of a pair adjacent, so they share an accumulation window: their shared feature
+    # then cancels in the head's gradient. Unpaired rows go last, so no pair straddles a window
+    # boundary (accum is even).
+    groups: dict[str, list[int]] = {}
+    cx = []
+    for i, r in enumerate(train):
+        if r.get("source") == "counterexample":
+            cx.append(i)
+        else:
+            groups.setdefault(r["id"].rpartition(":")[0], []).append(i)
+    pairs = [g for g in groups.values() if len(g) == 2]
+    rest = [i for g in groups.values() if len(g) != 2 for i in g]
+    # Counterexamples have no twin. They travel two to a slot among the pairs, so every slot is
+    # still two rows and window alignment holds; an odd one out goes last. Without them the list
+    # below is Stage 1's, and so is the order.
+    random.Random(f"cx-{seed}-{ep}").shuffle(cx)
+    pairs += [cx[k:k + 2] for k in range(0, len(cx) - 1, 2)]
+    rest += cx[len(cx) - len(cx) % 2:]
+    random.Random(seed + ep).shuffle(pairs)
+    return [i for g in pairs for i in g] + rest
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--arm", choices=sorted(ARMS), required=True)
@@ -306,6 +424,10 @@ def main():
                     help="training seed; the registered arm uses the default. Others are diagnostics")
     ap.add_argument("--permute-labels", action="store_true",
                     help="permutation null: shuffle train labels within each rule; val/cal untouched")
+    ap.add_argument("--cross", type=Path, default=None,
+                    help="phase 1b Step 1 admission file: adds Step 3's cross-rule term to the train and val loss")
+    ap.add_argument("--extra-rows", type=Path, default=None,
+                    help="phase 1b arm NC: counterexample rows appended to train/val/cal by their fold")
     ap.add_argument("--smoke", type=int, default=0,
                     help="engineering check only: train on the first N train rows for one epoch; reads no val/cal")
     args = ap.parse_args()
@@ -335,7 +457,10 @@ def main():
             prng.shuffle(labels)
             for i, y in zip(idx, labels):
                 train[i] = {**train[i], "label": y}
-    pw = pos_weights(train, menu)
+    pw = pos_weights(train, menu)     # frozen rows only: counterexamples do not move pos_weight
+    cross = load_cross(args.cross, menu) if args.cross else None
+    extra = ({"train": [], "val": [], "cal": []} if args.extra_rows is None
+             else load_extra_rows(args.extra_rows, menu, {r["id"] for r in train}))
     cfg = ARMS[args.arm]
     rec = RECIPES[args.recipe]
     lr_body = rec["lr_body"] if rec["lr_body"] is not None else cfg["lr_body"]
@@ -344,14 +469,23 @@ def main():
     accum, warmup = rec["accum"], rec["warmup"]
     if args.smoke:
         train, epochs = train[: args.smoke], 1
+    train = train + extra["train"]
 
     model = Arm(args.arm, len(menu), args.device, args.recipe)
     body_p, head_p = model.trainable()
+    phase1b = {}
+    if cross is not None:
+        phase1b["cross"] = dict(file=str(args.cross), sha256=cross.sha256, admitted=sorted(cross.admitted),
+                                masked=len(cross.masked), weight=CROSS_LAMBDA)
+    if args.extra_rows is not None:
+        phase1b["extra_rows"] = dict(file=str(args.extra_rows),
+                                     sha256=hashlib.sha256(args.extra_rows.read_bytes()).hexdigest(),
+                                     per_fold={f: len(v) for f, v in extra.items()})
     emit(event="start", arm=args.arm, device=args.device, backend=("rocm" if torch.version.hip else "cuda"),
          torch=torch.__version__, gpu=torch.cuda.get_device_name(args.device), menu=menu, pos_weight=pw,
          trainable_body=sum(p.numel() for p in body_p), smoke=args.smoke, seed=args.seed,
          permute_labels=args.permute_labels, cfg=cfg, recipe=args.recipe,
-         resolved=dict(rec, lr_body=lr_body, lr_head=lr_head, epochs=epochs))
+         resolved=dict(rec, lr_body=lr_body, lr_head=lr_head, epochs=epochs), **phase1b)
 
     opt = torch.optim.AdamW([
         {"params": body_p, "lr": lr_body, "weight_decay": WEIGHT_DECAY},
@@ -362,33 +496,21 @@ def main():
     sched = torch.optim.lr_scheduler.LambdaLR(     # linear warmup, then linear decay to 0
         opt, lambda s: (s + 1) / warm if s < warm else max(0.0, (steps - s) / max(1, steps - warm)))
 
-    def epoch_order(ep: int) -> list[int]:
-        if not rec["pair_windows"]:
-            order = list(range(len(train)))
-            random.Random(args.seed + ep).shuffle(order)
-            return order
-        # Both texts of a pair adjacent, so they share an accumulation window: their shared feature
-        # then cancels in the head's gradient. Unpaired rows go last, so no pair straddles a window
-        # boundary (accum is even).
-        groups: dict[str, list[int]] = {}
-        for i, r in enumerate(train):
-            groups.setdefault(r["id"].rpartition(":")[0], []).append(i)
-        pairs = [g for g in groups.values() if len(g) == 2]
-        rest = [i for g in groups.values() if len(g) != 2 for i in g]
-        random.Random(args.seed + ep).shuffle(pairs)
-        return [i for g in pairs for i in g] + rest
-
-    val = [] if args.smoke else load_rows("val")
+    val = [] if args.smoke else load_rows("val") + extra["val"]
     best = (math.inf, -1)
     step, win_z = 0, []
     for ep in range(epochs):
         model.train()
-        order = epoch_order(ep)
+        order = epoch_order(train, args.seed, ep, rec["pair_windows"])
         run, n = 0.0, 0
         for i, j in enumerate(order):
             r = train[j]
-            z = cell_logit(model, r, rule_idx)
-            loss = weighted_bce(z, r["label"], pw[r["rule"]])
+            if cross is None:
+                z = cell_logit(model, r, rule_idx)
+                loss = weighted_bce(z, r["label"], pw[r["rule"]])
+            else:
+                z, zc, _ = row_logits(model, r, rule_idx, cross)
+                loss = weighted_bce(z, r["label"], pw[r["rule"]]) + CROSS_LAMBDA * cross_loss(zc)
             (loss / accum).backward()
             run += loss.item()
             win_z.append(z.item())
@@ -415,8 +537,12 @@ def main():
         emit(event="epoch", epoch=ep, train_loss=run / n)
         if args.smoke:
             continue
-        vz = fold_logits(model, val, rule_idx)
-        vl = fold_loss(vz, val, pw)
+        if cross is None:
+            vz = fold_logits(model, val, rule_idx)
+            vl = fold_loss(vz, val, pw)
+        else:
+            vz, vc = fold_eval(model, val, rule_idx, cross)
+            vl = fold_loss_cross(vz, vc, val, pw)
         emit(event="val", epoch=ep, val_loss=vl)
         if vl < best[0]:
             best = (vl, ep)
@@ -428,9 +554,13 @@ def main():
 
     emit(event="selected", epoch=best[1], val_loss=best[0])
     model.load_state_dict(torch.load(args.out / "best.pt"), strict=False)
-    cal = load_rows("cal")
-    cz = fold_logits(model, cal, rule_idx)
-    vz = fold_logits(model, val, rule_idx)
+    cal = load_rows("cal") + extra["cal"]
+    if cross is None:
+        cz = fold_logits(model, cal, rule_idx)
+        vz = fold_logits(model, val, rule_idx)
+    else:
+        cz, cc = fold_eval(model, cal, rule_idx, cross)
+        vz, vc = fold_eval(model, val, rule_idx, cross)
 
     def sig(x: float) -> float:        # phase 1's formula, guarded only where it would overflow
         try:
@@ -438,6 +568,8 @@ def main():
         except OverflowError:
             return 0.0
 
+    # Own cells only, as in Stage 1. Step 4's calibration and thresholds over own plus admitted
+    # cross cells are a separate script, so every arm (B, N, NC) gets the same code.
     temps, thr = {}, {}
     for rule in menu:
         ci = [i for i, r in enumerate(cal) if r["rule"] == rule]
@@ -448,9 +580,13 @@ def main():
         thr[rule] = thresholds(vp, [val[i]["label"] for i in vi])
     (args.out / "calibration.json").write_text(json.dumps(dict(menu=menu, temperatures=temps), indent=1))
     (args.out / "thresholds.json").write_text(json.dumps(thr, indent=1))
-    (args.out / "fold-logits.json").write_text(json.dumps(dict(
+    logits = dict(
         val=[dict(id=r["id"], rule=r["rule"], label=r["label"], z=z) for r, z in zip(val, vz)],
-        cal=[dict(id=r["id"], rule=r["rule"], label=r["label"], z=z) for r, z in zip(cal, cz)])))
+        cal=[dict(id=r["id"], rule=r["rule"], label=r["label"], z=z) for r, z in zip(cal, cz)])
+    if cross is not None:
+        logits["val_cross"] = [dict(id=r["id"], unit=u, head=h, z=v) for r, c in zip(val, vc) for u, h, v in c]
+        logits["cal_cross"] = [dict(id=r["id"], unit=u, head=h, z=v) for r, c in zip(cal, cc) for u, h, v in c]
+    (args.out / "fold-logits.json").write_text(json.dumps(logits))
     emit(event="done", selected_epoch=best[1], val_loss=best[0],
          temps_at_bound=[r for r in menu if temps[r]["at_bound"]])
 
