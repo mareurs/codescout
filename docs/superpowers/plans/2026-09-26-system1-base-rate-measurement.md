@@ -268,18 +268,18 @@ All code goes in scripts/measure. Every module is importable by path and exposes
 - `exclusions(sessions, excluded_sids: set[str]) -> dict[str, str]`, mapping sid to reason. Reasons:
   - `sdk-cli`;
   - `scratchpad-project`;
-  - `fork-of:<sid>`: the first 5 message uuids repeat another session's; the earliest `first_ts` is kept as the original;
+  - `fork-of:<sid>`: SUPERSEDED by spec Amendment 3(c). Forks are labelled by `relations()` and counted through `attribute_entries`, not excluded;
   - `excluded-by-spec`: session `3c5b02df`, plus sessions whose task was this measurement.
 
 - [ ] **Step 1: Write the failing tests.**
   - `test_tool_results_meta_and_command_wrappers_are_not_operator_messages`: a fixture holding one each of `tool_result`, `isMeta`, `<command-name>`, a compaction summary and one real prompt; exactly the real prompt is returned.
   - `test_a_truncated_last_line_is_skipped_and_counted`.
-  - `test_a_fork_is_excluded_and_its_original_kept`.
+  - the fork-orientation twins and the `attribute_entries` tests of spec Amendment 3(c) (replacing `test_a_fork_is_excluded_and_its_original_kept`).
   - `test_sdk_cli_and_scratchpad_sessions_are_excluded_with_reasons`.
 - [ ] **Step 2: Run them to verify they fail.**
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run them to verify they pass.**
-- [ ] **Step 5: V2, the positive control on real data.** Freeze a scratch corpus with Task 4, run `exclusions`, and check that every fork run named in `docs/evals/rule-tell-scoring-2026-09-23.md` (DP1, RTD-3 and the e2s forks) is excluded as `fork-of:` or `sdk-cli`. **If any known fork is kept, stop and find another signal before Task 6;** that is what the spec's verification requires. Record the list and the result in the commit message.
+- [ ] **Step 5: V2, the positive control on real data.** RE-POINTED by spec Amendment 3(a): the named fork runs are absent from every profile, so the controls are `d8a1f024` (fork of `571eb3d6`), the `.claude-sdd` prefix copy of `571eb3d6`, and a synthetic fixture. Original text: freeze a scratch corpus with Task 4, run `exclusions`, and check that every fork run named in `docs/evals/rule-tell-scoring-2026-09-23.md` (DP1, RTD-3 and the e2s forks) is excluded as `fork-of:` or `sdk-cli`. **If any known fork is kept, stop and find another signal before Task 6;** that is what the spec's verification requires. Record the list and the result in the commit message.
 - [ ] **Step 6: Commit** `feat(measure): stage 1a sessions, exclusions, fork detection (V2: <n>/<n> known forks excluded)`.
 
 ### Task 6: Stage 1b — the events database and joins

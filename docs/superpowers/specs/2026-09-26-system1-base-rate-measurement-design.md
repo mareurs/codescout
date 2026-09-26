@@ -316,3 +316,31 @@ No correction was counted, no correction content was read, and no rate that ente
   - no `format_compact` renderer reads `_guide_hint`, so text-form tool responses drop it.
 
   Part B must never read `hint: true` as "hint shown". (Source: Task 2's Opus review, Minor 5.)
+
+### Amendment 3 — 2026-09-26, recorded when Stage 1a (Task 5) landed
+
+**Source:** Task 5 (`scripts/measure/transcripts.py`, commits 46b267b4, 66ea4e0b, 84dba2bd, 0ff91320, 4a09e95d), its three Opus reviews, and the controller's rulings R22–R32, R36–R38 in the SDD ledger. Where this amendment and the body disagree, this amendment wins.
+
+**Disclosure, because the go/no-go rule is pre-registered.** Items (b), (c) and (d) change definitions after the controller probed the real corpus. The probes counted *shapes* only:
+
+- sessions per sid across profiles;
+- shared uuid prefixes;
+- task-notification entries, command wrappers, bare slash commands and interrupt markers.
+
+No probe read a correction, a miss, a judge verdict, or any quantity the go/no-go rule is computed from. The go/no-go rule and its thresholds are unchanged.
+
+- **(a) V2 re-pointed (R24).** The spec's known forks (the phase-2 fork-route replays) are in no profile's `projects/` dir: they ran from a copied prefix under a throwaway config dir. No detector can find them, because they are absent. The positive controls are therefore:
+  - `d8a1f024`, a genuine in-corpus fork of `571eb3d6`;
+  - the `.claude-sdd` copy of `571eb3d6`, an exact prefix of the `.claude-kat` copy;
+  - a synthetic fork fixture.
+- **(b) One sessionId in several profiles is ONE session (R22).** A session resumed under another profile leaves a transcript in each, identified as `<profile>/<sid>`. The copy whose uuid list is a superset is kept, and the prefix copy is excluded as `duplicate-prefix-of:<profile>/<sid>`. When neither is a prefix of the other, the longer is kept and the other is excluded as `divergent-duplicate-of:<profile>/<sid>`, a case counted in the observability map.
+- **(c) Forks are attributed, not excluded (R28, superseding the body's `fork-of` exclusion and R23).** A fork is a transcript with a different sessionId whose first 5 uuids equal another's. `relations()` labels it `fork-of:<copy_id>` for reporting only; the original is the member whose first entry after the common prefix is EARLIER.
+
+  Counting goes through `attribute_entries`, which assigns EVERY entry uuid, of every entry type, to exactly one non-excluded transcript containing it: the one with the most TOTAL uuids, with ties broken by earliest `first_ts`, then `copy_id` (R31). An excluded copy owns nothing, and Stage D and `relations()` choose keepers with one function over one population, the non-excluded copies (R32, R36). So `relations(sessions, exclusions)` never names an excluded copy on either side. A consequence of R22 worth stating: a `divergent-duplicate-of:` copy's UNIQUE uuids belong to no transcript and are not counted. That is the documented cost of keeping one copy, and the observability map counts it. Every later stage counts an entry only for its owner. Measured on the 135-transcript live corpus (2026-09-26): 436,943 uuids, 0 with no owner or an owner that lacks them, and 1,657 assistant uuids shared across transcripts, each owned once. Excluding the fork would instead have discarded a near-superset holding 47 real operator prompts.
+- **(d) What an operator message is.** On top of the body's exclusions (tool results, `isMeta`, `isCompactSummary`, command wrappers), `operator_messages()` excludes:
+  - task notifications: `promptSource == "system"`, or `origin.kind == "task-notification"`, or, for older entries, text starting `<task-notification>` (R26; 1,409 entries);
+  - wrappers starting `<command-message>` (R27; 66). A prompt that merely MENTIONS a wrapper tag stays a prompt;
+  - bare slash commands, stripped text matching `^/[a-z][a-z0-9-]*$` (R29; 202, mostly `/compact`);
+  - operator interrupts: text exactly equal to `[Request interrupted by user]` or `[Request interrupted by user for tool use]` (R25). These are returned separately by `operator_interrupts()`, recorded as `turns.kind='interrupt'`, and treated by the miner as a correction signal (source `operator_interrupt`, corrector `operator`), with the next prompt carrying the correction text. Exact equality, so a prompt QUOTING the marker stays a prompt.
+
+  On 132 transcripts, R26, R27 and R29 took `operator_messages` from 4,528 (already net of R25's interrupts) to 2,851, exactly 4,528 − (1,409 + 66 + 202). Interrupts are counted apart from prompts, so the readout can show both.
