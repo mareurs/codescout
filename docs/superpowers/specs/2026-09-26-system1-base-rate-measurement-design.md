@@ -303,3 +303,16 @@ No correction was counted, no correction content was read, and no rate that ente
 - **A1.9 Telemetry justified by named measurements.** The Codex doc asks that telemetry be added only for a named, unresolved measurement that informs a decision. Part A's fields each name theirs:
   - `tool_use_id`: the exact joins that the prospective window depends on (A1.2);
   - `deliveries_json`: "was context delivered before the decision" for codescout's own injections (A1.3).
+
+### Amendment 2 — 2026-09-26, recorded when Part A shipped
+
+**Source:** Task 3, shipping Part A (`tool_use_id` commits 18e15470, decfd71f; `deliveries_json` commits 2884ae0d, 705bca92) and Task 2's Opus review (Minor 5). Where this amendment and the body disagree, this amendment wins.
+
+- **(a) V1 answered 2026-09-26.** Transcripts record hook executions as `attachment` entries (`hook_success`: hook name, event, exit code, duration, `toolUseID`). They record injected text as `hook_additional_context` (SessionStart carried 5,692 chars in session `3c5b02df`). A Stop hook that emits nothing records no content. So companion deliveries enter `deliveries` from transcripts.
+- **(b) The `deliveries_json` shape is one entry per claiming engine,** `{engine, ledger_keys[], blocks[{sha256, bytes}], hint}`, not one per block. The coordinator can attribute keys to an engine but not to a block. The spec's purpose, which engine delivered what with `[]` versus NULL, is unchanged.
+- **(c) Metric 7 is `next_action_aligned`, not "changed".** Without a counterfactual, a pipeline can only observe whether the next action matched what the delivery said, as `aligned|not-aligned|unknown`. The readout labels it that way, never as effect.
+- **(d) What `hint: true` in `deliveries_json` means.** It records that the engine coordinator KEPT that engine's hint for the response's `_guide_hint` field. It does NOT establish that the caller saw the hint:
+  - `inject_hint` does nothing on a non-object value (`src/tools/core/guide_emit.rs`);
+  - no `format_compact` renderer reads `_guide_hint`, so text-form tool responses drop it.
+
+  Part B must never read `hint: true` as "hint shown". (Source: Task 2's Opus review, Minor 5.)
