@@ -1,6 +1,7 @@
-"""Phase-1b Step 1's scripts: draw_audit_sample.py (menu and draw), label_items.py (blinding) and
-score_audit.py (answers, union rule, admission, masking, counterexample rows, clean-text stops).
-Standard library only:
+"""Phase-1b Step 1's scripts: draw_audit_sample.py (menu and draw), label_items.py (blinding),
+score_audit.py (answers, union rule, admission, masking, counterexample rows, clean-text stops)
+and run_labellers.py (per-call checks, the one re-run, batches, prompts, the clean channel; both
+models faked, none called). Standard library only:
     python3 tests/test_phase1b_audit.py
 """
 import importlib.util
@@ -8,6 +9,7 @@ import json
 import pathlib
 import random
 import re
+import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -24,6 +26,7 @@ def load(name):
 da = load("draw_audit_sample")
 li = load("label_items")
 sa = load("score_audit")
+rl = load("run_labellers")
 
 MENU = ["a_rule", "b_rule", "c_rule"]
 
@@ -248,6 +251,90 @@ class Key(unittest.TestCase):
                     [dict(key[0], sentence="other")] + key[1:]):        # a sentence drifted
             with self.assertRaises(SystemExit):
                 sa.check_key(bad, sample, clean, cands)
+
+
+class Labellers(unittest.TestCase):
+    menu = set(MENU)
+    ids = ["L1", "L2"]
+
+    def raw(self, answers):
+        return "\n".join(json.dumps(a) for a in answers)
+
+    def test_check_call(self):
+        good = [ans("L1"), ans("L2", ["a_rule"])]
+        self.assertIsNone(rl.check_call(good, self.ids, self.menu))
+        # Each bad case keeps every other answer valid, so only the check it names can refuse it.
+        cases = {"invalid": [dict(ans("L1"), unsure=True), ans("L2")],
+                 "not in this call": good + [ans("L9")],
+                 "duplicate": good + [ans("L2")],
+                 "1 of 2 items unanswered": good[:1]}
+        for why, answers in cases.items():
+            self.assertIn(why, rl.check_call(answers, self.ids, self.menu), why)
+
+    def attempts(self, outcomes):
+        calls = []
+
+        def call(attempt):
+            calls.append(attempt)
+            out = outcomes[attempt - 1]
+            if isinstance(out, Exception):
+                raise out
+            return out
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                got = rl.run_call("c", self.ids, call, self.menu, pathlib.Path(tmp))
+            except rl.Stop as e:
+                got = e
+            files = sorted(p.name for p in pathlib.Path(tmp).iterdir())
+        return got, calls, files
+
+    def test_an_error_is_re_run_once(self):
+        # LOAD-BEARING: attempt 2 answers in reverse order, so returning the model's order reds.
+        got, calls, files = self.attempts([RuntimeError("boom"), self.raw([ans("L2"), ans("L1", ["b_rule"])])])
+        self.assertEqual([a["id"] for a in got], ["L1", "L2"])
+        self.assertEqual(calls, [1, 2])
+        self.assertEqual(files, ["c.a1.err", "c.a2.txt"])
+
+    def test_an_incomplete_answer_is_re_run_once(self):
+        got, calls, _ = self.attempts([self.raw([ans("L1")]), "```\n" + self.raw([ans("L1"), ans("L2")]) + "\n```"])
+        self.assertEqual(([a["id"] for a in got], calls), (["L1", "L2"], [1, 2]))
+
+    def test_a_second_failure_stops_with_both_reasons(self):
+        got, calls, _ = self.attempts([self.raw([ans("L1")]), RuntimeError("down")] + [self.raw([ans("L1"), ans("L2")])])
+        self.assertIsInstance(got, rl.Stop)
+        self.assertEqual(calls, [1, 2])                        # never a third attempt
+        self.assertIn("attempt 1: 1 of 2 items unanswered", str(got))
+        self.assertIn("attempt 2: down", str(got))
+
+    def test_batches_of_25_in_file_order(self):
+        items = [{"id": f"L{i}"} for i in range(51)]
+        parts = rl.batches(items)
+        self.assertEqual([len(p) for p in parts], [25, 25, 1])
+        self.assertEqual([i for p in parts for i in p], items)
+
+    def test_claude_prompt_is_instruction_menu_and_the_batch(self):
+        batch = [{"id": "L7", "sentence": "s", "paragraph": "p"}, {"id": "L8", "sentence": "t", "paragraph": "q"}]
+        pr = rl.claude_prompt("THE INSTRUCTION", '{"a_rule": {}}', batch)
+        self.assertTrue(pr.startswith("THE INSTRUCTION"))
+        self.assertIn('## menu.json\n\n{"a_rule": {}}', pr)
+        self.assertEqual(pr.split("## Items\n\n")[1].splitlines(), [json.dumps(b) for b in batch])
+
+    def test_codex_sees_exactly_three_files(self):
+        self.assertEqual(rl.codex_files("I", "M", "X"),
+                         {"audit-instruction.md": "I", "menu.json": "M", "items.jsonl": "X"})
+
+    def test_the_claude_channel_must_be_clean(self):
+        with self.assertRaises(SystemExit) as e:
+            rl.check_channel("")
+        # The message, not only the refusal: an empty path also fails dirty_reasons (no settings
+        # reads as plugins enabled), so only the text separates the unset guard from that one.
+        self.assertIn("unset", str(e.exception))
+        with tempfile.TemporaryDirectory() as tmp:
+            (pathlib.Path(tmp) / "settings.json").write_text('{"enabledPlugins": {}, "hooks": {}}')
+            rl.check_channel(tmp)                              # clean: no refusal
+            (pathlib.Path(tmp) / "CLAUDE.md").write_text("rules")
+            with self.assertRaises(SystemExit):
+                rl.check_channel(tmp)
 
 
 if __name__ == "__main__":
