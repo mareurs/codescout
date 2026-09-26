@@ -3037,13 +3037,24 @@ mod tests {
     /// derived from `server.tools` rather than from `action_contract`'s arms — a declared
     /// tool that is absent must not be a failure.
     ///
+    /// **Extended 2026-09-26 to also check `long_docs()`**, not just `description()` —
+    /// the archived `memory` fix above patched only the short description, leaving
+    /// `long_docs()` (read on demand via the tool-guide resource) with no test of its own.
+    /// Checked only for tools declaring `ActionContract::Inventory` and only when
+    /// `long_docs()` is `Some`; `memory` is currently the only member (`edit_file` has
+    /// `long_docs()` but is `Thematic`). Verified red: mangling one action name in
+    /// `memory`'s `long_docs()` failed this test naming exactly that action, then passed
+    /// again on revert.
+    ///
     /// docs/issues/archive/2026-09-02-index-description-omits-the-verify-action.md
     /// docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md
+    /// docs/issues/2026-09-24-residual-memory-tool-doc-gate-reads-long-docs.md
     #[tokio::test]
     async fn tool_descriptions_name_every_action_they_claim_to_enumerate() {
         let (_dir, server) = make_server().await;
         let mut undeclared: Vec<String> = Vec::new();
         let mut under_reported: Vec<String> = Vec::new();
+        let mut under_reported_long_docs: Vec<String> = Vec::new();
         let mut thematic_but_complete: Vec<String> = Vec::new();
 
         for t in &server.tools {
@@ -3067,12 +3078,35 @@ mod tests {
                 .copied()
                 .filter(|a| !names_action(d, a))
                 .collect();
+            let missing_long_docs: Vec<&str> = match t.long_docs() {
+                Some(long) => actions
+                    .iter()
+                    .copied()
+                    .filter(|a| !names_action(long, a))
+                    .collect(),
+                None => Vec::new(),
+            };
 
             match action_contract(t.name()) {
                 None => undeclared.push(format!("{} (enum: {})", t.name(), actions.join(", "))),
-                Some(ActionContract::Inventory) if !missing.is_empty() => under_reported.push(
-                    format!("{} omits {:?} of {}", t.name(), missing, actions.len()),
-                ),
+                Some(ActionContract::Inventory) => {
+                    if !missing.is_empty() {
+                        under_reported.push(format!(
+                            "{} omits {:?} of {}",
+                            t.name(),
+                            missing,
+                            actions.len()
+                        ));
+                    }
+                    if !missing_long_docs.is_empty() {
+                        under_reported_long_docs.push(format!(
+                            "{} long_docs() omits {:?} of {}",
+                            t.name(),
+                            missing_long_docs,
+                            actions.len()
+                        ));
+                    }
+                }
                 // The thematic arm is guarded in the OPPOSITE direction. An
                 // `Inventory`-style assertion is monotone under widening the
                 // description, so it can never fire on an over-broad exemption; without
@@ -3103,6 +3137,20 @@ mod tests {
              re-declare the tool `Thematic` in `action_contract` if it no longer \
              enumerates. Mind `TOOL_SURFACE_CHAR_BUDGET`.",
             under_reported.join("; ")
+        );
+        assert!(
+            under_reported_long_docs.is_empty(),
+            "these tools' long_docs() promise an inventory of their `action` enum (same \
+             `Inventory` contract as the short description) and omit one or more actions: \
+             {}.\n\
+             long_docs() is the fuller reference an agent reads on demand via the \
+             tool-guide resource — it must not describe a NARROWER surface than the short \
+             description already promised. Add the missing action(s) to long_docs(), or \
+             stop using the `action=\"...\"` enumeration style there if it is meant to stay \
+             thematic (only the short description's contract is declared in \
+             `action_contract`; long_docs() is checked only when present, for whichever \
+             tools declare `Inventory`).",
+            under_reported_long_docs.join("; ")
         );
         assert!(
             thematic_but_complete.is_empty(),

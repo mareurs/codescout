@@ -1,10 +1,12 @@
 ---
 id: a230df10e15016de
 kind: bug
-status: open
+status: taken
 title: 'RESIDUAL: Extend the memory tool-doc gate to check long_docs() as well as description()'
 tags:
 - cluster/doc-contradicted-by-code
+claimed_at: 2026-09-26
+claimed_by: b4de6398-fed1-4c1d-a359-2b9a42554e10
 closed: null
 opened: 2026-09-24
 owner: marius
@@ -27,7 +29,11 @@ Remaining work split out of `docs/issues/archive/2026-09-02-memory-description-o
 
 ## Fix
 
-Not started. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
+Extended `tool_descriptions_name_every_action_they_claim_to_enumerate` (`src/server.rs`) to also compute a missing-actions check against `t.long_docs()` when it is `Some`, scoped to tools declaring `ActionContract::Inventory` (only `memory` currently has both). Added `under_reported_long_docs` alongside the existing `under_reported` and a fourth `assert!` naming the omissions. `memory`'s `long_docs()` already names all 8 actions, so the gate is currently green with no drift to fix — this closes the residual regression-test gap, not a live defect.
+
+## Tests added
+
+No new test function — the existing gate test is the regression test; that is the point (one site, extended, not a duplicate). Verified red: temporarily renamed `action="refresh_anchors"` to `action="refresh-anchors-MUTATED"` in `memory`'s `long_docs()`, re-ran `cargo test --lib tool_descriptions_name_every_action_they_claim_to_enumerate` under `scripts/with-slot.sh`, observed failure naming `memory long_docs() omits ["refresh_anchors"] of 8` at the new assertion's line, then reverted (`git diff` clean) and re-ran green.
 
 ## References
 
