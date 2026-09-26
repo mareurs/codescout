@@ -1,0 +1,505 @@
+{"id": "L0001", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the observed output."}
+{"id": "L0002", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the plan's missing placement detail."}
+{"id": "L0003", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Local tests exercise the rewritten module."}
+{"id": "L0004", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly withholds an unverified claim."}
+{"id": "L0005", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Preserves needed evidence with sessionId attribution."}
+{"id": "L0006", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes helper behavior exercised in context."}
+{"id": "L0007", "rules": ["open_artifact"], "unsure": false, "unsure_rules": [], "reason": "States implementation behavior from the plan."}
+{"id": "L0008", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Proposes stronger attribution rather than assigning authorship."}
+{"id": "L0009", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States a design requirement."}
+{"id": "L0010", "rules": ["d_loudness"], "unsure": false, "unsure_rules": [], "reason": "Relies on a warning whose stderr is discarded."}
+{"id": "L0011", "rules": ["member_vs_population", "question_asked"], "unsure": false, "unsure_rules": [], "reason": "Passing suites after deletion establish missing detection, not that the guard can never execute."}
+{"id": "L0012", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Analyzes the explicit guard condition."}
+{"id": "L0013", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Records a current scope decision."}
+{"id": "L0014", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Grounds control-flow analysis in explicit code."}
+{"id": "L0015", "rules": ["member_vs_population", "question_asked"], "unsure": false, "unsure_rules": [], "reason": "Tests exercise other branches, not the topic branch claimed fixed."}
+{"id": "L0016", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports what the outputs omitted."}
+{"id": "L0017", "rules": ["open_artifact", "run_tool"], "unsure": false, "unsure_rules": [], "reason": "Infers unexercised tools' behavior from a plan document."}
+{"id": "L0018", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Prescribes actionable error text."}
+{"id": "L0019", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Requires a discriminating test precondition."}
+{"id": "L0020", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes specific test assertions."}
+{"id": "L0021", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes decision difficulty without asserting exhaustive search."}
+{"id": "L0022", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies remaining planning work."}
+{"id": "L0023", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Specifies a fixture that discriminates the condition."}
+{"id": "L0024", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a property-based guard."}
+{"id": "L0025", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States the intended registry architecture."}
+{"id": "L0026", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly leaves the cause unresolved."}
+{"id": "L0027", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes parser logic."}
+{"id": "L0028", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "Fetching stored content does not verify refresh delivery."}
+{"id": "L0029", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports directly checked binary strings."}
+{"id": "L0030", "rules": [], "unsure": false, "unsure_rules": [], "reason": "No unrun source-only basis is stated."}
+{"id": "L0031", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the observed failure stage."}
+{"id": "L0032", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Compares implementation tradeoffs."}
+{"id": "L0033", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Distinguishes running image state from hook purpose."}
+{"id": "L0034", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the guard's matching dependency."}
+{"id": "L0035", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports behavior corroborated by differing definitions."}
+{"id": "L0036", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports direct fixture setup checks."}
+{"id": "L0037", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Editing an assertion alone does not transfer red evidence."}
+{"id": "L0038", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains why session trailers distinguish authors."}
+{"id": "L0039", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the content of the identified bug record."}
+{"id": "L0040", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a missing guard without claiming protection."}
+{"id": "L0041", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports intervening commits."}
+{"id": "L0042", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States the governing scope decision."}
+{"id": "L0043", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Quotes the matching predicate."}
+{"id": "L0044", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports an executed command and its output."}
+{"id": "L0045", "rules": [], "unsure": true, "unsure_rules": ["closed_population"], "reason": "Unclear whether future surfaces are assumed identical or the sentence merely identifies a reusable design risk."}
+{"id": "L0046", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Provides an evidence pointer."}
+{"id": "L0047", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly describes the query's limited population."}
+{"id": "L0048", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Restates the precedence ruling."}
+{"id": "L0049", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses direct reads and reproductions while preserving uncertainty."}
+{"id": "L0050", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Lists supported architectural changes."}
+{"id": "L0051", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly requires semicolon chaining."}
+{"id": "L0052", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Names a design precedent."}
+{"id": "L0053", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Scopes reachability to the specified task."}
+{"id": "L0054", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The fragment makes no independent violating claim."}
+{"id": "L0055", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Retains rejected signature reasoning to prevent reintroduction."}
+{"id": "L0056", "rules": [], "unsure": true, "unsure_rules": ["d_sessionid"], "reason": "Unclear whether Scout identifies a self-named session or a generic audit role."}
+{"id": "L0057", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a bounded observed population."}
+{"id": "L0058", "rules": ["open_artifact", "run_tool"], "unsure": false, "unsure_rules": [], "reason": "Asserts tool overwrite behavior from documented semantics without a reported call."}
+{"id": "L0059", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the observed inheritance mechanism."}
+{"id": "L0060", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports two actual test failures."}
+{"id": "L0061", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains an export design choice."}
+{"id": "L0062", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the round-trip test's assertions."}
+{"id": "L0063", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Checks selected hits and rejects misleading evidence."}
+{"id": "L0064", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a real call and output."}
+{"id": "L0065", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Requires a separate check for separate work."}
+{"id": "L0066", "rules": ["d_loudness"], "unsure": false, "unsure_rules": [], "reason": "Credits a debug assertion with protection in release builds that remove it."}
+{"id": "L0067", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The diagnostic was reproduced by running the command."}
+{"id": "L0068", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Limits the caller claim to one module."}
+{"id": "L0069", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies a distinct remaining problem."}
+{"id": "L0070", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Gives conditional guidance for future migrations."}
+{"id": "L0071", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Both unchanged assertions were observed red and green."}
+{"id": "L0072", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly limits the claim to recorded triggers."}
+{"id": "L0073", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains a comment omitted from the fix."}
+{"id": "L0074", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains observed test failures through control flow."}
+{"id": "L0075", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The shell chain is not two test lanes."}
+{"id": "L0076", "rules": [], "unsure": true, "unsure_rules": ["run_tool"], "reason": "Source supports the cancellation design, but it is unclear whether runtime cancellation behavior was exercised."}
+{"id": "L0077", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Enumerates independent guard sites without claiming coverage."}
+{"id": "L0078", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Proposes a preventive comment or assertion."}
+{"id": "L0079", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses the relevant platform baseline to prioritize."}
+{"id": "L0080", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Derives branch reachability from explicit conditions."}
+{"id": "L0081", "rules": ["d_semicolon"], "unsure": false, "unsure_rules": [], "reason": "Chains the two cargo test lanes with &&."}
+{"id": "L0082", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only states the feature gate."}
+{"id": "L0083", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Requires rechecking mutable checkout state."}
+{"id": "L0084", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Names a closed two-file set and reports execution."}
+{"id": "L0085", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The build checks the stated input files."}
+{"id": "L0086", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Records the intended precedence decision."}
+{"id": "L0087", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States an explicit design tradeoff."}
+{"id": "L0088", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Provides a content-based recovery identifier."}
+{"id": "L0089", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains possible experimental outcomes."}
+{"id": "L0090", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the staleness predicate."}
+{"id": "L0091", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies an independently scoped check."}
+{"id": "L0092", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Distinguishes database contents from manifest metadata."}
+{"id": "L0093", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly reads the loader artifact."}
+{"id": "L0094", "rules": [], "unsure": true, "unsure_rules": ["question_asked"], "reason": "Scores differ, but the significance criterion needed to judge 'no measurable benefit' is not shown."}
+{"id": "L0095", "rules": ["open_artifact"], "unsure": false, "unsure_rules": [], "reason": "Claims checker coverage from a design document."}
+{"id": "L0096", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States the linter's actual restricted scope."}
+{"id": "L0097", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a pattern within the observed runs."}
+{"id": "L0098", "rules": [], "unsure": true, "unsure_rules": ["closed_population"], "reason": "The set meant by 'all cases' is not defined."}
+{"id": "L0099", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Estimates cost over the stated parameter set."}
+{"id": "L0100", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains where the synthesis is maintained."}
+{"id": "L0101", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Separates direct source facts from measured runtime evidence."}
+{"id": "L0102", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Refers to the directly observed falsifying pair."}
+{"id": "L0103", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains transaction semantics without claiming an unrun stress test."}
+{"id": "L0104", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The formatter directly checks the claimed property."}
+{"id": "L0105", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a scoped audit's findings."}
+{"id": "L0106", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Requests a test for the missing compound-command case."}
+{"id": "L0107", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies a concurrency pattern rather than relying on a document for implementation behavior."}
+{"id": "L0108", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The chain contains one test lane and clippy."}
+{"id": "L0109", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports live command and document checks."}
+{"id": "L0110", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the selector and its returned count."}
+{"id": "L0111", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Prescribes specific observable evidence."}
+{"id": "L0112", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains a prospective maintenance risk."}
+{"id": "L0113", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the original assertion's own failure."}
+{"id": "L0114", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Records evidence necessary to the chosen remedy."}
+{"id": "L0115", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly excludes unsupported coverage credit."}
+{"id": "L0116", "rules": [], "unsure": false, "unsure_rules": [], "reason": "No pair of test lanes is chained."}
+{"id": "L0117", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Attributes the run by sessionId and its log."}
+{"id": "L0118", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Credits the measurement using sessionId."}
+{"id": "L0119", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only introduces a handoff note."}
+{"id": "L0120", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Names the specific regression assertion that protects the branch."}
+{"id": "L0121", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Predicts recurrence from the stated retained process state."}
+{"id": "L0122", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains classification under a tagging policy."}
+{"id": "L0123", "rules": [], "unsure": true, "unsure_rules": ["d_history"], "reason": "The old-release behavior may explain recovery, but its relevance to this operation is unclear."}
+{"id": "L0124", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Names both the failure and the caller that handles it."}
+{"id": "L0125", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains why repeated measurements may differ."}
+{"id": "L0126", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Limits mutation evidence to the mutated crate."}
+{"id": "L0127", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Specifies a bounded test case."}
+{"id": "L0128", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies the precise missing test coverage."}
+{"id": "L0129", "rules": [], "unsure": true, "unsure_rules": ["run_tool"], "reason": "The cutoff claim follows a source scan; whether the stated file behavior was observed is unclear."}
+{"id": "L0130", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes explicit data flow and preserves caller variation."}
+{"id": "L0131", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports relevant checks after the edit."}
+{"id": "L0132", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the evidence projection's actual limits."}
+{"id": "L0133", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports measured sizes and parsing results."}
+{"id": "L0134", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Scopes mutation evidence to the tested document."}
+{"id": "L0135", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses the commit's Session-Id trailer."}
+{"id": "L0136", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only introduces the handoff."}
+{"id": "L0137", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Quotes a live residual predicate without claiming protection."}
+{"id": "L0138", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports only the properties directly checked."}
+{"id": "L0139", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a document's count, corroborated by the described searches."}
+{"id": "L0140", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Provides reproduction steps, not test-lane chaining."}
+{"id": "L0141", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a live process-lifecycle probe."}
+{"id": "L0142", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Scopes observations to two actual runs."}
+{"id": "L0143", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States the guard's matching dependency."}
+{"id": "L0144", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a parser pattern's coverage."}
+{"id": "L0145", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Measures the consumer-visible truncation directly."}
+{"id": "L0146", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Applies a documentation convention."}
+{"id": "L0147", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes missing observability without crediting a guard."}
+{"id": "L0148", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly marks the option unimplemented."}
+{"id": "L0149", "rules": [], "unsure": true, "unsure_rules": ["open_artifact", "run_tool"], "reason": "Unclear whether this quotes a policy under discussion or endorses its unverified tool-behavior claim."}
+{"id": "L0150", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports actual local and CI build results."}
+{"id": "L0151", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Applies a responsibility policy."}
+{"id": "L0152", "rules": [], "unsure": false, "unsure_rules": [], "reason": "No source-only or documentary basis is stated."}
+{"id": "L0153", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly bounds the current change."}
+{"id": "L0154", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the consequence of fast-forward promotion."}
+{"id": "L0155", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the warning mechanism without claiming it protects users."}
+{"id": "L0156", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses semicolons between test lanes."}
+{"id": "L0157", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes an added fallback without claiming exhaustive results."}
+{"id": "L0158", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Corrects interpretation of a capped count."}
+{"id": "L0159", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the observed failing tests."}
+{"id": "L0160", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the unit tests' mocked execution scope."}
+{"id": "L0161", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Runs the probe in the relevant scheduler environment."}
+{"id": "L0162", "rules": ["d_history"], "unsure": false, "unsure_rules": [], "reason": "Preserves an obsolete diagnosis and ticket title without a decision requiring them."}
+{"id": "L0163", "rules": [], "unsure": true, "unsure_rules": ["run_tool"], "reason": "Source establishes the exit branch, but no runtime probe of this command form is shown."}
+{"id": "L0164", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reads the current file list directly."}
+{"id": "L0165", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes implementation sites, not mutation-based coverage."}
+{"id": "L0166", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly identifies unmutated sites."}
+{"id": "L0167", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a migration step."}
+{"id": "L0168", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses the actual return type for a structural claim."}
+{"id": "L0169", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The paragraph explicitly reports artifact verification."}
+{"id": "L0170", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The chain is an install and build, not two test lanes."}
+{"id": "L0171", "rules": [], "unsure": true, "unsure_rules": ["d_loudness"], "reason": "The recommendation may rely on an unread response, but its stated justification is operation ordering."}
+{"id": "L0172", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a directly exercised limitation."}
+{"id": "L0173", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Discusses name resolution without attributing work by name."}
+{"id": "L0174", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports timing and failure frequency from bounded runs."}
+{"id": "L0175", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the available control surface."}
+{"id": "L0176", "rules": [], "unsure": false, "unsure_rules": [], "reason": "No unrun documentary basis is stated."}
+{"id": "L0177", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Derives a property from the explicit uniqueness predicate."}
+{"id": "L0178", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly rejects treating a selector as a census."}
+{"id": "L0179", "rules": ["closed_population", "question_asked"], "unsure": false, "unsure_rules": [], "reason": "One delivery and injector configuration do not establish that every session knows the procedure."}
+{"id": "L0180", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States the architecture and governing mutation policy."}
+{"id": "L0181", "rules": ["d_adjacency"], "unsure": false, "unsure_rules": [], "reason": "Assigns cache defects from nearby edits and timing."}
+{"id": "L0182", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The superseded derivation explains a live counting correction."}
+{"id": "L0183", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains distinct serialization paths."}
+{"id": "L0184", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Records a current limitation at its implementation site."}
+{"id": "L0185", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes an assertion edit without transferring earlier red evidence."}
+{"id": "L0186", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports task difficulty."}
+{"id": "L0187", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains why the derivation must accompany the number."}
+{"id": "L0188", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Applies a conditional promotion threshold."}
+{"id": "L0189", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes current and planned module boundaries."}
+{"id": "L0190", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States the search scope and selector explicitly."}
+{"id": "L0191", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Introduces a proposed approach rather than verified behavior."}
+{"id": "L0192", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a crate-wide reference search."}
+{"id": "L0193", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Prescribes a distribution workflow."}
+{"id": "L0194", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Applies a write-safety design rule."}
+{"id": "L0195", "rules": [], "unsure": true, "unsure_rules": ["run_tool"], "reason": "The source-based exit claim lacks a shown runtime check."}
+{"id": "L0196", "rules": [], "unsure": true, "unsure_rules": ["run_tool"], "reason": "The passage analyzes source and command semantics, but does not show whether this behavior was run."}
+{"id": "L0197", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses a direct reproduction of module shadowing."}
+{"id": "L0198", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Limits what the mitigation accomplishes."}
+{"id": "L0199", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Proposes an explicit dependency parameter."}
+{"id": "L0200", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the guard's data dependency."}
+{"id": "L0201", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Rejects inferring safety from an unexercised destructive operation."}
+{"id": "L0202", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Grounds the limitations in a direct source trace."}
+{"id": "L0203", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Checks the relevant branch relation and command result."}
+{"id": "L0204", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Classifies an observed defect using a convention."}
+{"id": "L0205", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports two actual scenario runs."}
+{"id": "L0206", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Gives an operational checklist step."}
+{"id": "L0207", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a test case."}
+{"id": "L0208", "rules": ["run_tool"], "unsure": false, "unsure_rules": [], "reason": "Claims duplicate-write output and exit behavior from source alone."}
+{"id": "L0209", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies an unreachable guard rather than relying on it."}
+{"id": "L0210", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The paragraph also directly verifies the specific token's resolution."}
+{"id": "L0211", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Names a test of the exact invariant."}
+{"id": "L0212", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reads implementation artifacts and corrects the proposed design."}
+{"id": "L0213", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Proposes filtering invalid scoring inputs."}
+{"id": "L0214", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Requests a direct validation test."}
+{"id": "L0215", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the provenance of a live misreading."}
+{"id": "L0216", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the attached directory comparison."}
+{"id": "L0217", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Records an intentional scope boundary."}
+{"id": "L0218", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly limits the available evidence."}
+{"id": "L0219", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes behavior verified by the stated probes."}
+{"id": "L0220", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Introduces the migration's partial status."}
+{"id": "L0221", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States a dependency constraint."}
+{"id": "L0222", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Analyzes resource lifetime from explicit control flow."}
+{"id": "L0223", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Discusses a specification rather than substituting documentation for code behavior."}
+{"id": "L0224", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The paragraph reports reading all relevant call sites."}
+{"id": "L0225", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly states independent artifact verification."}
+{"id": "L0226", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a discrepancy between measurements."}
+{"id": "L0227", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reads the implementation and reports platform test runs."}
+{"id": "L0228", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only reports an entry's status."}
+{"id": "L0229", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports relevant module tests without broader inference."}
+{"id": "L0230", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Withholds action pending maintainer authorization despite peer approval."}
+{"id": "L0231", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Quotes the documented claim being audited, not an endorsed runtime conclusion."}
+{"id": "L0232", "rules": ["d_adjacency"], "unsure": false, "unsure_rules": [], "reason": "Attributes records from nearby commits during the same window."}
+{"id": "L0233", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Distinguishes defects by their different remedies."}
+{"id": "L0234", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the repair's scope without widening it to prose."}
+{"id": "L0235", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses a live fixture to reject the hypothesis."}
+{"id": "L0236", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Quotes the actual guard predicate."}
+{"id": "L0237", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains why a tempting diagnosis yields the wrong repair."}
+{"id": "L0238", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Clearly distinguishes measured premises from later deductions."}
+{"id": "L0239", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The paragraph explains the reader's contract and caller defect."}
+{"id": "L0240", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the change without extrapolating its evidence."}
+{"id": "L0241", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Quotes and analyzes the predicate itself."}
+{"id": "L0242", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Derives a difference from the stated exclusive branches."}
+{"id": "L0243", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a revised verification rule."}
+{"id": "L0244", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a coverage check confirmed by the subsequent listing."}
+{"id": "L0245", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a client timeout observed in context."}
+{"id": "L0246", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The obsolete path is the live defect being diagnosed."}
+{"id": "L0247", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Successful execution is corroborated by the materialized archive listing."}
+{"id": "L0248", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Directly checks the remote branch positions."}
+{"id": "L0249", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses the actual commit's Session-Id trailer."}
+{"id": "L0250", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports mutation of the exact asserted wording."}
+{"id": "L0251", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses the queue log for the enqueue claim."}
+{"id": "L0252", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Preserves a conflated figure to explain its actionable population split."}
+{"id": "L0253", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a general lifecycle predicate rather than a fixed enumeration."}
+{"id": "L0254", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Specifies acceptance behavior for a future gate."}
+{"id": "L0255", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the remaining reads within the sample."}
+{"id": "L0256", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Measures the actual development loop before deciding."}
+{"id": "L0257", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Labels a hypothesis subsequently tested and rejected."}
+{"id": "L0258", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a comparison and warning mechanism."}
+{"id": "L0259", "rules": [], "unsure": false, "unsure_rules": [], "reason": "No source-only basis for the runtime claim is stated."}
+{"id": "L0260", "rules": [], "unsure": true, "unsure_rules": ["run_tool"], "reason": "Source establishes EOF propagation, but the sentence also claims process exit without a shown live call."}
+{"id": "L0261", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Records a justified false-positive disposition."}
+{"id": "L0262", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports suite status without proving an unrelated member claim."}
+{"id": "L0263", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Enumerates independent implementation sites."}
+{"id": "L0264", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly rejects name-based identification."}
+{"id": "L0265", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "A schema migration test does not measure prompt coherence."}
+{"id": "L0266", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports direct recovery from the reflog."}
+{"id": "L0267", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the retained refactor's current rationale."}
+{"id": "L0268", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses semicolons between the test lanes."}
+{"id": "L0269", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States the selected edit primitive."}
+{"id": "L0270", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains a recorded runtime incident and identifies its evidentiary source."}
+{"id": "L0271", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains a relevant type-bound change."}
+{"id": "L0272", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the observed surviving mutation."}
+{"id": "L0273", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a bounded test run."}
+{"id": "L0274", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies distinct call sites in source."}
+{"id": "L0275", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Checks the actual push scope with a dry run."}
+{"id": "L0276", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The paragraph supplies direct falsifying experiments."}
+{"id": "L0277", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains differing fallback capabilities without documentary substitution."}
+{"id": "L0278", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the helper's testing purpose."}
+{"id": "L0279", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly documents operational limits."}
+{"id": "L0280", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Checks the relevant neighbors in every sampled match."}
+{"id": "L0281", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "One refused hand-edit does not establish that every possible write uses the append call."}
+{"id": "L0282", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the consequence of misleading remedy text."}
+{"id": "L0283", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies a mismatch between wording and implementation."}
+{"id": "L0284", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Checks the specified lock-taking sites directly."}
+{"id": "L0285", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Aligns the displayed population with the query scope."}
+{"id": "L0286", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "Job success does not verify watermark advancement."}
+{"id": "L0287", "rules": [], "unsure": true, "unsure_rules": ["open_artifact"], "reason": "The paragraph says the migration file still needs opening, but does not identify the claim's actual basis."}
+{"id": "L0288", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Applies a status criterion after checking landed commits."}
+{"id": "L0289", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The paragraph identifies the exact fence-handling assertion."}
+{"id": "L0290", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes validation behavior without a source-only basis."}
+{"id": "L0291", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Points to research and open questions without asserting code behavior."}
+{"id": "L0292", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the original assertion's failure only."}
+{"id": "L0293", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Matches classifier patterns to actual source strings."}
+{"id": "L0294", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports comparable before-and-after measurements."}
+{"id": "L0295", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The chain contains git operations, not test lanes."}
+{"id": "L0296", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Preserves the correction needed to choose the right remedy."}
+{"id": "L0297", "rules": [], "unsure": true, "unsure_rules": ["closed_population"], "reason": "Unclear whether 'stable' means across the two observed runs or guarantees future stability."}
+{"id": "L0298", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Gives a reproduction setup command."}
+{"id": "L0299", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains a live status error through necessary history."}
+{"id": "L0300", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses the specific run log for the failure claim."}
+{"id": "L0301", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the measurements that changed the decision."}
+{"id": "L0302", "rules": ["d_sessionid"], "unsure": false, "unsure_rules": [], "reason": "Attributes a gate to an agent name rather than a sessionId."}
+{"id": "L0303", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Points to a relevant correction table."}
+{"id": "L0304", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses explicit authorship credit, not adjacency."}
+{"id": "L0305", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Labels deferred scope."}
+{"id": "L0306", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Prescribes a scoped per-site audit."}
+{"id": "L0307", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports agreement across two baseline runs."}
+{"id": "L0308", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the observed transcript independently of the changed assertion."}
+{"id": "L0309", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "A numerical timestamp difference alone does not establish the timestamp's unit."}
+{"id": "L0310", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Applies the pre-registered experimental decision rule."}
+{"id": "L0311", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States the comment problem substantiated in context."}
+{"id": "L0312", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a test exercising independent database connections."}
+{"id": "L0313", "rules": ["run_tool"], "unsure": false, "unsure_rules": [], "reason": "Asserts a recovery command's refusal while explicitly saying it was not run."}
+{"id": "L0314", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Records planned work and labels its effect an extrapolation."}
+{"id": "L0315", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains why a guard remains needed despite a common bypassing form."}
+{"id": "L0316", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Cites an architectural rationale."}
+{"id": "L0317", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Separates two different measurement questions."}
+{"id": "L0318", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Warns against replaying a stale selector."}
+{"id": "L0319", "rules": ["member_vs_population", "question_asked"], "unsure": false, "unsure_rules": [], "reason": "Other projects' passing tests cannot diagnose this fixture's missing tool."}
+{"id": "L0320", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains exclusion of irrelevant briefing material."}
+{"id": "L0321", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports directly observed drift."}
+{"id": "L0322", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses a relevant reproduction to motivate the fix."}
+{"id": "L0323", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States the probe's intended purpose, not achieved protection."}
+{"id": "L0324", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a schema improvement without claiming budget enforcement."}
+{"id": "L0325", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Labels a hypothesis that the paragraph rejects."}
+{"id": "L0326", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the source helper's parsing logic."}
+{"id": "L0327", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only states where results are recorded."}
+{"id": "L0328", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies incomplete guards rather than claiming complete coverage."}
+{"id": "L0329", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The paragraph directly checks the cited retirement records."}
+{"id": "L0330", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly restricts a live observation to its instant."}
+{"id": "L0331", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes an unread log without treating it as protection."}
+{"id": "L0332", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only introduces the renaming plan."}
+{"id": "L0333", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The prior truth is relevant to explaining silent drift."}
+{"id": "L0334", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only one cargo test lane appears."}
+{"id": "L0335", "rules": [], "unsure": true, "unsure_rules": ["question_asked"], "reason": "One shell call does not make separate git reads atomic, but no concurrent change is shown here."}
+{"id": "L0336", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Computes row size from the two stored copies."}
+{"id": "L0337", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Limits evidence to the mutated resolver."}
+{"id": "L0338", "rules": ["d_red"], "unsure": false, "unsure_rules": [], "reason": "Credits the earlier red to a tightened assertion without rerunning it."}
+{"id": "L0339", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes what the new tests assert."}
+{"id": "L0340", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Names the selector without claiming exhaustive page coverage."}
+{"id": "L0341", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly identifies an untested task class."}
+{"id": "L0342", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Acknowledges the remaining test gap."}
+{"id": "L0343", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Proposes publishing the complete evidence."}
+{"id": "L0344", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports shipped message behavior without an unrun-source basis."}
+{"id": "L0345", "rules": ["open_artifact"], "unsure": false, "unsure_rules": [], "reason": "Relies on an agent's account of a source comment for implementation behavior and rationale."}
+{"id": "L0346", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Summarizes the three enumerated delivery examples."}
+{"id": "L0347", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Combines a relevant test with the explicit shared guard logic."}
+{"id": "L0348", "rules": [], "unsure": false, "unsure_rules": [], "reason": "History explains the current warning against wildcard authorization."}
+{"id": "L0349", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the current migration ordering and its rationale."}
+{"id": "L0350", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Labels a hypothesis subsequently tested live and rejected."}
+{"id": "L0351", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The type claim is corroborated by compiler output."}
+{"id": "L0352", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a scoped latency finding."}
+{"id": "L0353", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Notices overlapping work without inferring permission."}
+{"id": "L0354", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Limits mutation credit to the tested handler."}
+{"id": "L0355", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Provides a conditional diagnostic route."}
+{"id": "L0356", "rules": ["selector_narrow", "question_asked"], "unsure": false, "unsure_rules": [], "reason": "Scores selected only from duplicate pairs cannot establish the whole corpus's score distribution."}
+{"id": "L0357", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a standing instruction rather than a census-based extrapolation."}
+{"id": "L0358", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies the missing check that allowed the overstatement."}
+{"id": "L0359", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a specific unguarded shape without widening the grep result."}
+{"id": "L0360", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a concrete test case."}
+{"id": "L0361", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Credits only the assertion that actually failed."}
+{"id": "L0362", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses semicolon-separated test lanes."}
+{"id": "L0363", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The paragraph substantiates the scope through code."}
+{"id": "L0364", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses a direct before-and-after diff."}
+{"id": "L0365", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States a requirement for discriminating evidence."}
+{"id": "L0366", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Restates the future evidence needed for diagnosis."}
+{"id": "L0367", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Names an enforcement path through the warnings-as-errors gate."}
+{"id": "L0368", "rules": [], "unsure": true, "unsure_rules": ["closed_population"], "reason": "The future-retirement claim may extrapolate from one case or describe an invariant of the template; the distinction is unclear."}
+{"id": "L0369", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Defines a selection predicate without widening its population."}
+{"id": "L0370", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains a design exclusion."}
+{"id": "L0371", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Separates instance classification from mechanism diagnosis."}
+{"id": "L0372", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "A successful docs build is not shown to check internal link resolution."}
+{"id": "L0373", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Defines workflow states and separates distinct verification facts."}
+{"id": "L0374", "rules": [], "unsure": true, "unsure_rules": ["run_tool"], "reason": "The explanation starts from source, but may describe an observed broken summary; no explicit run is shown."}
+{"id": "L0375", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Old-process behavior remains relevant to the current remedy."}
+{"id": "L0376", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes an output format that preserves needed context."}
+{"id": "L0377", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains why a test misses a mutant-only leak."}
+{"id": "L0378", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes explicit filtering without an exhaustive claim."}
+{"id": "L0379", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains why an unknown-error counter offers no specific remedy."}
+{"id": "L0380", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "Clean short-session results do not measure whether the instruction would have helped the long-session field case."}
+{"id": "L0381", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Assigns future responsibility from maintainership, not historical authorship from adjacency."}
+{"id": "L0382", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Rejects a population conclusion from a selected count."}
+{"id": "L0383", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports preserving an actual process exit status."}
+{"id": "L0384", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports observed buffer-chain lengths."}
+{"id": "L0385", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Rejects a nondiscriminating green run as proof of a fix."}
+{"id": "L0386", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly reports measured recovery-command behavior."}
+{"id": "L0387", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains why the separate fixture still reaches its guard."}
+{"id": "L0388", "rules": ["run_tool"], "unsure": false, "unsure_rules": [], "reason": "Claims command refusal while explicitly stating it was not run."}
+{"id": "L0389", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a bounded timeout change."}
+{"id": "L0390", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Derives the mode change from the stated predicate."}
+{"id": "L0391", "rules": [], "unsure": false, "unsure_rules": [], "reason": "No pair of test lanes is involved."}
+{"id": "L0392", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses a live setting check and relevant dedicated test."}
+{"id": "L0393", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the reverse check within the fixed corpus."}
+{"id": "L0394", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Prescribes updating the two identified imports."}
+{"id": "L0395", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The specified instrument measures word counts directly."}
+{"id": "L0396", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains two specific activation routes."}
+{"id": "L0397", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Gives a trigger-specific triage instruction."}
+{"id": "L0398", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Applies the stated disjunctive promotion rule."}
+{"id": "L0399", "rules": [], "unsure": true, "unsure_rules": ["open_artifact"], "reason": "Unclear whether the documentation supplies intended ordering or substitutes for checking implemented output."}
+{"id": "L0400", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Proposes dynamic enumeration to cover future tools."}
+{"id": "L0401", "rules": [], "unsure": false, "unsure_rules": [], "reason": "No source-only basis for the reported output is stated."}
+{"id": "L0402", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports measured output and explains the correct counting unit."}
+{"id": "L0403", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains behavior observed during the mutation incident."}
+{"id": "L0404", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Proposes implementation and direct round-trip verification."}
+{"id": "L0405", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains why formatting cannot repair changed string contents."}
+{"id": "L0406", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Retests the exact shipped wording as its own experimental arm."}
+{"id": "L0407", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses a real zero-test run and its output."}
+{"id": "L0408", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies the live exclusion responsible for the incident."}
+{"id": "L0409", "rules": [], "unsure": true, "unsure_rules": ["question_asked"], "reason": "Timestamp changes show intervening writes, but may not establish the exact bytes the formatter read."}
+{"id": "L0410", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Distinguishes the documented sequencing rule from envelope exit-code semantics."}
+{"id": "L0411", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly rejects treating visibility as consent."}
+{"id": "L0412", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses the cited transcript to assess the correction."}
+{"id": "L0413", "rules": ["closed_population"], "unsure": false, "unsure_rules": [], "reason": "A finite random suffix cannot guarantee that all future parallel servers use distinct files."}
+{"id": "L0414", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "The shown concurrent and sequential timings leave a gap, so they do not establish that no separating ceiling exists."}
+{"id": "L0415", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly states the preview's cap and observed count."}
+{"id": "L0416", "rules": [], "unsure": true, "unsure_rules": ["selector_narrow"], "reason": "It is unclear whether the searched call and Drop implementation exhaust all explicit shutdown-checkpoint routes."}
+{"id": "L0417", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Runs both lanes with semicolons and reads both outputs."}
+{"id": "L0418", "rules": [], "unsure": true, "unsure_rules": ["run_tool"], "reason": "Byte inspection supports the branch analysis, but the command's runtime bypass is not shown exercised."}
+{"id": "L0419", "rules": ["d_loudness"], "unsure": false, "unsure_rules": [], "reason": "Credits an unread stderr log with catching future failures."}
+{"id": "L0420", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses full tree listings for the dependency-count comparison."}
+{"id": "L0421", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Provides a reproduction setup."}
+{"id": "L0422", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes observed failure reporting without a source-only basis."}
+{"id": "L0423", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains stage-level exit semantics without citing an unrun source basis."}
+{"id": "L0424", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies missing direct delivery rather than claiming protection."}
+{"id": "L0425", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses bounded experimental results and separates independently tested code changes."}
+{"id": "L0426", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the eight observed status entries."}
+{"id": "L0427", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the search's directory, pattern, and hits."}
+{"id": "L0428", "rules": ["member_vs_population", "question_asked"], "unsure": false, "unsure_rules": [], "reason": "An average call count cannot verify the intended behavior of one particular run."}
+{"id": "L0429", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses a direct EOF execution probe."}
+{"id": "L0430", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the data already available at the extraction boundary."}
+{"id": "L0431", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the diagnosis being corrected, not an endorsed implementation claim."}
+{"id": "L0432", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Grounds the proposed repair in direct source inspection."}
+{"id": "L0433", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Proposes shared construction to prevent implementation drift."}
+{"id": "L0434", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies the actual shared predicate and its scope."}
+{"id": "L0435", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a diagnostic observation checked against concurrent state."}
+{"id": "L0436", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the byte-splice implementation difference."}
+{"id": "L0437", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Applies an explicit planning scope rule."}
+{"id": "L0438", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Derives missing accumulation from the explicit early return."}
+{"id": "L0439", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Keeps the conclusion scoped to tracked files."}
+{"id": "L0440", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the raw-string predicate, with an observed refusal in context."}
+{"id": "L0441", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes comparing the relevant surfaces."}
+{"id": "L0442", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Records an audit disposition without itself restating the broader runtime inference."}
+{"id": "L0443", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States a current guard and retention instruction."}
+{"id": "L0444", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses bisection and reversal to isolate the change."}
+{"id": "L0445", "rules": ["d_history"], "unsure": false, "unsure_rules": [], "reason": "Restates a retired predicate and name without needing them for the current remedy."}
+{"id": "L0446", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Distinguishes the usable citation from the branch-side hash."}
+{"id": "L0447", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies the exact existing assertion and its intended contract."}
+{"id": "L0448", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only one test lane appears; the memory supplies workflow policy."}
+{"id": "L0449", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The paragraph directly exercises both filter behaviors."}
+{"id": "L0450", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains why the population split changes the remedy."}
+{"id": "L0451", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly withholds a conclusion without the needed experiment."}
+{"id": "L0452", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Derives the lock requirement from the inspected macro expansion."}
+{"id": "L0453", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The paragraph verifies both the preview and complete buffer."}
+{"id": "L0454", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Chains git operations, not test lanes."}
+{"id": "L0455", "rules": [], "unsure": true, "unsure_rules": ["closed_population"], "reason": "The universal future-verification claim assumes later checks continue searching the private labels."}
+{"id": "L0456", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies separate implementations without transferring mutation evidence."}
+{"id": "L0457", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains why the predicate is scoped to pathspec commits."}
+{"id": "L0458", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Maps the two instruments to their measured quantities."}
+{"id": "L0459", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains why already-stored vectors need an independent repair."}
+{"id": "L0460", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a real call and its returned fields."}
+{"id": "L0461", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes remaining state without misusing export success."}
+{"id": "L0462", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly separates idle-exit behavior from connect budgets."}
+{"id": "L0463", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports unchanged reproduction results after the purge."}
+{"id": "L0464", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains independent document and code drift."}
+{"id": "L0465", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States a protocol capability supported by the shared tested path."}
+{"id": "L0466", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the gate's observed result after its fixes."}
+{"id": "L0467", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the platform-specific canonicalization difference."}
+{"id": "L0468", "rules": [], "unsure": true, "unsure_rules": ["open_artifact"], "reason": "The guard-health claim cites T-18, but it is unclear whether that record reports direct verification or substitutes for it."}
+{"id": "L0469", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The paragraph reports actual probe runs and clean reversion."}
+{"id": "L0470", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identifies a mechanism-specific sensitivity in the measurement."}
+{"id": "L0471", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses semicolon-separated test lanes."}
+{"id": "L0472", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the new test's post-change result."}
+{"id": "L0473", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a rendered result checked against its sort rule."}
+{"id": "L0474", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Keeps the requested measurement tied to the explicit 30-item sample."}
+{"id": "L0475", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly limits the fix and names the remaining exclusion."}
+{"id": "L0476", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses the inspected error type and a compilation check."}
+{"id": "L0477", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Requires direct sessionId attribution."}
+{"id": "L0478", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses the relevant platform result to explain residual status."}
+{"id": "L0479", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the wrapper's displayed output, not authorship inferred from a chosen name."}
+{"id": "L0480", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly limits what the guards could have detected."}
+{"id": "L0481", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the fail-closed fallback for unlisted flags."}
+{"id": "L0482", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "Zero commits on the left does not establish strict ancestry without a positive right-side count."}
+{"id": "L0483", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a test of the exact specified input."}
+{"id": "L0484", "rules": ["d_mutation", "question_asked"], "unsure": false, "unsure_rules": [], "reason": "A mutation in the write branch cannot verify the three untouched branches."}
+{"id": "L0485", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the original assertion's own failure."}
+{"id": "L0486", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the different commit scope using the observed partial push."}
+{"id": "L0487", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the diagnosed race without claiming universal prevention."}
+{"id": "L0488", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The paragraph directly checks the specific file's live owner."}
+{"id": "L0489", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Introduces a provisional checklist."}
+{"id": "L0490", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The test exercises the exact insert behavior claimed."}
+{"id": "L0491", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Enumerates the three implementation sites."}
+{"id": "L0492", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Keeps the measurement tied to the store actually queried."}
+{"id": "L0493", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reads the function's predicate and reports relevant test lanes."}
+{"id": "L0494", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Credits the existing workflow rather than an unobserved guard."}
+{"id": "L0495", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the function's test results without transferring another assertion's red."}
+{"id": "L0496", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Chooses to publish the derivation instead of a decaying tally."}
+{"id": "L0497", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses a relevant dispatch test and direct diff inspection."}
+{"id": "L0498", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports absent guarding and successful exit without claiming protection."}
+{"id": "L0499", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports current citation destinations."}
+{"id": "L0500", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Provides a reproduction command, not chained test lanes."}
+{"id": "L0501", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly rejects a nondiscriminating verification result."}
+{"id": "L0502", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes behavior and fixture origin without claiming all-site mutation coverage."}
+{"id": "L0503", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Names a research proposal; no menu breach is visible."}
+{"id": "L0504", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the defined exclusion from the reported rate."}
+{"id": "L0505", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the relevant existing normalizer without inferring peer permission."}

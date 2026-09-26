@@ -1,0 +1,17 @@
+closed_population        6/291  upper 0.0442  admitted
+d_adjacency              0/278  upper 0.0136  admitted
+d_history                1/280  upper 0.0199  admitted
+d_loudness               1/273  upper 0.0205  admitted
+d_mutation               0/277  upper 0.0137  admitted
+d_red                    0/287  upper 0.0132  admitted
+d_semicolon              0/284  upper 0.0133  admitted
+d_sessionid              2/275  upper 0.0261  admitted
+d_visibility             0/282  upper 0.0134  admitted
+member_vs_population     3/283  upper 0.0307  admitted
+open_artifact            1/283  upper 0.0197  admitted
+question_asked          15/265  upper 0.0913  REMOVED (Haiku-only)
+run_tool                 5/277  upper 0.0416  admitted
+selector_narrow          1/265  upper 0.0211  admitted
+masked (unit text, head) cells: 91
+counterexample rows admitted: 169; dropped by head|fold: {'closed_population|cal': 1, 'closed_population|train': 2, 'closed_population|val': 3, 'd_adjacency|train': 1, 'd_semicolon|cal': 1, 'd_semicolon|train': 3, 'open_artifact|cal': 2, 'open_artifact|train': 3, 'open_artifact|val': 3, 'run_tool|cal': 3, 'run_tool|train': 2}
+clean texts survived 12/12 (swap 3/3, Codex 3/3); dropped []

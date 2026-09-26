@@ -1,0 +1,25 @@
+{"id": "L0226", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a reconciliation mismatch that exposed an error; no rule breached."}
+{"id": "L0227", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes what code computes, read from its source; that is not a claim about a tool's runtime output."}
+{"id": "L0228", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A bare status statement; no claim is made."}
+{"id": "L0229", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The module's own tests are cited after a local edit to that module; the check exercises the change."}
+{"id": "L0230", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The peer's approval is explicitly not treated as permission; the author waits for the maintainer."}
+{"id": "L0231", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Lists where a doc states the claim, as a surface inventory; the text does not assert the tool's behaviour."}
+{"id": "L0232", "rules": ["d_adjacency"], "unsure": false, "unsure_rules": [], "reason": "Attributes authorship to Dana because she committed to adjacent files during that window."}
+{"id": "L0233", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A classification ruling with stated reasoning; no rule breached."}
+{"id": "L0234", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States the move response shape with no memory or doc basis given; no rule's shape is visible."}
+{"id": "L0235", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The candidate was refuted by actually running doctor on a fixture."}
+{"id": "L0236", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A cited code description of the guard condition; no rule breached."}
+{"id": "L0237", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains a tempting misreading and why it is ruled out; no rule breached."}
+{"id": "L0238", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States the premise was measured on a given date; it is explicitly distinguished from deduction."}
+{"id": "L0239", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A plain design statement; the blame-based attribution is in another sentence."}
+{"id": "L0240", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a change; the overreaching future-records claim is in another sentence."}
+{"id": "L0241", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Quotes the predicate and describes what the code references; no rule breached."}
+{"id": "L0242", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Hypothetical reasoning about a naive loop; the memory-based claim is in the next sentence."}
+{"id": "L0243", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the content of a shipped text edit; no rule breached."}
+{"id": "L0244", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States that a check occurred; the grep overreach is in a later sentence."}
+{"id": "L0245", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A behaviour claim with no source-reading basis stated; the population inference is in a later sentence."}
+{"id": "L0246", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the current config values; the stale path is relevant to the decision, not idle history."}
+{"id": "L0247", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Exit 0 is cited for an error-free write, which it plausibly measures."}
+{"id": "L0248", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The ref position was observed directly by listing remote refs."}
+{"id": "L0249", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Attributes the change positively via the Session-Id trailer rather than by adjacency."}
+{"id": "L0250", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The red was observed directly by deleting the wording locally."}

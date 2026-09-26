@@ -1,0 +1,25 @@
+{"id": "L0201", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States stash/clean behaviour with no stated basis; the man-page basis belongs to the previous sentence."}
+{"id": "L0202", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Says the loader code was traced directly; the peer-permission breach is in another sentence."}
+{"id": "L0203", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Claims are measured directly, not accepted from the peer; the peer is identified by sessionId elsewhere."}
+{"id": "L0204", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Classifies the issue by citing a doc section; makes no claim about code behaviour resting on that doc."}
+{"id": "L0205", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports actually running the suite and observing the failures."}
+{"id": "L0206", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A checklist instruction with no rule breach visible."}
+{"id": "L0207", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a test case's expected behaviour; no breach."}
+{"id": "L0208", "rules": ["run_tool"], "unsure": false, "unsure_rules": [], "reason": "Asserts runtime behaviour (silent overwrite, exit 0) based explicitly on reading the handler source only."}
+{"id": "L0209", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Diagnoses the unreachable guard as a defect; does not rely on it as protection."}
+{"id": "L0210", "rules": ["member_vs_population"], "unsure": false, "unsure_rules": [], "reason": "Uses the whole doc-lint job being green as proof that one specific token resolves."}
+{"id": "L0211", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A named test guards the invariant; no breach visible."}
+{"id": "L0212", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports reading the source directly with cited locations; the quoted old caveat is needed context."}
+{"id": "L0213", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States a planned change only."}
+{"id": "L0214", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A plain test instruction."}
+{"id": "L0215", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Commit-history analysis; no breach in this sentence."}
+{"id": "L0216", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Points to attached evidence; the peer-permission breach is in another sentence."}
+{"id": "L0217", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Notes code left untouched per a ruling; no breach."}
+{"id": "L0218", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States the available evidence; the selector overreach is in another sentence."}
+{"id": "L0219", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes compound commands in general, not chaining the cargo test lanes with &&."}
+{"id": "L0220", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A plain status summary."}
+{"id": "L0221", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A constraint statement; the adjacency attribution is in another sentence."}
+{"id": "L0222", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes what the code computes on the early return; no breach."}
+{"id": "L0223", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the ULID spec's requirements, not a code claim resting on memory."}
+{"id": "L0224", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Conclusion follows from reading the call sites; the attribution is in another sentence."}
+{"id": "L0225", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The peer's trace is stated as independently verified at the bytes, so it does not rest on hearsay."}

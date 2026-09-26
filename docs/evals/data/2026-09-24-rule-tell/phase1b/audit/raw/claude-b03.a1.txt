@@ -1,0 +1,25 @@
+{"id": "L0076", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The cancellation claim cites the code artifact (inner.rs lines) directly. No rule is breached."}
+{"id": "L0077", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It only describes the three emission sites. The single-site mutation claim is in another sentence."}
+{"id": "L0078", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The '&&' is inside a Rust assertion expression, not a chain of cargo test lanes."}
+{"id": "L0079", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It rests on a measured MSVC baseline run, not on a doc or memory. This is a scoping judgment."}
+{"id": "L0080", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It quotes the shell code at cited lines. The '&&' is a shell test, not cargo lanes."}
+{"id": "L0081", "rules": ["d_semicolon"], "unsure": false, "unsure_rules": [], "reason": "It describes the two cargo test lanes chained with '&&'."}
+{"id": "L0082", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A plain factual statement about the feature flag. The misuse of the check result comes later."}
+{"id": "L0083", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It states branch conventions and a check requirement. No rule is breached."}
+{"id": "L0084", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The population is explicitly listed and the loader was actually run."}
+{"id": "L0085", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It covers a fixed set of 14 files, checked by a build over that directory."}
+{"id": "L0086", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It cites a ruling for a precedence decision, not a claim about what the code does."}
+{"id": "L0087", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A design decision statement. The docs-based runtime claim is in another sentence."}
+{"id": "L0088", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The '&&' chains git commands, not the two cargo test lanes."}
+{"id": "L0089", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It interprets possible outcomes. No check result is misapplied."}
+{"id": "L0090", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It describes what the check computes, with no basis claim and no coverage overreach."}
+{"id": "L0091", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A factual scope statement about check 4. The overclaim is in an earlier sentence."}
+{"id": "L0092", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It reasons about where the split information lives. No rule is breached."}
+{"id": "L0093", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The text says it opened the loader artifact itself."}
+{"id": "L0094", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A score comparison and conclusion. The adjacency attribution is in another sentence."}
+{"id": "L0095", "rules": ["open_artifact"], "unsure": false, "unsure_rules": [], "reason": "It states the checker's behavior based on the design doc rather than the code."}
+{"id": "L0096", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It accurately states the linter's glob scope. The later sentence draws the wrong conclusion."}
+{"id": "L0097", "rules": [], "unsure": false, "unsure_rules": [], "reason": "An inference over a fixed scanned set. The name-based attribution is in the next sentence."}
+{"id": "L0098", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The verification claim is about the guard itself across cases. No aggregate stands in for a member."}
+{"id": "L0099", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A cost estimate over a fixed, enumerated set of 51 parameters."}
+{"id": "L0100", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It cites a routing policy for where content lives, not a claim about code behavior."}

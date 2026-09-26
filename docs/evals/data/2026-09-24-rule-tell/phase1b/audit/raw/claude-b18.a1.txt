@@ -1,0 +1,25 @@
+{"id": "L0451", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States that no A/B test was run and defers the question; claims nothing unsupported."}
+{"id": "L0452", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Conclusion follows from the macro expansion dumped with cargo expand, an artifact actually run."}
+{"id": "L0453", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Tool behaviour is confirmed by running it on a 2000-line file."}
+{"id": "L0454", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The && chains git add and commit, not the two cargo test lanes."}
+{"id": "L0455", "rules": [], "unsure": true, "unsure_rules": ["closed_population"], "reason": "'Every future verification' covers an open set; the paragraph's mapping table suggests later checks may differ."}
+{"id": "L0456", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes each path's own assignment; the one-site mutation overclaim is in the previous sentence."}
+{"id": "L0457", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Defines the guard predicate and its scope; no menu rule is breached."}
+{"id": "L0458", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Summarizes what the two scripts do; the peer-approval claim is in another sentence."}
+{"id": "L0459", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Justifies the change using the current tree's state; this is history a decision needs."}
+{"id": "L0460", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports actually running the call and reading its output."}
+{"id": "L0461", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States watermark and doctor behaviour without claiming an improper basis."}
+{"id": "L0462", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Correctly says the test measures a different step than the earlier fixes did."}
+{"id": "L0463", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Re-ran reindex and find after the purge; the purge was approved by the owner."}
+{"id": "L0464", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Attributes drift to independent change rates without routing authorship by adjacency."}
+{"id": "L0465", "rules": ["closed_population"], "unsure": false, "unsure_rules": [], "reason": "Claims 'any MCP client', including future ones, works with no further work; the set is open."}
+{"id": "L0466", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the observed gate exit status after the fixes."}
+{"id": "L0467", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains platform path semantics with no improper basis; the blame attribution is another sentence."}
+{"id": "L0468", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports what shipped with explicit counts and its own tests; no overclaim."}
+{"id": "L0469", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Backed by running the probe and diffing the tree; the grep overclaim is another sentence."}
+{"id": "L0470", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A structural consequence of parsing shell strings, not a closed-set claim."}
+{"id": "L0471", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The two cargo lanes are chained with ';' as the rule requires."}
+{"id": "L0472", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the test passing after the change; the red was observed on the production path."}
+{"id": "L0473", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Checks the rendered output against the spec's sort rule, which the spec defines."}
+{"id": "L0474", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The paragraph explicitly frames the 30 items as a bounded sample, not the whole population."}
+{"id": "L0475", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly narrows the fix's scope and states the remaining gap."}

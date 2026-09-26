@@ -1,0 +1,25 @@
+{"id": "L0426", "rules": [], "unsure": true, "unsure_rules": ["run_tool"], "reason": "Asserts status output shape; unclear whether it rests on the man page cited nearby or on an actual run."}
+{"id": "L0427", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The grep scope is stated and the result is reported as-is; the following sentence also keeps its conclusion scoped to src/tools."}
+{"id": "L0428", "rules": ["member_vs_population"], "unsure": false, "unsure_rules": [], "reason": "Uses an average over four runs as proof that one specific cs run behaved as intended."}
+{"id": "L0429", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports actually running the command and its observed exit time."}
+{"id": "L0430", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Structural claim about the extract input; no rule breach visible."}
+{"id": "L0431", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports what the report claimed, which is context for the correction; no breach."}
+{"id": "L0432", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Rests on reading source at cited lines, and 'all three gates' is a fixed, named set."}
+{"id": "L0433", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States intent and existing behaviour with no evidence misuse."}
+{"id": "L0434", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes what the code computes, read from the guard itself."}
+{"id": "L0435", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The && chaining is in another sentence; this sentence reports grep's observed output."}
+{"id": "L0436", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the code difference; the suite-as-proof claim is in a different sentence."}
+{"id": "L0437", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Cites a plan's process rule for a decision, not for what code does."}
+{"id": "L0438", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reads the code directly with line citations; describes the control flow."}
+{"id": "L0439", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A scan over tracked files supports a claim about tracked files; the scope matches."}
+{"id": "L0440", "rules": ["run_tool"], "unsure": false, "unsure_rules": [], "reason": "Claims quoting cannot bypass the runtime rejection, reasoning from how the check reads source rather than trying it."}
+{"id": "L0441", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the comparison performed; no breach."}
+{"id": "L0442", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A conclusion sentence with no evidence cited itself; the flawed inference is in the prior sentence."}
+{"id": "L0443", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States current state and a recommendation; no basis misuse."}
+{"id": "L0444", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The bisect positively isolates the commit; the adjacency attribution is in another sentence."}
+{"id": "L0445", "rules": ["d_history"], "unsure": false, "unsure_rules": [], "reason": "Records a retired name and former behaviour that no decision in the paragraph needs."}
+{"id": "L0446", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly marks which SHA is history versus citation, which the decision needs."}
+{"id": "L0447", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Quotes the actual test and its doc comment; no breach."}
+{"id": "L0448", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The && chains fmt, clippy and test, not the two cargo test lanes; it states a convention, not code behaviour."}
+{"id": "L0449", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A topic statement, backed by an observed test in the paragraph."}
+{"id": "L0450", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains the relevance of the split; no breach."}

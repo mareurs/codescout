@@ -1,0 +1,25 @@
+{"id": "L0151", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Classifies the defect by a project rule; makes no claim about what code does."}
+{"id": "L0152", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the implemented change; no rule breached."}
+{"id": "L0153", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States a scoping decision about whitespace sensitivity; no violation."}
+{"id": "L0154", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Fast-forward SHA claim; the unread log issue is in other sentences."}
+{"id": "L0155", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only describes the check; the paragraph itself flags the discarded stderr."}
+{"id": "L0156", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Chains the two cargo lanes with ';', as required."}
+{"id": "L0157", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the added scan; the paragraph acknowledges the dead-code job never sees the warning."}
+{"id": "L0158", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Advice to sum the fields or page; no breach."}
+{"id": "L0159", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports an observed, fixed set of failures."}
+{"id": "L0160", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the current test mechanism; not presented as a guarantee over future tests."}
+{"id": "L0161", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Runtime behaviour was observed by running a job and reading its log."}
+{"id": "L0162", "rules": ["d_history"], "unsure": false, "unsure_rules": [], "reason": "Records the superseded diagnosis and old ticket title as history no decision needs."}
+{"id": "L0163", "rules": [], "unsure": true, "unsure_rules": ["run_tool"], "reason": "Exit behaviour is cited from source lines, not a run; could instead count as describing what the code computes."}
+{"id": "L0164", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "The list's current contents are offered as evidence about its contents when the incident happened."}
+{"id": "L0165", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only lists the three guard sites; the overclaim appears in a later sentence."}
+{"id": "L0166", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Honestly states the other sites were not mutated."}
+{"id": "L0167", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Procedural description of a migration step."}
+{"id": "L0168", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A claim about code output backed by reading the artifact; the adjacency issue is in another sentence."}
+{"id": "L0169", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The dissolved-crate mention explains the defect, so it is needed."}
+{"id": "L0170", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Uses '&&' with npm, not the two cargo test lanes."}
+{"id": "L0171", "rules": [], "unsure": true, "unsure_rules": ["d_loudness"], "reason": "Endorses update's ordering, whose protective status the only caller never reads."}
+{"id": "L0172", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports an actual run confirming the pusher's behaviour."}
+{"id": "L0173", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Notes a session exited; attributes no work by name."}
+{"id": "L0174", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The failure rate is derived from the six observed runs of this test."}
+{"id": "L0175", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States a mode constraint; no breach visible."}

@@ -1,0 +1,25 @@
+{"id": "L0401", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the shim's exit and the stderr drop with no stated basis; no rule breach is visible."}
+{"id": "L0402", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Measured runtime behaviour, reported with explicit counts and an explanation."}
+{"id": "L0403", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the mechanism of the stub's exit and the gate's looping; no rule breach."}
+{"id": "L0404", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States planned work; no claim rests on an improper basis."}
+{"id": "L0405", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Formatter behaviour is claimed without a stated basis, so run_tool does not apply."}
+{"id": "L0406", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The shipped string was itself re-tested; memory is cited only for the discipline, not for code behaviour."}
+{"id": "L0407", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Claim is confirmed by an observed run's output."}
+{"id": "L0408", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Causal remark about the exclude list; the selector overreach is in the preceding sentence."}
+{"id": "L0409", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Timestamp evidence directly bears on file change during the check; no rule breach."}
+{"id": "L0410", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only mentions ; versus &&; does not run the lanes chained with &&."}
+{"id": "L0411", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly warns against treating named sids as consent; complies with d_visibility."}
+{"id": "L0412", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Judges the narrowing by the quoted transcript; the name-based attribution is in the next sentence."}
+{"id": "L0413", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the logging design; the four-character random ID is a design choice, not a breach."}
+{"id": "L0414", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Conclusion follows from the measured ranges quoted in the paragraph."}
+{"id": "L0415", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the observed response count; the overgeneralisation happens in the next sentence."}
+{"id": "L0416", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A repo-wide search for the explicit call supports a conclusion about explicit checkpoints only."}
+{"id": "L0417", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Lanes are chained with ';' and both outputs were read."}
+{"id": "L0418", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The behaviour is verified at the bytes per the paragraph."}
+{"id": "L0419", "rules": ["d_loudness"], "unsure": false, "unsure_rules": [], "reason": "Relies on a log as protection that the paragraph says nobody tails."}
+{"id": "L0420", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Crate count verified by a full tree listing; the peer permission is in the next sentence."}
+{"id": "L0421", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reproduction instruction only."}
+{"id": "L0422", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes manager behaviour with no stated improper basis."}
+{"id": "L0423", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes pipeline exit behaviour with no stated source-only basis."}
+{"id": "L0424", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Points out that nothing reaches the session; it identifies the loudness gap rather than relying on it."}
+{"id": "L0425", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Eval results and counts are reported with evidence; no rule breach visible."}

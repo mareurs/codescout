@@ -332,6 +332,71 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
 
 Predictions 1–5 are the text committed in `2e4743e0`, before Step 4's smoke run, unchanged. In prediction 4, "prediction 6 below" is § *Predictions*' prediction 6, not prediction 6 here. In prediction 5, NC is registered.
 
+## Stage 2 results, 2026-09-26
+
+**Steps 1 and 2 ran on 2026-09-26, 11:22–11:35 UTC, in the registered order.**
+- **Scripts:** `draw_audit_sample.py`, `label_items.py` and `score_audit.py` at `4606a129`; `run_labellers.py` at `14346eb4`; `mine_counterexamples.py` at `96b52f0c`; `gen_codex_clean.py` at `58c91dad`.
+- **Instrument:** `audit-instruction.md` at `02511d99`, sha256 `cbd2bffe58f364ba…`, the value recorded in `run-header.json`.
+- **Every call passed its check on the first attempt.** Codex made one call: 505 answers, 132,783 tokens. Claude ran 21 batches of 25. No call was re-run, so no stop rule could fire.
+- **Outputs, in `phase1b/audit/`:**
+  - `labels-codex.jsonl`, sha256 `c35a5f5e47d28941…`, and `labels-claude.jsonl`, `03b6ace20482c091…`;
+  - `raw/` and `run-header.json`;
+  - `admission.json`, `447de4a5281dabaa…`, and `counterexamples.jsonl`, `1afed05f59f9c9f3…`;
+  - `result.json` and `summary.txt`.
+- **Disclosed:** while the run was going, the operator's agent read the tail of Codex's log to confirm the call had ended. Every rule that uses the labels was fixed before that.
+
+### Step 1 — admission
+
+| head | flagged / audit cells | Wilson 95% upper | |
+|---|---|---|---|
+| `closed_population` | 6 / 291 | 0.0442 | admitted |
+| `d_adjacency` | 0 / 278 | 0.0136 | admitted |
+| `d_history` | 1 / 280 | 0.0199 | admitted |
+| `d_loudness` | 1 / 273 | 0.0205 | admitted |
+| `d_mutation` | 0 / 277 | 0.0137 | admitted |
+| `d_red` | 0 / 287 | 0.0132 | admitted |
+| `d_semicolon` | 0 / 284 | 0.0133 | admitted |
+| `d_sessionid` | 2 / 275 | 0.0261 | admitted |
+| `d_visibility` | 0 / 282 | 0.0134 | admitted |
+| `member_vs_population` | 3 / 283 | 0.0307 | admitted |
+| `open_artifact` | 1 / 283 | 0.0197 | admitted |
+| `question_asked` | 15 / 265 | 0.0913 | **removed** |
+| `run_tool` | 5 / 277 | 0.0416 | admitted |
+| `selector_narrow` | 1 / 265 | 0.0211 | admitted |
+
+- **13 of 14 heads are admitted, so prediction 6 (at least 10) held.**
+- **`question_asked` is removed from the local menu and becomes Haiku-only.** The count taken before registration allowed for this: rules whose subject is common in engineering prose might not be admitted.
+- **The two admissions nearest the bound** are `closed_population` (6 of 291) and `run_tool` (5 of 277).
+- **91 (unit text, head) cells are masked,** everywhere those texts appear.
+- **Agreement, reported only.** Counts are over all 505 items: the audit sample, the candidates and the clean texts.
+  - Over the 14 rules, 41 (item, rule) flags came from both labellers, 28 from Codex only and 23 from Claude only. So neither labeller accounts for most of the misses. In phase 1's Stage 2, misses ran 6 to 1 one way.
+  - Disagreement concentrates on the heads nearest the bound. Reading each rule as both / Codex only / Claude only: `question_asked` 9/10/5, `run_tool` 6/8/2, `closed_population` 2/5/4, `open_artifact` 7/2/5, `member_vs_population` 3/1/3, `selector_narrow` 1/1/2.
+  - Every other rule has at most one disagreement.
+
+### NC's counterexamples
+
+- **Of 193 candidates labelled in the same runs, 169 are admitted.** Each is admitted as a negative for its own head only.
+- **24 were flagged or unsure and dropped** (train / val / cal):
+  - `closed_population` 2 / 3 / 1;
+  - `open_artifact` 3 / 3 / 2;
+  - `run_tool` 2 / 0 / 3;
+  - `d_semicolon` 3 / 0 / 1;
+  - `d_adjacency` 1 / 0 / 0.
+- **Admitted, train / val / cal:**
+  - `closed_population` 28 / 7 / 9;
+  - `d_semicolon` 27 / 10 / 6;
+  - `open_artifact` 27 / 5 / 4;
+  - `run_tool` 28 / 10 / 7;
+  - `d_adjacency` 1 / 0 / 0.
+- **`d_adjacency`'s cue `he` is left with one train counterexample.** It had no val or cal candidate even before labelling.
+
+### Step 2 — the clean texts
+
+- **All 12 new clean texts survived both labellers:** the 3 swap texts, the 3 Codex texts, and 12 of 12 overall.
+- **No Step 2 stop rule fired.** The rules require at least 2 of 3, 2 of 3 and 7 of 12.
+
+**Next, as registered:** N and NC training, three seeds each. Both take `--cross audit/admission.json`, and NC also takes `--extra-rows audit/counterexamples.jsonl`.
+
 ## Step 1 — the cross-rule audit (decides which cells become negatives)
 
 **The cells in question.** For a text whose row is about rule A, a cell (unit, B) with B ≠ A, over every unit of the text. These are the cells phase 1 masked.

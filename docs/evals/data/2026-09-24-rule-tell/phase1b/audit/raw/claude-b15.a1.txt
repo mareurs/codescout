@@ -1,0 +1,25 @@
+{"id": "L0376", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the script's output design. No rule breach; the peer-label adoption is in the next sentence."}
+{"id": "L0377", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains why Case F passes on correct code. No unsupported claim or misapplied evidence."}
+{"id": "L0378", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the filter design with no basis stated and no check misapplied."}
+{"id": "L0379", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States a design choice for the counter. No rule subject is breached."}
+{"id": "L0380", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The conclusion rests on the measured comparison. No visible aggregate-to-member or instrument mismatch."}
+{"id": "L0381", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Assigns future ownership by listed maintainership. It does not attribute an existing write by adjacency or name."}
+{"id": "L0382", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Draws a consequence from the exclusion. The doc-based claim sits in the previous sentence."}
+{"id": "L0383", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes how the probe captured the exit status. No breach."}
+{"id": "L0384", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports observed chain depths from practice. No breach."}
+{"id": "L0385", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Correctly warns that a green run is not evidence of a fix."}
+{"id": "L0386", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The runtime behaviour is reported as measured, so it rests on running the command."}
+{"id": "L0387", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reasons about the unchanged Kotlin case. It does not reuse an earlier red for an edited assertion."}
+{"id": "L0388", "rules": ["run_tool"], "unsure": false, "unsure_rules": [], "reason": "Asserts the command's runtime refusal while explicitly stating it was never run."}
+{"id": "L0389", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the code's timeout change and early-exit loop. No breach."}
+{"id": "L0390", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes what the index method computes, as a direct consequence of the code."}
+{"id": "L0391", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The advice is about the cwd parameter. It does not chain the two test lanes with &&."}
+{"id": "L0392", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The claims were checked against the live catalog and pinned by a test."}
+{"id": "L0393", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The reverse-direction run plausibly measures false negatives over the corpus."}
+{"id": "L0394", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A directive to flip the two sites. The build-green claim is in the next sentence."}
+{"id": "L0395", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States measurable word-count checks and the tool used to measure them."}
+{"id": "L0396", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A history note that explains the deployment state a reader needs. No breach evident."}
+{"id": "L0397", "rules": [], "unsure": true, "unsure_rules": ["open_artifact"], "reason": "Asserts the wine skip is permanent by citing a CI comment. Unclear whether this rests on a doc rather than behaviour."}
+{"id": "L0398", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Applies the tracker's quoted rule directly. No breach."}
+{"id": "L0399", "rules": ["open_artifact"], "unsure": false, "unsure_rules": [], "reason": "States the code's shape-line behaviour \"per the same doc\" rather than from reading the code."}
+{"id": "L0400", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Proposes enumerating the tools, which properly handles an open population. No breach."}

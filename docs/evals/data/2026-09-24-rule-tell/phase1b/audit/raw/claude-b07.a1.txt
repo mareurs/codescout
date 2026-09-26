@@ -1,0 +1,25 @@
+{"id": "L0176", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States the missing-heading behaviour with no stated basis, so run_tool does not apply; the adjacency merge is another sentence."}
+{"id": "L0177", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Draws a safety property from the reused gate expression; no aggregate, selector, or memory-based claim."}
+{"id": "L0178", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Cites the module's framing for design intent; the paragraph reads the code itself for the behaviour."}
+{"id": "L0179", "rules": ["closed_population"], "unsure": false, "unsure_rules": [], "reason": "Claims every session in the fleet knows it; the fleet gains new sessions, and the claim rests on one run plus a config."}
+{"id": "L0180", "rules": [], "unsure": true, "unsure_rules": ["open_artifact"], "reason": "The mutation gating rests on the skill's Phase 4 document; unclear whether this is a design choice or a claim about what code does."}
+{"id": "L0181", "rules": ["d_adjacency"], "unsure": false, "unsure_rules": [], "reason": "Attributes the cache bugs to Tomas because he edited a neighbouring file that week."}
+{"id": "L0182", "rules": [], "unsure": true, "unsure_rules": ["d_history"], "reason": "Writes the superseded prescription into prose; it is marked as a correction, but the history may be unneeded."}
+{"id": "L0183", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reasons from the serialization path; no check is cited as proof and no memory basis is stated."}
+{"id": "L0184", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Documents a known limitation; no menu rule is breached."}
+{"id": "L0185", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes rewriting case 12; it does not claim an earlier red as evidence for the edited assertion."}
+{"id": "L0186", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Introductory framing sentence with no claim that breaks a rule."}
+{"id": "L0187", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains why the correction is recorded; the peer corrected the account but granted no permission."}
+{"id": "L0188", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A decision to keep the note local pending a third instance; no rule is breached."}
+{"id": "L0189", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A structural claim about the boundaries; no rule is breached."}
+{"id": "L0190", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the selector honestly; the overgeneralization appears in a later sentence."}
+{"id": "L0191", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A heading citing the plan; it asserts nothing about code behaviour."}
+{"id": "L0192", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The reference search across the crate measures the liveness claim directly."}
+{"id": "L0193", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Prescribes a procedure from CLAUDE.md; it makes no claim about code behaviour."}
+{"id": "L0194", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A design justification citing the convention; it does not claim what code does."}
+{"id": "L0195", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the script with specific line citations, which indicates the artifact was read."}
+{"id": "L0196", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Cites the script lines and refutes the stated premise; no rule is breached."}
+{"id": "L0197", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The bug claim rests on a direct reproduction; the closed-population claim is in a later sentence."}
+{"id": "L0198", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Limits what the changes achieve; the grep overreach is in later sentences."}
+{"id": "L0199", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Proposes a remedy; the legacy-file history is in another sentence."}
+{"id": "L0200", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes how the guard decides with no stated basis; the source-read runtime claim is in another sentence."}

@@ -1,0 +1,25 @@
+{"id": "L0101", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Template cited for report format only; the measured facts are said to be read from source and runs."}
+{"id": "L0102", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Bare statement that the falsifier pair was measured; no rule breach visible."}
+{"id": "L0103", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Design rationale about locking with no basis stated; no rule breach."}
+{"id": "L0104", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A clean formatter step measures formatting, and the server file is the only modified file."}
+{"id": "L0105", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the audit's own findings; the grep overclaim is in another sentence."}
+{"id": "L0106", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The chain is git and grep, not cargo test lanes; the three probes are a fixed set."}
+{"id": "L0107", "rules": ["open_artifact"], "unsure": true, "unsure_rules": ["open_artifact"], "reason": "The race claim about code seems to rest on an earlier bug report's diagnosis, not the code itself."}
+{"id": "L0108", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The && joins cargo test and clippy, not the two cargo test lanes."}
+{"id": "L0109", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Commands were run and their output observed directly."}
+{"id": "L0110", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a listing result; no claim over the whole population."}
+{"id": "L0111", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Guidance about naming evidence; breaks nothing."}
+{"id": "L0112", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Predicts future moves break it, which correctly treats the set as open."}
+{"id": "L0113", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the first check's failure; the edited check is re-observed failing later."}
+{"id": "L0114", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Records a fix taken and a measurement; no breach."}
+{"id": "L0115", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly declines to credit the inert assertion with branch coverage."}
+{"id": "L0116", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The && is a cd chain, not the two cargo test lanes."}
+{"id": "L0117", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Attributes by sessionId, supported by that session's own log."}
+{"id": "L0118", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Credits a trace to a sessionId positively."}
+{"id": "L0119", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Title sentence only."}
+{"id": "L0120", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The pinning test exercises the branch, so the claimed warning is plausible."}
+{"id": "L0121", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A prediction about the next reconnect; no rule breach visible."}
+{"id": "L0122", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Applies a tagging convention; no breach."}
+{"id": "L0123", "rules": [], "unsure": true, "unsure_rules": ["d_history"], "reason": "Cites former release behavior as rationale; unclear whether that history is needed."}
+{"id": "L0124", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Design description of the retry path; no basis claim or unreached guard."}
+{"id": "L0125", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Mechanism claim with no misapplied check or basis."}

@@ -1,0 +1,25 @@
+{"id": "L0126", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The coverage claim is limited to the parser crate, where the mutation was caught, so it is not overgeneralised."}
+{"id": "L0127", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A test-case description of the flock failure behaviour; it breaks no rule."}
+{"id": "L0128", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The confirmation refers to the gap existing, and 'no existing test' ranges over a fixed current set."}
+{"id": "L0129", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It describes what the code comparison computes; the over-broad selector claim is in a different sentence."}
+{"id": "L0130", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Code-reading description of what parse_globs and OverrideBuilder compute, with caveats stated; no violation."}
+{"id": "L0131", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It reports named checks passing after the edit, without citing them as proof of an unmeasured property."}
+{"id": "L0132", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes what the projection code computes, with no borrowed basis; the faulty inference is in the next sentence."}
+{"id": "L0133", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Size comparison of the trackers; no rule applies."}
+{"id": "L0134", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The protection claim is limited to the one file and sentence where the failure was observed."}
+{"id": "L0135", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Attributes the commit by sessionId read from the trailer, which is correct practice."}
+{"id": "L0136", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A title sentence; no content to judge."}
+{"id": "L0137", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Quotes the current code line and states what it computes; no violation."}
+{"id": "L0138", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Row counts before and after the migration directly measure the migration's integrity."}
+{"id": "L0139", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports what the bug file counts; it makes no claim about code resting on the doc."}
+{"id": "L0140", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The && chains git stash commands, not the two cargo test lanes."}
+{"id": "L0141", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A direct runtime observation of the SIGTERM behaviour."}
+{"id": "L0142", "rules": [], "unsure": true, "unsure_rules": ["question_asked"], "reason": "Two separate runs may not exercise the same-project concurrent contention the symptom involved."}
+{"id": "L0143", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States a code dependency with no borrowed basis; the faulty suite inference is in a later sentence."}
+{"id": "L0144", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States parser behaviour with no basis given; the peer-approval problem is in another sentence."}
+{"id": "L0145", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports an empirical runtime confirmation of the limit."}
+{"id": "L0146", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A procedural instruction citing a convention; it makes no claim about code behaviour."}
+{"id": "L0147", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the silent failure with no source-only basis stated; no guard is relied on."}
+{"id": "L0148", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Status note that option 2 is not built; no violation."}
+{"id": "L0149", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports what the document states, as an explicit quotation; the sentence asserts nothing itself."}
+{"id": "L0150", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The failure was observed directly in the CI job log."}

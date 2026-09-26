@@ -1,0 +1,19 @@
+{
+ "labellers": [
+  "codex",
+  "claude"
+ ],
+ "codex": "gpt-6-astra/medium",
+ "claude": "claude-opus-5-5",
+ "items": 505,
+ "claude_batches": 21,
+ "status": "completed",
+ "sha256": {
+  "audit-instruction.md": "cbd2bffe58f364badcc763c50c0aeeaf9fb31e3a8c266b4886defc997efa8388",
+  "menu.json": "cd3179baea66ca26a7efa46b5c25160f08fbbd35ead52c6cc66c47b79bd08531",
+  "items.jsonl": "bc967dc43a563750963d8fc478f386458bc532261483f536850a087b60936af6"
+ },
+ "started": "2026-09-26T11:22:26.835817+00:00",
+ "claude_channel": "/tmp/claude-1000/-home-marius-work-claude-codescout/571eb3d6-c879-43f6-b3f9-5a51e744e1af/scratchpad/judge-config-main",
+ "ended": "2026-09-26T11:34:53.517719+00:00"
+}

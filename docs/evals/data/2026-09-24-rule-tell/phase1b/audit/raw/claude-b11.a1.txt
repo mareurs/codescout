@@ -1,0 +1,25 @@
+{"id": "L0276", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Summary sentence introducing the refutation results; it makes no claim that breaks a rule."}
+{"id": "L0277", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States a behavioural difference with no stated basis. The peer-permission breach is in a different sentence."}
+{"id": "L0278", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Design rationale for the split; no check, attribution or population claim."}
+{"id": "L0279", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Structural lead-in sentence; nothing checkable is claimed."}
+{"id": "L0280", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The neighbour check is scoped to the 15 cases it covered. The overreaching claim is in the first sentence."}
+{"id": "L0281", "rules": [], "unsure": true, "unsure_rules": ["question_asked"], "reason": "One refused hand-edit may not show that every write arrives through the append call."}
+{"id": "L0282", "rules": [], "unsure": false, "unsure_rules": [], "reason": "An inference about caller behaviour drawn from the documented mismatch; no rule breached."}
+{"id": "L0283", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Analysis of prose versus code; no rule's breach is visible."}
+{"id": "L0284", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The grep result is reported only for the two sites it names; no widening to a population."}
+{"id": "L0285", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Keeps the query scope and the label consistent; no breach."}
+{"id": "L0286", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "A successful job exit status is cited as proof the watermark advances correctly, which it never measures."}
+{"id": "L0287", "rules": [], "unsure": true, "unsure_rules": ["open_artifact"], "reason": "States what the migration guard needs, yet the paragraph implies the migration file has not been opened."}
+{"id": "L0288", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Records a verified status transition in a tracker entry; it is not stale history cited as live."}
+{"id": "L0289", "rules": [], "unsure": true, "unsure_rules": ["member_vs_population"], "reason": "A whole-suite pass is cited as proof; the named fence test is in the suite, but the aggregate is the evidence given."}
+{"id": "L0290", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the script's validation behaviour with no source-only basis stated."}
+{"id": "L0291", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Points to companion documents; makes no claim about code behaviour."}
+{"id": "L0292", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a red observed on the original assertion. The carry-over breach is in a later sentence."}
+{"id": "L0293", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Error strings were verified against the source file; this describes code content, not runtime shape."}
+{"id": "L0294", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A measured before-and-after capture supports the claim."}
+{"id": "L0295", "rules": [], "unsure": false, "unsure_rules": [], "reason": "This is a git command chain, not the two cargo test lanes, so d_semicolon does not apply."}
+{"id": "L0296", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly corrects to 13 of the 14 counted processes; the population is fixed and counted."}
+{"id": "L0297", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Identical output from two runs does measure stability of the set."}
+{"id": "L0298", "rules": [], "unsure": false, "unsure_rules": [], "reason": "This is a shell `&&` in reproduction steps, not the cargo test lanes."}
+{"id": "L0299", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explains a transcription error that the paragraph grounds in commits; no rule breached."}
+{"id": "L0300", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The runtime claim is backed by an observed log line from an actual run."}

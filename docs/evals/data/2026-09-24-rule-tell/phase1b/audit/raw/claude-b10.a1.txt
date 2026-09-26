@@ -1,0 +1,25 @@
+{"id": "L0251", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The claim rests on the queue log, which is direct evidence about the backlog itself."}
+{"id": "L0252", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It reports the script's split output. The retained figure is explicitly flagged and its history explains a live decision."}
+{"id": "L0253", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It describes a mechanism applying to future rows. It does not claim an open set is fixed."}
+{"id": "L0254", "rules": [], "unsure": false, "unsure_rules": [], "reason": "This is a specification of required gate behaviour, not a claim resting on unverified evidence."}
+{"id": "L0255", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It characterises the remaining reads within the sample. The whole-history overreach is in a different sentence."}
+{"id": "L0256", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The && chains touch and build, not the two cargo test lanes. The measurement was run empirically."}
+{"id": "L0257", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It is stated as a hypothesis and then tested, not asserted as how the code behaves."}
+{"id": "L0258", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It plainly describes what the code computes, with no unsupported evidence cited."}
+{"id": "L0259", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It states pipeline exit behaviour but gives no basis of source-reading."}
+{"id": "L0260", "rules": ["run_tool"], "unsure": true, "unsure_rules": ["run_tool"], "reason": "It concludes the process exits at runtime on EOF from reading source alone, never observed running."}
+{"id": "L0261", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A disposition note; it breaks no rule."}
+{"id": "L0262", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The aggregate is cited only for an aggregate requirement of the checklist."}
+{"id": "L0263", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It describes three call sites. The one-site mutation overclaim occurs in a later sentence."}
+{"id": "L0264", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It explicitly rejects name-based attribution."}
+{"id": "L0265", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "A schema migration test is cited as proof of prompt-surface coherence, which it never measures."}
+{"id": "L0266", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It reports an observed reflog entry and the recovery action taken."}
+{"id": "L0267", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Future callers are a design motivation, not a coverage claim over a closed set."}
+{"id": "L0268", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The two lanes are chained with a semicolon, which is correct."}
+{"id": "L0269", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A plain design statement."}
+{"id": "L0270", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The peer supplied a timestamp reading, not permission. No source-only basis is stated for the ENOSPC claim."}
+{"id": "L0271", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It describes a code change and the reason for it."}
+{"id": "L0272", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The mechanism explains an observed mutation result, 96/0. No overclaim of coverage."}
+{"id": "L0273", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It reports a test run without claiming anything beyond that run."}
+{"id": "L0274", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It describes the source layout, which is visible in the source."}
+{"id": "L0275", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It rests on an observed push dry-run."}

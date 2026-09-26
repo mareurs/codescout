@@ -1,0 +1,216 @@
+{
+ "admission": {
+  "closed_population": {
+   "cells": 291,
+   "flagged": 6,
+   "wilson_upper": 0.04424621290643596,
+   "admitted": true
+  },
+  "d_adjacency": {
+   "cells": 278,
+   "flagged": 0,
+   "wilson_upper": 0.013630351232749175,
+   "admitted": true
+  },
+  "d_history": {
+   "cells": 280,
+   "flagged": 1,
+   "wilson_upper": 0.01994978572993054,
+   "admitted": true
+  },
+  "d_loudness": {
+   "cells": 273,
+   "flagged": 1,
+   "wilson_upper": 0.02045398865633466,
+   "admitted": true
+  },
+  "d_mutation": {
+   "cells": 277,
+   "flagged": 0,
+   "wilson_upper": 0.01367888517940362,
+   "admitted": true
+  },
+  "d_red": {
+   "cells": 287,
+   "flagged": 0,
+   "wilson_upper": 0.01320856438693777,
+   "admitted": true
+  },
+  "d_semicolon": {
+   "cells": 284,
+   "flagged": 0,
+   "wilson_upper": 0.013346229315012146,
+   "admitted": true
+  },
+  "d_sessionid": {
+   "cells": 275,
+   "flagged": 2,
+   "wilson_upper": 0.02612538593367947,
+   "admitted": true
+  },
+  "d_visibility": {
+   "cells": 282,
+   "flagged": 0,
+   "wilson_upper": 0.01343961130920062,
+   "admitted": true
+  },
+  "member_vs_population": {
+   "cells": 283,
+   "flagged": 3,
+   "wilson_upper": 0.03069866929186586,
+   "admitted": true
+  },
+  "open_artifact": {
+   "cells": 283,
+   "flagged": 1,
+   "wilson_upper": 0.01974122869327928,
+   "admitted": true
+  },
+  "question_asked": {
+   "cells": 265,
+   "flagged": 15,
+   "wilson_upper": 0.0912804009329733,
+   "admitted": false
+  },
+  "run_tool": {
+   "cells": 277,
+   "flagged": 5,
+   "wilson_upper": 0.04155211985029818,
+   "admitted": true
+  },
+  "selector_narrow": {
+   "cells": 265,
+   "flagged": 1,
+   "wilson_upper": 0.021062355950578898,
+   "admitted": true
+  }
+ },
+ "admitted": [
+  "closed_population",
+  "d_adjacency",
+  "d_history",
+  "d_loudness",
+  "d_mutation",
+  "d_red",
+  "d_semicolon",
+  "d_sessionid",
+  "d_visibility",
+  "member_vs_population",
+  "open_artifact",
+  "run_tool",
+  "selector_narrow"
+ ],
+ "removed": [
+  "question_asked"
+ ],
+ "masked": 91,
+ "counterexamples": {
+  "admitted": 169,
+  "dropped": {
+   "closed_population|cal": 1,
+   "closed_population|train": 2,
+   "closed_population|val": 3,
+   "d_adjacency|train": 1,
+   "d_semicolon|cal": 1,
+   "d_semicolon|train": 3,
+   "open_artifact|cal": 2,
+   "open_artifact|train": 3,
+   "open_artifact|val": 3,
+   "run_tool|cal": 3,
+   "run_tool|train": 2
+  }
+ },
+ "clean": {
+  "survived": [
+   "clean-10",
+   "clean-11",
+   "clean-12",
+   "clean-13",
+   "clean-14",
+   "clean-6",
+   "clean-7",
+   "clean-8",
+   "clean-9",
+   "codex-clean-1",
+   "codex-clean-2",
+   "codex-clean-3"
+  ],
+  "dropped": [],
+  "swap": 3,
+  "codex": 3,
+  "total": 12,
+  "stop": []
+ },
+ "agreement": {
+  "closed_population": {
+   "both": 2,
+   "codex_only": 5,
+   "claude_only": 4
+  },
+  "d_adjacency": {
+   "both": 2,
+   "codex_only": 0,
+   "claude_only": 0
+  },
+  "d_history": {
+   "both": 3,
+   "codex_only": 0,
+   "claude_only": 1
+  },
+  "d_loudness": {
+   "both": 4,
+   "codex_only": 0,
+   "claude_only": 1
+  },
+  "d_mutation": {
+   "both": 1,
+   "codex_only": 0,
+   "claude_only": 0
+  },
+  "d_red": {
+   "both": 1,
+   "codex_only": 0,
+   "claude_only": 0
+  },
+  "d_semicolon": {
+   "both": 1,
+   "codex_only": 0,
+   "claude_only": 0
+  },
+  "d_sessionid": {
+   "both": 1,
+   "codex_only": 1,
+   "claude_only": 0
+  },
+  "d_visibility": {
+   "both": 0,
+   "codex_only": 0,
+   "claude_only": 0
+  },
+  "member_vs_population": {
+   "both": 3,
+   "codex_only": 1,
+   "claude_only": 3
+  },
+  "open_artifact": {
+   "both": 7,
+   "codex_only": 2,
+   "claude_only": 5
+  },
+  "question_asked": {
+   "both": 9,
+   "codex_only": 10,
+   "claude_only": 5
+  },
+  "run_tool": {
+   "both": 6,
+   "codex_only": 8,
+   "claude_only": 2
+  },
+  "selector_narrow": {
+   "both": 1,
+   "codex_only": 1,
+   "claude_only": 2
+  }
+ }
+}

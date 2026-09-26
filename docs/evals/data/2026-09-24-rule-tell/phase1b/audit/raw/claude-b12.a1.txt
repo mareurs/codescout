@@ -1,0 +1,25 @@
+{"id": "L0301", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a measured timing, and the speed comparison rests on that measurement; no rule is breached."}
+{"id": "L0302", "rules": [], "unsure": true, "unsure_rules": ["d_sessionid"], "reason": "Blame is a positive basis, but 'codescout-0a' may be a self-reported session name, not a sessionId."}
+{"id": "L0303", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only a cross-reference to another section; it makes no claim."}
+{"id": "L0304", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Attribution rests positively on the change history, not on adjacency; Ravi is not a session."}
+{"id": "L0305", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A scope-deferral fragment with no claim."}
+{"id": "L0306", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A planned grep with explicit scope; no result is reported as covering a wider population."}
+{"id": "L0307", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports an observed rerun result for a deterministic method; no rule is breached."}
+{"id": "L0308", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the transcript's contents directly; the d_red issue sits in another sentence."}
+{"id": "L0309", "rules": [], "unsure": true, "unsure_rules": ["question_asked"], "reason": "A 2,400,000 row difference only indicates nanoseconds if the sampling interval is known; the interval is not shown."}
+{"id": "L0310", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Applies a pre-registered decision rule to measured results; no breach."}
+{"id": "L0311", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The author's agreement is not used as permission to act; no rule is breached."}
+{"id": "L0312", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the test's setup and why it passes; it is not offered as proof of the multi-process behaviour."}
+{"id": "L0313", "rules": ["run_tool"], "unsure": false, "unsure_rules": [], "reason": "Asserts the command's runtime refusal while stating it was never run."}
+{"id": "L0314", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Plan text describing the intended work; no claim is breached."}
+{"id": "L0315", "rules": [], "unsure": false, "unsure_rules": [], "reason": "An argument about the guard's rationale; no source-only basis is stated for the runtime claim."}
+{"id": "L0316", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Cites the ADR for the design rationale, not for what the code does."}
+{"id": "L0317", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Characterizes what the eval measures without a doc or memory basis; no breach."}
+{"id": "L0318", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States runtime behaviour with no stated source-only basis."}
+{"id": "L0319", "rules": ["member_vs_population", "question_asked"], "unsure": false, "unsure_rules": [], "reason": "A suite passing across 60 sample projects is offered as proof about one fixture's missing tool, which the suite does not exercise."}
+{"id": "L0320", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States a brief-content decision; the name-based attribution appears in another sentence."}
+{"id": "L0321", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports an observed drift over four listed entries; no breach."}
+{"id": "L0322", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The reproduction exercises the wrapper's behaviour; no peer permission or mismatched check is involved."}
+{"id": "L0323", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States the probe's intended purpose only; the guard problem appears in later sentences."}
+{"id": "L0324", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Notes a schema gain for callers; no breach."}
+{"id": "L0325", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The `&&` belongs to a shell-classification hypothesis, not to chaining the two test lanes."}

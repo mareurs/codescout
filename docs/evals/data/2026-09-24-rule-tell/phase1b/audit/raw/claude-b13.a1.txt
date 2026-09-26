@@ -1,0 +1,25 @@
+{"id": "L0326", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States code behaviour with line references and no borrowed basis. The archived bug is cited as a live reference, not superseded prose."}
+{"id": "L0327", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only records where the results are logged. The `&&` chaining sits in a different sentence."}
+{"id": "L0328", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The `&&` is inside a code guard expression, not chained cargo test lanes. It describes the flawed guards factually."}
+{"id": "L0329", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States a retirement convention. The unread-log problem appears in later sentences, not this one."}
+{"id": "L0330", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly limits the live check's coverage to this instant rather than overclaiming."}
+{"id": "L0331", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the swallowed panic without relying on it; the paragraph explicitly avoids trusting the panic."}
+{"id": "L0332", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A heading fragment with no claim in it."}
+{"id": "L0333", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The history serves the drift explanation. The suite-green overclaim is in a different sentence."}
+{"id": "L0334", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The `&&` chains fmt, clippy and a single cargo test, not the two cargo test lanes."}
+{"id": "L0335", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Chains git read commands, not cargo test lanes. No rule is breached."}
+{"id": "L0336", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A straightforward size computation that follows from the stated trigger behaviour."}
+{"id": "L0337", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The claim is scoped to the symbol resolver, where the mutation was actually caught."}
+{"id": "L0338", "rules": ["d_red"], "unsure": false, "unsure_rules": [], "reason": "Treats the pre-edit failure as evidence for the tightened control and skips re-observing the red."}
+{"id": "L0339", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes what the new tests assert; there is no overclaim."}
+{"id": "L0340", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the search method; the paragraph scopes the reported result to filenames containing `edit`."}
+{"id": "L0341", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States an open gap honestly. Name-based attribution happens in the previous sentence."}
+{"id": "L0342", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Acknowledges an untested case."}
+{"id": "L0343", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Proposes a remedy. Name-based attribution happens in the first sentence."}
+{"id": "L0344", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Mentions `;`/`&&` as message content, not as test lanes being chained."}
+{"id": "L0345", "rules": ["open_artifact"], "unsure": false, "unsure_rules": [], "reason": "States what a code comment says based on the agent's report rather than reading the file."}
+{"id": "L0346", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Introduces three listed fixes; no rule is breached in this sentence."}
+{"id": "L0347", "rules": ["question_asked"], "unsure": true, "unsure_rules": ["question_asked"], "reason": "One bare-array test is cited as proof that the refusal is unreachable from any malformed payload."}
+{"id": "L0348", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The `&&` is in shell code, not test lanes. The removed-arm history supports the naming decision."}
+{"id": "L0349", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes current script behaviour with no borrowed basis stated."}
+{"id": "L0350", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The hint is framed as a hypothesis and then tested against the schema and a live call, not asserted as fact."}

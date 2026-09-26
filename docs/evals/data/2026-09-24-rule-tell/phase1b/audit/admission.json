@@ -1,0 +1,383 @@
+{
+ "admitted": [
+  "closed_population",
+  "d_adjacency",
+  "d_history",
+  "d_loudness",
+  "d_mutation",
+  "d_red",
+  "d_semicolon",
+  "d_sessionid",
+  "d_visibility",
+  "member_vs_population",
+  "open_artifact",
+  "run_tool",
+  "selector_narrow"
+ ],
+ "masked": [
+  {
+   "unit": "**Do not pair this with relaxing the gate.** T-18 records that the guard is healthy for the symbol-body population; only the non-definition minority is mis-served, and that is better fixed at the gate's head-read case than by weakening it — which is what actually shipped: the head-read exemption (`start == 1 && end <= 60`) plus the extent-ordered hint exempt 102 of 103 `start == 1` refusals, are code with their own tests, and were never subject to the prompt-eval gate.",
+   "head": "open_artifact"
+  },
+  {
+   "unit": "**Precedence is unchanged.** Env still wins, per the ruling.",
+   "head": "open_artifact"
+  },
+  {
+   "unit": "**The label/content gap is the finding, not a footnote.** This ledger names interventions by a private shorthand (`L3`…`L5`) that the destination artifact never adopted, so every future verification of I-4 and I-5 hits the same false negative.",
+   "head": "closed_population"
+  },
+  {
+   "unit": "**The two ranges have met.** No ceiling both passes a healthy loaded run and fails a genuine sequential regression — wall clock has stopped being a discriminator here rather than merely becoming noisy.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "**There is no backlog.** What there is, is a template: every future retirement inherits this property, and there would be nothing to notice.",
+   "head": "closed_population"
+  },
+  {
+   "unit": "**Wording sophistication is not the binding constraint — attention is.** So the answer to \"would the maintainer's CLAUDE.md have helped B.?\" is: measured, no — his own instruction outperformed it on every metric; what he lacked was not better prose but (a) placement that survives long sessions, (b) contracts that define ground truth as the artifact itself, and (c) substrate gates, which don't decay at all.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "A repo-wide search for the checkpoint call and for a Drop impl on the catalog returned zero matches, so no explicit checkpoint runs on shutdown.",
+   "head": "selector_narrow"
+  },
+  {
+   "unit": "A test that inserts a body holding a multi-line string passed once I made the shift skip literal interiors, so the insert path preserves string values.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "A unit test that feeds a bare array and gets the overview text back confirms that path, so the refusal is unreachable from a malformed payload.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "According to the design doc, the checker also descends into Rust doc comments.",
+   "head": "open_artifact"
+  },
+  {
+   "unit": "Across the four runs the average tool-call count matched the previous step, so the cs run that never invoked `references` also behaved as intended.",
+   "head": "member_vs_population"
+  },
+  {
+   "unit": "Across the four runs the average tool-call count matched the previous step, so the cs run that never invoked `references` also behaved as intended.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "After the change I started two separate index runs on this host, and each held exactly one lock and finished alone.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "All 40 files in the audit corpus now show at least one live owner, so the subagent-touched file that started this report has a reachable party.",
+   "head": "member_vs_population"
+  },
+  {
+   "unit": "Any MCP client that requests progress — including a future Claude Code — gets it with no further work.",
+   "head": "closed_population"
+  },
+  {
+   "unit": "Arm B scored 26 of 75 and Arm C scored 31 of 75, so rerank shows no measurable benefit on this run.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "Author name and email are identical for every session, so those fields cannot tell them apart, and the trailer is what does the work.",
+   "head": "closed_population"
+  },
+  {
+   "unit": "Because both lanes stayed green with the call removed, the guard is dead code and can never execute on any markdown edit path.",
+   "head": "member_vs_population"
+  },
+  {
+   "unit": "Because both lanes stayed green with the call removed, the guard is dead code and can never execute on any markdown edit path.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "Both cite this file at its **archive** path; they were re-pointed in the same commit as the move, per the archive rule.",
+   "head": "open_artifact"
+  },
+  {
+   "unit": "Both orderings match what each operation can afford to lose, so I would leave them as they are.",
+   "head": "d_loudness"
+  },
+  {
+   "unit": "Counting commits on each side of the two branches returns zero on the left, so master is a strict ancestor of the experiments branch and promotion is a fast-forward.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "Decay *detection* is automatic (sweep-driven); every mutation stays human-gated per the skill's Phase 4.",
+   "head": "open_artifact"
+  },
+  {
+   "unit": "Each of the eight shows up as a permanent `??` line in the status listing, which is the noise-blindness the change set out to avoid.",
+   "head": "run_tool"
+  },
+  {
+   "unit": "Every caller in the catalog find module goes from AST to SQL.",
+   "head": "closed_population"
+  },
+  {
+   "unit": "Every one of them sits above 0.82, so the scores across the whole corpus form a tight cluster near the top.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "Every one of them sits above 0.82, so the scores across the whole corpus form a tight cluster near the top.",
+   "head": "selector_narrow"
+  },
+  {
+   "unit": "Every prompt surface reads coherently with the new model because the schema migration test passed.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "Finding no entry to lean on made that call harder than it needed to be.",
+   "head": "selector_narrow"
+  },
+  {
+   "unit": "Fixes the general problem: any future surface that edits a shape has the same hole.",
+   "head": "closed_population"
+  },
+  {
+   "unit": "I ran the suite on 2026-08-15 and it passed, so the formatter does what the note claims.",
+   "head": "member_vs_population"
+  },
+  {
+   "unit": "If the variable name in that arm were misspelled, the startup warning would tell us straight away.",
+   "head": "d_loudness"
+  },
+  {
+   "unit": "In the migration file itself, the guard needs vec0 statically linked for trigger-body validation, so it may block removing the table.",
+   "head": "open_artifact"
+  },
+  {
+   "unit": "It is not a requirement: `run_command` exposes no per-stage control surface, the > MCP call is request/response with no mid-flight channel, #2 makes pipeline mutually > exclusive with `run_in_background` (closing the one handle-based path), and the existing > cancellation intent is explicitly the opposite — `src/tools/run_command/inner.rs:436-439` > kills *\"the entire pipeline … not just the shell\"* on future-drop, by design.",
+   "head": "run_tool"
+  },
+  {
+   "unit": "Opening the session's file list shows it currently names `adapter.rs` as well, so a sweep would have caught both halves.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "Per the `merge=false` overwrite semantics already documented for that tool, omitting it on a non-merge call resets it to `None` — call out in the tool description (same foot-gun as `render_template`).",
+   "head": "open_artifact"
+  },
+  {
+   "unit": "Per the `merge=false` overwrite semantics already documented for that tool, omitting it on a non-merge call resets it to `None` — call out in the tool description (same foot-gun as `render_template`).",
+   "head": "run_tool"
+  },
+  {
+   "unit": "Read full state in a single command — `git reflog -15 && git branch -v && git rev-parse HEAD && git symbolic-ref HEAD` — so the observation set is internally consistent before any write.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "Reading it showed `ResilientStdin` absorbs only `WouldBlock`, so a 0-byte EOF already propagates and the process already exits.",
+   "head": "run_tool"
+  },
+  {
+   "unit": "Reading only the handler source, `memory write` overwrites a duplicate title silently and exits 0.",
+   "head": "run_tool"
+  },
+  {
+   "unit": "Recovery took a second find with include_archived set, since releases before the archive change kept ids stable.",
+   "head": "d_history"
+  },
+  {
+   "unit": "Route it per the file's own § Fix > rather than re-diagnosing: the wine skip is PERMANENT (no Python launcher under wine, see > the `.github/workflows/ci.yml` comment), so an MSVC-side failure is a genuinely different > signal from the skip-listed one. > 2.",
+   "head": "open_artifact"
+  },
+  {
+   "unit": "Scout re-swept the class repo-wide: exactly 4 sites, all now `docs/issues/`, no stragglers.",
+   "head": "d_sessionid"
+  },
+  {
+   "unit": "Scout re-swept the class repo-wide: exactly 4 sites, all now `docs/issues/`, no stragglers.",
+   "head": "selector_narrow"
+  },
+  {
+   "unit": "Since that fetch returned the record, the prompt will now be picked up by agents during their next refresh cycle.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "Status stays mitigated: the residual skips pass on real Windows MSVC.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "Swapping the project directory lookup in the write branch for a constant path turned the write test red, which shows all four branches resolve through the workspace helper.",
+   "head": "d_mutation"
+  },
+  {
+   "unit": "Swapping the project directory lookup in the write branch for a constant path turned the write test red, which shows all four branches resolve through the workspace helper.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "That comparison fires even when the bytes fit the inline budget, which is why a 150 KB file with short lines still comes back cut off.",
+   "head": "run_tool"
+  },
+  {
+   "unit": "That comparison protects users against anchor mismatch in the field.",
+   "head": "d_loudness"
+  },
+  {
+   "unit": "That is the pattern an earlier bug report diagnosed as undefined behavior, because unserialized env writers race the context builder's many env reads.",
+   "head": "open_artifact"
+  },
+  {
+   "unit": "That log would catch any further failure of this kind.",
+   "head": "d_loudness"
+  },
+  {
+   "unit": "That state is the default, since every session starts with a standing instruction to commit or push only on request.",
+   "head": "closed_population"
+  },
+  {
+   "unit": "The claiming section is therefore known to all sessions in the fleet.",
+   "head": "closed_population"
+  },
+  {
+   "unit": "The claiming section is therefore known to all sessions in the fleet.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "The diagnostic log now gets a file layer at INFO level, with a random four-character instance ID in its name, so parallel servers never share a file.",
+   "head": "closed_population"
+  },
+  {
+   "unit": "The docs build succeeds with no warnings, so every internal link in the manual resolves.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "The earlier failure carries over, so the tightened control is known to catch an unconditional exit, and I skipped running it against that build.",
+   "head": "d_red"
+  },
+  {
+   "unit": "The export job exited with status success on both hosts, so the per-repo watermark is advancing correctly under the new id.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "The file's own `do_start` path deliberately drops the lock before shutting down a stale client for exactly this reason (per the agent, a comment near `manager.rs:~1040` warns that shutting down under the lock \"would block all other get_or_start callers\"); `shutdown_all` does the warned-against thing for every client back-to-back.",
+   "head": "open_artifact"
+  },
+  {
+   "unit": "The full doc-lint job finished green across all 212 files, so the archive-companion token resolves correctly.",
+   "head": "member_vs_population"
+  },
+  {
+   "unit": "The gate itself was added by codescout-0a, because the blame for the `notice_once` lines shows that agent as the author.",
+   "head": "d_sessionid"
+  },
+  {
+   "unit": "The generic shape line survives **below** it rather than being displaced, per the same doc: returning `Some` must not drop the key list a `json_path` is aimed with.",
+   "head": "open_artifact"
+  },
+  {
+   "unit": "The guard check formerly tested for any id value and was named has_id_field before we renamed it.",
+   "head": "d_history"
+  },
+  {
+   "unit": "The guard treats the file as server-only, so every write arrives through the append call, and I confirmed that by watching a hand-edit get refused in the log.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "The harness itself runs its two lanes as `cargo test --test brief_shape && cargo test --test brief_limits`.",
+   "head": "d_semicolon"
+  },
+  {
+   "unit": "The implementer's guard (`if !new_string.ends_with('\\n') && edits.last().span.end == sec_end { push('\\n') }`) faithfully reproduces legacy — verified across all cases.",
+   "head": "closed_population"
+  },
+  {
+   "unit": "The plan doc says symbol_at and call_graph go through the same resolver call as references, so they behave identically.",
+   "head": "open_artifact"
+  },
+  {
+   "unit": "The plan doc says symbol_at and call_graph go through the same resolver call as references, so they behave identically.",
+   "head": "run_tool"
+  },
+  {
+   "unit": "The raw trace holds nanosecond stamps, which I confirmed by subtracting two adjacent rows by hand and getting 2,400,000.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "The recovery command in the report was copied without being run, and it refuses because the path already exists.",
+   "head": "run_tool"
+  },
+  {
+   "unit": "The server in this window is running a deleted binary, and the stale-binary hook exists to block re-indexing in exactly that case.",
+   "head": "d_loudness"
+  },
+  {
+   "unit": "The stat timestamps differed by nine seconds between the start and end of the command, which accounts for that report; the check read the bytes exactly as they were at that moment.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "The tool rejects any command containing the ack token before the shell sees it, because the check reads the raw command string, so quoting cannot get around it.",
+   "head": "run_tool"
+  },
+  {
+   "unit": "The tool-listing tests all pass across the 60 sample projects in the suite, so the fixture's missing symbol_at is certainly a defect in the fixture's config.",
+   "head": "member_vs_population"
+  },
+  {
+   "unit": "The tool-listing tests all pass across the 60 sample projects in the suite, so the fixture's missing symbol_at is certainly a defect in the fixture's config.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "The two other defects sit in the traversal cache, and Tomas was the one who edited the neighbouring config loader that week, so the cache bugs are his.",
+   "head": "d_adjacency"
+  },
+  {
+   "unit": "They are Dana's, since she was the one committing to the adjacent issue files during that window.",
+   "head": "d_adjacency"
+  },
+  {
+   "unit": "This section previously prescribed deriving the count index-free as `tracked ∪ git ls-files --others --exclude-standard`.",
+   "head": "d_history"
+  },
+  {
+   "unit": "Those tests pass after the patch, so the topic branch now hides retired artifacts.",
+   "head": "member_vs_population"
+  },
+  {
+   "unit": "Those tests pass after the patch, so the topic branch now hides retired artifacts.",
+   "head": "question_asked"
+  },
+  {
+   "unit": "Two separate forced reindex runs returned the same seven unknown sample ids, byte for byte, so the set is stable rather than random.",
+   "head": "closed_population"
+  },
+  {
+   "unit": "We first blamed a parallel HOME race, and the ticket carried that title until Tuesday.",
+   "head": "d_history"
+  },
+  {
+   "unit": "When the seeded log is empty, `grep -c` prints `0` **and exits 1** — \"matched nothing\", not \"failed\" — so the `|| echo 0` fallback fires on a perfectly good result and appends a second zero.",
+   "head": "run_tool"
+  },
+  {
+   "unit": "`356b30b9214842b7` — **the sharpest one.** `is_buffer_only` only recognises `/`-bearing words, so `cat @cmd_x && rm -rf ~` classifies as buffer-only and skips the dangerous-command gate *and* the source-file block entirely.",
+   "head": "run_tool"
+  },
+  {
+   "unit": "`provenance-subsystem.md`'s own § *Defining sections for cited entries* states a measured policy: promote only entries other files actually cite, because \"mass-promotion would contradict this tracker's own 'narrative only when a row is insufficient' rule, and it is **safe** to leave them precisely because prefix `PV` is now defined — `link_scan` reports a citation of an undefined `PV-N` as *dangling*, so future breakage is visible rather than silent.\"",
+   "head": "open_artifact"
+  },
+  {
+   "unit": "`provenance-subsystem.md`'s own § *Defining sections for cited entries* states a measured policy: promote only entries other files actually cite, because \"mass-promotion would contradict this tracker's own 'narrative only when a row is insufficient' rule, and it is **safe** to leave them precisely because prefix `PV` is now defined — `link_scan` reports a citation of an undefined `PV-N` as *dangling*, so future breakage is visible rather than silent.\"",
+   "head": "run_tool"
+  },
+  {
+   "unit": "`scripts/pre-commit-foreign-index.sh:95-97` exits 0 on every pathspec commit, on the stated premise that such a commit *\"IGNORES the shared index entirely, so it cannot capture staged content and needs no guard.\"* **The premise is false.** A pathspec commit ignores the index only for paths it does **not** name; for a path it *does* name, it commits that path's working-tree content and consumes the peer's staged entry.",
+   "head": "run_tool"
+  },
+  {
+   "unit": "`scripts/pre-commit-foreign-index.sh:95-98` exits 0 when `${GIT_INDEX_FILE##*/}` matches `next-index-*` — the temporary index git builds for a pathspec commit.",
+   "head": "run_tool"
+  },
+  {
+   "unit": "`scripts/pre-commit-foreign-index.sh:99-102` reads `GIT_INDEX_FILE`, and exits 0 when the basename matches `next-index-*` — the temp index git builds for a partial commit.",
+   "head": "run_tool"
+  },
+  {
+   "unit": "`symbols` search mode (as opposed to overview) is likewise still unbounded, per the plan's own contingency gate.",
+   "head": "open_artifact"
+  }
+ ]
+}

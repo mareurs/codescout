@@ -1,0 +1,25 @@
+{"id": "L0001", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports observed output. The alarm reliance appears in another sentence."}
+{"id": "L0002", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the plan's content itself, not code behaviour resting on the plan."}
+{"id": "L0003", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The module's own tests follow a local edit, and determinism is argued structurally, not from the pass count."}
+{"id": "L0004", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly declines to assert an untraced claim."}
+{"id": "L0005", "rules": [], "unsure": false, "unsure_rules": [], "reason": "History is recorded because a future guard test needs it. Attribution is by sessionId."}
+{"id": "L0006", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes what the helper code does."}
+{"id": "L0007", "rules": ["open_artifact"], "unsure": false, "unsure_rules": [], "reason": "States that symbols search mode is unbounded, resting on the plan rather than the code."}
+{"id": "L0008", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The peer's framing supplies a design idea, not permission to act."}
+{"id": "L0009", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A design requirement for the timeout. No rule is breached."}
+{"id": "L0010", "rules": ["d_loudness"], "unsure": false, "unsure_rules": [], "reason": "Relies on the startup warning, yet the paragraph says no test reaches that arm and stderr goes to /dev/null."}
+{"id": "L0011", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "Green lanes show the guard is untested, not that it is dead code or unreachable."}
+{"id": "L0012", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the guard expression in the code."}
+{"id": "L0013", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A scope decision with its rationale. No rule is breached."}
+{"id": "L0014", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Cites code lines directly."}
+{"id": "L0015", "rules": ["question_asked", "member_vs_population"], "unsure": false, "unsure_rules": [], "reason": "The passing tests exercise only the anchor and no-args branches, yet are cited as proof about the topic branch."}
+{"id": "L0016", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Observation about the tools' outputs."}
+{"id": "L0017", "rules": ["open_artifact"], "unsure": false, "unsure_rules": [], "reason": "Asserts identical behaviour of two tools on the plan doc's word, not from the code."}
+{"id": "L0018", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A requirement statement. The claim about the existing branch states no memory-based basis."}
+{"id": "L0019", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The test cases form a fixed set. It explains the fixture design."}
+{"id": "L0020", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the new tests' coverage."}
+{"id": "L0021", "rules": [], "unsure": true, "unsure_rules": ["selector_narrow"], "reason": "It may carry forward the narrow phrase-search result as proof that no precedent exists anywhere."}
+{"id": "L0022", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A to-do statement about the plan."}
+{"id": "L0023", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A test-design requirement citing a lesson. No code behaviour is asserted from memory."}
+{"id": "L0024", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the code change."}
+{"id": "L0025", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A design statement about the registry's writers."}

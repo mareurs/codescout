@@ -1,0 +1,25 @@
+{"id": "L0051", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the gate lanes as `;`-chained, which complies with d_semicolon."}
+{"id": "L0052", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Cites a precedent for a design choice; it states no code behaviour on a doc's authority."}
+{"id": "L0053", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States tracker behaviour with no stated basis. Task 5 is a fixed scope. The adjacency breach is in the next sentence."}
+{"id": "L0054", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A fragment that only cross-references bug numbers."}
+{"id": "L0055", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The superseded draft is recorded because it justifies the pinned 'do not simplify to a slice' decision."}
+{"id": "L0056", "rules": [], "unsure": true, "unsure_rules": ["selector_narrow"], "reason": "The repo-wide re-sweep's pattern is not shown, so I cannot tell whether 'no stragglers' overreaches what the selector covered."}
+{"id": "L0057", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The counts were measured on this machine, and the sentence itself flags that the set is open."}
+{"id": "L0058", "rules": ["open_artifact", "run_tool"], "unsure": false, "unsure_rules": [], "reason": "Asserts the tool's runtime reset-to-None behaviour on the basis of 'already documented' semantics, not a run."}
+{"id": "L0059", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A causal claim with no cited check, doc basis, or selector."}
+{"id": "L0060", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only reports that two tests caught a cost; the overclaim is in a later sentence."}
+{"id": "L0061", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Gives a design rationale for excluding commit rows; no rule is breached."}
+{"id": "L0062", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes what the test asserts; no rule is breached."}
+{"id": "L0063", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Every hit was read directly and the selector's limitation is acknowledged."}
+{"id": "L0064", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports actually running the command and reading its output."}
+{"id": "L0065", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Correctly notes that the remaining work needs its own check."}
+{"id": "L0066", "rules": ["d_loudness"], "unsure": false, "unsure_rules": [], "reason": "Relies on a debug_assert for protection in the field, while the paragraph says release builds strip it out."}
+{"id": "L0067", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The explanation rests on a reproduction that was run; the && lane chaining is in another sentence."}
+{"id": "L0068", "rules": [], "unsure": true, "unsure_rules": ["closed_population"], "reason": "'Every caller' is claimed over a set that could gain members; unclear whether it is meant as a current enumerated snapshot."}
+{"id": "L0069", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Notes remaining untracked work; no rule is breached."}
+{"id": "L0070", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Forward-looking advice; no rule is breached."}
+{"id": "L0071", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Red and green were observed on the assertions themselves; the overclaim is in the next sentence."}
+{"id": "L0072", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States a recorded trigger; this is not a superseded fact or a guard claim."}
+{"id": "L0073", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The inference rests on the commit's file list, and the session is identified by its id."}
+{"id": "L0074", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Traces the failure path with cited lines; no rule is breached."}
+{"id": "L0075", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The && joins cd and git add, not the two cargo test lanes."}

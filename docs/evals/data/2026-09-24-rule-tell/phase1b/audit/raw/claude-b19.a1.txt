@@ -1,0 +1,25 @@
+{"id": "L0476", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Type claim follows from reading the error module; no rule breached."}
+{"id": "L0477", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Recommends sessionId attribution, which complies with the rules."}
+{"id": "L0478", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "Evidence is a MinGW/wine CI job, but it is cited as proof the skips pass on real Windows MSVC."}
+{"id": "L0479", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the wrapper's observed output; the next sentence explicitly limits the scope of the mutation test."}
+{"id": "L0480", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Careful coverage analysis; no rule breached."}
+{"id": "L0481", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Future-flag claim rests on the stated safe-incomplete mechanism and treats the set as open."}
+{"id": "L0482", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Commit count directly measures the ancestry claim."}
+{"id": "L0483", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The test directly exercises the claimed case."}
+{"id": "L0484", "rules": ["d_mutation"], "unsure": false, "unsure_rules": [], "reason": "A mutation in the write branch only is claimed to show all four branches use the helper."}
+{"id": "L0485", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only reports the first failure; the misuse of that red occurs in the next sentence."}
+{"id": "L0486", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Counterfactual about alternative logic; no basis misused."}
+{"id": "L0487", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Diagnosis statement; the overreach is in another sentence."}
+{"id": "L0488", "rules": ["member_vs_population"], "unsure": false, "unsure_rules": [], "reason": "A corpus-wide aggregate is used as proof about one file not shown to be in the corpus."}
+{"id": "L0489", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Heading only."}
+{"id": "L0490", "rules": [], "unsure": true, "unsure_rules": ["question_asked"], "reason": "The paragraph says literals still get indented; unclear whether the passing test actually checked string contents."}
+{"id": "L0491", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Enumerates the sites factually."}
+{"id": "L0492", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Correctly scopes the zero to the legacy store."}
+{"id": "L0493", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes what the code computes, based on reading it; not a tool-runtime claim."}
+{"id": "L0494", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Causal explanation; no rule breached."}
+{"id": "L0495", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Plain report of the suite result, not stretched to a member claim."}
+{"id": "L0496", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The && chaining appears in a different sentence."}
+{"id": "L0497", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Dispatch test and diff reading support the claim; name attribution is in another sentence."}
+{"id": "L0498", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports the absence of a guard; does not rely on one."}
+{"id": "L0499", "rules": [], "unsure": true, "unsure_rules": ["open_artifact"], "reason": "'per the archive rule' may be the basis for the claim rather than an observed commit."}
+{"id": "L0500", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Repro step using && that is not the cargo test lanes."}

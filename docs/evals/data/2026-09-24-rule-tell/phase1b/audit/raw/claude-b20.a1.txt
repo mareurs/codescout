@@ -1,0 +1,5 @@
+{"id": "L0501", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The sentence admits the verification run could not discriminate between outcomes. That is a caveat, not a breach."}
+{"id": "L0502", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The six tools are a fixed, counted set. The one-site mutation claim is in the next sentence and is scoped to the context tool."}
+{"id": "L0503", "rules": [], "unsure": false, "unsure_rules": [], "reason": "This reports what Lanier calls his programme. No menu rule's subject is breached."}
+{"id": "L0504", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It states how enrichment entries are structured and why they do not move the rate. The superseded history is in a later sentence."}
+{"id": "L0505", "rules": [], "unsure": false, "unsure_rules": [], "reason": "It gives no memory, doc, or plan as the basis for the normalizer's behaviour. The peer-approval breach is in a different sentence."}

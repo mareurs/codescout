@@ -1,0 +1,25 @@
+{"id": "L0026", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States an open question; the session-name attribution is in a different sentence."}
+{"id": "L0027", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes what the parser's lookahead computes; it does not chain cargo test lanes."}
+{"id": "L0028", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "A successful fetch shows the record exists, not that agents will pick it up on refresh."}
+{"id": "L0029", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The string-match counts directly measure that the features are present in the binary."}
+{"id": "L0030", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A runtime claim with no basis stated, so run_tool does not apply."}
+{"id": "L0031", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports an observed build failure."}
+{"id": "L0032", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Weighs one option's tradeoff; the one-site mutation claim is in a later sentence."}
+{"id": "L0033", "rules": [], "unsure": true, "unsure_rules": ["d_loudness"], "reason": "Cites the hook as protection while the paragraph says the running image predates it; unclear whether the hook is relied on here."}
+{"id": "L0034", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes what the guard depends on; no rule is broken."}
+{"id": "L0035", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Observed behaviour that contradicts the changelog claim."}
+{"id": "L0036", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Setup steps for two files; the overgeneralisation is in a different sentence."}
+{"id": "L0037", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Only reports the edit; the next sentence reuses the earlier red as evidence."}
+{"id": "L0038", "rules": [], "unsure": true, "unsure_rules": ["closed_population"], "reason": "'Every session' covers an open set, apparently inferred from ten commits; it may instead be a structural fact of the shared checkout."}
+{"id": "L0039", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports what the bug record says, not a claim about code behaviour."}
+{"id": "L0040", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Exposes a silent guard rather than relying on it; no basis is stated for the runtime claim."}
+{"id": "L0041", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A plain timing fact; the range was re-derived afterwards."}
+{"id": "L0042", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Cites a policy decision, not what code does."}
+{"id": "L0043", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes a code condition; the '&&' is not a test-lane chain."}
+{"id": "L0044", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The command was run this turn and its output read."}
+{"id": "L0045", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly addresses future surfaces rather than treating the set as fixed."}
+{"id": "L0046", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A pointer to an evidence document."}
+{"id": "L0047", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Describes the query honestly; the overclaim about all bugs comes in a later sentence."}
+{"id": "L0048", "rules": [], "unsure": true, "unsure_rules": ["open_artifact"], "reason": "'Env still wins, per the ruling' may rest a code-behaviour claim on a ruling rather than on the code."}
+{"id": "L0049", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Based on a direct log read and reproductions; the awk '&&' is not a test-lane chain."}
+{"id": "L0050", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A design scenario statement."}

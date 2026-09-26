@@ -1,0 +1,25 @@
+{"id": "L0351", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States the struct's fields; the paragraph shows compiler output confirming it, and no memory basis is given."}
+{"id": "L0352", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports a latency count and observed polling patterns; no rule breach is visible."}
+{"id": "L0353", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Notes a nearby branch but attributes no write and grants no permission; the permission issue is in the next sentence."}
+{"id": "L0354", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Coverage claim is explicitly scoped to the one mutated site, not generalized to all four."}
+{"id": "L0355", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Conditional diagnostic guidance; no rule breach is visible."}
+{"id": "L0356", "rules": ["selector_narrow"], "unsure": false, "unsure_rules": [], "reason": "Pairs selected by status 'duplicate' are reported as the score distribution of the whole corpus."}
+{"id": "L0357", "rules": [], "unsure": true, "unsure_rules": ["closed_population"], "reason": "'Every session' spans an open set; unclear whether the standing instruction is a guaranteed system default."}
+{"id": "L0358", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Acknowledges the lack of detection; it does not rely on an unreached guard as protection."}
+{"id": "L0359", "rules": [], "unsure": false, "unsure_rules": [], "reason": "States a coverage gap honestly; the grep overreach is in another sentence."}
+{"id": "L0360", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Reports one test case's outcome; no rule breach is visible."}
+{"id": "L0361", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Attributes the red to the assertion that actually produced it."}
+{"id": "L0362", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The two test lanes are chained with ';', as the rule requires."}
+{"id": "L0363", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Present-tense claim about the current code, supported by the reading described next."}
+{"id": "L0364", "rules": [], "unsure": false, "unsure_rules": [], "reason": "The overwrite claim is confirmed by a diff of the file itself."}
+{"id": "L0365", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A general methodological principle; no rule breach is visible."}
+{"id": "L0366", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Restates the re-open trigger; the peer permission is granted in a different sentence."}
+{"id": "L0367", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A compiler warnings gate is a reached, enforced path; no breach is visible."}
+{"id": "L0368", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Explicitly treats future retirements as an open population inheriting the risk."}
+{"id": "L0369", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A specification of filter logic, not a claim about results."}
+{"id": "L0370", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A design rationale about line-range edits; no rule breach is visible."}
+{"id": "L0371", "rules": [], "unsure": false, "unsure_rules": [], "reason": "A classification verdict; no rule breach is visible."}
+{"id": "L0372", "rules": ["question_asked"], "unsure": false, "unsure_rules": [], "reason": "A clean docs build is cited as proof that links resolve, but the build is not shown to check links."}
+{"id": "L0373", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Design description of the journal states; no rule breach is visible."}
+{"id": "L0374", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Runtime claim about grep, but no source-reading basis is stated."}
+{"id": "L0375", "rules": [], "unsure": false, "unsure_rules": [], "reason": "Operational note with an observed example; no rule breach is visible."}
