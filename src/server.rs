@@ -3048,7 +3048,7 @@ mod tests {
     ///
     /// docs/issues/archive/2026-09-02-index-description-omits-the-verify-action.md
     /// docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md
-    /// docs/issues/2026-09-24-residual-memory-tool-doc-gate-reads-long-docs.md
+    /// docs/issues/archive/2026-09-24-residual-memory-tool-doc-gate-reads-long-docs.md
     #[tokio::test]
     async fn tool_descriptions_name_every_action_they_claim_to_enumerate() {
         let (_dir, server) = make_server().await;

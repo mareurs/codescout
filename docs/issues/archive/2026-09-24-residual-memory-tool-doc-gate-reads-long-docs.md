@@ -1,13 +1,13 @@
 ---
-id: a230df10e15016de
+id: 52926c4f251df5c2
 kind: bug
-status: taken
+status: fixed
 title: 'RESIDUAL: Extend the memory tool-doc gate to check long_docs() as well as description()'
 tags:
 - cluster/doc-contradicted-by-code
-claimed_at: 2026-09-26
-claimed_by: b4de6398-fed1-4c1d-a359-2b9a42554e10
-closed: null
+closed: 2026-09-26
+fix_patch_id: 18a55c33641f988e37aeab08c9500be739952268
+fix_sha: b990f177df31d8cff5f00bd54085f72f4b827a5b
 opened: 2026-09-24
 owner: marius
 related:
@@ -30,6 +30,8 @@ Remaining work split out of `docs/issues/archive/2026-09-02-memory-description-o
 ## Fix
 
 Extended `tool_descriptions_name_every_action_they_claim_to_enumerate` (`src/server.rs`) to also compute a missing-actions check against `t.long_docs()` when it is `Some`, scoped to tools declaring `ActionContract::Inventory` (only `memory` currently has both). Added `under_reported_long_docs` alongside the existing `under_reported` and a fourth `assert!` naming the omissions. `memory`'s `long_docs()` already names all 8 actions, so the gate is currently green with no drift to fix — this closes the residual regression-test gap, not a live defect.
+
+Fixed in `b990f177` (`git show b990f177 | git patch-id --stable` → `18a55c33641f988e37aeab08c9500be739952268`).
 
 ## Tests added
 
