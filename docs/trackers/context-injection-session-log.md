@@ -12,7 +12,7 @@ topic: context-injection
 entry_prefix:
   - F
   - W
-entry_high_water_F: 16
+entry_high_water_F: 17
 entry_high_water_W: 6
 ---
 
@@ -50,6 +50,7 @@ author to make.
 | F-14 | 2026-09-26 | med | architectural | mitigated | Said only the Stop hook sees chat prose; UserPromptSubmit already carries transcript_path and a sibling plugin tail-reads it |
 | F-15 | 2026-09-26 | med | architectural | mitigated | The engine key-disjointness gate computes over build-time corpora, so a session-authored corpus would be invisible to it |
 | F-16 | 2026-09-26 | med | plan-prose | mitigated | The spec's per-block delivery shape is not attributable at the coordinator — keys are per engine, not per block |
+| F-17 | 2026-09-26 | high | architectural | open | The live check found `tool_use_id` NULL on every row: rmcp puts `_meta` in RequestContext.meta, and the test built params in-process |
 
 ## Wins Index
 
@@ -1584,6 +1585,22 @@ True of the `guide_ledger.rs` / `server.rs` / `guide_rearm.rs` shape at `HEAD` o
 **Rests on:** `CLAUDE.md` § *Observer Blindness*, position 3 (make the correct path end in a safe state), applied to plan-writing: the scout runs before the shape is chosen, not after a reviewer rejects it.
 
 ---
+
+## F-17 — The live check found tool_use_id NULL on every row: rmcp puts _meta in RequestContext.meta, and the test built params in-process
+
+**Valid:** dated 2026-09-26
+
+**Observed:** Part A shipped `tool_use_id` (read from `_meta["claudecode/toolUseId"]` inside `call_tool_inner`), with a test through `call_tool_inner` named after "the production funnel". The plan's live exact-join check (Task 3 Step 2) found `tool_use_id` NULL on 49 of 49 live rows of session `3c5b02df`, window 11:22:16–11:40 UTC, against a server started 11:22:16 UTC on the rebuilt binary. `deliveries_json` was populated on the same rows, which proves the binary was new.
+
+**Expected:** Non-NULL, and matching the transcript's `tool_use` ids exactly once each.
+
+**Gap:** rmcp 1.3.0 deserializes a `tools/call` through a `WithMeta<P>` proxy: a named `_meta` field beside `#[serde(flatten)] _rest: P`. serde gives a flattened field only the keys the named fields left, so `CallToolRequestParams.meta` is always `None` on the wire. The Meta goes to `Request.extensions`, then to `RequestContext.meta`. Reproduced in a scratch crate against rmcp's real deserializer: `params.meta = None`; the extensions Meta holds both `claudecode/toolUseId` and `progressToken`. The existing test deserialized `CallToolRequestParams` DIRECTLY, and the struct's own serde does read `_meta`. So the test exercised serde and still missed the one entry point the wire uses. The pre-existing `conversation_from_meta` tier is dead in production the same way.
+
+**Cost:** Every row since Part A shipped needs the heuristic join, and the conversation tier could never have fired once a client sent its key. No test, gate or review caught it: Task 1's Opus-tier review approved the shape. Only the plan's live check, which the plan owned as a separate step, could reach it.
+
+**Lesson:** "Through the production funnel" means through the TRANSPORT, not the first function the harness can call. When a value arrives from the wire, the test's input must be bytes through the real deserializer. A struct built in-process, even by `serde_json::from_value`, is the exact shape the failure hides in. A plan step that runs the real binary against the real client is the instrument here, not a formality after the tests.
+
+**Fix:** bug `6e14221db0c20de9`, fix dispatched (Task 3 fix round 1): fold `req_ctx.meta` into `req.meta` in `call_tool`, with an end-to-end duplex-transport test.
 
 ## Template for new entries
 
