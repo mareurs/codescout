@@ -186,11 +186,11 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
   - The cue list (`29506f12`).
   - The counterexample miner, with its cross-fold fix after the Codex review (`ec12b2a1`, `96b52f0c`).
   - `train_arm.py --cross` and `--extra-rows`, with their parity checks (`f566082c`).
+  - Step 4's scripts, `phase1b/score_run.py` and `phase1b/step4.py`, which also take Stage 2's per-run measurements (`f78c0eba`; § *Step 4's scripts* below).
 - **Remaining before registration:**
-  1. A Step 4 script, shared by arms B, N and NC. It computes calibration and thresholds over own plus admitted cross cells, and runs the pre-gate check. `fold-logits.json`'s `val_cross` and `cal_cross` are its input.
-  2. The diagnose step: add all-cells val AUC, and move own-negative firing to `cal`.
-  3. Step 1's scripts: `draw_audit_sample.py`, and the scorer that writes the admission file `--cross` reads (`{"admitted": [...], "masked": [{"unit", "head"}]}`). Both are committed before anything is drawn.
-  4. Fix the predictions, then register.
+  1. Step 1's scripts: `draw_audit_sample.py`, and the scorer that writes the admission file `--cross` reads (`{"admitted": [...], "masked": [{"unit", "head"}]}`). Both are committed before anything is drawn.
+  2. The operator confirms one choice made while writing Step 4: every arm is scored on one cell set, NC's counterexample rows included (§ *Step 4's scripts*).
+  3. Fix the predictions, then register. The draft predictions below were committed in `2e4743e0`, before Step 4's smoke run; any change to them after that run says so.
 - **Then, in order:** the Codex clean texts; the audit labelling of the sample, the clean texts and the counterexample candidates; mining; N and NC training; Steps 4 and 5.
 
 **What Stage 2 tests.** Stage 1 changes optimisation only, and Stage 1's registered prediction 5 expects its learned runs to keep firing on other rules' text. Stage 2 adds the training change this draft was built around, audited cross-rule negatives, and asks two questions:
@@ -217,12 +217,29 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
 1. **Step 1, the audit:** unchanged. It reads the frozen data, which Stage 1 did not change.
 2. **Step 2, the clean texts:** unchanged. `clean-6` to `clean-14` were committed in `02511d99`, before any phase-1b training. The three Codex texts are generated after Stage 2 is registered and before its training, from the committed prompt. Stage 1 had trained by then, and it read no gate text.
 3. **Step 3, training:** the recipe and seeds above replace the phase-1 settings and the L2-1b / L2-1b-s2 pair. The loss, λ = 1, and selection by the lowest validation-fold L (own term plus cross term) are unchanged.
-4. **Step 4:** unchanged. B takes it identically.
+4. **Step 4:** unchanged in its rules. Every arm, B included, takes it through the same two scripts, on the same cells (§ *Step 4's scripts*).
 5. **Step 5:** every checkpoint of every arm goes through the gate once.
 
 **Measured per run, in addition to Stage 1's measurements:**
 - **All-cells val AUC,** over own cells plus admitted cross cells, pooled and per head. Own-cell AUC cannot see a head that fires on another rule's text. In all six Stage 1 runs, the `d_semicolon` head scored 1.000 on its own pairs and fired on 479 of 479 other rules' val cells. The all-cells AUC falls when that happens.
 - **Own-negative firing on `cal`,** not `val`. Thresholds are chosen on `val`, so a count there is set by the threshold rule rather than by the model (bug `2bac7e0a27fbc392`).
+
+**Step 4's scripts, 2026-09-26** (`f78c0eba`):
+- **A gap in the plan, found while writing them.** The plan fed Step 4 from each run's `fold-logits.json` (`val_cross`, `cal_cross`). Arm B's three files have neither: B trained in Stage 1, without `--cross` and before any admission file existed. Step 4 now reads a scoring pass instead.
+- **`score_run.py`** loads a run's `best.pt` and scores its val and cal cells: each row's own cell, plus the admitted cross cells of the admission file it is given.
+  - **All nine checkpoints go through it,** with the same admission file and the same counterexample file. So B, N and NC are calibrated, thresholded and checked on one cell set. That set includes NC's val and cal counterexample rows, although B and N never trained on them. *This choice was made while writing the script, and is the operator's to confirm before registration.* The alternative, leaving out the rows an arm did not train on, would make N and NC differ in evaluation as well as in training.
+  - **It refuses** a checkpoint whose sha256 differs from `--expect-sha256` (B's pins are in § *Stage 1 results*), and a run trained with `--cross` or `--extra-rows` but scored with a different file.
+  - **Parity:** each frozen row's own-cell logit must equal the run's own `fold-logits.json` exactly, and so must its cross cells when the run trained with `--cross`. Otherwise nothing is written.
+- **`step4.py`** applies § *Step 4* per admitted head, with `train_arm.fit_temperature` and `train_arm.thresholds` unchanged. It writes the temperatures, the thresholds, the pre-gate results, each removal with its counts, the final menu and gate-ability. `--common` gives the common menu over several runs.
+  - A counterexample row is an own-rule negative for its head in calibration and thresholds. It counts toward neither bound of the pre-gate check, which reads cross cells and own positives only.
+  - A head with no cal cross cell or no cal positive cannot be checked, and leaves the menu. Every head has at least 4 cal positives, so only a mask covering all of a head's cross cells could reach this.
+  - **It also takes Stage 2's per-run measurements** from the same input: own-cell val AUC over frozen rows, pooled (Stage 1's learned criterion) and per head; all-cells val AUC, pooled and per head; and, on cal at each head's precision threshold, firing on its own frozen negatives and on its counterexample rows. `diagnose_run.py` stays as it is, as the instrument behind § *Stage 1 results*.
+  - `tests/test_phase1b_step4.py`: 27 tests. 30 of 31 mutations are killed, one per guarded site. The survivor deletes the span-gate condition, which today's constants make inert: any 2 of the 3 gate positives include `d_semicolon` or `d_sessionid`, and each is a span text's rule.
+- **The smoke run, disclosed.** Both scripts ran once on B's seed-20260935 checkpoint, with a stand-in admission file (all 14 heads admitted, one cell masked) and two stand-in counterexample rows (one val, one cal).
+  - It caught a bug before commit. Frozen rows carry source `synthetic` or `mined`, and `step4.py` first filed them as counterexamples, which removed every head.
+  - Parity held: 521 val and 359 cal frozen rows at max |Δz| = 0.0. The own-cell AUC reproduced § *Stage 1 results*' 0.982257589154141 exactly, and every per-rule value matched.
+  - **What was seen.** Under the stand-in admission, 9 of B's 14 heads failed own-positive recall ≥ 0.5 at the all-cells precision threshold, and none failed the cross-firing bound. The 5 left were `closed_population`, `d_adjacency`, `d_red`, `d_semicolon` and `d_sessionid`, so the gate stayed gate-able. `d_sessionid`'s temperature fit at the upper bound, 10.
+  - No gate text was read, and nothing was run on B's other two seeds. The real admission file will differ, so these are not B's result.
 
 **Reading, over every seed.** The research showed that a reading over only the runs that learned is selection after treatment. If the negatives change how often training fails, conditioning on "learned" biases the comparison. So:
 - **Each arm's result is its number of seeds that pass the gate,** out of 3, on the common menu. A seed that did not learn (own-cell val AUC below 0.80) counts as a failure for its arm.
