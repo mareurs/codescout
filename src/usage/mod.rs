@@ -1,4 +1,5 @@
 pub mod db;
+pub(crate) mod deliveries;
 
 use crate::agent::Agent;
 use anyhow::Result;
@@ -87,8 +88,19 @@ impl UsageRecorder {
         // downstream as `called_at - latency_ms` — see the `started_at` migration.
         let started_at = db::now_timestamp();
         let start = Instant::now();
-        let result = f().await;
+        // The delivery sink is scoped around exactly this call's future, and drained
+        // inside the scope because a task-local is gone once it ends. `f()` is awaited
+        // inline on this task, so `call_content`'s fan-out runs inside the scope. It
+        // starts at `None`, never `Some(vec![])`: a call whose fan-out never ran must
+        // record NULL, not a claim that it ran and delivered nothing.
+        let (result, delivered) = deliveries::DELIVERY_SINK
+            .scope(std::cell::RefCell::new(None), async {
+                let r = f().await;
+                (r, deliveries::DELIVERY_SINK.with(|s| s.borrow_mut().take()))
+            })
+            .await;
         let latency_ms = start.elapsed().as_millis() as i64;
+        let deliveries_json = deliveries::to_column(&delivered);
         // Best-effort — never let recording fail the tool call
         let _ = self
             .write_content(
@@ -98,11 +110,15 @@ impl UsageRecorder {
                 input,
                 workspace_override,
                 &result,
+                deliveries_json.as_deref(),
             )
             .await;
         result
     }
 
+    // Eight parameters since `deliveries_json` joined; `db::write_record`, which
+    // this feeds, carries the same allow.
+    #[allow(clippy::too_many_arguments)]
     async fn write_content(
         &self,
         tool_name: &str,
@@ -111,6 +127,7 @@ impl UsageRecorder {
         input: &Value,
         workspace_override: Option<&std::path::Path>,
         result: &Result<Vec<Content>>,
+        deliveries_json: Option<&str>,
     ) -> Result<()> {
         let (project_root, head_sha) = self
             .agent
@@ -218,6 +235,9 @@ impl UsageRecorder {
             // query could derive after the fact.
             db::MeasurementLinkage {
                 tool_use_id: self.tool_use_id.as_deref(),
+                // Drained from the task-local sink by `record_content`, never
+                // behind `self.debug`, for the same reason as `tool_use_id`.
+                deliveries_json,
             },
         )?;
         Ok(())
@@ -1422,6 +1442,108 @@ mod content_tests {
         assert_eq!(
             tool_use_id, None,
             "no tool_use_id was passed in — the column must be NULL, not a sentinel"
+        );
+    }
+
+    /// Review Focus 2: an `Err` before the fan-out writes NULL, never `"[]"`. That is
+    /// the "never ran" half of the column's contract. On its own this is an absence
+    /// assertion, which a recorder that never writes the column also satisfies;
+    /// `record_content_writes_the_sinks_value` below is its positive half.
+    #[tokio::test]
+    async fn record_content_writes_null_deliveries_when_the_fan_out_never_ran() {
+        use serde_json::json;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let recorder = UsageRecorder::new(
+            agent.clone(),
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+            None,
+            None,
+        );
+
+        let _ = recorder
+            .record_content("symbols", &json!({"query": "x"}), None, || async {
+                // Load-bearing: returns WITHOUT calling `deliveries::record`, which is
+                // what an `Err` out of `Tool::call` does before `call_content` reaches
+                // the fan-out.
+                Err(anyhow::anyhow!("boom"))
+            })
+            .await;
+
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        let (outcome, deliveries): (String, Option<String>) = conn
+            .query_row("SELECT outcome, deliveries_json FROM tool_calls", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(outcome, "error", "the row is the failed call's own");
+        assert_eq!(
+            deliveries, None,
+            "the fan-out never ran, so NULL; \"[]\" would claim it ran and delivered nothing"
+        );
+    }
+
+    /// The sink's value reaches the column, with `debug` off: the value recorded
+    /// inside the closure is what `write_content` writes, not a default.
+    #[tokio::test]
+    async fn record_content_writes_the_sinks_value() {
+        use crate::usage::deliveries::{BlockDigest, DeliveryRecord};
+        use serde_json::json;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let recorder = UsageRecorder::new(
+            agent.clone(),
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+            None,
+            None,
+        );
+
+        let fixture = DeliveryRecord {
+            engine: "session-opener",
+            ledger_keys: vec!["k".to_string()],
+            blocks: vec![BlockDigest {
+                sha256: "00".to_string(),
+                bytes: 1,
+            }],
+            hint: true,
+        };
+        let _ = recorder
+            .record_content("symbols", &json!({"query": "x"}), None, || async move {
+                crate::usage::deliveries::record(vec![fixture]);
+                Ok(vec![Content::text("ok")])
+            })
+            .await;
+
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        let deliveries: Option<String> = conn
+            .query_row("SELECT deliveries_json FROM tool_calls", [], |r| r.get(0))
+            .unwrap();
+        let parsed: Value = serde_json::from_str(
+            deliveries
+                .as_deref()
+                .expect("the closure recorded, so the column must not be NULL"),
+        )
+        .unwrap();
+        // A literal, not `serde_json::to_value(fixture)`: the expected shape must not
+        // be produced by the serializer under test.
+        assert_eq!(
+            parsed,
+            json!([{
+                "engine": "session-opener",
+                "ledger_keys": ["k"],
+                "blocks": [{"sha256": "00", "bytes": 1}],
+                "hint": true,
+            }])
         );
     }
 }

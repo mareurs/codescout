@@ -183,6 +183,16 @@ impl GuideLedger {
         self.emitted.contains_key(topic)
     }
 
+    /// The keys currently stamped, as an owned set.
+    ///
+    /// Record-only: `engines::coordinator::run_post_in` snapshots it around each
+    /// engine's `emit` and diffs the two, to attribute the keys that engine added
+    /// for `usage.db`'s `deliveries_json`. Owned rather than borrowed because the
+    /// engine takes `&mut self` between the two snapshots.
+    pub(crate) fn key_set(&self) -> std::collections::BTreeSet<String> {
+        self.emitted.keys().cloned().collect()
+    }
+
     /// Has nothing been surfaced yet this session?
     ///
     /// True at session start and again after [`clear`](Self::clear) (workspace

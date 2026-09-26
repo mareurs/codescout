@@ -200,6 +200,22 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         "CREATE INDEX IF NOT EXISTS idx_tool_calls_tool_use_id ON tool_calls(tool_use_id);",
     )?;
 
+    // Migration: which post-phase engine attached what to each response, as a JSON
+    // array (`crate::usage::deliveries`). Record-only; additive + nullable, so every
+    // pre-existing row and the unchanged SELECTs stay correct.
+    //
+    // NOTE the NULL ambiguity, stated rather than repeated silently: NULL means BOTH
+    // "the fan-out never ran for this call" (an `Err` before `run_post`, or a tool that
+    // overrides `call_content` without it) AND "this row predates the column",
+    // separable only by `called_at`. It never means "delivered nothing": that is `[]`,
+    // written explicitly, and it is the distinction this column exists to draw.
+    let has_deliveries_json: bool = conn
+        .prepare("SELECT deliveries_json FROM tool_calls LIMIT 0")
+        .is_ok();
+    if !has_deliveries_json {
+        conn.execute_batch("ALTER TABLE tool_calls ADD COLUMN deliveries_json TEXT;")?;
+    }
+
     backfill_legacy_rows(&conn, &project_root.to_string_lossy())?;
 
     Ok(conn)
@@ -275,18 +291,21 @@ pub struct BufferLinkage<'a> {
     pub reads: Option<&'a str>,
 }
 
-/// The measurement-linkage fields a client can assert on a request, travelling as one
-/// value for the reason [`BufferLinkage`]'s doc gives: `write_record` already takes many
-/// positional parameters, several of them adjacent `Option<&str>` — a named struct makes
-/// a silent transposition unrepresentable rather than merely unlikely. A second field
-/// (deliveries) joins this one later; keep it a named struct rather than collapsing it
-/// back to a bare `Option<&str>` parameter.
+/// The measurement-linkage fields recorded per call, travelling as one value for the
+/// reason [`BufferLinkage`]'s doc gives: `write_record` already takes many positional
+/// parameters, several of them adjacent `Option<&str>`, and a named struct makes a
+/// silent transposition unrepresentable rather than merely unlikely. Keep it a named
+/// struct rather than collapsing its fields back into bare `Option<&str>` parameters.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct MeasurementLinkage<'a> {
     /// The `claudecode/toolUseId` a client asserted on this request's `_meta`, if any.
     /// Record-only: nothing reads this back into behavior today. See
     /// `crate::tools::session_key::tool_use_id_from_meta`.
     pub tool_use_id: Option<&'a str>,
+    /// JSON array of which post-phase engine attached what to this response, from
+    /// `crate::usage::deliveries::to_column`. Record-only. `None` (NULL) means the
+    /// fan-out never ran; `Some("[]")` means it ran and delivered nothing.
+    pub deliveries_json: Option<&'a str>,
 }
 
 /// The current UTC instant in the exact textual shape `write_record`'s
@@ -340,8 +359,8 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
         // lexicographic compare against a `datetime()`-shaped literal, and the shared
         // prefix is fixed-width, so a `.SSS` suffix always sorts after the same second
         // and before the next one.
-        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id, emitted_output_id, read_output_ids, effect_class, tool_use_id)
-                 VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id, emitted_output_id, read_output_ids, effect_class, tool_use_id, deliveries_json)
+                 VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
         params![
             tool_name,
             latency_ms,
@@ -365,6 +384,7 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
             linkage.reads,
             effect_class,
             measurement.tool_use_id,
+            measurement.deliveries_json,
             ],
     )?;
     // `pika_observations` is not codescout's table (a buddy-plugin skill creates it,
@@ -1317,6 +1337,47 @@ mod tests {
             has_index, 1,
             "migration must create idx_tool_calls_tool_use_id"
         );
+    }
+
+    #[test]
+    fn open_db_adds_deliveries_json_to_a_pre_migration_table() {
+        // A REAL pre-migration table, built by hand for the reason
+        // `open_db_adds_tool_use_id_to_a_pre_migration_table` gives: `tmp()` bakes
+        // every column in through `open_db` first and never reaches the ALTER.
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join(".codescout").join("usage.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        {
+            let pre = Connection::open(&db_path).unwrap();
+            pre.execute_batch(
+                "CREATE TABLE tool_calls (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tool_name  TEXT NOT NULL,
+                    called_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
+                    latency_ms INTEGER NOT NULL,
+                    outcome    TEXT NOT NULL,
+                    overflowed INTEGER NOT NULL DEFAULT 0,
+                    error_msg  TEXT
+                );
+                INSERT INTO tool_calls (tool_name, latency_ms, outcome)
+                    VALUES ('symbols', 1, 'success');",
+            )
+            .unwrap();
+        }
+
+        let conn = open_db(dir.path()).unwrap();
+
+        // The row that predates the column reads NULL: the second of the two
+        // meanings the migration comment gives NULL. `query_row` erroring on a
+        // missing column is what makes this also the positive half.
+        let old: Option<String> = conn
+            .query_row(
+                "SELECT deliveries_json FROM tool_calls WHERE tool_name = 'symbols'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(old, None);
     }
 
     #[test]

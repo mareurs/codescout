@@ -1473,8 +1473,18 @@ pub trait Tool: Send + Sync {
                         .and_then(|v| v.as_str())
                         .is_some(),
             };
-            let e = crate::engines::coordinator::run_post(&post, &mut emitted);
-            (e.hint, e.blocks)
+            let crate::engines::coordinator::Emission {
+                hint,
+                blocks,
+                deliveries,
+            } = crate::engines::coordinator::run_post(&post, &mut emitted);
+            // Record-only: which engine attached what, for `usage.db`'s
+            // `deliveries_json` (`crate::usage::deliveries`). Every call that
+            // reaches the fan-out records here, `[]` included, so NULL is left
+            // meaning only "the fan-out never ran". A no-op outside
+            // `UsageRecorder::record_content`'s scope.
+            crate::usage::deliveries::record(deliveries);
+            (hint, blocks)
         };
 
         // Build the primary response block (the tool's actual output).

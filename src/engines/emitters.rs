@@ -57,6 +57,7 @@ pub(crate) fn emit_session_opener(_ctx: &PostCtx<'_>, ledger: &mut GuideLedger) 
             Emitted::Claimed(Emission {
                 hint: Some((topic.to_string(), GuideDeliveryShape::Whole)),
                 blocks: vec![block],
+                ..Default::default()
             })
         }
         // CLAIMED, not Declined. The pre-refactor `if/else` returned
@@ -102,6 +103,7 @@ pub(crate) fn emit_guide_sections(ctx: &PostCtx<'_>, ledger: &mut GuideLedger) -
             return Emitted::Claimed(Emission {
                 hint: Some((topic.to_string(), shape)),
                 blocks,
+                ..Default::default()
             });
         }
     }
@@ -134,7 +136,11 @@ pub(crate) fn emit_operator_rules(ctx: &PostCtx<'_>, ledger: &mut GuideLedger) -
             r.id, r.imperative
         )));
     }
-    Emitted::Claimed(Emission { hint: None, blocks })
+    Emitted::Claimed(Emission {
+        hint: None,
+        blocks,
+        ..Default::default()
+    })
 }
 
 #[cfg(test)]

@@ -8,6 +8,7 @@
 use super::{Corpus, EngineDecl, ENGINES};
 use crate::tools::guide_emit::GuideDeliveryShape;
 use crate::tools::guide_ledger::GuideLedger;
+use crate::usage::deliveries::{BlockDigest, DeliveryRecord};
 use rmcp::model::Content;
 use serde_json::Value;
 
@@ -75,6 +76,11 @@ pub(crate) struct Emission {
     /// response — see `run_post_in`.
     pub hint: Option<(String, GuideDeliveryShape)>,
     pub blocks: Vec<Content>,
+    /// Record-only: which engine contributed what, for `usage.db`'s
+    /// `deliveries_json` (`crate::usage::deliveries`). Filled by `run_post_in`
+    /// on the aggregate it returns, and by nothing else. An emitter's own
+    /// `Emission` leaves it empty, and `run_post_in` never reads it there.
+    pub deliveries: Vec<DeliveryRecord>,
 }
 
 impl Emission {
@@ -138,12 +144,30 @@ pub(crate) fn run_post_in(
         if claimed.contains(&engine.corpus) {
             continue;
         }
+        // Record-only, for `Emission::deliveries`: snapshot the ledger so the keys
+        // THIS engine adds can be told apart from keys already stamped.
+        let before = ledger.key_set();
         let Emitted::Claimed(e) = emit(ctx, ledger) else {
             continue;
         };
         claimed.push(engine.corpus);
+        let mut kept_hint = false;
         if out.hint.is_none() {
+            kept_hint = e.hint.is_some();
             out.hint = e.hint;
+        }
+        let ledger_keys: Vec<String> = ledger.key_set().difference(&before).cloned().collect();
+        let blocks: Vec<BlockDigest> = e.blocks.iter().map(BlockDigest::of).collect();
+        // A claim that contributed nothing is not a delivery. `operator-rules`
+        // claims on every call with a selector, so recording empty claims would
+        // leave `[]` unwritable. See `DeliveryRecord`.
+        if !blocks.is_empty() || !ledger_keys.is_empty() || kept_hint {
+            out.deliveries.push(DeliveryRecord {
+                engine: engine.id,
+                ledger_keys,
+                blocks,
+                hint: kept_hint,
+            });
         }
         out.blocks.extend(e.blocks);
     }
@@ -187,6 +211,7 @@ mod tests {
         Emitted::Claimed(Emission {
             hint: Some(("first".into(), GuideDeliveryShape::Whole)),
             blocks: vec![Content::text("FIRST")],
+            ..Default::default()
         })
     }
     fn claims_nothing(_c: &PostCtx<'_>, _l: &mut GuideLedger) -> Emitted {
@@ -199,8 +224,22 @@ mod tests {
         Emitted::Claimed(Emission {
             hint: Some(("second".into(), GuideDeliveryShape::Whole)),
             blocks: vec![Content::text("SECOND")],
+            ..Default::default()
         })
     }
+
+    fn inserts_k1_and_claims_abc(_c: &PostCtx<'_>, l: &mut GuideLedger) -> Emitted {
+        l.insert("k1".to_string());
+        Emitted::Claimed(Emission {
+            hint: None,
+            blocks: vec![Content::text("abc")],
+            ..Default::default()
+        })
+    }
+
+    /// SHA-256("abc"), the FIPS 180-2 example vector. A literal rather than a
+    /// digest recomputed in the test, so a wrong digest cannot agree with itself.
+    const SHA256_OF_ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
     fn reports_ledger_state(_c: &PostCtx<'_>, l: &mut GuideLedger) -> Emitted {
         Emitted::Claimed(Emission {
@@ -210,6 +249,7 @@ mod tests {
             } else {
                 "REARMED"
             })],
+            ..Default::default()
         })
     }
 
@@ -353,5 +393,79 @@ mod tests {
         )];
         let out = run_post_in(&engines, &ctx(&v), &mut ledger);
         assert_eq!(texts(&out), vec!["REARMED".to_string()]);
+    }
+
+    fn engines_recorded(e: &Emission) -> Vec<&'static str> {
+        e.deliveries.iter().map(|d| d.engine).collect()
+    }
+
+    #[test]
+    fn each_claiming_engine_is_recorded_with_the_keys_it_added_and_its_block_digests() {
+        let v = json!({});
+        let mut ledger = GuideLedger::default();
+        // Load-bearing: a key stamped BEFORE the engine ran must not be attributed
+        // to it. Without it, recording the whole key set instead of the difference
+        // yields the same `["k1"]` and survives.
+        ledger.insert("pre-existing".to_string());
+        let engines = [decl(
+            "keyed",
+            Corpus::CompiledGuides,
+            inserts_k1_and_claims_abc,
+        )];
+        let out = run_post_in(&engines, &ctx(&v), &mut ledger);
+        assert_eq!(out.deliveries.len(), 1, "got {:?}", out.deliveries);
+        let r = &out.deliveries[0];
+        assert_eq!(r.engine, "keyed");
+        assert_eq!(r.ledger_keys, vec!["k1".to_string()]);
+        assert_eq!(
+            r.blocks,
+            vec![crate::usage::deliveries::BlockDigest {
+                sha256: SHA256_OF_ABC.to_string(),
+                bytes: 3,
+            }]
+        );
+        assert!(!r.hint, "this engine carried no hint");
+    }
+
+    /// The decliner's absence is only evidence beside the claimer's presence: an
+    /// empty `deliveries` would satisfy the first assertion alone.
+    #[test]
+    fn a_declining_engine_leaves_no_record() {
+        let v = json!({});
+        let engines = [
+            decl("decliner", Corpus::CompiledGuides, declines),
+            decl("would-emit", Corpus::CompiledGuides, claims_a_block),
+        ];
+        let out = run_post_in(&engines, &ctx(&v), &mut GuideLedger::default());
+        assert_eq!(engines_recorded(&out), vec!["would-emit"]);
+    }
+
+    /// A claim that shipped nothing is not a delivery. `operator-rules` claims on
+    /// every call with a selector, which is every call, so recording empty claims
+    /// would put an entry in every row and `[]` could never be written.
+    #[test]
+    fn a_claim_that_delivers_nothing_leaves_no_record() {
+        let v = json!({});
+        let engines = [
+            decl("empty-claimer", Corpus::OperatorLedger, claims_nothing),
+            decl("guides", Corpus::CompiledGuides, claims_a_block),
+        ];
+        let out = run_post_in(&engines, &ctx(&v), &mut GuideLedger::default());
+        assert_eq!(engines_recorded(&out), vec!["guides"]);
+    }
+
+    /// Both engines carry a hint and both are recorded, so the flag, not the
+    /// record's presence, is what tells them apart.
+    #[test]
+    fn hint_is_marked_only_on_the_engine_whose_hint_survived() {
+        let v = json!({});
+        let engines = [
+            decl("guides", Corpus::CompiledGuides, claims_a_block),
+            decl("rules", Corpus::OperatorLedger, claims_second),
+        ];
+        let out = run_post_in(&engines, &ctx(&v), &mut GuideLedger::default());
+        assert_eq!(out.hint.map(|(t, _)| t), Some("first".to_string()));
+        let flags: Vec<(&str, bool)> = out.deliveries.iter().map(|d| (d.engine, d.hint)).collect();
+        assert_eq!(flags, vec![("guides", true), ("rules", false)]);
     }
 }
