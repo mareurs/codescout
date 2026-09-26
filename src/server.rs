@@ -10714,6 +10714,100 @@ mod guide_hint_tests {
         );
     }
 
+    /// `tool_calls.deliveries_json` through the production funnel
+    /// (`call_tool_inner`), for the same reason as the test above: a
+    /// `UsageRecorder` test cannot see the sink's scope or the fan-out's `record`
+    /// call being deleted. Two calls in one conversation, so the second is the
+    /// deduplicated one: its fan-out RUNS and delivers nothing, which is `"[]"`,
+    /// never NULL.
+    #[tokio::test]
+    async fn call_tool_inner_records_opener_then_empty_deliveries() {
+        use sha2::Digest as _;
+
+        async fn call(server: &CodeScoutServer) -> Vec<rmcp::model::Content> {
+            let params = json!({
+                "name": "run_command",
+                "arguments": {"command": "echo hi"},
+            });
+            let req: CallToolRequestParams = serde_json::from_value(params).unwrap();
+            server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .unwrap()
+                .content
+        }
+
+        let (dir, server) = make_server().await;
+        let first = call(&server).await;
+        let second = call(&server).await;
+
+        let db = dir.path().join(".codescout").join("usage.db");
+        let conn = rusqlite::Connection::open(db).unwrap();
+        let rows: Vec<Option<String>> = conn
+            .prepare("SELECT deliveries_json FROM tool_calls WHERE tool_name = 'run_command' ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(rows.len(), 2, "one row per call, got {rows:?}");
+
+        // POSITIVE CONTROL: the opener really rode the first response, so the
+        // record below describes a delivery that happened.
+        assert!(
+            !guide_blocks(&first).is_empty(),
+            "the session opener must fire on the first call"
+        );
+        let entries: Vec<Value> = serde_json::from_str(
+            rows[0]
+                .as_deref()
+                .expect("the first call's fan-out ran, so its row must not be NULL"),
+        )
+        .unwrap();
+        let opener = entries
+            .iter()
+            .find(|e| e["engine"] == "session-opener")
+            .unwrap_or_else(|| panic!("no session-opener entry in {entries:?}"));
+        assert_eq!(opener["hint"], true, "the opener's hint is the one kept");
+        assert!(
+            opener["ledger_keys"]
+                .as_array()
+                .is_some_and(|k| k.contains(&json!(crate::prompts::SESSION_OPENING_GUIDE))),
+            "the opener stamps its topic: {opener}"
+        );
+
+        // Record-only: every recorded digest names a block the caller actually
+        // received. `recorded` is checked non-empty first, or "every" is vacuous.
+        let returned: std::collections::HashSet<String> = first
+            .iter()
+            .filter_map(|c| c.as_text())
+            .map(|t| hex::encode(sha2::Sha256::digest(t.text.as_bytes())))
+            .collect();
+        let recorded: Vec<String> = entries
+            .iter()
+            .flat_map(|e| e["blocks"].as_array().cloned().unwrap_or_default())
+            .filter_map(|b| b["sha256"].as_str().map(str::to_string))
+            .collect();
+        assert!(!recorded.is_empty(), "the opener recorded no block digest");
+        for sha in &recorded {
+            assert!(
+                returned.contains(sha),
+                "recorded digest {sha} matches no block in the response"
+            );
+        }
+
+        // The deduplicated call: nothing rode it, and its row says so explicitly.
+        assert!(
+            guide_blocks(&second).is_empty(),
+            "a second call in the same conversation must be deduped"
+        );
+        assert_eq!(
+            rows[1].as_deref(),
+            Some("[]"),
+            "the fan-out ran and delivered nothing: \"[]\", not NULL and not an empty claim"
+        );
+    }
+
     /// A principal stamped into the ARGUMENTS re-arms the ledger; re-stating the
     /// same one does not.
     ///
