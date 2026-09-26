@@ -414,6 +414,79 @@ Predictions 1–5 are the text committed in `2e4743e0`, before Step 4's smoke ru
   - It scores all nine checkpoints on one cell set with `score_run.py`, checking B's three against their sha256 pins.
   - Then it runs `step4.py` per run, then `--common`, writing to `phase1b/stage2/`.
 
+### Step 3 — training, completed 2026-09-26 at 15:57 UTC
+
+- **All six runs exited 0.**
+- **Selected epochs,** for seeds 20260935 / 20260937 / 20260940: N 1 / 0 / 1, and NC 1 / 2 / 1.
+- **N-20260937's checkpoint comes from epoch 0**, the first fifth of its schedule. It is judged on its measurements like every other checkpoint.
+
+### Step 4 — nine checkpoints, 2026-09-26
+
+**How it ran.** `step4.sh` ran `score_run.py` and then `step4.py` on every checkpoint, then `--common` over all nine.
+- Results are in `phase1b/stage2/`: `step4-<arm>-<seed>.json` and `common.json`.
+- The scored logits are kept outside the repo.
+
+**Checks:**
+- **Parity is exact (max |Δz| = 0) for every checkpoint:**
+  - over 521 val and 359 cal frozen rows;
+  - over NC's counterexample rows (553 and 385 rows in all);
+  - and, for N and NC, over 32,168 val cross cells, the same cells as in training.
+- **B's three checkpoints matched their sha256 pins.**
+- **No run raised a saturation flag.**
+
+| arm · seed | own-cell val AUC | all-cells val AUC | removed at the pre-gate check | final menu (of 14) |
+|---|---|---|---|---|
+| B · 20260935 | 0.982 | 0.971 | 8 | 5 |
+| B · 20260937 | 0.963 | 0.953 | 9 | 4 |
+| B · 20260940 | 0.955 | 0.945 | 8 | 5 |
+| N · 20260935 | 0.973 | 0.997 | 3 | 10 |
+| N · 20260937 | 0.964 | 0.991 | 4 | 9 |
+| N · 20260940 | 0.975 | 0.995 | 2 | 11 |
+| NC · 20260935 | 0.976 | 0.995 | 3 | 10 |
+| NC · 20260937 | 0.978 | 0.998 | 0 | 13 |
+| NC · 20260940 | 0.973 | 0.993 | 3 | 10 |
+
+`question_asked` left at Step 1, so it is missing from every menu.
+
+**Every removal, in every arm, is by own-positive recall below 0.5 on cal.** No head fails the cross-rule firing check (≤ 5%).
+- **Why.** Thresholds are chosen on val over each head's own cells plus 2,374 to 2,534 admitted cross cells, at precision ≥ 0.9. A head that fires on other rules' text reaches that precision only with a threshold above most of its own positives. So at Step 4, over-firing reads as lost recall on cal, not as firing on cal.
+- **An example, `d_history` at seed 20260935.** B's precision threshold keeps 5 of 13 val positives and 3 of 8 cal positives, so B loses the head. N and NC keep it.
+- **Small cal counts drive some removals,** as § *Step 4* anticipated.
+  - `member_vs_population` has 4 cal positives. It is removed at 8 of 9 checkpoints, all but NC-20260937.
+  - `d_loudness` has 9. It is also removed at 8 of 9.
+  - Each removal's cal hits and positives are in its `step4-*.json`.
+
+**Measured per run, as registered:**
+- **Own-negative firing on cal, pooled over heads:**
+  - B: 1, 0 and 0 of 157;
+  - N: 1, 1 and 1;
+  - NC: 2, 1 and 0.
+- **NC's cal counterexamples fired:** 0 of 26 at every NC seed. B fired 0, 1 and 0 of 26, and N 0 at every seed.
+- **Temperatures on a bound:**
+  - B sits at the upper bound, 10, on 1, 2 and 4 heads, with `d_sessionid` at every seed.
+  - N sits at the lower bound, 0.25, on `d_semicolon` at seeds 20260937 and 20260940.
+  - NC sits at 0.25 on `d_semicolon` at every seed, `d_adjacency` at 20260935 and 20260937, and `d_sessionid` at 20260937.
+
+**The common menu over all nine checkpoints is `d_adjacency`, `d_semicolon` and `d_sessionid`.**
+- It is gate-able: the `semicolon` and `sessionid` positives apply, and so do both span texts.
+- Every checkpoint's own final menu is gate-able too.
+
+**Predictions:**
+- **Prediction 2 held:** N's own-cell val AUC is 0.973, 0.964 and 0.975, so at least 0.90 at 3 of 3 seeds.
+- **Prediction 3 failed.** N's pre-gate check removed 3, 4 and 2 heads, against at most 2 at every seed.
+  - Every removal is by the recall half of the check, on heads with 4 to 20 cal positives.
+  - That is a failure mode the prediction did not name. The negatives did not make heads fire on other rules; the precision threshold left them too few of their own positives.
+- **Predictions 1, 4 and 5 are read at Step 5.** Prediction 6 held at Step 1.
+
+**Step 5 needs a script that the registration did not commit.**
+- `scripts/phase1-local-trained.py`, phase 1's gate judge, is hard-wired to phase 1:
+  - its run directory and checkpoint;
+  - each run's own-cell temperatures and thresholds;
+  - the fixed 14-rule menu;
+  - phase 1's 10 texts.
+- Step 5 needs each checkpoint's Step 4 temperatures, thresholds and final menu, plus the 12 surviving clean texts.
+- A Step 5 script is written, tested and reviewed before the gate runs. Each checkpoint then runs the gate once.
+
 ## Step 1 — the cross-rule audit (decides which cells become negatives)
 
 **The cells in question.** For a text whose row is about rule A, a cell (unit, B) with B ≠ A, over every unit of the text. These are the cells phase 1 masked.

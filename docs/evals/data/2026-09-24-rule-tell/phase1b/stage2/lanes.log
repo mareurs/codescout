@@ -1,0 +1,9 @@
+train n 20260935 exit 0
+train nc 20260935 exit 0
+train n 20260937 exit 0
+train nc 20260937 exit 0
+train n 20260940 exit 0
+lane n done
+train nc 20260940 exit 0
+lane nc done
+all lanes done

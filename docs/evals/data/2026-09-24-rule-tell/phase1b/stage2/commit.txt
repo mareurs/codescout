@@ -1,0 +1,4 @@
+0ff91320971f15d9f7e3a3d16edc02328e0aecd9
+40decae62c77c46204ca9fbbf05a254696417f324096284ce4afa86567b843cc  /home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/stage3/train_arm.py
+447de4a5281dabaa472948bd5be3ba49f23cb0d40f7c7b0e64d2e99d590c3415  /home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/audit/admission.json
+1afed05f59f9c9f33c29b2732fbdf42ace2bc52e1f1c833c5465d4abedc9bf4b  /home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/audit/counterexamples.jsonl

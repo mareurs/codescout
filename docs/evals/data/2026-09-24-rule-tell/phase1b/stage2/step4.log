@@ -1,0 +1,48 @@
+{"run": "/home/marius/work/claude/rule-tell-runs/phase1b-s1/s1-r1-20260935", "parity": {"val": {"compared": 521, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "cal": {"compared": 359, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "ok": true}}
+score b-20260935 exit 0
+/home/marius/work/claude/rule-tell-runs/phase1b-s1/s1-r1-20260935: final menu 5/14; removed at step 4 ['d_history', 'd_loudness', 'd_mutation', 'd_visibility', 'member_vs_population', 'open_artifact', 'run_tool', 'selector_narrow']; gate-able True
+  own-cell val AUC 0.9823 (learned True); all-cells val AUC 0.9705
+step4 b-20260935 exit 0
+{"run": "/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-n-20260935", "parity": {"val": {"compared": 521, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "val_cross": {"compared": 32168, "same_cells": true, "max_abs_dz": 0.0}, "cal": {"compared": 359, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "cal_cross": {"compared": 22408, "same_cells": true, "max_abs_dz": 0.0}, "ok": true}}
+score n-20260935 exit 0
+/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-n-20260935: final menu 10/14; removed at step 4 ['d_loudness', 'member_vs_population', 'run_tool']; gate-able True
+  own-cell val AUC 0.9729 (learned True); all-cells val AUC 0.9972
+step4 n-20260935 exit 0
+{"run": "/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-nc-20260935", "parity": {"val": {"compared": 553, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "val_cross": {"compared": 32168, "same_cells": true, "max_abs_dz": 0.0}, "cal": {"compared": 385, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "cal_cross": {"compared": 22408, "same_cells": true, "max_abs_dz": 0.0}, "ok": true}}
+score nc-20260935 exit 0
+/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-nc-20260935: final menu 10/14; removed at step 4 ['d_loudness', 'member_vs_population', 'run_tool']; gate-able True
+  own-cell val AUC 0.9760 (learned True); all-cells val AUC 0.9945
+step4 nc-20260935 exit 0
+{"run": "/home/marius/work/claude/rule-tell-runs/phase1b-s1/s1-r1-20260937", "parity": {"val": {"compared": 521, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "cal": {"compared": 359, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "ok": true}}
+score b-20260937 exit 0
+/home/marius/work/claude/rule-tell-runs/phase1b-s1/s1-r1-20260937: final menu 4/14; removed at step 4 ['closed_population', 'd_loudness', 'd_mutation', 'd_red', 'd_visibility', 'member_vs_population', 'open_artifact', 'run_tool', 'selector_narrow']; gate-able True
+  own-cell val AUC 0.9631 (learned True); all-cells val AUC 0.9526
+step4 b-20260937 exit 0
+{"run": "/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-n-20260937", "parity": {"val": {"compared": 521, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "val_cross": {"compared": 32168, "same_cells": true, "max_abs_dz": 0.0}, "cal": {"compared": 359, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "cal_cross": {"compared": 22408, "same_cells": true, "max_abs_dz": 0.0}, "ok": true}}
+score n-20260937 exit 0
+/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-n-20260937: final menu 9/14; removed at step 4 ['d_loudness', 'member_vs_population', 'run_tool', 'selector_narrow']; gate-able True
+  own-cell val AUC 0.9641 (learned True); all-cells val AUC 0.9913
+step4 n-20260937 exit 0
+{"run": "/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-nc-20260937", "parity": {"val": {"compared": 553, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "val_cross": {"compared": 32168, "same_cells": true, "max_abs_dz": 0.0}, "cal": {"compared": 385, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "cal_cross": {"compared": 22408, "same_cells": true, "max_abs_dz": 0.0}, "ok": true}}
+score nc-20260937 exit 0
+/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-nc-20260937: final menu 13/14; removed at step 4 []; gate-able True
+  own-cell val AUC 0.9777 (learned True); all-cells val AUC 0.9980
+step4 nc-20260937 exit 0
+{"run": "/home/marius/work/claude/rule-tell-runs/phase1b-s1/s1-r1-20260940", "parity": {"val": {"compared": 521, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "cal": {"compared": 359, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "ok": true}}
+score b-20260940 exit 0
+/home/marius/work/claude/rule-tell-runs/phase1b-s1/s1-r1-20260940: final menu 5/14; removed at step 4 ['closed_population', 'd_loudness', 'd_mutation', 'd_visibility', 'member_vs_population', 'open_artifact', 'run_tool', 'selector_narrow']; gate-able True
+  own-cell val AUC 0.9551 (learned True); all-cells val AUC 0.9452
+step4 b-20260940 exit 0
+{"run": "/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-n-20260940", "parity": {"val": {"compared": 521, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "val_cross": {"compared": 32168, "same_cells": true, "max_abs_dz": 0.0}, "cal": {"compared": 359, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "cal_cross": {"compared": 22408, "same_cells": true, "max_abs_dz": 0.0}, "ok": true}}
+score n-20260940 exit 0
+/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-n-20260940: final menu 11/14; removed at step 4 ['d_loudness', 'member_vs_population']; gate-able True
+  own-cell val AUC 0.9752 (learned True); all-cells val AUC 0.9953
+step4 n-20260940 exit 0
+{"run": "/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-nc-20260940", "parity": {"val": {"compared": 553, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "val_cross": {"compared": 32168, "same_cells": true, "max_abs_dz": 0.0}, "cal": {"compared": 385, "frozen_missing_from_run": 0, "max_abs_dz": 0.0}, "cal_cross": {"compared": 22408, "same_cells": true, "max_abs_dz": 0.0}, "ok": true}}
+score nc-20260940 exit 0
+/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-nc-20260940: final menu 10/14; removed at step 4 ['d_loudness', 'member_vs_population', 'run_tool']; gate-able True
+  own-cell val AUC 0.9726 (learned True); all-cells val AUC 0.9927
+step4 nc-20260940 exit 0
+common menu (3): ['d_adjacency', 'd_semicolon', 'd_sessionid']  gate-able True
+common exit 0
+STEP4_DONE fail=0

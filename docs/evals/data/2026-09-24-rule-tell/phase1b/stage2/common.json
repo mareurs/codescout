@@ -1,0 +1,142 @@
+{
+ "runs": [
+  {
+   "run_dir": "/home/marius/work/claude/rule-tell-runs/phase1b-s1/s1-r1-20260935",
+   "final_menu": [
+    "closed_population",
+    "d_adjacency",
+    "d_red",
+    "d_semicolon",
+    "d_sessionid"
+   ]
+  },
+  {
+   "run_dir": "/home/marius/work/claude/rule-tell-runs/phase1b-s1/s1-r1-20260937",
+   "final_menu": [
+    "d_adjacency",
+    "d_history",
+    "d_semicolon",
+    "d_sessionid"
+   ]
+  },
+  {
+   "run_dir": "/home/marius/work/claude/rule-tell-runs/phase1b-s1/s1-r1-20260940",
+   "final_menu": [
+    "d_adjacency",
+    "d_history",
+    "d_red",
+    "d_semicolon",
+    "d_sessionid"
+   ]
+  },
+  {
+   "run_dir": "/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-n-20260935",
+   "final_menu": [
+    "closed_population",
+    "d_adjacency",
+    "d_history",
+    "d_mutation",
+    "d_red",
+    "d_semicolon",
+    "d_sessionid",
+    "d_visibility",
+    "open_artifact",
+    "selector_narrow"
+   ]
+  },
+  {
+   "run_dir": "/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-n-20260937",
+   "final_menu": [
+    "closed_population",
+    "d_adjacency",
+    "d_history",
+    "d_mutation",
+    "d_red",
+    "d_semicolon",
+    "d_sessionid",
+    "d_visibility",
+    "open_artifact"
+   ]
+  },
+  {
+   "run_dir": "/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-n-20260940",
+   "final_menu": [
+    "closed_population",
+    "d_adjacency",
+    "d_history",
+    "d_mutation",
+    "d_red",
+    "d_semicolon",
+    "d_sessionid",
+    "d_visibility",
+    "open_artifact",
+    "run_tool",
+    "selector_narrow"
+   ]
+  },
+  {
+   "run_dir": "/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-nc-20260935",
+   "final_menu": [
+    "closed_population",
+    "d_adjacency",
+    "d_history",
+    "d_mutation",
+    "d_red",
+    "d_semicolon",
+    "d_sessionid",
+    "d_visibility",
+    "open_artifact",
+    "selector_narrow"
+   ]
+  },
+  {
+   "run_dir": "/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-nc-20260937",
+   "final_menu": [
+    "closed_population",
+    "d_adjacency",
+    "d_history",
+    "d_loudness",
+    "d_mutation",
+    "d_red",
+    "d_semicolon",
+    "d_sessionid",
+    "d_visibility",
+    "member_vs_population",
+    "open_artifact",
+    "run_tool",
+    "selector_narrow"
+   ]
+  },
+  {
+   "run_dir": "/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-nc-20260940",
+   "final_menu": [
+    "closed_population",
+    "d_adjacency",
+    "d_history",
+    "d_mutation",
+    "d_red",
+    "d_semicolon",
+    "d_sessionid",
+    "d_visibility",
+    "open_artifact",
+    "selector_narrow"
+   ]
+  }
+ ],
+ "common_menu": [
+  "d_adjacency",
+  "d_semicolon",
+  "d_sessionid"
+ ],
+ "gate": {
+  "gate_positives_applying": [
+   "semicolon",
+   "sessionid"
+  ],
+  "span_texts_applying": [
+   "span-sessionid",
+   "span-semicolon"
+  ],
+  "gate_able": true
+ }
+}
