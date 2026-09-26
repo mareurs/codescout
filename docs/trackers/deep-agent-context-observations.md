@@ -10,7 +10,7 @@ tags:
 - context
 topic: deep-agent-observation
 time_scope: '2026-09-18_to_2026-10-02'
-entry_high_water_DCX: 3
+entry_high_water_DCX: 4
 entry_prefix:
 - DCX
 snapshot_anchor: '| ID | Date UTC | Sampling | Capture key | Observation |'
@@ -84,6 +84,7 @@ Group by canonical incident, session/task and source lineage. First report cover
 | DCX-1 | 2026-09-18 | historical-seed | seed-context-injection-W3 | Recipient-specific guide delivery |
 | DCX-2 | 2026-09-24 | routine-first | sebf651ec-open-bug-verify-sweep-brief | verifier brief contents for 34-bug sweep |
 | DCX-3 | 2026-09-25 | routine-first | se4fbc7ef-medium-tier-verify-brief | Verifier brief for the 18-bug medium-tier re-verification |
+| DCX-4 | 2026-09-26 | enrichment (retrospective) | 571eb3d6/explore-brief-splade-vram | Explore brief for SPLADE's 2.9 GiB; its one log-testable VERIFIED claim did not hold |
 
 ## DCX-1 — Historical seed — recipient-specific guide delivery
 
@@ -147,6 +148,25 @@ It returned five verdicts: 1 partially fixed, 3 still live with narrowed claims,
 **Coordinator spot-checks:** about 18 claims, among them 3 patch-ids, an ancestor check, the WAL pragmas, three profiles' deny lists, the stale-server counts, the `codex` parents, `guard_stale_binary`'s scope, citation drift, and two `claude-plugins` facts. All held. The one apparent mismatch was the coordinator's own grep pattern. The most consequential finding, `git commit -a` passing both ownership guards, was re-run independently with a control arm; the mechanism (`index.lock`) was found, and the finding filed as `ecb8e59d7be06c01` (its id since it was fixed and archived the same day). The coordinator also added two facts the verifier could not know: parent `2834158` is the coordinator's own process, and parent `1180549` no longer exists. Findings the notes carry that only the verifier ran, among them the WAL timings, the same-file and `-A` capture arms, and the `restore --staged` arms, are described in the notes without a coordinator re-run.
 
 **Rests on / related:** `DWF-9`, `DCX-2`.
+
+## DCX-4 — Explore brief for SPLADE's 2.9 GiB carried the measured facts and the vanished compose path; the one VERIFIED claim the logs could test did not hold
+
+**Status:** observed
+**Valid:** dated 2026-09-26
+
+| Field | Record |
+|---|---|
+| Status / Valid | `observed`; dated 2026-09-26 |
+| Sampling / capture mode | `enrichment`, `retrospective`. Captured about 15:45Z, after the outcome. Session `571eb3d6`'s routine-first DCX sample is already `missed-capture` (DWF ledger DCS-5), so this is not a new routine sample |
+| Identity / capture key | Key `571eb3d6/explore-brief-splade-vram`. Session `571eb3d6-c879-43f6-b3f9-5a51e744e1af`, resumed as `0cbae2f0-9c0a-40e0-bf04-7612432a3233` on `~/.claude-sdd` (codescout server env). Principal: the operator, through this coordinating session. Recipient: a background Explore subagent. Collector: the coordinating session. Model: claude-opus-5.5 per system context; the subagent's model was not recorded |
+| Time / substrate | Decision about 12:25Z; capture about 15:45Z. codescout `experiments`, shared checkout, HEAD in the `84dba2bd`–`2f9e3a2c` range during the episode. Also targeted `~/agents/llm` and `~/agents/llm-proxy`, read-only |
+| Objective / trigger | After a plain restart left SPLADE's TEI backend at 2.89 GiB on the RX 7800 XT, the operator said *"still 2.9G is a lot. you can send an codescout explorer subagent into llm-proxy or ~/agents/llm to understand what happens"* |
+| Pre-action evidence | The router cmdline (`--max-batch-tokens 2048 --max-client-batch-size 8`). The container env (`PYTORCH_HIP_ALLOC_CONF=expandable_segments:True`). Compose labels naming `/home/marius/work/claude/code-explorer/docker-compose.yml`, which no longer exists. Restart numbers 5.30 → 2.89 GiB. Neighbour VRAM (1.30 / 0.39 GiB). The manual's gfx1100 build note against a gfx1101 card |
+| Context decision | The brief passed all of the above as *"established, do not re-derive"*, plus the probable successor paths (`codescout/docker-compose.yml`, `docker/sparse-amd/`) marked *"verify both"*. It named six codescout docs and issues, forbade container operations and edits, and asked for VERIFIED (file:line or read-only measurement) versus INFERRED on every claim. No candidate search beyond those paths ran |
+| Observed sequence | **Returned in about 17 min:** a component breakdown (weights about 0.2, warmup output tensors up to 0.93, fragmentation 0.5–0.9, ROCm overhead about 1.0–1.3 GiB by subtraction), 8 levers, and 7 drift findings. It asked for two log checks it had skipped as container operations. **The coordinator ran them:** `finish rocm warmup` appeared in 276 lines (the ROCm warmup path, confirmed), but `expandable_segments not supported` appeared in **0**, against the agent's source-derived claim that the feature is compiled out with that warning. The coordinator recorded it as unresolved (gpu-tuning `docs/trackers/research.md` Q-2) and did not adopt it. It then independently re-verified each drift claim it filed (`e83e92ce`) |
+| Outcome / basis | `mixed`, delivery `on-time`. **Good:** the agent built on the measured numbers instead of re-measuring, and its drift findings became bug `2026-09-26-running-retrieval-stack-is-defined-nowhere`, each re-verified by the coordinator. **Bad:** one claim labelled VERIFIED (by source read) did not survive the one runtime check available; its label overstated its evidence class |
+| Counterfactual / missingness | `not-observed`. No briefless dispatch was tried. The subagent's own tool calls were not inspected |
+| Rests on / related | gpu-tuning `docs/trackers/research.md` R-5, Q-2 (commit `08e7acb`). codescout `docs/issues/2026-09-26-running-retrieval-stack-is-defined-nowhere.md` (`e83e92ce`). Companion workflow episode in the DWF ledger, key `571eb3d6/amd-second-card` |
 
 ## Template for new entries
 

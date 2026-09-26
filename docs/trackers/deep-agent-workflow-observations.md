@@ -14,8 +14,8 @@ entry_prefix:
 - DWF
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
-entry_high_water_DWF: 11
-entry_high_water_DCS: 11
+entry_high_water_DWF: 12
+entry_high_water_DCS: 12
 ---
 
 # Deep-agent workflow observations and session coverage
@@ -107,6 +107,8 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DCS-10 | 2026-09-26 | coverage | session-receipt | 571eb3d6/post-compaction-2026-09-24-to-26 |
 | DWF-11 | 2026-09-26 | workflow | routine-first (retrospective) | 3c5b02df/system1-lineage-read |
 | DCS-11 | 2026-09-26 | coverage | session-receipt | 3c5b02df/whole-session-to-05:40Z |
+| DWF-12 | 2026-09-26 | workflow | enrichment (retrospective) | 571eb3d6/amd-second-card |
+| DCS-12 | 2026-09-26 | coverage | session-receipt | 571eb3d6→0cbae2f0/post-compaction-2026-09-26 |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -642,6 +644,41 @@ No failed attempts beyond one refused pipe, which recovered on the next call.
 **Collection overhead:** about 10 minutes for DWF-11 plus this receipt, estimated, not measured.
 
 **Unresolved pending entries:** none.
+
+## DWF-12 — RX 7800 XT as a second training card: the "shrink SPLADE's budget" premise was falsified by reading its flags; a plain restart and a warm rerun separated cache from floor and compile from kernel cost
+
+**Status:** observed
+**Valid:** dated 2026-09-26
+
+| Field | Record |
+|---|---|
+| Status / Valid | `observed`; dated 2026-09-26 |
+| Sampling / capture mode | `enrichment`, `retrospective`. Captured about 15:45Z, after the episode. Session `571eb3d6`'s routine-first DWF sample is already `missed-capture` (DCS-5), so this is not a new routine sample |
+| Identity / key / times | Key `571eb3d6/amd-second-card`. Session `571eb3d6-c879-43f6-b3f9-5a51e744e1af`, resumed as `0cbae2f0-9c0a-40e0-bf04-7612432a3233` on `~/.claude-sdd`. Principal: the operator, through this coordinating session. Collector: the same session. Model: claude-opus-5.5 per system context. Started about 11:50Z; first smoke 12:04:53–12:10:02Z; warm rerun to 12:18:40Z (from the run logs' epoch stamps); finished about 12:20Z. The research fan-out and the write-up ran afterwards |
+| Task / authority / substrate | **Objective:** could the RX 7800 XT run the Qwen training arm, so runs parallelise across both cards. **Instructed, in order:** *"first check if AMD can run our tests"* (vendor noise accepted); *"shrink SPLADE's batch budget and run a smoke test on AMD"*; then, mid-task, *"the other session already started the training on NVIDIA. we don't disturb it. our work is separate, for future runs"*. **Substrate:** codescout `experiments`, shared checkout; the A5000 was running a peer's two training jobs |
+| Pre-action evidence | The CUDA venv's torch was `2.14.0+cu130`, with no HIP. `rocm-smi` showed the 7800 XT with 7.7 GB used by three root containers, and `gpu_busy_percent` at 100 while drawing 62 W. Stage 1's logs gave a peak of 8.55–8.68 GiB on the A5000. A ROCm venv existed (named in `train_arm.py`'s docstring) with `torch 2.14.0+rocm7.2` but no `fla` |
+| Initial next action / completion check | **Next action:** lower SPLADE's `--max-batch-tokens`. **Check:** VRAM freed, and the smoke run reaching `smoke-done` without an out-of-memory error |
+| Trajectory | 1. **Read the router cmdline:** it already had `--max-batch-tokens 2048 --max-client-batch-size 8`. The instructed premise, and the coordinator's own earlier "batch buffers" guess, were falsified, and **no config change was made**. 2. **Confirmed the service idle** (`te_embed_count` stable over 5 s), then did a plain `docker restart`: the backend fell from 5.30 to 2.89 GiB. The health-poll loop mis-read readiness (the endpoint returns 200 with an empty body); serving was confirmed through `/embed_sparse`. 3. **Read transformers' kernel dispatch** (Hub, then `fla`, then torch) and installed `fla` 0.5.2 and `einops` with `--no-deps`; torch was unchanged. 4. **First smoke** at `nice 19`, `OMP_NUM_THREADS=4`: 309 s to 200 rows, 8.72 GiB. The operator asked why AMD use looked low; sampling showed the autograd thread at 100% CPU, 84 new Triton cache entries, 93 W. 5. **Read `fla`'s source:** `do_not_specialize=['T']`, and no `T` in any autotune key. 6. **Warm rerun:** 125 s, cache 293 → 293, bit-identical loss. The linked DCX-4 covers the SPLADE Explore brief and its partly failed VERIFIED claim |
+| Effects / recovery | SPLADE container restarted once, an action of the class the operator authorised. ROCm venv gained 3 packages. Outputs in `~/work/claude/rule-tell-runs/amd-smoke/`. New repo `~/work/claude/gpu-tuning` (`08e7acb`, `e5ec7af`). codescout bug `e83e92ce`. No rollback needed |
+| Outcome / basis | `good`, `verified-complete` for "AMD can run it": `smoke-done` with exit 0 twice; warm time 1.3× the A5000's (125 s against 95 s); 0 recompiles; bit-identical loss. The peak on the longest rows is unmeasured (gpu-tuning Q-7) |
+| Delegation candidate | A "can card X run workload Y" probe: a fixed-row smoke run cold then warm, logging time, `max_memory_allocated`, KFD VRAM, compile-cache delta and power. It's a deterministic script needing no judgement. Missing input: choosing the longest rows |
+| Rests on / grouping / overhead | gpu-tuning `docs/trackers/research.md` R-1 and R-5. codescout `docs/issues/2026-09-26-running-retrieval-stack-is-defined-nowhere.md`. Linked DCX-4. Capture about 12 min, estimated |
+
+## DCS-12 — Session 571eb3d6 (resumed as 0cbae2f0): Stage 2 Steps 1–2, the AMD card as a second training device, the research fan-out, sixth post-compaction interval
+
+**Valid:** dated 2026-09-26
+
+| Field | Record |
+|---|---|
+| Session / principal / collector | Session `571eb3d6-c879-43f6-b3f9-5a51e744e1af`, **resumed as `0cbae2f0-9c0a-40e0-bf04-7612432a3233`**. That is the codescout server's `CLAUDE_CODE_SESSION_ID` on profile `~/.claude-sdd`; both ids have a project directory under that profile. Principal: the operator, through this coordinating session. Collector: the same session. Model: claude-opus-5.5 per system context. The operator ran `/fork` mid-interval; the fork (`82cff72e`) is a separate session and is not covered here |
+| Observed interval (UTC) | From DCS-10's end, 2026-09-26 04:49 (`91221154`), to about 15:50, the time of this receipt. It spans a compaction at about 11:20. The stretch before the compaction is known only from its compaction summary |
+| Workspace | `/home/marius/work/claude/codescout`, branch `experiments`, shared checkout. Also `~/work/claude/gpu-tuning`, a new local repo created in this interval (`08e7acb`, `e5ec7af`). Peers: `3c5b02df` (System 1/2 instrumentation, per the operator), and a peer session training phase-1b N and NC on the A5000 |
+| Coverage | `partial`, `retrospective` |
+| DCX routine / enrichment | Routine: none new. This session's routine-first sample was already `missed-capture` in DCS-5, and the first-sample rule doesn't restart on resume. Enrichment: **DCX-4** (the Explore brief on SPLADE's VRAM) |
+| DWF routine / enrichment | Routine: none new, same reason. Enrichment: **DWF-12** (the RX 7800 XT as a second training card) |
+| Native / delegated / unobserved gaps | **Delegated:** 1 Explore subagent and 5 general-purpose web-research subagents, which reported findings only; their tool calls weren't inspected. **Outside `usage.db`:** the phase-1b labelling run (1 `codex exec` call, 132,783 tokens; 21 Opus 5.5 `claude -p` judge batches), and two AMD smoke trainings run through a background `run_command`. **Pre-compaction work** from 04:49 to about 11:20 (Stage 2 registration, Step 1/2 scripts, Codex texts, the preflight-review integration, the judge-channel control) has no episode entries; it is recorded in the phase-1b prereg and commits `4606a129` to `90e0965d` |
+| Unresolved pending entries | None in these ledgers. Open work continues in gpu-tuning `docs/trackers/research.md` (Q-7 in progress: AMD peak memory on the longest rows) |
+| Collection overhead | About 25 min for DCX-4, DWF-12 and this receipt, estimated |
 
 ## Template for new entries
 
