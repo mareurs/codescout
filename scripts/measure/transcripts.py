@@ -328,21 +328,30 @@ def exclusions(sessions_list, excluded_sids):
             excl[cid] = "scratchpad-project"
 
     # --- D: R22 same sessionId across profiles ---
+    # R32: the keeper is decided by _sid_keepers() — the SAME function relations() uses —
+    # so the two can never disagree about which copy of a tied-length sid is canonical.
+    # Before this fix, this stage sorted independently by length alone, no copy_id
+    # tie-break at all, so a length TIE fell to Python's stable sort / remaining's
+    # iteration order (which follows profile-directory on-disk name, numeric prefix
+    # included) while _sid_keepers() broke the same tie by copy_id. On a genuine tie the
+    # two sorts could and did pick different keepers, so this stage could exclude a copy
+    # that relations() still named as a fork's kept original.
     remaining = [s for s in sessions_list if copy_id(s) not in excl]
     by_sid = {}
     for s in remaining:
         by_sid.setdefault(s.sid, []).append(s)
+    keepers = _sid_keepers(remaining)
     for sid, copies in by_sid.items():
         if len(copies) < 2:
             continue
-        timelines = {copy_id(c): _full_timeline(c.path) for c in copies}
-        # Longest copy is the tentative keeper; every shorter copy is checked against it.
-        ordered = sorted(copies, key=lambda c: len(timelines[copy_id(c)]), reverse=True)
-        keeper = ordered[0]
+        keeper = keepers[sid]
         keeper_id = copy_id(keeper)
+        timelines = {copy_id(c): _full_timeline(c.path) for c in copies}
         keeper_tl = timelines[keeper_id]
-        for other in ordered[1:]:
+        for other in copies:
             other_id = copy_id(other)
+            if other_id == keeper_id:
+                continue
             other_tl = timelines[other_id]
             n = len(other_tl)
             if other_tl == keeper_tl[:n]:
@@ -355,10 +364,13 @@ def exclusions(sessions_list, excluded_sids):
 
 def _sid_keepers(sessions_list):
     """For each sid, the R22 "keeper" copy — the longest timeline, ties broken by copy_id
-    for determinism (same rule exclusions() Stage D applies). relations() needs this
-    independently of exclusions(): per R28(ii)'s signature, relations(sessions) takes no
-    exclusions map, so when a sid itself has more than one profile copy it must re-derive
-    which copy is canonical (the one R22 would keep) rather than being told.
+    for determinism. relations() needs this independently of exclusions(): per R28(ii)'s
+    signature, relations(sessions) takes no exclusions map, so when a sid itself has more
+    than one profile copy it must re-derive which copy is canonical (the one R22 would
+    keep) rather than being told.
+
+    R32: exclusions() Stage D now calls this same function rather than re-implementing its
+    own sort, so the two can never pick different keepers for the same sid.
     """
     by_sid = {}
     for s in sessions_list:
@@ -432,17 +444,25 @@ def relations(sessions_list):
 
 
 def attribute_entries(sessions_list, exclusions_map):
-    """R28(iii): map each operator-message uuid to exactly one owning transcript (copy_id),
-    over non-excluded transcripts, resolving the double-counting a fork pair's (or any
-    other overlapping pair's) shared prefix would otherwise cause.
+    """R28(iii)/R31: map each ENTRY uuid — every entry in the transcript (prompts, assistant
+    messages, tool results, meta entries, all of them), not only operator-message uuids — to
+    exactly one owning transcript (copy_id), over non-excluded transcripts, resolving the
+    double-counting a fork pair's (or any other overlapping pair's) shared prefix would
+    otherwise cause.
 
-    Each uuid is attributed to the containing transcript with the MOST operator-message
-    uuids; ties are broken by earliest first_ts, then lexically smallest copy_id. This is
-    computed as one global sort of candidate sessions by (-count, first_ts, copy_id),
-    assigning each of a session's uuids to it only if no earlier (in that order) session
-    already claimed it — equivalent to independently picking, per uuid, the max-count
-    containing session with the same tie-break, because a total order restricts
-    consistently onto any subset (the subset of sessions containing that uuid).
+    R31: counting and attributing every entry (not just operator messages) matters because
+    the downstream audit samples ASSISTANT messages — restricting this map to operator-
+    message uuids would silently omit every assistant-message uuid from it entirely, and
+    could pick the wrong owner for a fork pair's shared prefix, whose decision points are
+    exactly what the audit is sampling.
+
+    Each uuid is attributed to the containing transcript with the MOST total uuids; ties
+    are broken by earliest first_ts, then lexically smallest copy_id. This is computed as
+    one global sort of candidate sessions by (-count, first_ts, copy_id), assigning each of
+    a session's uuids to it only if no earlier (in that order) session already claimed it —
+    equivalent to independently picking, per uuid, the max-count containing session with the
+    same tie-break, because a total order restricts consistently onto any subset (the subset
+    of sessions containing that uuid).
     """
     candidates = [s for s in sessions_list if copy_id(s) not in exclusions_map]
 
@@ -450,9 +470,7 @@ def attribute_entries(sessions_list, exclusions_map):
     counts = {}
     for s in candidates:
         entries, _skipped = read_jsonl(s.path)
-        uuids = {
-            e.get("uuid") for e in operator_messages(entries) if e.get("uuid") is not None
-        }
+        uuids = {e.get("uuid") for e in entries if e.get("uuid") is not None}
         cid = copy_id(s)
         uuid_sets[cid] = uuids
         counts[cid] = len(uuids)
