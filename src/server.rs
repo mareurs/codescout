@@ -1350,6 +1350,10 @@ impl CodeScoutServer {
         // other field anything on this path needs.
         let asserted_conversation =
             crate::tools::session_key::conversation_from_meta(req.meta.as_ref().map(|m| &m.0));
+        // Record-only — see `db::MeasurementLinkage`. Read here, beside the
+        // conversation key, for the same reason: `req.arguments` moves next.
+        let asserted_tool_use_id =
+            crate::tools::session_key::tool_use_id_from_meta(req.meta.as_ref().map(|m| &m.0));
 
         let mut input: Value = Self::parse_input(req.arguments);
 
@@ -1477,6 +1481,7 @@ impl CodeScoutServer {
             self.session_id.clone(),
             serving_session.unwrap_or_else(|| self.cc_session_id.clone()),
             asserted_agent,
+            asserted_tool_use_id,
         );
         let input_for_record = input.clone();
 
@@ -10665,6 +10670,47 @@ mod guide_hint_tests {
         assert!(
             call(&server, Some("conv-child")).await.is_empty(),
             "re-stating the same conversation must not re-arm"
+        );
+    }
+
+    /// The `claudecode/toolUseId` a client asserts on `_meta` must reach the
+    /// `tool_calls.tool_use_id` column via the production funnel
+    /// (`call_tool_inner`) — not just via `UsageRecorder` in isolation, which
+    /// cannot see the `server.rs` wiring if it is ever deleted.
+    #[tokio::test]
+    async fn call_tool_inner_records_the_meta_tool_use_id() {
+        let (dir, server) = make_server().await;
+
+        let mut params = json!({
+            "name": "run_command",
+            "arguments": {"command": "echo hi"},
+        });
+        let mut meta = serde_json::Map::new();
+        meta.insert(
+            crate::tools::session_key::TOOL_USE_ID_META_KEY.to_string(),
+            json!("toolu_srv1"),
+        );
+        params["_meta"] = Value::Object(meta);
+        let req: CallToolRequestParams = serde_json::from_value(params).unwrap();
+
+        server
+            .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap();
+
+        let db = dir.path().join(".codescout").join("usage.db");
+        let tool_use_id: Option<String> = rusqlite::Connection::open(db)
+            .unwrap()
+            .query_row(
+                "SELECT tool_use_id FROM tool_calls ORDER BY id DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            tool_use_id.as_deref(),
+            Some("toolu_srv1"),
+            "the meta-asserted tool_use_id must reach the tool_calls row"
         );
     }
 

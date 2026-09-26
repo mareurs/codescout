@@ -119,6 +119,31 @@ pub fn conversation_from_meta(
     })
 }
 
+/// The `_meta` key Claude Code sends on every `tools/call` — see
+/// `CONVERSATION_META_KEYS`'s doc and `no_sub_conversation_key_is_ever_probed`
+/// for why this key must never be probed as a conversation identifier: it is
+/// call-scoped, not conversation-scoped.
+pub const TOOL_USE_ID_META_KEY: &str = "claudecode/toolUseId";
+
+/// The tool-call id a client asserted on this request's `_meta`, if any.
+///
+/// Unlike [`conversation_from_meta`], this is deliberately CALL-scoped: it is
+/// a fresh value on every `tools/call`, so it exists purely as a record-only
+/// measurement join key and must never be folded into a conversation or
+/// session key — that is exactly the mistake `MEASURED_TOO_FINE` denylists.
+///
+/// `None` covers every "the client said nothing" shape — absent `_meta`,
+/// absent key, a non-string value, or whitespace — matching
+/// [`conversation_from_meta`]'s silence rules exactly.
+pub fn tool_use_id_from_meta(
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Option<String> {
+    let meta = meta?;
+    let raw = meta.get(TOOL_USE_ID_META_KEY)?.as_str()?;
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
 /// The argument key a companion hook stamps this call's principal into.
 ///
 /// **The vendor namespacing is structural, not decorative.** `.` and `/` cannot
@@ -270,6 +295,44 @@ mod tests {
                 "probe key must be vendor-namespaced, not bare: {key}"
             );
         }
+    }
+
+    #[test]
+    fn a_tool_use_id_is_read_from_its_meta_key() {
+        let m = meta_map(&[(TOOL_USE_ID_META_KEY, serde_json::json!(" toolu_01ABC "))]);
+        assert_eq!(
+            tool_use_id_from_meta(Some(&m)),
+            Some("toolu_01ABC".to_string())
+        );
+    }
+
+    #[test]
+    fn every_shape_of_client_silence_yields_no_tool_use_id() {
+        assert_eq!(tool_use_id_from_meta(None), None);
+        assert_eq!(tool_use_id_from_meta(Some(&meta_map(&[]))), None);
+        assert_eq!(
+            tool_use_id_from_meta(Some(&meta_map(&[(
+                TOOL_USE_ID_META_KEY,
+                serde_json::json!(7)
+            )]))),
+            None
+        );
+        assert_eq!(
+            tool_use_id_from_meta(Some(&meta_map(&[(
+                TOOL_USE_ID_META_KEY,
+                serde_json::json!("  ")
+            )]))),
+            None
+        );
+    }
+
+    #[test]
+    fn a_tool_use_id_never_becomes_a_conversation_key() {
+        // This pins the `MEASURED_TOO_FINE` intent against the new reader: a
+        // map holding ONLY the call-scoped tool-use-id key must never resolve
+        // as a conversation, however plausible a probe might look.
+        let m = meta_map(&[(TOOL_USE_ID_META_KEY, serde_json::json!("toolu_01ABC"))]);
+        assert_eq!(conversation_from_meta(Some(&m)), None);
     }
 
     #[test]

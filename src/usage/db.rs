@@ -178,6 +178,24 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         conn.execute_batch("ALTER TABLE tool_calls ADD COLUMN effect_class TEXT;")?;
     }
 
+    // Migration: the `claudecode/toolUseId` a client asserted on the request's
+    // `_meta` (record-only join key — see `MeasurementLinkage`). Additive +
+    // nullable, so every pre-existing row and the unchanged SELECTs stay correct.
+    //
+    // NOTE the NULL ambiguity, stated rather than repeated silently: NULL means
+    // BOTH "the client sent none" AND "this row predates the column", separable
+    // only by `called_at` — the same defect `read_output_ids` above states and
+    // accepts for the same reason.
+    let has_tool_use_id: bool = conn
+        .prepare("SELECT tool_use_id FROM tool_calls LIMIT 0")
+        .is_ok();
+    if !has_tool_use_id {
+        conn.execute_batch(
+            "ALTER TABLE tool_calls ADD COLUMN tool_use_id TEXT;
+             CREATE INDEX IF NOT EXISTS idx_tool_calls_tool_use_id ON tool_calls(tool_use_id);",
+        )?;
+    }
+
     backfill_legacy_rows(&conn, &project_root.to_string_lossy())?;
 
     Ok(conn)
@@ -253,6 +271,20 @@ pub struct BufferLinkage<'a> {
     pub reads: Option<&'a str>,
 }
 
+/// The measurement-linkage fields a client can assert on a request, travelling as one
+/// value for the reason [`BufferLinkage`]'s doc gives: `write_record` already takes many
+/// positional parameters, several of them adjacent `Option<&str>` — a named struct makes
+/// a silent transposition unrepresentable rather than merely unlikely. A second field
+/// (deliveries) joins this one later; keep it a named struct rather than collapsing it
+/// back to a bare `Option<&str>` parameter.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct MeasurementLinkage<'a> {
+    /// The `claudecode/toolUseId` a client asserted on this request's `_meta`, if any.
+    /// Record-only: nothing reads this back into behavior today. See
+    /// `crate::tools::session_key::tool_use_id_from_meta`.
+    pub tool_use_id: Option<&'a str>,
+}
+
 /// The current UTC instant in the exact textual shape `write_record`'s
 /// `strftime('%Y-%m-%d %H:%M:%f','now')` produces.
 ///
@@ -290,6 +322,7 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
     agent_id: Option<&str>,
     linkage: BufferLinkage<'_>,
     effect_class: Option<&str>,
+    measurement: MeasurementLinkage<'_>,
 ) -> Result<()> {
     // Taken by value so the sha and its dirty bit cannot be separated at the call site.
     // They were separable before BL-24, and the flag was the half that got dropped.
@@ -303,8 +336,8 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
         // lexicographic compare against a `datetime()`-shaped literal, and the shared
         // prefix is fixed-width, so a `.SSS` suffix always sorts after the same second
         // and before the next one.
-        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id, emitted_output_id, read_output_ids, effect_class)
-                 VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id, emitted_output_id, read_output_ids, effect_class, tool_use_id)
+                 VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
         params![
             tool_name,
             latency_ms,
@@ -327,6 +360,7 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
             linkage.emitted,
             linkage.reads,
             effect_class,
+            measurement.tool_use_id,
             ],
     )?;
     // `pika_observations` is not codescout's table (a buddy-plugin skill creates it,
@@ -1235,6 +1269,16 @@ mod tests {
     }
 
     #[test]
+    fn open_db_adds_tool_use_id_to_a_pre_migration_table() {
+        // `tmp()` builds `tool_calls` via `open_db`, whose base `CREATE TABLE` (above)
+        // predates `tool_use_id` — every fresh open exercises the same
+        // probe-then-`ALTER TABLE` path a real pre-existing db file would.
+        let (_dir, conn) = tmp();
+        conn.execute("SELECT tool_use_id FROM tool_calls LIMIT 0", [])
+            .unwrap();
+    }
+
+    #[test]
     fn called_at_carries_sub_second_precision() {
         // The discriminator is the FORMAT the production INSERT writes, not a value
         // read back from a row this test inserted. Under `datetime('now')` the string
@@ -1262,6 +1306,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
         let ts: String = conn
@@ -1305,6 +1350,7 @@ mod tests {
                 None,
                 Default::default(),
                 None,
+                Default::default(),
             )
             .unwrap();
         }
@@ -1359,6 +1405,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
         let (start, done): (Option<String>, String) = conn
@@ -1402,6 +1449,7 @@ mod tests {
                 agent,
                 Default::default(),
                 None,
+                Default::default(),
             )
             .unwrap();
         }
@@ -1500,6 +1548,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
         let count: i64 = conn
@@ -1532,6 +1581,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
         let (name, latency, outcome, overflowed, msg): (String, i64, String, i64, Option<String>) =
@@ -1572,6 +1622,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
         let overflowed: i64 = conn
@@ -1617,6 +1668,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
         let after: i64 = conn
@@ -1691,6 +1743,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
 
@@ -1825,6 +1878,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
         write_record(
@@ -1848,6 +1902,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
         write_record(
@@ -1871,6 +1926,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
 
@@ -1906,6 +1962,7 @@ mod tests {
                 None,
                 Default::default(),
                 None,
+                Default::default(),
             )
             .unwrap();
         }
@@ -2182,6 +2239,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
         let (cs, ps, sid, inp, out): (String, String, String, String, String) = conn
@@ -2222,6 +2280,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
         let (ps, inp, out): (Option<String>, Option<String>, Option<String>) = conn
@@ -2260,6 +2319,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
         let (ft, tok, ef, pr): (Option<String>, Option<i64>, Option<String>, Option<String>) = conn
@@ -2307,6 +2367,7 @@ mod tests {
                 None,
                 Default::default(),
                 None,
+                Default::default(),
             )
             .unwrap();
             let (sha, got): (String, Option<i64>) = conn
@@ -2362,6 +2423,7 @@ mod tests {
                     reads: None,
                 },
                 None,
+                Default::default(),
             )
             .unwrap();
         };
@@ -2390,6 +2452,7 @@ mod tests {
                     reads,
                 },
                 None,
+                Default::default(),
             )
             .unwrap();
         };
@@ -2452,6 +2515,7 @@ mod tests {
                 reads: None,
             },
             None,
+            Default::default(),
         )
         .unwrap();
         write_record(
@@ -2478,6 +2542,7 @@ mod tests {
                 reads: Some(r#"["@cmd_zzz999"]"#),
             },
             None,
+            Default::default(),
         )
         .unwrap();
 

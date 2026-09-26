@@ -40,6 +40,9 @@ pub struct UsageRecorder {
     /// decision, so this degrades to the previous behaviour rather than erroring.
     /// docs/adrs/2026-09-14-a-subagent-is-a-principal.md
     agent_id: Option<String>,
+    /// The `claudecode/toolUseId` the server read from this request's `_meta`, if any.
+    /// Record-only — see `db::MeasurementLinkage`.
+    tool_use_id: Option<String>,
 }
 
 impl UsageRecorder {
@@ -49,6 +52,7 @@ impl UsageRecorder {
         session_id: String,
         cc_session_id: String,
         agent_id: Option<String>,
+        tool_use_id: Option<String>,
     ) -> Self {
         Self {
             agent,
@@ -56,6 +60,7 @@ impl UsageRecorder {
             session_id,
             cc_session_id,
             agent_id,
+            tool_use_id,
         }
     }
 
@@ -208,6 +213,12 @@ impl UsageRecorder {
             (tool_name == "run_command")
                 .then(|| crate::tools::run_command::declared_effect(input))
                 .flatten(),
+            // Extracted unconditionally, never behind `self.debug` — same rationale as
+            // the buffer linkage above: this is a column, not something a debug-only
+            // query could derive after the fact.
+            db::MeasurementLinkage {
+                tool_use_id: self.tool_use_id.as_deref(),
+            },
         )?;
         Ok(())
     }
@@ -819,6 +830,7 @@ mod content_tests {
             "mcp-session".to_string(),
             "my-cc-session".to_string(),
             None,
+            None,
         );
 
         let _ = recorder
@@ -860,6 +872,7 @@ mod content_tests {
             true,
             "test-session".to_string(),
             "cc-test".to_string(),
+            None,
             None,
         );
         let input = json!({"query": "test_symbol", "path": "src/lib.rs"});
@@ -915,6 +928,7 @@ mod content_tests {
             "test-session".to_string(),
             "cc-test".to_string(),
             None,
+            None,
         );
         for (tool, input) in [
             ("run_command", json!({"command": "ls"})),
@@ -969,6 +983,7 @@ mod content_tests {
             false,
             "pin-session".to_string(),
             "cc-pin".to_string(),
+            None,
             None,
         );
         let input = json!({"query": "x"});
@@ -1039,6 +1054,7 @@ mod content_tests {
             "wt-session".to_string(),
             "cc-wt".to_string(),
             None,
+            None,
         );
         let input = json!({"query": "x"});
 
@@ -1088,6 +1104,7 @@ mod content_tests {
             true,
             "test-session".to_string(),
             "cc-test".to_string(),
+            None,
             None,
         );
         let input = json!({"path": "/bad/path"});
@@ -1146,6 +1163,7 @@ mod content_tests {
             "test-session".to_string(),
             "cc-test".to_string(),
             None,
+            None,
         );
         let input = json!({});
 
@@ -1199,6 +1217,7 @@ mod content_tests {
             "test-session".to_string(),
             "cc-test".to_string(),
             None,
+            None,
         );
         let input = json!({"query": "test_symbol"});
 
@@ -1235,6 +1254,7 @@ mod content_tests {
             false,
             "test-session".to_string(),
             "cc-test".to_string(),
+            None,
             None,
         );
         let input = json!({"name_path": "LspManager/get_or_start", "path": "src/lsp/manager.rs"});
@@ -1285,6 +1305,7 @@ mod content_tests {
             "test-session".to_string(),
             "cc-test".to_string(),
             None,
+            None,
         );
 
         // A call that BOTH names an existing handle and overflows into a new one, so a
@@ -1319,6 +1340,88 @@ mod content_tests {
             reads.as_deref(),
             Some(r#"["@cmd_prior1"]"#),
             "the handle this call named — a DIFFERENT value, so a field swap reds here"
+        );
+    }
+
+    /// Record-only wiring: the client asserted a `claudecode/toolUseId` on this call
+    /// (via `UsageRecorder::new`'s new final field, standing in for the server's
+    /// `_meta` read), and it lands in the column unconditionally — `debug` is off
+    /// here on purpose, mirroring `record_content_records_buffer_linkage_with_debug_off`
+    /// above: `input_json` stays NULL while `tool_use_id` is populated, which is the
+    /// whole point of a column rather than something a debug-only blob could derive.
+    #[tokio::test]
+    async fn record_content_records_tool_use_id_with_debug_off() {
+        use serde_json::json;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let recorder = UsageRecorder::new(
+            agent.clone(),
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+            None,
+            Some("toolu_01X".to_string()),
+        );
+
+        let input = json!({"query": "x"});
+        let _ = recorder
+            .record_content("symbols", &input, None, || async {
+                Ok(vec![Content::text("ok")])
+            })
+            .await;
+
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        let (inp, tool_use_id): (Option<String>, Option<String>) = conn
+            .query_row("SELECT input_json, tool_use_id FROM tool_calls", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert!(inp.is_none(), "debug is off — input_json stays NULL");
+        assert_eq!(
+            tool_use_id.as_deref(),
+            Some("toolu_01X"),
+            "the tool_use_id must be recorded even though debug is off"
+        );
+    }
+
+    /// The other half of the same wiring: a client that sent no `claudecode/toolUseId`
+    /// (or a server that resolved none) must leave the column NULL, not some sentinel —
+    /// the migration comment's NULL-ambiguity note only holds if an absent id and a
+    /// pre-migration row are the same NULL, never a stand-in string.
+    #[tokio::test]
+    async fn record_content_records_null_tool_use_id_when_the_client_sent_none() {
+        use serde_json::json;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let recorder = UsageRecorder::new(
+            agent.clone(),
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+            None,
+            None,
+        );
+
+        let input = json!({"query": "x"});
+        let _ = recorder
+            .record_content("symbols", &input, None, || async {
+                Ok(vec![Content::text("ok")])
+            })
+            .await;
+
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        let tool_use_id: Option<String> = conn
+            .query_row("SELECT tool_use_id FROM tool_calls", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            tool_use_id, None,
+            "no tool_use_id was passed in — the column must be NULL, not a sentinel"
         );
     }
 }

@@ -543,6 +543,7 @@ mod tests {
                 None,
                 Default::default(),
                 None,
+                Default::default(),
             )
             .unwrap();
         }
@@ -568,6 +569,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
         // a FOREIGN-project row for the same target — must be excluded (F-1)
@@ -592,6 +594,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
 
@@ -684,6 +687,7 @@ mod tests {
             None,
             Default::default(),
             None,
+            Default::default(),
         )
         .unwrap();
 
