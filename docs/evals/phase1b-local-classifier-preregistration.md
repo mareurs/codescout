@@ -15,9 +15,9 @@ tags:
 
 **Valid:** dated 2026-09-25
 
-**Status: Stage 1 registered in `24426921` and complete (§ *Stage 1 results*: both recipes stable; `s1-r1` carried forward). Stage 2 is a DRAFT and not registered.**
+**Status: Stage 1 registered in `24426921` and complete (§ *Stage 1 results*: both recipes stable; `s1-r1` carried forward). Stage 2 registered on 2026-09-26 by the commit that marks its heading below "registered before it runs". Later stages are not registered.**
 - **Stage 1,** a stable training recipe, runs after that commit.
-- **The sections from "Step 1 — the cross-rule audit" onward** are the Stage-2+ draft. They will be revised in light of Stage 1 and of `docs/research/2026-09-25-phase1-training-research-synthesis.md`: rule-conditioned formulation, cue-balanced training rows, all-cells validation, and failure rates over all seeds in place of the "learned-only" causal reading, which the research showed to be selection after treatment. Each stage is registered before it runs.
+- **The sections from "Step 1 — the cross-rule audit" onward** are Stage 2's steps, amended by § *Stage 2* and registered with it. Of the revisions the research synthesis (`docs/research/2026-09-25-phase1-training-research-synthesis.md`) asked for, Stage 2 takes cue counterexamples (arm NC), all-cells validation, and the reading over every seed in place of the "learned-only" one. The rule-conditioned formulation is Stage 3's, run only if Stage 2 fails. Each stage is registered before it runs.
 
 ## Why this exists
 
@@ -175,23 +175,32 @@ Common to all three: JevK5 with LoRA r16/α32/dropout 0.05 on all linear project
 
 The three `s1-r1` checkpoints are Stage 2's arm B.
 
-## Stage 2 — cross-rule negatives, a draft (not registered)
+## Stage 2 — cross-rule negatives, 2026-09-26 (registered before it runs)
 
-**Status: draft, written while Stage 1's last seed was training.** It is registered only after § *Stage 1 results* is written and the open decisions below are settled. Steps 1–5 below are Stage 2's steps; this section states what changes in them.
+**Status: registered 2026-09-26, before any Stage 2 data is drawn and before any Stage 2 run trains.** It was drafted while Stage 1's last seed was training, and registered after § *Stage 1 results*, the operator's decisions and the operator's confirmations below. Steps 1–5 below are Stage 2's steps; this section states what changes in them, and where the two disagree, this section wins.
 
-**Where registration stands, 2026-09-26:**
-- **Done:**
+**Registration, 2026-09-26:**
+- **Committed before registration:**
   - Stage 1 results, and the recipe named (`c69a99e4`).
-  - The operator's decisions (`29506f12`).
-  - The cue list (`29506f12`).
+  - The operator's decisions and the cue list (`29506f12`).
   - The counterexample miner, with its cross-fold fix after the Codex review (`ec12b2a1`, `96b52f0c`).
   - `train_arm.py --cross` and `--extra-rows`, with their parity checks (`f566082c`).
   - Step 4's scripts, `phase1b/score_run.py` and `phase1b/step4.py`, which also take Stage 2's per-run measurements (`f78c0eba`, `be87d3e4`; § *Step 4's scripts* below).
-  - Step 1's scripts, `phase1b/draw_audit_sample.py`, `phase1b/label_items.py`, `phase1b/score_audit.py` and `phase1b/run_labellers.py` (`4606a129`, `d423236b`; § *Step 1's scripts* below). None has been run.
-- **Remaining before registration:**
-  1. The operator confirms the choices made while writing Steps 1 and 4 (§ *Step 4's scripts*, § *Step 1's scripts*), above all that every arm is scored on one cell set.
-  2. Fix the predictions, then register. The draft predictions below were committed in `2e4743e0`, before Step 4's smoke run; any change to them after that run says so.
-- **Then, in order:** the Codex clean texts; the audit labelling of the sample, the clean texts and the counterexample candidates; mining; N and NC training; Steps 4 and 5.
+  - Step 1's scripts, `phase1b/draw_audit_sample.py`, `phase1b/label_items.py`, `phase1b/score_audit.py` and `phase1b/run_labellers.py` (`4606a129`, `d423236b`; § *Step 1's scripts* below).
+  - None of Step 1's scripts has run, and the miner has only run with `--count-only`.
+- **Confirmed by the operator, 2026-09-26:**
+  - every arm is scored on one cell set (§ *Step 4's scripts*);
+  - the six choices listed in § *Step 1's scripts*;
+  - predictions 1–5 as drafted in `2e4743e0`, unchanged after Step 4's smoke run;
+  - the earlier draft's audit prediction, carried as prediction 6.
+- **Then, in this order:**
+  1. The three Codex clean texts, from the committed prompt (§ *Step 2*).
+  2. The audit sample (`draw_audit_sample.py`) and the counterexample candidates (`mine_counterexamples.py`, which refuses to draw before the Codex texts exist).
+  3. The labellers' items (`label_items.py`), the two labellers (`run_labellers.py`), then the scorer (`score_audit.py`): the admission file, NC's counterexample rows and the clean-text verdicts.
+  4. N and NC training, three seeds each.
+  5. Step 4 for all nine checkpoints (`score_run.py`, then `step4.py`), then Step 5.
+
+  *Corrected at registration:* the draft listed mining after the audit labelling, but the candidates are labelled in the same runs, so they are drawn first.
 
 **What Stage 2 tests.** Stage 1 changes optimisation only, and Stage 1's registered prediction 5 expects its learned runs to keep firing on other rules' text. Stage 2 adds the training change this draft was built around, audited cross-rule negatives, and asks two questions:
 1. Do the negatives stop that firing without costing own-rule detection?
@@ -207,8 +216,8 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
 | arm | training | trained in | can ship |
 |---|---|---|---|
 | **B** | Stage 1's three `s1-r1` checkpoints, unchanged, pinned by sha256 in § *Stage 1 results* | Stage 1 | no |
-| **N** | the same recipe, plus Step 3's cross-rule term | Stage 2 | yes |
-| **NC** | N, plus cue counterexamples | Stage 2, if open decision 1 registers it | yes, if registered |
+| **N** | the same recipe, plus Step 3's cross-rule term | Stage 2 | no: NC's diagnostic |
+| **NC** | N, plus cue counterexamples | Stage 2 | yes: the ship arm |
 
 - **B replaces D and D2.** D and D2 differ from the phase-1b arm in the recipe as well as the negatives, and D2 never learned. B differs from N only by the cross-rule term, so B against N is the causal comparison this draft wanted: one recipe, three seeds each.
 - **B goes through Steps 4 and 5 exactly as N does,** on the same admitted heads, and is not retrained. It is diagnostic and cannot ship, so that exactly one arm is the ship candidate and none is chosen after the gate.
@@ -220,6 +229,8 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
 4. **Step 4:** unchanged in its rules. Every arm, B included, takes it through the same two scripts, on the same cells (§ *Step 4's scripts*).
 5. **Step 5:** every checkpoint of every arm goes through the gate once.
 
+**And § *After the gate*:** its "L2-1b" is NC's seed-20260935 checkpoint, which reaches T only under the ship rule below. If NC fails the ship rule, the local route stops as that section says, except that the rule-conditioned formulation (open decision 2) may follow as Stage 3, under a new registration.
+
 **Measured per run, in addition to Stage 1's measurements:**
 - **All-cells val AUC,** over own cells plus admitted cross cells, pooled and per head. Own-cell AUC cannot see a head that fires on another rule's text. In all six Stage 1 runs, the `d_semicolon` head scored 1.000 on its own pairs and fired on 479 of 479 other rules' val cells. The all-cells AUC falls when that happens.
 - **Own-negative firing on `cal`,** not `val`. Thresholds are chosen on `val`, so a count there is set by the threshold rule rather than by the model (bug `2bac7e0a27fbc392`).
@@ -227,7 +238,7 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
 **Step 4's scripts, 2026-09-26** (`f78c0eba`):
 - **A gap in the plan, found while writing them.** The plan fed Step 4 from each run's `fold-logits.json` (`val_cross`, `cal_cross`). Arm B's three files have neither: B trained in Stage 1, without `--cross` and before any admission file existed. Step 4 now reads a scoring pass instead.
 - **`score_run.py`** loads a run's `best.pt` and scores its val and cal cells: each row's own cell, plus the admitted cross cells of the admission file it is given.
-  - **All nine checkpoints go through it,** with the same admission file and the same counterexample file. So B, N and NC are calibrated, thresholded and checked on one cell set. That set includes NC's val and cal counterexample rows, although B and N never trained on them. *This choice was made while writing the script, and is the operator's to confirm before registration.* The alternative, leaving out the rows an arm did not train on, would make N and NC differ in evaluation as well as in training.
+  - **All nine checkpoints go through it,** with the same admission file and the same counterexample file. So B, N and NC are calibrated, thresholded and checked on one cell set. That set includes NC's val and cal counterexample rows, although B and N never trained on them. *This choice was made while writing the script; the operator confirmed it on 2026-09-26.* The alternative, leaving out the rows an arm did not train on, would make N and NC differ in evaluation as well as in training.
   - **It refuses** a checkpoint whose sha256 differs from `--expect-sha256` (B's pins are in § *Stage 1 results*), and a run trained with `--cross` or `--extra-rows` but scored with a different file.
   - **Parity:** each frozen row's own-cell logit must equal the run's own `fold-logits.json` exactly, and so must its cross cells when the run trained with `--cross`. Otherwise nothing is written.
 - **`step4.py`** applies § *Step 4* per admitted head, with `train_arm.fit_temperature` and `train_arm.thresholds` unchanged. It writes the temperatures, the thresholds, the pre-gate results, each removal with its counts, the final menu and gate-ability. `--common` gives the common menu over several runs.
@@ -260,20 +271,21 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
 - **Scratch end-to-end runs** used a synthetic sample, stand-in Codex texts and candidates, and seeded labels, with no model called.
   - The scorer reproduced the seeded outcome, and its two output files loaded through `train_arm.load_cross` and `train_arm.load_extra_rows`.
   - `run_labellers.py`'s `main`, with both models faked, wrote both label files in item order. Codex saw exactly the three files and its config. A batch that failed twice stopped the run with exit 4 and no labels written.
-- **For the operator to confirm:** the unit-draw call, the blinding, the validity rule, masking from candidates, the literal reading of "unflagged", and a new `CODEX_HOME` for each attempt.
+- **Confirmed by the operator, 2026-09-26:** the unit-draw call, the blinding, the validity rule, masking from candidates, the literal reading of "unflagged", and a new `CODEX_HOME` for each attempt.
 
 **Reading, over every seed.** The research showed that a reading over only the runs that learned is selection after treatment. If the negatives change how often training fails, conditioning on "learned" biases the comparison. So:
 - **Each arm's result is its number of seeds that pass the gate,** out of 3, on the common menu. A seed that did not learn (own-cell val AUC below 0.80) counts as a failure for its arm.
 - **The causal claim needs N at 2 or 3 of 3 and B at 0 of 3,** on the common menu. That claim is that the negatives remove the over-firing that failed phase 1's gate. It is worded as a pattern, because three seeds per arm cannot establish more: the one-sided Fisher exact p is 0.05 for 3 of 3 against 0 of 3, and 0.2 for 2 of 3 against 0 of 3.
+- **The common menu** is the heads on all nine checkpoints' final menus (B, N and NC at three seeds each), computed by `step4.py --common`. Every checkpoint's gate is reported on its own final menu and on the common menu. If the common menu keeps fewer than 2 of the 3 gate positives, the comparison is reported as not possible. *(Carried at registration from § A diagnostic arm, whose four checkpoints are now these nine.)*
 
 **Ship rule:**
-- The candidate arm proceeds to T only if **all three** of its seeds pass the gate on their own final menus.
+- The candidate arm, NC, proceeds to T only if **all three** of its seeds pass the gate on their own final menus.
 - The checkpoint carried to T is **seed 20260935**, fixed now, so nothing is selected after the gate.
 
 **Open decisions, for the operator, before registration.** *Decided 2026-09-25, all three as recommended: NC is registered and is the ship arm, with N its diagnostic; the per-rule heads are kept; and the ship bar is all three seeds.*
 
 1. **Cue counterexamples, arm NC.**
-   - **Why N alone likely fails the gate.** Cross-rule negatives cannot remove a cue that no other rule's text contains. `&&` is in all 77 `d_semicolon` positives in train and val (surface probe, target units). It is in none of the 13,033 units of the 2,509 other rules' rows across train, val and cal, counted over every unit with `ta.segment` while this was drafted. Prediction 6 already expects N to fire on `clean-12` for that reason. So N would likely fail the gate by construction.
+   - **Why N alone likely fails the gate.** Cross-rule negatives cannot remove a cue that no other rule's text contains. `&&` is in all 77 `d_semicolon` positives in train and val (surface probe, target units). It is in none of the 13,033 units of the 2,509 other rules' rows across train, val and cal, counted over every unit with `ta.segment` while this was drafted. Prediction 6 (§ *Predictions*) already expects N to fire on `clean-12` for that reason. So N would likely fail the gate by construction.
    - **What the research says.** It puts counterexamples in *training*: cue present, label unchanged (Gardner et al., Prop. 1; McCoy et al., §7).
    - **(a) NC is the ship arm, and N is its diagnostic.**
      - *Cue list* (`phase1b/cue_list.py`, output `cue-list.json`, computed from `train` and the training-side manifest only, before registration). Cue candidates are, for each head with probe AUC ≥ 0.9, the 3 features with the largest positive coefficients in its train-fit surface probe.
@@ -303,12 +315,15 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
    - The rule-conditioned form needs one forward pass per menu rule per draft, about 14 where the current form needs one.
 3. **The ship bar: all three seeds** (proposed above), or at least two with seed 20260935 among them.
 
-**Predictions, to be fixed at registration:**
+**Predictions, fixed at registration:**
 1. **B fails the gate at 3 of 3 seeds,** on its own menu and on the common menu. Stage 1 did not touch the over-firing.
 2. **N keeps own-cell val AUC at 0.90 or more at 3 of 3 seeds.** The negatives do not cost own-rule detection.
 3. **N's pre-gate check removes at most 2 heads at every seed.**
 4. **N fires `d_semicolon` on `clean-12` at 2 or more of 3 seeds.** This is prediction 6 below, restated per seed.
 5. **If NC is registered, NC does not fire `d_semicolon` on `clean-12` at 2 or more of 3 seeds.**
+6. **The audit admits at least 10 of the 14 heads.** Carried from § *Predictions*, prediction 1, written before any audit data existed; the operator carried it at registration.
+
+Predictions 1–5 are the text committed in `2e4743e0`, before Step 4's smoke run, unchanged. In prediction 4, "prediction 6 below" is § *Predictions*' prediction 6, not prediction 6 here. In prediction 5, NC is registered.
 
 ## Step 1 — the cross-rule audit (decides which cells become negatives)
 
@@ -424,7 +439,7 @@ For a training row with rule A, target unit t and label y, the loss is:
 
 ## A diagnostic arm, which cannot ship
 
-**Superseded in the Stage 2 draft:** arm B, Stage 1's three checkpoints of the carried recipe, replaces D and D2. B differs from the phase-1b arm only by the cross-rule term; D and D2 differ in the recipe too, and D2 never learned. The text below is kept until Stage 2 is registered.
+**Superseded at Stage 2's registration:** arm B, Stage 1's three checkpoints of the carried recipe, replaces D and D2. B differs from the phase-1b arm only by the cross-rule term; D and D2 differ in the recipe too, and D2 never learned. The text below is the earlier draft's, kept for the record, and is not part of the registration.
 
 **D** is phase 1's L2 checkpoint (`db18339d…`), unchanged, taken through Step 4's calibration, thresholds, pre-gate check and the gate, on the same admitted heads. **D2** is the phase-1-settings checkpoint at seed 20260937, from the seed-floor diagnostic, taken through the same steps.
 - **It separates the two changes:** whether the evaluation change alone (thresholds over all cells) would have fixed phase 1, or the training change is needed.
@@ -450,6 +465,8 @@ For a training row with rule A, target unit t and label y, the loss is:
 
 ## Predictions
 
+**Superseded at Stage 2's registration** by § *Stage 2*'s predictions 1–6. Those restate prediction 6 here per seed (Stage 2's prediction 4) and carry prediction 1 (Stage 2's prediction 6). The rest were about arms D, D2, L2-1b and L2-1b-s2, which Stage 2 replaced. Kept as the earlier draft's text.
+
 1. The audit admits at least 10 of the 14 heads.
 2. Of the admitted heads, the pre-gate check removes at most 2.
 3. **On the common menu, D and D2 fail the gate, and L2-1b and L2-1b-s2 pass every clean text except `clean-12`.** Re-thresholding over all cells does not stop confident clean-text fires like `d_sessionid` at p = 0.99, and the training change does.
@@ -459,12 +476,12 @@ For a training row with rule A, target unit t and label y, the loss is:
 
 ## Known limits
 
-- **One seed and one run,** as in phase 1. *(Stage 2 draft: three seeds per arm, read as counts; runs are not bit-reproducible.)*
+- **One seed and one run,** as in phase 1. *(Stage 2: three seeds per arm, read as counts; runs are not bit-reproducible.)*
 - **Phase 1's gate texts have now been seen,** and they shaped this design. The new clean texts are the counterweight. The old texts stay in the gate, so the gate is at least as hard as phase 1's.
 - **The audit's two labellers are models.** Opus shares a model family with the spec author and the synthetic generator. The union rule is conservative for admission, and it can mask cells that are in fact negative, which costs data and never correctness.
 - **Removing heads trades coverage for precision.** A head removed at Step 1 or Step 4 moves to Haiku, and the local menu that ships may be smaller than 14.
 - **The Wilson bound assumes independent draws.** The 300 rows can include both texts of a pair, which share every unit but one, so two audit items can be near-copies. That makes the interval somewhat optimistic. The draw is reported with the count of pairs that contributed both texts.
-- **The loss change interacts with calibration.** Cross-rule negatives shift every head toward NO, and temperatures and thresholds are refitted over the new cell set to absorb that. D controls for the threshold half of that interaction, not the calibration half.
+- **The loss change interacts with calibration.** Cross-rule negatives shift every head toward NO, and temperatures and thresholds are refitted over the new cell set to absorb that. D controls for the threshold half of that interaction, not the calibration half. *(Stage 2: arm B takes the same refit over the same cells, so the refit is common to B and N. And a temperature cancels from every threshold decision except where floats saturate, which `step4.py` reports (§ *Step 4's scripts*), so the calibration half reaches a decision only through saturation.)*
 
 ## Revisions before registration
 
