@@ -187,11 +187,10 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
   - The counterexample miner, with its cross-fold fix after the Codex review (`ec12b2a1`, `96b52f0c`).
   - `train_arm.py --cross` and `--extra-rows`, with their parity checks (`f566082c`).
   - Step 4's scripts, `phase1b/score_run.py` and `phase1b/step4.py`, which also take Stage 2's per-run measurements (`f78c0eba`, `be87d3e4`; § *Step 4's scripts* below).
-  - Step 1's scripts, `phase1b/draw_audit_sample.py`, `phase1b/label_items.py` and `phase1b/score_audit.py` (`4606a129`; § *Step 1's scripts* below). The draw has not been run.
+  - Step 1's scripts, `phase1b/draw_audit_sample.py`, `phase1b/label_items.py`, `phase1b/score_audit.py` and `phase1b/run_labellers.py` (`4606a129`, `d423236b`; § *Step 1's scripts* below). None has been run.
 - **Remaining before registration:**
-  1. `phase1b/run_labellers.py`, the one script that calls models. Codex runs once, in a new `CODEX_HOME`, in a directory holding only the instruction, `menu.json` and the items. Claude Opus 5.5 runs on the clean judge channel in batches of 25. A call that errors, or returns an invalid or incomplete set, is re-run once; a second failure stops phase 1b at Step 1.
-  2. The operator confirms the choices made while writing Steps 1 and 4 (§ *Step 4's scripts*, § *Step 1's scripts*), above all that every arm is scored on one cell set.
-  3. Fix the predictions, then register. The draft predictions below were committed in `2e4743e0`, before Step 4's smoke run; any change to them after that run says so.
+  1. The operator confirms the choices made while writing Steps 1 and 4 (§ *Step 4's scripts*, § *Step 1's scripts*), above all that every arm is scored on one cell set.
+  2. Fix the predictions, then register. The draft predictions below were committed in `2e4743e0`, before Step 4's smoke run; any change to them after that run says so.
 - **Then, in order:** the Codex clean texts; the audit labelling of the sample, the clean texts and the counterexample candidates; mining; N and NC training; Steps 4 and 5.
 
 **What Stage 2 tests.** Stage 1 changes optimisation only, and Stage 1's registered prediction 5 expects its learned runs to keep firing on other rules' text. Stage 2 adds the training change this draft was built around, audited cross-rule negatives, and asks two questions:
@@ -243,7 +242,7 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
   - **What was seen.** Under the stand-in admission, 9 of B's 14 heads failed own-positive recall ≥ 0.5 at the all-cells precision threshold, and none failed the cross-firing bound. The 5 left were `closed_population`, `d_adjacency`, `d_red`, `d_semicolon` and `d_sessionid`, so the gate stayed gate-able. `d_sessionid`'s temperature fit at the upper bound, 10.
   - No gate text was read, and nothing was run on B's other two seeds. The real admission file will differ, so these are not B's result.
 
-**Step 1's scripts, 2026-09-26** (`4606a129`), committed and not yet run:
+**Step 1's scripts, 2026-09-26** (`4606a129`, `d423236b`), committed and not yet run:
 - **`draw_audit_sample.py`** builds `menu.json` and draws the sample as § *Step 1* specifies. Two points the text left open are fixed in code:
   - The unit draw is `random.Random(20260936 + i).randrange(n)`, over the row's units cut by the training segmenter.
   - `menu.json` takes each rule's law and form-2b spec from the gate code's own strings (`RULES`, `SPEC_FORMS["2b"]`), because phase 1 committed no `menu.json` to compare bytes with. Phase 1 built its menu the same way (`stage2/make_label_batches.py`).
@@ -253,9 +252,15 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
   - **Masking takes the candidates' flags too.** Every (sentence, rule) flagged on an audit item or a candidate is masked wherever that sentence appears. Clean texts are gate texts, so a flag on one only drops it.
   - **"Unflagged" is read literally.** A candidate becomes a row only when neither labeller lists, or is unsure about, *any* menu rule, not only its own head's. That can drop a candidate that would have been a correct row; it never admits a doubtful one.
   - It exits 3, after writing, when a Step 2 stop rule fires.
-- `tests/test_phase1b_audit.py`: 22 tests, standard library only; 33 of 33 mutations killed. The Wilson test reproduces the 14 admission limits in `diagnostics/audit-arithmetic.txt`. The closest, `member_vs_population` at 7 flagged of its expected 284 cells, sits 5.4 × 10⁻⁶ under the 5% bound, far above float error.
-- A scratch end-to-end run reproduced a seeded outcome. It used a synthetic sample, stand-in Codex texts and candidates, and labels seeded for a known result. Its two output files loaded through `train_arm.load_cross` and `train_arm.load_extra_rows`.
-- **For the operator to confirm:** the unit-draw call, the blinding, the validity rule, masking from candidates, and the literal reading of "unflagged".
+- **`run_labellers.py`** is the one script that calls models.
+  - **Codex** runs once, by `codex exec` with the API-key variables stripped, in a directory holding only `audit-instruction.md`, `menu.json` and `items.jsonl`. It is `generate_synthetic.codex_complete`'s invocation, with those three files in place of its single `task.md`. Each attempt gets a new `CODEX_HOME`, holding only the auth link and the model config.
+  - **Claude Opus 5.5** runs on the clean judge channel, refused unless `dirty_reasons` finds nothing. Each batch of 25 is sent as the instruction, `menu.json` and the batch, verbatim.
+  - **Every call is checked:** exactly one valid answer for each item of the call, and none for any other. A call that errors, or returns an invalid or incomplete set, is re-run once. A second failure exits 4 (Step 1's stop), writes no labels file, and cancels the Claude batches not yet started.
+- `tests/test_phase1b_audit.py`: 30 tests, standard library only, both models faked; 45 of 45 mutations killed over the four files. The Wilson test reproduces the 14 admission limits in `diagnostics/audit-arithmetic.txt`. The closest, `member_vs_population` at 7 flagged of its expected 284 cells, sits 5.4 × 10⁻⁶ under the 5% bound, far above float error.
+- **Scratch end-to-end runs** used a synthetic sample, stand-in Codex texts and candidates, and seeded labels, with no model called.
+  - The scorer reproduced the seeded outcome, and its two output files loaded through `train_arm.load_cross` and `train_arm.load_extra_rows`.
+  - `run_labellers.py`'s `main`, with both models faked, wrote both label files in item order. Codex saw exactly the three files and its config. A batch that failed twice stopped the run with exit 4 and no labels written.
+- **For the operator to confirm:** the unit-draw call, the blinding, the validity rule, masking from candidates, the literal reading of "unflagged", and a new `CODEX_HOME` for each attempt.
 
 **Reading, over every seed.** The research showed that a reading over only the runs that learned is selection after treatment. If the negatives change how often training fails, conditioning on "learned" biases the comparison. So:
 - **Each arm's result is its number of seeds that pass the gate,** out of 3, on the common menu. A seed that did not learn (own-cell val AUC below 0.80) counts as a failure for its arm.
