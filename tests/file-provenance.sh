@@ -1010,5 +1010,159 @@ has   "a committed path with zero records still names its window" "$nr" "window:
 hasnt "and infers no cause from zero records"                     "$nr" "LIKELY CAUSE"
 
 echo
+echo "== a linked worktree finds its transcripts, and each relative write its tree =="
+# docs/issues/2026-09-24-file-provenance-reads-no-transcripts-inside-a-worktree.md
+#
+# Everything above pins FILE_PROVENANCE_ROOTS, so none of it exercises DISCOVERY -- which
+# is where this bug lived. These cases run with a fake HOME and a real repo + worktree.
+# Two defects, one per half of the fix:
+#   1. The transcript dir was slugged from the git toplevel. In a linked worktree that is
+#      the worktree, but a session's transcripts live under its CWD -- usually the main
+#      checkout -- so ZERO transcripts were read and every file was UNKNOWN.
+#   2. The slug replaced only `/`. Claude Code replaces every non-alphanumeric byte
+#      (measured 2026-09-24: 11 project dirs, none holding anything outside [A-Za-z0-9-]),
+#      so a session STARTED in `.worktrees/x` was missed too.
+# Reading the main checkout's transcripts creates the hazard these controls pin: a
+# relative path names a file in whichever tree was ACTIVE, so `src/x.rs` written in the
+# worktree must not be credited to the main checkout's `src/x.rs`, and vice versa.
+
+# cwd_tool_use <file> <cwd> <tool> <input-json>  -- a record carrying `cwd`, as real ones do
+cwd_tool_use() {
+    python3 - "$1" "$2" "$3" "$4" <<'PY'
+import json, sys
+f, cwd, name, inp = sys.argv[1:5]
+rec = {"type": "assistant", "cwd": cwd, "sessionId": f.rsplit("/", 1)[-1][:-6],
+       "message": {"content": [{"type": "tool_use", "name": name, "input": json.loads(inp)}]}}
+open(f, "a").write(json.dumps(rec) + "\n")
+PY
+}
+slug() { printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g'; }
+
+H="$T/home"
+MAIN="$T/wt/main"
+mkdir -p "$MAIN" "$H/.claude-t"
+git -C "$MAIN" init -q
+git -C "$MAIN" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+git -C "$MAIN" worktree add -q "$MAIN/.worktrees/feat" -b feat
+MAIN="$(cd "$MAIN" && pwd -P)"
+WT="$MAIN/.worktrees/feat"
+MDIR="$H/.claude-t/projects/$(slug "$MAIN")"
+WDIR="$H/.claude-t/projects/$(slug "$WT")"
+mkdir -p "$MDIR" "$WDIR"
+
+# run_in <dir> <path>: no REPO_ROOT, no FILE_PROVENANCE_ROOTS -- discovery is under test.
+run_in() { (cd "$1" && HOME="$H" CLAUDE_CODE_SESSION_ID="$ME" python3 "$TOOL" "$2" 2>&1); }
+
+# A main-checkout session that activated the worktree, then wrote relatively.
+S1="$MDIR/$ME.jsonl"
+cwd_tool_use "$S1" "$MAIN" mcp__codescout__workspace "{\"action\":\"activate\",\"path\":\"$WT\"}"
+cwd_tool_use "$S1" "$MAIN" mcp__codescout__create_file '{"path":"src/after_activate.rs","content":"x"}'
+has   "worktree write from a main-cwd session -> MINE in the worktree" \
+      "$(run_in "$WT" src/after_activate.rs)" "MINE"
+hasnt "and is NOT credited to the main checkout's same-named file" \
+      "$(run_in "$MAIN" src/after_activate.rs)" "MINE"
+
+# CONTROL: a relative write with no activation belongs to the session's cwd (main).
+S2="$MDIR/$PEER.jsonl"
+cwd_tool_use "$S2" "$MAIN" mcp__codescout__edit_file '{"path":"src/main_only.rs","old_string":"a","new_string":"b"}'
+has   "unactivated relative write -> attributed in the main checkout" \
+      "$(run_in "$MAIN" src/main_only.rs)" "$PEER"
+hasnt "and not in the worktree" "$(run_in "$WT" src/main_only.rs)" "$PEER"
+
+# The per-call `workspace=` argument overrides the active tree for that one call only.
+S3="$MDIR/33333333-aaaa-bbbb-cccc-000000000003.jsonl"
+cwd_tool_use "$S3" "$MAIN" mcp__codescout__edit_file "{\"path\":\"src/pinned.rs\",\"workspace\":\"$WT\",\"old_string\":\"a\",\"new_string\":\"b\"}"
+cwd_tool_use "$S3" "$MAIN" mcp__codescout__edit_file '{"path":"src/unpinned.rs","old_string":"a","new_string":"b"}'
+has   "workspace= pins that call to the worktree" "$(run_in "$WT" src/pinned.rs)" "33333333"
+hasnt "and does not leak into the next call"      "$(run_in "$WT" src/unpinned.rs)" "33333333"
+
+# run_command runs in the ACTIVE project; native Bash runs in the session's cwd.
+S4="$MDIR/44444444-aaaa-bbbb-cccc-000000000004.jsonl"
+cwd_tool_use "$S4" "$MAIN" mcp__codescout__workspace "{\"action\":\"activate\",\"path\":\"$WT\"}"
+cwd_tool_use "$S4" "$MAIN" mcp__codescout__run_command '{"command":"echo x > src/via_rc.rs"}'
+cwd_tool_use "$S4" "$MAIN" Bash '{"command":"echo x > src/via_bash.rs","description":"f"}'
+has   "run_command writes into the activated worktree" "$(run_in "$WT" src/via_rc.rs)" "44444444"
+has   "native Bash writes into the session's cwd"       "$(run_in "$MAIN" src/via_bash.rs)" "44444444"
+hasnt "and native Bash is not credited to the worktree" "$(run_in "$WT" src/via_bash.rs)" "44444444"
+
+# A session STARTED in the worktree: only the Claude slug (`.` -> `-`) finds its dir.
+S5="$WDIR/55555555-aaaa-bbbb-cccc-000000000005.jsonl"
+cwd_tool_use "$S5" "$WT" mcp__codescout__create_file '{"path":"src/started_in_wt.rs","content":"x"}'
+has   "a session started in the worktree is found via the dot-folding slug" \
+      "$(run_in "$WT" src/started_in_wt.rs)" "55555555"
+
+echo
+echo "== the active tree is process-wide, starts at the checkout root, and honours cwd= =="
+# Review findings on the worktree fix above:
+#   1. codescout's active project belongs to the MCP SERVER, shared by a session and its
+#      subagents (docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-
+#      subagent-can-flip-it.md). Tracking it per transcript file credited a subagent's relative
+#      write to the session's cwd tree after the PARENT had activated another -- a wrong-tree
+#      attribution, which fmt-mine then acts on. The fix does not guess: where the tree is
+#      unknowable the write is credited to NEITHER tree.
+#   2. The active tree started at the record's cwd; codescout resolves relative paths against
+#      the checkout ROOT, so a session whose cwd was a subdirectory lost every such write.
+#   3. run_command's `cwd=` names a subdirectory of the active project.
+
+# ts_tool_use <file> <cwd> <sessionId> <iso-ts> <tool> <input-json>
+ts_tool_use() {
+    python3 - "$1" "$2" "$3" "$4" "$5" "$6" <<'PY'
+import json, sys
+f, cwd, sid, ts, name, inp = sys.argv[1:7]
+rec = {"type": "assistant", "cwd": cwd, "sessionId": sid, "timestamp": ts,
+       "message": {"content": [{"type": "tool_use", "name": name, "input": json.loads(inp)}]}}
+open(f, "a").write(json.dumps(rec) + "\n")
+PY
+}
+mkdir -p "$MAIN/docs"
+ACT_WT="{\"action\":\"activate\",\"path\":\"$WT\"}"
+
+# (2) cwd is a subdirectory: a relative codescout write still names the checkout root.
+S6=66666666-aaaa-bbbb-cccc-000000000006
+ts_tool_use "$MDIR/$S6.jsonl" "$MAIN/docs" $S6 2026-09-20T10:00:00Z mcp__codescout__create_file '{"path":"src/from_subdir_cwd.rs","content":"x"}'
+has   "a subdirectory cwd resolves codescout paths from the checkout root" \
+      "$(run_in "$MAIN" src/from_subdir_cwd.rs)" "66666666"
+
+# (1a) parent activated the worktree, then its SUBAGENT wrote relatively: unknowable -> neither.
+S7=77777777-aaaa-bbbb-cccc-000000000007
+ts_tool_use "$MDIR/$S7.jsonl" "$MAIN" $S7 2026-09-20T10:00:00Z mcp__codescout__workspace "$ACT_WT"
+mkdir -p "$MDIR/$S7/subagents"
+ts_tool_use "$MDIR/$S7/subagents/agent-s7.jsonl" "$MAIN" $S7 2026-09-20T10:01:00Z mcp__codescout__create_file '{"path":"src/by_sub_after_activate.rs","content":"x"}'
+hasnt "a subagent write after the parent's activation is not credited to the main checkout" \
+      "$(run_in "$MAIN" src/by_sub_after_activate.rs)" "77777777"
+hasnt "nor guessed into the worktree" \
+      "$(run_in "$WT" src/by_sub_after_activate.rs)" "77777777"
+
+# CONTROL for (1a): with no activation anywhere in the session, a subagent's relative write
+# is unambiguous and IS credited. Without this the two `hasnt` above pass for a tool that
+# simply ignores every subagent write.
+S8=88888888-aaaa-bbbb-cccc-000000000008
+ts_tool_use "$MDIR/$S8.jsonl" "$MAIN" $S8 2026-09-20T10:00:00Z mcp__codescout__read_file '{"path":"README.md"}'
+mkdir -p "$MDIR/$S8/subagents"
+ts_tool_use "$MDIR/$S8/subagents/agent-s8.jsonl" "$MAIN" $S8 2026-09-20T10:01:00Z mcp__codescout__create_file '{"path":"src/by_sub_plain.rs","content":"x"}'
+has   "a subagent write in a session that never activated anything is credited" \
+      "$(run_in "$MAIN" src/by_sub_plain.rs)" "88888888"
+
+# (1b) a SUBAGENT activated the worktree: the parent's later relative writes are unknowable,
+# its earlier ones are not.
+S9=99999999-aaaa-bbbb-cccc-000000000009
+ts_tool_use "$MDIR/$S9.jsonl" "$MAIN" $S9 2026-09-20T10:00:00Z mcp__codescout__create_file '{"path":"src/parent_before.rs","content":"x"}'
+mkdir -p "$MDIR/$S9/subagents"
+ts_tool_use "$MDIR/$S9/subagents/agent-s9.jsonl" "$MAIN" $S9 2026-09-20T10:01:00Z mcp__codescout__workspace "$ACT_WT"
+ts_tool_use "$MDIR/$S9.jsonl" "$MAIN" $S9 2026-09-20T10:02:00Z mcp__codescout__create_file '{"path":"src/parent_after.rs","content":"x"}'
+has   "a parent write BEFORE any subagent activation is still credited" \
+      "$(run_in "$MAIN" src/parent_before.rs)" "99999999"
+hasnt "a parent write AFTER a subagent activated a tree is not credited to main" \
+      "$(run_in "$MAIN" src/parent_after.rs)" "99999999"
+hasnt "nor to the worktree" "$(run_in "$WT" src/parent_after.rs)" "99999999"
+
+# (3) run_command's cwd= is a subdirectory of the ACTIVE project.
+S10=aaaaaaaa-aaaa-bbbb-cccc-000000000010
+ts_tool_use "$MDIR/$S10.jsonl" "$MAIN" $S10 2026-09-20T10:00:00Z mcp__codescout__workspace "$ACT_WT"
+ts_tool_use "$MDIR/$S10.jsonl" "$MAIN" $S10 2026-09-20T10:01:00Z mcp__codescout__run_command '{"command":"echo x > via_cwd.rs","cwd":"sub"}'
+has   "run_command cwd= resolves under the active worktree" \
+      "$(run_in "$WT" sub/via_cwd.rs)" "aaaaaaaa"
+
+echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" = "0" ]

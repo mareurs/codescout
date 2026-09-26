@@ -286,6 +286,49 @@ fn convert_document_symbols(
         .collect()
 }
 
+/// pyright reports an assignment's range as its name alone, so a multi-line Python
+/// constant arrives one line long — and `symbols` bodies and `edit_code` ranges are
+/// both derived from it. Widen those ranges to the whole statement, here where the
+/// symbols enter codescout, so every consumer agrees on the correct span.
+/// BUG docs/issues/2026-09-24-python-multiline-constant-range-is-its-first-line.md
+fn with_python_ranges(
+    mut symbols: Vec<super::SymbolInfo>,
+    language_id: &str,
+    path: &Path,
+) -> Vec<super::SymbolInfo> {
+    if language_id == "python" {
+        if let Ok(source) = std::fs::read_to_string(path) {
+            crate::ast::python_ranges::extend_python_assignment_ranges(&mut symbols, &source);
+        }
+    }
+    symbols
+}
+
+/// [`with_python_ranges`] for a flat `workspace/symbol` result spanning many files:
+/// each Python file holding a variable-like symbol is read and parsed once, and only
+/// that file's symbols are matched against it. Order is preserved — it is the ranking.
+fn with_python_ranges_by_file(mut symbols: Vec<super::SymbolInfo>) -> Vec<super::SymbolInfo> {
+    use super::symbols::SymbolKind;
+    let mut files: Vec<PathBuf> = symbols
+        .iter()
+        .filter(|s| matches!(s.kind, SymbolKind::Constant | SymbolKind::Variable))
+        .filter(|s| crate::ast::detect_language(&s.file) == Some("python"))
+        .map(|s| s.file.clone())
+        .collect();
+    files.sort();
+    files.dedup();
+    for file in files {
+        let Ok(source) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        crate::ast::python_ranges::extend_python_assignment_ranges(
+            symbols.iter_mut().filter(|s| s.file == file),
+            &source,
+        );
+    }
+    symbols
+}
+
 /// Configuration for launching a language server.
 #[derive(Debug, Clone)]
 pub struct LspServerConfig {
@@ -1047,30 +1090,32 @@ impl LspClient {
         let infos: Vec<lsp_types::SymbolInformation> =
             serde_json::from_value(result).context("failed to parse workspace/symbol response")?;
 
-        Ok(infos
-            .into_iter()
-            .map(|si| {
-                let file = uri_to_path(&si.location.uri);
-                let name_path = match &si.container_name {
-                    Some(container) if !container.is_empty() => {
-                        format!("{}/{}", container, si.name)
+        Ok(with_python_ranges_by_file(
+            infos
+                .into_iter()
+                .map(|si| {
+                    let file = uri_to_path(&si.location.uri);
+                    let name_path = match &si.container_name {
+                        Some(container) if !container.is_empty() => {
+                            format!("{}/{}", container, si.name)
+                        }
+                        _ => si.name.clone(),
+                    };
+                    super::SymbolInfo {
+                        name: si.name,
+                        name_path,
+                        kind: si.kind.into(),
+                        file,
+                        start_line: si.location.range.start.line,
+                        end_line: si.location.range.end.line,
+                        start_col: si.location.range.start.character,
+                        range_start_line: None,
+                        children: vec![],
+                        detail: None,
                     }
-                    _ => si.name.clone(),
-                };
-                super::SymbolInfo {
-                    name: si.name,
-                    name_path,
-                    kind: si.kind.into(),
-                    file,
-                    start_line: si.location.range.start.line,
-                    end_line: si.location.range.end.line,
-                    start_col: si.location.range.start.character,
-                    range_start_line: None,
-                    children: vec![],
-                    detail: None,
-                }
-            })
-            .collect())
+                })
+                .collect(),
+        ))
     }
 
     /// Note that `path`'s current bytes were handed to the server.
@@ -1265,12 +1310,16 @@ impl LspClient {
         if let Ok(symbols) =
             serde_json::from_value::<Vec<lsp_types::DocumentSymbol>>(result.clone())
         {
-            return Ok(convert_document_symbols(&symbols, &file_path, ""));
+            return Ok(with_python_ranges(
+                convert_document_symbols(&symbols, &file_path, ""),
+                language_id,
+                path,
+            ));
         }
 
         // Fall back to flat SymbolInformation[]
         if let Ok(infos) = serde_json::from_value::<Vec<lsp_types::SymbolInformation>>(result) {
-            return Ok(infos
+            let flat = infos
                 .iter()
                 .map(|si| {
                     let name_path = match &si.container_name {
@@ -1292,7 +1341,8 @@ impl LspClient {
                         detail: None,
                     }
                 })
-                .collect());
+                .collect();
+            return Ok(with_python_ranges(flat, language_id, path));
         }
 
         Ok(vec![])
@@ -2154,6 +2204,84 @@ struct Point {
             result[0].detail, None,
             "empty string detail should collapse to None"
         );
+    }
+
+    /// A variable-like symbol as pyright reports it: name-only range at `(line, 0)`.
+    fn name_only(
+        name: &str,
+        kind: super::super::symbols::SymbolKind,
+        file: &Path,
+    ) -> super::super::SymbolInfo {
+        super::super::SymbolInfo {
+            name: name.into(),
+            name_path: name.into(),
+            kind,
+            file: file.to_path_buf(),
+            start_line: 0,
+            end_line: 0,
+            start_col: 0,
+            range_start_line: Some(0),
+            children: vec![],
+            detail: None,
+        }
+    }
+
+    #[test]
+    fn with_python_ranges_widens_a_multi_line_constant_for_python_only() {
+        use super::super::symbols::SymbolKind;
+        let dir = tempdir().unwrap();
+        let py = dir.path().join("m.py");
+        std::fs::write(&py, "MARKERS = (\n    \"a\",\n)\n").unwrap();
+
+        let out = with_python_ranges(
+            vec![name_only("MARKERS", SymbolKind::Constant, &py)],
+            "python",
+            &py,
+        );
+        assert_eq!(
+            out[0].end_line, 2,
+            "document_symbols must hand out the whole statement"
+        );
+
+        // Same bytes, another language id: the pass is gated on the language, not the text.
+        let out = with_python_ranges(
+            vec![name_only("MARKERS", SymbolKind::Constant, &py)],
+            "rust",
+            &py,
+        );
+        assert_eq!(out[0].end_line, 0);
+    }
+
+    #[test]
+    fn with_python_ranges_by_file_scopes_each_parse_to_its_own_file_and_keeps_order() {
+        use super::super::symbols::SymbolKind;
+        let dir = tempdir().unwrap();
+        let multi = dir.path().join("a.py");
+        let single = dir.path().join("b.py");
+        let rust = dir.path().join("c.rs");
+        std::fs::write(&multi, "A = (\n    1,\n)\n").unwrap();
+        // Load-bearing: `B` sits at the SAME (0, 0) as `A`, so matching it against a.py's
+        // parse would widen it. Only the per-file filter keeps it one line.
+        std::fs::write(&single, "B = 1\n").unwrap();
+        // Load-bearing: these bytes are VALID multi-line Python. A Rust-looking fixture fails to
+        // parse as Python, so it stayed one line even with the language filter removed — the
+        // test passed either way (review finding). Only the `.rs` extension may exclude it.
+        std::fs::write(&rust, "C = (\n    1,\n)\n").unwrap();
+
+        let out = with_python_ranges_by_file(vec![
+            name_only("B", SymbolKind::Constant, &single),
+            name_only("C", SymbolKind::Constant, &rust),
+            name_only("A", SymbolKind::Constant, &multi),
+        ]);
+        let names: Vec<&str> = out.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["B", "C", "A"],
+            "workspace/symbol order is the ranking"
+        );
+        assert_eq!(out[0].end_line, 0, "b.py's `B` is a one-line statement");
+        assert_eq!(out[1].end_line, 0, "a .rs file is never parsed as Python");
+        assert_eq!(out[2].end_line, 2, "a.py's `A` closes on line 2");
     }
 
     #[test]

@@ -654,7 +654,10 @@ pub fn refusal_predicate(err_family: &str) -> Option<&'static str> {
                  `find` without -maxdepth. `git` is unbounded ONLY without an output limiter \
                  (-n, --max-count, -3, --show-current, --porcelain/--short, --stat) — `--oneline` is \
                  NOT a limiter, it bounds width rather than line count; single-line plumbing \
-                 (rev-parse, patch-id, merge-base, describe) is always bounded. On the RIGHT, \
+                 (rev-parse, patch-id, merge-base, describe) is always bounded, and so is \
+                 plumbing bounded by its argument count (check-ignore without --stdin, \
+                 cat-file -t/-s/-e) — but `git diff -- <file>` and `git ls-files <path>` are \
+                 NOT: one path bounds neither. On the RIGHT, \
                  trimmers (head, tail, grep, sed, awk, sort) block — but `cut`/`tr` are 1:1 on \
                  records and never do, and a stage that COLLAPSES anywhere in the chain (wc, \
                  grep -c, sha256sum, git patch-id) allows the whole pipeline whatever follows it."
