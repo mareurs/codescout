@@ -186,10 +186,11 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
   - The cue list (`29506f12`).
   - The counterexample miner, with its cross-fold fix after the Codex review (`ec12b2a1`, `96b52f0c`).
   - `train_arm.py --cross` and `--extra-rows`, with their parity checks (`f566082c`).
-  - Step 4's scripts, `phase1b/score_run.py` and `phase1b/step4.py`, which also take Stage 2's per-run measurements (`f78c0eba`; § *Step 4's scripts* below).
+  - Step 4's scripts, `phase1b/score_run.py` and `phase1b/step4.py`, which also take Stage 2's per-run measurements (`f78c0eba`, `be87d3e4`; § *Step 4's scripts* below).
+  - Step 1's scripts, `phase1b/draw_audit_sample.py`, `phase1b/label_items.py` and `phase1b/score_audit.py` (`4606a129`; § *Step 1's scripts* below). The draw has not been run.
 - **Remaining before registration:**
-  1. Step 1's scripts: `draw_audit_sample.py`, and the scorer that writes the admission file `--cross` reads (`{"admitted": [...], "masked": [{"unit", "head"}]}`). Both are committed before anything is drawn.
-  2. The operator confirms one choice made while writing Step 4: every arm is scored on one cell set, NC's counterexample rows included (§ *Step 4's scripts*).
+  1. `phase1b/run_labellers.py`, the one script that calls models. Codex runs once, in a new `CODEX_HOME`, in a directory holding only the instruction, `menu.json` and the items. Claude Opus 5.5 runs on the clean judge channel in batches of 25. A call that errors, or returns an invalid or incomplete set, is re-run once; a second failure stops phase 1b at Step 1.
+  2. The operator confirms the choices made while writing Steps 1 and 4 (§ *Step 4's scripts*, § *Step 1's scripts*), above all that every arm is scored on one cell set.
   3. Fix the predictions, then register. The draft predictions below were committed in `2e4743e0`, before Step 4's smoke run; any change to them after that run says so.
 - **Then, in order:** the Codex clean texts; the audit labelling of the sample, the clean texts and the counterexample candidates; mining; N and NC training; Steps 4 and 5.
 
@@ -234,12 +235,27 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
   - A counterexample row is an own-rule negative for its head in calibration and thresholds. It counts toward neither bound of the pre-gate check, which reads cross cells and own positives only.
   - A head with no cal cross cell or no cal positive cannot be checked, and leaves the menu. Every head has at least 4 cal positives, so only a mask covering all of a head's cross cells could reach this.
   - **It also takes Stage 2's per-run measurements** from the same input: own-cell val AUC over frozen rows, pooled (Stage 1's learned criterion) and per head; all-cells val AUC, pooled and per head; and, on cal at each head's precision threshold, firing on its own frozen negatives and on its counterexample rows. `diagnose_run.py` stays as it is, as the instrument behind § *Stage 1 results*.
-  - `tests/test_phase1b_step4.py`: 27 tests. 30 of 31 mutations are killed, one per guarded site. The survivor deletes the span-gate condition, which today's constants make inert: any 2 of the 3 gate positives include `d_semicolon` or `d_sessionid`, and each is a span text's rule.
+  - `tests/test_phase1b_step4.py`: 30 tests. 34 of 35 mutations are killed, one per guarded site. The survivor deletes the span-gate condition, which today's constants make inert: any 2 of the 3 gate positives include `d_semicolon` or `d_sessionid`, and each is a span text's rule.
+  - **Saturation, reported and never applied** (`be87d3e4`). In exact arithmetic each threshold is a raw-logit cutoff, so the temperature, fit on cal, cancels from every pre-gate decision on cal. In floats the sigmoid is exactly 1.0 from about 36.8 (measured), so at T = 0.25 every logit above about 9.2 ties. `step4.py` counts, per bound, the cal cells that fire although their raw logit is below the cutoff. The realistic case is an own positive tied at the top, which inflates recall. A tied cross cell needs a small T despite a confidently wrong cal cell, which the fit resists. The smoke run had none.
 - **The smoke run, disclosed.** Both scripts ran once on B's seed-20260935 checkpoint, with a stand-in admission file (all 14 heads admitted, one cell masked) and two stand-in counterexample rows (one val, one cal).
   - It caught a bug before commit. Frozen rows carry source `synthetic` or `mined`, and `step4.py` first filed them as counterexamples, which removed every head.
   - Parity held: 521 val and 359 cal frozen rows at max |Δz| = 0.0. The own-cell AUC reproduced § *Stage 1 results*' 0.982257589154141 exactly, and every per-rule value matched.
   - **What was seen.** Under the stand-in admission, 9 of B's 14 heads failed own-positive recall ≥ 0.5 at the all-cells precision threshold, and none failed the cross-firing bound. The 5 left were `closed_population`, `d_adjacency`, `d_red`, `d_semicolon` and `d_sessionid`, so the gate stayed gate-able. `d_sessionid`'s temperature fit at the upper bound, 10.
   - No gate text was read, and nothing was run on B's other two seeds. The real admission file will differ, so these are not B's result.
+
+**Step 1's scripts, 2026-09-26** (`4606a129`), committed and not yet run:
+- **`draw_audit_sample.py`** builds `menu.json` and draws the sample as § *Step 1* specifies. Two points the text left open are fixed in code:
+  - The unit draw is `random.Random(20260936 + i).randrange(n)`, over the row's units cut by the training segmenter.
+  - `menu.json` takes each rule's law and form-2b spec from the gate code's own strings (`RULES`, `SPEC_FORMS["2b"]`), because phase 1 committed no `menu.json` to compare bytes with. Phase 1 built its menu the same way (`stage2/make_label_batches.py`).
+- **`label_items.py`** keeps the labellers blind to where an item came from. The audit sample, the 12 new clean texts and the counterexample candidates take one shape, go through one `random.Random(20260942).shuffle`, and are numbered `L0001`, `L0002`, … in shuffled order. A clean text is one item, whose sentence and paragraph are both the whole text. Claude reads the items in batches of 25, in file order; Codex reads them whole.
+- **`score_audit.py`** writes the admission file `--cross` reads, arm NC's counterexample rows for `--extra-rows`, and Step 2's clean-text verdicts.
+  - **An answer file is valid** only if it answers every item exactly once, both rule lists hold menu keys only, and `unsure` is true exactly when `unsure_rules` is non-empty. Anything else is refused.
+  - **Masking takes the candidates' flags too.** Every (sentence, rule) flagged on an audit item or a candidate is masked wherever that sentence appears. Clean texts are gate texts, so a flag on one only drops it.
+  - **"Unflagged" is read literally.** A candidate becomes a row only when neither labeller lists, or is unsure about, *any* menu rule, not only its own head's. That can drop a candidate that would have been a correct row; it never admits a doubtful one.
+  - It exits 3, after writing, when a Step 2 stop rule fires.
+- `tests/test_phase1b_audit.py`: 22 tests, standard library only; 33 of 33 mutations killed. The Wilson test reproduces the 14 admission limits in `diagnostics/audit-arithmetic.txt`. The closest, `member_vs_population` at 7 flagged of its expected 284 cells, sits 5.4 × 10⁻⁶ under the 5% bound, far above float error.
+- A scratch end-to-end run reproduced a seeded outcome. It used a synthetic sample, stand-in Codex texts and candidates, and labels seeded for a known result. Its two output files loaded through `train_arm.load_cross` and `train_arm.load_extra_rows`.
+- **For the operator to confirm:** the unit-draw call, the blinding, the validity rule, masking from candidates, and the literal reading of "unflagged".
 
 **Reading, over every seed.** The research showed that a reading over only the runs that learned is selection after treatment. If the negatives change how often training fails, conditioning on "learned" biases the comparison. So:
 - **Each arm's result is its number of seeds that pass the gate,** out of 3, on the common menu. A seed that did not learn (own-cell val AUC below 0.80) counts as a failure for its arm.
