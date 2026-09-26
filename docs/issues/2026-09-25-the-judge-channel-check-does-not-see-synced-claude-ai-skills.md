@@ -48,6 +48,18 @@ The check enumerates three ways a config dir can add context. The synced-skill p
 - **A first call on a fresh directory reads 304** in `--output-format json`, and every later call reads 478. That transient is not the synced skills: a fresh directory with `syncClaudeAiSkills: false` creates no `skills/` directory and shows the same 304 → 478 step. The stream-json runs above read 456 and 457 from the first call.
 - **So synced skills add nothing to model input under `--tools ""`.** Every judged or generated run in the campaign passes that flag, so none of their inputs differ from a fresh channel's.
 
+**2026-09-26, same session, on the phase-1b labeller's own model and flags** (Claude Code 2.1.283; `claude-opus-5-5`; `--tools ""`; run_labellers' system prompt), prompted by a Codex preflight review (`docs/research/2026-09-26-codex-phase1b-labelling-preflight-review.md`) that rightly rejected a first control in which the "fresh" directory synced the same skills during the measured run:
+
+| config dir | input tokens | skills registered (stream-json `init`) |
+|---|---|---|
+| `judge-config-main` | 412 | 18 bundled + 8 `anthropic-skills:*` |
+| `judge-config-blocked`: `skills` and `plugins` created as plain files, so syncing is impossible | 412 | 18 bundled; `plugin_errors`: "claude.ai plugin sync disabled this session ... a stray file is in the way" |
+
+- The blocked directory still held `skills` and `plugins` as plain files after its run. With the mechanism removed and model, prompt and flags fixed, the token count is unchanged, so the 8 synced skills are registered but not in the labeller's context. Both runs show `tools: []` and `mcp_servers: []`.
+- A second, independent removal mechanism from 2026-09-25's `syncClaudeAiSkills: false`, and on Opus 5.5, not Sonnet 5.
+- No first-call transient under Opus 5.5: each fresh directory read 412 on its first call, in both output formats.
+- Not attributed: about 390 tokens of the 412 beyond the roughly 20-token prompt, common to both configurations. The measurement bounds the synced skills, not the whole context. The same channel served phase 1's audits.
+
 ## Hypotheses tried
 
 - **"The synced skills add about 174 tokens per call."** Refuted: the jump is a first-call transient, present with syncing off.
