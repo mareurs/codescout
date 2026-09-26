@@ -17,7 +17,8 @@ than re-deriving it.
   added" section says so). Its `~/.claude`-only base is **not** an open issue — per
   `docs/PROBES.md`'s claude-traces row, that limitation "has since been fixed", and this was
   independently re-verified against the live script in this session:
-  `/home/marius/agents/llm-proxy/.claude/skills/claude-traces/scripts/cc.py:23` reads
+  line 23 of cc.py in the llm-proxy repo's claude-traces skill (the script the symlink above
+  reaches) reads
   `CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude"))`, so the
   script already honors `CLAUDE_CONFIG_DIR` and is reachable across all three profiles on this
   machine, not just `~/.claude`. **Reuse the predicate**, not the tool: Stage 1's own
