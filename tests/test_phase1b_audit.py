@@ -339,6 +339,283 @@ class Labellers(unittest.TestCase):
                 rl.check_channel(tmp)
 
 
+class LabellerMain(unittest.TestCase):
+    """Exercise real scheduling and on-disk run ownership; only the models are faked."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = pathlib.Path(self.tmp.name)
+        self.d = self.root / "audit"
+        self.d.mkdir()
+        self.items = [{"id": f"L{i}", "sentence": "s", "paragraph": "p"} for i in range(1, 9)]
+        (self.d / "items.jsonl").write_text("".join(json.dumps(i) + "\n" for i in self.items))
+        (self.d / "menu.json").write_text(json.dumps({"a_rule": {}}))
+        self.cfg = self.root / "config"
+        self.cfg.mkdir()
+        (self.cfg / "settings.json").write_text('{"enabledPlugins": {}, "hooks": {}}')
+
+    def reply(self, prompt):
+        items = [json.loads(line) for line in prompt.split("## Items\n\n")[1].splitlines()]
+        return "\n".join(json.dumps(ans(i["id"])) for i in reversed(items)), 0.0
+
+    def invoke(self, complete, workers=2, dry=False):
+        import contextlib
+        import io
+        import os
+        from unittest.mock import patch
+
+        class Judge:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def complete(self, prompt):
+                return complete(prompt)
+
+        argv = ["run_labellers.py", "--audit", str(self.d), "--only", "claude", "--workers", str(workers)]
+        if dry:
+            argv.append("--dry-run")
+        with patch.object(sys, "argv", argv), patch.dict(os.environ, JUDGE_CONFIG_DIR=str(self.cfg)), \
+             patch.object(rl.gs, "ClaudeGen", Judge), patch.object(rl, "BATCH", 1), \
+             patch.object(rl.subprocess, "run", side_effect=AssertionError("unexpected real model call")), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return rl.main()
+
+    def test_later_failure_stops_pending_batches_while_first_is_slow(self):
+        import collections
+        import threading
+        from unittest.mock import patch
+
+        first_started, release_first = threading.Event(), threading.Event()
+        calls = []
+        executor = rl.cf.ThreadPoolExecutor
+
+        class Executor(executor):
+            def shutdown(self, *args, **kwargs):
+                release_first.set()  # cleanup releases the fake in-flight call
+                return super().shutdown(*args, **kwargs)
+
+        def complete(prompt):
+            item = json.loads(prompt.split("## Items\n\n")[1])["id"]
+            calls.append(item)
+            if item == "L1":
+                first_started.set()
+                self.assertTrue(release_first.wait(2))
+            elif item == "L2":
+                self.assertTrue(first_started.wait(2))
+                raise RuntimeError("both attempts fail")
+            else:
+                release_first.set()  # the old ordered-map runner reaches this branch
+            return self.reply(prompt)
+
+        with patch.object(rl.cf, "ThreadPoolExecutor", Executor):
+            self.assertEqual(self.invoke(complete), 4)
+        self.assertEqual(collections.Counter(calls), {"L1": 1, "L2": 2})
+        self.assertFalse((self.d / "labels-claude.jsonl").exists())
+        header = json.loads((self.d / "run-header.json").read_text())
+        self.assertIn("claude-b01", header["stop"])
+
+    def test_terminal_failure_cancels_another_batchs_retry(self):
+        import collections
+        import threading
+        from unittest.mock import patch
+
+        first_started, release_first = threading.Event(), threading.Event()
+        calls = []
+        executor = rl.cf.ThreadPoolExecutor
+
+        class Executor(executor):
+            def shutdown(self, *args, **kwargs):
+                release_first.set()  # controller has observed the terminal failure
+                return super().shutdown(*args, **kwargs)
+
+        def complete(prompt):
+            item = json.loads(prompt.split("## Items\n\n")[1])["id"]
+            calls.append(item)
+            if item == "L1":
+                first_started.set()
+                self.assertTrue(release_first.wait(2))
+                raise RuntimeError("would otherwise retry after another batch stopped")
+            if item == "L2":
+                self.assertTrue(first_started.wait(2))
+                raise RuntimeError("terminal batch")
+            return self.reply(prompt)
+
+        with patch.object(rl.cf, "ThreadPoolExecutor", Executor):
+            self.assertEqual(self.invoke(complete), 4)
+        self.assertEqual(collections.Counter(calls), {"L1": 1, "L2": 2})
+
+
+    def test_success_keeps_item_order_after_out_of_order_completion(self):
+        import threading
+        third_started = threading.Event()
+        def complete(prompt):
+            item = json.loads(prompt.split("## Items\n\n")[1])["id"]
+            if item == "L1":
+                # LOAD-BEARING: released when L3 starts, not when L2 does. With --workers 2, L3 is
+                # submitted only after the controller has read L2's result, so batch 1 is stored
+                # before batch 0 on every run. Releasing on L2's start let both land in one wait()
+                # and the ordering mutation survived one run in two.
+                self.assertTrue(third_started.wait(2))
+            elif item == "L3":
+                third_started.set()
+            return self.reply(prompt)
+        self.assertEqual(self.invoke(complete), 0)
+        got = [json.loads(line)["id"] for line in (self.d / "labels-claude.jsonl").read_text().splitlines()]
+        self.assertEqual(got, [f"L{i}" for i in range(1, 9)])
+
+    def test_previous_artifacts_refuse_before_any_model_call(self):
+        original = self.d
+        for n, name in enumerate(("run-header.json", "raw", "labels-codex.jsonl", "labels-claude.jsonl")):
+            with self.subTest(name=name):
+                self.d = self.root / f"prior-{n}"
+                self.d.mkdir()
+                for input_name in ("items.jsonl", "menu.json"):
+                    (self.d / input_name).write_bytes((original / input_name).read_bytes())
+                path = self.d / name
+                if name == "raw":
+                    path.mkdir()
+                    path = path / "claude-b00.a1.txt"
+                path.write_text("previous evidence\n")
+                calls = []
+                def complete(prompt):
+                    calls.append(prompt)
+                    return self.reply(prompt)
+                with self.assertRaises(SystemExit):
+                    self.invoke(complete)
+                self.assertEqual(calls, [])
+                self.assertEqual(path.read_text(), "previous evidence\n")
+        self.d = original
+
+    def test_in_progress_run_is_already_reserved(self):
+        nested_calls = []
+        checked = []
+        def complete(prompt):
+            if not checked:
+                checked.append(True)
+                def nested(prompt):
+                    nested_calls.append(prompt)
+                    return self.reply(prompt)
+                with self.assertRaises(SystemExit):
+                    self.invoke(nested)
+            return self.reply(prompt)
+        self.assertEqual(self.invoke(complete, workers=1), 0)
+        self.assertEqual(nested_calls, [])
+
+    def test_invalid_worker_count_refuses_before_outputs(self):
+        calls = []
+        def complete(prompt):
+            calls.append(prompt)
+            return self.reply(prompt)
+        with self.assertRaises((SystemExit, ValueError)):
+            self.invoke(complete, workers=0)
+        self.assertEqual(calls, [])
+        self.assertFalse((self.d / "raw").exists())
+        self.assertFalse((self.d / "run-header.json").exists())
+
+    def test_reservation_is_exclusive_even_when_both_prechecks_saw_nothing(self):
+        import concurrent.futures
+        import threading
+        from unittest.mock import patch
+
+        barrier = threading.Barrier(2)
+        header_path = self.d / "run-header.json"
+        exists = pathlib.Path.exists
+
+        def overlapping_exists(path):
+            observed = exists(path)
+            if path == header_path:
+                barrier.wait(timeout=2)  # both see absence before either opens the header
+            return observed
+
+        def reserve(owner):
+            try:
+                rl.reserve_run(self.d, {"owner": owner})
+                return owner, "claimed"
+            except SystemExit:
+                return owner, "refused"
+
+        with patch.object(pathlib.Path, "exists", overlapping_exists):
+            with concurrent.futures.ThreadPoolExecutor(2) as pool:
+                results = list(pool.map(reserve, ("first", "second")))
+        self.assertEqual(sorted(status for _, status in results), ["claimed", "refused"])
+        owner = next(owner for owner, status in results if status == "claimed")
+        self.assertEqual(json.loads(header_path.read_text()), {"owner": owner})
+
+    def test_cancellation_is_not_retried_or_recorded_as_a_model_failure(self):
+        import concurrent.futures
+        calls = []
+        def cancel(attempt):
+            calls.append(attempt)
+            raise concurrent.futures.CancelledError()
+        raw = self.root / "cancelled"
+        raw.mkdir()
+        with self.assertRaises(concurrent.futures.CancelledError):
+            rl.run_call("cancelled", ["L1"], cancel, {"a_rule"}, raw)
+        self.assertEqual(calls, [1])
+        self.assertEqual(list(raw.iterdir()), [])
+
+    def test_workers_see_a_terminal_failure_before_the_controller_does(self):
+        # SEAM: the controller is held in its first wait, so only the worker-side stop signal can
+        # prevent L1's retry, which is decided after L2 has failed terminally. The controller's
+        # own `finally` also sets the signal, but only after this window.
+        import collections
+        import time
+        from unittest.mock import patch
+
+        calls = []
+        real_wait, held = rl.cf.wait, []
+
+        def slow_wait(fs, return_when):
+            if not held:
+                held.append(True)
+                time.sleep(0.6)          # L2 fails twice and L1 decides its retry inside this
+            return real_wait(fs, return_when=return_when)
+
+        def complete(prompt):
+            item = json.loads(prompt.split("## Items\n\n")[1])["id"]
+            calls.append(item)
+            if item == "L2":
+                raise RuntimeError("terminal batch")
+            if item == "L1":
+                deadline = time.time() + 2
+                while calls.count("L2") < 2 and time.time() < deadline:
+                    time.sleep(0.01)
+                time.sleep(0.2)          # L2's worker records its Stop and sets the signal
+                raise RuntimeError("attempt 1 fails; without the signal a retry follows")
+            return self.reply(prompt)
+
+        with patch.object(rl.cf, "wait", slow_wait):
+            self.assertEqual(self.invoke(complete), 4)
+        self.assertEqual(collections.Counter(calls), {"L1": 1, "L2": 2})
+
+    def test_labels_are_never_overwritten_even_when_one_appears_mid_run(self):
+        # The reservation refuses a labels file that exists at the start; this is the other case,
+        # a file written by someone else while the run is in flight.
+        planted = self.d / "labels-claude.jsonl"
+
+        def complete(prompt):
+            if not planted.exists():
+                planted.write_text("written by someone else\n")
+            return self.reply(prompt)
+
+        with self.assertRaises(FileExistsError):
+            self.invoke(complete)
+        self.assertEqual(planted.read_text(), "written by someone else\n")
+
+
+    def test_dry_run_does_not_reserve_or_call(self):
+        calls = []
+        def complete(prompt):
+            calls.append(prompt)
+            return self.reply(prompt)
+        self.assertEqual(self.invoke(complete, dry=True), 0)
+        self.assertEqual(calls, [])
+        self.assertFalse((self.d / "raw").exists())
+        self.assertFalse((self.d / "run-header.json").exists())
+
+
+
 class CodexClean(unittest.TestCase):
     good = [{"id": "codex-clean-1", "text": "one"}, {"id": "codex-clean-2", "text": "two"},
             {"id": "codex-clean-3", "text": "three"}]

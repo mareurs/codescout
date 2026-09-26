@@ -15,13 +15,17 @@ Every call's output is parsed as JSON lines and must hold exactly one valid answ
 (score_audit.valid) for each item of the call and none for any other. A call that errors, or
 returns an invalid or incomplete set, is re-run once, Codex in another new CODEX_HOME. A second
 failure stops phase 1b at Step 1: exit 4, no labels file is written, and Claude batches not yet
-started are cancelled.
+started are cancelled. At most --workers batches are pending, terminal failure is observed in
+completion order, and an in-flight batch cannot start another attempt after the stop is signalled.
 Neither labeller sees the other's answers, key.jsonl, or anything of the classifier's.
 
 Writes DIR/labels-codex.jsonl and DIR/labels-claude.jsonl (answers in items.jsonl order),
 DIR/raw/ (every attempt's output, error and Codex log) and DIR/run-header.json (models, channel,
-the sha256 of the three input files, times, and a stop reason if one fired). --dry-run prints the
-plan and calls nothing.
+the sha256 of the three input files, times, status, and a stop reason if one fired). The header is
+created exclusively before model calls; an existing header, raw directory or labels file refuses
+the run. --only selects a standalone invocation, not a way to resume or combine separate runs in
+the same audit directory. A stopped or interrupted invocation stays reserved; there is no automatic
+resume or reset of its attempt budget. --dry-run prints the plan, reserves nothing and calls nothing.
 """
 import argparse
 import concurrent.futures as cf
@@ -33,6 +37,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -72,11 +77,13 @@ def check_call(answers: list, ids: list[str], menu: set) -> str | None:
 
 def run_call(name: str, ids: list[str], call, menu: set, raw_dir: Path) -> list[dict]:
     """At most two attempts of call(attempt) -> raw text. Returns the answers in `ids` order, or
-    raises Stop naming both failures."""
+    raises Stop naming both failures. Cancellation never consumes another attempt."""
     reasons = []
     for attempt in (1, 2):
         try:
             raw = call(attempt)
+        except cf.CancelledError:
+            raise
         except Exception as e:                       # noqa: BLE001 -- recorded; re-run once
             (raw_dir / f"{name}.a{attempt}.err").write_text(str(e))
             reasons.append(f"attempt {attempt}: {str(e)[:200]}")
@@ -139,6 +146,71 @@ def codex_call(files: dict[str, str], home: Path, log_path: Path, timeout: int =
         shutil.rmtree(work, ignore_errors=True)
 
 
+def reserve_run(d: Path, header: dict) -> Path:
+    """Claim one audit invocation before spending tokens; stopped runs remain claimed."""
+    previous = [p.name for p in (d / "raw", d / "run-header.json", *d.glob("labels-*.jsonl"))
+                if p.exists() or p.is_symlink()]
+    if previous:
+        raise SystemExit(f"refused: audit run already exists in {d}: {sorted(previous)}; do not relaunch")
+    header_path = d / "run-header.json"
+    try:
+        with header_path.open("x") as out:  # exclusive creation also refuses simultaneous starters
+            out.write(json.dumps(header, indent=1) + "\n")
+    except FileExistsError:
+        raise SystemExit(f"refused: audit run already reserved in {d}; do not relaunch") from None
+    raw = d / "raw"
+    raw.mkdir()  # an unexpected legacy writer must not be silently reused either
+    return raw
+
+
+def run_claude_batches(items: list[dict], instruction: str, menu_text: str, menu: set,
+                       raw: Path, judge, workers: int) -> list[dict]:
+    """Bound pending work; notice failure in completion order, return answers in item order."""
+    stopped = threading.Event()
+
+    def one(n, batch):
+        def call(attempt):
+            if stopped.is_set():
+                raise cf.CancelledError()
+            return judge.complete(claude_prompt(instruction, menu_text, batch))[0]
+        try:
+            return run_call(f"claude-b{n:02d}", [i["id"] for i in batch], call, menu, raw)
+        except cf.CancelledError:
+            return None
+        except Exception:
+            stopped.set()  # workers see failure before the controller observes the future
+            raise
+
+    jobs = iter(enumerate(batches(items)))
+    parts, pending = {}, {}
+    ex = cf.ThreadPoolExecutor(workers)
+    try:
+        while True:
+            # Belt and braces: `call` re-checks the signal before every attempt and the signal never
+            # resets, so a batch submitted after the stop cancels before any model call anyway. This
+            # check only avoids submitting it; no model-call test can see the difference.
+            while len(pending) < workers and not stopped.is_set():
+                job = next(jobs, None)
+                if job is None:
+                    break
+                n, batch = job
+                pending[ex.submit(one, n, batch)] = n
+            if not pending:
+                break
+            done, _ = cf.wait(pending, return_when=cf.FIRST_COMPLETED)
+            # Read every completed outcome before scheduling any replacement work.
+            for future in done:
+                n = pending.pop(future)
+                answers = future.result()
+                if answers is not None:
+                    parts[n] = answers
+    finally:
+        stopped.set()
+        ex.shutdown(wait=True, cancel_futures=True)
+    return [answer for n in sorted(parts) for answer in parts[n]]
+
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--audit", type=Path, default=HERE / "audit")
@@ -146,6 +218,8 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=4, help="Claude batches in flight at once")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+    if args.workers < 1:
+        ap.error("--workers must be positive")
     d = args.audit
     instruction = INSTRUCTION.read_text()
     menu_text = (d / "menu.json").read_text()
@@ -155,7 +229,7 @@ def main() -> int:
     ids = [i["id"] for i in items]
     who = [args.only] if args.only else ["codex", "claude"]
     header = dict(labellers=who, codex=f"{gs.CODEX_MODEL}/{gs.CODEX_EFFORT}", claude=CLAUDE_MODEL,
-                  items=len(items), claude_batches=len(batches(items)),
+                  items=len(items), claude_batches=len(batches(items)), status="running",
                   sha256={n: hashlib.sha256(t.encode()).hexdigest()
                           for n, t in codex_files(instruction, menu_text, items_text).items()},
                   started=datetime.datetime.now(datetime.timezone.utc).isoformat())
@@ -163,11 +237,14 @@ def main() -> int:
         print(json.dumps(header, indent=1))
         return 0
     cfg = os.environ.get("JUDGE_CONFIG_DIR", "")
+    judge = None
     if "claude" in who:
         check_channel(cfg)
         header["claude_channel"] = cfg
-    raw = d / "raw"
-    raw.mkdir(parents=True, exist_ok=True)
+        # Validate the subscription credentials before the preceding Codex call spends anything.
+        judge = gs.ClaudeGen(CLAUDE_MODEL, cfg, timeout=900)
+        judge.SYSTEM = CLAUDE_SYSTEM
+    raw = reserve_run(d, header)
     got = {}
     try:
         if "codex" in who:
@@ -175,26 +252,16 @@ def main() -> int:
             got["codex"] = run_call("codex", ids, lambda a: codex_call(files, new_codex_home(), raw / f"codex.a{a}.log"),
                                     menu, raw)
         if "claude" in who:
-            judge = gs.ClaudeGen(CLAUDE_MODEL, cfg, timeout=900)
-            judge.SYSTEM = CLAUDE_SYSTEM
-
-            def one(nb):
-                n, b = nb
-                return run_call(f"claude-b{n:02d}", [i["id"] for i in b],
-                                lambda a: judge.complete(claude_prompt(instruction, menu_text, b))[0], menu, raw)
-            ex = cf.ThreadPoolExecutor(args.workers)
-            try:
-                got["claude"] = [a for part in ex.map(one, enumerate(batches(items))) for a in part]
-            finally:
-                ex.shutdown(wait=True, cancel_futures=True)   # after a Stop, start no further batch
+            got["claude"] = run_claude_batches(items, instruction, menu_text, menu, raw, judge, args.workers)
     except Stop as e:
-        header.update(stop=str(e), ended=datetime.datetime.now(datetime.timezone.utc).isoformat())
+        header.update(status="stopped", stop=str(e), ended=datetime.datetime.now(datetime.timezone.utc).isoformat())
         (d / "run-header.json").write_text(json.dumps(header, indent=1) + "\n")
         print(f"STOP at Step 1: {e}", file=sys.stderr)
         return 4
     for w, answers in got.items():
-        (d / f"labels-{w}.jsonl").write_text("".join(json.dumps(a, ensure_ascii=False) + "\n" for a in answers))
-    header["ended"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with (d / f"labels-{w}.jsonl").open("x") as out:
+            out.write("".join(json.dumps(a, ensure_ascii=False) + "\n" for a in answers))
+    header.update(status="completed", ended=datetime.datetime.now(datetime.timezone.utc).isoformat())
     (d / "run-header.json").write_text(json.dumps(header, indent=1) + "\n")
     print(f"labels written for {', '.join(got)}: {len(items)} items each")
     return 0
