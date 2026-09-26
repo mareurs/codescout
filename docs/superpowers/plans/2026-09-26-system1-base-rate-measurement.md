@@ -32,6 +32,7 @@ topic: system1-measurement
 - **Corpora live outside the repo** under `~/work/claude/measurement-corpora/<corpus-id>/`. Only manifests, readouts and code are committed. Never commit a transcript, a `usage.db` copy, or anything containing the operator's private `CLAUDE.md`.
 - **Subscription only, never the paid API.** Codex runs through `codex exec` with a fresh `CODEX_HOME`, and strips `OPENAI_API_KEY`/`CODEX_API_KEY`/`OPENAI_BASE_URL`, exactly as `codex_complete` does.
 - **The go/no-go rule is fixed by the spec and must not be edited during implementation.**
+  - **Window (spec Amendment 1, A1.2):** the decision reads only the latest 7 days before the freeze instant T. The retained window (2026-08-26 onward) is reported as a precedent and never decides. The contrast project is descriptive, on its own retained window.
   - GO: bootstrap lower bound ≥ **0.3** addressable operator-caught misses per session.
   - NO-GO: upper bound < **0.3**.
   - INCONCLUSIVE: anything else, or judge-gate failure, or spot-check agreement < **20/25**.
@@ -40,6 +41,12 @@ topic: system1-measurement
   - correction mode: detectability agrees on **≥16/21** RTD cases;
   - audit mode: **≥3/4** `peer × yes` cases, **≥6/8** `yes` cases, **≤5/52** controls fired.
 - **Sizes (spec):** correction census ≤ **400** (uniform registered sample beyond it); audit **200 + 100** qualifying decision points; pilot **20** items, excluded from all estimates.
+- **Scope (spec Amendment 1):** besides the go/no-go, the pipeline baselines three descriptive outcomes, and none of them decides anything:
+  - context support (A1.3);
+  - lesson transfer (A1.4);
+  - the background-worker opportunity share (A1.5).
+
+  The observability map (A1.6) is published before any Codex call.
 - **Leakage:** every judge input's latest included timestamp precedes the decision's. An input that fails is refused, never judged.
 - **Timestamps are UTC.** Transcripts use ISO-8601 with `Z`. `usage.db` `called_at` is `YYYY-MM-DD HH:MM:SS[.fff]` with no zone. Normalise both before any comparison.
 - **Rust gate:** `./scripts/gate.sh` before each Rust task's commit. Targeted runs use `scripts/with-slot.sh cargo test …`, never the path the gate printed. Rust mutations go through `./scripts/mutation-probe.sh`.
@@ -196,7 +203,7 @@ topic: system1-measurement
 
   This is the spec's live check.
 
-- [ ] **Step 3: Amend the spec**, appending a dated `## Amendments` section.
+- [ ] **Step 3: Amend the spec** with a dated Amendment 2, appended to the spec's existing `## Amendments` section (Amendment 1 is already there).
   - **(a) V1 answered 2026-09-26:** transcripts record hook executions as `attachment` entries (`hook_success`: hook name, event, exit code, duration, `toolUseID`). They record injected text as `hook_additional_context` (SessionStart carried 5,692 chars in session `3c5b02df`). A Stop hook that emits nothing records no content. So companion deliveries enter `deliveries` from transcripts.
   - **(b) The `deliveries_json` shape is one entry per claiming engine,** `{engine, ledger_keys[], blocks[{sha256, bytes}], hint}`, not one per block. The coordinator can attribute keys to an engine but not to a block. The spec's purpose, which engine delivered what with `[]` versus NULL, is unchanged.
   - **(c) Metric 7 is `next_action_aligned`, not "changed".** Without a counterfactual, a pipeline can only observe whether the next action matched what the delivery said, as `aligned|not-aligned|unknown`. The readout labels it that way, never as effect.
@@ -221,6 +228,7 @@ All code goes in scripts/measure. Every module is importable by path and exposes
     - `repos`: `{name: path}`;
     - `bounds`: `{start_utc, end_utc}`.
   - It copies into `out_root/corpus_id/`. It snapshots SQLite with `sqlite3 … ".backup"`, never `cp`. It writes `manifest.json` and returns the manifest.
+  - `bounds` carries both windows, `{retained: {start_utc, end_utc}, decision: {start_utc, end_utc}}`, where `decision.start_utc` is `end_utc` minus 7 days (spec A1.2).
 - `verify(corpus_dir: pathlib.Path) -> list[str]`: returns the mismatching relative paths; an empty list means intact.
 - **Manifest keys:**
   - `corpus_id`, `created_utc`, `bounds`;
@@ -230,8 +238,10 @@ All code goes in scripts/measure. Every module is importable by path and exposes
   - `repos: {name: head_sha}`;
   - `exclusions: []`, filled by Task 5.
 
+- [ ] **Step 0: Check existing instruments (spec A1.8).** Read `docs/PROBES.md` and list each instrument that overlaps Stages 0–4, e.g. the claude-traces reader's `message.id` dedupe. For each, record reuse-after-predicate-check or declined-because, in `scripts/measure/README.md`. Tasks 5–11 follow that record.
 - [ ] **Step 1: Write the failing tests.**
   - `test_verify_is_empty_on_an_intact_corpus`.
+  - `test_decision_window_is_the_last_seven_days_of_the_retained_window`.
   - `test_verify_names_a_changed_file`: flip one byte, and `verify` returns exactly that path.
   - `test_freeze_refuses_an_out_root_inside_the_repo`: `ValueError` naming the Global Constraint.
   - `test_manifest_counts_subagent_transcripts_separately`: a fixture tree with `<sid>.jsonl` plus `<sid>/subagents/agent-x.jsonl`.
@@ -366,7 +376,9 @@ All code goes in scripts/measure. Every module is importable by path and exposes
   - `is_decision_point`;
   - `lessons: list[str]` or `"uncovered"`/`"abstain"`;
   - `detectability`, one of `in-trace|obtainable|external`;
-  - `quote: str`.
+  - `quote: str`;
+  - `evidence_present_before`, `evidence_used`: each `yes|no|unknown` (spec A1.3), audit mode;
+  - `lesson_outcomes: dict[str, str]`, lesson id to `applied|missed`, for each lesson the judge finds applicable (spec A1.4), audit mode.
 - `verify_quote(v: Verdict, pre_evidence: str) -> Verdict`: an `in-trace` verdict whose quote is not verbatim in `pre_evidence` becomes `abstain`.
 - `judge(item, votes=3) -> dict`: majority over 3 votes, keeping all three verdicts and the disagreement.
 - `run_gate() -> dict` over the RTD cases and the 52 never-corrected controls, which are the 57 passages of `docs/evals/rule-tell-controls.md` minus the five its § *Five passages below are known positives* names.
@@ -378,6 +390,7 @@ All code goes in scripts/measure. Every module is importable by path and exposes
   - `test_an_input_with_a_later_timestamp_is_refused` (leakage; Review Focus 5).
   - `test_a_quote_not_in_the_evidence_downgrades_to_abstain`.
   - `test_majority_keeps_all_votes_and_the_disagreement`.
+  - `test_audit_verdict_carries_context_and_transfer_fields`: `parse_verdict` on an audit-mode reply returns `evidence_present_before`, `evidence_used` and `lesson_outcomes`. A reply missing any of them parses to `unknown` / `{}` and is flagged, never defaulted to `yes`/`applied`.
   - `test_gate_thresholds_match_the_spec`: `run_gate`'s constants are 16/21, 3/4, 6/8 and 5/52.
 - [ ] **Step 2: Run them to verify they fail.**
 - [ ] **Step 3: Implement.** The `CODEX_HOME` config pins the model. `codex --version` and the model name are written into every output header.
@@ -412,10 +425,13 @@ All code goes in scripts/measure. Every module is importable by path and exposes
 - `session_bootstrap(per_session: list[float], resamples=10000, seed: int) -> tuple[float, float]`: a 95% percentile interval.
 - `decide(lower: float, upper: float, gate_passed: bool, agreement: int) -> str`, returning `GO|NO-GO|INCONCLUSIVE` under the Global Constraints rule.
 - `spotcheck_packet(judged, seed) -> list[dict]`: 25 items, stratified 10 / 10 / 5, **with judge labels removed**.
-- `agreement(operator_labels, judge_labels) -> dict`: raw k/25 and Cohen's κ on addressable yes/no, with `abstain` counted as no.
+- `agreement(operator_labels, judge_labels) -> dict`: raw k/25 and Cohen's κ on addressable yes/no, with `abstain` counted as no. **Also reported per field** for `evidence_present_before`, `evidence_used` and applied/missed. Only the addressable label feeds `decide` (spec A1.7).
 - `miner_recall(audit_misses, candidates) -> tuple[int, int]`: of the audit-found misses that an operator message corrected later in the same session, how many the miner proposed. Returned as `(found, total)` and reported with its Wilson interval. **This is the only check that can see a miner biased toward NO-GO.**
 - `cost_between(events_db, sid, start_ts, end_ts) -> dict`: `{tokens, tool_calls, operator_turns, wall_s}` from the origin turn to resolution; `tokens` comes from Task 6's once-per-`message.id` counts.
 - `next_action_aligned(delivery, next_tool_event) -> str`: `aligned` when the next tool call's name or path argument appears in the delivered text, `not-aligned` when a next call exists and neither does, `unknown` when there is no next call in the session.
+- `context_support(verdicts) -> dict`: over qualifying audit decision points, the count and Wilson interval where `evidence_present_before == "yes"` and `evidence_used == "yes"`, with `unknown` counts shown (spec A1.3).
+- `transfer_rate(verdicts) -> dict`: applied / (applied + missed) over lesson-applicable decision points, split by project and by dated/undated lessons (spec A1.4).
+- `task_family(tool_name: str, input_json: str | None) -> str` and `delegable_share(events_db, window) -> dict`: the deterministic classifier and per-session shares of calls and recorded latency (spec A1.5). **Latencies are never summed across overlapping calls into a time-saved figure.**
 - `render(…) -> str`: the readout markdown. It **begins with the spec's § *What a result cannot establish*, copied verbatim**, then the metrics per corpus and project, weekly breakdowns, the contrast project side by side (never pooled, with a generalisation warning when the two rates differ by more than 2×), and the miner-recall estimate.
 
 - [ ] **Step 1: Write the failing tests.**
@@ -431,6 +447,11 @@ All code goes in scripts/measure. Every module is importable by path and exposes
   - `test_miner_recall_counts_only_operator_corrected_audit_misses`: an audit miss with no later operator correction is excluded from the denominator.
   - `test_cost_between_uses_once_per_message_tokens`.
   - `test_next_action_aligned_is_unknown_without_a_next_call`.
+  - `test_task_family_classifies_each_family`: one fixture per family (`doc` `append_entry` on a `docs/trackers/` path, `run_command` `./scripts/gate.sh`, `edit_code` `rename`) plus an `other`.
+  - `test_delegable_share_never_sums_overlapping_latency_into_elapsed_time`: two overlapping calls give shares of recorded latency, and no field named or described as elapsed or saved time.
+  - `test_transfer_rate_denominator_excludes_non_applicable_decision_points`.
+  - `test_only_the_addressable_label_feeds_decide`: per-field agreement below 20/25 on a descriptive field leaves `decide` unchanged.
+  - `test_decide_reads_only_the_decision_window`: a session outside `decision` bounds does not enter the per-session rates that `decide` receives.
   - `test_a_contrast_rate_over_twice_codescouts_emits_the_warning`.
 - [ ] **Step 2: Run them to verify they fail.**
 - [ ] **Step 3: Implement.**
@@ -439,10 +460,36 @@ All code goes in scripts/measure. Every module is importable by path and exposes
 
 ### Task 12: Run it and publish (operator-gated)
 
-- [ ] **Step 1: Freeze the real corpora.** codescout plus the contrast project: MRV-poc, or backend-kotlin if MRV-poc has fewer than 15 sessions after exclusions. Use `bounds` from the oldest surviving transcript to the freeze instant. Commit only the manifests under `docs/evals/data/<date>-system1-base-rates/`.
+- [ ] **Step 1: Freeze the real corpora.** codescout plus the contrast project: MRV-poc, or backend-kotlin if MRV-poc has fewer than 15 sessions after exclusions. The contrast is compared on its retained window, descriptive only (spec A1.2). `bounds` carries the retained window (oldest surviving transcript to the freeze instant T) and the decision window (the last 7 days before T). Commit only the manifests under `docs/evals/data/<date>-system1-base-rates/`.
 - [ ] **Step 2: Run** `join`, then `mine`, then `sample`, then `judge`, all under the registered seeds.
 - [ ] **Step 3: Generate the spot-check packet** and hand it to the operator. **Wait for their 25 labels;** no readout is final before them.
-- [ ] **Step 4: Run `readout`.** Commit the readout doc under `docs/evals/` citing the corpus id, plus the gate, pilot and agreement files. Report the decision to the operator in one line with its interval.
-- [ ] **Step 5: If the result is INCONCLUSIVE,** record the prospective window's read date in the readout: 21 days from Task 3 Step 2's date. It is read under the same rule.
+- [ ] **Step 4: Run `readout`.** Commit the readout doc under `docs/evals/` citing the corpus id, plus the gate, pilot and agreement files. Report to the operator in one line: the go/no-go decision with its interval, and the three descriptive baselines (context support, transfer rate, delegable-work share), each with its unit and window.
+- [ ] **Step 5: If the result is INCONCLUSIVE,** record the prospective window's read date in the readout. The window covers `[T − 7 days, T_live + 21 days)`, where T_live is the day after Task 3 Step 2 passes (spec A1.2). It is read under the same rule.
+
+### Task 13: The observability map (runs after Task 6, before Task 7)
+
+**Why here:** spec A1.6 requires the map before any Codex call. It needs Task 6's events database, and nothing from Tasks 7–11.
+
+**Files:** create `scripts/measure/observability.py`; test in `tests/test_measure_observability.py`. The output is `docs/evals/data/<date>-system1-base-rates/observability-map.md`, committed.
+
+**Interfaces — consumes:** Task 6's `events.db` and Task 5's `exclusions`.
+
+**Interfaces — produces:**
+- `coverage(events_db, manifest) -> dict`, which counts:
+  - `tool_events` by `join_method`;
+  - `deliveries` by `source`;
+  - sessions per project and window;
+  - exclusions by reason;
+  - turns by `kind`.
+- `render_map(coverage: dict) -> str`: for each outcome (mistakes, context, transfer, background-worker) and each chain link (opportunity, signal or request, delivery or action, observed use, checked outcome), one of `measurable now` / `needs adjudication` / `unobservable`, with the coverage number that justifies the label, or the reason none exists. Rediscovery (A1.4) is always `needs adjudication`.
+
+- [ ] **Step 1: Write the failing tests.**
+  - `test_every_outcome_and_chain_link_has_a_label`: the rendered map has 4 × 5 labelled cells and no blank.
+  - `test_a_link_with_zero_coverage_is_never_labelled_measurable_now`.
+  - `test_rediscovery_is_needs_adjudication`.
+- [ ] **Step 2: Run them to verify they fail.**
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run them to verify they pass.**
+- [ ] **Step 5: Produce the map on a real frozen corpus.** Use Task 5's scratch corpus until Task 12 freezes the real one; Task 12 then re-runs this step. Commit the map, then commit the code.
 
 **Not in this plan:** V4, the Langfuse completeness check. The spec excludes Langfuse, and nothing here depends on it.

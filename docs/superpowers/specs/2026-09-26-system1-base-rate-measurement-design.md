@@ -137,7 +137,7 @@ Each is reported per corpus and per project. Proportions carry Wilson 95% interv
 
 ## Go/no-go rule — fixed before any data is read
 
-**Quantity:** addressable operator-caught misses per session, on codescout.
+**Quantity:** addressable operator-caught misses per session, on codescout, **over the decision window defined in Amendment 1, A1.2**: the latest 7 days before the freeze instant.
 
 **Interval:** 95% percentile interval from 10,000 bootstrap resamples **of sessions**, with the seed recorded. Sessions are resampled because misses cluster within them.
 
@@ -259,3 +259,47 @@ No correction was counted, no correction content was read, and no rate that ente
 - `docs/evals/rule-injection-timing-preregistration.md` and `docs/evals/rule-tell-scoring-2026-09-23.md`: the replay route that owns benefit measurement, the correction-commit census, the fork runs.
 - `docs/evals/phase1-local-classifier-preregistration.md`: `verify_span`, Codex as independent labeller, the judge-channel lesson.
 - `context-injection-session-log:F-14` and `context-injection-session-log:F-15`: the two hook-surface and gate-population corrections made while designing this.
+
+## Amendments
+
+### Amendment 1 — 2026-09-26, operator-approved, before any data was read
+
+**Source:** the operator's update to `docs/research/2026-09-26-codex-three-role-intervention.md` (§ *Agreed priority: all three outcomes, measurement first*, and § *Proposed extension: a Codescout-specialised background miniagent*), and two operator decisions taken in session `3c5b02df` after reading it. No corpus had been frozen and no correction, rate or judge output existed. Where this amendment and the body disagree, this amendment wins.
+
+- **A1.1 Scope: three outcomes plus an execution baseline.** The measurement now baselines all three outcomes the operator named:
+  - fewer mistakes and repeated reviews;
+  - relevant context at the moment of decision;
+  - transfer of lessons across sessions and projects;
+  - plus the opportunity size for a background worker.
+
+  **Only outcome 1 carries a decision rule**, the go/no-go below. The others are descriptive baselines, and they feed the choice of the first intervention: frequency, observed cost, addressability and measurement confidence (Codex doc, § *Choose and evaluate interventions after the baseline*).
+- **A1.2 Window.**
+  - **Decision window:** the go/no-go reads only `[T − 7 days, T)`, where T is the freeze instant.
+  - **Retained window:** everything since the oldest surviving transcript (2026-08-26). It is reported as a precedent and stability check and **never decides**.
+  - **Why:** the operator's standing guidance that recent fixes make older aggregate rates misleading, and the Codex doc's *"older incidents supply precedents rather than current frequency estimates"*.
+  - **Cost:** about 30 codescout transcripts were written in the 7 days before 2026-09-26, before exclusions, so INCONCLUSIVE is the expected outcome unless the true rate is far from 0.3/session.
+  - **INCONCLUSIVE:** the prospective read covers `[T − 7 days, T_live + 21 days)`, where T_live is the day after Part A is verified live. It is read under the same rule.
+  - **The contrast project** is too thin for 7 days (MRV-poc: 9 transcripts), so it is compared on its own retained window, descriptive only, and labelled as such.
+- **A1.3 Outcome 2, context at the right moment.** For each qualifying audit decision point, the judge also returns:
+  - `evidence_present_before`: yes / no / unknown. Was the evidence this decision needed present in the trace before it?
+  - `evidence_used`: yes / no / unknown.
+
+  Metric: the share of decision points whose needed evidence was present before the decision and used, with Wilson intervals. Deliveries whose `next_action_aligned` is `not-aligned` are reported as candidate unnecessary interruptions. That is descriptive; it is not an established harm.
+- **A1.4 Outcome 3, transfer.** For each lesson the judge finds applicable at a decision point, it returns `applied` or `missed`.
+  - **Metric:** transfer rate = applied / (applied + missed) over lesson-applicable decision points in the audit. It is split by project and kept separate for `undated` lessons.
+  - **Why this matters:** misses alone had no denominator, which is the Codex doc's warning against letting failure trackers become the denominator.
+  - **Not measured:** repeated investigation, or rediscovery. It needs semantic matching of investigations to earlier results, so it is listed as `needs adjudication` in the observability map.
+- **A1.5 Background-worker baseline, deterministic and with no model.**
+  - **The classifier:** each tool event is assigned to a task family by tool and action:
+    - `tracker-maintenance`: `doc` `append_entry` / `update_entry` / `update` / `create` on `docs/trackers/`;
+    - `specified-run`: `run_command` invoking `./scripts/gate.sh`, `cargo test`, `pytest` or a `scripts/` entry point;
+    - `scoped-refactor`: `edit_code` `rename`;
+    - `other`.
+  - **The metric:** the share of tool calls and of recorded latency in each family, per session.
+  - **What it is not:** it measures opportunity size, not delegability or saving. Latencies are never summed across overlapping calls and never presented as elapsed time saved.
+- **A1.6 Observability map, published before any Codex call.** After the join, a committed document lists, for each outcome, each link of the chain (opportunity → signal or request → delivery or delegated action → observed use → independently checked outcome) as `measurable now`, `needs adjudication` or `unobservable`. It carries coverage numbers from the events database: joins that are exact, heuristic or unmatched; delivery coverage by source; sessions per project and window; and exclusions by reason.
+- **A1.7 Spot-check.** The same 25 items; the operator also labels `evidence_present_before`, `evidence_used` and the applied/missed labels. Agreement is reported per field. Only the addressable yes/no label is decision-bearing (≥ 20/25); the others qualify their own baselines.
+- **A1.8 Existing instruments first.** Before building each pipeline stage, check `docs/PROBES.md` for an instrument that already measures it. Reuse one only after checking its current predicate against the live schema, or record why it was declined.
+- **A1.9 Telemetry justified by named measurements.** The Codex doc asks that telemetry be added only for a named, unresolved measurement that informs a decision. Part A's fields each name theirs:
+  - `tool_use_id`: the exact joins that the prospective window depends on (A1.2);
+  - `deliveries_json`: "was context delivered before the decision" for codescout's own injections (A1.3).
