@@ -1,0 +1,11 @@
+{
+ "codex": "gpt-6-astra/medium",
+ "directive": "Read codex-clean-prompt.md and menu.json in this directory. Do exactly what codex-clean-prompt.md asks. Reply with only the three JSON lines it specifies, and nothing else. Use no other file.",
+ "sha256": {
+  "codex-clean-prompt.md": "9a1c15ec4145cb4738b4d863bdf0359eee7ef1dfa97ed7e6020c0d87828849d3",
+  "menu.json": "cd3179baea66ca26a7efa46b5c25160f08fbbd35ead52c6cc66c47b79bd08531"
+ },
+ "started": "2026-09-26T06:15:50.077045+00:00",
+ "failed_attempts": [],
+ "ended": "2026-09-26T06:16:00.516276+00:00"
+}

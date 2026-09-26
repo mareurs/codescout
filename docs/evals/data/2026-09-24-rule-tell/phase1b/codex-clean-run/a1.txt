@@ -1,0 +1,3 @@
+{"id":"codex-clean-1","text":"Add a parser test that supplies an empty string and asserts the expected validation error."}
+{"id":"codex-clean-2","text":"Keep the query scoped to pending jobs. Label the displayed count as pending jobs so its scope is clear."}
+{"id":"codex-clean-3","text":"Include the sessionId in each write record so reviewers can attribute the change directly."}
