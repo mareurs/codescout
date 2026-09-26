@@ -21,13 +21,13 @@ R23's fork EXCLUSION — see below):
 Every key in the exclusions() dict is a copy id `<profile>/<sid>` (see copy_id()) — never a
 bare sid — so the R22 case (one sid, two profiles) cannot collide with itself.
 
-R28: forks are NO LONGER an exclusion reason (a real pair showed R23 excluding a copy with 64
+R28: forks are NO LONGER an exclusion reason (a real pair showed R23 excluding a copy with 47
 real operator prompts as `fork-of:`, discarding content that was never actually duplicated —
 the two transcripts diverge early and each carries its own unique tail). Fork *relationships*
 are now reporting-only, via relations() (R23's same detection + orientation, unchanged), and
-overlap in the counted operator-message uuids is resolved separately by attribute_entries(),
-which assigns each uuid to exactly one owning transcript so a fork pair's shared prefix is
-counted once rather than twice.
+overlap in the counted entry uuids (R31: every entry, not just operator messages) is resolved
+separately by attribute_entries(), which assigns each uuid to exactly one owning transcript so
+a fork pair's shared prefix is counted once rather than twice.
 
 operator_messages() additionally excludes (R26) harness task-notification entries
 (`promptSource == "system"` or `origin.kind == "task-notification"`, or — for older entries
@@ -328,8 +328,9 @@ def exclusions(sessions_list, excluded_sids):
             excl[cid] = "scratchpad-project"
 
     # --- D: R22 same sessionId across profiles ---
-    # R32: the keeper is decided by _sid_keepers() — the SAME function relations() uses —
-    # so the two can never disagree about which copy of a tied-length sid is canonical.
+    # R32/R36: the keeper is decided by _sid_keepers() — the SAME function relations() uses,
+    # and (since R36/F4) over the SAME non-excluded population this stage builds `remaining`
+    # from — so the two cannot disagree about which copy of a tied-length sid is canonical.
     # Before this fix, this stage sorted independently by length alone, no copy_id
     # tie-break at all, so a length TIE fell to Python's stable sort / remaining's
     # iteration order (which follows profile-directory on-disk name, numeric prefix
@@ -364,13 +365,15 @@ def exclusions(sessions_list, excluded_sids):
 
 def _sid_keepers(sessions_list):
     """For each sid, the R22 "keeper" copy — the longest timeline, ties broken by copy_id
-    for determinism. relations() needs this independently of exclusions(): per R28(ii)'s
-    signature, relations(sessions) takes no exclusions map, so when a sid itself has more
-    than one profile copy it must re-derive which copy is canonical (the one R22 would
-    keep) rather than being told.
+    for determinism. relations() needs this independently of exclusions(): even though it
+    now (R36/F4) takes an exclusions_map of its own and is called over the non-excluded
+    population, when a sid itself has more than one surviving profile copy it must still
+    re-derive which copy is canonical (the one R22 would keep) rather than being told.
 
     R32: exclusions() Stage D now calls this same function rather than re-implementing its
-    own sort, so the two can never pick different keepers for the same sid.
+    own sort. R36 additionally makes relations() call it over the SAME non-excluded
+    population Stage D uses (not the raw, unfiltered sessions_list) — so the two callers
+    cannot pick different keepers for the same sid.
     """
     by_sid = {}
     for s in sessions_list:
@@ -386,7 +389,7 @@ def _sid_keepers(sessions_list):
     return keepers
 
 
-def relations(sessions_list):
+def relations(sessions_list, exclusions_map):
     """R28(ii): fork relationships, reporting-only — forks no longer exclude anything (see
     module docstring and exclusions(), which dropped stage E).
 
@@ -399,8 +402,18 @@ def relations(sessions_list):
     _sid_keepers) — so a fork reference points at the copy_id that survives R22, matching
     the controller's R24 update ("d8a1f024 now appears in relations() as
     fork-of:<571eb3d6's kept copy_id>").
+
+    R36: computed only over NON-excluded copies — sessions whose copy_id is in
+    exclusions_map (any reason: R22 duplicate, sdk-cli, scratchpad, ...) are dropped before
+    grouping, and _sid_keepers() itself runs over that same filtered population. So an
+    excluded copy can never be named as a fork's original, and can never own a relation
+    entry of its own. When a sid's would-be keeper is excluded by some OTHER stage (e.g. a
+    longer sdk-cli copy dropped at Stage B), the surviving copy of that sid stands in as the
+    representative; if every copy of a sid is excluded, that sid contributes no
+    representative at all and its fork group produces no relation for it.
     """
-    representatives = list(_sid_keepers(sessions_list).values())
+    non_excluded = [s for s in sessions_list if copy_id(s) not in exclusions_map]
+    representatives = list(_sid_keepers(non_excluded).values())
 
     groups = {}
     for s in representatives:

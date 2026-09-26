@@ -265,40 +265,53 @@ def _session_dir(corpus_dir, profile_dir, project_slug):
 
 
 class ForkDetection(unittest.TestCase):
-    def _assert_fork_orientation(self, orig_sid, fork_sid):
+    def _assert_fork_orientation(self, orig_sid, fork_sid, divergence_idx):
         # R30: shared helper for TWIN fixtures — (A) the true original's sid sorts
         # lexically EARLIER than the fork's, (B) it sorts LATER — so a mutation that
         # substitutes sid order, glob/insertion order, or first_ts for the real
         # timestamp-based orientation fails on at least one twin instead of coincidentally
         # matching both. See the two callers below for exactly what each twin catches.
         #
-        # Layout (both branches, both twins):
+        # Layout (both branches, both twins — divergence_idx DIFFERS between the twins, 6
+        # and 8, so a hardcoded or skipped-scan divergence point cannot coincidentally land
+        # on the true divergence entry for both):
         #   indices 0-4: identical uuid AND timestamp on both branches (the shared prefix,
         #     length == FORK_PREFIX_LEN) — what makes the two sessions group as a fork pair.
-        #   index 5 (== FORK_PREFIX_LEN): the SAME uuid "c5" on both branches, but
-        #     DELIBERATELY REVERSED timestamps — orig's is LATER than fork's. A mutation
-        #     that hardcodes divergence_idx=FORK_PREFIX_LEN (skipping the forward scan for
-        #     the true divergence point) reads ts HERE and concludes the fork branch is
-        #     earlier — wrong on both twins, since that verdict depends only on which
-        #     physical branch (orig/fork) is read, not on which sid is which.
-        #   index 6: the TRUE divergence — uuids differ between branches, with timestamps
-        #     that correctly identify the "-orig" branch as the real original.
+        #   indices 5..divergence_idx-1 (filler): the SAME uuid per index on both branches,
+        #     but DELIBERATELY REVERSED timestamps — orig's is LATER than fork's at every
+        #     filler index. A mutation that hardcodes or misidentifies the divergence index
+        #     so it lands in this range reads a reversed-order pair and gets the orientation
+        #     backwards.
+        #   index == divergence_idx: the TRUE divergence — uuids differ between branches,
+        #     with CORRECT timestamps (orig earlier) that correctly identify the "-orig"
+        #     branch as the real original.
+        #   one tail entry immediately after divergence_idx: uuids differ between branches
+        #     again, but timestamps here are REVERSED relative to the true verdict (orig
+        #     LATER). Skipping the forward scan entirely (divergence_idx falls back to
+        #     common_len, so `_ts_at` reads tl[-1]) reads THIS entry instead of the true
+        #     divergence one and gets the orientation backwards — this is what makes the
+        #     scan itself, not just its target index, load-bearing.
         with tempfile.TemporaryDirectory() as tmp:
             corpus_dir = _make_corpus(pathlib.Path(tmp))
             proj = _session_dir(corpus_dir, "00-.claude-kat", "p")
 
-            def branch(sid, idx5_ts, idx6_uuid, idx6_ts):
+            def branch(sid, is_orig):
                 lines = [_entry(f"u{i}", f"2026-09-20T10:00:0{i}Z", sid) for i in range(5)]
-                lines.append(_entry("c5", idx5_ts, sid))
-                lines.append(_entry(idx6_uuid, idx6_ts, sid))
+                for i in range(transcripts.FORK_PREFIX_LEN, divergence_idx):
+                    ts = (
+                        f"2026-09-20T11:00:{i:02d}Z"
+                        if is_orig
+                        else f"2026-09-20T10:30:{i:02d}Z"
+                    )
+                    lines.append(_entry(f"c{i}", ts, sid))
+                div_ts = "2026-09-20T09:00:00Z" if is_orig else "2026-09-20T09:00:05Z"
+                lines.append(_entry(f"d-{sid}", div_ts, sid))
+                tail_ts = "2026-09-21T09:00:00Z" if is_orig else "2026-09-21T08:00:00Z"
+                lines.append(_entry(f"tail-{sid}", tail_ts, sid))
                 return lines
 
-            orig_lines = branch(
-                orig_sid, "2026-09-20T10:00:08Z", f"u6-{orig_sid}", "2026-09-20T10:00:09Z"
-            )
-            fork_lines = branch(
-                fork_sid, "2026-09-20T10:00:05Z", f"u6-{fork_sid}", "2026-09-21T09:00:00Z"
-            )
+            orig_lines = branch(orig_sid, True)
+            fork_lines = branch(fork_sid, False)
 
             _write_lines(proj / f"{orig_sid}.jsonl", orig_lines)
             _write_lines(proj / f"{fork_sid}.jsonl", fork_lines)
@@ -307,15 +320,15 @@ class ForkDetection(unittest.TestCase):
             self.assertEqual({s.sid for s in sess}, {orig_sid, fork_sid})
 
             excl = transcripts.exclusions(sess, set())
-            rels = transcripts.relations(sess)
+            rels = transcripts.relations(sess, excl)
             kept_key = f".claude-kat/{orig_sid}"
             fork_key = f".claude-kat/{fork_sid}"
 
             # R28(i): forks are never an exclusion reason.
             self.assertEqual(excl, {})
             # R28(ii)/R30: the real original — the branch whose true divergence-point entry
-            # (index 6) has the earlier timestamp — is oriented correctly regardless of
-            # which sid sorts lexically earlier or which file glob-sorts first.
+            # has the earlier timestamp — is oriented correctly regardless of which sid sorts
+            # lexically earlier or which file glob-sorts first.
             self.assertEqual(rels.get(fork_key), "fork-of:" + kept_key)
             self.assertNotIn(kept_key, rels)
 
@@ -324,19 +337,26 @@ class ForkDetection(unittest.TestCase):
         # (tied, so it falls to sid), and distinct[0] (glob/insertion order) all
         # coincidentally agree with the correct answer here — this twin alone would not
         # catch them. max(sid) IS caught here: it would wrongly pick z-fork as the
-        # original. The fixed-divergence-idx mutation is caught here too (see the helper's
-        # index-5 comment).
-        self._assert_fork_orientation("a-orig", "z-fork")
+        # original. divergence_idx=6 is this twin's TRUE divergence point, so a hardcoded
+        # divergence_idx=FORK_PREFIX_LEN(=5) reads the reversed-timestamp filler entry at
+        # index 5 and is caught here too.
+        self._assert_fork_orientation("a-orig", "z-fork", divergence_idx=6)
 
     def test_fork_orientation_twin_b_original_sorts_lexically_later(self):
         # z-orig is the true original but sorts LEXICALLY LATER than a-fork, and
         # a-fork.jsonl also glob-sorts first — so min(sid), first_ts-tied-to-sid, and
         # distinct[0] (glob/insertion order) all wrongly pick a-fork here. max(sid)
-        # coincidentally agrees with the correct answer on this twin. Combined with twin A,
-        # every one of the five named mutations (min(sid), max(sid), distinct[0], first_ts,
-        # fixed divergence_idx=FORK_PREFIX_LEN) fails at least one twin, while the real
-        # forward-scan-then-timestamp logic passes both.
-        self._assert_fork_orientation("z-orig", "a-fork")
+        # coincidentally agrees with the correct answer on this twin. This twin's TRUE
+        # divergence point is 8, two past twin A's (6) — so a hardcoded divergence_idx=6
+        # lands in THIS twin's reversed-timestamp filler range (indices 5-7) rather than
+        # coincidentally hitting the true divergence entry, and a deleted forward scan
+        # (divergence_idx falls back to common_len, reading tl[-1]) reads the reversed-
+        # timestamp tail entry on both twins regardless of where the true divergence sits.
+        # Combined with twin A, every named mutation (min(sid), max(sid), distinct[0],
+        # first_ts, divergence_idx=FORK_PREFIX_LEN, divergence_idx hardcoded to a fixed
+        # value, and the forward scan deleted outright) fails at least one twin, while the
+        # real forward-scan-then-timestamp logic passes both.
+        self._assert_fork_orientation("z-orig", "a-fork", divergence_idx=8)
 
     def test_no_false_fork_when_first_uuids_differ(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -350,13 +370,14 @@ class ForkDetection(unittest.TestCase):
             excl = transcripts.exclusions(sess, set())
             self.assertEqual(excl, {})
             # R28: no false relation either — first 5 uuids differ, so this isn't a fork pair.
-            self.assertEqual(transcripts.relations(sess), {})
+            self.assertEqual(transcripts.relations(sess, excl), {})
 
 
 class AttributeEntries(unittest.TestCase):
     def test_a_fork_pairs_shared_prefix_goes_to_the_longer_transcript(self):
         # R28(iii): a fork pair diverging right at FORK_PREFIX_LEN — the shared prefix is
-        # attributed to whichever copy has MORE total operator-message uuids, and each
+        # attributed to whichever copy has MORE total entry uuids (R31: every entry, not just
+        # operator messages), and each
         # branch's unique tail stays with its own copy. None lost, none double-counted.
         with tempfile.TemporaryDirectory() as tmp:
             corpus_dir = _make_corpus(pathlib.Path(tmp))
@@ -475,15 +496,21 @@ class AttributeEntries(unittest.TestCase):
             self.assertEqual(len(attrib), 5)
 
     def test_attribution_covers_every_entry_type_not_just_operator_messages(self):
-        # R31: attribute_entries() must map EVERY entry uuid -- not only operator-message
-        # (type=="user", real-prompt) uuids -- because the downstream audit samples
-        # ASSISTANT messages. b-orig and a-copy share one real prompt ("sp0", tied first_ts)
-        # and each has ONLY that one operator message, so an operator-count-only comparison
-        # ties 1-vs-1 and falls to the copy_id tie-break ("a-copy" < "b-orig" lexically) --
-        # wrongly handing the shared prompt to a-copy. Counting every entry breaks the tie
-        # correctly: b-orig has 4 total uuids, a-copy has 3, so b-orig wins. And the
-        # non-prompt uuids (assistant-message entries) must appear in the map at all, which
-        # an operator-message-only extraction would never populate.
+        # R31/R37: attribute_entries() must map EVERY entry uuid -- not only operator-message
+        # (type=="user", real-prompt) uuids -- because the downstream audit samples ASSISTANT
+        # messages. b-orig and a-copy share one real prompt ("sp0", tied first_ts) and each has
+        # only that one operator message, so an operator-count-only comparison ties 1-vs-1 and
+        # falls to the copy_id tie-break ("a-copy" < "b-orig" lexically) -- wrongly handing the
+        # shared prompt to a-copy. Counting every entry breaks the tie correctly: b-orig has 7
+        # total uuids, a-copy has 5, so b-orig wins.
+        #
+        # R37: probes/task5-fix3-types.txt enumerates the real corpus and finds exactly 4
+        # uuid-bearing top-level `type` values (assistant, attachment, system, user) and, within
+        # type=="user", exactly 4 sub-kinds by (isMeta, isCompactSummary, tool_result_shaped) --
+        # 7 distinct kinds total. Every kind gets one uuid here, unique to a single copy, so a
+        # scope restricted to operator-messages-plus-assistant (or missing any other single
+        # kind) drops that uuid from the map entirely -- a bare KeyError on lookup below, not a
+        # mere mis-attribution.
         with tempfile.TemporaryDirectory() as tmp:
             corpus_dir = _make_corpus(pathlib.Path(tmp))
             proj = _session_dir(corpus_dir, "00-.claude-kat", "p")
@@ -494,11 +521,24 @@ class AttributeEntries(unittest.TestCase):
                 _entry("a1", "2026-09-20T10:00:01Z", "b-orig", type_="assistant"),
                 _entry("a2", "2026-09-20T10:00:02Z", "b-orig", type_="assistant"),
                 _entry("t1", "2026-09-20T10:00:03Z", "b-orig", type_="assistant"),
+                _entry("attach-b", "2026-09-20T10:00:04Z", "b-orig", type_="attachment"),
+                _entry("sys-b", "2026-09-20T10:00:05Z", "b-orig", type_="system"),
+                _entry("meta-b", "2026-09-20T10:00:06Z", "b-orig", type_="user", is_meta=True),
             ]
             a_lines = [
                 _entry("sp0", ts0, "a-copy", content="shared prompt"),
                 _entry("a3", "2026-09-20T10:00:01Z", "a-copy", type_="assistant"),
                 _entry("t2", "2026-09-20T10:00:02Z", "a-copy", type_="assistant"),
+                _entry(
+                    "tr-a",
+                    "2026-09-20T10:00:03Z",
+                    "a-copy",
+                    type_="user",
+                    content=[{"type": "tool_result", "content": "result text"}],
+                ),
+                _entry(
+                    "compact-a", "2026-09-20T10:00:04Z", "a-copy", type_="user", is_compact=True
+                ),
             ]
             _write_lines(proj / "b-orig.jsonl", b_lines)
             _write_lines(proj / "a-copy.jsonl", a_lines)
@@ -508,14 +548,16 @@ class AttributeEntries(unittest.TestCase):
 
             cid_b = ".claude-kat/b-orig"
             cid_a = ".claude-kat/a-copy"
-            # Every non-prompt uuid must be in the map at all.
-            for u in ("a1", "a2", "t1"):
+            # Every non-prompt uuid must be in the map at all, whatever its entry `type` --
+            # assistant, attachment, system, and each type=="user" sub-kind (isMeta,
+            # isCompactSummary, tool_result-shaped).
+            for u in ("a1", "a2", "t1", "attach-b", "sys-b", "meta-b"):
                 self.assertEqual(attrib[u], cid_b)
-            for u in ("a3", "t2"):
+            for u in ("a3", "t2", "tr-a", "compact-a"):
                 self.assertEqual(attrib[u], cid_a)
-            # b-orig has 4 total uuids, a-copy has 3 -- b-orig wins the shared prompt.
+            # b-orig has 7 total uuids, a-copy has 5 -- b-orig wins the shared prompt.
             self.assertEqual(attrib["sp0"], cid_b)
-            self.assertEqual(len(attrib), 6)
+            self.assertEqual(len(attrib), 11)
 
     def test_attribution_most_count_wins_when_longer_copy_sorts_lexically_earlier(self):
         # Twin A (non-discriminating alone -- see the twin below): the copy with MORE total
@@ -572,40 +614,86 @@ class AttributeEntries(unittest.TestCase):
 
             self.assertEqual(attrib["sh0"], ".claude-kat/z-long")
 
-    def test_an_excluded_copy_never_wins_an_attribution_even_with_the_highest_count(self):
-        # R31 x R28: an excluded transcript must never own a uuid, however many entries it
-        # has. P is an R22 prefix-copy of K (excluded by Stage D); S is a much longer,
-        # distinct-sid transcript excluded as sdk-cli (Stage B). Neither may appear as an
-        # owner in the attribution map.
+    def test_an_excluded_copy_never_wins_an_attribution_whatever_the_exclusion_reason(self):
+        # R31 x R28 x R32: an excluded transcript must never own a uuid, whatever the reason it
+        # was excluded and however it compares to the keeper. The R22 prefix-copy fixture this
+        # test used to carry gave the excluded copy a strict SUBSET of the keeper's uuids, so it
+        # never outranked the keeper whether or not the exclusion filter existed at all (R31's
+        # excluded-copy half was vacuous for R22 copies). One case per exclusion kind below is
+        # built so the excluded copy WOULD win (or at least own something) without the filter.
         with tempfile.TemporaryDirectory() as tmp:
             corpus_dir = _make_corpus(pathlib.Path(tmp))
             sdd_proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
             kat_proj = _session_dir(corpus_dir, "01-.claude-kat", "p")
 
-            shared = [_entry(f"u{i}", f"2026-09-20T10:00:0{i}Z", "dup-sid") for i in range(5)]
-            p_lines = shared
-            k_lines = shared + [_entry("k5", "2026-09-20T10:00:05Z", "dup-sid")]
+            # --- Case 1: R22 prefix copy (duplicate-prefix-of:), tied on distinct-uuid count ---
+            # P (.claude-kat) has 5 lines / 5 distinct uuids. K (.claude-sdd) repeats one of
+            # those same uuids on a 6th line, so it has 6 lines but the SAME 5 distinct uuids --
+            # a genuine tie in attribute_entries()'s own count-based ranking. _sid_keepers()
+            # picks K anyway (RAW line count, 6 > 5, is what R22/R32 rank on, not distinct
+            # count), so K is the keeper and P is excluded as duplicate-prefix-of:K. Without the
+            # exclusion filter, P's copy_id (".claude-kat/...") sorts lexically before K's
+            # (".claude-sdd/..."), and a tied first_ts (both start with the same p0 entry) falls
+            # through to that copy_id tie-break -- so P would WIN every shared uuid.
+            p_lines = [_entry(f"p{i}", f"2026-09-20T10:00:0{i}Z", "dup-p1") for i in range(5)]
+            k_lines = p_lines + [_entry("p0", "2026-09-20T10:00:05Z", "dup-p1")]
+            _write_lines(kat_proj / "dup-p1.jsonl", p_lines)
+            _write_lines(sdd_proj / "dup-p1.jsonl", k_lines)
+
+            # --- Case 2: R22 divergent duplicate (divergent-duplicate-of:), unique tail uuids ---
+            # K2 (.claude-sdd) has 6 lines/uuids; D (.claude-kat) shares K2's first 3 entries
+            # then diverges -- its last 2 uuids (d3, d4) exist NOWHERE else in the corpus. K2 is
+            # longer (6 > 5 lines) so it is the keeper and D is excluded as
+            # divergent-duplicate-of:K2. d3/d4 being ABSENT from the attribution map once D is
+            # excluded is R22's documented cost (an excluded copy's exclusive entries are never
+            # audited), not a bug -- annotated here rather than asserted as a coincidence.
+            k2_lines = [_entry(f"k{i}", f"2026-09-20T11:00:0{i}Z", "dup-y") for i in range(6)]
+            d_lines = k2_lines[:3] + [
+                _entry("d3", "2026-09-20T11:00:03Z", "dup-y"),
+                _entry("d4", "2026-09-20T11:00:04Z", "dup-y"),
+            ]
+            _write_lines(sdd_proj / "dup-y.jsonl", k2_lines)
+            _write_lines(kat_proj / "dup-y.jsonl", d_lines)
+
+            # --- Case 3: sdk-cli (Stage B), kept from the original test -- already kills ---
             s_lines = [
-                _entry(f"s{i}", f"2026-09-21T09:00:{i:02d}Z", "sdk-session",
-                       entrypoint="sdk-cli")
+                _entry(
+                    f"s{i}", f"2026-09-21T09:00:{i:02d}Z", "sdk-session", entrypoint="sdk-cli"
+                )
                 for i in range(10)
             ]
-            _write_lines(sdd_proj / "dup-sid.jsonl", p_lines)
-            _write_lines(kat_proj / "dup-sid.jsonl", k_lines)
             _write_lines(kat_proj / "sdk-session.jsonl", s_lines)
 
             sess = transcripts.sessions(corpus_dir)
             excl = transcripts.exclusions(sess, set())
             attrib = transcripts.attribute_entries(sess, excl)
 
-            cid_k = ".claude-kat/dup-sid"
-            # P's uuids are already a subset of K's -- P has no unique entries of its own,
-            # so it owning nothing is exactly what len(attrib) == 6 (not 5 + 10 + ...) shows.
-            for u in [f"u{i}" for i in range(5)] + ["k5"]:
+            cid_k = ".claude-sdd/dup-p1"
+            cid_p = ".claude-kat/dup-p1"
+            cid_k2 = ".claude-sdd/dup-y"
+            cid_d = ".claude-kat/dup-y"
+
+            self.assertEqual(excl.get(cid_p), f"duplicate-prefix-of:{cid_k}")
+            self.assertEqual(excl.get(cid_d), f"divergent-duplicate-of:{cid_k2}")
+            self.assertNotIn(cid_k, excl)
+            self.assertNotIn(cid_k2, excl)
+
+            # Case 1: P owns NOTHING -- every shared uuid goes to K, the actual keeper.
+            for u in ("p0", "p1", "p2", "p3", "p4"):
                 self.assertEqual(attrib[u], cid_k)
-            self.assertEqual(len(attrib), 6)
+
+            # Case 2: D's unique tail uuids are simply absent; the shared prefix goes to K2.
+            for u in ("d3", "d4"):
+                self.assertNotIn(u, attrib)
+            for u in ("k0", "k1", "k2", "k3", "k4", "k5"):
+                self.assertEqual(attrib[u], cid_k2)
+
+            # Case 3: sdk-cli, excluded, owns nothing however many entries it has.
             for i in range(10):
                 self.assertNotIn(f"s{i}", attrib)
+
+            # P's 0 + D's 0 + S's 0 + K's 5 + K2's 6 == 11 total owned uuids.
+            self.assertEqual(len(attrib), 11)
 
 
 class SpecExclusions(unittest.TestCase):
@@ -764,7 +852,7 @@ class SameSessionAcrossProfiles(unittest.TestCase):
 
             sess = transcripts.sessions(corpus_dir)
             excl = transcripts.exclusions(sess, set())
-            rels = transcripts.relations(sess)
+            rels = transcripts.relations(sess, excl)
 
             self.assertEqual(
                 excl.get(".claude-sdd/dup-x"), "duplicate-prefix-of:.claude-kat/dup-x"
@@ -775,6 +863,68 @@ class SameSessionAcrossProfiles(unittest.TestCase):
             self.assertEqual(fork_rel, "fork-of:.claude-kat/dup-x")
             fork_target = fork_rel.split("fork-of:", 1)[1]
             self.assertNotIn(fork_target, excl)
+
+    def test_relations_names_the_surviving_copy_when_the_forks_target_is_excluded_elsewhere(
+        self,
+    ):
+        # R36: this time the target sid's copy is dropped by Stage B (sdk-cli), a DIFFERENT
+        # exclusion reason than the R22 test above -- so Stage D's dup-check never even runs
+        # on this sid (only one copy of it remains once Stage B has excluded the other).
+        # Two profile copies of sid "dup-x" carry byte-identical content: .claude-kat's is
+        # marked entrypoint="sdk-cli" (excluded at Stage B), .claude-sdd's is plain "cli"
+        # (survives). fork-y shares dup-x's first FORK_PREFIX_LEN uuids and diverges after.
+        # relations() must name the SURVIVING .claude-sdd copy as the fork's original, never
+        # the excluded .claude-kat one -- proving the fallback representative-selection
+        # (non_excluded, not sessions_list) works for a non-R22 exclusion reason too.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            sdd_proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            kat_proj = _session_dir(corpus_dir, "01-.claude-kat", "p")
+
+            dup = [_entry(f"u{i}", f"2026-09-20T10:00:0{i}Z", "dup-x") for i in range(5)]
+            dup_sdk = [
+                _entry(f"u{i}", f"2026-09-20T10:00:0{i}Z", "dup-x", entrypoint="sdk-cli")
+                for i in range(5)
+            ]
+            fork = dup + [_entry("f5", "2026-09-21T09:00:00Z", "fork-y")]
+
+            _write_lines(sdd_proj / "dup-x.jsonl", dup)
+            _write_lines(kat_proj / "dup-x.jsonl", dup_sdk)
+            _write_lines(kat_proj / "fork-y.jsonl", fork)
+
+            sess = transcripts.sessions(corpus_dir)
+            excl = transcripts.exclusions(sess, set())
+            rels = transcripts.relations(sess, excl)
+
+            self.assertEqual(excl.get(".claude-kat/dup-x"), "sdk-cli")
+            self.assertNotIn(".claude-sdd/dup-x", excl)
+
+            self.assertEqual(rels.get(".claude-kat/fork-y"), "fork-of:.claude-sdd/dup-x")
+
+    def test_an_excluded_copy_that_would_be_a_fork_gets_no_relation_entry(self):
+        # R36: the FORK side of the pair is excluded this time (scratchpad-project, Stage C),
+        # not the original. Even though its first FORK_PREFIX_LEN uuids match dup-z's and it
+        # would otherwise be named "fork-of:", an excluded copy must own no relation entry at
+        # all -- it must not appear as a key in the returned map, whatever it would have
+        # pointed at.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-kat", "p")
+            scratch_proj = _session_dir(corpus_dir, "00-.claude-kat", "scratchpad-p")
+
+            base = [_entry(f"u{i}", f"2026-09-20T10:00:0{i}Z", "dup-z") for i in range(5)]
+            fork = base + [_entry("f5", "2026-09-21T09:00:00Z", "fork-scratch")]
+
+            _write_lines(proj / "dup-z.jsonl", base)
+            _write_lines(scratch_proj / "fork-scratch.jsonl", fork)
+
+            sess = transcripts.sessions(corpus_dir)
+            excl = transcripts.exclusions(sess, set())
+            rels = transcripts.relations(sess, excl)
+
+            fork_cid = ".claude-kat/fork-scratch"
+            self.assertEqual(excl.get(fork_cid), "scratchpad-project")
+            self.assertNotIn(fork_cid, rels)
 
 
 class WriteExclusions(unittest.TestCase):
