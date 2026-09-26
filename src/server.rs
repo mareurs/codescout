@@ -1802,7 +1802,7 @@ impl ServerHandler for CodeScoutServer {
 
     async fn call_tool(
         &self,
-        req: CallToolRequestParams,
+        mut req: CallToolRequestParams,
         req_ctx: RequestContext<RoleServer>,
     ) -> std::result::Result<CallToolResult, McpError> {
         // Idle-shutdown clock: a tool call is the definition of activity. Set before any
@@ -1827,6 +1827,30 @@ impl ServerHandler for CodeScoutServer {
             .get_progress_token()
             .map(|token| progress::ProgressReporter::new(req_ctx.peer.clone(), token.0));
         let peer = Some(req_ctx.peer.clone());
+        // rmcp's `WithMeta<P>` deserialization proxy (`model/serde_impl.rs`) has a
+        // named `_meta` field beside `P`'s `#[serde(flatten)] _rest`; serde gives a
+        // flattened field only the keys no named field already claimed, so
+        // `req.meta` (`CallToolRequestParams.meta`) is ALWAYS `None` for a real,
+        // wire-deserialized request — rmcp stashes the parsed `Meta` into
+        // `RequestContext.meta` instead. That is why `call_tool_inner`'s reads of
+        // `req.meta` (`conversation_from_meta`, `tool_use_id_from_meta`) saw `None`
+        // on every live call. See
+        // docs/issues/2026-09-26-call-tool-inner-reads-meta-from-a-params-field-rmcp-never-fills.md.
+        // Fold it back into `req.meta` here, before `call_tool_inner` runs, without
+        // changing that function's signature. Precedence mirrors rmcp's own
+        // `WithMeta` serializer, which merges the same two sources as
+        // `params_meta.extend(ext_meta)`: params-level meta is the base, and
+        // context (`req_ctx.meta`) keys win on conflict. That precedence decides
+        // nothing reachable today — `call_tool` only ever receives
+        // wire-deserialized params, whose `meta` is always `None` — so no test
+        // pins it, deliberately.
+        let mut merged_meta = req.meta.take().unwrap_or_default();
+        merged_meta.extend(req_ctx.meta.clone());
+        req.meta = if merged_meta.is_empty() {
+            None
+        } else {
+            Some(merged_meta)
+        };
         // `req_ctx.ct` is rmcp's per-request CancellationToken. It is cancelled
         // when the client sends a CancelledNotification (Escape in Claude Code).
         // Hand it to call_tool_inner so the tool future can be aborted instead
@@ -10721,10 +10745,14 @@ mod guide_hint_tests {
         );
     }
 
-    /// The `claudecode/toolUseId` a client asserts on `_meta` must reach the
-    /// `tool_calls.tool_use_id` column via the production funnel
-    /// (`call_tool_inner`) — not just via `UsageRecorder` in isolation, which
-    /// cannot see the `server.rs` wiring if it is ever deleted.
+    /// NOT "the production funnel": this pins `call_tool_inner`'s own read of
+    /// `tool_use_id_from_meta` given a params-level `_meta`, deserialized
+    /// directly onto `CallToolRequestParams` — it does not exercise `call_tool`'s
+    /// fold (rmcp strips `_meta` into `RequestContext.meta` before `call_tool`
+    /// ever hands `req` to `call_tool_inner`, so a real request's `req.meta` is
+    /// always `None` here; see the fold's comment in `call_tool`). The wire path
+    /// — `_meta` on an actual `tools/call`, folded by `call_tool` — is covered by
+    /// `call_tool_records_the_wire_meta_tool_use_id` below.
     #[tokio::test]
     async fn call_tool_inner_records_the_meta_tool_use_id() {
         let (dir, server) = make_server().await;
@@ -10759,6 +10787,149 @@ mod guide_hint_tests {
             tool_use_id.as_deref(),
             Some("toolu_srv1"),
             "the meta-asserted tool_use_id must reach the tool_calls row"
+        );
+    }
+    /// The wire path, over rmcp's real transport: `_meta` travels as bytes
+    /// through `server.serve(...)`, so rmcp's `WithMeta<P>` deserialization
+    /// proxy actually runs and strips `_meta` into `RequestContext.meta` before
+    /// `call_tool` ever sees it — the one entry point a hand-built
+    /// `CallToolRequestParams` (as in the test above) cannot reach, which is
+    /// exactly the defect's blind spot
+    /// (docs/issues/2026-09-26-call-tool-inner-reads-meta-from-a-params-field-rmcp-never-fills.md).
+    #[tokio::test]
+    async fn call_tool_records_the_wire_meta_tool_use_id() {
+        let (dir, server) = make_server().await;
+
+        let (client, transport) = tokio::io::duplex(65536);
+        let (read_half, write_half) = tokio::io::split(transport);
+        // The request MUST travel as bytes through `serve` for rmcp's real
+        // `WithMeta<P>` proxy to run — a hand-built `CallToolRequestParams`
+        // bypasses that proxy entirely and cannot exercise this defect.
+        let serve_task = tokio::spawn(async move {
+            let running = server
+                .serve((read_half, write_half))
+                .await
+                .expect("server should start serving over the duplex transport");
+            let _ = running.waiting().await;
+        });
+
+        // `BufReader` forwards `AsyncWrite` straight through for a type that is
+        // both (no buffering on the write side), so the client end needs no
+        // split of its own — only the server end, per the transport's own shape.
+        let mut client = tokio::io::BufReader::new(client);
+        let thirty_s = std::time::Duration::from_secs(30);
+
+        async fn send(w: &mut (impl tokio::io::AsyncWrite + Unpin), msg: &Value) {
+            let mut line = msg.to_string();
+            line.push('\n');
+            tokio::io::AsyncWriteExt::write_all(w, line.as_bytes())
+                .await
+                .expect("write to duplex transport");
+            tokio::io::AsyncWriteExt::flush(w)
+                .await
+                .expect("flush duplex transport");
+        }
+
+        async fn recv_id(r: &mut (impl tokio::io::AsyncBufRead + Unpin), id: u64) -> Value {
+            loop {
+                let mut line = String::new();
+                let n = tokio::io::AsyncBufReadExt::read_line(r, &mut line)
+                    .await
+                    .expect("read from duplex transport");
+                assert!(n > 0, "server closed the transport unexpectedly");
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let v: Value = serde_json::from_str(trimmed).expect("response line is JSON");
+                if v.get("id").and_then(|x| x.as_u64()) == Some(id) {
+                    return v;
+                }
+            }
+        }
+
+        tokio::time::timeout(
+            thirty_s,
+            send(
+                &mut client,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test", "version": "0.1"}
+                    }
+                }),
+            ),
+        )
+        .await
+        .expect("send initialize should not time out");
+
+        tokio::time::timeout(thirty_s, recv_id(&mut client, 1))
+            .await
+            .expect("read initialize response should not time out");
+
+        tokio::time::timeout(
+            thirty_s,
+            send(
+                &mut client,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "method": "notifications/initialized",
+                    "params": {}
+                }),
+            ),
+        )
+        .await
+        .expect("send notifications/initialized should not time out");
+
+        // The `_meta` key is the LITERAL string, not `TOOL_USE_ID_META_KEY`: a
+        // const-built fixture would drift silently with the const, same reason
+        // the neighbouring test above gives for its own literal key.
+        tokio::time::timeout(
+            thirty_s,
+            send(
+                &mut client,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "run_command",
+                        "arguments": {"command": "echo hi"},
+                        "_meta": {"claudecode/toolUseId": "toolu_wire1"}
+                    }
+                }),
+            ),
+        )
+        .await
+        .expect("send tools/call should not time out");
+
+        let response = tokio::time::timeout(thirty_s, recv_id(&mut client, 2))
+            .await
+            .expect("read tools/call response should not time out");
+        assert!(
+            response.get("error").is_none(),
+            "tools/call over the wire returned an error: {response:?}"
+        );
+
+        serve_task.abort();
+
+        let db = dir.path().join(".codescout").join("usage.db");
+        let tool_use_id: Option<String> = rusqlite::Connection::open(db)
+            .unwrap()
+            .query_row(
+                "SELECT tool_use_id FROM tool_calls ORDER BY id DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            tool_use_id.as_deref(),
+            Some("toolu_wire1"),
+            "the wire-level _meta tool_use_id must reach the tool_calls row through call_tool's fold"
         );
     }
 
