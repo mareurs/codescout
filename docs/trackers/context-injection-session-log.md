@@ -12,8 +12,8 @@ topic: context-injection
 entry_prefix:
   - F
   - W
-entry_high_water_F: 15
-entry_high_water_W: 5
+entry_high_water_F: 16
+entry_high_water_W: 6
 ---
 
 # Session Log — Context Injection & Principal Identity
@@ -49,6 +49,7 @@ author to make.
 | F-13 | 2026-09-24 | high | architectural | open | The "shared server" hypothesis was wrong — resolves F-6's open question, surfaces two unfiled ledger-restore gaps |
 | F-14 | 2026-09-26 | med | architectural | mitigated | Said only the Stop hook sees chat prose; UserPromptSubmit already carries transcript_path and a sibling plugin tail-reads it |
 | F-15 | 2026-09-26 | med | architectural | mitigated | The engine key-disjointness gate computes over build-time corpora, so a session-authored corpus would be invisible to it |
+| F-16 | 2026-09-26 | med | plan-prose | mitigated | The spec's per-block delivery shape is not attributable at the coordinator — keys are per engine, not per block |
 
 ## Wins Index
 
@@ -59,6 +60,7 @@ author to make.
 | W-3 | 2026-09-14 | high | when the obvious benefit is already provided, measure the property the incumbent cannot have by construction | the ADR's justification would have stayed an argument after F-6 demoted it, with the real benefit unmeasured and unclaimable | validated |
 | W-4 | 2026-09-14 | high | ask what proposition a confirming result proves before copying the thing that produced it | `permissionDecision:'allow'` would have shipped on a matcher covering every codescout tool, auto-approving every subagent `run_command` and `edit_code` | validated |
 | W-5 | 2026-09-14 | high | file specifically enough to be FALSIFIED, not merely accurately | the same bug filed vaguely would have been true, needed no correction, and yielded none of the six — and the shipped fix depends on two specifics it would not have carried | validated |
+| W-6 | 2026-09-26 | high | count a struct's construction sites before adding per-call state to it; probe the population a classifier will read before writing its filter | Task 2 would have been a 54-file change, and the miner would have counted tool results as operator corrections, erring toward a false GO | validated |
 
 ---
 
@@ -1524,6 +1526,62 @@ True of the `guide_ledger.rs` / `server.rs` / `guide_rearm.rs` shape at `HEAD` o
 **Rests on:** an assertion computed over an enumeration fixed at build time cannot vouch for members minted at runtime; name the member instead.
 
 **Fix idea / Pointer:** a runtime corpus needs a per-member structural guarantee — a reserved key namespace that its `owns_key` accepts and every other engine's refuses — tested in the shape of `no_engine_claims_a_key_from_outside_every_corpus` (same module), which already asserts that predicates can refuse a foreign key. Not by extending `live_keys()`, which cannot enumerate what does not exist at build time.
+
+---
+
+## F-16 — The spec's per-block delivery shape is not attributable at the coordinator — keys are per engine, not per block
+
+**Observed:** 2026-09-26, scouting the plan for `docs/superpowers/specs/2026-09-26-system1-base-rate-measurement-design.md`, § *Prospective codescout additions*, before writing its tasks.
+
+**When:** turning the spec's `deliveries_json` into a plan task.
+
+**Expected:** what the spec (written in this session, `4caa3968`) says: an array of `{engine, ledger_key, sha256, bytes}`, **one entry per block** the engine coordinator attached.
+
+**Got:**
+- `run_post_in` (`src/engines/coordinator.rs`) sees each engine's `Emitted::Claimed(Emission { hint, blocks })` and nothing else.
+- The keys each engine inserts go straight into `GuideLedger`, whose `emitted` map is private with no non-test accessor (`src/tools/guide_ledger.rs`).
+- So the coordinator can learn which keys an **engine** added, by diffing a key snapshot before and after that engine runs. It cannot learn which key belongs to which **block**.
+- The per-block shape needs every emitter to report its own pairs: three sites instead of one, for no gain to the spec's purpose.
+
+**Probable cause:** the spec's shape was written from the consumer's side without reading the producer's return type.
+
+**Workaround:** the plan (`a2d62589fc638396`, Task 2) records **one entry per claiming engine**: `{engine, ledger_keys[], blocks[{sha256, bytes}], hint}`. Task 3 amends the spec to match. The spec's purpose, which engine delivered what with `[]` versus NULL, is unchanged.
+
+**Severity:** med — the spec's shape would have forced either a re-design mid-task or three emitter changes a reviewer would have rejected.
+
+**Status:** mitigated
+
+**Valid:** dated 2026-09-26
+
+**Rests on:** a data shape is designed against what the producer returns, not only against what the consumer wants.
+
+**Fix idea / Pointer:** the plan's Task 3, Step 3 (b).
+
+---
+
+## W-6 — Counting ToolContext's construction sites chose a task-local, and probing the transcript found the operator-message trap — both before the plan was written
+
+**Observed:** 2026-09-26, the same pre-plan scout as the entry above.
+
+**Pattern:** before putting per-call state on a struct every tool builds, **count its construction sites**, then look for a precedent that already chose not to.
+
+**What the scout found:**
+- `ToolContext { … }` is built as a bare struct literal at **226 sites in 54 files**. A per-call delivery sink added as a field would have touched all 54.
+- `tokio::task_local!` `PEER_SERVE_DISPATCH` (`src/tools/core/types.rs`) is the precedent. Its doc comment argues exactly this case: *"Deliberately NOT a `ToolContext` field … A task-local scopes the fact to exactly the call it describes."*
+- The plan scopes `DELIVERY_SINK` around `f()` inside `UsageRecorder::record_content`, which awaits `call_content` inline on the same task. That confines the change to 5 files.
+- **A second find, from the same scout:** in session `3c5b02df`'s transcript, `type: "user"` entries were **167 tool results and 6 `isMeta` injections beside 12 real prompts**. A miner reading `type == "user"` as "the operator spoke" would have counted tool output as operator corrections, inflating the very quantity the go/no-go rests on. It is pinned in the plan's Review Focus 3, with tests in Tasks 5 and 8.
+
+**Counterfactual:**
+- Without the count, Task 2 would have been a 54-file change, mostly test fixtures, that a reviewer rejects or that ripples into peers' uncommitted work on this checkout.
+- Without the transcript probe, the operator-caught count would have been inflated by tool results. It errs toward a false GO: every mis-read tool result becomes an "operator correction".
+
+**Impact:** high
+
+**Status:** validated
+
+**Valid:** dated 2026-09-26
+
+**Rests on:** `CLAUDE.md` § *Observer Blindness*, position 3 (make the correct path end in a safe state), applied to plan-writing: the scout runs before the shape is chosen, not after a reviewer rejects it.
 
 ---
 
