@@ -14,8 +14,8 @@ entry_prefix:
 - DWF
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
-entry_high_water_DWF: 10
-entry_high_water_DCS: 10
+entry_high_water_DWF: 11
+entry_high_water_DCS: 11
 ---
 
 # Deep-agent workflow observations and session coverage
@@ -105,6 +105,8 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DCS-8 | 2026-09-24 | coverage | session-receipt | 938e2953/gate-cache-disk |
 | DCS-9 | 2026-09-25 | coverage | session-receipt | e4fbc7ef/whole-session |
 | DCS-10 | 2026-09-26 | coverage | session-receipt | 571eb3d6/post-compaction-2026-09-24-to-26 |
+| DWF-11 | 2026-09-26 | workflow | routine-first (retrospective) | 3c5b02df/system1-lineage-read |
+| DCS-11 | 2026-09-26 | coverage | session-receipt | 3c5b02df/whole-session-to-05:40Z |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -571,6 +573,75 @@ No new DWF or DCX was opened: this was follow-on work, not first-eligible. **One
 | Notable, for the review | Claims corrected before anything was built on them, each by re-reading the rows or the code: <br>• the direction of a pinned calibration temperature (lower bound, not upper); <br>• "the `d_semicolon` head learned yes-unless-`;`", refuted by scoring other rules' sentences: 14 of 14 containing `;` fire; <br>• "fires on 100% of other rules' text", re-read as mostly a threshold at 2.2e-13 set on own pairs; <br>• identical own-negative firing counts across two runs, traced to thresholds chosen on the same fold and filed as `2bac7e0a27fbc392`; <br>• two count errors in the Stage 2 draft, caught before commit. <br>Externally, the operator's Codex review found the miner compared new candidates only with frozen data (`8c17b1dbcf88a097`). It was fixed in `96b52f0c`, and 9 of 9 mutations are killed |
 | Unresolved pending entries | None in this ledger. Phase-1b Stage 2 is unregistered: a Step 4 script, all-cells AUC in the diagnose step, the Step 1 audit scripts and the predictions remain |
 | Collection overhead | About 10 minutes for this receipt, estimated |
+
+## DWF-11 — System 1 lineage read and explanation — routine-first, retrospective
+
+**Status:** observed
+**Valid:** dated 2026-09-26
+
+**Sampling / capture mode:** routine-first, **retrospective**. The pre-action snapshot was not taken before the investigation started. It is recorded after the outcome, and no pre-decision fact below is reconstructed from the later result.
+
+**Identity / key / times:**
+- **Session / principal:** session `3c5b02df-b6ce-45f5-9d03-1194e38465c0`, profile `~/.claude-kat`, model Opus 5.5; the collector is the same session.
+- **Capture key:** `3c5b02df/system1-lineage-read`.
+- **Times:** the session's first recorded codescout call is 2026-09-26 04:53:24 UTC; start and finish of this episode itself are unknown.
+
+**Task / authority / substrate:**
+- **Objective:** read `docs/research/2026-09-26-codex-three-role-intervention.md` and explain what had been built toward "System 1".
+- **Authority:** explanation only, read-only as instructed.
+- **Substrate:** branch `experiments` at `91221154`, dirty with peers' uncommitted files.
+
+**Pre-action evidence:** not captured (retrospective).
+
+**Trajectory, as recorded:**
+- read the Codex doc;
+- grep for System 1 and Jev mentions;
+- read the design tracker `d16552e9981f521e` and its 20-September amendment;
+- read the Jev notes, the rule-tell scoring doc, the phase 1 and phase 1b pre-registrations and the RTD corpus header;
+- verify that `emit_pre` is absent from `src/`;
+- check git log for the recent evals commits.
+
+No failed attempts beyond one refused pipe, which recovered on the next call.
+
+**Effects / recovery:** no files changed; the output was an explanation.
+
+**Outcome / basis:** `good`, `verified-complete` only in the sense that the operator accepted the account and moved on. The follow-up turn's claims were checked in a later recon and two were wrong: `context-injection-session-log:F-14` and `context-injection-session-log:F-15`. Those errors were in the second turn's architecture assessment, not in this episode's account.
+
+**Delegation candidate:** none. It is a reading task with no bounded completion check a worker could run.
+
+**Rests on / grouping / overhead:**
+- **Grouping:** one session. It led to the design `docs/superpowers/specs/2026-09-26-system1-base-rate-measurement-design.md` (`4caa3968`).
+- **Overhead:** capture effort about 5 minutes, estimated, not measured.
+
+## DCS-11 — Session 3c5b02df — System 1 lineage, three-role assessment, recon, base-rate measurement design
+
+**Valid:** dated 2026-09-26
+
+**Identity:**
+- **Session / principal / collector:** session `3c5b02df-b6ce-45f5-9d03-1194e38465c0`, profile `~/.claude-kat`, model Opus 5.5; the collector is the same session.
+- **Workspace:** codescout checkout, branch `experiments`.
+
+**Observed interval (UTC):**
+- The first and last recorded codescout calls are 2026-09-26 04:53:24 and 05:40:31: 120 calls, no subagent `agent_id`.
+- Native `Read`, `Skill` and `AskUserQuestion` calls are not in that count.
+- The session continued past the last recorded call. This receipt is written mid-session at the operator's request to commit, so a resumed or later part of the session updates it rather than counting another.
+
+**Coverage:** `partial`. The interval above is covered; nothing after this write is.
+
+**Routine samples:**
+- **DWF:** `DWF-11`, retrospective (a `missed-capture` of the pre-action snapshot, recorded after the outcome).
+- **DCX:** `missed-capture`. One eligible context event was observed and not entered as a DCX: the operator-rule `OP-4` delivery on an `edit_file` call at 05:22:48 UTC, which arrived while the agent was already doing what it asked. It is used instead as a named positive control in `docs/superpowers/specs/2026-09-26-system1-base-rate-measurement-design.md` § *Testing the pipeline*.
+
+**Enrichment:** none entered as DWF. The two material corrections of this session's own claims are recorded canonically as `context-injection-session-log:F-14` and `context-injection-session-log:F-15` and are not duplicated here.
+
+**Native / delegated / unobserved gaps:**
+- Native tool calls are absent from `usage.db`.
+- There was no delegation.
+- One harness settings change was made outside the repo: `cleanupPeriodDays: 3650` in all three profiles, on the operator's instruction.
+
+**Collection overhead:** about 10 minutes for DWF-11 plus this receipt, estimated, not measured.
+
+**Unresolved pending entries:** none.
 
 ## Template for new entries
 

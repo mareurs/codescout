@@ -12,7 +12,7 @@ topic: context-injection
 entry_prefix:
   - F
   - W
-entry_high_water_F: 13
+entry_high_water_F: 15
 entry_high_water_W: 5
 ---
 
@@ -47,6 +47,8 @@ author to make.
 | F-11 | 2026-09-14 | med | tooling | open | A control whose subject was relabelled in transit — `2>&1` made my stderr evidence stdout |
 | F-12 | 2026-09-14 | med | self-friction | open | Third today: the falsifier was in my own § E1, three sections below the claim it refutes |
 | F-13 | 2026-09-24 | high | architectural | open | The "shared server" hypothesis was wrong — resolves F-6's open question, surfaces two unfiled ledger-restore gaps |
+| F-14 | 2026-09-26 | med | architectural | mitigated | Said only the Stop hook sees chat prose; UserPromptSubmit already carries transcript_path and a sibling plugin tail-reads it |
+| F-15 | 2026-09-26 | med | architectural | mitigated | The engine key-disjointness gate computes over build-time corpora, so a session-authored corpus would be invisible to it |
 
 ## Wins Index
 
@@ -1463,6 +1465,67 @@ True of the `guide_ledger.rs` / `server.rs` / `guide_rearm.rs` shape at `HEAD` o
 **Fix idea / Pointer:** File `docs/issues/` bug entries for mechanism 2 (`poll_guide_rearm` principal-scoping race) and mechanism 3 (`parked_ledgers` / `rekey()` not consulting on-disk history) — pending user decision on how to proceed, same conversation.
 
 **Resolved same session.** Mechanism 2 was retracted before filing — re-reading `docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md` directly showed it is Decision #8, already litigated and accepted ("Acceptable, matches 'degrade to re-sending, never to suppressing.'"), not a new defect; filing it would have been exactly the rediscovery this tracker exists to prevent. Mechanism 3 was filed as `bebe1b228d668b40` (`docs/issues/archive/2026-09-24-rekey-never-consults-the-on-disk-ledger-of-the-principal-it-targets.md`), fixed and verified same session — including live, end to end, through the real principal-stamp hook and a real `/mcp` restart (evidence in the bug file's *Tests added*): `GuideLedger::adopt()` added as `rekey`'s disk-consulting twin, wired into `adopt_request_conversation`'s case-3 branch only. A second, latent defect surfaced by the new regression test in the same investigation — `adopt_request_conversation`'s parent-call fallback used the frozen construction-time `base_ledger_key` rather than `poll_rendezvous`'s current resolution — was fixed in the same commit. SHA `971ed73f4d9f1ded140926de7d8b7889eb1dc161`, patch-id `5dba2cc5ae2d34af2d23f58778ecd6f520bd79f4`, branch `experiments`.
+
+## F-14 — Said only the Stop hook sees chat prose; UserPromptSubmit already carries transcript_path and a sibling plugin tail-reads it
+
+**Observed:** 2026-09-26, assessing the operator-endorsed "System 2 can direct System 1" extension in `docs/research/2026-09-26-codex-three-role-intervention.md` (§ *Agreed extension*, then untracked).
+
+**When:** deciding which surface could observe an agent's chat-prose claim (the extension's own example: *"there are no callers"* after a text search), in order to put a scope question to the operator.
+
+**Expected:** what I told the operator in the preceding turn — chat prose is visible **only** to the companion `Stop` hook, and only at turn end — so the question offered a dichotomy: bring the companion plugin (its Stop hook) into the design, or keep to what the codescout server sees.
+
+**Got:**
+- `transcript_path` over the companion's `hooks/*.mjs` in the claude-plugins repo: **0 matches**. Positive control over the same path and glob, `permissionDecision|additionalContext`: 20 matches in 9 files, so the zero is a reading of those files, not an unreachable path. **No companion hook, the Stop hook included, reads the transcript today.**
+- Over the whole claude-plugins repo, `transcript_path` appears in 9 files. The session-bridge plugin's SessionStart hook documents its stdin as `session_id, cwd, transcript_path, hook_event_name`. The buddy plugin's scripts/skill_ledger.py (`scan_from_event`) reads `transcript_path` from a **UserPromptSubmit** event and tail-reads the transcript JSONL from a saved byte offset, parsing assistant `tool_use` entries.
+- So an in-tree precedent already reads the agent's prior output **at the start of the next turn** — the boundary phase 2 injected at (`docs/evals/rule-injection-timing-preregistration.md` § *Arms*: the boundary before the violating turn, `<system-reminder>` carrier).
+
+**Probable cause:** the hook surface was stated from `docs/architecture/companion-plugin.md` § *Full hook inventory*, whose rows say what each hook **does** and never what its event **carries**; no hook input was read.
+
+**Workaround:** corrected to the operator in the same session. No design document carries the wrong claim.
+
+**Still unverified:** whether PreToolUse input carries `transcript_path` (no in-tree reader of it found), and the latency of a read-then-inject on UserPromptSubmit.
+
+**Severity:** med — no code written, but it mis-framed a scope decision the operator was asked to make, and pointed the design at a turn-end surface instead of the turn-start one that phase 2 actually measured.
+
+**Status:** mitigated
+
+**Valid:** dated 2026-09-26
+
+**Rests on:** a checkable fact that is about to become a recommendation is read at its source in the same session — here, a hook event's input, not an inventory's description of the hook.
+
+**Fix idea / Pointer:** if the design adopts prose observation, the candidate surface is a UserPromptSubmit hook reading the transcript tail (precedent: the buddy plugin's skill ledger), injecting at the next turn's start. That surface is in the claude-plugins repo, so taking it in is the operator's scope decision.
+
+---
+
+## F-15 — The engine key-disjointness gate computes over build-time corpora, so a session-authored corpus would be invisible to it
+
+**Observed:** 2026-09-26, same assessment as the entry above: listing the costs of adding a session-scoped "watch for" corpus beside the `operator-rules` engine.
+
+**When:** writing the recommendation's *now harder* consequences.
+
+**Expected:** what I told the operator — that `engines_over_different_corpora_own_disjoint_key_spaces` (`src/engines/mod.rs`, tests module) "has to accommodate" a runtime corpus, i.e. that the gate would notice it and need changing.
+
+**Got:**
+- The gate iterates `live_keys()`, which is built from three compiled-in sources and nothing else: `GUIDE_INDEX.ledger_keys()`, `GUIDE_TOPICS`, and `OPERATOR_RULES` mapped through `route::ledger_key`. `OPERATOR_RULES` is a `LazyLock` over an `include_str!` of `docs/trackers/operator-rules.md` (`src/operator_rules/corpus.rs`). `Corpus` has exactly three variants: `CompiledGuides`, `OperatorLedger`, `SkillFiles`.
+- Keys minted at runtime from System 2's directives would lie outside that population. The gate would therefore stay **green without ever seeing them** — vacuous for the new corpus, not red.
+
+**Probable cause:** the test's assertion was read and its population's constructor was not.
+
+**Instantiates:** `CLAUDE.md` § *Testing Discipline*, "ask whether the population is CLOSED" — a population fixed at build time asked to vouch for an open, session-authored one.
+
+**Workaround:** corrected the consequence to the operator in the same session. No design document carries the wrong claim.
+
+**Severity:** med — a design citing this gate as coverage for the new corpus would have been covered zero times while reading as guarded.
+
+**Status:** mitigated
+
+**Valid:** dated 2026-09-26
+
+**Rests on:** an assertion computed over an enumeration fixed at build time cannot vouch for members minted at runtime; name the member instead.
+
+**Fix idea / Pointer:** a runtime corpus needs a per-member structural guarantee — a reserved key namespace that its `owns_key` accepts and every other engine's refuses — tested in the shape of `no_engine_claims_a_key_from_outside_every_corpus` (same module), which already asserts that predicates can refuse a foreign key. Not by extending `live_keys()`, which cannot enumerate what does not exist at build time.
+
+---
 
 ## Template for new entries
 
