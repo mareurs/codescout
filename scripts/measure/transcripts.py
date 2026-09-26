@@ -35,6 +35,15 @@ COMMAND_WRAPPER_TAGS = (
     "<local-command-caveat>",
 )
 
+# R25: an entry whose whole text, after strip(), EQUALS exactly one of these literals is an
+# operator INTERRUPT, not a prompt — exact equality, never substring, so a real prompt that
+# merely quotes one of these strings still counts as a prompt. Measured across all 3 profiles:
+# 160 x "[Request interrupted by user]", 38 x "[Request interrupted by user for tool use]".
+INTERRUPT_MARKERS = (
+    "[Request interrupted by user]",
+    "[Request interrupted by user for tool use]",
+)
+
 _PROFILE_DIR_RE = re.compile(r"^\d+-(.+)$")
 
 
@@ -85,8 +94,11 @@ def operator_messages(entries):
     Excludes (Review Focus 3): isMeta entries (skill-loading injections etc, whether their
     content is a list or a string), compaction summaries (isCompactSummary), tool results
     (message.content a list not leading with a "text" item — so not recognized by
-    _message_text at all), and messages wrapped in <command-name>, <local-command-stdout>
-    or <local-command-caveat> (slash-command scaffolding, not the operator's own words).
+    _message_text at all), messages wrapped in <command-name>, <local-command-stdout> or
+    <local-command-caveat> (slash-command scaffolding, not the operator's own words), and
+    (R25) operator-interrupt markers (see operator_interrupts() — the same text extraction
+    and the same strip()-equality check decide both functions, so there is exactly one place
+    that decision is made).
     """
     kept = []
     for entry in entries:
@@ -99,9 +111,36 @@ def operator_messages(entries):
         text = _message_text(entry)
         if text is None:
             continue
+        if text.strip() in INTERRUPT_MARKERS:
+            continue
         if text.startswith(COMMAND_WRAPPER_TAGS):
             continue
         kept.append(entry)
+    return kept
+
+
+def operator_interrupts(entries):
+    """R25: return exactly the entries operator_messages() drops as interrupt markers.
+
+    Same structural filters as operator_messages() (type=="user", not isMeta, not a
+    compaction summary) and the same _message_text() extraction — this and
+    operator_messages() are the only two places INTERRUPT_MARKERS is consulted, and both
+    consult it via strip()-equality, never substring, so a prompt that merely quotes a
+    marker is excluded here and kept there.
+    """
+    kept = []
+    for entry in entries:
+        if entry.get("type") != "user":
+            continue
+        if entry.get("isMeta"):
+            continue
+        if entry.get("isCompactSummary"):
+            continue
+        text = _message_text(entry)
+        if text is None:
+            continue
+        if text.strip() in INTERRUPT_MARKERS:
+            kept.append(entry)
     return kept
 
 

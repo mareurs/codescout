@@ -97,6 +97,68 @@ class OperatorMessages(unittest.TestCase):
         got = transcripts.operator_messages([assistant, real_prompt])
         self.assertEqual(got, [real_prompt])
 
+    def test_an_interrupt_marker_is_not_an_operator_message(self):
+        # R25: both known literals, in both observed content shapes (plain string, and a
+        # list leading with a {"type": "text"} item) — none of these are operator prompts.
+        marker_string_plain = _entry(
+            "u1", "2026-09-20T10:00:00Z", "s1", content="[Request interrupted by user]",
+        )
+        marker_string_tool = _entry(
+            "u2", "2026-09-20T10:00:01Z", "s1",
+            content="[Request interrupted by user for tool use]",
+        )
+        marker_array_plain = _entry(
+            "u3", "2026-09-20T10:00:02Z", "s1",
+            content=[{"type": "text", "text": "[Request interrupted by user]"}],
+        )
+        marker_array_tool = _entry(
+            "u4", "2026-09-20T10:00:03Z", "s1",
+            content=[{"type": "text", "text": "[Request interrupted by user for tool use]"}],
+        )
+        # Whitespace around the marker (strip()-equality, not raw equality) is still a marker.
+        marker_padded = _entry(
+            "u5", "2026-09-20T10:00:04Z", "s1", content="  [Request interrupted by user]  \n",
+        )
+        real_prompt = _entry("u6", "2026-09-20T10:00:05Z", "s1", content="please fix the bug")
+
+        entries = [
+            marker_string_plain, marker_string_tool, marker_array_plain, marker_array_tool,
+            marker_padded, real_prompt,
+        ]
+        got = transcripts.operator_messages(entries)
+        self.assertEqual(got, [real_prompt])
+
+    def test_a_prompt_quoting_the_marker_is_still_a_prompt(self):
+        # R25: exact equality only, never substring — a prompt that merely quotes the
+        # marker text stays a real prompt.
+        quoting_prompt = _entry(
+            "u1", "2026-09-20T10:00:00Z", "s1",
+            content="why did you print [Request interrupted by user]?",
+        )
+        got = transcripts.operator_messages([quoting_prompt])
+        self.assertEqual(got, [quoting_prompt])
+        self.assertEqual(transcripts.operator_interrupts([quoting_prompt]), [])
+
+
+class OperatorInterrupts(unittest.TestCase):
+    def test_operator_interrupts_returns_exactly_the_markers(self):
+        real_prompt = _entry("u1", "2026-09-20T10:00:00Z", "s1", content="do the thing")
+        marker_string = _entry(
+            "u2", "2026-09-20T10:00:01Z", "s1", content="[Request interrupted by user]",
+        )
+        marker_array = _entry(
+            "u3", "2026-09-20T10:00:02Z", "s1",
+            content=[{"type": "text", "text": "[Request interrupted by user for tool use]"}],
+        )
+        quoting_prompt = _entry(
+            "u4", "2026-09-20T10:00:03Z", "s1",
+            content="the marker text is [Request interrupted by user], see?",
+        )
+
+        entries = [real_prompt, marker_string, marker_array, quoting_prompt]
+        got = transcripts.operator_interrupts(entries)
+        self.assertEqual(got, [marker_string, marker_array])
+
 
 class ReadJsonl(unittest.TestCase):
     def test_a_truncated_last_line_is_skipped_and_counted(self):
