@@ -299,7 +299,12 @@ mod tests {
 
     #[test]
     fn a_tool_use_id_is_read_from_its_meta_key() {
-        let m = meta_map(&[(TOOL_USE_ID_META_KEY, serde_json::json!(" toolu_01ABC "))]);
+        // Literal wire key, not `TOOL_USE_ID_META_KEY` — this pins the const's
+        // VALUE. Building `_meta` from the const itself would leave this test
+        // green even if the const drifted from what Claude Code actually
+        // sends (e.g. to "claudecode/tool_use_id"): production and fixture
+        // would drift together and every row would silently record NULL.
+        let m = meta_map(&[("claudecode/toolUseId", serde_json::json!(" toolu_01ABC "))]);
         assert_eq!(
             tool_use_id_from_meta(Some(&m)),
             Some("toolu_01ABC".to_string())

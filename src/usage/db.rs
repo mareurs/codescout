@@ -190,11 +190,15 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         .prepare("SELECT tool_use_id FROM tool_calls LIMIT 0")
         .is_ok();
     if !has_tool_use_id {
-        conn.execute_batch(
-            "ALTER TABLE tool_calls ADD COLUMN tool_use_id TEXT;
-             CREATE INDEX IF NOT EXISTS idx_tool_calls_tool_use_id ON tool_calls(tool_use_id);",
-        )?;
+        conn.execute_batch("ALTER TABLE tool_calls ADD COLUMN tool_use_id TEXT;")?;
     }
+    // Unconditional, unlike the ALTER above: if a prior run added the column
+    // but crashed before this line, a later `open_db` must still repair the
+    // missing index rather than skip it forever because `has_tool_use_id` now
+    // reads true. `IF NOT EXISTS` makes this safe to run on every open.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_tool_calls_tool_use_id ON tool_calls(tool_use_id);",
+    )?;
 
     backfill_legacy_rows(&conn, &project_root.to_string_lossy())?;
 
@@ -1270,12 +1274,49 @@ mod tests {
 
     #[test]
     fn open_db_adds_tool_use_id_to_a_pre_migration_table() {
-        // `tmp()` builds `tool_calls` via `open_db`, whose base `CREATE TABLE` (above)
-        // predates `tool_use_id` — every fresh open exercises the same
-        // probe-then-`ALTER TABLE` path a real pre-existing db file would.
-        let (_dir, conn) = tmp();
+        // Build a REAL pre-migration `tool_calls` table by hand — the columns
+        // as they stood before this task (matching `open_db`'s base
+        // `CREATE TABLE` above), with no `tool_use_id` column and no index —
+        // so the probe-then-ALTER path is actually exercised. `tmp()` calls
+        // `open_db` first, which bakes every column (including
+        // `tool_use_id`) into a fresh `CREATE TABLE IF NOT EXISTS`, so it
+        // never reaches the `ALTER TABLE` branch at all.
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join(".codescout").join("usage.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        {
+            let pre = Connection::open(&db_path).unwrap();
+            pre.execute_batch(
+                "CREATE TABLE tool_calls (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tool_name  TEXT NOT NULL,
+                    called_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
+                    latency_ms INTEGER NOT NULL,
+                    outcome    TEXT NOT NULL,
+                    overflowed INTEGER NOT NULL DEFAULT 0,
+                    error_msg  TEXT
+                );",
+            )
+            .unwrap();
+        }
+
+        let conn = open_db(dir.path()).unwrap();
+
         conn.execute("SELECT tool_use_id FROM tool_calls LIMIT 0", [])
             .unwrap();
+
+        let has_index: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type = 'index' AND name = 'idx_tool_calls_tool_use_id'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            has_index, 1,
+            "migration must create idx_tool_calls_tool_use_id"
+        );
     }
 
     #[test]
