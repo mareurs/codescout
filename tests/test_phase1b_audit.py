@@ -9,6 +9,7 @@ import json
 import pathlib
 import random
 import re
+import sys
 import tempfile
 import unittest
 
@@ -27,6 +28,7 @@ da = load("draw_audit_sample")
 li = load("label_items")
 sa = load("score_audit")
 rl = load("run_labellers")
+gc = load("gen_codex_clean")
 
 MENU = ["a_rule", "b_rule", "c_rule"]
 
@@ -335,6 +337,68 @@ class Labellers(unittest.TestCase):
             (pathlib.Path(tmp) / "CLAUDE.md").write_text("rules")
             with self.assertRaises(SystemExit):
                 rl.check_channel(tmp)
+
+
+class CodexClean(unittest.TestCase):
+    good = [{"id": "codex-clean-1", "text": "one"}, {"id": "codex-clean-2", "text": "two"},
+            {"id": "codex-clean-3", "text": "three"}]
+
+    def test_check_texts(self):
+        self.assertIsNone(gc.check_texts(self.good))
+        # Each bad case keeps the other objects valid, so only the check it names can refuse it.
+        for bad in (self.good[:2],                                             # one missing
+                    self.good + [self.good[0]],                                # one twice
+                    self.good[:2] + [{"id": "codex-clean-4", "text": "x"}],     # not a registered id
+                    self.good[:2] + [{"id": "codex-clean-3", "text": "  "}],    # blank text
+                    self.good[:2] + [{"id": "codex-clean-3"}],                 # no text
+                    # LOAD-BEARING: no id at all. The final ids comparison also refuses an unknown
+                    # id, but without the id check a missing one raises KeyError at o["id"],
+                    # crashing the run instead of refusing it (observed under that mutation).
+                    self.good[:2] + [{"text": "x"}]):
+            self.assertIsNotNone(gc.check_texts(bad), bad)
+
+    def generate(self, outcomes):
+        calls = []
+
+        def call(attempt):
+            calls.append(attempt)
+            out = outcomes[attempt - 1]
+            if isinstance(out, Exception):
+                raise out
+            return out
+        with tempfile.TemporaryDirectory() as tmp:
+            out = pathlib.Path(tmp) / "codex-clean-texts.jsonl"
+            rc, reasons = gc.generate(call, out, pathlib.Path(tmp))
+            written = out.read_text() if out.exists() else None
+            files = sorted(p.name for p in pathlib.Path(tmp).iterdir())
+        return rc, reasons, written, calls, files
+
+    def test_re_run_once_then_written_in_id_order(self):
+        # LOAD-BEARING: the valid answer comes back out of order; the file must be in id order.
+        raw = "\n".join(json.dumps(o) for o in self.good[::-1])
+        rc, reasons, written, calls, files = self.generate([RuntimeError("down"), raw])
+        self.assertEqual((rc, calls), (0, [1, 2]))
+        self.assertEqual([json.loads(line)["id"] for line in written.splitlines()], list(gc.IDS))
+        self.assertIn("a1.err", files)
+
+    def test_two_failures_write_nothing(self):
+        raw = "\n".join(json.dumps(o) for o in self.good[:2])
+        rc, reasons, written, calls, _ = self.generate([raw, raw, raw])
+        self.assertEqual((rc, written, calls), (4, None, [1, 2]))
+        self.assertEqual(len(reasons), 2)
+
+    def test_refuses_to_generate_twice(self):
+        saved, saved_argv = gc.ct.CODEX_CLEAN, sys.argv
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                gc.ct.CODEX_CLEAN = pathlib.Path(tmp) / "codex-clean-texts.jsonl"
+                sys.argv = ["gen_codex_clean.py", "--dry-run"]
+                self.assertEqual(gc.main(), 0)                  # absent: a dry run proceeds
+                gc.ct.CODEX_CLEAN.write_text("{}\n")
+                with self.assertRaises(SystemExit):             # present: refused, even a dry run
+                    gc.main()
+            finally:
+                gc.ct.CODEX_CLEAN, sys.argv = saved, saved_argv
 
 
 if __name__ == "__main__":
