@@ -202,6 +202,8 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
 
   *Corrected at registration:* the draft listed mining after the audit labelling, but the candidates are labelled in the same runs, so they are drawn first.
 
+- **Added after registration, 2026-09-26:** `phase1b/gen_codex_clean.py` (`58c91dad`), the Step 2 generator the registration did not commit. It implements the registered prompt and channel, edits no registered script, and has not run.
+
 **What Stage 2 tests.** Stage 1 changes optimisation only, and Stage 1's registered prediction 5 expects its learned runs to keep firing on other rules' text. Stage 2 adds the training change this draft was built around, audited cross-rule negatives, and asks two questions:
 1. Do the negatives stop that firing without costing own-rule detection?
 2. Does the result pass the gate?
