@@ -15,7 +15,7 @@ entry_prefix:
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
 entry_high_water_DWF: 10
-entry_high_water_DCS: 9
+entry_high_water_DCS: 10
 ---
 
 # Deep-agent workflow observations and session coverage
@@ -104,6 +104,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DWF-10 | 2026-09-24 | workflow | enrichment | 571eb3d6/review-model-vs-context |
 | DCS-8 | 2026-09-24 | coverage | session-receipt | 938e2953/gate-cache-disk |
 | DCS-9 | 2026-09-25 | coverage | session-receipt | e4fbc7ef/whole-session |
+| DCS-10 | 2026-09-26 | coverage | session-receipt | 571eb3d6/post-compaction-2026-09-24-to-26 |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -553,6 +554,23 @@ the mechanism stays an untested hypothesis with its test named in the bug file.
 - the upstream report, drafted only, since filing waits on the operator.
 
 No new DWF or DCX was opened: this was follow-on work, not first-eligible. **One new capture gap:** a probe of `git commit -p` hung on its interactive prompt and was killed by the 60 s timeout. No process was left behind, and it is recorded as that bug's `unverified:` caveat |
+
+## DCS-10 — Session 571eb3d6 — Stage 2 freeze through Stage 4, phase-1b Stage 1 and the Stage 2 draft, fourth and fifth post-compaction intervals
+
+**Valid:** dated 2026-09-26
+
+| Field | Record |
+|---|---|
+| Session / principal / collector | Session `571eb3d6-c879-43f6-b3f9-5a51e744e1af`. Principal: the operator, via this coordinating session. Collector: the same session. Model: claude-opus-5.5. Resumed across profiles within the interval (`~/.claude-sdd`, then `~/.claude-kat` after a process restart on 2026-09-25) |
+| Observed interval (UTC) | From after DCS-7 to handoff: 2026-09-24 15:03 (commit `9c0d2505`) to 2026-09-26 04:49 (commit `91221154`). The interval holds at least two compactions. This receipt is written from the current stretch's own record and the compaction summaries of the earlier ones |
+| Workspace | `/home/marius/work/claude/codescout`, branch `experiments`, shared checkout. Peer edits left untouched throughout: `docs/trackers/2026-09-21-codex-telemetry-research-handoff.md`, `.codescout/audit/*`, `docs/issues/2026-08-31-cross-account-agents-cannot-see-each-other.md`, `AI` |
+| Coverage | `partial`, retrospective |
+| DCX routine / enrichment | None recorded. This session's routine sample was already `missed-capture` in DCS-2. Context choices made without a pre-action snapshot: re-summoning the Snow Pheasant (LLM lens) before drafting phase-1b Stage 2; reading the whole Stage-2+ draft before editing it; and reading `freeze_stage2.py` before copying its held-out filter, which led to extracting the filter (`c2ba18cb`) rather than copying it |
+| DWF routine / enrichment | Enrichment: DWF-10 (`91893139`, the review model-vs-context experiment). No routine sample. Outcomes live in the eval docs, about 75 commits from `9c0d2505` to `91221154`: the Stage 2 labelling and freeze; Stage 3 training and the Stage 4 gate (no trained arm passes; the local route stopped under its rule); the post-stop diagnostics; phase-1b Stage 1 registered, run and read (both recipes stable, `s1-r1` carried); the Stage 2 draft with the operator's decisions; the cue list and counterexample miner; `train_arm --cross/--extra-rows`; and the fixes from two Codex reviews |
+| Native / delegated / unobserved gaps | Research subagents (four, plus one on the injection formulation) and one forked subagent for the ML Training Takin update, in earlier stretches. Six phase-1b GPU training runs, their diagnose runs, and earlier Stage 3 runs, all as detached shell lanes. `codex exec` reviews run by the operator outside this session. None of these is in `usage.db` beyond the MCP calls that launched or read them |
+| Notable, for the review | Claims corrected before anything was built on them, each by re-reading the rows or the code: <br>• the direction of a pinned calibration temperature (lower bound, not upper); <br>• "the `d_semicolon` head learned yes-unless-`;`", refuted by scoring other rules' sentences: 14 of 14 containing `;` fire; <br>• "fires on 100% of other rules' text", re-read as mostly a threshold at 2.2e-13 set on own pairs; <br>• identical own-negative firing counts across two runs, traced to thresholds chosen on the same fold and filed as `2bac7e0a27fbc392`; <br>• two count errors in the Stage 2 draft, caught before commit. <br>Externally, the operator's Codex review found the miner compared new candidates only with frozen data (`8c17b1dbcf88a097`). It was fixed in `96b52f0c`, and 9 of 9 mutations are killed |
+| Unresolved pending entries | None in this ledger. Phase-1b Stage 2 is unregistered: a Step 4 script, all-cells AUC in the diagnose step, the Step 1 audit scripts and the predictions remain |
+| Collection overhead | About 10 minutes for this receipt, estimated |
 
 ## Template for new entries
 

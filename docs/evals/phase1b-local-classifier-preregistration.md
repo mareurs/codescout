@@ -179,6 +179,20 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
 
 **Status: draft, written while Stage 1's last seed was training.** It is registered only after § *Stage 1 results* is written and the open decisions below are settled. Steps 1–5 below are Stage 2's steps; this section states what changes in them.
 
+**Where registration stands, 2026-09-26:**
+- **Done:**
+  - Stage 1 results, and the recipe named (`c69a99e4`).
+  - The operator's decisions (`29506f12`).
+  - The cue list (`29506f12`).
+  - The counterexample miner, with its cross-fold fix after the Codex review (`ec12b2a1`, `96b52f0c`).
+  - `train_arm.py --cross` and `--extra-rows`, with their parity checks (`f566082c`).
+- **Remaining before registration:**
+  1. A Step 4 script, shared by arms B, N and NC. It computes calibration and thresholds over own plus admitted cross cells, and runs the pre-gate check. `fold-logits.json`'s `val_cross` and `cal_cross` are its input.
+  2. The diagnose step: add all-cells val AUC, and move own-negative firing to `cal`.
+  3. Step 1's scripts: `draw_audit_sample.py`, and the scorer that writes the admission file `--cross` reads (`{"admitted": [...], "masked": [{"unit", "head"}]}`). Both are committed before anything is drawn.
+  4. Fix the predictions, then register.
+- **Then, in order:** the Codex clean texts; the audit labelling of the sample, the clean texts and the counterexample candidates; mining; N and NC training; Steps 4 and 5.
+
 **What Stage 2 tests.** Stage 1 changes optimisation only, and Stage 1's registered prediction 5 expects its learned runs to keep firing on other rules' text. Stage 2 adds the training change this draft was built around, audited cross-rule negatives, and asks two questions:
 1. Do the negatives stop that firing without costing own-rule detection?
 2. Does the result pass the gate?
