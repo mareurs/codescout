@@ -395,7 +395,24 @@ Predictions 1–5 are the text committed in `2e4743e0`, before Step 4's smoke ru
 - **All 12 new clean texts survived both labellers:** the 3 swap texts, the 3 Codex texts, and 12 of 12 overall.
 - **No Step 2 stop rule fired.** The rules require at least 2 of 3, 2 of 3 and 7 of 12.
 
-**Next, as registered:** N and NC training, three seeds each. Both take `--cross audit/admission.json`, and NC also takes `--extra-rows audit/counterexamples.jsonl`.
+**Step 3, launched 2026-09-26 at 11:57 UTC, before any Stage 2 result exists.**
+- **What runs:** N and NC, recipe `s1-r1`, seeds 20260935, 20260937 and 20260940.
+  - They run in two lanes on the RTX A5000, one per arm, three seeds in turn, as Stage 1 ran its two recipes.
+  - Runs are written outside the repo, under `~/work/claude/rule-tell-runs/phase1b-s2/`.
+  - `lanes.sh` refuses to reuse an existing run directory.
+- **Pinned in `commit.txt`:** HEAD `0ff91320` and the sha256s of the three input files.
+  - `train_arm.py` is unchanged since `f566082c`: `40decae62c77c462…`.
+  - `admission.json`: `447de4a5281dabaa…`.
+  - `counterexamples.jsonl`: `1afed05f59f9c9f3…`.
+- **Each run's start event records its inputs:**
+  - the 13 admitted heads and the 91 masked cells;
+  - for NC, 111 / 32 / 26 counterexample rows (train / val / cal).
+- **`question_asked` still trains its own term.** Step 3's first term covers every row's own rule, so the head stays in the model. It leaves the local menu at Step 4.
+- **Reading the training loss.** N and NC log the own term plus λ times the cross term, which starts at 2 ln 2 = 1.386 with a zero-initialised head. Stage 1's overshoot threshold (0.75 in epoch 0) was set for the own term alone and does not apply to this sum.
+- **Step 4 is queued behind training** (`step4.sh`).
+  - It starts only if all six runs exit 0.
+  - It scores all nine checkpoints on one cell set with `score_run.py`, checking B's three against their sha256 pins.
+  - Then it runs `step4.py` per run, then `--common`, writing to `phase1b/stage2/`.
 
 ## Step 1 — the cross-rule audit (decides which cells become negatives)
 
