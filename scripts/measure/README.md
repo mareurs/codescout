@@ -13,13 +13,16 @@ than re-deriving it.
   `usage` — one model completion is often split across several lines (thinking/text/tool_use),
   each carrying an identical `usage` payload, and naive per-line summing overcounts 2.1-2.6x.
   **Declined as a dependency for Stage 0**: it lives in llm-proxy behind this repo's
-  `.claude/skills/claude-traces` symlink, ships no test suite (the bug file's own "Tests added"
-  section says so), and its hardcoded `~/.claude`-only base is a separately filed, still-open
-  issue (`llm-proxy:docs/issues/2026-07-10-ccpy-config-dir-hardcoded-and-path-encoding.md`) — a
-  `CLAUDE_CONFIG_DIR` claim in `docs/PROBES.md` could not be independently re-verified against
-  the live script in this session, so it is recorded here as asserted-current rather than
-  confirmed. **Reuse the predicate**, not the tool: Stage 1's own turn/completion counting needs
-  the identical `message.id`-dedupe check, and should be validated against this bug file's two
+  `.claude/skills/claude-traces` symlink and ships no test suite (the bug file's own "Tests
+  added" section says so). Its `~/.claude`-only base is **not** an open issue — per
+  `docs/PROBES.md`'s claude-traces row, that limitation "has since been fixed", and this was
+  independently re-verified against the live script in this session:
+  `/home/marius/agents/llm-proxy/.claude/skills/claude-traces/scripts/cc.py:23` reads
+  `CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude"))`, so the
+  script already honors `CLAUDE_CONFIG_DIR` and is reachable across all three profiles on this
+  machine, not just `~/.claude`. **Reuse the predicate**, not the tool: Stage 1's own
+  turn/completion counting needs the identical `message.id`-dedupe check, and should be
+  validated against this bug file's two
   reproductions ($5.3861 on session `23b22760`, $108.4389 on `55515bc5`) as a positive control
   before being trusted on the frozen corpus.
 

@@ -206,17 +206,31 @@ def freeze(corpus_id, sources, out_root):
 
 
 def verify(corpus_dir):
-    """Recompute sha256 for every file `manifest.json` lists; return the relative paths that
-    are missing or no longer match. Empty list means the corpus is intact."""
+    """Recompute sha256 for every file `manifest.json` lists, AND walk `corpus_dir` for any file
+    on disk the manifest does not list (except `manifest.json` itself — R1: it is never a corpus
+    member). Returns the sorted relative paths that are missing, changed, or unexpectedly added.
+    Empty list means the corpus is intact."""
     corpus_dir = pathlib.Path(corpus_dir)
     manifest = json.loads((corpus_dir / "manifest.json").read_text())
 
-    mismatches = []
-    for rel, meta in manifest.get("files", {}).items():
+    known = manifest.get("files", {})
+    mismatches = set()
+
+    for rel, meta in known.items():
         path = corpus_dir / rel
         if not path.is_file():
-            mismatches.append(rel)
+            mismatches.add(rel)
             continue
         if _sha256_of(path) != meta.get("sha256"):
-            mismatches.append(rel)
+            mismatches.add(rel)
+
+    for path in corpus_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(corpus_dir).as_posix()
+        if rel == "manifest.json":
+            continue
+        if rel not in known:
+            mismatches.add(rel)
+
     return sorted(mismatches)

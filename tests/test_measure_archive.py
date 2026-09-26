@@ -123,6 +123,104 @@ class FreezeAndVerify(unittest.TestCase):
         self.assertNotIn("manifest.json", manifest["files"])
         corpus_dir = self.out_root / manifest["corpus_id"]
         self.assertTrue((corpus_dir / "manifest.json").exists())
+    def test_multi_profile_transcripts_are_kept_distinct(self):
+        # Review round 1, finding 1: a mutation breaking `profile_name` derivation (wrong
+        # parent depth, or the "profile" fallback always firing) must not leave this green.
+        # Two distinct synthetic profile roots, same project slug, same-named session file.
+        tmp_path = pathlib.Path(self.tmp.name)
+        two_profile_root = tmp_path / "two_profiles"
+        dir_a = two_profile_root / ".claude-a" / "projects" / "p"
+        dir_b = two_profile_root / ".claude-b" / "projects" / "p"
+        dir_a.mkdir(parents=True)
+        dir_b.mkdir(parents=True)
+        (dir_a / "s1.jsonl").write_text('{"profile": "a"}\n')
+        (dir_b / "s1.jsonl").write_text('{"profile": "b"}\n')
+        sub_dir = dir_b / "s1" / "subagents"
+        sub_dir.mkdir(parents=True)
+        (sub_dir / "agent-x.jsonl").write_text('{"type": "assistant"}\n')
+
+        sources = dict(self.sources)
+        sources["transcript_dirs"] = [str(dir_a), str(dir_b)]
+        manifest = archive.freeze("c-multiprofile", sources, self.out_root)
+        corpus_dir = self.out_root / manifest["corpus_id"]
+
+        rels = [r for r in manifest["files"] if r.startswith("transcripts/")]
+        a_rels = [r for r in rels if ".claude-a" in r]
+        b_rels = [r for r in rels if ".claude-b" in r]
+        self.assertTrue(a_rels, "profile .claude-a's name must appear in a manifest files key")
+        self.assertTrue(b_rels, "profile .claude-b's name must appear in a manifest files key")
+
+        a_s1 = [r for r in a_rels if r.endswith("/s1.jsonl")]
+        b_s1 = [r for r in b_rels if r.endswith("/s1.jsonl")]
+        self.assertEqual(len(a_s1), 1)
+        self.assertEqual(len(b_s1), 1)
+        self.assertNotEqual(a_s1[0], b_s1[0])  # distinct destination paths — no overwrite
+
+        a_bytes = (corpus_dir / a_s1[0]).read_bytes()
+        b_bytes = (corpus_dir / b_s1[0]).read_bytes()
+        self.assertIn(b'"profile": "a"', a_bytes)
+        self.assertIn(b'"profile": "b"', b_bytes)
+        self.assertNotEqual(a_bytes, b_bytes)
+
+        self.assertEqual(manifest["counts"]["transcripts"], 2)
+        self.assertEqual(manifest["counts"]["subagent_transcripts"], 1)
+
+    def test_verify_names_an_added_file(self):
+        manifest = archive.freeze("c-added", self.sources, self.out_root)
+        corpus_dir = self.out_root / manifest["corpus_id"]
+        extra = corpus_dir / "transcripts" / "intruder.jsonl"
+        extra.parent.mkdir(parents=True, exist_ok=True)
+        extra.write_text('{"not": "in manifest"}\n')
+        self.assertEqual(archive.verify(corpus_dir), ["transcripts/intruder.jsonl"])
+
+    def test_verify_names_a_deleted_file(self):
+        manifest = archive.freeze("c-deleted", self.sources, self.out_root)
+        corpus_dir = self.out_root / manifest["corpus_id"]
+        target_rel = next(iter(manifest["files"]))
+        (corpus_dir / target_rel).unlink()
+        self.assertEqual(archive.verify(corpus_dir), [target_rel])
+
+    def test_usage_db_wal_rows_are_captured_by_backup_not_a_file_copy(self):
+        # R20 discriminator: rows committed in WAL mode but never checkpointed sit only in the
+        # `-wal` file alongside the main `.db` file. A plain `shutil.copy` of the main file alone
+        # would miss them (or find no `tool_calls` table at all); `sqlite3.Connection.backup`
+        # goes through SQLite's own consistent-snapshot machinery and must not.
+        tmp_path = pathlib.Path(self.tmp.name)
+        wal_db = tmp_path / "wal_usage.db"
+        conn = sqlite3.connect(str(wal_db))
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            "CREATE TABLE tool_calls (id INTEGER PRIMARY KEY, tool_name TEXT, session_id TEXT)"
+        )
+        rows = [
+            ("read_file", "s1"),
+            ("grep", "s1"),
+            ("doc", "s2"),
+            ("edit_code", "s2"),
+            ("symbols", "s3"),
+        ]
+        conn.executemany(
+            "INSERT INTO tool_calls (tool_name, session_id) VALUES (?, ?)", rows
+        )
+        conn.commit()
+        # Deliberately left OPEN and uncheckpointed: these rows sit in `wal_usage.db-wal`, not
+        # necessarily in `wal_usage.db` itself.
+        self.addCleanup(conn.close)
+
+        sources = dict(self.sources)
+        sources["usage_dbs"] = [str(wal_db)]
+        manifest = archive.freeze("c-wal", sources, self.out_root)
+        corpus_dir = self.out_root / manifest["corpus_id"]
+
+        frozen = next((corpus_dir / "usage_dbs").iterdir())
+        check_conn = sqlite3.connect(str(frozen))
+        try:
+            count = check_conn.execute("SELECT COUNT(*) FROM tool_calls").fetchone()[0]
+        finally:
+            check_conn.close()
+
+        self.assertEqual(count, len(rows))
+        self.assertEqual(manifest["counts"]["usage_rows"], len(rows))
 
 
 if __name__ == "__main__":
