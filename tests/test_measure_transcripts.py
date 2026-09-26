@@ -139,6 +139,71 @@ class OperatorMessages(unittest.TestCase):
         self.assertEqual(got, [quoting_prompt])
         self.assertEqual(transcripts.operator_interrupts([quoting_prompt]), [])
 
+    def test_task_notifications_are_excluded_three_shapes_plus_a_kept_prompt(self):
+        # R26: 1,409 of 4,528 real operator_messages() entries are harness task-
+        # notifications. Three shapes, each independently excluded, plus a real prompt
+        # carrying neither field (and not matching the text-prefix fallback) stays kept.
+        prompt_source_system = _entry(
+            "u1", "2026-09-20T10:00:00Z", "s1", content="some task update",
+        )
+        prompt_source_system["promptSource"] = "system"
+
+        origin_kind = _entry(
+            "u2", "2026-09-20T10:00:01Z", "s1",
+            content="2 background agents were stopped by the user: ...",
+        )
+        origin_kind["origin"] = {"kind": "task-notification"}
+
+        fallback_prefix = _entry(
+            "u3", "2026-09-20T10:00:02Z", "s1",
+            content="<task-notification>older-shaped notification</task-notification>",
+        )
+
+        real_prompt = _entry("u4", "2026-09-20T10:00:03Z", "s1", content="please review this")
+
+        entries = [prompt_source_system, origin_kind, fallback_prefix, real_prompt]
+        got = transcripts.operator_messages(entries)
+        self.assertEqual(got, [real_prompt])
+
+    def test_the_real_command_wrapper_order_is_excluded(self):
+        # R27: the real skill-command wrapper order is <command-message> FIRST, then
+        # <command-name> — 66 real entries in this exact order were missed by a
+        # <command-name>-only startswith check.
+        wrapped = _entry(
+            "u1", "2026-09-20T10:00:00Z", "s1",
+            content="<command-message>model</command-message>\n<command-name>/model</command-name>",
+        )
+        got = transcripts.operator_messages([wrapped])
+        self.assertEqual(got, [])
+
+    def test_a_prompt_mentioning_command_name_mid_sentence_stays_a_prompt(self):
+        # Guards against over-exclusion: only text that STARTS WITH a wrapper tag is
+        # excluded — mentioning <command-name> mid-sentence does not.
+        mentioning = _entry(
+            "u1", "2026-09-20T10:00:00Z", "s1",
+            content="can you explain what <command-name> means in the transcript format?",
+        )
+        got = transcripts.operator_messages([mentioning])
+        self.assertEqual(got, [mentioning])
+
+    def test_bare_slash_commands_are_excluded(self):
+        # R29: a bare slash command with no arguments (202 "/compact" in the real corpus)
+        # is harness scaffolding, not an operator prompt.
+        compact = _entry("u1", "2026-09-20T10:00:00Z", "s1", content="/compact")
+        clear = _entry("u2", "2026-09-20T10:00:01Z", "s1", content="/clear")
+        got = transcripts.operator_messages([compact, clear])
+        self.assertEqual(got, [])
+
+    def test_a_slash_command_with_arguments_is_kept(self):
+        # Guards against over-exclusion: BARE_SLASH_COMMAND_RE is anchored full-string, so
+        # a real prompt that happens to start with a slash-command-shaped token followed by
+        # more words is not a bare command.
+        prompt = _entry(
+            "u1", "2026-09-20T10:00:00Z", "s1", content="/review this function please",
+        )
+        got = transcripts.operator_messages([prompt])
+        self.assertEqual(got, [prompt])
+
 
 class OperatorInterrupts(unittest.TestCase):
     def test_operator_interrupts_returns_exactly_the_markers(self):
@@ -200,38 +265,59 @@ def _session_dir(corpus_dir, profile_dir, project_slug):
 
 
 class ForkDetection(unittest.TestCase):
-    def test_a_fork_is_excluded_and_its_original_kept(self):
+    def test_a_fork_is_reported_as_a_relation_and_its_original_kept(self):
+        # R28: forks are no longer excluded — see relations()/attribute_entries().
+        # Sid naming is deliberately a-orig/z-fork rather than orig-sid/fork-sid: lexically
+        # "a-orig" < "z-fork" is the SAME direction as which one is chronologically earlier
+        # (the real original) — the OPPOSITE of the old orig-sid/fork-sid naming (where
+        # "fork-sid" < "orig-sid" lexically). Flipping it means a mutation that substitutes
+        # sid/positional order for the real timestamp comparison produces a DIFFERENT
+        # (wrong) answer here, instead of coincidentally matching.
         with tempfile.TemporaryDirectory() as tmp:
             corpus_dir = _make_corpus(pathlib.Path(tmp))
             proj = _session_dir(corpus_dir, "00-.claude-kat", "p")
 
-            shared = [
-                _entry(f"u{i}", f"2026-09-20T10:00:0{i}Z", "orig-sid")
-                for i in range(5)
+            shared = [_entry(f"u{i}", f"2026-09-20T10:00:0{i}Z", "a-orig") for i in range(5)]
+            # Two more entries with the SAME uuid on both branches, extending the common
+            # prefix past FORK_PREFIX_LEN (5) — the real divergence is at index 7. If the
+            # divergence-scan loop were removed (defaulting to divergence==FORK_PREFIX_LEN),
+            # this would compare the wrong pair of entries and fail.
+            common_tail = [
+                _entry("c5", "2026-09-20T10:00:05Z", "a-orig"),
+                _entry("c6", "2026-09-20T10:00:06Z", "a-orig"),
             ]
-            # The original continues forward in real time right after the shared prefix.
-            orig_lines = shared + [_entry("u5-orig", "2026-09-20T10:00:05Z", "orig-sid",
-                                           content="continue original work")]
-            # The fork was replayed later — same first 5 uuids, but its own sessionId and a
+            # The original continues forward in real time right after the common prefix.
+            orig_lines = shared + common_tail + [
+                _entry("u7-orig", "2026-09-20T10:00:07Z", "a-orig", content="continue original work")
+            ]
+            fork_shared = [_entry(f"u{i}", f"2026-09-20T10:00:0{i}Z", "z-fork") for i in range(5)]
+            fork_common_tail = [
+                _entry("c5", "2026-09-20T10:00:05Z", "z-fork"),
+                _entry("c6", "2026-09-20T10:00:06Z", "z-fork"),
+            ]
+            # The fork was replayed later — same shared prefix, but its own sessionId and a
             # later-timestamped divergent entry.
-            fork_shared = [
-                _entry(f"u{i}", f"2026-09-20T10:00:0{i}Z", "fork-sid")
-                for i in range(5)
+            fork_lines = fork_shared + fork_common_tail + [
+                _entry("u7-fork", "2026-09-21T09:00:00Z", "z-fork", content="branch from the replay")
             ]
-            fork_lines = fork_shared + [_entry("u5-fork", "2026-09-21T09:00:00Z", "fork-sid",
-                                                content="branch from the replay")]
 
-            _write_lines(proj / "orig-sid.jsonl", orig_lines)
-            _write_lines(proj / "fork-sid.jsonl", fork_lines)
+            _write_lines(proj / "a-orig.jsonl", orig_lines)
+            _write_lines(proj / "z-fork.jsonl", fork_lines)
 
             sess = transcripts.sessions(corpus_dir)
-            self.assertEqual({s.sid for s in sess}, {"orig-sid", "fork-sid"})
+            self.assertEqual({s.sid for s in sess}, {"a-orig", "z-fork"})
 
             excl = transcripts.exclusions(sess, set())
-            kept_key = "[.]claude-kat/orig-sid".replace("[.]", ".")
-            fork_key = ".claude-kat/fork-sid"
-            self.assertNotIn(kept_key, excl)
-            self.assertEqual(excl.get(fork_key), "fork-of:orig-sid")
+            rels = transcripts.relations(sess)
+            kept_key = ".claude-kat/a-orig"
+            fork_key = ".claude-kat/z-fork"
+
+            # R28(i): forks are never an exclusion reason anymore.
+            self.assertEqual(excl, {})
+
+            # R28(ii): the relationship is reported instead, oriented correctly.
+            self.assertEqual(rels.get(fork_key), "fork-of:" + kept_key)
+            self.assertNotIn(kept_key, rels)
 
     def test_no_false_fork_when_first_uuids_differ(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -244,6 +330,130 @@ class ForkDetection(unittest.TestCase):
             sess = transcripts.sessions(corpus_dir)
             excl = transcripts.exclusions(sess, set())
             self.assertEqual(excl, {})
+            # R28: no false relation either — first 5 uuids differ, so this isn't a fork pair.
+            self.assertEqual(transcripts.relations(sess), {})
+
+
+class AttributeEntries(unittest.TestCase):
+    def test_a_fork_pairs_shared_prefix_goes_to_the_longer_transcript(self):
+        # R28(iii): a fork pair diverging right at FORK_PREFIX_LEN — the shared prefix is
+        # attributed to whichever copy has MORE total operator-message uuids, and each
+        # branch's unique tail stays with its own copy. None lost, none double-counted.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-kat", "p")
+
+            shared = [
+                _entry(f"u{i}", f"2026-09-20T10:00:0{i}Z", "orig-a", content=f"shared prompt {i}")
+                for i in range(5)
+            ]
+            a_only = [
+                _entry("u5-a", "2026-09-20T10:00:05Z", "orig-a", content="a tail 1"),
+                _entry("u6-a", "2026-09-20T10:00:06Z", "orig-a", content="a tail 2"),
+            ]
+            b_shared = [
+                _entry(f"u{i}", f"2026-09-20T10:00:0{i}Z", "fork-b", content=f"shared prompt {i}")
+                for i in range(5)
+            ]
+            b_only = [
+                _entry("u5-b", "2026-09-21T09:00:00Z", "fork-b", content="b tail 1"),
+                _entry("u6-b", "2026-09-21T09:00:01Z", "fork-b", content="b tail 2"),
+                _entry("u7-b", "2026-09-21T09:00:02Z", "fork-b", content="b tail 3"),
+            ]
+            _write_lines(proj / "orig-a.jsonl", shared + a_only)
+            _write_lines(proj / "fork-b.jsonl", b_shared + b_only)
+
+            sess = transcripts.sessions(corpus_dir)
+            attrib = transcripts.attribute_entries(sess, {})
+
+            cid_a = ".claude-kat/orig-a"
+            cid_b = ".claude-kat/fork-b"
+            # orig-a has 7 total uuids, fork-b has 8 — fork-b is longer, so it owns the
+            # shared prefix.
+            for i in range(5):
+                self.assertEqual(attrib[f"u{i}"], cid_b)
+            self.assertEqual(attrib["u5-a"], cid_a)
+            self.assertEqual(attrib["u6-a"], cid_a)
+            self.assertEqual(attrib["u5-b"], cid_b)
+            self.assertEqual(attrib["u6-b"], cid_b)
+            self.assertEqual(attrib["u7-b"], cid_b)
+            self.assertEqual(len(attrib), 10)
+
+    def test_a_near_duplicate_pair_shaped_like_the_real_corpus_counts_shared_prompts_once(self):
+        # Shaped like the real .claude/dcf4beb1 vs .claude/66523284 pair: a deep shared run
+        # (beyond FORK_PREFIX_LEN) with a small unique tail on EACH side. Every operator
+        # prompt is attributed exactly once; none is lost.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude", "p")
+
+            shared = [
+                _entry(f"s{i}", f"2026-09-20T10:00:{i:02d}Z", "small-orig", content=f"shared {i}")
+                for i in range(14)
+            ]
+            small_only = [
+                _entry(f"small-tail-{i}", f"2026-09-20T10:00:{14 + i:02d}Z", "small-orig",
+                       content=f"small tail {i}")
+                for i in range(3)
+            ]
+            big_shared = [
+                _entry(f"s{i}", f"2026-09-20T10:00:{i:02d}Z", "big-fork", content=f"shared {i}")
+                for i in range(14)
+            ]
+            big_only = [
+                _entry(f"big-tail-{i}", f"2026-09-21T09:00:{i:02d}Z", "big-fork",
+                       content=f"big tail {i}")
+                for i in range(5)
+            ]
+            _write_lines(proj / "small-orig.jsonl", shared + small_only)
+            _write_lines(proj / "big-fork.jsonl", big_shared + big_only)
+
+            sess = transcripts.sessions(corpus_dir)
+            attrib = transcripts.attribute_entries(sess, {})
+
+            cid_small = ".claude/small-orig"
+            cid_big = ".claude/big-fork"
+            # big-fork (14 + 5 = 19 uuids) outsizes small-orig (14 + 3 = 17), so it owns the
+            # 14-entry shared run; each side's own tail stays with it.
+            for i in range(14):
+                self.assertEqual(attrib[f"s{i}"], cid_big)
+            for i in range(3):
+                self.assertEqual(attrib[f"small-tail-{i}"], cid_small)
+            for i in range(5):
+                self.assertEqual(attrib[f"big-tail-{i}"], cid_big)
+            self.assertEqual(len(attrib), 14 + 3 + 5)
+
+    def test_a_pure_copy_under_a_new_sid_keeps_zero_entries(self):
+        # A wholly different sessionId (not an R22 same-sid case) whose transcript is a
+        # byte-for-byte copy of another's — same uuids, same timestamps, zero unique content
+        # of its own. Tied uuid COUNT and tied first_ts against the original, so the
+        # tie-break falls to copy_id: "a-original" sorts before "z-purecopy", so the copy
+        # claims none of the shared uuids.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-kat", "p")
+
+            original_lines = [
+                _entry(f"p{i}", f"2026-09-20T10:00:0{i}Z", "a-original", content=f"prompt {i}")
+                for i in range(5)
+            ]
+            copy_lines = [
+                _entry(f"p{i}", f"2026-09-20T10:00:0{i}Z", "z-purecopy", content=f"prompt {i}")
+                for i in range(5)
+            ]
+            _write_lines(proj / "a-original.jsonl", original_lines)
+            _write_lines(proj / "z-purecopy.jsonl", copy_lines)
+
+            sess = transcripts.sessions(corpus_dir)
+            attrib = transcripts.attribute_entries(sess, {})
+
+            cid_original = ".claude-kat/a-original"
+            cid_copy = ".claude-kat/z-purecopy"
+            for i in range(5):
+                self.assertEqual(attrib[f"p{i}"], cid_original)
+            copy_owned = [u for u, owner in attrib.items() if owner == cid_copy]
+            self.assertEqual(copy_owned, [])
+            self.assertEqual(len(attrib), 5)
 
 
 class SpecExclusions(unittest.TestCase):
@@ -337,16 +547,53 @@ class SameSessionAcrossProfiles(unittest.TestCase):
             )
             self.assertNotIn(".claude-kat/div-sid", excl)
 
+    def test_the_longer_copy_can_be_in_the_lexically_earlier_profile(self):
+        # Both cases above put the longer copy in .claude-kat (lexically LATER than
+        # .claude-sdd) — a "keep the later profile" mutation would pass both undetected.
+        # Here the longer copy is in .claude (lexically EARLIER than .claude-sdd), so such a
+        # mutation picks the wrong (shorter) copy as keeper.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            early_proj = _session_dir(corpus_dir, "00-.claude", "p")
+            late_proj = _session_dir(corpus_dir, "01-.claude-sdd", "p")
+
+            base = [_entry(f"u{i}", f"2026-09-20T10:00:0{i}Z", "cross-sid") for i in range(5)]
+            early_lines = base + [
+                _entry("early-only-1", "2026-09-20T10:00:05Z", "cross-sid"),
+                _entry("early-only-2", "2026-09-20T10:00:06Z", "cross-sid"),
+            ]
+            late_lines = base + [_entry("late-only", "2026-09-20T10:00:05Z", "cross-sid")]
+
+            _write_lines(early_proj / "cross-sid.jsonl", early_lines)
+            _write_lines(late_proj / "cross-sid.jsonl", late_lines)
+
+            sess = transcripts.sessions(corpus_dir)
+            excl = transcripts.exclusions(sess, set())
+
+            self.assertEqual(
+                excl.get(".claude-sdd/cross-sid"), "divergent-duplicate-of:.claude/cross-sid"
+            )
+            self.assertNotIn(".claude/cross-sid", excl)
+
 
 class WriteExclusions(unittest.TestCase):
     def test_write_exclusions_updates_manifest_preserving_other_keys(self):
         with tempfile.TemporaryDirectory() as tmp:
             corpus_dir = _make_corpus(pathlib.Path(tmp))
+            before = json.loads((corpus_dir / "manifest.json").read_text())
+
             transcripts.write_exclusions(
                 corpus_dir, {".claude-kat/b": "sdk-cli", ".claude-kat/a": "scratchpad-project"}
             )
             manifest = json.loads((corpus_dir / "manifest.json").read_text())
-            self.assertEqual(manifest["corpus_id"], "c-test")
+
+            # R1(update): EVERY pre-existing key survives write_exclusions unchanged, not
+            # just corpus_id — "exclusions" is the one key write_exclusions is meant to change.
+            for key, value in before.items():
+                if key == "exclusions":
+                    continue
+                self.assertEqual(manifest.get(key), value, f"key {key!r} was not preserved")
+
             self.assertEqual(
                 manifest["exclusions"],
                 [
