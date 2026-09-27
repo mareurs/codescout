@@ -14,7 +14,6 @@ opened: 2026-09-02
 owner: marius
 related: []
 severity: high
-unverified: 'TRACKED 5820a75840dd2d52 — The PRECONDITION is verified at the bytes; the ALLOCATION is not. Both files now declare entry_prefix (T / I) and a matching entry_high_water, read back from disk. But no append_entry was run against either, because a successful call allocates a real id and writes a real entry, and that is a content decision rather than a probe. So the claim ''append_entry now works here'' rests on allocate_entry_id''s frontmatter check being the only thing that was failing — read at augmentation.rs:971-983, not observed. The next person to append verifies it for free; if it still refuses, the cause is downstream of the declaration and this record is reopened rather than re-derived. No regression test either: the durable form is a doc-to-code join asserting that every tracker with an append_entry recipe in docs/TAXONOMY.md declares an entry_prefix, which is IC-11''s mechanizable sub-shape and is not written.'
 ---
 
 # BUG: T-N and I-N have no open append path — both documented routes refuse, leaving only the one that destroys the collection
@@ -193,6 +192,8 @@ recurs elsewhere: `test-escape-hardening.md`'s own **augmentation prompt** instr
 `artifact(append_entry, entry_collection="interventions", id_prefix="I")`. So the artifact
 was serving the instruction that its own frontmatter made impossible — a fourth place to
 check when auditing whether a documented route still exists.
+
+**Resolved 2026-09-27; the `unverified:` caveat is discharged, both halves.** The regression-test half now exists: `every_taxonomy_append_entry_recipe_is_one_the_code_accepts` in `src/librarian/tools/append_entry.rs` (`8fd92e0a`, residual `96b2b1b9a25bb1b0`). The allocation half is moot for these two ledgers, and the root cause above is worth reading with that in mind: T and I are PARAMS ledgers (`entry_collection` `observations` / `interventions`), and at HEAD the params allocator reads no `entry_prefix` at all — only the prose path does (`bug-fix-session-log:F-176`). Whether the params path read one on 2026-09-02, when this record inferred the refusal, is not established. Entries `T-33` (`dd9abd25`, 2026-09-04) and `I-9` (`9c82bda4`, 2026-09-07) were added after the declaration.
 ## References
 
 - `src/librarian/catalog/augmentation.rs:971-983` — the refusal

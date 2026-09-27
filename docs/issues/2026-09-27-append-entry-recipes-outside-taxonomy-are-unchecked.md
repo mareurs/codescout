@@ -15,7 +15,7 @@ tags:
 
 ## Summary
 
-The TAXONOMY recipe gate (`every_taxonomy_append_entry_recipe_is_one_the_code_accepts`, in `src/librarian/tools/append_entry.rs`) reads only the *Main taxonomy* table of `docs/TAXONOMY.md`. Three other surfaces also route writers to `append_entry` and are unchecked: `CLAUDE.md`, the committed augmentation-sidecar prompts under `docs/augmentations/`, and each ledger's own template section. The parent of residual `5820a75840dd2d52` found a sidecar prompt (test-escape-hardening's) instructing a call that its own frontmatter made impossible at the time.
+The TAXONOMY recipe gate (`every_taxonomy_append_entry_recipe_is_one_the_code_accepts`, in `src/librarian/tools/append_entry.rs`) reads only the *Main taxonomy* table of `docs/TAXONOMY.md`. Three other surfaces also route writers to `append_entry` and are unchecked: `CLAUDE.md`, the committed augmentation-sidecar prompts under `docs/augmentations/`, and each ledger's own template section. The parent of residual `96b2b1b9a25bb1b0` found a sidecar prompt (test-escape-hardening's) instructing a call that its own frontmatter made impossible at the time.
 
 ## Fix
 

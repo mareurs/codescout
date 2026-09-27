@@ -1,5 +1,5 @@
 ---
-id: '5820a75840dd2d52'
+id: 96b2b1b9a25bb1b0
 kind: bug
 status: fixed
 title: 'RESIDUAL: Write the doc-to-code test asserting every tracker with an append_entry recipe in docs/TAXONOMY.md declares entry_prefix'

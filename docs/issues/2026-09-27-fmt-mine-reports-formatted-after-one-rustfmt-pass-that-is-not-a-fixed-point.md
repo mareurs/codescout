@@ -47,7 +47,7 @@ fn check_prose(root: &Path, r: &Recipe) -> Option<String> {
 
 ## Environment
 
-rustfmt 1.9.0-stable (8bab26f4f6 2026-07-14); `experiments` at `00286ae6`; observed in `src/librarian/tools/append_entry.rs` while implementing residual `5820a75840dd2d52`.
+rustfmt 1.9.0-stable (8bab26f4f6 2026-07-14); `experiments` at `00286ae6`; observed in `src/librarian/tools/append_entry.rs` while implementing residual `96b2b1b9a25bb1b0`.
 
 ## Root cause
 

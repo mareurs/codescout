@@ -14,8 +14,8 @@ entry_prefix:
 - DWF
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
-entry_high_water_DWF: 12
-entry_high_water_DCS: 12
+entry_high_water_DWF: 13
+entry_high_water_DCS: 13
 ---
 
 # Deep-agent workflow observations and session coverage
@@ -109,6 +109,8 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DCS-11 | 2026-09-26 | coverage | session-receipt | 3c5b02df/whole-session-to-05:40Z |
 | DWF-12 | 2026-09-26 | workflow | enrichment (retrospective) | 571eb3d6/amd-second-card |
 | DCS-12 | 2026-09-26 | coverage | session-receipt | 571eb3d6→0cbae2f0/post-compaction-2026-09-26 |
+| DWF-13 | 2026-09-27 | workflow | enrichment | b4de6398:taxonomy-recipes-test |
+| DCS-13 | 2026-09-27 | coverage | session-receipt | b4de6398:session |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -679,6 +681,45 @@ No failed attempts beyond one refused pipe, which recovered on the next call.
 | Native / delegated / unobserved gaps | **Delegated:** 1 Explore subagent and 5 general-purpose web-research subagents, which reported findings only; their tool calls weren't inspected. **Outside `usage.db`:** the phase-1b labelling run (1 `codex exec` call, 132,783 tokens; 21 Opus 5.5 `claude -p` judge batches), and two AMD smoke trainings run through a background `run_command`. **Pre-compaction work** from 04:49 to about 11:20 (Stage 2 registration, Step 1/2 scripts, Codex texts, the preflight-review integration, the judge-channel control) has no episode entries; it is recorded in the phase-1b prereg and commits `4606a129` to `90e0965d` |
 | Unresolved pending entries | None in these ledgers. Open work continues in gpu-tuning `docs/trackers/research.md` (Q-7 in progress: AMD peak memory on the longest rows) |
 | Collection overhead | About 25 min for DCX-4, DWF-12 and this receipt, estimated |
+
+## DWF-13 — TAXONOMY append_entry recipe gate — pre-action packet
+
+**Status:** pending-outcome
+**Valid:** dated 2026-09-27
+
+**Sampling / capture mode:** enrichment; prospective. This session's first eligible task (the `long_docs()` gate extension, commits `b990f177`, `a43b467e`) was not captured pre-action; the session's DCS receipt records that gap.
+
+**Identity / key:** session `b4de6398-fed1-4c1d-a359-2b9a42554e10` (main loop, no child agents so far); key `b4de6398:taxonomy-recipes-test`; model Opus 5.5 at capture.
+
+**Task / authority / substrate:** implement the operator-approved plan for residual `96b2b1b9a25bb1b0` (operator chose Native execution, "as you think is best"); `experiments` at `a3349921`, shared checkout with peer sessions' dirty files; target `src/librarian/tools/append_entry.rs`.
+
+**Pre-action evidence:** spec `docs/superpowers/specs/2026-09-27-taxonomy-append-recipes-test-design.md`; plan `docs/superpowers/plans/2026-09-27-taxonomy-append-recipes-test.md`; `bug-fix-session-log:F-176`. At capture the corpus is believed clean against the code contract (13 recipe rows; 5 undeclared session logs to exempt).
+
+**Initial next action / completion check:** write the scanner test-first and watch it fail to compile; completion = corpus test green, 11 mutations each KILLED with the named message substring, gate `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`.
+
+**Outcome, dated 2026-09-27 (pre-action fields above unchanged):** `good`; `verified-complete` for the gate as scoped, final whole-branch review still pending at this writing. Commits `95ff5e64` (scanner) and `8fd92e0a` (checks + corpus test). 13 tests green. 11 guarded sites each KILLED under `scripts/mutation-probe.sh` with the named finding; steps 1–9 produced exactly one finding each. Step 6's first form was refused by the probe as not-applied (its replacement contained its find literal), and the re-run was KILLED. Gate `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, with all 13 test names `ok` in the default lane.
+
+**Trajectory deviations, each ledgered as a ruling:** (1) the plan's Task 1 fence was three backticks around a fixture holding a three-backtick fence, flipping fence parity for the rest of the plan (fixed, `a3349921`); (2) the pre-commit rustfmt check refused a file `fmt-mine.sh` had just reported formatted — reproduced as rustfmt 1.9.0 needing two passes, filed `d1eff909c0d8a73a`; (3) the cluster-member hook required three class-ledger lines in the same commit as the new bug files (`fd237517`); (4) archiving the residual re-keyed it, so seven files were repointed and the parent's caveat discharged. Check actually established: the gate reds on each named defect and is green on today's corpus; it establishes nothing about the three surfaces out of scope (`fc491a58e7a9b561`).
+
+## DCS-13 — Session b4de6398 — IC-11 residuals: long_docs gate and the TAXONOMY recipe gate
+
+**Valid:** dated 2026-09-27
+
+**Identity:** session `b4de6398-fed1-4c1d-a359-2b9a42554e10`, main loop, self-collected; no child agents so far (the final whole-branch review subagent is still to come and is not covered here). Models: Sonnet 5 until mid-session, then Opus 5.5.
+
+**Interval / workspace:** observed 2026-09-26 (UTC start not recorded) through 2026-09-27; `/home/marius/work/claude/codescout` on `experiments`, shared checkout.
+
+**Coverage:** `partial`.
+
+**DWF:** routine-first `missed-capture` — the first eligible task (IC-11 residual `52926c4f251df5c2`, `long_docs()` gate extension, commits `b990f177`, `a43b467e`) was done without a pre-action snapshot. Enrichment: `DWF-13` (TAXONOMY recipe gate), captured prospectively.
+
+**DCX:** routine `missed-capture`, enrichment none — no context-timing decision was recorded this session.
+
+**Gaps:** native-tool activity is not in `usage.db`; this receipt comes from the session's own transcript and its commits.
+
+**Overhead:** about 6 tool calls for DWF-13 and this receipt, estimated from the transcript rather than timed.
+
+**Pending:** DWF-13's final-review outcome.
 
 ## Template for new entries
 

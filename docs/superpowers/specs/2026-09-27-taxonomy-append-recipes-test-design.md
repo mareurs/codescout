@@ -20,7 +20,7 @@ topic: taxonomy-recipe-gate
 
 ## Goal
 
-Close residual `5820a75840dd2d52` (`docs/issues/2026-09-24-residual-taxonomy-recipes-declare-entry-prefix-test.md`): a writer who copies an `append_entry` recipe from the *Main taxonomy* table of `docs/TAXONOMY.md` must not be refused.
+Close residual `96b2b1b9a25bb1b0` (`docs/issues/archive/2026-09-24-residual-taxonomy-recipes-declare-entry-prefix-test.md`): a writer who copies an `append_entry` recipe from the *Main taxonomy* table of `docs/TAXONOMY.md` must not be refused.
 
 Why that matters: the parent (`docs/issues/archive/2026-09-02-two-trackers-have-no-open-append-path.md`) records what a refused writer reaches for next — `doc(action="augment", merge=true, …)`, which replaces the whole collection and once took the T-N queue from 19 entries to 1.
 
@@ -91,7 +91,7 @@ Measured 2026-09-26/27 against `experiments` HEAD; re-verify before implementing
 ## Bookkeeping
 
 - Before implementing, record the deep-agent observation-window workflow entry (pre-action snapshot) in `docs/trackers/deep-agent-workflow-observations.md`.
-- Claim `5820a75840dd2d52`; on completion fill its Fix and Tests sections, record SHA and patch-id, archive via `doc(action="move")`, repoint inbound citations.
+- Claim `96b2b1b9a25bb1b0`; on completion fill its Fix and Tests sections, record SHA and patch-id, archive via `doc(action="move")`, repoint inbound citations.
 - File two follow-up issues: the uncovered surfaces (CLAUDE.md, sidecar prompts, ledger templates), tagged `cluster/selector-narrower-than-its-population`; and the template shipping undeclared so its own recipe is refused on a fresh copy, tagged `cluster/doc-contradicted-by-code`.
 - Pathspec commits of this session's paths only, each green on landing, so no gate/falsifier coupling applies.
 

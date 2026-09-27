@@ -55,7 +55,7 @@ topic: taxonomy-recipe-gate
 
 **Files:**
 - Modify: `src/librarian/tools/append_entry.rs` (append a new `#[cfg(test)] mod taxonomy_recipes` after the existing `mod tests`, which ends at the end of the file)
-- Modify (via `doc`): `docs/issues/2026-09-24-residual-taxonomy-recipes-declare-entry-prefix-test.md`, `docs/trackers/deep-agent-workflow-observations.md`
+- Modify (via `doc`): `docs/issues/archive/2026-09-24-residual-taxonomy-recipes-declare-entry-prefix-test.md`, `docs/trackers/deep-agent-workflow-observations.md`
 
 **Interfaces:**
 - Produces (used by Task 2, all private to `taxonomy_recipes`):
@@ -71,7 +71,7 @@ topic: taxonomy-recipe-gate
 - [ ] **Step 1: Claim the bug**
 
 ```
-doc(action="update", id="5820a75840dd2d52", patch={"status": "taken", "extra": {"claimed_by": "<your session id>", "claimed_at": "<today>"}})
+doc(action="update", id="96b2b1b9a25bb1b0", patch={"status": "taken", "extra": {"claimed_by": "<your session id>", "claimed_at": "<today>"}})
 ```
 
 - [ ] **Step 2: Record the observation-window snapshot BEFORE writing code** (CLAUDE.md § *Deep-agent observation window*; this is an `enrichment` sample — the session's first eligible task was not captured, which the Task 4 receipt records)
@@ -80,7 +80,7 @@ doc(action="update", id="5820a75840dd2d52", patch={"status": "taken", "extra": {
 doc(action="append_entry", id="1b770cb6462acde6", id_prefix="DWF",
     anchor_heading="## Template for new entries",
     title="TAXONOMY append_entry recipe gate — pre-action packet",
-    body="**Status:** pending-outcome\n**Valid:** dated <today>\n\n**Sampling / capture mode:** enrichment; prospective.\n\n**Identity / key:** session <your session id>; key `<session-prefix>:taxonomy-recipes-test`.\n\n**Task / authority / substrate:** implement the operator-approved plan for residual `5820a75840dd2d52`; experiments at <HEAD sha>, shared dirty tree.\n\n**Pre-action evidence:** spec `docs/superpowers/specs/2026-09-27-taxonomy-append-recipes-test-design.md`; `bug-fix-session-log:F-176`.\n\n**Initial next action / completion check:** write the scanner test-first; completion = corpus test green, 11 mutations each KILLED with the named message, gate 0/0/0/0.",
+    body="**Status:** pending-outcome\n**Valid:** dated <today>\n\n**Sampling / capture mode:** enrichment; prospective.\n\n**Identity / key:** session <your session id>; key `<session-prefix>:taxonomy-recipes-test`.\n\n**Task / authority / substrate:** implement the operator-approved plan for residual `96b2b1b9a25bb1b0`; experiments at <HEAD sha>, shared dirty tree.\n\n**Pre-action evidence:** spec `docs/superpowers/specs/2026-09-27-taxonomy-append-recipes-test-design.md`; `bug-fix-session-log:F-176`.\n\n**Initial next action / completion check:** write the scanner test-first; completion = corpus test green, 11 mutations each KILLED with the named message, gate 0/0/0/0.",
     index_row="| {id} | <today> | workflow | enrichment | <session-prefix>:taxonomy-recipes-test |")
 ```
 
@@ -409,7 +409,7 @@ Parses docs/TAXONOMY.md's Main taxonomy rows into prose / params /
 template recipes without splitting cells on '|' (the F row holds
 unescaped pipes in a code span); the target is read only from the
 Lives-in cell. Unparseable rows are recorded, never skipped. Checks
-follow in the next commit. Residual 5820a75840dd2d52." -- src/librarian/tools/append_entry.rs
+follow in the next commit. Residual 96b2b1b9a25bb1b0." -- src/librarian/tools/append_entry.rs
 ```
 
 ---
@@ -748,7 +748,7 @@ params recipe => committed sidecar declares the entry_collection, and
 entry_prefix is deliberately not asserted (bug-fix-session-log:F-176);
 F template => every session log declares [F, W] except a shrink-only
 exemption list of five. Production readers throughout. Residual
-5820a75840dd2d52." -- src/librarian/tools/append_entry.rs
+96b2b1b9a25bb1b0." -- src/librarian/tools/append_entry.rs
 ```
 
 ---
@@ -830,7 +830,7 @@ doc(action="create", kind="bug", status="open",
     rel_path="docs/issues/2026-09-27-append-entry-recipes-outside-taxonomy-are-unchecked.md",
     title="BUG: append_entry recipes outside TAXONOMY are not checked by the recipe gate",
     tags=["cluster/selector-narrower-than-its-population"],
-    body="## Summary\n\nThe TAXONOMY recipe gate (`every_taxonomy_append_entry_recipe_is_one_the_code_accepts`) reads only the Main taxonomy table. Three other surfaces also route writers to `append_entry` and are unchecked: CLAUDE.md, committed augmentation-sidecar prompts under `docs/augmentations/`, and each ledger's own template section. The parent of residual `5820a75840dd2d52` found a sidecar prompt instructing a refused call.\n\n## Fix\n\nNot started. Reuse the gate's scanner and checks with a second input per surface; the sidecar prompts are YAML strings, not table rows.\n\n## References\n\n- `docs/superpowers/specs/2026-09-27-taxonomy-append-recipes-test-design.md`")
+    body="## Summary\n\nThe TAXONOMY recipe gate (`every_taxonomy_append_entry_recipe_is_one_the_code_accepts`) reads only the Main taxonomy table. Three other surfaces also route writers to `append_entry` and are unchecked: CLAUDE.md, committed augmentation-sidecar prompts under `docs/augmentations/`, and each ledger's own template section. The parent of residual `96b2b1b9a25bb1b0` found a sidecar prompt instructing a refused call.\n\n## Fix\n\nNot started. Reuse the gate's scanner and checks with a second input per surface; the sidecar prompts are YAML strings, not table rows.\n\n## References\n\n- `docs/superpowers/specs/2026-09-27-taxonomy-append-recipes-test-design.md`")
 ```
 
 - [ ] **Step 2: File the template follow-up**
@@ -851,7 +851,7 @@ Expected: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, and `grep -E 'taxonomy_recipes::' <
 - [ ] **Step 4: Write the residual's Fix and Tests sections**
 
 ```
-doc(action="update", id="5820a75840dd2d52", patch={"body_edits": [
+doc(action="update", id="96b2b1b9a25bb1b0", patch={"body_edits": [
   {"heading": "## Fix", "action": "replace", "content": "<what shipped: the module, the code contract per shape, the five exemptions; Task 2 SHA; the two follow-up files>"},
   {"heading": "## References", "action": "insert_before", "content": "## Tests added\n\n<the Task 3 verdict table: step, file, mutation, verdict, matched substring>\n"}]})
 ```
@@ -864,21 +864,21 @@ git patch-id --stable < <scratchpad>/fix.patch
 ```
 
 ```
-doc(action="update", id="5820a75840dd2d52", patch={"status": "fixed", "extra": {"claimed_by": null, "claimed_at": null, "closed": "<today>", "fix_sha": "<sha>", "fix_patch_id": "<patch-id>"}})
+doc(action="update", id="96b2b1b9a25bb1b0", patch={"status": "fixed", "extra": {"claimed_by": null, "claimed_at": null, "closed": "<today>", "fix_sha": "<sha>", "fix_patch_id": "<patch-id>"}})
 ```
 
 - [ ] **Step 6: Commit the bookkeeping** (three separate calls; include the DWF tracker only if its diff is yours alone)
 
 ```bash
-git add -- docs/issues/2026-09-24-residual-taxonomy-recipes-declare-entry-prefix-test.md docs/issues/2026-09-27-append-entry-recipes-outside-taxonomy-are-unchecked.md docs/issues/2026-09-27-session-log-template-recipe-is-refused-on-a-fresh-copy.md
+git add -- docs/issues/archive/2026-09-24-residual-taxonomy-recipes-declare-entry-prefix-test.md docs/issues/2026-09-27-append-entry-recipes-outside-taxonomy-are-unchecked.md docs/issues/2026-09-27-session-log-template-recipe-is-refused-on-a-fresh-copy.md
 git diff --cached --name-only
-git commit -m "docs(issues): close the TAXONOMY recipe residual; file its two follow-ups" -- docs/issues/2026-09-24-residual-taxonomy-recipes-declare-entry-prefix-test.md docs/issues/2026-09-27-append-entry-recipes-outside-taxonomy-are-unchecked.md docs/issues/2026-09-27-session-log-template-recipe-is-refused-on-a-fresh-copy.md
+git commit -m "docs(issues): close the TAXONOMY recipe residual; file its two follow-ups" -- docs/issues/archive/2026-09-24-residual-taxonomy-recipes-declare-entry-prefix-test.md docs/issues/2026-09-27-append-entry-recipes-outside-taxonomy-are-unchecked.md docs/issues/2026-09-27-session-log-template-recipe-is-refused-on-a-fresh-copy.md
 ```
 
 - [ ] **Step 7: Archive and repoint**
 
 ```
-doc(action="move", id="5820a75840dd2d52", new_rel_path="docs/issues/archive/2026-09-24-residual-taxonomy-recipes-declare-entry-prefix-test.md")
+doc(action="move", id="96b2b1b9a25bb1b0", new_rel_path="docs/issues/archive/2026-09-24-residual-taxonomy-recipes-declare-entry-prefix-test.md")
 ```
 
 Read the response's `inbound_path_citations` minus `inbound_citations_cleared`, and repoint each remaining citer to the archive path — at minimum the spec's Goal line. Stage both halves of the move (`git add -- <old> <new>`, confirm column-1 letters in `git status --short`) plus the repointed files, check `git diff --cached --name-only`, then:
