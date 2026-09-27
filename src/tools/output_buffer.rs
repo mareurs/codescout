@@ -861,7 +861,29 @@ impl OutputBuffer {
     ///   buffered output, not real filesystem paths)
     /// - `refreshed_handles`: canonical handle IDs (e.g. `@file_abc123`) that were
     ///   auto-refreshed from disk because the underlying file had changed
+    ///
+    /// **A heredoc body is data: no handle inside one is read, refused or rewritten.**
+    /// This was the sixth scanner over the same argument string in this process and the
+    /// last one with no notion of a heredoc, so it misread a body in BOTH directions at
+    /// once -- an expired handle merely *mentioned* in prose refused the whole call, and a
+    /// LIVE one was silently rewritten to a temp path inside the content being written
+    /// (exit 0, no warning), which is the same corruption `mask_heredoc_bodies` was written
+    /// for one scanner over. See
+    /// `docs/issues/2026-09-21-a-buffer-handle-mentioned-in-a-heredoc-body-is-resolved-as-an-argument.md`
+    /// and `CLAUDE.md` § *Parsers Over a Namespace*.
+    ///
+    /// Masking alone would have closed neither direction: `String::replace` rewrites
+    /// *every* occurrence of a token and has no way to skip one, so offsets found on a
+    /// masked copy buy nothing unless the substitution happens at those offsets too. The
+    /// splice at the end of this function is the substantive half, and
+    /// `mask_heredoc_bodies` (offset-preserving) rather than `strip_heredoc_bodies` (which
+    /// moves every later index) is what makes those offsets addressable at all.
     pub fn resolve_refs(&self, command: &str) -> Result<(String, Vec<PathBuf>, bool, Vec<String>)> {
+        // Blank heredoc bodies before ANY scan below. Byte offsets are preserved by
+        // construction, so an offset found in `masked` addresses the same byte in
+        // `command` -- the reason this is the masking sibling and not the stripping one.
+        let masked = crate::util::path_security::mask_heredoc_bodies(command);
+
         // Guard: @ack_* handles are for deferred execution, not content interpolation.
         //
         // Gated on a LIVE handle lookup rather than on the token's SHAPE. `@ack_<8hex>` is
@@ -877,10 +899,15 @@ impl OutputBuffer {
         // function is reached whenever the command IS a bare handle, so everything
         // arriving here mentions the token mid-string -- exactly the population that only
         // a lookup can classify.
+        //
+        // Scanned on the MASKED copy. "a heredoc body, a commit message, a comment" was
+        // already this comment's own list of what must not be refused, and the first of the
+        // three is the one a liveness lookup cannot reach: a LIVE ack quoted in a body is
+        // refused by liveness alone, exactly as the sibling namespace was.
         static ACK_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
         if let Some(m) = ACK_RE
             .get_or_init(|| Regex::new(r"@ack_[0-9a-f]{8}").expect("valid regex"))
-            .find(command)
+            .find(&masked)
         {
             let token = m.as_str();
             if self.get_dangerous(token).is_some() {
@@ -902,19 +929,43 @@ impl OutputBuffer {
             Regex::new(r"@(?:cmd|file|tool|bg)_[0-9a-f]{8}(\.err)?").expect("valid regex")
         });
 
-        let refs: Vec<&str> = re.find_iter(command).map(|m| m.as_str()).collect();
-        if refs.is_empty() {
+        // Right boundary, enforced here rather than in the pattern because `regex` has no
+        // lookaround. `[0-9a-f]{8}` is not right-anchored, so `@cmd_deadbeef1` matched its
+        // own 8-hex PREFIX: the call was refused naming a token SHORTER than the one typed,
+        // and had that prefix been live it would instead have been spliced into the middle
+        // of a longer word. A token that runs on into another word character was never this
+        // handle, in either direction.
+        let spans: Vec<(usize, usize)> = re
+            .find_iter(&masked)
+            .filter(|m| {
+                !masked[m.end()..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+            })
+            .map(|m| (m.start(), m.end()))
+            .collect();
+
+        if spans.is_empty() {
             return Ok((command.to_string(), vec![], false, vec![]));
         }
 
         // Deduplicate while preserving order (same ref token may appear twice).
         let mut seen = std::collections::HashSet::new();
-        let unique_refs: Vec<&str> = refs.iter().filter(|r| seen.insert(**r)).copied().collect();
+        let unique_refs: Vec<&str> = spans
+            .iter()
+            .map(|&(start, end)| &command[start..end])
+            .filter(|r| seen.insert(*r))
+            .collect();
 
-        let mut result = command.to_string();
         let mut temp_paths: Vec<PathBuf> = Vec::new();
         let mut temp_path_strings: Vec<String> = Vec::new();
         let mut refreshed_handles: Vec<String> = Vec::new();
+        // Token -> the text to splice in for it. Built once per UNIQUE token (a temp file
+        // is materialised once however many times the handle is mentioned); the splice
+        // below then walks every span.
+        let mut substitutions: std::collections::HashMap<&str, String> =
+            std::collections::HashMap::new();
 
         for token in &unique_refs {
             let is_stderr = token.ends_with(".err");
@@ -936,7 +987,10 @@ impl OutputBuffer {
                 let log_path = self.get_background_log(base_id).ok_or_else(|| {
                     RecoverableError::with_hint(
                         format!("background job ref not found: {}", token),
-                        "Buffer refs expire when the session resets. Re-run the original command to get a fresh handle.",
+                        mention_escape_hint(
+                            token,
+                            "Buffer refs expire when the session resets. Re-run the original command to get a fresh handle.",
+                        ),
                     )
                 })?;
                 // Substitute the LIVE log file directly, not a point-in-time
@@ -958,8 +1012,8 @@ impl OutputBuffer {
                 // a native Windows path, so `cat @bg_x` would name a file that
                 // does not exist and silently return nothing.
                 let path_str = crate::platform::shell_path_str(&log_path);
-                result = result.replace(token, &path_str);
-                temp_path_strings.push(path_str);
+                temp_path_strings.push(path_str.clone());
+                substitutions.insert(*token, path_str);
                 continue;
             }
 
@@ -967,7 +1021,10 @@ impl OutputBuffer {
                 .get_with_refresh_flag(base_id)
                 .ok_or_else(|| RecoverableError::with_hint(
                     format!("buffer reference not found: {}", token),
-                    "Buffer refs expire when the session resets. Re-run the command to get a fresh ref.",
+                    mention_escape_hint(
+                        token,
+                        "Buffer refs expire when the session resets. Re-run the command to get a fresh ref.",
+                    ),
                 ))?;
 
             if was_refreshed {
@@ -1021,15 +1078,40 @@ impl OutputBuffer {
             // `temp_path_strings` in the same form so the `is_buffer_only`
             // match below still recognises these as our own temp files.
             let path_str = crate::platform::shell_path_str(&path);
-            // Replace all occurrences of this token with the temp path
-            result = result.replace(token, &path_str);
-            temp_path_strings.push(path_str);
+            temp_path_strings.push(path_str.clone());
+            substitutions.insert(*token, path_str);
             temp_paths.push(path);
         }
+
+        // Splice at the offsets the masked scan returned, rather than replacing the token
+        // text. `String::replace` rewrites EVERY occurrence and has no way to skip one, so
+        // it would have put the temp path back into the heredoc body the mask exists to
+        // exclude -- masking without this rewrite changes nothing in the silent direction.
+        // Spans arrive from `find_iter` in ascending, non-overlapping order, which is what
+        // lets a single forward cursor copy the gaps between them.
+        let mut result = String::with_capacity(command.len());
+        let mut cursor = 0usize;
+        for &(start, end) in &spans {
+            let token = &command[start..end];
+            let path_str = substitutions.get(token).ok_or_else(|| {
+                anyhow::anyhow!("internal: matched token {token} was never resolved")
+            })?;
+            result.push_str(&command[cursor..start]);
+            result.push_str(path_str);
+            cursor = end;
+        }
+        result.push_str(&command[cursor..]);
 
         // Determine is_buffer_only: true only when every path-like argument is one
         // of our own injected temp files. Relative paths without a ./ prefix (e.g.
         // "src/main.rs") are also treated as non-buffer-only.
+        //
+        // A token left literal by the mask above reaches here unsubstituted, and must be
+        // inert for this classifier in BOTH directions: it is not in `temp_path_strings`
+        // (nothing was materialised for it), and `is_path_like` is false for a bare
+        // `@cmd_<8hex>` (no separator, no leading sigil), so it neither earns buffer-only
+        // status nor revokes it. Asserted rather than assumed --
+        // `a_handle_masked_out_of_substitution_is_inert_for_the_buffer_only_classifier`.
         let is_buffer_only = !shell_words(&result).iter().any(|word| {
             let is_temp = temp_path_strings
                 .iter()
@@ -1068,6 +1150,34 @@ impl OutputBuffer {
         }
         !shell_words(command).iter().any(|w| is_path_like(w))
     }
+}
+
+/// The escape clause carried by every "handle-shaped token did not resolve" refusal.
+///
+/// Shared by the two refusal sites so there is ONE place to change and ONE site to mutate;
+/// two copies of a remedy sentence drift, and this file has already paid for that once
+/// (`is_path_like`, whose two copies disagreed about `../`).
+///
+/// It exists because a guard's PREDICATE is what gets asserted and its REMEDY is untested
+/// by construction unless someone writes for it. Before this, a caller who wanted to
+/// *mention* a handle rather than resolve it had no answer at all — the refusal named the
+/// token and offered only "re-run the command", which is advice for a different problem.
+/// `CLAUDE.md` § *Parsers Over a Namespace*: where an escape exists, name it at the refusal
+/// site; where one does not, say so there — "a documented limitation and a silent
+/// reinterpretation cost a reader very different amounts". Both halves are here, because
+/// both are true: a heredoc body IS an escape, and quoting is NOT one.
+///
+/// The second sentence is load-bearing and reads like a caveat: single-quoting is the first
+/// thing a caller tries (it was hypothesis 1 in the bug file), it is invisible to this scan,
+/// and making it an escape is not available — `cat '@cmd_1a2b3c4d'` is an ordinary, correct
+/// way to name a buffer, so honouring the quotes would silently stop resolving it.
+fn mention_escape_hint(token: &str, reacquire: &str) -> String {
+    format!(
+        "{reacquire} To MENTION {token} literally instead of resolving it, put it inside a \
+         quoted heredoc body (`<<'EOF' … EOF`): a heredoc body is data, and no handle in one \
+         is resolved, refused or rewritten — live or expired. Quoting alone is NOT an escape: \
+         `'{token}'` is still resolved, because this scan runs before any shell parse."
+    )
 }
 
 /// Whether the shell will turn `word` into a filesystem path.
@@ -1698,6 +1808,241 @@ mod tests {
             .resolve_refs(script)
             .expect("a script mentioning an ack-shaped filename must be allowed to run");
         assert_eq!(resolved, script, "command must pass through unchanged");
+    }
+
+    // --- A heredoc body is data -------------------------------------------------------
+    //
+    // One test per guarded SITE, not one per feature: the mask feeding the REF scan, the
+    // mask feeding the ACK scan, the right-boundary filter, the offset splice and the remedy
+    // text are five separate lines, and a mutation killed at one says nothing about the other
+    // four. Each also names the DIRECTION it is monotone under, because the loud half of this
+    // bug (a refusal) and the silent half (a rewrite) are satisfied by opposite mutations.
+    //
+    // Bug: docs/issues/2026-09-21-a-buffer-handle-mentioned-in-a-heredoc-body-is-resolved-as-an-argument.md
+
+    #[test]
+    fn an_expired_handle_mentioned_in_a_quoted_heredoc_body_is_not_refused() {
+        // Mode 1 -- the loud half, and the one that cost the parent session a commit: a
+        // `git commit -F -` whose PROSE quoted a handle that had expired at an MCP reconnect
+        // was refused whole, and the workaround was to stop using a heredoc at all.
+        let buf = OutputBuffer::new(10);
+        let cmd = "cat <<'MSG'\nprose citing @cmd_deadbeef as a measurement\nMSG";
+        let (resolved, temps, _is_buffer_only, _refreshed) = buf
+            .resolve_refs(cmd)
+            .expect("a handle mentioned in a heredoc body must not refuse the call");
+        assert_eq!(resolved, cmd, "the body must pass through byte-identical");
+        assert!(temps.is_empty(), "nothing should have been materialised");
+    }
+
+    #[test]
+    fn a_live_handle_mentioned_in_a_quoted_heredoc_body_is_not_substituted() {
+        // Mode 4 -- the silent half, and the only one that can lose data: exit 0, no warning,
+        // and a temp path that will never exist written into whatever the heredoc was
+        // feeding. Asserting on THIS direction is what the bug file's "Tests added" note
+        // asks for; the refusal test above is monotone under keeping half the bug.
+        let buf = OutputBuffer::new(10);
+        let id = buf.store("prev".into(), "hello\n".into(), String::new(), 0);
+        let cmd = format!("cat <<'MSG'\nprose citing the live handle {id} in a body\nMSG");
+        let (resolved, temps, is_buffer_only, _refreshed) = buf.resolve_refs(&cmd).unwrap();
+        assert_eq!(
+            resolved, cmd,
+            "a LIVE handle inside a body must not be rewritten"
+        );
+        assert!(
+            temps.is_empty(),
+            "no temp file should be materialised: {temps:?}"
+        );
+        assert!(
+            !is_buffer_only,
+            "nothing was substituted, so nothing is buffer-only"
+        );
+    }
+
+    #[test]
+    fn the_same_handle_is_substituted_in_command_text_and_left_literal_in_the_body() {
+        // The discriminator for the SPLICE, and the only test here that a masking call alone
+        // would fail. `String::replace` rewrites EVERY occurrence of a token and has no way
+        // to skip one, so with the mask in place and the old substitution kept, the body
+        // occurrence is still rewritten -- the two halves of the fix are separable and this
+        // pins the second. ONE token in TWO positions is what makes it a test of the
+        // position rather than of the token; two different handles would pass either way.
+        let buf = OutputBuffer::new(10);
+        let id = buf.store("prev".into(), "hello\n".into(), String::new(), 0);
+        let cmd = format!("cat {id} && cat <<'MSG'\ncitation: {id}\nMSG");
+        let (resolved, temps, _is_buffer_only, _refreshed) = buf.resolve_refs(&cmd).unwrap();
+        assert_eq!(temps.len(), 1, "one temp file for the one real use");
+        let path = crate::platform::shell_path_str(&temps[0]);
+        assert!(
+            resolved.contains(&format!("cat {path} &&")),
+            "the command-position handle must still resolve: {resolved}"
+        );
+        assert_eq!(
+            resolved.matches(id.as_str()).count(),
+            1,
+            "exactly one occurrence -- the body one -- must survive literally: {resolved}"
+        );
+        assert!(
+            resolved.contains(&format!("citation: {id}")),
+            "and it must be the body occurrence, not the argument: {resolved}"
+        );
+        OutputBuffer::cleanup_temp_files(&temps);
+    }
+
+    #[test]
+    fn a_handle_on_the_heredoc_opener_line_is_still_resolved() {
+        // The fix's ceiling, and why it is `mask_heredoc_bodies` rather than the cheaper
+        // "skip the scan whenever `<<` appears": that form would trade a corruption bug for
+        // silently refusing to resolve a handle in any command that happens to carry a
+        // heredoc. Sibling of `mask_heredoc_bodies_keeps_a_pipe_outside_the_body`.
+        let buf = OutputBuffer::new(10);
+        let id = buf.store("prev".into(), "pattern\n".into(), String::new(), 0);
+        let cmd = format!("grep -f {id} <<'EOF'\nhaystack line\nEOF");
+        let (resolved, temps, _is_buffer_only, _refreshed) = buf.resolve_refs(&cmd).unwrap();
+        assert_eq!(temps.len(), 1, "the opener-line handle must still resolve");
+        assert!(
+            !resolved.contains(id.as_str()),
+            "opener line should have been substituted: {resolved}"
+        );
+        assert!(
+            resolved.contains("haystack line"),
+            "the body must survive verbatim: {resolved}"
+        );
+        OutputBuffer::cleanup_temp_files(&temps);
+    }
+
+    #[test]
+    fn a_token_that_runs_on_into_another_word_character_is_not_this_handle() {
+        // Mode 2, loud half. `[0-9a-f]{8}` is not right-anchored, so `@cmd_deadbeef1` matched
+        // its own 8-hex PREFIX and the refusal named a token SHORTER than the one typed --
+        // the tell that made the report legible in the first place.
+        let buf = OutputBuffer::new(10);
+        let cmd = "echo harmless @cmd_deadbeef1";
+        let (resolved, temps, _is_buffer_only, _refreshed) = buf
+            .resolve_refs(cmd)
+            .expect("a nine-character suffix is not an eight-hex handle");
+        assert_eq!(resolved, cmd);
+        assert!(temps.is_empty());
+    }
+
+    #[test]
+    fn a_live_handle_is_not_spliced_into_the_middle_of_a_longer_token() {
+        // Mode 2, silent half -- unreported, and the half that corrupts rather than refuses.
+        // The loud test above is also satisfied by a lookup-gated pass-through that has no
+        // right boundary at all; only a LIVE prefix separates "not refused" from "not
+        // rewritten", which is why the boundary needs a case of its own in this direction.
+        let buf = OutputBuffer::new(10);
+        let id = buf.store("prev".into(), "hello\n".into(), String::new(), 0);
+        let cmd = format!("echo {id}9");
+        let (resolved, temps, _is_buffer_only, _refreshed) = buf.resolve_refs(&cmd).unwrap();
+        assert_eq!(
+            resolved, cmd,
+            "the live 8-hex PREFIX of a longer token must not be substituted"
+        );
+        assert!(temps.is_empty(), "nothing should have been materialised");
+    }
+
+    #[test]
+    fn the_not_found_refusal_names_the_escape_and_names_quoting_as_a_non_escape() {
+        // A suite that tests only WHO IS REFUSED leaves the remedy untested by construction,
+        // and the remedy is exactly what the bug file asks for: "a word at the refusal site
+        // about what a caller can do, since today the answer is 'nothing'". Asserted as
+        // SHAPE, never as prose -- each needle is an ENTITY the clause must name (`<<'`, and
+        // the quoted form of the token), so a rewording survives and a deletion reds.
+        let buf = OutputBuffer::new(10);
+        let err = buf
+            .resolve_refs("grep hello @cmd_deadbeef")
+            .expect_err("an unresolvable handle in command position is still refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("<<'"),
+            "the refusal must name the heredoc escape a caller can act on, got: {msg}"
+        );
+        assert!(
+            msg.contains("'@cmd_deadbeef'"),
+            "the refusal must show the quoted form and say it is not an escape, got: {msg}"
+        );
+        assert!(
+            msg.contains("Re-run the command"),
+            "the pre-existing re-acquire advice must survive the rewrite, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn single_quoting_is_deliberately_not_an_escape_and_the_refusal_says_so() {
+        // Mode 3 of the report, NOT closed, and not closed deliberately -- this test exists
+        // so nobody credits the fix with coverage it does not provide. Honouring the quotes
+        // would be a silent regression in the opposite direction: `cat '@cmd_1a2b3c4d'` is
+        // an ordinary, correct way to name a buffer, and a quote-aware scan would quietly
+        // stop resolving it. So the limitation stands and is stated at the refusal site
+        // instead. Both halves are pinned: the quoted LIVE handle still resolves, and the
+        // quoted dead one is refused WITH the escape that does work named.
+        let buf = OutputBuffer::new(10);
+        let id = buf.store("prev".into(), "hello\n".into(), String::new(), 0);
+        let (resolved, temps, _is_buffer_only, _refreshed) =
+            buf.resolve_refs(&format!("cat '{id}'")).unwrap();
+        assert!(
+            !resolved.contains(id.as_str()),
+            "a single-quoted LIVE handle must keep resolving: {resolved}"
+        );
+        OutputBuffer::cleanup_temp_files(&temps);
+
+        let err = buf
+            .resolve_refs("echo '@cmd_deadbeef'")
+            .expect_err("a single-quoted expired handle is still refused");
+        assert!(
+            err.to_string().contains("<<'"),
+            "...but the refusal now names the escape that does work: {err}"
+        );
+    }
+
+    #[test]
+    fn a_handle_masked_out_of_substitution_is_inert_for_the_buffer_only_classifier() {
+        // `is_buffer_only` consumes the RESOLVED string, so a token the mask kept out of
+        // substitution reaches it literally. It must be inert in BOTH directions: it cannot
+        // EARN buffer-only status (nothing was materialised for it, so it is not one of our
+        // temp files) and it cannot REVOKE it (a bare `@cmd_<8hex>` has no separator and no
+        // leading sigil, so `is_path_like` is false). The direction that matters is the
+        // first: a false `true` here SKIPS the dangerous-command and source-file gates.
+        let buf = OutputBuffer::new(10);
+        let id = buf.store("prev".into(), "hello\n".into(), String::new(), 0);
+
+        let cmd = format!("wc -l {id} <<'EOF'\n{id}\nEOF");
+        let (_resolved, temps, is_buffer_only, _refreshed) = buf.resolve_refs(&cmd).unwrap();
+        assert!(
+            is_buffer_only,
+            "a literal handle left in the body must not revoke buffer-only status"
+        );
+        OutputBuffer::cleanup_temp_files(&temps);
+
+        let cmd = format!("wc -l /etc/passwd <<'EOF'\n{id}\nEOF");
+        let (_resolved, temps, is_buffer_only, _refreshed) = buf.resolve_refs(&cmd).unwrap();
+        assert!(
+            !is_buffer_only,
+            "a literal handle in the body must not earn buffer-only status for a real path"
+        );
+        OutputBuffer::cleanup_temp_files(&temps);
+    }
+
+    #[test]
+    fn a_live_ack_handle_quoted_in_a_heredoc_body_is_not_refused() {
+        // The sibling namespace at the same call site. Its guard is already lookup-gated, so
+        // a DEAD ack in a body was never the problem -- a LIVE one was, and liveness is the
+        // one thing that cannot separate a mention from an interpolation. The guard's own
+        // comment already listed "a heredoc body" among what must not be refused; the mask
+        // is what makes that sentence true. Second half asserts the mask NARROWS the guard
+        // rather than defeating it.
+        let buf = OutputBuffer::new(10);
+        let handle = buf.store_dangerous("rm -rf /dist".to_string(), None, 30, false);
+        let cmd = format!("cat <<'MSG'\nthe pending ack was {handle}\nMSG");
+        let (resolved, temps, _is_buffer_only, _refreshed) = buf
+            .resolve_refs(&cmd)
+            .expect("a live ack MENTIONED in a heredoc body is prose, not interpolation");
+        assert_eq!(resolved, cmd);
+        assert!(temps.is_empty());
+        assert!(
+            buf.resolve_refs(&format!("grep pattern {handle}")).is_err(),
+            "a live ack in command position must still be refused"
+        );
     }
 
     #[test]
