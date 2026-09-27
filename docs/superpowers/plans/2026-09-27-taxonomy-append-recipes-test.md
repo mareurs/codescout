@@ -84,9 +84,9 @@ doc(action="append_entry", id="1b770cb6462acde6", id_prefix="DWF",
     index_row="| {id} | <today> | workflow | enrichment | <session-prefix>:taxonomy-recipes-test |")
 ```
 
-- [ ] **Step 3: Write the failing scanner tests.** Append this module to the end of `src/librarian/tools/append_entry.rs` (after `mod tests`'s closing brace) with `edit_code(action="insert", symbol="tests", position="after", path="src/librarian/tools/append_entry.rs", body=…)`, then run `./scripts/fmt-mine.sh`. The module is tests only for now — Step 5 adds the implementation into it.
+- [ ] **Step 3: Write the failing scanner tests.** Append this module to the end of `src/librarian/tools/append_entry.rs` (after `mod tests`'s closing brace) with `edit_code(action="insert", symbol="tests", position="after", path="src/librarian/tools/append_entry.rs", body=…)`, then run `./scripts/fmt-mine.sh`. The module is tests only for now — Step 5 adds the implementation into it. The fence below is FOUR backticks because the fixture contains a three-backtick fence.
 
-```rust
+````rust
 /// Doc-to-code gate: every `append_entry` recipe in `docs/TAXONOMY.md`'s *Main taxonomy* table
 /// must be one `call` accepts. Spec: docs/superpowers/specs/2026-09-27-taxonomy-append-recipes-test-design.md.
 #[cfg(test)]
@@ -207,7 +207,7 @@ mod taxonomy_recipes {
         assert_eq!(crlf.rows_seen, lf.rows_seen);
     }
 }
-```
+````
 
 - [ ] **Step 4: Run to verify it fails**
 
