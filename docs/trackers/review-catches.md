@@ -1,0 +1,373 @@
+---
+id: '3fc46942aafb886e'
+kind: tracker
+status: active
+title: Review catches — defects an external reviewer caught that the author missed (RC-N)
+tags:
+- review
+- lessons
+- promotion-queue
+topic: review catches and lesson distribution
+entry_prefix: RC
+expects_augmentation: docs/augmentations/docs-trackers-review-catches.yaml
+---
+
+# Review catches — defects an external reviewer caught that the author missed (RC-N)
+
+## Scope and method
+
+**What this holds:** one entry per defect or wrong claim that a reviewer **other than the author** caught. The reviewer might be Codex, an Opus review subagent or a human. For each: what the author had built or claimed, how the reviewer found it, what happened, and the lesson in a form that can be moved to where future work will read it.
+
+**Why it exists:** a correction recorded only in a review document, a bug file or a commit message is read once and then forgotten. Authors repeat defects their own context hides (`observer-blindness`, and the 2026-09-24 model-vs-context experiment, `docs/evals/review-model-vs-context-2026-09-24.md`). Here the lessons live in one queryable place, each with a named home and a promotion status. Distributing them later is then a filter, not a re-reading of the review documents.
+
+**Boundaries:**
+- A catch the author made **themselves** is not a row here. That belongs in a session log (F-N or W-N).
+- A defect **class** goes to `observer-blindness` (OB-N) or `issue-clusters` (IC-N).
+- A **mechanism** built after a lesson goes to `test-escape-hardening` (I-N).
+- A row here cites those ids; it does not replace them.
+
+**Seeded 2026-09-27** from the rule-tell local-classifier campaign (2026-09-24 to 2026-09-27): the Codex reviews and their bug files, and the Opus review of `phase1b/step5_gate.py`.
+
+## How to distribute a lesson
+
+1. Filter for `promotion` = `pending`, and group the rows by `lesson_home`.
+2. For each group, open the home and grep for the lesson. It may already be there, in other words.
+3. Write the lesson in the home's own conventions. For `CLAUDE.md` § *Testing Discipline*, that means a measured instance beside the law, not a new law, unless two or more rows share a mechanism no law states.
+4. Set the row's `promoted_to` to `<path>@<sha>` and its `promotion` to `promoted` with `update_entry`. Use `duplicate` or `not-promotable` where those fit.
+
+## Catches
+
+Each entry below is condensed from its source document, which remains authoritative. Structured fields (reviewer, fix, bug, cluster, lesson home, promotion) are in the row.
+
+### RC-1 — Score A accepted incomplete rule sweeps and scored a partial group as a clean text
+
+**Missed:** `report_corpus` in `scripts/phase1-span-selector.py` never checked that each (case, side) group held every registered rule exactly once. So one NO row scored as a clean negative text, and the report exited 0.
+**Found by:** an offline probe of the extracted functions, fed a single synthetic NO row.
+**Lesson:** validate membership and uniqueness before reporting a whole-corpus metric. A missing row is not a NO.
+
+### RC-2 — A verbatim quote was treated as locating the claim, though it proves only that the sentence exists
+
+**Missed:** a YES counted only when it came with a verbatim quote, but nothing checked that the quote landed on the violating sentence.
+**Found by:** the review, recorded in the scoring document's *Registered for any next run* section.
+**Lesson:** a quote proves the sentence exists, not that it is the violation. Measure claim correctness separately from rule correctness.
+
+### RC-3 — RTD-3's 0/10 was read as the reminder stopping the violation, though 3 of 10 forks were scored before the decision point
+
+**Missed:** the scoring document said binding the rule to the claim "stops the violation". But three of the ten 3-1b forks were scored on a first turn that comes before the decision point.
+**Found by:** reading which turn each fork was scored on.
+**Lesson:** a score taken before the decision point describes that turn, not what the agent writes after its tool call returns.
+
+### RC-4 — The Stage 2 miner stored the corrected text as the positive's context, a label leak if used as input
+
+**Missed:** `change_blocks` returned only the new side of each hunk, and it was written as the positive sentence's `paragraph`. The corrected twin appeared in 605 of 946 rows.
+**Found by:** a whitespace-normalised substring test over the 946 mined rows.
+**Lesson:** keep the before- and after-correction contexts apart, and check a target against the side it came from, because the new side carries the answer. The bug file records two open residuals.
+
+### RC-5 — The miner's overlap census counted 20 document pairs sharing a shingle; there are 25
+
+**Missed:** keeping one owner per shingle records star edges (A-B and A-C, never B-C), and that number was published as a count of document pairs.
+**Found by:** an inverted index listing every unordered pair of owners.
+**Lesson:** a star-edge map preserves connected components, not pairs. Publish a count under the frame it actually measures.
+
+### RC-6 — The verdict that mined pairs 'would bring no rule' to 50 positives went beyond its ten-row sample
+
+**Missed:** the conclusion extrapolated a pooled ten-row manual sample through keyword hints, which are not labels. 615 rows had no hint at all.
+**Found by:** reading the derivation against what its instrument can show.
+**Lesson:** say what was measured: no rule has yet been shown to reach 50 adjudicated positives.
+
+### RC-7 — The local-classifier plan chose C1 on held-out T while promising T is never read during selection
+
+**Missed:** Stage 4 picked C1 by its T any-fire rate, spending T on selection before presenting it as the held-out evaluation.
+**Found by:** reading the two conflicting sections side by side.
+**Lesson:** a held-out set used to choose an arm becomes a selection set. Choose on validation, freeze the choice, then read T.
+
+### RC-8 — Stage 2 labelled every other sentence a negative for every rule, and did not keep incident families in one fold
+
+**Missed:** a correction diff is evidence only for its own rule's positive and twin. Every other (sentence, rule) cell is unknown. Incident families could also straddle folds.
+**Found by:** reading the labelling contract against what a correction diff can establish.
+**Lesson:** a construction labels only what it is evidence for. Mask the rest, and keep families within one fold.
+
+### RC-9 — Score A accepted rows files missing whole case/side texts and reported zero incomplete groups
+
+**Missed:** after RC-1's fix, `report_corpus` still checked only the groups present, never the corpus's expected list of texts. An empty file returned 0.
+**Found by:** running the extracted function on an empty input and on a single complete text.
+**Lesson:** check the expected set of groups, not only the rule grid of the groups that are present.
+
+### RC-10 — The phase-2 scorer kept no per-row votes or provenance, and ran on any judge profile
+
+**Missed:** per-row decisions were printed as totals and never saved, so they could not be rebuilt without paying for the judge calls again. The scorer also lacked the clean-profile refusal.
+**Found by:** reading the scorer's source.
+**Lesson:** save each row's ballots and verdict before aggregating, and use one shared clean-channel check.
+
+### RC-11 — JevK5's cannot_happen score on its violation text exactly ties clean-1, so no threshold separates them
+
+**Missed:** the positive was counted among the texts scoring above their rule's clean maximum, though it tied clean-1 exactly (0.600599).
+**Found by:** rebuilding the L0 probabilities in the gate's logged order.
+**Lesson:** a positive that ties a clean text cannot be separated by any threshold on that rule.
+
+### RC-12 — 'Four of five' L0 texts was false: only three meet both properties together
+
+**Missed:** each of two properties held on four of the five texts, but not on the same four.
+**Found by:** the same rebuild of the L0 probabilities.
+**Lesson:** count the conjunction itself.
+
+### RC-13 — The stripped-arm prediction was marked 'Holds', though 7/8 is below this run's 9/10
+
+**Missed:** the prediction held against the registered 8/10 but not against this run's 9/10.
+**Found by:** arithmetic on the clean-checker cells.
+**Lesson:** check a "not below" prediction against each comparator separately. Cells this small establish neither equivalence nor an effect.
+
+### RC-14 — Family-level recall 5/17 was called an upper bound on spec tightening; it bounds only regrouping fixed outputs
+
+**Missed:** regrouping outputs that already exist does not bound what re-specified rules could produce.
+**Found by:** recounting form 3's existing rows.
+**Lesson:** a bound on regrouping fixed outputs does not bound runs with changed specifications.
+
+### RC-15 — The Phase 1b audit sampled distinct keys, dropping the paragraph context its instruction lets decide the verdict
+
+**Missed:** 5,422 of the 8,303 (unit text, rule) keys occur in more than one distinct paragraph, and the instruction lets the paragraph decide the verdict.
+**Found by:** an offline census over the frozen folds with the real segmenter.
+**Lesson:** define the adjudication unit by the context actually shown.
+
+### RC-16 — The audit's Wilson bound was estimated on distinct keys, while training consumes every admitted instance
+
+**Missed:** a bound over keys is not a bound over the instance-weighted population that the loss averages over.
+**Found by:** the key-multiplicity distribution from the same census.
+**Lesson:** state which population a bound covers, and sample the population the loss averages over.
+
+### RC-17 — The draft compared D with L2-1b on final pass/fail after pruning heads separately per arm
+
+**Missed:** different menus alone can change a gate result, so the comparison could partly measure coverage rather than the training change.
+**Found by:** reading Step 4's pruning rule against the causal comparison.
+**Lesson:** read a causal comparison on the heads both arms keep. This became the common menu.
+
+### RC-18 — Known limits says D controls the threshold half but not calibration, though Step 4 refits both for D
+
+**Missed:** D goes through Step 4, which refits both temperature and threshold.
+**Found by:** reading the sentence against Step 4.
+**Outcome:** open. The sentence is unchanged and no decision is recorded.
+**Lesson:** a control taken through a procedure that refits two things controls their combination, not one of them.
+
+### RC-19 — The Stage 2 freeze asserted counts taken before segmentation, not the positive rows it wrote
+
+**Missed:** `count[rule]` was incremented before `row()` could drop a target, yet it was described as a check on frozen positives. Four rules already differed.
+**Found by:** a byte-identical baseline freeze, plus an in-memory mutation that dropped every positive and still passed.
+**Lesson:** assert the invariant on the rows actually written, after every filter that can drop them.
+
+### RC-20 — Calibration held only 4 positives each for d_semicolon and member_vs_population, so their thresholds are fragile
+
+**Missed:** the freeze did not flag it.
+**Outcome:** accepted, no change. Removals at 4 positives are reported as the small-sample case.
+**Lesson:** report the denominator behind any per-rule threshold fitted on a handful of positives.
+
+### RC-21 — Running the synthetic test module directly skipped the FreezeMenuGuard regressions defined after unittest.main()
+
+**Missed:** the class was added below `unittest.main()`, so running the file directly ran 16 tests, not 21. The recorded 21-test pass came from discovery.
+**Found by:** comparing a direct run with import discovery.
+**Lesson:** keep `unittest.main()` below the last TestCase.
+
+### RC-22 — L1's overfit check and pair alignment were said to rule out an engineering cause; they rule out two named causes
+
+**Missed:** memorising 32 rows and a label-alignment check do not exclude optimiser, hyperparameter or full-data dynamics.
+**Found by:** reading the claim against what each check establishes.
+**Lesson:** a small-subset overfit and a label-alignment check rule out only their named causes.
+
+### RC-23 — L2's 39% cross-rule firing was presented as the failure's mechanism, though it counts firing on unlabelled cells
+
+**Missed:** 2,614 firings over 6,773 cells are firings on unknown cells, not proven false positives, and a plausible mechanism is not a causal test.
+**Found by:** reading the producer of the table.
+**Lesson:** a firing rate on unlabelled cells is not a false-positive rate. Already promoted: the Snow Pheasant's `masked-labels-over-fire` memory records this correction.
+
+### RC-24 — The synthetic-pairs audit let test-set audit results decide what enters training
+
+**Missed:** the audits were sampled by (generator, rule) without separating training pairs from T-syn pairs, and drops applied to both.
+**Found by:** reading the audit and admission clauses against the rule that test sets are read last.
+**Lesson:** split audit populations by generator, split and rule. Only training-side audits may decide training admission.
+
+### RC-25 — The leakage filter did not explicitly protect the seed set S, T-syn-in or T-syn-cross
+
+**Missed:** those sets were not named in the filter, and the inherited "move the smaller group" rule did not forbid moving held-out groups into training.
+**Found by:** reading the filter clauses.
+**Lesson:** protect every held-out set by name, and resolve a collision by dropping the training-side item, never by moving test data.
+
+### RC-26 — Overlap with T was checked on positive and twin sentences only, missing overlaps through the contexts
+
+**Missed:** 51 non-T rows overlapped T's full context, including admitted positives.
+**Found by:** a shingle check over all four text fields.
+**Lesson:** check overlap on every field the model actually receives.
+
+### RC-27 — Seed selection allowed the campaign documents that the miner deliberately excludes
+
+**Missed:** 246 eligible paragraphs came from the campaign's own scoring, registration and review documents.
+**Found by:** a census against the miner's exclusion expression.
+**Lesson:** a lexical overlap filter does not stop campaign outcomes leaking into generation. Exclude campaign documents whole.
+
+### RC-28 — Seed sampling and the pilot were not reproducibly fixed, and the pilot's '22 pairs' contradicted five seeds per call
+
+**Missed:** an RNG seed with no ordered population, algorithm or parser admits several datasets. 22 calls at five seeds each yield 110 pairs, not 22.
+**Found by:** reading the sampling clauses.
+**Lesson:** a seed alone does not fix a sample. Commit a deterministic extractor and an ordered manifest first.
+
+### RC-29 — Audit size, denominator and execution were underspecified; max(10%, 8) gives 9.5 at 95 pairs
+
+**Missed:** the sample-size rule, what counts as a source, the aggregation and invalid-answer handling were all open, so the drop decision could depend on choices made after the data existed.
+**Found by:** arithmetic on the registered rule.
+**Lesson:** freeze the formula, the unit, the aggregation and the invalid-answer policy before any data exists.
+
+### RC-30 — Both generators got the same shortcut cues, so cross-generator success could not show rule learning
+
+**Missed:** one construction recipe was shared by both generators, yet cross-generator performance was claimed to show rule learning.
+**Found by:** reading the prompt against the claim.
+**Lesson:** transfer between generators that follow the same recipe shows transfer under that recipe.
+
+### RC-31 — The mechanical construction checks did not establish sentence-level labels
+
+**Missed:** the checks did not confirm that each sentence is exactly one unit under the training segmenter, and auditors did not judge the replacement inside its paragraph.
+**Found by:** reading the checks against the contradiction rule.
+**Lesson:** validate generated sentences with the real segmenter, and judge replacements in their full paragraph.
+
+### RC-32 — Independent filtering could break the pairing between the two generators' test sets
+
+**Missed:** pairs were dropped independently per generator, so the two recalls could cover different seed populations.
+**Found by:** reading the filtering clauses.
+**Lesson:** compare generators only on seed ids that survive in both sets.
+
+### RC-33 — The shortcut prediction named T-syn-in while its rule was defined on T-syn-cross, and the probe's tokenization was not frozen
+
+**Missed:** the prediction and its decision rule named different sets, and an ordinary word tokenizer can discard the `&&` versus `;` cue.
+**Found by:** reading the prediction clauses.
+**Lesson:** a prediction names its own set's decision rule, and probe features are frozen so that punctuation survives.
+
+### RC-34 — Admitting audits by cell would silently accept individually disputed pairs as training labels
+
+**Missed:** eight pairs marked "disagree" sat in retained cells, three of them disputing the target label itself.
+**Found by:** recomputing each cell's decision and locating the disputed pairs.
+**Lesson:** a cell-level threshold can admit items already known to be disputed. Register an item-level decision.
+
+### RC-35 — A top-up sized to reach 50 before the final filters could still fall short after the freeze
+
+**Missed:** sizing from pre-freeze counts ignores how many items survive every later filter.
+**Found by:** reading the stop rule against the pre-freeze counts.
+**Lesson:** size a top-up from what survives every later filter.
+
+### RC-36 — The labeller's stop on a terminal failure waited behind earlier batches, so pending batches still started
+
+**Missed:** results were consumed in input order, so a later batch's second failure went unseen behind a slow earlier one. The existing tests covered per-call retry, not this path.
+**Found by:** a fake-model run with batch 0 blocked and batch 1 failing twice: all 21 batches started.
+**Lesson:** test the controller path where a later failure sits behind an earlier slow future, and bound pending work with a shared stop signal.
+
+### RC-37 — Relaunching the labeller paid for model calls again and overwrote the prior labels and header
+
+**Missed:** `mkdir(exist_ok=True)` plus reused filenames meant "run once" was never enforced.
+**Found by:** a fake-model run into a directory that already held results.
+**Lesson:** "run once" needs an exclusive reservation of the output location before any model call.
+
+### RC-38 — The labeller checked cheap preconditions only after spending on the Codex call
+
+**Missed:** the worker count and the Claude channel were validated only after the expensive call had been made.
+**Found by:** integration tests run against the pre-fix runner.
+**Lesson:** check cheap preconditions before creating outputs or spending.
+
+### RC-39 — The judge-channel control (412 vs 412 tokens) could not show synced skills add nothing: both directories synced them
+
+**Missed:** the control never removed the suspected injection, and equal token counts do not mean equal content.
+**Found by:** reading the probe and the design of the comparison.
+**Lesson:** a control must remove the suspected mechanism while holding everything else fixed. The blocked-sync control (`90e0965d`) did.
+
+### RC-40 — The counterexample miner checked candidates against the frozen folds only, never against each other across folds
+
+**Missed:** 64 cross-fold shingles touched 28 eligible paragraphs, and the 8 tests stayed green with every shingle check disabled.
+**Found by:** the real `--count-only` pool, plus a mutation that disabled shingles and survived.
+**Lesson:** compare new items with each other across folds, and test that the filters fail when switched off. Already promoted: the Snow Pheasant's `new-vs-new-overlap` memory.
+
+### RC-41 — A passing permutation null was said to show 'the split carries no link but the labels'
+
+**Missed:** a near-chance shuffled run shows that this run recovered no held-out signal, not that every leakage path is absent.
+**Found by:** recomputing the null run's AUC and reading the conclusion against what a null can show.
+**Lesson:** a passing null is a diagnostic inside its band, not proof that the split is clean.
+
+### RC-42 — 'The loss only fell from there' went beyond the logging resolution of running means every 200 rows
+
+**Missed:** the maximum was taken over running means logged at intervals, not over every step.
+**Found by:** reading the logging frequency against the claim.
+**Lesson:** a maximum over logged means is an observation at that interval only.
+
+### RC-43 — A temperature at its lower bound was read as proof that a head's calibration items were perfectly separated
+
+**Missed:** hitting the bound does not prove separation in general, even though all 17 cases here were in fact separated.
+**Found by:** checking all 17 cases against their calibration logits.
+**Outcome:** open. The sentence is unchanged.
+**Lesson:** a parameter on its bound does not prove the property. Check the logits directly.
+
+### RC-44 — The Phase 1b Stage-2 shell wrappers exited 0 after a child failed
+
+**Missed:** each wrapper ended on an `echo`, and `lanes.sh` used a bare `wait`, so a failed run reported success. No recorded child failed.
+**Found by:** disposable copies of the wrappers with a fake child exiting 23.
+**Lesson:** a wrapper that ends on `echo` or a bare `wait` reports success whatever its children did. Pass each child's status through.
+
+### RC-45 — The gate's claim took the first unit of highest P, so a float-saturated tie at 1.0 quoted an innocent sentence
+
+**Missed:** `sig(z/T)` rounds to 1.0 for z/T above about 36.8. At T = 0.25, which three heads use, two confident units tie, and `max` took the first, an innocent sentence in every span text.
+**Found by:** reproduced on the real `span-semicolon` text: logits 12, 30 and 5 fail the span gate.
+**Outcome:** fixed by taking the argmax of the raw logit. P and every fire decision are unchanged. No tie occurred in the gate run.
+**Lesson:** an argmax over saturating probabilities ties. Choose by the raw score, and record ties.
+
+### RC-46 — A failure after the gate's reservation would lose all evidence, and errored rows kept only a count, never the error
+
+**Missed:** output was captured in memory, and the gate code prints only a count of errored rows. A crash would have left a "running" file that could not be re-run.
+**Found by:** reading the reservation and the capture paths.
+**Lesson:** a one-shot run writes a crash record, holding the traceback, partial rows and error texts, before it re-raises.
+
+### RC-47 — The gate result did not record which code produced it, and could run from uncommitted bytes
+
+**Missed:** the header held data hashes only, and the script itself was uncommitted.
+**Found by:** reading the header fields.
+**Lesson:** refuse to run a one-shot evaluation from a dirty tree, and record HEAD plus the hash of every file a verdict depends on.
+
+### RC-48 — 'Each checkpoint's gate runs once' depended on the paths the caller passed, not on the checkpoint
+
+**Missed:** the reservation was `<out-dir>/<filename stem>`, so another directory or a renamed copy would run the gate again.
+**Found by:** reading how the reservation is keyed.
+**Lesson:** key a run-once reservation to the thing run: a marker beside the checkpoint.
+
+### RC-49 — Nothing checked where common.json came from, and the summary never checked the nine results agree
+
+**Missed:** any `--common` file was accepted, and the summary read gate-ability from the first result only.
+**Found by:** reading the inputs' provenance.
+**Lesson:** check a derived input against its derivation (nine runs, their intersection), and check that results being pooled share it.
+
+### RC-50 — Predictions 4 and 5 would count an unjudged or errored clean-12 cell as 'did not fire'
+
+**Missed:** a rule absent from the judged rows read as NO, which favours prediction 5.
+**Found by:** reading how the summary reads `clean-12`.
+**Lesson:** absence of a judgment is not a NO. Refuse to read a prediction from a cell that was not judged.
+
+### RC-51 — The gate scored its texts in worker threads, while parity was checked in the main thread
+
+**Missed:** bit-equality across threads was assumed, never measured.
+**Found by:** reading where `sel.sweep` calls the judge.
+**Lesson:** compute the scores the verdict reads on the same path that parity verified.
+
+### RC-52 — A NaN logit read as YES, because the NO branch tested p < t
+
+**Missed:** `nan < t` is False, so a NaN fired with a claim, and `max` skips a NaN unless it comes first.
+**Found by:** reading the comparison.
+**Lesson:** a decision written as "NO if p < t" fires on NaN. Refuse non-finite values before comparing.
+
+### RC-53 — Failed instrument checks left no durable record, and the result file was not written atomically
+
+**Missed:** a refusal wrote nothing, so a retry was invisible, and a crash mid-write could leave a partial file.
+**Found by:** reading the refusal and write paths.
+**Lesson:** record every refusal, and write results with a temporary file and a rename.
+
+### RC-54 — Step 5's tests gave both menus one gate-ability value and never drove run_checkpoint to a PASS
+
+**Missed:** the summary fixture set own and common gate-ability to the same value, so a test could not tell which one the code read. The only end-to-end test asserted FAIL, which cannot catch a run wrongly recorded as FAIL.
+**Found by:** the reviewer's in-memory mutation lens: these mutants survived all 54 tests.
+**Lesson:** a fixture that sets two fields equal cannot test which one is read, and a FAIL-only end-to-end test is monotone toward failure. It is an instance of `CLAUDE.md` § *Testing Discipline*'s monotone and fixture-annotation laws.
+
+## History
+
+### 2026-09-27 — created
+
+Created at the operator's request, after the phase-1b campaign stopped, from the campaign's reviews. The rows are seeded from the review documents and bug files, and cite them.
