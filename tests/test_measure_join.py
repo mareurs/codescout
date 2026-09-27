@@ -103,6 +103,87 @@ def _hook_success_entry(uuid, ts, sid, hook_name="SessionStart", content="shared
     }
 
 
+# --- R56 real-shaped hook fixtures ---------------------------------------------------------
+# Key sets and value forms copied from real attachments on the 2026-09-27 snapshot (texts
+# sanitized and shortened). A hook_success carries every key below. A hac carries only
+# type/content/hookName/toolUseID/hookEvent, and its `content` is ALWAYS a list, with 1 element
+# (Pre/PostToolUse, SubagentStart, some SessionStart) or 2 (a merged SessionStart hac).
+
+
+def _sha(text):
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _real_hook_success(uuid, ts, sid, event, hook_name, tool_use_id, text, *, plain=False,
+                       agent_id=None):
+    """`plain=False`: a JSON-stdout hook, which carries the text in stdout's
+    hookSpecificOutput.additionalContext, with `content` "". `plain=True`: a plain-stdout hook
+    (buddy's run.mjs), which carries the text verbatim in `content`, with stdout adding a
+    trailing newline. `text=None`: a hook that printed `{}` and injected nothing.
+    """
+    if text is None:
+        content, stdout = "", "{}"
+    elif plain:
+        content, stdout = text, text + "\n"
+    else:
+        content = ""
+        stdout = json.dumps({"hookSpecificOutput": {"hookEventName": event,
+                                                    "additionalContext": text}})
+    e = {
+        "type": "attachment", "uuid": uuid, "timestamp": ts, "sessionId": sid,
+        "isSidechain": agent_id is not None,
+        "attachment": {
+            "type": "hook_success", "hookName": hook_name, "toolUseID": tool_use_id,
+            "hookEvent": event, "content": content, "stdout": stdout, "stderr": "",
+            "exitCode": 0, "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/hook.mjs",
+            "durationMs": 57,
+        },
+    }
+    if agent_id is not None:
+        e["agentId"] = agent_id
+    return e
+
+
+def _real_hac(uuid, ts, sid, event, hook_name, tool_use_id, elements, *, agent_id=None):
+    e = {
+        "type": "attachment", "uuid": uuid, "timestamp": ts, "sessionId": sid,
+        "isSidechain": agent_id is not None,
+        "attachment": {
+            "type": "hook_additional_context", "content": list(elements),
+            "hookName": hook_name, "toolUseID": tool_use_id, "hookEvent": event,
+        },
+    }
+    if agent_id is not None:
+        e["agentId"] = agent_id
+    return e
+
+
+SUPERPOWERS_TEXT = (
+    "<EXTREMELY_IMPORTANT>\nYou have superpowers.\n\n**Below is the full content of your "
+    "'superpowers:using-superpowers' skill.**\n</EXTREMELY_IMPORTANT>"
+)
+CS_SESSION_TEXT = "PROJECT BOOTSTRAP: As your FIRST codescout action, call\nworkspace(activate)."
+CS_MEMORIES_TEXT = "codescout MEMORIES: architecture conventions gotchas -- read the matching ones."
+SUBAGENT_BOOTSTRAP_TEXT = (
+    "PROJECT BOOTSTRAP: workspace(action=\"activate\", path=\"/repo\") is your FIRST\n"
+    "codescout action, before Phase 0 below."
+)
+BUDDY_RELOADED_TEXT = (
+    "<!-- buddy:reloaded sid=s-1 from=s-0 source=compact -->\n\n"
+    "Reloaded from compact -- and ONLY these, nothing else: reconnaissance."
+)
+UPS_TEXT = (
+    "→ skill `codescout-companion:reconnaissance` already loaded this session (seen 2×) "
+    "— do not re-invoke; its instructions are still in context."
+)
+CS_HINT_TEXT = "[cs-hint] Use `read_file` or `find_symbol` — Bash on source files is blocked."
+
+
+def _hook_rows(events_db):
+    rows = _table_rows(sqlite3.connect(str(events_db)), "deliveries")
+    return [d for d in rows if d["source"] == "transcript_hook"]
+
+
 def _make_corpus(tmp_path, repos=None, bounds=None):
     corpus_dir = tmp_path / "corpus"
     (corpus_dir / "manifest.json").parent.mkdir(parents=True, exist_ok=True)
@@ -257,6 +338,23 @@ class TokensWrittenOncePerMessageId(unittest.TestCase):
             # first line to report message.id "m1") gets the full count and a2 (same id) gets 0.
             self.assertEqual(by_uuid["a1"]["tokens"], 35)
             self.assertEqual(by_uuid["a2"]["tokens"], 0)
+
+
+class TurnsInsertIsPlain(unittest.TestCase):
+    """The R45 uuid gate upstream is what keeps `turns` at one row per (sid, uuid). If it ever
+    lets a uuid through twice, the second write must RAISE, not vanish behind `INSERT OR
+    IGNORE` while the `turns` counter still counts it.
+    """
+
+    def test_a_second_turns_write_of_one_uuid_raises_integrity_error(self):
+        conn = sqlite3.connect(":memory:")
+        join._create_schema(conn)
+        counts = {}
+        entry = _entry("u-dup", "2026-09-20T10:00:00Z", "sid1")
+
+        join._write_turn(conn, counts, ".claude/sid1", None, entry, "prompt", {})
+        with self.assertRaises(sqlite3.IntegrityError):
+            join._write_turn(conn, counts, ".claude/sid1", None, entry, "prompt", {})
 
 
 class OperatorRuleMarkerDelivery(unittest.TestCase):
@@ -752,6 +850,32 @@ class CalledAtFallback(unittest.TestCase):
         self.assertEqual(counts["heuristic_via_called_at"], 1)
 
 
+    def test_a_started_at_keyed_heuristic_join_leaves_heuristic_via_called_at_at_zero(self):
+        conn = sqlite3.connect(":memory:")
+        join._create_schema(conn)
+        counts = _fresh_counts()
+
+        candidates = [_candidate(
+            "p/sid1", "sid1", "mcp__codescout__grep", {"pattern": "x"}, _iso(BASE),
+        )]
+        # started_at is present, so the time key is started_at and the called_at fallback is
+        # never consulted. load-bearing: called_at and latency_ms are set anyway, so a counter
+        # that fires for every heuristic join, fallback or not, has something to fire on.
+        usage_rows = [
+            _usage_row("db:1", "grep", "sid1", json.dumps({"pattern": "x"}),
+                       started_at=_sql_ts(BASE + timedelta(seconds=1)),
+                       called_at=_sql_ts(BASE + timedelta(seconds=3)), latency_ms=2000),
+        ]
+
+        join._join_tool_events(conn, candidates, usage_rows, counts, {}, {})
+        conn.commit()
+        rows = _table_rows(conn, "tool_events")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["join_method"], "heuristic")
+        self.assertEqual(counts.get("heuristic_via_called_at", 0), 0)
+
+
 class UsageRowJoinsAtMostOnce(unittest.TestCase):
     def test_each_usage_row_joins_at_most_once(self):
         conn = sqlite3.connect(":memory:")
@@ -1091,17 +1215,18 @@ class SubagentOwnershipOrder(unittest.TestCase):
 
             # sess-hi has 3 distinct top-level uuids (incl. the shared one), sess-lo has 2 --
             # both `_order_like_attribution` and `attribute_entries` sort candidates by
-            # (-uuid_count, first_ts, copy_id), so sess-hi wins on count alone; first_ts is not
-            # made to matter, so this cannot pass by accidentally exercising the tie-break
-            # instead of the count comparison.
+            # (-uuid_count, first_ts, copy_id). load-bearing: sess-hi has the higher count but
+            # the LATER first_ts (09:30 vs 09:00), so count and time disagree. An order that
+            # drops the count dimension, leaving (first_ts, copy_id), puts sess-lo first and
+            # drifts from attribute_entries -- which this fixture must detect (mutant D1).
             _write_lines(proj / "sess-hi.jsonl", [
-                _entry("shared-top-1", "2026-09-20T09:00:00Z", "sess-hi"),
-                _entry("hi2", "2026-09-20T09:00:01Z", "sess-hi"),
-                _entry("hi3", "2026-09-20T09:00:02Z", "sess-hi"),
+                _entry("shared-top-1", "2026-09-20T09:30:00Z", "sess-hi"),
+                _entry("hi2", "2026-09-20T09:30:01Z", "sess-hi"),
+                _entry("hi3", "2026-09-20T09:30:02Z", "sess-hi"),
             ])
             _write_lines(proj / "sess-lo.jsonl", [
-                _entry("shared-top-1", "2026-09-20T09:30:00Z", "sess-lo"),
-                _entry("lo2", "2026-09-20T09:30:01Z", "sess-lo"),
+                _entry("shared-top-1", "2026-09-20T09:00:00Z", "sess-lo"),
+                _entry("lo2", "2026-09-20T09:00:01Z", "sess-lo"),
             ])
 
             shared_sub_entries = [_entry("shared-sub-1", "2026-09-20T10:00:00Z", "sess-hi")]
@@ -1142,10 +1267,9 @@ class SubagentAttachmentUnionGate(unittest.TestCase):
     sessions' subagent directories, as a fork pair's shared subagent file is) is emitted once
     PER KEEPER instead of once total, since the attachment path would bypass the very dedup
     gate that plain entries are correctly subject to. Calls `_process_subagent_union` directly
-    (bypassing `build_events`/R53's `_dedup_hook_deliveries`) so this cannot be masked by that
-    separate, later, (tool_use_id, key, sha256)-keyed dedup pass -- the two duplicate rows this
-    test constructs share a uuid but nothing else, so only the seen_uuids gate can prevent the
-    second emission. Reviewer's own mutation of this ordering double-emitted 12 real subagent
+    (bypassing `build_events`'s later `_dedup_hook_deliveries` pass, which under R56 never
+    collapses two hook_additional_context rows anyway) -- the two duplicate rows this test
+    constructs share a uuid, so only the seen_uuids gate can prevent the second emission. Reviewer's own mutation of this ordering double-emitted 12 real subagent
     deliverable attachments on the live corpus with no test noticing.
     """
 
@@ -1156,8 +1280,8 @@ class SubagentAttachmentUnionGate(unittest.TestCase):
             sub_dir_b = tmp_path / "fork-b" / "subagents"
             # Same uuid, same content -- a literal copy, as a fork pair's subagent file is --
             # but each keeper's own call passes its OWN tool_use_id, so the two rows this
-            # emits (if the gate fails to block the second) do not share R53's dedup key
-            # either, and only the seen_uuids gate stands between one row and two.
+            # emits (if the gate fails to block the second) differ in tool_use_id too, and only
+            # the seen_uuids gate stands between one row and two.
             shared_att_a = [_attachment_entry(
                 "sub_att1", "2026-09-21T10:05:00Z", "fork-a", tool_use_id="tu-a",
             )]
@@ -1326,6 +1450,8 @@ class RealFormatHeuristicJoin(unittest.TestCase):
             self.assertEqual(counts["tool_events_heuristic"], 1)
             self.assertEqual(counts["tool_events_exact"], 0)
             self.assertEqual(counts["tool_events_none"], 0)
+            # started_at is non-NULL here, so this join never used the R54 called_at fallback.
+            self.assertEqual(counts["heuristic_via_called_at"], 0)
 
 
 
@@ -1393,11 +1519,10 @@ class SubagentHookDeliveries(unittest.TestCase):
 
 
 class HookDeliveryDedup(unittest.TestCase):
-    """R53: Claude Code records one hook injection as a `hook_success`/`hook_additional_context`
-    twin -- both sharing (toolUseID, hook event, sha256) -- and `_deliveries_from_attachment`
-    emits a row for each. `_dedup_hook_deliveries` collapses each such group to one row,
-    preferring the `hook_additional_context` copy; a lone `hook_success` (no twin) falls back
-    to itself and is counted in `hook_success_only`.
+    """R53, as narrowed by R56: a `hook_success`/`hook_additional_context` twin yields ONE row
+    (the hac), and a lone `hook_success` falls back to itself and is counted in
+    `hook_success_only`. These two are the Pre/PostToolUse shape, where both sides do share a
+    toolUseID; `HookTwinRule` covers the shapes where they do not.
     """
 
     def test_a_hook_success_and_hook_additional_context_twin_yields_one_row(self):
@@ -1443,6 +1568,283 @@ class HookDeliveryDedup(unittest.TestCase):
             hook_deliveries = [d for d in deliveries if d["source"] == "transcript_hook"]
             self.assertEqual(len(hook_deliveries), 1)
             self.assertEqual(counts["hook_success_only"], 1)
+
+
+class HookTwinRule(unittest.TestCase):
+    """R56 (supersedes R53's key): a `hook_success` row is DROPPED as a twin iff a
+    `hook_additional_context` (hac) row exists in the SAME session copy, the SAME transcript file
+    and the SAME hook event, whose text EQUALS the hook_success text or has an ELEMENT equal to
+    it, within |dts| <= 5 s. toolUseID is not part of the key, two hac rows are never collapsed,
+    and nothing pairs across sessions or files.
+
+    Each fixture copies a real shape from the 2026-09-27 snapshot (the file and lines are cited
+    on the test), sanitized. The timestamps keep the real sub-second offsets between twins, so a
+    window narrowed to 0 s fails on them.
+    """
+
+    SID_A = "19e0e253-6b26-4a74-a201-000000000001"
+    SID_B = "2cb44cd3-8673-4604-a8ac-000000000002"
+
+    def _build(self, files):
+        """`files` maps a path under one project dir to its entries. Returns (hook rows, counts)."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        corpus_dir = _make_corpus(pathlib.Path(tmp.name))
+        proj = _session_dir(corpus_dir, "00-.claude", "p")
+        for rel, entries in files.items():
+            _write_lines(proj / rel, entries)
+        events_db = pathlib.Path(tmp.name) / "events.db"
+        counts = join.build_events(corpus_dir, events_db, excluded_sids=set())
+        return _hook_rows(events_db), counts
+
+    def test_a_subagentstart_twin_under_a_different_tool_use_id_yields_one_row(self):
+        # Real shape: 00-.claude/.../19e0e253-.../subagents/agent-a17b789c8283dda21.jsonl L2-L4.
+        # All 909 SubagentStart twins on the snapshot carry a different uuid on each side.
+        sid, agent = self.SID_A, "a17b789c8283dda21"
+        rows, counts = self._build({
+            f"{sid}.jsonl": [_entry("u1", "2026-09-02T09:30:00.000Z", sid)],
+            f"{sid}/subagents/agent-{agent}.jsonl": [
+                # agent-guide-snapshot.mjs printed `{}`: it injected nothing, so it has no row.
+                _real_hook_success("s2", "2026-09-02T09:30:20.016Z", sid, "SubagentStart",
+                                   "SubagentStart:general-purpose",
+                                   "f6064fde-1c3a-43ce-9181-9474a695d62a", None, agent_id=agent),
+                _real_hook_success("s3", "2026-09-02T09:30:20.021Z", sid, "SubagentStart",
+                                   "SubagentStart:general-purpose",
+                                   # load-bearing: NOT the hac's toolUseID (kills a tuid key)
+                                   "f6064fde-1c3a-43ce-9181-9474a695d62a",
+                                   SUBAGENT_BOOTSTRAP_TEXT, agent_id=agent),
+                # load-bearing: 1 ms after s3, not 0 (kills a 0 s window)
+                _real_hac("s4", "2026-09-02T09:30:20.022Z", sid, "SubagentStart", "SubagentStart",
+                          "b92acfec-8c2b-44c4-82a5-f0bedb5a9797", [SUBAGENT_BOOTSTRAP_TEXT],
+                          agent_id=agent),
+            ],
+        })
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["engine_or_hook"], "SubagentStart")  # the hac's hookName
+        self.assertEqual(rows[0]["tool_use_id"], "b92acfec-8c2b-44c4-82a5-f0bedb5a9797")
+        self.assertEqual(counts["hook_success_twins_dropped"], 1)
+        self.assertEqual(counts["hook_success_only"], 0)
+
+    def test_a_merged_two_string_sessionstart_hac_absorbs_both_hook_success_twins(self):
+        # Real shape: 00-.claude/.../08a2785b-...jsonl L4-L6 (startup). Each hook_success text is
+        # ONE ELEMENT of the merged hac, never the joined whole.
+        sid, tuid = self.SID_A, "4cc21e92-88ee-4506-a178-6224eff03119"
+        rows, counts = self._build({f"{sid}.jsonl": [
+            _entry("u1", "2026-09-03T23:02:50.000Z", sid),
+            # 325 ms before the hac
+            _real_hook_success("h1", "2026-09-03T23:02:54.906Z", sid, "SessionStart",
+                               "SessionStart:startup", tuid, SUPERPOWERS_TEXT),
+            # 91 ms before the hac
+            _real_hook_success("h2", "2026-09-03T23:02:55.140Z", sid, "SessionStart",
+                               "SessionStart:startup", tuid, CS_SESSION_TEXT),
+            # load-bearing: 2 elements, each equal to one hook_success text (kills
+            # per-element matching disabled)
+            _real_hac("h3", "2026-09-03T23:02:55.231Z", sid, "SessionStart", "SessionStart",
+                      "SessionStart", [SUPERPOWERS_TEXT, CS_SESSION_TEXT]),
+        ]})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["sha256"], _sha(SUPERPOWERS_TEXT + "\n\n" + CS_SESSION_TEXT))
+        self.assertEqual(counts["hook_success_twins_dropped"], 2)
+        self.assertEqual(counts["hook_success_only"], 0)
+
+    def test_a_sessionstart_hac_under_the_literal_tool_use_id_sessionstart_is_a_twin(self):
+        # Real shape: 00-.claude/.../2cb44cd3-...jsonl L2388-L2389 (resume), 67 ms apart. All 666
+        # SessionStart hacs on the snapshot carry the toolUseID "SessionStart".
+        sid = self.SID_A
+        rows, counts = self._build({f"{sid}.jsonl": [
+            _entry("u1", "2026-09-02T01:52:39.303Z", sid),
+            _real_hook_success("r1", "2026-09-02T01:52:39.387Z", sid, "SessionStart",
+                               "SessionStart:resume", "7388e5d7-efc6-4480-8fc5-49ff8a7c3596",
+                               CS_MEMORIES_TEXT),
+            _real_hac("r2", "2026-09-02T01:52:39.454Z", sid, "SessionStart", "SessionStart",
+                      "SessionStart", [CS_MEMORIES_TEXT]),
+        ]})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["tool_use_id"], "SessionStart")
+        self.assertEqual(counts["hook_success_twins_dropped"], 1)
+        self.assertEqual(counts["hook_success_only"], 0)
+
+    def test_a_compact_plain_stdout_hook_success_with_no_hac_is_kept(self):
+        # Real shape: 00-.claude/.../19e0e253-...jsonl L1127-L1130 (compact). Three hooks ran; the
+        # merged hac carries only the two JSON-stdout hooks' texts. Buddy's plain-stdout text
+        # never gets a hac (on the snapshot, no hac within 10 s carries even its first 120
+        # characters), yet it sits 1 ms from a same-event hac, so only the TEXT key keeps it.
+        sid, tuid = self.SID_A, "07b8849a-e40d-4e4d-b135-15451bc6c5c5"
+        rows, counts = self._build({f"{sid}.jsonl": [
+            _entry("u1", "2026-09-02T06:46:06.000Z", sid),
+            _real_hook_success("c1", "2026-09-02T06:46:06.907Z", sid, "SessionStart",
+                               "SessionStart:compact", tuid, SUPERPOWERS_TEXT),
+            _real_hook_success("c2", "2026-09-02T06:46:06.959Z", sid, "SessionStart",
+                               "SessionStart:compact", tuid, CS_MEMORIES_TEXT),
+            # load-bearing: plain stdout, text in `content`, and no element of c4 equals it
+            _real_hook_success("c3", "2026-09-02T06:46:07.173Z", sid, "SessionStart",
+                               "SessionStart:compact", tuid, BUDDY_RELOADED_TEXT, plain=True),
+            _real_hac("c4", "2026-09-02T06:46:07.174Z", sid, "SessionStart", "SessionStart",
+                      "SessionStart", [SUPERPOWERS_TEXT, CS_MEMORIES_TEXT]),
+        ]})
+        buddy = [r for r in rows if r["sha256"] == _sha(BUDDY_RELOADED_TEXT)]
+        self.assertEqual(len(buddy), 1)
+        self.assertEqual(buddy[0]["engine_or_hook"], "SessionStart:compact")
+        self.assertEqual(len(rows), 2)  # the buddy hook_success and the merged hac
+        self.assertEqual(counts["hook_success_only"], 1)
+        self.assertEqual(counts["hook_success_twins_dropped"], 2)
+
+    def test_a_userpromptsubmit_plain_stdout_hook_success_is_kept(self):
+        # Real shape: 00-.claude/.../bf44ba81-...jsonl L2506-L2507. No UserPromptSubmit hook on
+        # the snapshot has a hac.
+        sid = self.SID_A
+        rows, counts = self._build({f"{sid}.jsonl": [
+            _entry("p1", "2026-09-01T10:57:03.675Z", sid),
+            _real_hook_success("p2", "2026-09-01T10:57:03.885Z", sid, "UserPromptSubmit",
+                               "UserPromptSubmit", "a058aaa6-b893-41fe-a26c-92a311f29283",
+                               UPS_TEXT, plain=True),
+        ]})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["engine_or_hook"], "UserPromptSubmit")
+        self.assertEqual(rows[0]["sha256"], _sha(UPS_TEXT))
+        self.assertEqual(counts["hook_success_only"], 1)
+        self.assertEqual(counts.get("hook_success_twins_dropped", 0), 0)
+
+    def test_byte_identical_sessionstart_text_in_two_sessions_is_never_paired_across_them(self):
+        # Session A has the real hs/hac pair (shape: 2cb44cd3 L2388-L2389). Session B, starting
+        # 1 s later, carries the same text as a hook_success with no hac of its own (the fallback
+        # class). B's row must survive: a key without the session lets A's hac absorb it.
+        a, b = self.SID_A, self.SID_B
+        rows, counts = self._build({
+            f"{a}.jsonl": [
+                _entry("a0", "2026-09-02T01:52:30.000Z", a),
+                _real_hook_success("a1", "2026-09-02T01:52:39.387Z", a, "SessionStart",
+                                   "SessionStart:resume", "7388e5d7-efc6-4480-8fc5-49ff8a7c3596",
+                                   CS_MEMORIES_TEXT),
+                _real_hac("a2", "2026-09-02T01:52:39.454Z", a, "SessionStart", "SessionStart",
+                          "SessionStart", [CS_MEMORIES_TEXT]),
+            ],
+            f"{b}.jsonl": [
+                _entry("b0", "2026-09-02T01:52:31.000Z", b),
+                # load-bearing: within 5 s of a2, same event, same text; no hac in session B
+                _real_hook_success("b1", "2026-09-02T01:52:40.454Z", b, "SessionStart",
+                                   "SessionStart:resume", "2dd3d6ba-f0d9-4bf1-a91a-ce0606d7460d",
+                                   CS_MEMORIES_TEXT),
+            ],
+        })
+        self.assertEqual(
+            sorted(r["sid"] for r in rows), sorted([f".claude/{a}", f".claude/{b}"])
+        )
+        self.assertEqual(counts["hook_success_only"], 1)
+        self.assertEqual(counts["hook_success_twins_dropped"], 1)
+
+    def test_identical_sessionstart_hacs_of_two_sessions_are_never_collapsed(self):
+        # The R53 defect itself: every SessionStart hac carries the toolUseID "SessionStart", so
+        # R53's (toolUseID, event, sha256) key merged byte-identical hacs of DIFFERENT sessions
+        # into one row, deleting 333 real deliveries on the fix-round-3 re-review's snapshot. The
+        # two sessions here even share the timestamp, so no time key could separate them.
+        a, b = self.SID_A, self.SID_B
+        files = {}
+        for sid, pfx in ((a, "a"), (b, "b")):
+            files[f"{sid}.jsonl"] = [
+                _entry(f"{pfx}0", "2026-09-02T01:52:30.000Z", sid),
+                _real_hook_success(f"{pfx}1", "2026-09-02T01:52:39.387Z", sid, "SessionStart",
+                                   "SessionStart:resume", f"{pfx}-tuid", CS_MEMORIES_TEXT),
+                _real_hac(f"{pfx}2", "2026-09-02T01:52:39.454Z", sid, "SessionStart",
+                          "SessionStart", "SessionStart", [CS_MEMORIES_TEXT]),
+            ]
+        rows, counts = self._build(files)
+        self.assertEqual(
+            sorted(r["sid"] for r in rows), sorted([f".claude/{a}", f".claude/{b}"])
+        )
+        self.assertTrue(all(r["tool_use_id"] == "SessionStart" for r in rows))
+        self.assertEqual(counts["hook_success_twins_dropped"], 2)
+
+    def test_the_same_text_in_two_files_of_one_session_is_never_paired_across_them(self):
+        # SessionStart hooks occur in subagent files too (680 hook_success, 242 hac on the
+        # snapshot). The top-level file's hook_success has no hac of its own; the subagent file
+        # holds a hac with the same text 600 ms later. A key without the file would pair them.
+        sid, agent = self.SID_A, "a24915499b197900d"
+        rows, counts = self._build({
+            f"{sid}.jsonl": [
+                _entry("u1", "2026-09-02T11:53:30.000Z", sid),
+                _real_hook_success("t1", "2026-09-02T11:53:35.361Z", sid, "SessionStart",
+                                   "SessionStart:startup", "top-tuid", SUPERPOWERS_TEXT),
+            ],
+            f"{sid}/subagents/agent-{agent}.jsonl": [
+                _real_hook_success("t2", "2026-09-02T11:53:35.861Z", sid, "SessionStart",
+                                   "SessionStart:startup", "sub-tuid", SUPERPOWERS_TEXT,
+                                   agent_id=agent),
+                # load-bearing: same session, event and text as t1, 600 ms from it, other file
+                _real_hac("t3", "2026-09-02T11:53:35.961Z", sid, "SessionStart", "SessionStart",
+                          "SessionStart", [SUPERPOWERS_TEXT], agent_id=agent),
+            ],
+        })
+        self.assertEqual(sorted(r["tool_use_id"] for r in rows), ["SessionStart", "top-tuid"])
+        self.assertEqual(counts["hook_success_only"], 1)
+        self.assertEqual(counts["hook_success_twins_dropped"], 1)
+
+    def test_a_same_text_hac_six_seconds_away_is_not_a_twin(self):
+        # Real shape: 00-.claude/.../774ba049-.../subagents/agent-a3ba615808d91a57d.jsonl. The
+        # subagent's first SubagentStart has its twin; a later SubagentStart in the same file
+        # has no hac, and the earlier hac carries its text (62.6 s away there). Here the gap is
+        # 6 s, just outside the window; every real twin on the snapshot is within 1.713 s.
+        sid, agent = self.SID_A, "a3ba615808d91a57d"
+        rows, counts = self._build({
+            f"{sid}.jsonl": [_entry("u1", "2026-09-24T07:39:00.000Z", sid)],
+            f"{sid}/subagents/agent-{agent}.jsonl": [
+                _real_hook_success("w1", "2026-09-24T07:39:12.049Z", sid, "SubagentStart",
+                                   "SubagentStart:general-purpose", "tuid-1",
+                                   SUBAGENT_BOOTSTRAP_TEXT, agent_id=agent),
+                _real_hac("w2", "2026-09-24T07:39:12.050Z", sid, "SubagentStart", "SubagentStart",
+                          "tuid-2", [SUBAGENT_BOOTSTRAP_TEXT], agent_id=agent),
+                # load-bearing: exactly 6.000 s after w2 (kills an unbounded window)
+                _real_hook_success("w3", "2026-09-24T07:39:18.050Z", sid, "SubagentStart",
+                                   "SubagentStart:general-purpose", "tuid-3",
+                                   SUBAGENT_BOOTSTRAP_TEXT, agent_id=agent),
+            ],
+        })
+        self.assertEqual(sorted(r["tool_use_id"] for r in rows), ["tuid-2", "tuid-3"])
+        self.assertEqual(counts["hook_success_twins_dropped"], 1)
+        self.assertEqual(counts["hook_success_only"], 1)
+
+    def test_a_same_text_hac_of_another_hook_event_is_not_a_twin(self):
+        # Constructed from two real shapes: no text crosses hook events on the snapshot today,
+        # so this case guards the ruling's event key rather than a measured collision. A lone
+        # UserPromptSubmit hook_success (bf44ba81 L2507 shape) and a PostToolUse twin pair
+        # (ffb95976 L121-L122 shape) share one text, 500 ms apart.
+        sid = self.SID_A
+        rows, counts = self._build({f"{sid}.jsonl": [
+            _entry("e0", "2026-09-02T08:34:47.000Z", sid),
+            _real_hook_success("e1", "2026-09-02T08:34:47.343Z", sid, "UserPromptSubmit",
+                               "UserPromptSubmit", "ups-tuid", CS_HINT_TEXT, plain=True),
+            _real_hook_success("e2", "2026-09-02T08:34:47.843Z", sid, "PostToolUse",
+                               "PostToolUse:Bash", "toolu_01HpGPXXtbLsM3VX6cfRyDkg", CS_HINT_TEXT),
+            # load-bearing: same text as e1, 500 ms away, but a different hook event
+            _real_hac("e3", "2026-09-02T08:34:47.843Z", sid, "PostToolUse", "PostToolUse:Bash",
+                      "toolu_01HpGPXXtbLsM3VX6cfRyDkg", [CS_HINT_TEXT]),
+        ]})
+        self.assertEqual(sorted(r["tool_use_id"] for r in rows),
+                         ["toolu_01HpGPXXtbLsM3VX6cfRyDkg", "ups-tuid"])
+        self.assertEqual(counts["hook_success_only"], 1)
+        self.assertEqual(counts["hook_success_twins_dropped"], 1)
+
+    def test_two_hacs_with_equal_text_in_one_file_are_both_kept(self):
+        # Real shape: 00-.claude/.../ffb95976-...jsonl L121-L126. Two Bash calls 1.197 s apart
+        # drew the same [cs-hint] text, each with its own hs/hac twin: two injections, so two
+        # rows. A hac-vs-hac collapse would leave one.
+        sid = self.SID_A
+        a, b = "toolu_01HpGPXXtbLsM3VX6cfRyDkg", "toolu_01WbCnhBuWyNfDijrfZviCzt"
+        rows, counts = self._build({f"{sid}.jsonl": [
+            _entry("q0", "2026-09-02T08:34:40.000Z", sid),
+            _real_hook_success("q1", "2026-09-02T08:34:47.843Z", sid, "PostToolUse",
+                               "PostToolUse:Bash", a, CS_HINT_TEXT),
+            _real_hac("q2", "2026-09-02T08:34:47.843Z", sid, "PostToolUse", "PostToolUse:Bash",
+                      a, [CS_HINT_TEXT]),
+            _real_hook_success("q3", "2026-09-02T08:34:49.040Z", sid, "PostToolUse",
+                               "PostToolUse:Bash", b, CS_HINT_TEXT),
+            # load-bearing: equal text to q2, 1.197 s after it, same file and event
+            _real_hac("q4", "2026-09-02T08:34:49.040Z", sid, "PostToolUse", "PostToolUse:Bash",
+                      b, [CS_HINT_TEXT]),
+        ]})
+        self.assertEqual(sorted(r["tool_use_id"] for r in rows), sorted([a, b]))
+        self.assertEqual(counts["hook_success_twins_dropped"], 2)
+        self.assertEqual(counts["hook_success_only"], 0)
 
 class ThinkingOnlyLines(unittest.TestCase):
     def test_a_thinking_only_assistant_line_is_kind_assistant_thinking_with_null_text(self):

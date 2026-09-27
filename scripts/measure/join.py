@@ -47,6 +47,12 @@ _OUTPUT_MARKER_PATTERNS = (("operator-rule", OP_RULE_RE), ("get_guide", GUIDE_MA
 MCP_TOOL_PREFIX = "mcp__codescout__"
 JOIN_WINDOW_SECONDS = 120
 
+# R56: a hook_success and its hook_additional_context twin are at most this far apart. Measured
+# on the 2026-09-27 snapshot: every twin pair falls within 1.713 s (Pre/PostToolUse and
+# SubagentStart within 0.2 s), and the nearest same-text, same-file, same-event hac for a
+# hook_success that is NOT a twin is 12.1 s away.
+HOOK_TWIN_WINDOW_SECONDS = 5
+
 # R44: the spec's own § Scope excludes its own design session from the census by default --
 # "Excluded, each listed in the manifest with its reason: ... **this design session**
 # (`3c5b02df`)" (docs/superpowers/specs/2026-09-26-system1-base-rate-measurement-design.md
@@ -312,19 +318,24 @@ def _coerce_attachment_text(text):
     return None
 
 
-def _deliveries_from_attachment(entry, cid):
+def _deliveries_from_attachment(entry, cid, agent_path=None):
     """Amendment 2(a): hook executions appear as `attachment` entries. `hook_success` marks
     a hook ran (exit code/duration, toolUseID); injected text is recorded as
     `hook_additional_context`. A hook emitting nothing (e.g. a Stop hook with no output)
     records no content, and produces no delivery row here.
 
-    R53: Claude Code records one hook injection TWICE for some hook events -- a
-    `hook_success` attachment (whose stdout carries the same additionalContext text) and a
-    companion `hook_additional_context` attachment, both sharing (toolUseID, hook event,
-    sha256). The returned dict carries a transient `_atype` tag (the attachment's own
-    `type`) so a later dedup pass (`_dedup_hook_deliveries`) can prefer the
-    `hook_additional_context` twin; `_atype` is stripped before any row reaches the
-    `deliveries` table.
+    R53/R56: Claude Code records some hook injections TWICE -- a `hook_success` attachment
+    (whose stdout carries the context) and a `hook_additional_context` ("hac") attachment.
+    The returned dict carries transient fields for the later twin pass
+    (`_dedup_hook_deliveries`), all stripped before any row reaches the `deliveries` table:
+    - `_atype`: the attachment's own `type`;
+    - `_agent_path`: which transcript FILE the entry came from -- None for the top-level file,
+      the subagent file's corpus-relative path otherwise (the same convention as
+      `turns.agent_path`), so (sid, _agent_path) names exactly one file;
+    - `_elem_sha256s`: the sha256 of each ELEMENT of a list-shaped `content`. A merged hac
+      carries several hooks' texts as one list (measured: 609 SessionStart hacs with 2
+      elements on the 2026-09-27 snapshot), and a hook_success twin's text equals ONE element,
+      never the joined whole. A string-shaped or stdout-derived text is its own one element.
     """
     att = entry.get("attachment")
     if not isinstance(att, dict):
@@ -333,7 +344,9 @@ def _deliveries_from_attachment(entry, cid):
     if atype not in ("hook_success", "hook_additional_context"):
         return []
 
-    text = _coerce_attachment_text(att.get("rendered") or att.get("content") or None)
+    raw = att.get("rendered") or att.get("content") or None
+    text = _coerce_attachment_text(raw)
+    elements = raw if text and isinstance(raw, list) else None
     if not text:
         stdout = att.get("stdout")
         if isinstance(stdout, str) and stdout.strip():
@@ -347,6 +360,8 @@ def _deliveries_from_attachment(entry, cid):
                     text = hso.get("additionalContext") or None
     if not text:
         return []
+    if elements is None:
+        elements = [text]
 
     key = att.get("hookEvent") or att.get("hookName")
     return [
@@ -360,6 +375,8 @@ def _deliveries_from_attachment(entry, cid):
             "bytes": len(text.encode()),
             "tool_use_id": att.get("toolUseID"),
             "_atype": atype,
+            "_agent_path": agent_path,
+            "_elem_sha256s": [hashlib.sha256(x.encode()).hexdigest() for x in elements],
         }
     ]
 
@@ -471,8 +488,12 @@ def _write_turn(conn, counts, cid, agent_path, entry, kind, tokens_by_uuid):
     message = entry.get("message") if isinstance(entry.get("message"), dict) else {}
     message_id = message.get("id")
     tokens = tokens_by_uuid.get(uuid, 0)
+    # A plain INSERT, never OR IGNORE: the R45 uuid gate upstream is what guarantees one row
+    # per (sid, uuid), so a second write means that gate failed. That must raise
+    # (sqlite3.IntegrityError on the primary key), not be silently dropped while the
+    # `turns` counter below still counts it.
     conn.execute(
-        "INSERT OR IGNORE INTO turns (sid, agent_path, uuid, ts, role, kind, text, "
+        "INSERT INTO turns (sid, agent_path, uuid, ts, role, kind, text, "
         "message_id, tokens) VALUES (?,?,?,?,?,?,?,?,?)",
         (cid, agent_path, uuid, ts, entry.get("type"), kind, text, message_id, tokens),
     )
@@ -621,7 +642,7 @@ def _process_subagent_union(conn, sessions_list, excl, keeper, keeper_cid, corpu
                 continue
             seen_uuids.add(uuid)
             if e.get("type") == "attachment":
-                delivery_rows.extend(_deliveries_from_attachment(e, keeper_cid))
+                delivery_rows.extend(_deliveries_from_attachment(e, keeper_cid, agent_path))
                 continue
             kind = _entry_kind(
                 e, uuid in prompt_uuids, uuid in interrupt_uuids, uuid in delegation_uuids
@@ -638,45 +659,66 @@ def _process_subagent_union(conn, sessions_list, excl, keeper, keeper_cid, corpu
     return tool_use_candidates, delivery_rows
 
 
-def _dedup_hook_deliveries(delivery_rows, counts):
-    """R53: one delivery per (toolUseID, hook event, sha256) among `transcript_hook`-sourced
-    rows -- Claude Code records one hook injection as BOTH a `hook_success` attachment and a
-    `hook_additional_context` attachment, and `_deliveries_from_attachment` emits a row for
-    each. `hook_additional_context` is Amendment 2(a)'s named record of injected text, so a
-    group's `hook_additional_context` member wins when one exists; a group with no such twin
-    (a lone `hook_success`) falls back to its one row and is counted in `hook_success_only`
-    so the build reports how often that happened. Non-`transcript_hook` rows (usage-row
-    deliveries) pass through untouched -- this dedup applies only to the source R53 names.
+def _hook_twin_scope(d):
+    """R56: the scope a hook_success and its hac twin must SHARE -- the same session copy
+    (`sid`, the profile-qualified copy_id), the same transcript file (`_agent_path`: None for
+    the top-level file, else the subagent file) and the same hook event (`key`). toolUseID is
+    deliberately NOT part of it: measured on the 2026-09-27 snapshot, only Pre/PostToolUse
+    twins share one. A SubagentStart twin carries a different uuid on each side (909 of 909),
+    and every SessionStart hac carries the literal toolUseID "SessionStart" (666 of 666).
     """
-    groups = {}
+    return (d.get("sid"), d.get("_agent_path"), d.get("key"))
+
+
+def _is_hook_twin(hs, hac):
+    """R56: True iff `hac` records the same injection as hook_success `hs`, given that the
+    caller has already matched their `_hook_twin_scope`: the hs text EQUALS the hac text, or
+    equals one ELEMENT of a merged multi-string hac, and |dts| <= HOOK_TWIN_WINDOW_SECONDS.
+    A missing or unparseable ts is never a twin, since the window cannot be shown to hold.
+    """
+    if hs.get("sha256") != hac.get("sha256") and hs.get("sha256") not in hac.get("_elem_sha256s", ()):
+        return False
+    try:
+        dt = abs((utc(hac["ts"]) - utc(hs["ts"])).total_seconds())
+    except (KeyError, ValueError, TypeError, AttributeError):
+        return False
+    return dt <= HOOK_TWIN_WINDOW_SECONDS
+
+
+def _dedup_hook_deliveries(delivery_rows, counts):
+    """R56 (supersedes R53's key): among `transcript_hook` rows, a `hook_success` delivery is
+    DROPPED as a twin iff some `hook_additional_context` row shares its `_hook_twin_scope` and
+    `_is_hook_twin` holds; the drop is counted in `hook_success_twins_dropped`. Otherwise it is
+    kept as the fallback record of that injection and counted in `hook_success_only` (measured:
+    SessionStart:compact and UserPromptSubmit plain-stdout hooks never get a hac, and some
+    SubagentStart hooks do not either).
+
+    hac rows are ALWAYS kept: two hacs are never collapsed against each other, whatever their
+    text or toolUseID, since each is its own injection. R53 keyed on (toolUseID, event, sha)
+    with no session and no time, so all SessionStart hacs -- sharing toolUseID "SessionStart"
+    -- were collapsed across sessions, deleting 333 real deliveries. Nothing here pairs across
+    sessions or files. Non-`transcript_hook` rows (usage-row deliveries) pass through untouched.
+    """
+    hacs_by_scope = {}
     for d in delivery_rows:
-        if d.get("source") != "transcript_hook":
-            continue
-        gkey = (d.get("tool_use_id"), d.get("key"), d.get("sha256"))
-        groups.setdefault(gkey, []).append(d)
+        if d.get("source") == "transcript_hook" and d.get("_atype") == "hook_additional_context":
+            hacs_by_scope.setdefault(_hook_twin_scope(d), []).append(d)
 
-    chosen = {}
-    for gkey, rows in groups.items():
-        preferred = next((r for r in rows if r.get("_atype") == "hook_additional_context"), None)
-        if preferred is not None:
-            chosen[gkey] = preferred
-        else:
-            chosen[gkey] = rows[0]
-            counts["hook_success_only"] = counts.get("hook_success_only", 0) + 1
-
-    emitted = set()
     out = []
     for d in delivery_rows:
         if d.get("source") != "transcript_hook":
             out.append(d)
             continue
-        gkey = (d.get("tool_use_id"), d.get("key"), d.get("sha256"))
-        if gkey in emitted:
-            continue
-        emitted.add(gkey)
-        winner = chosen[gkey]
-        winner.pop("_atype", None)
-        out.append(winner)
+        if d.get("_atype") == "hook_success":
+            if any(_is_hook_twin(d, h) for h in hacs_by_scope.get(_hook_twin_scope(d), ())):
+                counts["hook_success_twins_dropped"] = counts.get("hook_success_twins_dropped", 0) + 1
+                continue
+            counts["hook_success_only"] = counts.get("hook_success_only", 0) + 1
+        out.append(d)
+
+    for d in out:
+        for transient in ("_atype", "_agent_path", "_elem_sha256s"):
+            d.pop(transient, None)
     return out
 
 
@@ -1028,6 +1070,7 @@ def build_events(corpus_dir, events_db, repo_paths=None, excluded_sids=SPEC_EXCL
         "subagent_duplicate_uuids_skipped": 0,
         "top_level_attribution_skipped": 0,
         "hook_success_only": 0,
+        "hook_success_twins_dropped": 0,
         "heuristic_via_called_at": 0,
     }
 
@@ -1053,9 +1096,8 @@ def build_events(corpus_dir, events_db, repo_paths=None, excluded_sids=SPEC_EXCL
         all_tool_use_candidates.extend(sub_tool_use_candidates)
         delivery_rows.extend(sub_delivery_rows)
 
-    # R53: one delivery per (toolUseID, hook event, sha256) among the transcript_hook rows
-    # just collected -- Claude Code emits a hook_success/hook_additional_context twin for
-    # some hook invocations, and _deliveries_from_attachment produced a row for each.
+    # R56: drop each hook_success whose hook_additional_context twin (same session copy, file
+    # and event; equal text or an equal element; |dts| <= 5 s) is present; hacs are all kept.
     delivery_rows = _dedup_hook_deliveries(delivery_rows, counts)
 
     # R50(c): a usage row whose session is out of the corpus or excluded (no kept session maps
