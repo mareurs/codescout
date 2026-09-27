@@ -1959,7 +1959,20 @@ mod taxonomy_recipes {
                 in_section = line.trim_end() == SECTION;
                 continue;
             }
-            if !in_section || !line.starts_with("| **") {
+            if !in_section || !line.starts_with('|') {
+                continue;
+            }
+            // A row that names append_entry but that the scanner cannot read as a recipe would
+            // otherwise pass unchecked, so it is a finding, never a skip.
+            let mentions = line.contains("append_entry");
+            if !line.starts_with("| **") {
+                if mentions {
+                    scan.unparseable.push(format!(
+                        "docs/TAXONOMY.md:{}: a table row mentions append_entry but has no bold `| **X-N** |` \
+                     label, so no recipe is read from it",
+                        idx + 1
+                    ));
+                }
                 continue;
             }
             scan.rows_seen += 1;
@@ -1970,7 +1983,15 @@ mod taxonomy_recipes {
                 .trim()
                 .to_string();
             if !line.contains(CALL_OPENER) {
-                scan.non_recipe_rows.push(label);
+                if mentions {
+                    scan.unparseable.push(format!(
+                        "{}: mentions append_entry but no call opens with `{CALL_OPENER}`, so a reordered or \
+                     reformatted recipe is not read and would pass unchecked",
+                        at(idx + 1, &label)
+                    ));
+                } else {
+                    scan.non_recipe_rows.push(label);
+                }
                 continue;
             }
             match parse_row(line) {
@@ -1999,6 +2020,15 @@ mod taxonomy_recipes {
     /// F-N recipe is refused there. SHRINK-ONLY: declare `entry_prefix: [F, W]` in one, then
     /// delete its line; the test reds until you do.
     const TEMPLATE_EXEMPT: &[&str] = &[
+        "local-onnx-embedding-session-log.md",
+        "pr-review-session-log.md",
+        "release-promotion-session-log.md",
+        "structural-edit-gate-session-log.md",
+        "worktree-semantic-search-session-log.md",
+    ];
+    /// The names `TEMPLATE_EXEMPT` landed with. Growing the list past these reds
+    /// `the_template_exemption_list_only_shrinks`, which makes "shrink-only" a check, not a comment.
+    const TEMPLATE_EXEMPT_AT_LANDING: &[&str] = &[
         "local-onnx-embedding-session-log.md",
         "pr-review-session-log.md",
         "release-promotion-session-log.md",
@@ -2037,22 +2067,35 @@ mod taxonomy_recipes {
         if declared.contains(&r.id_prefix) {
             return None;
         }
-        let refusal = if declared.is_empty() {
-            format!(
-                "allocate_entry_id: `{}` does not declare an entry_prefix",
-                r.target
+        let (refusal, value) = if declared.is_empty() {
+            (
+                format!(
+                    "allocate_entry_id: `{}` does not declare an entry_prefix",
+                    r.target
+                ),
+                format!("\"{}\"", r.id_prefix),
             )
         } else {
-            format!(
-                "allocate_entry_id: `{}` is not declared by this ledger (it declares {})",
-                r.id_prefix,
-                declared.join(", ")
+            // `extra` keys are upserted, so the remedy must restate the existing namespaces or it
+            // would replace them.
+            let all: Vec<String> = declared
+                .iter()
+                .chain(std::iter::once(&r.id_prefix))
+                .map(|d| format!("\"{d}\""))
+                .collect();
+            (
+                format!(
+                    "allocate_entry_id: `{}` is not declared by this ledger (it declares {})",
+                    r.id_prefix,
+                    declared.join(", ")
+                ),
+                format!("[{}]", all.join(", ")),
             )
         };
         Some(format!(
-            "{}: prose recipe for id_prefix=\"{p}\" is refused — {refusal}. Repair ONE side: declare \
-         it (doc(action=\"update\", id=<artifact id of {t}>, patch={{extra: {{\"entry_prefix\": \
-         \"{p}\"}}}})), or correct the TAXONOMY row if the recipe is what is wrong.",
+            "{}: prose recipe for id_prefix=\"{p}\" is refused — {refusal}. If `{t}` is yours, repair ONE \
+         side: declare it (doc(action=\"update\", id=<artifact id of {t}>, patch={{extra: \
+         {{\"entry_prefix\": {value}}}}})), or correct the TAXONOMY row if the recipe is what is wrong.",
             r.at(),
             p = r.id_prefix,
             t = r.target
@@ -2075,8 +2118,11 @@ mod taxonomy_recipes {
         let missing = |what: &str| {
             format!(
                 "{}: params recipe (entry_collection=\"{collection}\") targets `{}`, which {what} — on a \
-             fresh clone no augmentation re-attaches, so append_entry refuses it. Export the shape: \
-             librarian(action=\"doctor\", fix=\"export_augmentations\") (a dry run; then confirm=true).",
+             fresh clone no augmentation re-attaches, so append_entry refuses it. If the tracker is \
+             yours, commit its shape as a sidecar. `librarian(action=\"doctor\", \
+             fix=\"export_augmentations\")` has NO per-file scope: its dry run lists every un-exported \
+             tracker under the root, other sessions' included, so confirm it only if every file it \
+             lists is yours.",
                 r.at(),
                 r.target
             )
@@ -2136,6 +2182,8 @@ mod taxonomy_recipes {
                 r.target
             ));
         }
+        // The recipe's OWN prefix, plus W because the W-N row carries no call ("Same").
+        let required = [r.id_prefix.as_str(), "W"];
         for name in &names {
             let rel = format!("{dir}{name}");
             let declared = match read_fm(&dir_path.join(name)) {
@@ -2146,8 +2194,8 @@ mod taxonomy_recipes {
                 }
             };
             let is_exempt = exempt.contains(&name.as_str());
-            let has_both = ["F", "W"].iter().all(|p| declared.iter().any(|d| d == p));
-            match (is_exempt, declared.is_empty(), has_both) {
+            let has_required = required.iter().all(|p| declared.iter().any(|d| d == p));
+            match (is_exempt, declared.is_empty(), has_required) {
                 (true, true, _) | (false, _, true) => {}
                 (true, false, _) => out.push(format!(
                     "`{rel}` now declares {} — delete its line from TEMPLATE_EXEMPT \
@@ -2155,18 +2203,24 @@ mod taxonomy_recipes {
                     declared.join(", ")
                 )),
                 (false, true, _) => out.push(format!(
-                    "{}: `{rel}` declares no entry_prefix, so the F-N recipe is refused there. If this log \
+                    "{}: `{rel}` declares no entry_prefix, so the {p}-N recipe is refused there. If this log \
                  is YOURS: declare it before appending, as docs/templates/session-log.md says \
                  (doc(action=\"update\", id=<its artifact id>, patch={{extra: {{\"entry_prefix\": \
-                 [\"F\", \"W\"]}}}})). If it is NOT yours, it is likely a peer's log in progress — this \
+                 [\"{p}\", \"W\"]}}}})). If it is NOT yours, it is likely a peer's log in progress — this \
                  test reads the working tree: attribute it with scripts/file-provenance.py and ask \
-                 them; do not declare it for them.",
-                    r.at()
+                 them; do not declare it for them. If its owner is no longer live \
+                 (scripts/peer-sessions.sh lists who is), declaring it is safe — a declaration adds no \
+                 definers (context-injection-session-log:F-1) — or ask the operator; never add it to \
+                 TEMPLATE_EXEMPT.",
+                    r.at(),
+                    p = r.id_prefix
                 )),
                 (false, false, false) => out.push(format!(
-                    "{}: `{rel}` declares {} — a session log owns both F and W (the W-N row is \"Same\").",
+                    "{}: `{rel}` declares {} — the F-N recipe passes id_prefix=\"{p}\" and the W-N row is \
+                 \"Same\", so a session log must declare both {p} and W.",
                     r.at(),
-                    declared.join(", ")
+                    declared.join(", "),
+                    p = r.id_prefix
                 )),
             }
         }
@@ -2179,11 +2233,39 @@ mod taxonomy_recipes {
         }
         out
     }
+    /// Each recipe shape the scanner must find; a shape it lost is named, one at a time.
+    fn missing_shapes(recipes: &[Recipe]) -> Vec<&'static str> {
+        let has = |want: fn(&Shape) -> bool| recipes.iter().any(|r| want(&r.shape));
+        let mut out = Vec::new();
+        if !has(|s| matches!(s, Shape::Prose)) {
+            out.push("prose");
+        }
+        if !has(|s| matches!(s, Shape::Params { .. })) {
+            out.push("params");
+        }
+        if !has(|s| matches!(s, Shape::Template)) {
+            out.push("template");
+        }
+        out
+    }
+
+    fn report(failures: &[String], population: &str) -> String {
+        format!(
+            "{} TAXONOMY append_entry recipe finding(s) — each would be refused, or the gate cannot read \
+         it:\n  {}\n\nThis test reads the WORKING TREE of a shared checkout. If a file a finding names \
+         is not yours — a peer's in-progress row or tracker — attribute it (python3 \
+         scripts/file-provenance.py <path>) and tell its owner; do not repair it for them. If it is \
+         yours, apply the repair its line names.\n\n{population}",
+            failures.len(),
+            failures.join("\n  ")
+        )
+    }
 
     /// Asserts the CODE contract per recipe shape. Params recipes are deliberately NOT required
     /// to declare `entry_prefix` — only the prose path reads it (bug-fix-session-log:F-176).
-    /// Covers TAXONOMY only: CLAUDE.md, sidecar prompts and ledger templates also route writers
-    /// to append_entry and are not read here.
+    /// Covers only the *Main taxonomy* table of docs/TAXONOMY.md: TAXONOMY's other tables,
+    /// CLAUDE.md, sidecar prompts and ledger templates also route writers to append_entry and are
+    /// not read here.
     #[test]
     fn every_taxonomy_append_entry_recipe_is_one_the_code_accepts() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -2201,10 +2283,11 @@ mod taxonomy_recipes {
          recipe(s); rows with no recipe: {:?}",
             scan.rows_seen, scan.non_recipe_rows
         );
+        let missing = missing_shapes(&scan.recipes);
         assert!(
-            prose > 0 && params > 0 && template > 0,
-            "a recipe shape is missing — the scanner lost it or the section moved; this is not a \
-         clean corpus. {population}"
+            missing.is_empty(),
+            "no {missing:?} recipe found — the scanner lost that shape or the section moved; this is not \
+         a clean corpus. {population}"
         );
 
         let mut failures = scan.unparseable.clone();
@@ -2224,13 +2307,7 @@ mod taxonomy_recipes {
                 Shape::Template => failures.extend(check_template(&root, r, TEMPLATE_EXEMPT)),
             }
         }
-        assert!(
-            failures.is_empty(),
-            "{} TAXONOMY append_entry recipe finding(s) — each would be refused, or the gate cannot \
-         read it:\n  {}\n\n{population}",
-            failures.len(),
-            failures.join("\n  ")
-        );
+        assert!(failures.is_empty(), "{}", report(&failures, &population));
     }
 
     /// A miniature TAXONOMY. Load-bearing details: the fenced ZZ row and the Q row under the
@@ -2281,11 +2358,49 @@ mod taxonomy_recipes {
 
     #[test]
     fn only_a_top_level_argument_at_a_word_boundary_counts() {
-        // Three decoys, each load-bearing: a quoted mention, a nested object and a longer key all
-        // spell `id_prefix="…"`; only the last, top-level one is the argument.
+        // Load-bearing decoys: a nested object and a longer key both spell `id_prefix="…"`.
+        // INERT decoy: the quoted mention's quotes are escaped, so the needle cannot match it
+        // whatever the string rule does; the string rule is covered by the bracket test below.
         let args =
             r#"body="id_prefix=\"Q\"", entry={id_prefix="Z"}, xid_prefix="Y", id_prefix="R""#;
         assert_eq!(top_level_arg(args, "id_prefix").as_deref(), Some("R"));
+    }
+
+    #[test]
+    fn a_bracket_inside_a_quoted_value_does_not_hide_a_later_argument() {
+        // Load-bearing: without the string rule the `{` counts as depth, and every later
+        // argument — here the recipe's own prefix — reads as nested and is lost.
+        let args = r#"title="{", id_prefix="R""#;
+        assert_eq!(top_level_arg(args, "id_prefix").as_deref(), Some("R"));
+    }
+
+    #[test]
+    fn an_underscore_is_a_word_character_for_the_key_boundary() {
+        let args = r#"x_id_prefix="Y", id_prefix="R""#;
+        assert_eq!(top_level_arg(args, "id_prefix").as_deref(), Some("R"));
+    }
+
+    #[test]
+    fn an_escaped_quote_does_not_end_a_string_inside_a_call() {
+        // Load-bearing: the `)` sits after an escaped quote, still inside the string.
+        let row = r##"`doc(action="append_entry", title="a \") b", id_prefix="R")`"##;
+        let args = call_args(row, open_of(row)).expect("closes at the real paren");
+        assert_eq!(top_level_arg(args, "id_prefix").as_deref(), Some("R"));
+    }
+
+    #[test]
+    fn a_row_that_mentions_append_entry_but_is_not_read_as_a_recipe_is_unparseable() {
+        // Each of the first three is a real recipe the scanner cannot read — reordered
+        // arguments, a spaced `=`, an unbolded label — and would otherwise pass unchecked.
+        let text = "## Main taxonomy\n\
+        | **R-N** | `docs/trackers/r.md` | c | `doc(id=\"x\", action=\"append_entry\", id_prefix=\"Q\")` | p |\n\
+        | **S-N** | `docs/trackers/s.md` | c | `doc(action = \"append_entry\", id_prefix=\"S\")` | p |\n\
+        | U-N | `docs/trackers/u.md` | c | `doc(action=\"append_entry\", id_prefix=\"U\")` | p |\n\
+        | **A-N** | `docs/trackers/a.md` | c | per the tracker's convention | p |\n";
+        let scan = scan_main_taxonomy(text);
+        assert!(scan.recipes.is_empty(), "{:?}", scan.recipes);
+        assert_eq!(scan.unparseable.len(), 3, "{:?}", scan.unparseable);
+        assert_eq!(scan.non_recipe_rows, vec!["A-N".to_string()]);
     }
 
     #[test]
@@ -2407,6 +2522,9 @@ mod taxonomy_recipes {
             other.contains("is not declared by this ledger") && other.contains("declares Q"),
             "{other}"
         );
+        // The remedy must ADD to the declaration: `extra` keys are upserted, so a scalar
+        // `"entry_prefix": "R"` would replace Q and strand the ledger's existing namespace.
+        assert!(other.contains(r#""entry_prefix": ["Q", "R"]"#), "{other}");
         let gone = check_prose(root, &recipe("docs/trackers/gone.md", "R", Shape::Prose)).unwrap();
         assert!(gone.contains("archived or moved"), "{gone}");
     }
@@ -2436,6 +2554,22 @@ mod taxonomy_recipes {
             "docs/trackers/yes.md",
             "---\nkind: tracker\nexpects_augmentation: true\n---\n# yes\n",
         );
+        put(
+            root,
+            "docs/trackers/no.md",
+            "---\nkind: tracker\nexpects_augmentation: false\n---\n# no\n",
+        );
+        put(
+            root,
+            "docs/trackers/junk.md",
+            "---\nkind: tracker\nexpects_augmentation: maybe\n---\n# junk\n",
+        );
+        // Load-bearing: the declaration names a sidecar that does not exist, the fresh-clone case.
+        put(
+            root,
+            "docs/trackers/lost.md",
+            "---\nkind: tracker\nexpects_augmentation: docs/augmentations/lost.yaml\n---\n# lost\n",
+        );
         let p = |c: &str| {
             recipe(
                 "docs/trackers/p.md",
@@ -2445,26 +2579,37 @@ mod taxonomy_recipes {
                 },
             )
         };
+        let at = |t: &str| {
+            recipe(
+                t,
+                "P",
+                Shape::Params {
+                    collection: "issues".into(),
+                },
+            )
+        };
         assert_eq!(check_params(root, &p("issues"), "issues"), None);
         let wrong = check_params(root, &p("items"), "items").unwrap();
         assert!(wrong.contains("declares Some(\"issues\")"), "{wrong}");
-        let bare = check_params(
-            root,
-            &recipe("docs/trackers/bare.md", "P", Shape::Prose),
-            "issues",
-        )
-        .unwrap();
+        let bare = check_params(root, &at("docs/trackers/bare.md"), "issues").unwrap();
         assert!(
             bare.contains("declares no `expects_augmentation` sidecar"),
             "{bare}"
         );
-        let yes = check_params(
-            root,
-            &recipe("docs/trackers/yes.md", "P", Shape::Prose),
-            "issues",
-        )
-        .unwrap();
+        let no = check_params(root, &at("docs/trackers/no.md"), "issues").unwrap();
+        assert!(
+            no.contains("declares no `expects_augmentation` sidecar"),
+            "{no}"
+        );
+        let yes = check_params(root, &at("docs/trackers/yes.md"), "issues").unwrap();
         assert!(yes.contains("names no committed sidecar"), "{yes}");
+        let junk = check_params(root, &at("docs/trackers/junk.md"), "issues").unwrap();
+        assert!(junk.contains("declares nothing"), "{junk}");
+        let lost = check_params(root, &at("docs/trackers/lost.md"), "issues").unwrap();
+        assert!(
+            lost.contains("`docs/augmentations/lost.yaml` does not read"),
+            "{lost}"
+        );
     }
 
     #[test]
@@ -2499,10 +2644,18 @@ mod taxonomy_recipes {
             "a declares [F, W]: {joined}"
         );
         assert!(
-            joined.contains("b-session-log.md` declares no entry_prefix")
-                && joined.contains("If this log is YOURS"),
+            joined.contains("b-session-log.md` declares no entry_prefix"),
             "{joined}"
         );
+        // Every addressee the undeclared-log remedy names must survive: its author, a live peer
+        // who owns it, and the case where the owner is gone and nobody is left to ask.
+        assert!(joined.contains("If this log is YOURS"), "{joined}");
+        assert!(
+            joined.contains("scripts/file-provenance.py")
+                && joined.contains("do not declare it for them"),
+            "{joined}"
+        );
+        assert!(joined.contains("scripts/peer-sessions.sh"), "{joined}");
         assert!(
             joined.contains("c-session-log.md` declares F —"),
             "{joined}"
@@ -2516,5 +2669,70 @@ mod taxonomy_recipes {
             "{joined}"
         );
         assert_eq!(out.len(), 4, "{joined}");
+    }
+
+    #[test]
+    fn the_template_check_requires_the_recipes_own_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        put(
+            root,
+            "docs/trackers/a-session-log.md",
+            "---\nentry_prefix: [F, W]\n---\n",
+        );
+        // Load-bearing: FX is citable, so only this check can see that no log declares it.
+        let r = recipe(
+            "docs/trackers/<topic>-session-log.md",
+            "FX",
+            Shape::Template,
+        );
+        let out = check_template(root, &r, &[]);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(out[0].contains("must declare both FX and W"), "{out:?}");
+    }
+    #[test]
+    fn a_single_missing_shape_is_named() {
+        let p = recipe("docs/trackers/a.md", "R", Shape::Prose);
+        let t = recipe("docs/trackers/<topic>-session-log.md", "F", Shape::Template);
+        let m = recipe(
+            "docs/trackers/m.md",
+            "T",
+            Shape::Params {
+                collection: "c".into(),
+            },
+        );
+        assert_eq!(missing_shapes(&[p.clone(), t.clone()]), vec!["params"]);
+        assert_eq!(missing_shapes(&[p, m.clone()]), vec!["template"]);
+        assert_eq!(missing_shapes(&[m, t]), vec!["prose"]);
+        assert_eq!(missing_shapes(&[]).len(), 3);
+    }
+
+    #[test]
+    fn every_failure_report_carries_the_peer_branch() {
+        // The corpus test reads the WORKING TREE of a shared checkout, so any finding can be a
+        // peer's in-progress edit; the report must say so whichever arm produced it.
+        let out = report(
+            &["docs/TAXONOMY.md:1 (X-N): something".to_string()],
+            "examined 1 row",
+        );
+        assert!(out.contains("docs/TAXONOMY.md:1 (X-N): something"), "{out}");
+        assert!(
+            out.contains("scripts/file-provenance.py") && out.contains("do not repair it for them"),
+            "{out}"
+        );
+        assert!(out.contains("examined 1 row"), "{out}");
+    }
+
+    #[test]
+    fn the_template_exemption_list_only_shrinks() {
+        let grown: Vec<&&str> = TEMPLATE_EXEMPT
+            .iter()
+            .filter(|n| !TEMPLATE_EXEMPT_AT_LANDING.contains(n))
+            .collect();
+        assert!(
+            grown.is_empty(),
+            "{grown:?} were ADDED to TEMPLATE_EXEMPT, which only shrinks: declare `entry_prefix: [F, W]` in \
+         the log instead (if it is a live peer's log, ask them)."
+        );
     }
 }
