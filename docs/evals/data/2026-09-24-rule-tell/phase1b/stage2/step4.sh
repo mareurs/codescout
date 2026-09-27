@@ -43,6 +43,8 @@ for seed in 20260935 20260937 20260940; do
 done
 if [ $fail = 0 ]; then
   "$PY" step4.py --common "$RES"/step4-*.json --out "$RES/common.json" >> "$OUT/step4.log" 2>> "$OUT/step4-stderr.log"
-  echo "common exit $?" >> "$OUT/step4.log"
+  rc=$?; echo "common exit $rc" >> "$OUT/step4.log"
+  [ $rc = 0 ] || fail=1
 fi
 echo "STEP4_DONE fail=$fail" >> "$OUT/step4.log"
+exit "$fail"

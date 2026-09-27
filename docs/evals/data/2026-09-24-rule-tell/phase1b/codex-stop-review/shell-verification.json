@@ -1,0 +1,153 @@
+{
+  "before_commit": "a5372e000a525f2f8e59d416cf690781598ac02c",
+  "before": {
+    "tests": 8,
+    "failures": 7,
+    "errors": 0,
+    "passed": false,
+    "output": "test_calibration_failure_skips_common_and_returns_nonzero (shell_tests.Stage2Shell.test_calibration_failure_skips_common_and_returns_nonzero) ... FAIL\ntest_common_failure_is_not_logged_as_done_without_failure (shell_tests.Stage2Shell.test_common_failure_is_not_logged_as_done_without_failure) ... FAIL\ntest_early_n_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_n_failure_survives_later_success_and_wait) ... FAIL\ntest_early_nc_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_nc_failure_survives_later_success_and_wait) ... FAIL\ntest_gate_execution_failure_skips_summary_and_returns_nonzero (shell_tests.Stage2Shell.test_gate_execution_failure_skips_summary_and_returns_nonzero) ... FAIL\ntest_score_failure_skips_its_calibration_and_common_and_returns_nonzero (shell_tests.Stage2Shell.test_score_failure_skips_its_calibration_and_common_and_returns_nonzero) ... FAIL\ntest_success_runs_every_child_and_returns_zero (shell_tests.Stage2Shell.test_success_runs_every_child_and_returns_zero) ... ok\ntest_summary_failure_is_not_logged_as_done_without_failure (shell_tests.Stage2Shell.test_summary_failure_is_not_logged_as_done_without_failure) ... FAIL\n\n======================================================================\nFAIL: test_calibration_failure_skips_common_and_returns_nonzero (shell_tests.Stage2Shell.test_calibration_failure_skips_common_and_returns_nonzero)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 119, in test_calibration_failure_skips_common_and_returns_nonzero\n    self.assertNotEqual(rc, 0, (log, err))\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^\nAssertionError: 0 == 0 : ('score b-20260935 exit 0\\nstep4 b-20260935 exit 23\\nscore n-20260935 exit 0\\nstep4 n-20260935 exit 0\\nscore nc-20260935 exit 0\\nstep4 nc-20260935 exit 0\\nscore b-20260937 exit 0\\nstep4 b-20260937 exit 0\\nscore n-20260937 exit 0\\nstep4 n-20260937 exit 0\\nscore nc-20260937 exit 0\\nstep4 nc-20260937 exit 0\\nscore b-20260940 exit 0\\nstep4 b-20260940 exit 0\\nscore n-20260940 exit 0\\nstep4 n-20260940 exit 0\\nscore nc-20260940 exit 0\\nstep4 nc-20260940 exit 0\\nSTEP4_DONE fail=1\\n', '')\n\n======================================================================\nFAIL: test_common_failure_is_not_logged_as_done_without_failure (shell_tests.Stage2Shell.test_common_failure_is_not_logged_as_done_without_failure)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 125, in test_common_failure_is_not_logged_as_done_without_failure\n    self.assertIn(\"STEP4_DONE fail=1\", log)\n    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'STEP4_DONE fail=1' not found in 'score b-20260935 exit 0\\nstep4 b-20260935 exit 0\\nscore n-20260935 exit 0\\nstep4 n-20260935 exit 0\\nscore nc-20260935 exit 0\\nstep4 nc-20260935 exit 0\\nscore b-20260937 exit 0\\nstep4 b-20260937 exit 0\\nscore n-20260937 exit 0\\nstep4 n-20260937 exit 0\\nscore nc-20260937 exit 0\\nstep4 nc-20260937 exit 0\\nscore b-20260940 exit 0\\nstep4 b-20260940 exit 0\\nscore n-20260940 exit 0\\nstep4 n-20260940 exit 0\\nscore nc-20260940 exit 0\\nstep4 nc-20260940 exit 0\\ncommon exit 23\\nSTEP4_DONE fail=0\\n'\n\n======================================================================\nFAIL: test_early_n_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_n_failure_survives_later_success_and_wait)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 94, in test_early_n_failure_survives_later_success_and_wait\n    self.check_training_failure(\"s2-n-20260935\")\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 103, in check_training_failure\n    self.assertNotEqual(rc, 0, (log, err))\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^\nAssertionError: 0 == 0 : ('train n 20260935 exit 23\\ntrain nc 20260935 exit 0\\ntrain n 20260937 exit 0\\ntrain nc 20260937 exit 0\\ntrain n 20260940 exit 0\\nlane n done\\ntrain nc 20260940 exit 0\\nlane nc done\\nall lanes done\\n', '')\n\n======================================================================\nFAIL: test_early_nc_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_nc_failure_survives_later_success_and_wait)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 97, in test_early_nc_failure_survives_later_success_and_wait\n    self.check_training_failure(\"s2-nc-20260935\")\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 103, in check_training_failure\n    self.assertNotEqual(rc, 0, (log, err))\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^\nAssertionError: 0 == 0 : ('train nc 20260935 exit 23\\ntrain n 20260935 exit 0\\ntrain n 20260937 exit 0\\ntrain nc 20260937 exit 0\\ntrain nc 20260940 exit 0\\nlane nc done\\ntrain n 20260940 exit 0\\nlane n done\\nall lanes done\\n', '')\n\n======================================================================\nFAIL: test_gate_execution_failure_skips_summary_and_returns_nonzero (shell_tests.Stage2Shell.test_gate_execution_failure_skips_summary_and_returns_nonzero)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 134, in test_gate_execution_failure_skips_summary_and_returns_nonzero\n    self.assertNotEqual(rc, 0, (log, err))\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^\nAssertionError: 0 == 0 : ('gate b-20260935 exit 23\\ngate n-20260935 exit 0\\ngate nc-20260935 exit 0\\ngate b-20260937 exit 0\\ngate n-20260937 exit 0\\ngate nc-20260937 exit 0\\ngate b-20260940 exit 0\\ngate n-20260940 exit 0\\ngate nc-20260940 exit 0\\nSTEP5_DONE fail=1\\n', '')\n\n======================================================================\nFAIL: test_score_failure_skips_its_calibration_and_common_and_returns_nonzero (shell_tests.Stage2Shell.test_score_failure_skips_its_calibration_and_common_and_returns_nonzero)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 111, in test_score_failure_skips_its_calibration_and_common_and_returns_nonzero\n    self.assertNotEqual(rc, 0, (log, err))\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^\nAssertionError: 0 == 0 : ('score b-20260935 exit 23\\nscore n-20260935 exit 0\\nstep4 n-20260935 exit 0\\nscore nc-20260935 exit 0\\nstep4 nc-20260935 exit 0\\nscore b-20260937 exit 0\\nstep4 b-20260937 exit 0\\nscore n-20260937 exit 0\\nstep4 n-20260937 exit 0\\nscore nc-20260937 exit 0\\nstep4 nc-20260937 exit 0\\nscore b-20260940 exit 0\\nstep4 b-20260940 exit 0\\nscore n-20260940 exit 0\\nstep4 n-20260940 exit 0\\nscore nc-20260940 exit 0\\nstep4 nc-20260940 exit 0\\nSTEP4_DONE fail=1\\n', '')\n\n======================================================================\nFAIL: test_summary_failure_is_not_logged_as_done_without_failure (shell_tests.Stage2Shell.test_summary_failure_is_not_logged_as_done_without_failure)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 140, in test_summary_failure_is_not_logged_as_done_without_failure\n    self.assertIn(\"STEP5_DONE fail=1\", log)\n    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'STEP5_DONE fail=1' not found in 'gate b-20260935 exit 0\\ngate n-20260935 exit 0\\ngate nc-20260935 exit 0\\ngate b-20260937 exit 0\\ngate n-20260937 exit 0\\ngate nc-20260937 exit 0\\ngate b-20260940 exit 0\\ngate n-20260940 exit 0\\ngate nc-20260940 exit 0\\nsummary exit 23\\nSTEP5_DONE fail=0\\n'\n\n----------------------------------------------------------------------\nRan 8 tests in 6.858s\n\nFAILED (failures=7)\n"
+  },
+  "after": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "passed": true,
+    "output": "test_calibration_failure_skips_common_and_returns_nonzero (shell_tests.Stage2Shell.test_calibration_failure_skips_common_and_returns_nonzero) ... ok\ntest_common_failure_is_not_logged_as_done_without_failure (shell_tests.Stage2Shell.test_common_failure_is_not_logged_as_done_without_failure) ... ok\ntest_early_n_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_n_failure_survives_later_success_and_wait) ... ok\ntest_early_nc_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_nc_failure_survives_later_success_and_wait) ... ok\ntest_gate_execution_failure_skips_summary_and_returns_nonzero (shell_tests.Stage2Shell.test_gate_execution_failure_skips_summary_and_returns_nonzero) ... ok\ntest_score_failure_skips_its_calibration_and_common_and_returns_nonzero (shell_tests.Stage2Shell.test_score_failure_skips_its_calibration_and_common_and_returns_nonzero) ... ok\ntest_success_runs_every_child_and_returns_zero (shell_tests.Stage2Shell.test_success_runs_every_child_and_returns_zero) ... ok\ntest_summary_failure_is_not_logged_as_done_without_failure (shell_tests.Stage2Shell.test_summary_failure_is_not_logged_as_done_without_failure) ... ok\n\n----------------------------------------------------------------------\nRan 8 tests in 6.921s\n\nOK\n"
+  },
+  "mutations": [
+    {
+      "name": "lane drops earlier child failure",
+      "file": "lanes.sh",
+      "old": "    [ $rc = 0 ] || fail=1",
+      "new": "    :",
+      "killed": true,
+      "result": {
+        "tests": 1,
+        "failures": 1,
+        "errors": 0,
+        "passed": false,
+        "output": "test_early_n_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_n_failure_survives_later_success_and_wait) ... FAIL\n\n======================================================================\nFAIL: test_early_n_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_n_failure_survives_later_success_and_wait)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 94, in test_early_n_failure_survives_later_success_and_wait\n    self.check_training_failure(\"s2-n-20260935\")\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 103, in check_training_failure\n    self.assertNotEqual(rc, 0, (log, err))\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^\nAssertionError: 0 == 0 : ('train nc 20260935 exit 0\\ntrain n 20260935 exit 23\\ntrain n 20260937 exit 0\\ntrain nc 20260937 exit 0\\ntrain n 20260940 exit 0\\nlane n done\\ntrain nc 20260940 exit 0\\nlane nc done\\nall lanes done fail=0\\n', '')\n\n----------------------------------------------------------------------\nRan 1 test in 0.201s\n\nFAILED (failures=1)\n"
+      }
+    },
+    {
+      "name": "lane returns successful echo status",
+      "file": "lanes.sh",
+      "old": "  return \"$fail\"",
+      "new": "  return 0",
+      "killed": true,
+      "result": {
+        "tests": 1,
+        "failures": 1,
+        "errors": 0,
+        "passed": false,
+        "output": "test_early_n_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_n_failure_survives_later_success_and_wait) ... FAIL\n\n======================================================================\nFAIL: test_early_n_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_n_failure_survives_later_success_and_wait)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 94, in test_early_n_failure_survives_later_success_and_wait\n    self.check_training_failure(\"s2-n-20260935\")\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 103, in check_training_failure\n    self.assertNotEqual(rc, 0, (log, err))\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^\nAssertionError: 0 == 0 : ('train nc 20260935 exit 0\\ntrain n 20260935 exit 23\\ntrain nc 20260937 exit 0\\ntrain n 20260937 exit 0\\ntrain nc 20260940 exit 0\\nlane nc done\\ntrain n 20260940 exit 0\\nlane n done\\nall lanes done fail=0\\n', '')\n\n----------------------------------------------------------------------\nRan 1 test in 0.201s\n\nFAILED (failures=1)\n"
+      }
+    },
+    {
+      "name": "parent ignores N status",
+      "file": "lanes.sh",
+      "old": "wait \"$n_pid\" || fail=1",
+      "new": "wait \"$n_pid\" || true",
+      "killed": true,
+      "result": {
+        "tests": 1,
+        "failures": 1,
+        "errors": 0,
+        "passed": false,
+        "output": "test_early_n_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_n_failure_survives_later_success_and_wait) ... FAIL\n\n======================================================================\nFAIL: test_early_n_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_n_failure_survives_later_success_and_wait)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 94, in test_early_n_failure_survives_later_success_and_wait\n    self.check_training_failure(\"s2-n-20260935\")\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 103, in check_training_failure\n    self.assertNotEqual(rc, 0, (log, err))\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^\nAssertionError: 0 == 0 : ('train nc 20260935 exit 0\\ntrain n 20260935 exit 23\\ntrain nc 20260937 exit 0\\ntrain n 20260937 exit 0\\ntrain nc 20260940 exit 0\\nlane nc done\\ntrain n 20260940 exit 0\\nlane n done\\nall lanes done fail=0\\n', '')\n\n----------------------------------------------------------------------\nRan 1 test in 0.200s\n\nFAILED (failures=1)\n"
+      }
+    },
+    {
+      "name": "parent ignores NC status",
+      "file": "lanes.sh",
+      "old": "wait \"$nc_pid\" || fail=1",
+      "new": "wait \"$nc_pid\" || true",
+      "killed": true,
+      "result": {
+        "tests": 1,
+        "failures": 1,
+        "errors": 0,
+        "passed": false,
+        "output": "test_early_nc_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_nc_failure_survives_later_success_and_wait) ... FAIL\n\n======================================================================\nFAIL: test_early_nc_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_nc_failure_survives_later_success_and_wait)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 97, in test_early_nc_failure_survives_later_success_and_wait\n    self.check_training_failure(\"s2-nc-20260935\")\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 103, in check_training_failure\n    self.assertNotEqual(rc, 0, (log, err))\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^\nAssertionError: 0 == 0 : ('train nc 20260935 exit 23\\ntrain n 20260935 exit 0\\ntrain nc 20260937 exit 0\\ntrain n 20260937 exit 0\\ntrain nc 20260940 exit 0\\nlane nc done\\ntrain n 20260940 exit 0\\nlane n done\\nall lanes done fail=0\\n', '')\n\n----------------------------------------------------------------------\nRan 1 test in 0.210s\n\nFAILED (failures=1)\n"
+      }
+    },
+    {
+      "name": "lanes exits zero",
+      "file": "lanes.sh",
+      "old": "exit \"$fail\"",
+      "new": "exit 0",
+      "killed": true,
+      "result": {
+        "tests": 1,
+        "failures": 1,
+        "errors": 0,
+        "passed": false,
+        "output": "test_early_n_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_n_failure_survives_later_success_and_wait) ... FAIL\n\n======================================================================\nFAIL: test_early_n_failure_survives_later_success_and_wait (shell_tests.Stage2Shell.test_early_n_failure_survives_later_success_and_wait)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 94, in test_early_n_failure_survives_later_success_and_wait\n    self.check_training_failure(\"s2-n-20260935\")\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 103, in check_training_failure\n    self.assertNotEqual(rc, 0, (log, err))\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^\nAssertionError: 0 == 0 : ('train n 20260935 exit 23\\ntrain nc 20260935 exit 0\\ntrain n 20260937 exit 0\\ntrain nc 20260937 exit 0\\ntrain n 20260940 exit 0\\nlane n done\\ntrain nc 20260940 exit 0\\nlane nc done\\nall lanes done fail=1\\n', '')\n\n----------------------------------------------------------------------\nRan 1 test in 0.201s\n\nFAILED (failures=1)\n"
+      }
+    },
+    {
+      "name": "common failure not accumulated",
+      "file": "step4.sh",
+      "old": "  [ $rc = 0 ] || fail=1\nfi",
+      "new": "  :\nfi",
+      "killed": true,
+      "result": {
+        "tests": 1,
+        "failures": 1,
+        "errors": 0,
+        "passed": false,
+        "output": "test_common_failure_is_not_logged_as_done_without_failure (shell_tests.Stage2Shell.test_common_failure_is_not_logged_as_done_without_failure) ... FAIL\n\n======================================================================\nFAIL: test_common_failure_is_not_logged_as_done_without_failure (shell_tests.Stage2Shell.test_common_failure_is_not_logged_as_done_without_failure)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 125, in test_common_failure_is_not_logged_as_done_without_failure\n    self.assertIn(\"STEP4_DONE fail=1\", log)\n    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'STEP4_DONE fail=1' not found in 'score b-20260935 exit 0\\nstep4 b-20260935 exit 0\\nscore n-20260935 exit 0\\nstep4 n-20260935 exit 0\\nscore nc-20260935 exit 0\\nstep4 nc-20260935 exit 0\\nscore b-20260937 exit 0\\nstep4 b-20260937 exit 0\\nscore n-20260937 exit 0\\nstep4 n-20260937 exit 0\\nscore nc-20260937 exit 0\\nstep4 nc-20260937 exit 0\\nscore b-20260940 exit 0\\nstep4 b-20260940 exit 0\\nscore n-20260940 exit 0\\nstep4 n-20260940 exit 0\\nscore nc-20260940 exit 0\\nstep4 nc-20260940 exit 0\\ncommon exit 23\\nSTEP4_DONE fail=0\\n'\n\n----------------------------------------------------------------------\nRan 1 test in 1.173s\n\nFAILED (failures=1)\n"
+      }
+    },
+    {
+      "name": "step4 exits zero",
+      "file": "step4.sh",
+      "old": "exit \"$fail\"",
+      "new": "exit 0",
+      "killed": true,
+      "result": {
+        "tests": 1,
+        "failures": 1,
+        "errors": 0,
+        "passed": false,
+        "output": "test_calibration_failure_skips_common_and_returns_nonzero (shell_tests.Stage2Shell.test_calibration_failure_skips_common_and_returns_nonzero) ... FAIL\n\n======================================================================\nFAIL: test_calibration_failure_skips_common_and_returns_nonzero (shell_tests.Stage2Shell.test_calibration_failure_skips_common_and_returns_nonzero)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 119, in test_calibration_failure_skips_common_and_returns_nonzero\n    self.assertNotEqual(rc, 0, (log, err))\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^\nAssertionError: 0 == 0 : ('score b-20260935 exit 0\\nstep4 b-20260935 exit 23\\nscore n-20260935 exit 0\\nstep4 n-20260935 exit 0\\nscore nc-20260935 exit 0\\nstep4 nc-20260935 exit 0\\nscore b-20260937 exit 0\\nstep4 b-20260937 exit 0\\nscore n-20260937 exit 0\\nstep4 n-20260937 exit 0\\nscore nc-20260937 exit 0\\nstep4 nc-20260937 exit 0\\nscore b-20260940 exit 0\\nstep4 b-20260940 exit 0\\nscore n-20260940 exit 0\\nstep4 n-20260940 exit 0\\nscore nc-20260940 exit 0\\nstep4 nc-20260940 exit 0\\nSTEP4_DONE fail=1\\n', '')\n\n----------------------------------------------------------------------\nRan 1 test in 1.148s\n\nFAILED (failures=1)\n"
+      }
+    },
+    {
+      "name": "summary failure not accumulated",
+      "file": "step5.sh",
+      "old": "  [ $rc = 0 ] || fail=1\nfi",
+      "new": "  :\nfi",
+      "killed": true,
+      "result": {
+        "tests": 1,
+        "failures": 1,
+        "errors": 0,
+        "passed": false,
+        "output": "test_summary_failure_is_not_logged_as_done_without_failure (shell_tests.Stage2Shell.test_summary_failure_is_not_logged_as_done_without_failure) ... FAIL\n\n======================================================================\nFAIL: test_summary_failure_is_not_logged_as_done_without_failure (shell_tests.Stage2Shell.test_summary_failure_is_not_logged_as_done_without_failure)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 140, in test_summary_failure_is_not_logged_as_done_without_failure\n    self.assertIn(\"STEP5_DONE fail=1\", log)\n    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'STEP5_DONE fail=1' not found in 'gate b-20260935 exit 0\\ngate n-20260935 exit 0\\ngate nc-20260935 exit 0\\ngate b-20260937 exit 0\\ngate n-20260937 exit 0\\ngate nc-20260937 exit 0\\ngate b-20260940 exit 0\\ngate n-20260940 exit 0\\ngate nc-20260940 exit 0\\nsummary exit 23\\nSTEP5_DONE fail=0\\n'\n\n----------------------------------------------------------------------\nRan 1 test in 0.611s\n\nFAILED (failures=1)\n"
+      }
+    },
+    {
+      "name": "step5 exits zero",
+      "file": "step5.sh",
+      "old": "exit \"$fail\"",
+      "new": "exit 0",
+      "killed": true,
+      "result": {
+        "tests": 1,
+        "failures": 1,
+        "errors": 0,
+        "passed": false,
+        "output": "test_gate_execution_failure_skips_summary_and_returns_nonzero (shell_tests.Stage2Shell.test_gate_execution_failure_skips_summary_and_returns_nonzero) ... FAIL\n\n======================================================================\nFAIL: test_gate_execution_failure_skips_summary_and_returns_nonzero (shell_tests.Stage2Shell.test_gate_execution_failure_skips_summary_and_returns_nonzero)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_phase1b_stage2_shell.py\", line 134, in test_gate_execution_failure_skips_summary_and_returns_nonzero\n    self.assertNotEqual(rc, 0, (log, err))\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^\nAssertionError: 0 == 0 : ('gate b-20260935 exit 23\\ngate n-20260935 exit 0\\ngate nc-20260935 exit 0\\ngate b-20260937 exit 0\\ngate n-20260937 exit 0\\ngate nc-20260937 exit 0\\ngate b-20260940 exit 0\\ngate n-20260940 exit 0\\ngate nc-20260940 exit 0\\nSTEP5_DONE fail=1\\n', '')\n\n----------------------------------------------------------------------\nRan 1 test in 0.547s\n\nFAILED (failures=1)\n"
+      }
+    }
+  ],
+  "sha256": {
+    "tests/test_phase1b_stage2_shell.py": "66a6ddb09488c1e0cdc999757c5e4cbd37a9464370a0316c2dd56122f12ffba2",
+    "docs/evals/data/2026-09-24-rule-tell/phase1b/codex-stop-review/verify_shell_fixes.py": "4f294f97b6ef5935bd5959adecd77c90f70d16ebbd617d49bb3796c80ab748cc",
+    "docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/lanes.sh": "5127fdcd011ad94ef077e97c8068d2c1e0cd903aef381b8af865d15c20db4db0",
+    "docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/step4.sh": "793d55dda8c8dc547a714bec558e41fb6b70ec497cfda456b1fccc7c7299d244",
+    "docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/step5.sh": "b11d307bb713b574219afbd394671cf6557c1fca766f07e6b6a98d12d3c7c93f"
+  },
+  "survived": 0
+}

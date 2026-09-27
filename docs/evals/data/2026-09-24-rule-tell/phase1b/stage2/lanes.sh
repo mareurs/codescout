@@ -20,17 +20,25 @@ sha256sum "$D/stage3/train_arm.py" "$ADM" "$CX" >> "$OUT/commit.txt"
 
 cd "$D/stage3" || exit 2
 lane() {
-  arm=$1; shift
+  local arm=$1 seed run rc fail=0; shift
   for seed in $SEEDS; do
     run=$OUT/s2-$arm-$seed
     mkdir -p "$run"
     "$PY" -u train_arm.py --arm qwen --recipe s1-r1 --seed "$seed" --cross "$ADM" "$@" --out "$run" \
       > "$run/stdout.log" 2> "$run/stderr.log"
-    echo "train $arm $seed exit $?" >> "$OUT/lanes.log"
+    rc=$?; echo "train $arm $seed exit $rc" >> "$OUT/lanes.log"
+    [ $rc = 0 ] || fail=1
   done
   echo "lane $arm done" >> "$OUT/lanes.log"
+  return "$fail"
 }
 lane n &
+n_pid=$!
 lane nc --extra-rows "$CX" &
-wait
-echo "all lanes done" >> "$OUT/lanes.log"
+nc_pid=$!
+# Wait for both lanes even when one fails; bare wait discards their statuses.
+fail=0
+wait "$n_pid" || fail=1
+wait "$nc_pid" || fail=1
+echo "all lanes done fail=$fail" >> "$OUT/lanes.log"
+exit "$fail"

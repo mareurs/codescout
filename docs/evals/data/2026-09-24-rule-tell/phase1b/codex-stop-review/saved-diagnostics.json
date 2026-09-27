@@ -1,0 +1,728 @@
+{
+  "scope": "post-stop saved gate logits and calibration outputs; no model calls or held-out reads",
+  "checked_gate_cells": 2025,
+  "checkpoints": {
+    "b-20260935": {
+      "menus": {
+        "own": {
+          "failed": [
+            "sessionid",
+            "clean-12"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 17,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 1,
+            "of": 2,
+            "errored": 0
+          }
+        },
+        "common": {
+          "failed": [
+            "sessionid",
+            "clean-12"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 17,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 1,
+            "of": 2,
+            "errored": 0
+          }
+        }
+      },
+      "rankings": {
+        "d_semicolon": {
+          "clean_z": 7.416813850402832,
+          "positive_z": 9.481467247009277,
+          "clean_above_positive": false,
+          "threshold": 0.7302434958175974,
+          "clean_p": 0.8053484077126272,
+          "positive_p": 0.8600100646661255
+        },
+        "d_sessionid": {
+          "clean_z": 8.816126823425293,
+          "positive_z": 8.059452056884766,
+          "clean_above_positive": true,
+          "threshold": 0.7105606989638985,
+          "clean_p": 0.7071562969971156,
+          "positive_p": 0.6912447798077839
+        }
+      },
+      "cal_own_cells_by_source": {
+        "mined": {
+          "positive": 2,
+          "detected_positive": 0,
+          "negative": 3,
+          "false_positive": 0
+        },
+        "synthetic": {
+          "positive": 154,
+          "detected_positive": 46,
+          "negative": 154,
+          "false_positive": 0
+        },
+        "counterexample": {
+          "positive": 0,
+          "detected_positive": 0,
+          "negative": 26,
+          "false_positive": 0
+        }
+      }
+    },
+    "b-20260937": {
+      "menus": {
+        "own": {
+          "failed": [
+            "sessionid",
+            "clean-12"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 17,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 1,
+            "of": 2,
+            "errored": 0
+          }
+        },
+        "common": {
+          "failed": [
+            "sessionid",
+            "clean-12"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 17,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 1,
+            "of": 2,
+            "errored": 0
+          }
+        }
+      },
+      "rankings": {
+        "d_semicolon": {
+          "clean_z": 4.122983932495117,
+          "positive_z": 6.903781890869141,
+          "clean_above_positive": false,
+          "threshold": 0.8860328351353692,
+          "clean_p": 0.984449142763502,
+          "positive_p": 0.9990380774353352
+        },
+        "d_sessionid": {
+          "clean_z": 2.942636251449585,
+          "positive_z": 1.3910008668899536,
+          "clean_above_positive": true,
+          "threshold": 0.5776365673976581,
+          "clean_p": 0.5730413988568732,
+          "positive_p": 0.5347199150864622
+        }
+      },
+      "cal_own_cells_by_source": {
+        "mined": {
+          "positive": 2,
+          "detected_positive": 0,
+          "negative": 3,
+          "false_positive": 0
+        },
+        "synthetic": {
+          "positive": 154,
+          "detected_positive": 32,
+          "negative": 154,
+          "false_positive": 0
+        },
+        "counterexample": {
+          "positive": 0,
+          "detected_positive": 0,
+          "negative": 26,
+          "false_positive": 1
+        }
+      }
+    },
+    "b-20260940": {
+      "menus": {
+        "own": {
+          "failed": [
+            "sessionid",
+            "clean-12"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 17,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 1,
+            "of": 2,
+            "errored": 0
+          }
+        },
+        "common": {
+          "failed": [
+            "sessionid",
+            "clean-12"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 17,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 1,
+            "of": 2,
+            "errored": 0
+          }
+        }
+      },
+      "rankings": {
+        "d_semicolon": {
+          "clean_z": 5.154815196990967,
+          "positive_z": 5.589005947113037,
+          "clean_above_positive": false,
+          "threshold": 0.9992622084396539,
+          "clean_p": 0.9992967679491828,
+          "positive_p": 0.9996183240211188
+        },
+        "d_sessionid": {
+          "clean_z": 4.692521572113037,
+          "positive_z": 4.982753753662109,
+          "clean_above_positive": false,
+          "threshold": 0.6421690889470844,
+          "clean_p": 0.615206736766016,
+          "positive_p": 0.6220539524967229
+        }
+      },
+      "cal_own_cells_by_source": {
+        "mined": {
+          "positive": 2,
+          "detected_positive": 0,
+          "negative": 3,
+          "false_positive": 0
+        },
+        "synthetic": {
+          "positive": 154,
+          "detected_positive": 35,
+          "negative": 154,
+          "false_positive": 0
+        },
+        "counterexample": {
+          "positive": 0,
+          "detected_positive": 0,
+          "negative": 26,
+          "false_positive": 0
+        }
+      }
+    },
+    "n-20260935": {
+      "menus": {
+        "own": {
+          "failed": [
+            "clean-13"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 18,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 1,
+            "of": 2,
+            "errored": 0
+          }
+        },
+        "common": {
+          "failed": [
+            "clean-13"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 18,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 1,
+            "of": 2,
+            "errored": 0
+          }
+        }
+      },
+      "rankings": {
+        "d_semicolon": {
+          "clean_z": 5.085543632507324,
+          "positive_z": 7.169575214385986,
+          "clean_above_positive": false,
+          "threshold": 0.9994586470590883,
+          "clean_p": 0.9989181886125277,
+          "positive_p": 0.9999340226259339
+        },
+        "d_sessionid": {
+          "clean_z": 1.2085902690887451,
+          "positive_z": 0.1876690834760666,
+          "clean_above_positive": true,
+          "threshold": 0.32911375607373666,
+          "clean_p": 0.9039727480768829,
+          "positive_p": 0.586171849246948
+        }
+      },
+      "cal_own_cells_by_source": {
+        "mined": {
+          "positive": 2,
+          "detected_positive": 0,
+          "negative": 3,
+          "false_positive": 0
+        },
+        "synthetic": {
+          "positive": 154,
+          "detected_positive": 105,
+          "negative": 154,
+          "false_positive": 1
+        },
+        "counterexample": {
+          "positive": 0,
+          "detected_positive": 0,
+          "negative": 26,
+          "false_positive": 0
+        }
+      }
+    },
+    "n-20260937": {
+      "menus": {
+        "own": {
+          "failed": [
+            "clean-13"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 18,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 1,
+            "of": 2,
+            "errored": 0
+          }
+        },
+        "common": {
+          "failed": [
+            "clean-13"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 18,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 1,
+            "of": 2,
+            "errored": 0
+          }
+        }
+      },
+      "rankings": {
+        "d_semicolon": {
+          "clean_z": 2.675468683242798,
+          "positive_z": 4.775656223297119,
+          "clean_above_positive": false,
+          "threshold": 0.9999971851379341,
+          "clean_p": 0.9999774973209253,
+          "positive_p": 0.9999999949434799
+        },
+        "d_sessionid": {
+          "clean_z": 1.9536908864974976,
+          "positive_z": 1.8082609176635742,
+          "clean_above_positive": true,
+          "threshold": 0.9361653642486479,
+          "clean_p": 0.9883755435800533,
+          "positive_p": 0.9838923876318332
+        }
+      },
+      "cal_own_cells_by_source": {
+        "mined": {
+          "positive": 2,
+          "detected_positive": 0,
+          "negative": 3,
+          "false_positive": 0
+        },
+        "synthetic": {
+          "positive": 154,
+          "detected_positive": 85,
+          "negative": 154,
+          "false_positive": 0
+        },
+        "counterexample": {
+          "positive": 0,
+          "detected_positive": 0,
+          "negative": 26,
+          "false_positive": 0
+        }
+      }
+    },
+    "n-20260940": {
+      "menus": {
+        "own": {
+          "failed": [
+            "clean-12",
+            "clean-13"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 17,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 1,
+            "of": 2,
+            "errored": 0
+          }
+        },
+        "common": {
+          "failed": [
+            "clean-12",
+            "clean-13"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 17,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 1,
+            "of": 2,
+            "errored": 0
+          }
+        }
+      },
+      "rankings": {
+        "d_semicolon": {
+          "clean_z": 2.823090076446533,
+          "positive_z": 6.635180473327637,
+          "clean_above_positive": false,
+          "threshold": 0.2514020885425398,
+          "clean_p": 0.9999875153413302,
+          "positive_p": 0.9999999999970153
+        },
+        "d_sessionid": {
+          "clean_z": 3.912221908569336,
+          "positive_z": 0.7167519927024841,
+          "clean_above_positive": true,
+          "threshold": 0.7504098408313196,
+          "clean_p": 0.9999992762534737,
+          "positive_p": 0.9302380362917777
+        }
+      },
+      "cal_own_cells_by_source": {
+        "mined": {
+          "positive": 2,
+          "detected_positive": 0,
+          "negative": 3,
+          "false_positive": 0
+        },
+        "synthetic": {
+          "positive": 154,
+          "detected_positive": 113,
+          "negative": 154,
+          "false_positive": 1
+        },
+        "counterexample": {
+          "positive": 0,
+          "detected_positive": 0,
+          "negative": 26,
+          "false_positive": 0
+        }
+      }
+    },
+    "nc-20260935": {
+      "menus": {
+        "own": {
+          "failed": [
+            "clean-12",
+            "clean-13"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 17,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 2,
+            "of": 2,
+            "errored": 0
+          }
+        },
+        "common": {
+          "failed": [
+            "clean-12",
+            "clean-13"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 17,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 2,
+            "of": 2,
+            "errored": 0
+          }
+        }
+      },
+      "rankings": {
+        "d_semicolon": {
+          "clean_z": 2.395265817642212,
+          "positive_z": 8.581398010253906,
+          "clean_above_positive": false,
+          "threshold": 0.004551607571181677,
+          "clean_p": 0.9999274344031175,
+          "positive_p": 0.9999999999999984
+        },
+        "d_sessionid": {
+          "clean_z": 1.3744300603866577,
+          "positive_z": 1.3692766427993774,
+          "clean_above_positive": true,
+          "threshold": 0.04341901699901927,
+          "clean_p": 0.9249821653275909,
+          "positive_p": 0.9243259637109011
+        }
+      },
+      "cal_own_cells_by_source": {
+        "mined": {
+          "positive": 2,
+          "detected_positive": 0,
+          "negative": 3,
+          "false_positive": 0
+        },
+        "synthetic": {
+          "positive": 154,
+          "detected_positive": 101,
+          "negative": 154,
+          "false_positive": 2
+        },
+        "counterexample": {
+          "positive": 0,
+          "detected_positive": 0,
+          "negative": 26,
+          "false_positive": 0
+        }
+      }
+    },
+    "nc-20260937": {
+      "menus": {
+        "own": {
+          "failed": [
+            "clean-12",
+            "clean-13"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 18,
+            "of": 20,
+            "errored": 0
+          },
+          "span": {
+            "passed": 2,
+            "of": 2,
+            "errored": 0
+          }
+        },
+        "common": {
+          "failed": [
+            "clean-12",
+            "clean-13"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 17,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 2,
+            "of": 2,
+            "errored": 0
+          }
+        }
+      },
+      "rankings": {
+        "d_semicolon": {
+          "clean_z": 3.0927212238311768,
+          "positive_z": 7.131504535675049,
+          "clean_above_positive": false,
+          "threshold": 0.19433206896257288,
+          "clean_p": 0.9999957597440436,
+          "positive_p": 0.9999999999995914
+        },
+        "d_sessionid": {
+          "clean_z": 0.7192554473876953,
+          "positive_z": 3.7136852741241455,
+          "clean_above_positive": false,
+          "threshold": 0.055219435812776725,
+          "clean_p": 0.946697804483565,
+          "positive_p": 0.9999996462379762
+        }
+      },
+      "cal_own_cells_by_source": {
+        "mined": {
+          "positive": 2,
+          "detected_positive": 0,
+          "negative": 3,
+          "false_positive": 0
+        },
+        "synthetic": {
+          "positive": 154,
+          "detected_positive": 123,
+          "negative": 154,
+          "false_positive": 1
+        },
+        "counterexample": {
+          "positive": 0,
+          "detected_positive": 0,
+          "negative": 26,
+          "false_positive": 0
+        }
+      }
+    },
+    "nc-20260940": {
+      "menus": {
+        "own": {
+          "failed": [
+            "clean-13"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 18,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 2,
+            "of": 2,
+            "errored": 0
+          }
+        },
+        "common": {
+          "failed": [
+            "clean-13"
+          ],
+          "passed": false,
+          "gate": {
+            "passed": 18,
+            "of": 19,
+            "errored": 0
+          },
+          "span": {
+            "passed": 2,
+            "of": 2,
+            "errored": 0
+          }
+        }
+      },
+      "rankings": {
+        "d_semicolon": {
+          "clean_z": 1.4861983060836792,
+          "positive_z": 6.3431878089904785,
+          "clean_above_positive": false,
+          "threshold": 0.9999972145327525,
+          "clean_p": 0.9973251698926845,
+          "positive_p": 0.9999999999894196
+        },
+        "d_sessionid": {
+          "clean_z": 6.479460716247559,
+          "positive_z": 4.5787858963012695,
+          "clean_above_positive": true,
+          "threshold": 0.9956540503501025,
+          "clean_p": 0.9999498329946042,
+          "positive_p": 0.9990853209655776
+        }
+      },
+      "cal_own_cells_by_source": {
+        "mined": {
+          "positive": 2,
+          "detected_positive": 0,
+          "negative": 3,
+          "false_positive": 0
+        },
+        "synthetic": {
+          "positive": 154,
+          "detected_positive": 103,
+          "negative": 154,
+          "false_positive": 0
+        },
+        "counterexample": {
+          "positive": 0,
+          "detected_positive": 0,
+          "negative": 26,
+          "false_positive": 0
+        }
+      }
+    }
+  },
+  "sha256": {
+    "/home/marius/work/claude/codescout/scripts/phase1-rule-selection.py": "ea0bbad28ee289aa99b9a1fa60ba0455bbf8bbe94a90430bce4e51c15806b3b4",
+    "/home/marius/work/claude/codescout/scripts/phase1-span-selector.py": "dda1fbec26b36afc51c3ea21d67a1b310dd4902931d855fb386339b92f07d449",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/clean_texts.py": "fd015491235b15fe0a6e24dc4beef63569a51d19caa445921810e3c5c025d0f9",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/codex-clean-texts.jsonl": "4f113551ffa22b8cf0085fb2eb24a6db486a702d9521f79123a7f13a3076e160",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/audit/result.json": "8a625fdfb2e4757827faac1ca73ef677dde76467d9bb2e3fb1b51ae3e0ea3858",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/b-20260935.json": "d4024bdaf78cf28213bb142639018e6434fe49465ac9126f5d67825124ea5757",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/step4-b-20260935.json": "0f40058b84574ca344cc4f033d31c092672d884dc0f077b818e18c2c7f20fdda",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/b-20260935.log.jsonl": "bf10b09207cdc93a8ac9e670c4d87bd7b5162f920e969bad6f1f5e2c8e417104",
+    "/home/marius/work/claude/rule-tell-runs/phase1b-s2/scored-b-20260935.json": "3a11b3b55e7e324543ee52739f95927d7b7a9e3e7db188a8e6715e7f02e0c96e",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/b-20260937.json": "f7022bfd1739e7f04844168d711865937f7fc4e52f1a62bc7911ec90d977d50b",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/step4-b-20260937.json": "73659844b29a6521645630cc3202fa3f7050bf4e553e52516f1ecee88e02083c",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/b-20260937.log.jsonl": "9cfb88b4b5816dbf711dbcbf153e40b0efcf388073bac0696f553c66b2b9bc56",
+    "/home/marius/work/claude/rule-tell-runs/phase1b-s2/scored-b-20260937.json": "801721cff57ad07a657f644121e666023c56de28238a543e322d518dae7649de",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/b-20260940.json": "15169a6a4070dd880115c68d53301eda4c4711ef1a62ec2da59e8b77f666f86d",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/step4-b-20260940.json": "7f914e4919b05b4af3281104945ff614cc8b1c3a4d76b1d667d73688bdfbf265",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/b-20260940.log.jsonl": "ec612dd8f8f805992425318ccbbfe079e9e0c5b532597c03753bbd2d82346b84",
+    "/home/marius/work/claude/rule-tell-runs/phase1b-s2/scored-b-20260940.json": "68d2cc429fbd50e2bf45860993978e18b05aa2e8ac78ceb121c35239f1c20b35",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/n-20260935.json": "b1daa55e8402c98e0eb69ac39bb1868ae2e6df6d9c138f1215e631dfbac35e9c",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/step4-n-20260935.json": "73ce9acf79973906bca1456af0f4ff2fe54977f7e052f9f4d376b6cf93bd11c0",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/n-20260935.log.jsonl": "28d5978849d71df5b811f4fe52925bf6c37cd6ce9ba75414bd3c23da629f0fcc",
+    "/home/marius/work/claude/rule-tell-runs/phase1b-s2/scored-n-20260935.json": "984c3e265df79f00dbd98d2992f0fe5a8b139837498604cc5dcea157f103106f",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/n-20260937.json": "7a812f80dc17a865fb017a87a68f0b5dd3a08f08d62cfaa8ea6582f5aee321b8",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/step4-n-20260937.json": "b644c8ed080bcbb8d552f7786ea8a83732bd754c2c1b24fdc8962beaeb9c4df9",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/n-20260937.log.jsonl": "54e2fae1f4559bdb50b55ea6f982506d20b2c395ba5a752409bec9bd1f049510",
+    "/home/marius/work/claude/rule-tell-runs/phase1b-s2/scored-n-20260937.json": "939d8f4299b16cbfd71e7f7e7af33820ed1419a7bcb934368b6c1468dbd548c9",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/n-20260940.json": "2fed7423153e59a00aafb50f5c5fa7ce0c9beb1ec49a8e29d397a34c46ffe2c3",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/step4-n-20260940.json": "e47e99d59ce1e57e18710aeae5b0cd20ae7f1a56d1f868d94c110c544f58ecbb",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/n-20260940.log.jsonl": "477841e59d20c0d9de917244ec14177583a23308f408e64ce218dffbce790422",
+    "/home/marius/work/claude/rule-tell-runs/phase1b-s2/scored-n-20260940.json": "8bddacafe16f0710c1b3667f3d98f100fdb3db1024ad42562dd9f350d3340f65",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/nc-20260935.json": "71312e88208065f0d5fdf75e1050ebe6a483d7aa1a8d13e91df455194c09cb0a",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/step4-nc-20260935.json": "2944eaf6e8054a0916fa18af78588fe2860d53059984f068fb06838e5baab013",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/nc-20260935.log.jsonl": "723aabd841d2f9d77e634a411e6c8247c11ab054a037ee9fc20a4b6c8ef72919",
+    "/home/marius/work/claude/rule-tell-runs/phase1b-s2/scored-nc-20260935.json": "76a3342abeace34be005ae4028770b6b02ca2c6357482202796588913ad1da11",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/nc-20260937.json": "7675673fe6a7cdf5bb0e2f2a0156f48d56c32477056477656a382a1b462072dc",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/step4-nc-20260937.json": "197c664540f24104c70a987938a2d8187745113f29ab3560a6bc060af3799483",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/nc-20260937.log.jsonl": "a9dc8b139ca89687439bfa7ff2bdbdceb90b75a9a0598be5846d81e3683ba073",
+    "/home/marius/work/claude/rule-tell-runs/phase1b-s2/scored-nc-20260937.json": "cff57eefef83d6a48c414902d94ab790b683b7eb6de49853a0ba7c5b0706eb0d",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/nc-20260940.json": "fc1ff2745d0cbe5320d99aba8d27a3fcfa3d2b9dc115fcccd4260c4650ab581d",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/step4-nc-20260940.json": "25058b36967b059172c1f2d2836160b8cb14c9c87dc47aa879b71e2886cc8364",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/nc-20260940.log.jsonl": "a8330ca838a8c1c5babc16e04f374c68cf2c2ae51e83b41a83d80eaa7f7df700",
+    "/home/marius/work/claude/rule-tell-runs/phase1b-s2/scored-nc-20260940.json": "31aece39dc7636ca5c265f072997f6cae07e6a60c073168083ff9537217e6cb1",
+    "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/gate/summary.json": "9d97d66ecb36c29f450fac3f2e118287e7ef8d3198eacc8c43c7512f5b0e212a"
+  }
+}

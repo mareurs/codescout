@@ -598,6 +598,22 @@ Predictions 1–5 are the text committed in `2e4743e0`, before Step 4's smoke ru
   6. **held**, at Step 1.
 - **What `clean-12` measures, as disclosed at registration:** in this run, the counterexamples did not reduce firing on `clean-12`. NC fired at 2 of 3 seeds and N at 1 of 3.
 
+### After the campaign: a Codex review, 2026-09-27
+
+**The runners' exit status.** A Codex review (`docs/research/2026-09-27-codex-phase1b-stop-review.md`) found that `stage2/lanes.sh`, `step4.sh` and `step5.sh` exit 0 even when a child fails. Each ends on an `echo`, and `lanes.sh`'s bare `wait` discards both lanes' statuses. The bug is `0614080cf4efbb1f` (`bug-fix-session-log:F-177`).
+- **The committed copies were edited after the run** so that they exit non-zero after a failed child.
+- **The as-run bytes are preserved:** `lanes.sh` and `step4.sh` in `08a5544e`, and `step5.sh` in `5a477c51`. They are also in `~/work/claude/rule-tell-runs/phase1b-s2/`.
+- **No result changes.** Every child of the recorded run exited 0: 6 of 6 in `lanes.log`, 19 of 19 in `step4.log` and 10 of 10 in `step5.log`.
+
+**Two of its diagnostics, read after the gate and not registered:**
+- **At NC · 20260935 and NC · 20260940, `d_sessionid` scores `clean-13` above the violation.** On the `sessionid` positive, p is 0.925 against 0.924, and 0.9999 against 0.9991. So no threshold keeps the violation without also firing on the clean text.
+- **Cal holds 154 synthetic and only 2 mined positives among the admitted heads,** one for `d_history` and one for `run_tool`. No checkpoint catches either at its precision threshold.
+- **Also recomputed:** all 2,025 logged gate decisions agree with the published results.
+
+**Its recommendation, for the operator's next decision:** keep the registered stop. Before paying for another training run:
+1. Build a small, independently adjudicated development set from real traces, with cue-preserving clean cases.
+2. Compare a rule-conditioned baseline on it.
+
 ## Step 1 — the cross-rule audit (decides which cells become negatives)
 
 **The cells in question.** For a text whose row is about rule A, a cell (unit, B) with B ≠ A, over every unit of the text. These are the cells phase 1 masked.

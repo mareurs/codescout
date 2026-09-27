@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 176
+entry_high_water_F: 177
 entry_high_water_W: 145
 ---
 
@@ -66,6 +66,7 @@ entry_high_water_W: 145
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-176 | 2026-09-26 | med | documentation | open | **A residual's literal wording is stronger than the code contract it guards — `entry_prefix` gates only the prose append path.** Residual `5820a758` asks that every TAXONOMY `append_entry` recipe target a tracker declaring `entry_prefix`; at HEAD only the prose branch checks it, so a literal test reds WIN-N and PV-N, which work. Also: recipe ids are machine-local `sha256(abs_path)`, and 5 of 20 session logs declare no `F`. |
+| F-177 | 2026-09-27 | med | eval-harness | fixed-verified | **Codex: Phase1b wrappers erase failed-child status.** Seven injected-failure cases returned zero; working-tree fixes pass eight tests and kill nine applied mutations. Historical model failures remain valid. |
 | F-175 | 2026-09-24 | high | self-friction | open | **A killed mutant kept running: a looping M4 mutant of `gate.sh` survived its suite and filled the machine's `/tmp` (tmpfs) with about 867K lock files.** Case F killed `$!` of a backgrounded function, a wrapper subshell (the bug fixed in case D minutes earlier, not swept to the other site). The mutation verdict (KILLED) was correct and said nothing about the survivor. It stopped only on inode exhaustion. My kill and my delete were both refused by the classifier; escalated to the operator. |
 | F-174 | 2026-09-24 | high | cross-session | mitigated | **Saving a script that every session runs from the working tree IS publishing it.** My uncommitted `gate.sh` pool change was picked up by 2 peers within about two minutes. Each started a COLD build in a new slot while its warm legacy tree sat unused, on a disk at 97%. I stopped my own run by pgid, deleted my slot under its own lock, and watched disk with `fuser` (a read-only check; `flock` would perturb leasing). |
 | F-173 | 2026-09-24 | high | self-friction | mitigated | **Recommended `flock -o` as strictly safer before running it; the two lock modes fail in opposite directions, and `-o` fails toward the race it was meant to prevent.** With `-o`, SIGKILLing the holder frees the slot while cargo keeps running in it, a correctness failure. Without `-o`, a daemon (sccache, measured) pins a slot for its lifetime, a disk-only failure. Choose the mode that fails toward disk. Plan revised before any code. |
@@ -17056,6 +17057,30 @@ At that point `df` showed 64G free, and no process was still building into a leg
 **Fix idea:** assert the CODE contract per recipe shape — prose ⇒ `id_prefix` in the file's declared set; params ⇒ the committed sidecar declares the named `entry_collection` — joined on the row's `Lives in` path, never the id. Leave F/W to the operator's decision.
 
 **Status:** open
+
+## F-177 — Codex: Phase1b wrappers report success after failed children
+
+**Observed:** 2026-09-27, Codex review of the completed Phase1b campaign at a5372e00.
+
+**Expected:** Shell exit status distinguishes a completed model experiment (including a negative scientific result) from failed training/scoring/gate execution.
+
+**Got:** `stage2/lanes.sh`, `step4.sh`, and `step5.sh` each return zero after a child failure. In the common-menu and summary cases they additionally log `DONE fail=0`. Disposable copies with fake Python children exiting 23 produced seven failing regression methods; success controls for all three scripts passed.
+
+**Cause:** Successful trailing echoes overwrite child status; bare `wait` drops lane failures; final summary/common calls were not added to the failure accumulator.
+
+**Fix:** Preserve training failures in each lane, wait for both explicit PIDs, propagate every stage's failures into its final exit status. Eight focused tests pass. Nine mutations applied to disposable copies: nine killed, zero survivors, zero test errors. No model calls.
+
+**Historical impact:** The actual campaign's complete expected child-status identities are all zero, and an independent saved-output recount agrees with all 2,025 logged gate cells. The orchestration defect does not explain the model's registered gate failure.
+
+**Severity:** med — downstream automation can consume a false completion status; the recorded run has no observed affected child failure.
+
+**Status:** fixed-verified — in the working tree; uncommitted; focused shell checks only, no fresh whole-repository Rust gate.
+
+**Valid:** dated 2026-09-27
+
+**Rests on:** `docs/issues/2026-09-27-codex-phase1b-shell-failures-return-success.md`; `docs/evals/data/2026-09-24-rule-tell/phase1b/codex-stop-review/shell-verification.json`; `run-status-checks.json` in the same directory.
+
+**Handoff:** `docs/research/2026-09-27-codex-phase1b-stop-review.md` records the code fixes, new ranking/calibration measurements, and a bounded next-step recommendation.
 
 ## Template for new entries
 

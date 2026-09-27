@@ -1,0 +1,40 @@
+[
+  {
+    "check": "bash -n",
+    "path": "docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/lanes.sh",
+    "rc": 0,
+    "stderr": ""
+  },
+  {
+    "check": "bash -n",
+    "path": "docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/step4.sh",
+    "rc": 0,
+    "stderr": ""
+  },
+  {
+    "check": "bash -n",
+    "path": "docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/step5.sh",
+    "rc": 0,
+    "stderr": ""
+  },
+  {
+    "check": "Python compile",
+    "path": "tests/test_phase1b_stage2_shell.py",
+    "rc": 0
+  },
+  {
+    "check": "Python compile",
+    "path": "docs/evals/data/2026-09-24-rule-tell/phase1b/codex-stop-review/analyze_saved.py",
+    "rc": 0
+  },
+  {
+    "check": "Python compile",
+    "path": "docs/evals/data/2026-09-24-rule-tell/phase1b/codex-stop-review/verify_shell_fixes.py",
+    "rc": 0
+  },
+  {
+    "check": "git diff --check (changed wrappers)",
+    "rc": 0,
+    "output": ""
+  }
+]

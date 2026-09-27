@@ -1,0 +1,67 @@
+{
+  "lanes.out": {
+    "sha256": "7506d57ff2245e76c8f0bd1126771bba51afba6837175325ff0e680e34402aa0",
+    "status_lines": [
+      "LANES_EXIT=0"
+    ]
+  },
+  "lanes.log": {
+    "sha256": "5a60dee31ae55db9ff183697ae261c52fca5ec90200dc5374b028ccca9eda605",
+    "status_lines": [
+      "train n 20260935 exit 0",
+      "train nc 20260935 exit 0",
+      "train n 20260937 exit 0",
+      "train nc 20260937 exit 0",
+      "train n 20260940 exit 0",
+      "train nc 20260940 exit 0"
+    ]
+  },
+  "step4.log": {
+    "sha256": "b72c8cbb1c2f14e278d868d27ee022e3e561a239703c4f208982aaeba6723fb6",
+    "status_lines": [
+      "score b-20260935 exit 0",
+      "step4 b-20260935 exit 0",
+      "score n-20260935 exit 0",
+      "step4 n-20260935 exit 0",
+      "score nc-20260935 exit 0",
+      "step4 nc-20260935 exit 0",
+      "score b-20260937 exit 0",
+      "step4 b-20260937 exit 0",
+      "score n-20260937 exit 0",
+      "step4 n-20260937 exit 0",
+      "score nc-20260937 exit 0",
+      "step4 nc-20260937 exit 0",
+      "score b-20260940 exit 0",
+      "step4 b-20260940 exit 0",
+      "score n-20260940 exit 0",
+      "step4 n-20260940 exit 0",
+      "score nc-20260940 exit 0",
+      "step4 nc-20260940 exit 0",
+      "common exit 0",
+      "STEP4_DONE fail=0"
+    ]
+  },
+  "step5.log": {
+    "sha256": "f75e9c6b098f33ec22c1d788cdc43be95ca4439f2f64ad3b55e272333149a47d",
+    "status_lines": [
+      "gate b-20260935 exit 0",
+      "gate n-20260935 exit 0",
+      "gate nc-20260935 exit 0",
+      "gate b-20260937 exit 0",
+      "gate n-20260937 exit 0",
+      "gate nc-20260937 exit 0",
+      "gate b-20260940 exit 0",
+      "gate n-20260940 exit 0",
+      "gate nc-20260940 exit 0",
+      "summary exit 0",
+      "STEP5_DONE fail=0"
+    ]
+  },
+  "accepted_counterexamples_by_head": {
+    "closed_population": 44,
+    "d_adjacency": 1,
+    "d_semicolon": 43,
+    "open_artifact": 36,
+    "run_tool": 45
+  }
+}

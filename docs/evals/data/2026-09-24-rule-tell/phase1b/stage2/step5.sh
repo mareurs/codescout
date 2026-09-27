@@ -25,6 +25,8 @@ for seed in 20260935 20260937 20260940; do
 done
 if [ $fail = 0 ]; then
   "$PY" step5_gate.py --summary "$GATE" --out "$GATE/summary.json" >> "$OUT/step5.log" 2>> "$OUT/step5-stderr.log"
-  echo "summary exit $?" >> "$OUT/step5.log"
+  rc=$?; echo "summary exit $rc" >> "$OUT/step5.log"
+  [ $rc = 0 ] || fail=1
 fi
 echo "STEP5_DONE fail=$fail" >> "$OUT/step5.log"
+exit "$fail"
