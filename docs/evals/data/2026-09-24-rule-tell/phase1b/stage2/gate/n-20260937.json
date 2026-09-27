@@ -1,0 +1,807 @@
+{
+ "checkpoint": "n-20260937",
+ "run_dir": "/home/marius/work/claude/rule-tell-runs/phase1b-s2/s2-n-20260937",
+ "checkpoint_sha256": "32a5f94cf2ac9ad265920038cf4f73c4faa8eadb4331e19c35b062f932386b7a",
+ "step4": {
+  "file": "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/step4-n-20260937.json",
+  "sha256": "b644c8ed080bcbb8d552f7786ea8a83732bd754c2c1b24fdc8962beaeb9c4df9"
+ },
+ "scored": {
+  "file": "/home/marius/work/claude/rule-tell-runs/phase1b-s2/scored-n-20260937.json",
+  "sha256": "939d8f4299b16cbfd71e7f7e7af33820ed1419a7bcb934368b6c1468dbd548c9"
+ },
+ "common": {
+  "file": "/home/marius/work/claude/codescout/docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/common.json",
+  "sha256": "e905e6868931aefbc0eef09c8208c1e91d1ea4b547ee3043c301d88acaa8456f"
+ },
+ "code": {
+  "head": "ec5350a10c610e7766971ff83d4c5eda10d2dfb8",
+  "dirty": [],
+  "sha256": {
+   "docs/evals/data/2026-09-24-rule-tell/phase1b/step5_gate.py": "32a7735a2174dc1b02a1724c71dca65e3a7fe613f3b8b81e106c6329b1a8e4cf",
+   "scripts/phase1-span-selector.py": "dda1fbec26b36afc51c3ea21d67a1b310dd4902931d855fb386339b92f07d449",
+   "scripts/phase1-rule-selection.py": "ea0bbad28ee289aa99b9a1fa60ba0455bbf8bbe94a90430bce4e51c15806b3b4",
+   "docs/evals/data/2026-09-24-rule-tell/stage3/train_arm.py": "40decae62c77c46204ca9fbbf05a254696417f324096284ce4afa86567b843cc",
+   "docs/evals/data/2026-09-24-rule-tell/stage2/segment.py": "c27e76f398b922c7efbb6cc6da9902541761884b2f4d84587dbf6a16b7b87fe8",
+   "docs/evals/data/2026-09-24-rule-tell/phase1b/step4.py": "f77b7259c2c2f79d1cd07cf01ae3dcdba5c61114b41a392d73b425a7463e7fd5",
+   "docs/evals/data/2026-09-24-rule-tell/phase1b/clean_texts.py": "fd015491235b15fe0a6e24dc4beef63569a51d19caa445921810e3c5c025d0f9",
+   "docs/evals/data/2026-09-24-rule-tell/phase1b/codex-clean-texts.jsonl": "4f113551ffa22b8cf0085fb2eb24a6db486a702d9521f79123a7f13a3076e160",
+   "docs/evals/data/2026-09-24-rule-tell/phase1b/audit/result.json": "8a625fdfb2e4757827faac1ca73ef677dde76467d9bb2e3fb1b51ae3e0ea3858",
+   "docs/evals/phase1b-local-classifier-preregistration.md": "a6881cb1d1c01482842d51ec18be13127302fbf9d6b4aaa059a9b19523e6f2bd",
+   "docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/step4-n-20260937.json": "b644c8ed080bcbb8d552f7786ea8a83732bd754c2c1b24fdc8962beaeb9c4df9",
+   "docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/common.json": "e905e6868931aefbc0eef09c8208c1e91d1ea4b547ee3043c301d88acaa8456f"
+  }
+ },
+ "learned": true,
+ "device": "NVIDIA RTX A5000",
+ "torch": "2.14.0+cu130",
+ "determinism": {
+  "text": "neutral",
+  "cells": 28,
+  "finite": true,
+  "max_abs_dz": 0.0,
+  "ok": true
+ },
+ "parity": {
+  "rows": 521,
+  "cells": 32689,
+  "differing": 0,
+  "max_abs_dz": 0.0,
+  "ok": true
+ },
+ "gate_texts": [
+  "clean-1",
+  "clean-2",
+  "semicolon",
+  "sessionid",
+  "cannot",
+  "contradiction",
+  "clean-3",
+  "clean-4",
+  "clean-5",
+  "member",
+  "clean-6",
+  "clean-7",
+  "clean-8",
+  "clean-9",
+  "clean-10",
+  "clean-11",
+  "clean-12",
+  "clean-13",
+  "clean-14",
+  "codex-clean-1",
+  "codex-clean-2",
+  "codex-clean-3"
+ ],
+ "status": "completed",
+ "started": "2026-09-27T06:20:22.839210+00:00",
+ "ended": "2026-09-27T06:20:25.397411+00:00",
+ "menus": {
+  "own": {
+   "menu": [
+    "closed_population",
+    "d_adjacency",
+    "d_history",
+    "d_mutation",
+    "d_red",
+    "d_semicolon",
+    "d_sessionid",
+    "d_visibility",
+    "open_artifact"
+   ],
+   "gate_ability": {
+    "gate_positives_applying": [
+     "semicolon",
+     "sessionid"
+    ],
+    "span_texts_applying": [
+     "span-sessionid",
+     "span-semicolon"
+    ],
+    "gate_able": true
+   },
+   "gate_rc": 1,
+   "span_rc": 1,
+   "gate": {
+    "passed": 18,
+    "of": 19,
+    "errored": 0
+   },
+   "span": {
+    "passed": 1,
+    "of": 2,
+    "errored": 0
+   },
+   "passed": false,
+   "texts": [
+    {
+     "id": "clean-1",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 1.4386229974259193e-06,
+      "d_adjacency": 3.8045057113763966e-10,
+      "d_history": 7.216108329330952e-05,
+      "d_mutation": 0.00044566487638494716,
+      "d_red": 2.621403998421158e-07,
+      "d_semicolon": 1.389275706346545e-10,
+      "d_sessionid": 3.195413836578851e-05,
+      "d_visibility": 3.794983935771849e-12,
+      "open_artifact": 0.001763146414806202
+     }
+    },
+    {
+     "id": "clean-2",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 4.4400053045921015e-07,
+      "d_adjacency": 8.640211209101633e-09,
+      "d_history": 0.00199424880332133,
+      "d_mutation": 0.0005517839683172648,
+      "d_red": 1.0823599681003542e-06,
+      "d_semicolon": 1.4016599399592794e-09,
+      "d_sessionid": 0.001810288291102101,
+      "d_visibility": 3.452167946057075e-11,
+      "open_artifact": 0.0018730782122756667
+     }
+    },
+    {
+     "id": "semicolon",
+     "want": "d_semicolon",
+     "applicable": true,
+     "fired": [
+      "d_semicolon"
+     ],
+     "passed": true,
+     "p": {
+      "closed_population": 8.098912940090281e-05,
+      "d_adjacency": 7.747162764826541e-07,
+      "d_history": 0.0012816971418095687,
+      "d_mutation": 0.019513643214216368,
+      "d_red": 0.000983750527550882,
+      "d_semicolon": 0.9999999949434799,
+      "d_sessionid": 9.355366212646203e-05,
+      "d_visibility": 1.6646307877421649e-06,
+      "open_artifact": 0.017357679687076792
+     }
+    },
+    {
+     "id": "sessionid",
+     "want": "d_sessionid",
+     "applicable": true,
+     "fired": [
+      "d_sessionid"
+     ],
+     "passed": true,
+     "p": {
+      "closed_population": 0.000161681728822488,
+      "d_adjacency": 0.0001998327327060871,
+      "d_history": 0.005069603454960967,
+      "d_mutation": 0.0027226558433028803,
+      "d_red": 6.500898843026282e-05,
+      "d_semicolon": 2.422971844152829e-10,
+      "d_sessionid": 0.9838923876318332,
+      "d_visibility": 9.38104968339868e-07,
+      "open_artifact": 0.03956697182300052
+     }
+    },
+    {
+     "id": "cannot",
+     "want": "cannot_happen",
+     "applicable": false,
+     "fired": []
+    },
+    {
+     "id": "contradiction",
+     "want": "contradiction",
+     "applicable": false,
+     "fired": []
+    },
+    {
+     "id": "clean-3",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 1.9965536474109234e-06,
+      "d_adjacency": 1.2369106777719264e-08,
+      "d_history": 0.0002408468819978644,
+      "d_mutation": 0.0007370045036479304,
+      "d_red": 4.843767804337478e-07,
+      "d_semicolon": 4.798671275421531e-09,
+      "d_sessionid": 6.652434413049759e-05,
+      "d_visibility": 1.5773475705849586e-11,
+      "open_artifact": 0.0019133268899373123
+     }
+    },
+    {
+     "id": "clean-4",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 2.0205819540654665e-06,
+      "d_adjacency": 4.649033594832422e-09,
+      "d_history": 0.0014040560464783575,
+      "d_mutation": 0.00030086885208673904,
+      "d_red": 4.770273906692848e-07,
+      "d_semicolon": 3.812593493811283e-10,
+      "d_sessionid": 0.00019235082983691502,
+      "d_visibility": 7.536308412214918e-12,
+      "open_artifact": 0.0026763338706827233
+     }
+    },
+    {
+     "id": "clean-5",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 2.258603383433754e-06,
+      "d_adjacency": 1.3292850045976664e-09,
+      "d_history": 8.101722836235295e-05,
+      "d_mutation": 0.000460860284364443,
+      "d_red": 1.2261452196044203e-06,
+      "d_semicolon": 9.717210267571915e-10,
+      "d_sessionid": 0.00016104835196949604,
+      "d_visibility": 1.3377491416241213e-10,
+      "open_artifact": 0.005280075027399741
+     }
+    },
+    {
+     "id": "member",
+     "want": "member_vs_population",
+     "applicable": false,
+     "fired": []
+    },
+    {
+     "id": "clean-6",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 9.027289449769516e-07,
+      "d_adjacency": 3.449015182021369e-08,
+      "d_history": 0.00024362893848435028,
+      "d_mutation": 0.0004524060616678741,
+      "d_red": 4.39865197598599e-06,
+      "d_semicolon": 3.8533605462971645e-13,
+      "d_sessionid": 0.0005201706137368702,
+      "d_visibility": 1.5492218582683352e-09,
+      "open_artifact": 0.0023322859619038156
+     }
+    },
+    {
+     "id": "clean-7",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 9.197880229575619e-07,
+      "d_adjacency": 2.2040701702493547e-08,
+      "d_history": 0.00026854104104334864,
+      "d_mutation": 0.0006815367762616087,
+      "d_red": 1.1600623735582725e-06,
+      "d_semicolon": 4.54477415454547e-10,
+      "d_sessionid": 4.535486317792256e-06,
+      "d_visibility": 1.085067990430848e-09,
+      "open_artifact": 0.0034365382556132465
+     }
+    },
+    {
+     "id": "clean-8",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 3.893721514521354e-07,
+      "d_adjacency": 7.783002834868398e-10,
+      "d_history": 0.00011213876912152727,
+      "d_mutation": 0.00043994069847269195,
+      "d_red": 6.597697596960251e-07,
+      "d_semicolon": 7.682947970418556e-10,
+      "d_sessionid": 1.2001519640931456e-05,
+      "d_visibility": 8.011080363468357e-12,
+      "open_artifact": 0.0013671786468442205
+     }
+    },
+    {
+     "id": "clean-9",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 2.793018728178948e-06,
+      "d_adjacency": 1.4662923747563688e-06,
+      "d_history": 0.0006149234259970272,
+      "d_mutation": 0.001264179694059756,
+      "d_red": 1.2025102494847942e-05,
+      "d_semicolon": 1.0179547522832599e-09,
+      "d_sessionid": 0.00011410977616706123,
+      "d_visibility": 2.2158361267399365e-07,
+      "open_artifact": 0.01294982086922865
+     }
+    },
+    {
+     "id": "clean-10",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 8.582253376788179e-06,
+      "d_adjacency": 3.1828697824647707e-06,
+      "d_history": 0.07177160054202797,
+      "d_mutation": 0.0008793313313947656,
+      "d_red": 2.301522869911503e-05,
+      "d_semicolon": 1.2561427214404468e-08,
+      "d_sessionid": 0.0007710859846618724,
+      "d_visibility": 2.7902784541620622e-08,
+      "open_artifact": 0.006520285627368255
+     }
+    },
+    {
+     "id": "clean-11",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 9.030659276292185e-07,
+      "d_adjacency": 7.224324251332203e-08,
+      "d_history": 0.00035349584763931443,
+      "d_mutation": 0.0003555803857715891,
+      "d_red": 4.967932769434564e-07,
+      "d_semicolon": 1.0293118731402846e-09,
+      "d_sessionid": 0.00013704806696895834,
+      "d_visibility": 4.151841471288993e-11,
+      "open_artifact": 0.0017309713309451244
+     }
+    },
+    {
+     "id": "clean-12",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 0.00010907681878478454,
+      "d_adjacency": 8.292645947826612e-08,
+      "d_history": 0.00039934356681002066,
+      "d_mutation": 0.01432262680742553,
+      "d_red": 0.0006088696902553329,
+      "d_semicolon": 0.9999774973209253,
+      "d_sessionid": 0.0003712820980477159,
+      "d_visibility": 1.2774049901682807e-07,
+      "open_artifact": 0.07407959872090725
+     }
+    },
+    {
+     "id": "clean-13",
+     "want": "none",
+     "applicable": true,
+     "fired": [
+      "d_sessionid"
+     ],
+     "passed": false,
+     "p": {
+      "closed_population": 0.0002755093480896291,
+      "d_adjacency": 0.010295339536694805,
+      "d_history": 0.5262153216563678,
+      "d_mutation": 0.0015194297889205965,
+      "d_red": 9.692657810022291e-05,
+      "d_semicolon": 5.808408807651807e-11,
+      "d_sessionid": 0.9883755435800533,
+      "d_visibility": 4.7497066791917306e-07,
+      "open_artifact": 0.032197313144632055
+     }
+    },
+    {
+     "id": "clean-14",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 8.264881540786547e-05,
+      "d_adjacency": 4.2609324093123674e-08,
+      "d_history": 0.009777144113484019,
+      "d_mutation": 0.038740883924871274,
+      "d_red": 4.460783647135806e-05,
+      "d_semicolon": 1.3495814276031583e-05,
+      "d_sessionid": 0.00012250501153701653,
+      "d_visibility": 2.68348903115028e-09,
+      "open_artifact": 0.022099067855496538
+     }
+    },
+    {
+     "id": "codex-clean-1",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 2.3391443057294808e-05,
+      "d_adjacency": 7.383464183708672e-09,
+      "d_history": 0.00044250741876673166,
+      "d_mutation": 0.003129809540083204,
+      "d_red": 8.613406215063648e-06,
+      "d_semicolon": 3.985645425397651e-06,
+      "d_sessionid": 0.00016182926684508387,
+      "d_visibility": 6.10866968497252e-10,
+      "open_artifact": 0.007628897843164563
+     }
+    },
+    {
+     "id": "codex-clean-2",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 4.539132148703877e-05,
+      "d_adjacency": 2.511029560346514e-08,
+      "d_history": 0.0008651812535025624,
+      "d_mutation": 0.0009186243328024037,
+      "d_red": 2.484216026696117e-06,
+      "d_semicolon": 6.5481519853315605e-09,
+      "d_sessionid": 0.001111738087827101,
+      "d_visibility": 2.0076618121506647e-11,
+      "open_artifact": 0.006557123860209083
+     }
+    },
+    {
+     "id": "codex-clean-3",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "closed_population": 4.65379710608689e-05,
+      "d_adjacency": 3.459656607907653e-08,
+      "d_history": 0.0003403215343681675,
+      "d_mutation": 0.003252397923686921,
+      "d_red": 4.946670082051884e-06,
+      "d_semicolon": 5.866794257939032e-09,
+      "d_sessionid": 1.6869834991819455e-05,
+      "d_visibility": 1.2197469572115081e-09,
+      "open_artifact": 0.0061270528207572495
+     }
+    }
+   ],
+   "span_texts": [
+    {
+     "id": "span-sessionid",
+     "rule": "d_sessionid",
+     "verdict": "NO",
+     "claim": null,
+     "on_target": false
+    },
+    {
+     "id": "span-semicolon",
+     "rule": "d_semicolon",
+     "verdict": "YES",
+     "claim": "I ran `cargo test --no-default-features && cargo test` so the default lane only runs when the lean lane passes.",
+     "on_target": true
+    }
+   ],
+   "errors": [],
+   "output": "=== SPAN CHECK (deterministic) ===\n  verbatim quote accepted      PASS\n  wrapped + quoted accepted    PASS\n  paraphrase refused           PASS\n  joined sentences refused     PASS\n  too-short span refused       PASS\n\n=== PER-RULE GATE \u2014 9 rules x 22 texts x 1 runs, subscription judge ===\n  clean-1        expect none            hit 1/1   fired [[]]   PASS\n  clean-2        expect none            hit 1/1   fired [[]]   PASS\n  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS\n  sessionid      expect d_sessionid     hit 1/1   fired [['d_sessionid']]   PASS\n  cannot         expect cannot_happen   n/a -- rule not judged in this run\n  contradiction  expect contradiction   n/a -- rule not judged in this run\n  clean-3        expect none            hit 1/1   fired [[]]   PASS\n  clean-4        expect none            hit 1/1   fired [[]]   PASS\n  clean-5        expect none            hit 1/1   fired [[]]   PASS\n  member         expect member_vs_population n/a -- rule not judged in this run\n  clean-6        expect none            hit 1/1   fired [[]]   PASS\n  clean-7        expect none            hit 1/1   fired [[]]   PASS\n  clean-8        expect none            hit 1/1   fired [[]]   PASS\n  clean-9        expect none            hit 1/1   fired [[]]   PASS\n  clean-10       expect none            hit 1/1   fired [[]]   PASS\n  clean-11       expect none            hit 1/1   fired [[]]   PASS\n  clean-12       expect none            hit 1/1   fired [[]]   PASS\n  clean-13       expect none            hit 0/1   fired [['d_sessionid']]   FAIL\n  clean-14       expect none            hit 1/1   fired [[]]   PASS\n  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS\n  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS\n  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS\n\ngate: 18/19   errored rows: 0\n\n=== CLAIM-TARGET CHECK (deterministic) ===\n  on-target quote accepted         PASS\n  right rule, wrong quote refused  PASS\n\n=== SPAN GATE \u2014 2 texts x 1 runs, expected rule only ===\n  span-sessionid   d_sessionid    ['NO']   FAIL\n  span-semicolon   d_semicolon    ['on-target']   PASS\n\nspan gate: 1/2   errored runs: 0\n"
+  },
+  "common": {
+   "menu": [
+    "d_adjacency",
+    "d_semicolon",
+    "d_sessionid"
+   ],
+   "gate_ability": {
+    "gate_positives_applying": [
+     "semicolon",
+     "sessionid"
+    ],
+    "span_texts_applying": [
+     "span-sessionid",
+     "span-semicolon"
+    ],
+    "gate_able": true
+   },
+   "gate_rc": 1,
+   "span_rc": 1,
+   "gate": {
+    "passed": 18,
+    "of": 19,
+    "errored": 0
+   },
+   "span": {
+    "passed": 1,
+    "of": 2,
+    "errored": 0
+   },
+   "passed": false,
+   "texts": [
+    {
+     "id": "clean-1",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 3.8045057113763966e-10,
+      "d_semicolon": 1.389275706346545e-10,
+      "d_sessionid": 3.195413836578851e-05
+     }
+    },
+    {
+     "id": "clean-2",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 8.640211209101633e-09,
+      "d_semicolon": 1.4016599399592794e-09,
+      "d_sessionid": 0.001810288291102101
+     }
+    },
+    {
+     "id": "semicolon",
+     "want": "d_semicolon",
+     "applicable": true,
+     "fired": [
+      "d_semicolon"
+     ],
+     "passed": true,
+     "p": {
+      "d_adjacency": 7.747162764826541e-07,
+      "d_semicolon": 0.9999999949434799,
+      "d_sessionid": 9.355366212646203e-05
+     }
+    },
+    {
+     "id": "sessionid",
+     "want": "d_sessionid",
+     "applicable": true,
+     "fired": [
+      "d_sessionid"
+     ],
+     "passed": true,
+     "p": {
+      "d_adjacency": 0.0001998327327060871,
+      "d_semicolon": 2.422971844152829e-10,
+      "d_sessionid": 0.9838923876318332
+     }
+    },
+    {
+     "id": "cannot",
+     "want": "cannot_happen",
+     "applicable": false,
+     "fired": []
+    },
+    {
+     "id": "contradiction",
+     "want": "contradiction",
+     "applicable": false,
+     "fired": []
+    },
+    {
+     "id": "clean-3",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 1.2369106777719264e-08,
+      "d_semicolon": 4.798671275421531e-09,
+      "d_sessionid": 6.652434413049759e-05
+     }
+    },
+    {
+     "id": "clean-4",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 4.649033594832422e-09,
+      "d_semicolon": 3.812593493811283e-10,
+      "d_sessionid": 0.00019235082983691502
+     }
+    },
+    {
+     "id": "clean-5",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 1.3292850045976664e-09,
+      "d_semicolon": 9.717210267571915e-10,
+      "d_sessionid": 0.00016104835196949604
+     }
+    },
+    {
+     "id": "member",
+     "want": "member_vs_population",
+     "applicable": false,
+     "fired": []
+    },
+    {
+     "id": "clean-6",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 3.449015182021369e-08,
+      "d_semicolon": 3.8533605462971645e-13,
+      "d_sessionid": 0.0005201706137368702
+     }
+    },
+    {
+     "id": "clean-7",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 2.2040701702493547e-08,
+      "d_semicolon": 4.54477415454547e-10,
+      "d_sessionid": 4.535486317792256e-06
+     }
+    },
+    {
+     "id": "clean-8",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 7.783002834868398e-10,
+      "d_semicolon": 7.682947970418556e-10,
+      "d_sessionid": 1.2001519640931456e-05
+     }
+    },
+    {
+     "id": "clean-9",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 1.4662923747563688e-06,
+      "d_semicolon": 1.0179547522832599e-09,
+      "d_sessionid": 0.00011410977616706123
+     }
+    },
+    {
+     "id": "clean-10",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 3.1828697824647707e-06,
+      "d_semicolon": 1.2561427214404468e-08,
+      "d_sessionid": 0.0007710859846618724
+     }
+    },
+    {
+     "id": "clean-11",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 7.224324251332203e-08,
+      "d_semicolon": 1.0293118731402846e-09,
+      "d_sessionid": 0.00013704806696895834
+     }
+    },
+    {
+     "id": "clean-12",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 8.292645947826612e-08,
+      "d_semicolon": 0.9999774973209253,
+      "d_sessionid": 0.0003712820980477159
+     }
+    },
+    {
+     "id": "clean-13",
+     "want": "none",
+     "applicable": true,
+     "fired": [
+      "d_sessionid"
+     ],
+     "passed": false,
+     "p": {
+      "d_adjacency": 0.010295339536694805,
+      "d_semicolon": 5.808408807651807e-11,
+      "d_sessionid": 0.9883755435800533
+     }
+    },
+    {
+     "id": "clean-14",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 4.2609324093123674e-08,
+      "d_semicolon": 1.3495814276031583e-05,
+      "d_sessionid": 0.00012250501153701653
+     }
+    },
+    {
+     "id": "codex-clean-1",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 7.383464183708672e-09,
+      "d_semicolon": 3.985645425397651e-06,
+      "d_sessionid": 0.00016182926684508387
+     }
+    },
+    {
+     "id": "codex-clean-2",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 2.511029560346514e-08,
+      "d_semicolon": 6.5481519853315605e-09,
+      "d_sessionid": 0.001111738087827101
+     }
+    },
+    {
+     "id": "codex-clean-3",
+     "want": "none",
+     "applicable": true,
+     "fired": [],
+     "passed": true,
+     "p": {
+      "d_adjacency": 3.459656607907653e-08,
+      "d_semicolon": 5.866794257939032e-09,
+      "d_sessionid": 1.6869834991819455e-05
+     }
+    }
+   ],
+   "span_texts": [
+    {
+     "id": "span-sessionid",
+     "rule": "d_sessionid",
+     "verdict": "NO",
+     "claim": null,
+     "on_target": false
+    },
+    {
+     "id": "span-semicolon",
+     "rule": "d_semicolon",
+     "verdict": "YES",
+     "claim": "I ran `cargo test --no-default-features && cargo test` so the default lane only runs when the lean lane passes.",
+     "on_target": true
+    }
+   ],
+   "errors": [],
+   "output": "=== SPAN CHECK (deterministic) ===\n  verbatim quote accepted      PASS\n  wrapped + quoted accepted    PASS\n  paraphrase refused           PASS\n  joined sentences refused     PASS\n  too-short span refused       PASS\n\n=== PER-RULE GATE \u2014 3 rules x 22 texts x 1 runs, subscription judge ===\n  clean-1        expect none            hit 1/1   fired [[]]   PASS\n  clean-2        expect none            hit 1/1   fired [[]]   PASS\n  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS\n  sessionid      expect d_sessionid     hit 1/1   fired [['d_sessionid']]   PASS\n  cannot         expect cannot_happen   n/a -- rule not judged in this run\n  contradiction  expect contradiction   n/a -- rule not judged in this run\n  clean-3        expect none            hit 1/1   fired [[]]   PASS\n  clean-4        expect none            hit 1/1   fired [[]]   PASS\n  clean-5        expect none            hit 1/1   fired [[]]   PASS\n  member         expect member_vs_population n/a -- rule not judged in this run\n  clean-6        expect none            hit 1/1   fired [[]]   PASS\n  clean-7        expect none            hit 1/1   fired [[]]   PASS\n  clean-8        expect none            hit 1/1   fired [[]]   PASS\n  clean-9        expect none            hit 1/1   fired [[]]   PASS\n  clean-10       expect none            hit 1/1   fired [[]]   PASS\n  clean-11       expect none            hit 1/1   fired [[]]   PASS\n  clean-12       expect none            hit 1/1   fired [[]]   PASS\n  clean-13       expect none            hit 0/1   fired [['d_sessionid']]   FAIL\n  clean-14       expect none            hit 1/1   fired [[]]   PASS\n  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS\n  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS\n  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS\n\ngate: 18/19   errored rows: 0\n\n=== CLAIM-TARGET CHECK (deterministic) ===\n  on-target quote accepted         PASS\n  right rule, wrong quote refused  PASS\n\n=== SPAN GATE \u2014 2 texts x 1 runs, expected rule only ===\n  span-sessionid   d_sessionid    ['NO']   FAIL\n  span-semicolon   d_semicolon    ['on-target']   PASS\n\nspan gate: 1/2   errored runs: 0\n"
+  }
+ }
+}

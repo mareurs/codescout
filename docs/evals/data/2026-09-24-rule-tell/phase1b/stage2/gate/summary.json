@@ -1,0 +1,70 @@
+{
+ "passed": {
+  "b-20260935": {
+   "own": false,
+   "common": false
+  },
+  "b-20260937": {
+   "own": false,
+   "common": false
+  },
+  "b-20260940": {
+   "own": false,
+   "common": false
+  },
+  "n-20260935": {
+   "own": false,
+   "common": false
+  },
+  "n-20260937": {
+   "own": false,
+   "common": false
+  },
+  "n-20260940": {
+   "own": false,
+   "common": false
+  },
+  "nc-20260935": {
+   "own": false,
+   "common": false
+  },
+  "nc-20260937": {
+   "own": false,
+   "common": false
+  },
+  "nc-20260940": {
+   "own": false,
+   "common": false
+  }
+ },
+ "seeds_passing": {
+  "b": {
+   "own": 0,
+   "common": 0
+  },
+  "n": {
+   "own": 0,
+   "common": 0
+  },
+  "nc": {
+   "own": 0,
+   "common": 0
+  }
+ },
+ "causal": "withheld",
+ "ship": {
+  "nc_own_passing": 0,
+  "proceeds_to_t": false,
+  "checkpoint": null
+ },
+ "clean12_d_semicolon_fired": {
+  "b": 3,
+  "n": 1,
+  "nc": 2
+ },
+ "predictions": {
+  "1": true,
+  "4": false,
+  "5": false
+ }
+}

@@ -1,0 +1,821 @@
+b-20260935: judge on NVIDIA RTX A5000 (cuda); determinism max |dz| 0.0 over 28 cells, finite True; parity 0 of 32689 cells differ
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 5 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 0/1   fired [[]]   FAIL
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 0/1   fired [['d_semicolon']]   FAIL
+  clean-13       expect none            hit 1/1   fired [[]]   PASS
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 17/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['NO']   FAIL
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 1/2   errored runs: 0
+--- b-20260935, own menu (5): FAIL
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 3 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 0/1   fired [[]]   FAIL
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 0/1   fired [['d_semicolon']]   FAIL
+  clean-13       expect none            hit 1/1   fired [[]]   PASS
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 17/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['NO']   FAIL
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 1/2   errored runs: 0
+--- b-20260935, common menu (3): FAIL
+gate b-20260935 exit 0
+n-20260935: judge on NVIDIA RTX A5000 (cuda); determinism max |dz| 0.0 over 28 cells, finite True; parity 0 of 32689 cells differ
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 10 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 1/1   fired [['d_sessionid']]   PASS
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 1/1   fired [[]]   PASS
+  clean-13       expect none            hit 0/1   fired [['d_sessionid']]   FAIL
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 18/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['NO']   FAIL
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 1/2   errored runs: 0
+--- n-20260935, own menu (10): FAIL
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 3 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 1/1   fired [['d_sessionid']]   PASS
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 1/1   fired [[]]   PASS
+  clean-13       expect none            hit 0/1   fired [['d_sessionid']]   FAIL
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 18/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['NO']   FAIL
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 1/2   errored runs: 0
+--- n-20260935, common menu (3): FAIL
+gate n-20260935 exit 0
+nc-20260935: judge on NVIDIA RTX A5000 (cuda); determinism max |dz| 0.0 over 28 cells, finite True; parity 0 of 32689 cells differ
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 10 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 1/1   fired [['d_sessionid']]   PASS
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 0/1   fired [['d_semicolon']]   FAIL
+  clean-13       expect none            hit 0/1   fired [['d_sessionid']]   FAIL
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 17/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['on-target']   PASS
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 2/2   errored runs: 0
+--- nc-20260935, own menu (10): FAIL
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 3 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 1/1   fired [['d_sessionid']]   PASS
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 0/1   fired [['d_semicolon']]   FAIL
+  clean-13       expect none            hit 0/1   fired [['d_sessionid']]   FAIL
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 17/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['on-target']   PASS
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 2/2   errored runs: 0
+--- nc-20260935, common menu (3): FAIL
+gate nc-20260935 exit 0
+b-20260937: judge on NVIDIA RTX A5000 (cuda); determinism max |dz| 0.0 over 28 cells, finite True; parity 0 of 32689 cells differ
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 4 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 0/1   fired [[]]   FAIL
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 0/1   fired [['d_semicolon']]   FAIL
+  clean-13       expect none            hit 1/1   fired [[]]   PASS
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 17/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['NO']   FAIL
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 1/2   errored runs: 0
+--- b-20260937, own menu (4): FAIL
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 3 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 0/1   fired [[]]   FAIL
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 0/1   fired [['d_semicolon']]   FAIL
+  clean-13       expect none            hit 1/1   fired [[]]   PASS
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 17/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['NO']   FAIL
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 1/2   errored runs: 0
+--- b-20260937, common menu (3): FAIL
+gate b-20260937 exit 0
+n-20260937: judge on NVIDIA RTX A5000 (cuda); determinism max |dz| 0.0 over 28 cells, finite True; parity 0 of 32689 cells differ
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 9 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 1/1   fired [['d_sessionid']]   PASS
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 1/1   fired [[]]   PASS
+  clean-13       expect none            hit 0/1   fired [['d_sessionid']]   FAIL
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 18/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['NO']   FAIL
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 1/2   errored runs: 0
+--- n-20260937, own menu (9): FAIL
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 3 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 1/1   fired [['d_sessionid']]   PASS
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 1/1   fired [[]]   PASS
+  clean-13       expect none            hit 0/1   fired [['d_sessionid']]   FAIL
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 18/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['NO']   FAIL
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 1/2   errored runs: 0
+--- n-20260937, common menu (3): FAIL
+gate n-20260937 exit 0
+nc-20260937: judge on NVIDIA RTX A5000 (cuda); determinism max |dz| 0.0 over 28 cells, finite True; parity 0 of 32689 cells differ
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 13 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 1/1   fired [['d_sessionid']]   PASS
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population hit 1/1   fired [['member_vs_population']]   PASS
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 0/1   fired [['d_semicolon']]   FAIL
+  clean-13       expect none            hit 0/1   fired [['d_sessionid']]   FAIL
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 18/20   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['on-target']   PASS
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 2/2   errored runs: 0
+--- nc-20260937, own menu (13): FAIL
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 3 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 1/1   fired [['d_sessionid']]   PASS
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 0/1   fired [['d_semicolon']]   FAIL
+  clean-13       expect none            hit 0/1   fired [['d_sessionid']]   FAIL
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 17/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['on-target']   PASS
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 2/2   errored runs: 0
+--- nc-20260937, common menu (3): FAIL
+gate nc-20260937 exit 0
+b-20260940: judge on NVIDIA RTX A5000 (cuda); determinism max |dz| 0.0 over 28 cells, finite True; parity 0 of 32689 cells differ
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 5 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 0/1   fired [[]]   FAIL
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 0/1   fired [['d_semicolon']]   FAIL
+  clean-13       expect none            hit 1/1   fired [[]]   PASS
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 17/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['NO']   FAIL
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 1/2   errored runs: 0
+--- b-20260940, own menu (5): FAIL
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 3 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 0/1   fired [[]]   FAIL
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 0/1   fired [['d_semicolon']]   FAIL
+  clean-13       expect none            hit 1/1   fired [[]]   PASS
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 17/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['NO']   FAIL
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 1/2   errored runs: 0
+--- b-20260940, common menu (3): FAIL
+gate b-20260940 exit 0
+n-20260940: judge on NVIDIA RTX A5000 (cuda); determinism max |dz| 0.0 over 28 cells, finite True; parity 0 of 32689 cells differ
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 11 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 1/1   fired [['d_sessionid']]   PASS
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 0/1   fired [['d_semicolon']]   FAIL
+  clean-13       expect none            hit 0/1   fired [['d_sessionid']]   FAIL
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 17/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['NO']   FAIL
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 1/2   errored runs: 0
+--- n-20260940, own menu (11): FAIL
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 3 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 1/1   fired [['d_sessionid']]   PASS
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 0/1   fired [['d_semicolon']]   FAIL
+  clean-13       expect none            hit 0/1   fired [['d_sessionid']]   FAIL
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 17/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['NO']   FAIL
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 1/2   errored runs: 0
+--- n-20260940, common menu (3): FAIL
+gate n-20260940 exit 0
+nc-20260940: judge on NVIDIA RTX A5000 (cuda); determinism max |dz| 0.0 over 28 cells, finite True; parity 0 of 32689 cells differ
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 10 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 1/1   fired [['d_sessionid']]   PASS
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 1/1   fired [[]]   PASS
+  clean-13       expect none            hit 0/1   fired [['d_sessionid']]   FAIL
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 18/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['on-target']   PASS
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 2/2   errored runs: 0
+--- nc-20260940, own menu (10): FAIL
+=== SPAN CHECK (deterministic) ===
+  verbatim quote accepted      PASS
+  wrapped + quoted accepted    PASS
+  paraphrase refused           PASS
+  joined sentences refused     PASS
+  too-short span refused       PASS
+
+=== PER-RULE GATE — 3 rules x 22 texts x 1 runs, subscription judge ===
+  clean-1        expect none            hit 1/1   fired [[]]   PASS
+  clean-2        expect none            hit 1/1   fired [[]]   PASS
+  semicolon      expect d_semicolon     hit 1/1   fired [['d_semicolon']]   PASS
+  sessionid      expect d_sessionid     hit 1/1   fired [['d_sessionid']]   PASS
+  cannot         expect cannot_happen   n/a -- rule not judged in this run
+  contradiction  expect contradiction   n/a -- rule not judged in this run
+  clean-3        expect none            hit 1/1   fired [[]]   PASS
+  clean-4        expect none            hit 1/1   fired [[]]   PASS
+  clean-5        expect none            hit 1/1   fired [[]]   PASS
+  member         expect member_vs_population n/a -- rule not judged in this run
+  clean-6        expect none            hit 1/1   fired [[]]   PASS
+  clean-7        expect none            hit 1/1   fired [[]]   PASS
+  clean-8        expect none            hit 1/1   fired [[]]   PASS
+  clean-9        expect none            hit 1/1   fired [[]]   PASS
+  clean-10       expect none            hit 1/1   fired [[]]   PASS
+  clean-11       expect none            hit 1/1   fired [[]]   PASS
+  clean-12       expect none            hit 1/1   fired [[]]   PASS
+  clean-13       expect none            hit 0/1   fired [['d_sessionid']]   FAIL
+  clean-14       expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-1  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-2  expect none            hit 1/1   fired [[]]   PASS
+  codex-clean-3  expect none            hit 1/1   fired [[]]   PASS
+
+gate: 18/19   errored rows: 0
+
+=== CLAIM-TARGET CHECK (deterministic) ===
+  on-target quote accepted         PASS
+  right rule, wrong quote refused  PASS
+
+=== SPAN GATE — 2 texts x 1 runs, expected rule only ===
+  span-sessionid   d_sessionid    ['on-target']   PASS
+  span-semicolon   d_semicolon    ['on-target']   PASS
+
+span gate: 2/2   errored runs: 0
+--- nc-20260940, common menu (3): FAIL
+gate nc-20260940 exit 0
+{
+ "seeds_passing": {
+  "b": {
+   "own": 0,
+   "common": 0
+  },
+  "n": {
+   "own": 0,
+   "common": 0
+  },
+  "nc": {
+   "own": 0,
+   "common": 0
+  }
+ },
+ "causal": "withheld",
+ "ship": {
+  "nc_own_passing": 0,
+  "proceeds_to_t": false,
+  "checkpoint": null
+ },
+ "predictions": {
+  "1": true,
+  "4": false,
+  "5": false
+ }
+}
+summary exit 0
+STEP5_DONE fail=0

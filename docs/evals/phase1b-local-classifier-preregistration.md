@@ -15,7 +15,7 @@ tags:
 
 **Valid:** dated 2026-09-25
 
-**Status: Stage 1 registered in `24426921` and complete (§ *Stage 1 results*: both recipes stable; `s1-r1` carried forward). Stage 2 registered on 2026-09-26 by the commit that marks its heading below "registered before it runs". Later stages are not registered.**
+**Status: Stage 1 registered in `24426921` and complete (§ *Stage 1 results*: both recipes stable; `s1-r1` carried forward). Stage 2 registered on 2026-09-26 by the commit that marks its heading below "registered before it runs", and complete on 2026-09-27 (§ *Stage 2 results*): no checkpoint passes the gate, NC does not proceed to T, and the local route stops for this data and backbone. Later stages are not registered.**
 - **Stage 1,** a stable training recipe, runs after that commit.
 - **The sections from "Step 1 — the cross-rule audit" onward** are Stage 2's steps, amended by § *Stage 2* and registered with it. Of the revisions the research synthesis (`docs/research/2026-09-25-phase1-training-research-synthesis.md`) asked for, Stage 2 takes cue counterexamples (arm NC), all-cells validation, and the reading over every seed in place of the "learned-only" one. The rule-conditioned formulation is Stage 3's, run only if Stage 2 fails. Each stage is registered before it runs.
 
@@ -540,6 +540,63 @@ Predictions 1–5 are the text committed in `2e4743e0`, before Step 4's smoke ru
   - A no-span-text menu had no case.
   - The `git status` flag test used a file pathspec, where the flag cannot change the output.
 - The third round also found a gap in the code. An ignored, uncommitted file read as committed, so `--ignored=matching` was added.
+
+### Step 5 — the gate, 2026-09-27
+
+**How it ran.** On 2026-09-27, 06:15–06:25 UTC, through `step5.sh`, once per checkpoint. Results are in `phase1b/stage2/gate/`: a `<arm>-<seed>.json` and a `.log.jsonl` for each checkpoint, plus `summary.json`.
+- HEAD was `ec5350a1`: two peer commits on top of `5a477c51`, which touch no file the gate reads.
+- Every result records the sha256 of each file a verdict depends on. `step5_gate.py` is `32a7735a…`, the reviewed and tested bytes.
+
+**The checks held for all nine checkpoints:**
+- determinism, max |Δz| = 0.0;
+- parity, 0 of 32,689 val cells different;
+- 0 errored rows.
+- No fired claim tied at its P: `ties_at_p` is 1 on all 40 YES rows of the own menus. So the raw-logit claim rule changed no claim.
+
+**No checkpoint passes, on its own menu or on the common menu.**
+
+| checkpoint | gate, own menu | span gate | texts that fail |
+|---|---|---|---|
+| B · 20260935 | 17 / 19 | 1 / 2 | the `sessionid` positive (missed); `clean-12` (`d_semicolon` fires); `span-sessionid` missed |
+| B · 20260937 | 17 / 19 | 1 / 2 | the same three |
+| B · 20260940 | 17 / 19 | 1 / 2 | the same three |
+| N · 20260935 | 18 / 19 | 1 / 2 | `clean-13` (`d_sessionid` fires); `span-sessionid` missed |
+| N · 20260937 | 18 / 19 | 1 / 2 | `clean-13`; `span-sessionid` missed |
+| N · 20260940 | 17 / 19 | 1 / 2 | `clean-12`; `clean-13`; `span-sessionid` missed |
+| NC · 20260935 | 17 / 19 | 2 / 2 | `clean-12`; `clean-13` |
+| NC · 20260937 | 18 / 20 | 2 / 2 | `clean-12`; `clean-13` |
+| NC · 20260940 | 18 / 19 | 2 / 2 | `clean-13` |
+
+- NC · 20260937's own menu keeps `member_vs_population`, so its `member` positive applies, and it passes.
+- On the common menu every checkpoint fails the same texts.
+
+**Where it fails: the two swap texts, and, for B and N, `d_sessionid`'s recall.**
+- **Every checkpoint passes the other 15 clean texts:**
+  - phase 1's five clean texts, `clean-1` to `clean-5`;
+  - `clean-6` to `clean-11`, and `clean-14`;
+  - the three Codex texts.
+
+  Phase 1's L2-QWEN fired four rules on each of `clean-1` and `clean-2`.
+- **B passes those texts too.** Under Step 4's thresholds, which are chosen over cross cells, B's over-firing became lost recall (§ *Step 4*). That is where B fails: it misses the `sessionid` positive and `span-sessionid` at every seed.
+- **`clean-12`** (`npm ci && npm run build`: `d_semicolon`'s cue, with no violation) is fired by B at 3 of 3 seeds, N at 1 and NC at 2.
+- **`clean-13`** (a session name mentioned, nothing attributed: `d_sessionid`'s cue) is fired by N and NC at every seed, with p from 0.90 to 1.00. B never fires it; its p of 0.57–0.71 is under its thresholds.
+  - Why it fires is not measured here.
+  - The registration mined no cue for `d_sessionid` and left its cues to the cross-rule term (§ *Stage 2*, the cue list).
+- **The span gate:** NC passes both texts at every seed; B and N miss `span-sessionid` at every seed. N fires on the stand-alone `sessionid` positive, but not on the same sentence inside `span-sessionid`'s paragraph.
+
+**Readings, as registered:**
+- **Ship rule:** NC passes its own menu at 0 of 3 seeds, so it does not proceed to T.
+  - As § *After the gate* and § *Stage 2* say, the local route stops for this data and backbone.
+  - The rule-conditioned formulation (open decision 2) may follow as Stage 3, under a new registration.
+- **The causal reading, on the common menu:** B, N and NC each pass at 0 of 3 seeds. The claim needs N at 2 or 3, so it is **withheld**.
+- **Predictions:**
+  1. B fails the gate at 3 of 3 seeds, on its own menu and on the common menu: **held.**
+  2. **held**, at Step 4.
+  3. **failed**, at Step 4.
+  4. N fires `d_semicolon` on `clean-12` at 2 or more of 3 seeds: **failed.** N fired at 1 seed, 20260940.
+  5. NC does not fire `d_semicolon` on `clean-12` at 2 or more of 3 seeds: **failed.** NC fired at 2, seeds 20260935 and 20260937.
+  6. **held**, at Step 1.
+- **What `clean-12` measures, as disclosed at registration:** in this run, the counterexamples did not reduce firing on `clean-12`. NC fired at 2 of 3 seeds and N at 1 of 3.
 
 ## Step 1 — the cross-rule audit (decides which cells become negatives)
 
