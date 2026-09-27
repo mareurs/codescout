@@ -1,15 +1,17 @@
 ---
 id: '0db9597a451ba41e'
 kind: bug
-status: open
+status: mitigated
 title: a rebuild reaches the rebuilding session only; every other server keeps the replaced inode and nothing reports it
 owners:
 - marius
 tags:
 - cluster/transient-shared-state-lies-to-readers
+closed: 2026-09-27
 opened: 2026-09-17
 related: []
 severity: medium
+unverified: 'The librarian has no stale-binary write guard, so a server on a replaced binary still runs old code for doc(move) and every other librarian write. Adding one is an open policy decision for the operator: right after a rebuild it would refuse most sessions'' writes.'
 ---
 
 ## Summary
@@ -159,11 +161,68 @@ the builder who needs asking.
 
 ## Fix
 
-Not yet fixed.
+**The reporting half is fixed as of 2026-09-27; the split itself cannot be.** A replaced inode stays mapped until
+its process exits, which is POSIX, and only each session's operator can type `/mcp`. So this file is `mitigated`.
+
+- **Candidate 1 (a `build_id` on `workspace(action="status")`)** predates this file (`fbd7f348`, 2026-08-28), as the
+  re-verification above records.
+- **Candidate 2 (`rb.sh` enumerates the fleet): BUILT.** After a SUCCESSFUL build, `scripts/rb.sh` prints
+  `scripts/stale-servers.sh --sessions`: every Claude Code session whose LIVE server is on the replaced binary,
+  listed by socket and launch directory, with the builder's own row marked. Superseded servers (`/mcp` does not reap
+  them) and servers under non-Claude parents (`/mcp` does not reach them) are counted apart and never listed as
+  sessions to reconnect. It is addressed to the operator, because `/mcp` is a slash command only they can type.
+  - The report runs only after a successful build, since a failed one replaced nothing.
+  - The build's own exit status is passed through. `rb.sh` no longer `exec`s the build, so that is now its job.
+  - A failing report never changes the exit status.
+  - The report is overridable (`CODESCOUT_RB_FLEET_CMD`), for the same reason the build is.
+  - `CLAUDE.md` § Development Commands now says so, where the `/mcp` instruction sits.
+- **Candidate 3 (notify the sessions):** not built, still the weakest. It costs a round trip per session and
+  informs without closing anything, and the operator is who acts.
+
+**Still open, and deliberately not decided here: a stale server runs OLD code for librarian writes.**
+`guard_stale_binary` (`src/retrieval/sync.rs:94`) refuses index sync from a replaced binary, and nothing under
+`src/librarian` checks `exe_deleted`, so the `doc(action="move")` exposure in § *Why this is more than…* is
+unguarded. Adding that guard is a policy decision, not a drive-by: right after any rebuild almost every server is
+stale (26 of 27 on 2026-09-25), so it would refuse most sessions' librarian writes until they reconnect. It is left
+to the operator.
+
+Fix SHA: `775181db` (experiments; the reporting half)
+Patch-id: `e597166601ff9b1396b32b766cbaa3c6a0ecdd01`
 
 ## Tests added
 
-None yet.
+- **`tests/rb-guard.sh` (40/0).** New rows:
+  - the fleet report runs after a successful build;
+  - it does not run after a failed build, which keeps its own exit code (7);
+  - it does not run on a refusal;
+  - a failing report leaves the exit code 0;
+  - with the seam empty, the default path prints the real `FLEET:` line.
+
+  Every allow row sets a SILENT fleet marker, which keeps the "completely silent" row hermetic.
+- **`tests/stale-servers.sh` (45/0).** `--sessions-report`:
+  - two stale sessions are listed by socket;
+  - the self marker lands on its row only;
+  - `/mcp` and "operator" appear in the remedy;
+  - a current live server lists nothing, and its superseded sibling is counted apart;
+  - non-Claude and parentless servers are counted, never listed;
+  - a stale mux is not a server;
+  - a two-live-servers tie is one session.
+
+  The live `--sessions` prints a FLEET line on any machine.
+
+Nine mutations via `scripts/mutation-probe.sh`, each killed by its named row:
+
+| mutation | killed by |
+|---|---|
+| `exit 0` in place of the build's code | the exit-code row |
+| report on failure | the failed-build row |
+| a failing report fails the build | the still-exits-0 row |
+| no default report | the FLEET line |
+| self marker on every row | the other-row check |
+| any CONN value | the current-live and neither-listed rows |
+| any flag | the current-live row |
+| mux counted as a server | the non-Claude count and mux rows |
+| no dedupe | the tie row |
 
 ## Workarounds
 
