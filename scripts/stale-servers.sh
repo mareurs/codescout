@@ -63,10 +63,22 @@
 #   --conn            read `pid|ppid|start|kind|parent` lines on stdin, print `pid|CONN`
 #   --remedy N M [K]  print the remedy for N reconnectable stale servers, M stale muxes
 #                     and K superseded servers
-#   All three exist so `tests/stale-servers.sh` can drive the real classifiers and the real
+#   --sessions-report read `pid|ppid|kind|flag|conn|cwd|self` lines on stdin, print the
+#                     per-session fleet report that `--sessions` prints live
+#   All four exist so `tests/stale-servers.sh` can drive the real classifiers and the real
 #   remedy text without live processes of any kind: a mux exists only while a language
 #   server is warm, which is exactly why the mux defect was absent from most runs, and a
 #   superseded server exists only after a /mcp the harness failed to close.
+#
+# --sessions: THE FLEET, PER SESSION (added 2026-09-27, run by scripts/rb.sh after a build)
+#   The table above is per PROCESS. The person who just rebuilt needs it per SESSION: which
+#   Claude Code sessions still talk to a server on the replaced binary, so do not have the
+#   build yet. /mcp is a slash command only a session's operator can type, so the report
+#   is addressed to that operator, not to the sessions. Right after a real build every
+#   pre-existing server is on the replaced inode, the builder's own included, so the list
+#   is normally EVERY session, and the builder's row is marked. That is the point, not
+#   noise: a fix reaches exactly the sessions that reconnect
+#   (docs/issues/2026-09-17-a-rebuild-reaches-one-session-and-the-rest-keep-serving-the-replaced-binary.md).
 #
 # THE SECOND AXIS: CONN, whether anything still TALKS to a server (added 2026-09-25)
 #   STATUS answers "is this the binary on disk?". It cannot answer "is anyone connected?",
@@ -159,6 +171,46 @@ mark_superseded() {
         }'
 }
 
+# The per-session fleet report. Reads `pid|ppid|kind|flag|conn|cwd|self` lines: CONN is
+# already computed (mark_superseded), cwd is the session's LAUNCH directory, and self is
+# `self` on the caller's own session. A session is listed once, when its LIVE server is on
+# the replaced binary. A superseded server does not list its session: /mcp cannot help it,
+# and the session's own live server may be current.
+sessions_report() {
+    awk -F'|' -v sockdir="$SOCK_DIR" '
+        $3 == "server" && $5 == "live" && $4 == "STALE" && !($2 in seen) {
+            seen[$2] = 1; n++; sess[n] = $2; cwd[n] = $6; me[n] = $7
+        }
+        $5 == "SUPERSEDED"                             { sup++ }
+        $3 == "server" && $5 == "-" && $4 == "STALE"   { other++ }
+        $3 == "server" && $5 == "NO-PARENT"            { orphan++ }
+        END {
+            if (n == 0) {
+                print "FLEET: no Claude Code session talks to a server on a replaced binary."
+            } else {
+                printf "FLEET: %d Claude Code session(s) still talk to a server on the REPLACED binary,\n", n
+                print "so they do not have this build yet. /mcp in each one picks it up, and only the"
+                print "operator of that session can type it:"
+                for (i = 1; i <= n; i++)
+                    printf "    %-9s %s/%s.sock  launched in %s%s\n", sess[i], sockdir, sess[i], cwd[i],
+                        (me[i] == "self" ? "   <-- you: /mcp here too" : "")
+            }
+            if (sup)    printf "%d superseded server(s) will not be reaped by /mcp: scripts/stale-servers.sh lists them.\n", sup
+            if (other)  printf "%d stale server(s) under a non-Claude parent (e.g. codex) are beyond /mcp.\n", other
+            if (orphan) printf "%d server(s) have no parent process left.\n", orphan
+        }'
+}
+
+# The caller's own session: the first ancestor of this shell that owns a socket in
+# cc-socks. Not a `comm` test, since a version-pinned install has comm=2.1.258.
+self_session() {
+    local p=$$
+    while [ -n "$p" ] && [ "$p" -gt 1 ] 2>/dev/null; do
+        [ -S "$SOCK_DIR/$p.sock" ] && { echo "$p"; return; }
+        p=$(sed -n 's/^PPid:[[:space:]]*//p' "/proc/$p/status" 2>/dev/null)
+    done
+}
+
 # Split by addressee, because the two populations' correct next actions are opposite and a
 # reader who follows the wrong one either hunts a session that does not exist or leaves a
 # process running that will never recycle on its own. Each branch is emitted only when its
@@ -204,7 +256,14 @@ case "${1-}" in
         remedy "${2-0}" "${3-0}" "${4-0}"
         exit 0
         ;;
+    --sessions-report)
+        sessions_report
+        exit 0
+        ;;
 esac
+
+mode=table
+[ "${1-}" = "--sessions" ] && mode=sessions
 
 rows=""
 conn_in=""
@@ -242,6 +301,17 @@ declare -A CONN
 while IFS='|' read -r cp cc; do
     [ -n "${cp:-}" ] && CONN[$cp]=$cc
 done < <(printf '%s' "$conn_in" | mark_superseded)
+
+if [ "$mode" = sessions ]; then
+    me=$(self_session)
+    while IFS='|' read -r _e pid pp kd fl _st; do
+        [ -n "${pid:-}" ] || continue
+        printf '%s|%s|%s|%s|%s|%s|%s\n' "$pid" "$pp" "$kd" "$fl" "${CONN[$pid]:-?}" \
+            "$(readlink "/proc/$pp/cwd" 2>/dev/null || echo '?')" \
+            "$([ -n "$me" ] && [ "$pp" = "$me" ] && echo self || echo -)"
+    done <<< "$rows" | sessions_report
+    exit 0
+fi
 
 # A superseded server is counted out of the SERVERS remedy even when it is stale: telling
 # its session to /mcp is the one instruction that cannot help it.

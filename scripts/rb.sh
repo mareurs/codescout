@@ -50,9 +50,34 @@ set -u
 # test can run. This is the seam that makes a positive control possible; it is not a
 # feature, and nothing in the repo sets it outside `tests/rb-guard.sh`.
 : "${CODESCOUT_RB_BUILD_CMD:=cargo rb}"
+
+# AFTER A SUCCESSFUL BUILD, SAY WHO DOES NOT HAVE IT. A rebuild replaces the binary every
+# session's codescout server runs, and each of them keeps the OLD inode until its own
+# operator types /mcp. Nothing reported that split, so a fix was "shipped" from the
+# builder's side and absent everywhere else
+# (docs/issues/2026-09-17-a-rebuild-reaches-one-session-and-the-rest-keep-serving-the-replaced-binary.md).
+# This is the one place that knows a rebuild just happened, so it prints the per-session
+# fleet here instead of leaving it to a pull instrument nobody thinks to run.
+#
+# The fleet command is overridable for the same reason the build is. Without a seam every
+# allow row of `tests/rb-guard.sh` would print this machine's live /proc, and no
+# assertion there could be hermetic. It runs ONLY when the build succeeds: a failed build
+# replaced nothing. Its own failure never changes the exit status, which stays the build's.
+_rb_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 build_and_exit() {
     # shellcheck disable=SC2086  # deliberate word-splitting: the override is a command line
-    exec $CODESCOUT_RB_BUILD_CMD "$@"
+    $CODESCOUT_RB_BUILD_CMD "$@"
+    local rc=$?
+    if [ "$rc" -eq 0 ]; then
+        if [ -n "${CODESCOUT_RB_FLEET_CMD:-}" ]; then
+            # shellcheck disable=SC2086
+            $CODESCOUT_RB_FLEET_CMD >&2 || true
+        else
+            echo >&2
+            bash "$_rb_here/stale-servers.sh" --sessions >&2 || true
+        fi
+    fi
+    exit "$rc"
 }
 
 # Not a git checkout: nothing to be behind. Build and get out of the way — a guard that

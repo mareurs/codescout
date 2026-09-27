@@ -149,6 +149,46 @@ eq "and names who decides"                     "yes" "$(has "operator's" "$SUPER
 eq "and does NOT tell them to reconnect"       "no"  "$(has 'Reconnect those sessions' "$SUPERSEDED_ONLY")"
 
 echo
+echo "== the per-session fleet report (--sessions, run by rb.sh) =="
+# docs/issues/2026-09-17-a-rebuild-reaches-one-session-and-the-rest-keep-serving-the-replaced-binary.md.
+# Driven through `--sessions-report`, the same sessions_report the live `--sessions` pipes
+# into. Lines are `pid|ppid|kind|flag|conn|cwd|self`, with CONN already computed.
+fleet() { printf '%s\n' "$@" | bash "$SRC" --sessions-report; }
+
+F2="$(fleet '10|500|server|STALE|live|/w/a|-' '11|501|server|STALE|live|/w/b|self')"
+eq "two sessions on the replaced binary are counted" "yes" "$(has 'FLEET: 2 Claude Code session(s)' "$F2")"
+eq "each is listed by its socket"               "yes" \
+   "$([ "$(has 'cc-socks/500.sock' "$F2")" = yes ] && [ "$(has 'cc-socks/501.sock' "$F2")" = yes ] && echo yes || echo no)"
+eq "the caller's own row is marked"             "yes" "$(has '501.sock  launched in /w/b   <-- you' "$F2")"
+# Only the self row carries the marker. Checked on the OTHER row, since a marker printed on
+# every row still satisfies the assertion above.
+eq "and no other row is"                        "no"  "$(has '/w/a   <-- you' "$F2")"
+# The remedy reaches a party who can act, by shape: /mcp, typed by an operator.
+eq "names /mcp and who can type it"             "yes" \
+   "$([ "$(has '/mcp' "$F2")" = yes ] && [ "$(has 'operator' "$F2")" = yes ] && echo yes || echo no)"
+
+# A session whose LIVE server is current is not listed, whatever else sits under it. Its
+# superseded sibling is counted apart, because /mcp would not reap it anyway.
+F3="$(fleet '20|600|server|current|live|/w/c|-' '21|600|server|STALE|SUPERSEDED|/w/c|-')"
+eq "a current live server lists nothing"        "yes" "$(has 'FLEET: no Claude Code session' "$F3")"
+eq "and its superseded sibling is counted apart" "yes" "$(has '1 superseded server(s)' "$F3")"
+
+# Stale servers beyond /mcp's reach are counted, never listed as sessions to reconnect.
+F4="$(fleet '30|700|server|STALE|-|/w/d|-' '31|701|server|STALE|NO-PARENT|/w/e|-' '32|800|mux|STALE|-|/w/f|-')"
+eq "a non-Claude parent's stale server is counted" "yes" "$(has '1 stale server(s) under a non-Claude parent' "$F4")"
+eq "a parentless server is counted"             "yes" "$(has '1 server(s) have no parent process left' "$F4")"
+eq "and neither is listed as a session"         "yes" "$(has 'FLEET: no Claude Code session' "$F4")"
+# A STALE mux is not a server, so it is neither listed nor counted as beyond /mcp.
+eq "a stale mux is not counted as a server"     "no"  "$(has '2 stale server(s)' "$F4")"
+
+# mark_superseded calls BOTH servers live when they tie on start ticks, so one session can
+# arrive twice. It is still one session to reconnect.
+eq "a session with two live stale servers is listed once" "yes" \
+   "$(has 'FLEET: 1 Claude Code session(s)' "$(fleet '40|900|server|STALE|live|/w/g|-' '41|900|server|STALE|live|/w/g|-')")"
+
+eq "the live mode prints a FLEET line on any machine" "yes" "$(has 'FLEET:' "$(bash "$SRC" --sessions)")"
+
+echo
 echo "== the summary names its population =="
 # Population-independent: on a runner with no codescout process at all the rows are empty
 # and both counters print zero, so these hold in CI and on a loaded workstation alike.

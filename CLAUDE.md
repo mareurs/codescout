@@ -164,7 +164,11 @@ and the suite asserts that stale `0` is really produced before asserting the gua
 run a pull for you, because moving HEAD here moves it for every session in this working tree. Typing
 `cargo rb` directly still works and remains the canonical name — three other surfaces and
 `ci.yml:385` quote it — so this is a mechanism for whoever runs the wrapper and a policy for everyone
-else, the same limitation `gate.sh` carries. Full command reference (every crate + fixture,
+else, the same limitation `gate.sh` carries. **After a successful build it also prints the fleet:
+every Claude Code session still talking to a server on the replaced binary, yours marked.** Each one
+lacks the build until its own operator types `/mcp`, and before this nothing told the builder who
+they were (`docs/issues/2026-09-17-a-rebuild-reaches-one-session-and-the-rest-keep-serving-the-replaced-binary.md`;
+the list is `scripts/stale-servers.sh --sessions`). Full command reference (every crate + fixture,
 `cargo rb` vs lean build) → memory `development-commands`; the binary symlink gotcha → memory
 `gotchas` (MCP Binary Symlink).
 ## Testing Discipline — what a green suite is evidence for
