@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 175
+entry_high_water_F: 176
 entry_high_water_W: 145
 ---
 
@@ -65,6 +65,7 @@ entry_high_water_W: 145
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-176 | 2026-09-26 | med | documentation | open | **A residual's literal wording is stronger than the code contract it guards — `entry_prefix` gates only the prose append path.** Residual `5820a758` asks that every TAXONOMY `append_entry` recipe target a tracker declaring `entry_prefix`; at HEAD only the prose branch checks it, so a literal test reds WIN-N and PV-N, which work. Also: recipe ids are machine-local `sha256(abs_path)`, and 5 of 20 session logs declare no `F`. |
 | F-175 | 2026-09-24 | high | self-friction | open | **A killed mutant kept running: a looping M4 mutant of `gate.sh` survived its suite and filled the machine's `/tmp` (tmpfs) with about 867K lock files.** Case F killed `$!` of a backgrounded function, a wrapper subshell (the bug fixed in case D minutes earlier, not swept to the other site). The mutation verdict (KILLED) was correct and said nothing about the survivor. It stopped only on inode exhaustion. My kill and my delete were both refused by the classifier; escalated to the operator. |
 | F-174 | 2026-09-24 | high | cross-session | mitigated | **Saving a script that every session runs from the working tree IS publishing it.** My uncommitted `gate.sh` pool change was picked up by 2 peers within about two minutes. Each started a COLD build in a new slot while its warm legacy tree sat unused, on a disk at 97%. I stopped my own run by pgid, deleted my slot under its own lock, and watched disk with `fuser` (a read-only check; `flock` would perturb leasing). |
 | F-173 | 2026-09-24 | high | self-friction | mitigated | **Recommended `flock -o` as strictly safer before running it; the two lock modes fail in opposite directions, and `-o` fails toward the race it was meant to prevent.** With `-o`, SIGKILLing the holder frees the slot while cargo keeps running in it, a correctness failure. Without `-o`, a daemon (sccache, measured) pins a slot for its lifetime, a disk-only failure. Choose the mode that fails toward disk. Plan revised before any code. |
@@ -17041,6 +17042,20 @@ At that point `df` showed 64G free, and no process was still building into a leg
 **Recovery:** My kill attempt was refused by the permission classifier as `Interfere With Workloads`. My deletion of my own temp dirs was refused as `Shared Scratch Sweep`. I did not ask the peer to delete them, because routing a refused action through another session is permission laundering; I escalated to the operator instead. The test is fixed: `run_gate` records the gate's own pid (`$BASHPID` before `exec`), and both case F's timeout and the EXIT trap `kill -9` that pid before removing anything. That fix has not been re-run while `/tmp` is full.
 
 **Rule for next time:** after fixing a `$!`-means-a-wrapper bug at one site, grep every other `$!` in the file. And after any mutation run whose mutant can loop, check for survivors: processes carrying the suite's env marker, and growth in its temp root. The summary line cannot show either.
+
+## F-176 — A residual's literal wording is stronger than the code contract it guards — `entry_prefix` gates only the prose append path
+
+**Valid:** dated 2026-09-26
+
+**Observed:** Residual `5820a75840dd2d52` asks for a test that every `append_entry` recipe in `docs/TAXONOMY.md` targets a tracker declaring `entry_prefix`. Its parent (`docs/issues/archive/2026-09-02-two-trackers-have-no-open-append-path.md`) says `allocate_entry_id` refused T-N/I-N for lacking a declaration — flagged there as *inferred, not measured*. At HEAD that does not hold for the params shape: `declared_prefixes_from_frontmatter` has one production caller, `allocate_entry_id` (`src/librarian/catalog/augmentation.rs:1709`), reached only from the prose branch of `src/librarian/tools/append_entry.rs` (`:297`, inside `if a.entry_collection.is_none()`). The params branch calls `augmentation::append_entry` (`augmentation.rs:686-944`), which checks no declaration. Whether the params path ever did is unverified.
+
+**Cost (counterfactual):** a test written to the residual's literal wording reports WIN-N (`docs/trackers/windows-platform-support.md`) and PV-N (`docs/trackers/provenance-subsystem.md`) as broken — neither declares `entry_prefix`, both work — and its remedy text sends the reader to add declarations the code does not need. I read WIN as live drift for two tool calls before reading the params branch.
+
+**Also found while scouting:** (1) every recipe `id=` in TAXONOMY is `sha256` of this machine's absolute path (verified for 5 of 11 by hashing), so a CI-run join keyed on them resolves nothing — `docs/adrs/2026-09-14-an-id-keyed-on-an-absolute-path-cannot-be-checked-off-the-machine.md`. (2) 5 of 20 `*-session-log.md` files declare no `entry_prefix` (pr-review, structural-edit-gate, local-onnx-embedding, release-promotion, worktree-semantic-search); TAXONOMY's F-N row routes them to prose `append_entry`, which refuses. The CURRENT `docs/templates/session-log.md` routes there too, but ships without frontmatter and tells writers to declare `entry_prefix` first; the `edit_file` route I first attributed to the template is an older copy of it still embedded in `structural-edit-gate-session-log.md` (corrected 2026-09-27 before commit). TAXONOMY's own blockquote already records F/W as an owed decision.
+
+**Fix idea:** assert the CODE contract per recipe shape — prose ⇒ `id_prefix` in the file's declared set; params ⇒ the committed sidecar declares the named `entry_collection` — joined on the row's `Lives in` path, never the id. Leave F/W to the operator's decision.
+
+**Status:** open
 
 ## Template for new entries
 
