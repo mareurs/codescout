@@ -1,37 +1,50 @@
-"""Stage 1c: the observability map (Task 13, fix round 1).
+"""Stage 1c: the observability map (Task 13, fix round 2).
 
 Spec A1.6 requires this map before any Codex-judge call: for every outcome and every
 causal-chain link, a label (measurable now / needs adjudication / unobservable) plus the
 coverage number from the events database that justifies it, or the reason none exists.
 
-Consumes Task 6's events.db (scripts/measure/join.py, do not modify) and Task 5's transcript
-helpers (scripts/measure/transcripts.py, do not modify). Produces two things:
+Consumes Task 6's events.db (scripts/measure/join.py), Task 5's transcript helpers
+(scripts/measure/transcripts.py) and Task 4's frozen-corpus manifest (scripts/measure/archive.py);
+none of the three is modified here. Produces:
+- earliest_kept_top_level_ts(corpus_dir) -> str and finalize_bounds(corpus_dir) -> dict (R71):
+  the pipeline, not a scratch driver, owns the two windows. Task 12 calls finalize_bounds right
+  after archive.freeze and before join.build_events (whose commits table reads the bounds).
 - coverage(events_db, corpus_dir) -> dict: every count the map needs, per DECISION window and
   RETAINED window (R62), plus the A1.6 appendix breakdowns.
-- render_map(coverage, manifest) -> str: the WHOLE document (R60) -- header, provenance,
-  windows, the four label tables plus the rediscovery row, and every A1.6 breakdown. The
+- render_map(coverage, manifest, code_version=None) -> str: the WHOLE document (R60, R68). The
   committed map file must be byte-identical to this function's output; it is never hand-edited.
 
-Fix round 1 (rulings R60-R67, ledger 2026-09-26-system1-base-rate-measurement): round 0's
-committed map was hand-written prose that happened to describe render_map's numbers, not
-render_map's actual output, so it published an inferred cause for the exact-join share, a
-retained window that started after the corpus's own oldest entry, and a wrong cause for a
-118-vs-119 gap that no test could have caught. This round makes render_map render everything,
-makes a missing coverage field raise instead of silently reading 0, derives the retained window
-from data, and reports both windows (with population) on every cell.
+Fix round 2 (rulings R68-R71):
+- R70, strict reads: every read of a coverage, events_meta, manifest or closed-set key (turn kind,
+  join method, delivery source) is a subscript, never `.get(..., default)`. A missing key RAISES;
+  only a PRESENT 0 renders 0. A closed-set value the build emits but this module does not declare
+  also raises, so a schema change cannot silently drop rows from a table. (A raw transcript
+  entry's optional fields -- uuid, timestamp -- are source data, not keys this module owns, and
+  are the only `.get` reads left.)
+- R71, windows: every membership test is the one half-open predicate `_in_window`, [start, end).
+  NULL and unparseable ts rows are skipped and counted, per table and per cause, and rendered.
+- R69, deliveries count DELIVERED ITEMS, not table rows (`_is_delivered_item`).
+- R68, the header is rendered from data plus one fixed rule sentence (PROVISIONAL_SENTENCE).
 
 Run: ~/work/claude/prompt-engineering/.venv/bin/python -m pytest tests/test_measure_observability.py -v
 """
+import collections
 import json
 import pathlib
 import sqlite3
+import subprocess
 import sys
+from datetime import timedelta
 
 _THIS_DIR = pathlib.Path(__file__).resolve().parent
 if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
 import join  # noqa: E402
 import transcripts  # noqa: E402
+
+# R68: the rendering code's version is read from the repo that holds this scripts/measure dir.
+_REPO_ROOT = _THIS_DIR.parents[1]
 
 # Empirically confirmed (2026-09-27, against the real corpus): the subagent-launching tool is
 # literally named "Agent" in transcripts -- not "Task". 95/95 sampled files matched "Agent";
@@ -49,8 +62,46 @@ TRANSFER_DELIVERY_MARKERS = frozenset(
     {"operator-rule", "get_guide", "operator-rules", "guide-sections", "session-opener"}
 )
 
+# R70: the closed value sets of join.py's schema (R46 and join._entry_kind). Every one is
+# zero-filled up front so an absent value is a PRESENT 0; a value outside the set raises.
+TURN_KINDS = (
+    "prompt", "interrupt", "delegation", "assistant_text", "assistant_thinking", "tool_use",
+    "tool_result", "meta",
+)
+JOIN_METHODS = ("exact", "heuristic", "none", "not_codescout")
+
+# R69: what ONE delivered item is, per deliveries.source. Measured on the 2026-09-27 scratch
+# snapshot before this was written (probes/task13-fix2-real.txt): join.py emits, for each
+# usage_deliveries_json engine record, one row per ledger key (key set, sha256 NULL) AND one row
+# per block (key NULL, sha256 set) -- 35 + 35 rows for 35 deliveries, every record carrying as
+# many blocks as keys. usage_output_json and transcript_hook had zero NULL-key rows; by
+# construction a transcript_hook row is one attachment whatever its key, so it always counts.
+DELIVERY_UNITS = {
+    "usage_output_json": "one per operator-rule or get_guide marker match in output_json",
+    "usage_deliveries_json": (
+        "one per ledger key of a deliveries_json engine record; its block rows (key NULL) are "
+        "digests of the same deliveries and are not counted"
+    ),
+    "transcript_hook": "one per hook injection (a hook_success or hook_additional_context row)",
+}
+DELIVERY_SOURCES = tuple(sorted(DELIVERY_UNITS))
+DELIVERY_UNIT_PHRASE = (
+    "delivered items: one per output_json marker match, one per deliveries_json ledger key "
+    "(block rows not counted), one per transcript hook injection"
+)
+
+# A1.2: the decision window is the last 7 days of the retained window.
+DECISION_WINDOW_DAYS = 7
+
+# R68: the ONE fixed sentence the header carries, true of every build.
+PROVISIONAL_SENTENCE = (
+    "A map from any corpus other than the Task 12 freeze is provisional; Task 12 regenerates "
+    "this file from the frozen real corpus."
+)
+
 _LINKS = ("opportunity", "signal/request", "delivery/action", "observed use", "checked outcome")
 _OUTCOMES = ("mistakes", "context", "transfer", "background-worker")
+_TS_TABLES = ("turns", "tool_events", "deliveries")
 
 # R58 (controller ruling): the map's BASE labels, as a table -- not scattered ifs. `field`
 # names a key into coverage()["fields"]; a cell with field=None has no computable aggregate
@@ -99,7 +150,7 @@ _BASE_TABLE = {
     },
     ("context", "delivery/action"): {
         "label": "measurable now",
-        "basis": "deliveries by source",
+        "basis": f"deliveries by source, counted as {DELIVERY_UNIT_PHRASE}",
         "field": "deliveries_total",
     },
     ("context", "observed use"): {
@@ -128,7 +179,7 @@ _BASE_TABLE = {
         "label": "measurable now",
         "basis": "deliveries whose engine_or_hook names a transfer-carrying engine "
                  "(TRANSFER_DELIVERY_MARKERS: operator-rule, get_guide, operator-rules, "
-                 "guide-sections, session-opener)",
+                 f"guide-sections, session-opener), counted as {DELIVERY_UNIT_PHRASE}",
         "field": "transfer_filtered_deliveries",
     },
     ("transfer", "observed use"): {
@@ -143,7 +194,7 @@ _BASE_TABLE = {
     },
     ("background-worker", "opportunity"): {
         "label": "measurable now",
-        "basis": "tool calls by A1.5 task family",
+        "basis": "tool calls (the A1.5 task-family split is not computed in this map)",
         "field": "tool_events_total",
     },
     ("background-worker", "signal/request"): {
@@ -178,16 +229,131 @@ _REDISCOVERY_SPEC = {
 }
 
 
+def _parse_ts(raw):
+    """(datetime, None) for a parseable ts; (None, "null") for a NULL or empty one; (None,
+    "unparseable") for anything join.utc cannot read. Never raises (R71)."""
+    if raw is None or raw == "":
+        return None, "null"
+    try:
+        return join.utc(raw), None
+    except (ValueError, TypeError, AttributeError):
+        return None, "unparseable"
+
+
+def _in_window(dt, window):
+    """R71: the ONE window-membership predicate, half-open [start, end)."""
+    start, end = window
+    return start <= dt < end
+
+
+def _iso_z(dt):
+    """Canonical "YYYY-MM-DDTHH:MM:SS[.mmm]Z" for a UTC datetime."""
+    frac = f".{dt.microsecond // 1000:03d}" if dt.microsecond else ""
+    return dt.strftime("%Y-%m-%dT%H:%M:%S") + frac + "Z"
+
+
+def _windows_from_bounds(bounds):
+    """{"retained": (start, end), "decision": (start, end)} from manifest.bounds, strictly: a
+    missing key raises KeyError, and an unset (None/empty) bound raises ValueError."""
+    windows = {}
+    for window_name in ("retained", "decision"):
+        w = bounds[window_name]
+        start_raw, end_raw = w["start_utc"], w["end_utc"]
+        if not start_raw or not end_raw:
+            raise ValueError(
+                f"manifest.bounds.{window_name} is not finalized ({w!r}); run "
+                "observability.finalize_bounds(corpus_dir) after archive.freeze."
+            )
+        windows[window_name] = (join.utc(start_raw), join.utc(end_raw))
+    return windows
+
+
+def _earliest_kept_top_level(sessions_list, excl):
+    """R71: the earliest ts over every entry of every KEPT session's top-level transcript (the
+    sessions transcripts.exclusions() does not exclude). Returns {"ts": the raw ts string of
+    that entry, "entries_without_ts": n, "entries_unparseable_ts": m}; entries without a ts or
+    with an unparseable one are skipped and counted, never fed to min(). "ts" is None when no
+    kept top-level entry has a parseable ts. The single implementation behind both
+    earliest_kept_top_level_ts() and coverage()."""
+    best_dt = None
+    best_raw = None
+    without_ts = 0
+    unparseable = 0
+    for s in sessions_list:
+        if transcripts.copy_id(s) in excl:
+            continue
+        entries, _skipped = transcripts.read_jsonl(s.path)
+        for e in entries:
+            raw = e.get("timestamp")
+            dt, why = _parse_ts(raw)
+            if why == "null":
+                without_ts += 1
+                continue
+            if why == "unparseable":
+                unparseable += 1
+                continue
+            if best_dt is None or dt < best_dt:
+                best_dt, best_raw = dt, raw
+    return {
+        "ts": best_raw,
+        "entries_without_ts": without_ts,
+        "entries_unparseable_ts": unparseable,
+    }
+
+
+def earliest_kept_top_level_ts(corpus_dir):
+    """R71: the earliest top-level entry ts over the sessions KEPT by
+    transcripts.exclusions(transcripts.sessions(corpus_dir), join.SPEC_EXCLUDED_SIDS). RAISES
+    ValueError if no kept top-level entry carries a parseable ts: the window has no start."""
+    sessions_list = transcripts.sessions(corpus_dir)
+    excl = transcripts.exclusions(sessions_list, join.SPEC_EXCLUDED_SIDS)
+    ts = _earliest_kept_top_level(sessions_list, excl)["ts"]
+    if ts is None:
+        raise ValueError(
+            "no kept top-level transcript entry carries a parseable ts, so the retained window "
+            "has no start."
+        )
+    return ts
+
+
+def finalize_bounds(corpus_dir):
+    """R71: set manifest.bounds from data and rewrite corpus_dir/manifest.json. retained =
+    [earliest_kept_top_level_ts, manifest.created_utc) and decision = [created_utc - 7 days,
+    created_utc). archive.freeze writes created_utc AFTER copying every file, so no copied ts can
+    fall at or after it. Task 12 calls this right after archive.freeze. Returns the bounds."""
+    corpus_dir = pathlib.Path(corpus_dir)
+    manifest_path = corpus_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    created = manifest["created_utc"]
+    end_dt = join.utc(created)
+    start = earliest_kept_top_level_ts(corpus_dir)
+    if not join.utc(start) < end_dt:
+        raise ValueError(
+            f"finalize_bounds: the earliest kept top-level entry ({start}) is not before the "
+            f"freeze instant ({created}), so the retained window would be empty."
+        )
+    bounds = {
+        "retained": {"start_utc": start, "end_utc": created},
+        "decision": {
+            "start_utc": _iso_z(end_dt - timedelta(days=DECISION_WINDOW_DAYS)),
+            "end_utc": created,
+        },
+    }
+    manifest["bounds"] = bounds
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+    return bounds
+
+
 def _exclusions_by_reason(excl):
     """Group transcripts.exclusions()'s {copy_id: reason} by reason CLASS: a dynamic reason
     like "divergent-duplicate-of:<keeper>" groups under "divergent-duplicate-of", not as its
     own singleton key per keeper.
     """
-    counts = {}
+    counts = collections.Counter()
     for reason in excl.values():
         base = reason.split(":", 1)[0]
-        counts[base] = counts.get(base, 0) + 1
-    return counts
+        counts[base] += 1
+    return dict(counts)
 
 
 def _excluded_by_spec_detail(sessions_list, excl):
@@ -199,10 +365,7 @@ def _excluded_by_spec_detail(sessions_list, excl):
     for cid, reason in excl.items():
         if reason.split(":", 1)[0] != "excluded-by-spec":
             continue
-        s = by_cid.get(cid)
-        if s is None:
-            continue
-        by_bare_sid.setdefault(s.sid, []).append(cid)
+        by_bare_sid.setdefault(by_cid[cid].sid, []).append(cid)
     if not by_bare_sid:
         return "none"
     parts = [
@@ -224,10 +387,7 @@ def _divergent_duplicate_unowned(sessions_list, excl, attribution):
     for cid, reason in excl.items():
         if not reason.startswith("divergent-duplicate-of:"):
             continue
-        session = by_cid.get(cid)
-        if session is None:
-            continue
-        entries, _skipped = transcripts.read_jsonl(session.path)
+        entries, _skipped = transcripts.read_jsonl(by_cid[cid].path)
         uuids = {e.get("uuid") for e in entries if e.get("uuid") is not None}
         unowned = sorted(uuids - owned)
         if unowned:
@@ -236,19 +396,14 @@ def _divergent_duplicate_unowned(sessions_list, excl, attribution):
 
 
 def _kept_sessions_with_zero_turns(sessions_list, excl, conn, attribution):
-    """R64: kept sessions (by cid) with zero rows in turns, plus a DATA-DERIVED explanation --
-    never a hardcoded cid or corpus-specific cause. For each such cid, look up who owns its own
-    transcript's uuids (attribute_entries() over the kept population): a zero-turn kept session
-    whose uuids are all owned by a DIFFERENT copy is explained by that; one with no owner found
-    anywhere gets an honest "no owning copy found" instead of a guessed cause. The old
-    "none of whose turns fall inside either window" text named the wrong cause (it was
-    vacuously true of every zero-turn session) and is not reproduced here.
+    """R64: kept sessions (by cid) with zero rows in turns, plus a DATA-DERIVED explanation:
+    the owned FRACTION of its own top-level uuids, per owning copy ("N of M uuids owned by
+    <copy>", from attribute_entries() over the kept population), plus "R of M owned by no kept
+    copy" for the rest. Never a hardcoded cid, never an inferred cause.
 
     Keys by transcripts.copy_id(s) (a str), never by the Session object itself: Session is a
-    plain @dataclass with mutable list fields (first_uuids, subagent_paths) and no
-    frozen=True/unsafe_hash=True, so Python sets __hash__ = None on it -- using a Session as a
-    dict key raises "TypeError: unhashable type: 'Session'" (confirmed against this file's own
-    coverage() on 2026-09-27; every sibling helper in this module already keys by cid).
+    plain @dataclass with mutable list fields and no frozen=True/unsafe_hash=True, so Python
+    sets __hash__ = None on it.
     """
     by_cid = {
         transcripts.copy_id(s): s
@@ -262,65 +417,47 @@ def _kept_sessions_with_zero_turns(sessions_list, excl, conn, attribution):
 
     explanations = []
     for cid in zero_turn:
-        session = by_cid.get(cid)
-        owners = set()
-        if session is not None:
-            entries, _skipped = transcripts.read_jsonl(session.path)
-            for e in entries:
-                u = e.get("uuid")
-                if u is not None and u in attribution:
-                    owners.add(attribution[u])
-        owners.discard(cid)
-        if owners:
-            explanations.append(f"{cid}: its uuids are owned by {', '.join(sorted(owners))}")
-        else:
-            explanations.append(f"{cid}: no owning copy found among kept sessions")
+        entries, _skipped = transcripts.read_jsonl(by_cid[cid].path)
+        uuids = {e.get("uuid") for e in entries if e.get("uuid") is not None}
+        total = len(uuids)
+        owners = collections.Counter()
+        unowned = 0
+        for u in uuids:
+            if u in attribution:
+                owners[attribution[u]] += 1
+            else:
+                unowned += 1
+        parts = [
+            f"{n} of {total} uuids owned by {owner}" for owner, n in sorted(owners.items())
+        ]
+        if unowned or not parts:
+            parts.append(f"{unowned} of {total} uuids owned by no kept copy")
+        explanations.append(f"{cid}: " + ", ".join(parts))
     return {"count": len(zero_turn), "cids": zero_turn, "detail": "; ".join(explanations)}
 
 
-def _sessions_per_project(sessions_list, excl, conn, manifest):
+def _sessions_per_project(sessions_list, excl, conn, windows):
     """Sessions per project (the project dir under transcripts/NN-<profile>/), split by
-    window (retained, decision). A session is in a window if any of its turns' ts falls inside
-    that window's [start_utc, end_utc] -- build_events applies no bounds filter to turns
-    itself, so this membership check is coverage()'s own responsibility. A turn with a NULL or
-    unparseable ts is skipped from this membership check (Minor ruling), never raised.
+    window (retained, decision). A kept session is in a window if any of its turns' ts falls
+    inside it, by the half-open _in_window (R71). build_events applies no bounds filter to
+    turns, so this membership check is coverage()'s own responsibility. A turn with a NULL or
+    unparseable ts is skipped here; coverage() counts it once, in skipped_ts["turns"].
+    Requires R64's subset check first: every turns.sid is a kept cid.
     """
     kept = [s for s in sessions_list if transcripts.copy_id(s) not in excl]
-
-    bounds = manifest.get("bounds") or {}
-    windows = {}
-    for window_name in ("retained", "decision"):
-        w = bounds.get(window_name) or {}
-        start_raw, end_raw = w.get("start_utc"), w.get("end_utc")
-        start = join.utc(start_raw) if start_raw else None
-        end = join.utc(end_raw) if end_raw else None
-        windows[window_name] = (start, end)
-
-    ts_by_sid = {}
+    ts_by_cid = {transcripts.copy_id(s): [] for s in kept}
     for row in conn.execute("SELECT sid, ts FROM turns"):
-        ts_by_sid.setdefault(row["sid"], []).append(row["ts"])
-
-    def _parsed(ts_list):
-        out = []
-        for ts in ts_list:
-            if not ts:
-                continue
-            try:
-                out.append(join.utc(ts))
-            except (ValueError, TypeError):
-                continue
-        return out
+        dt, why = _parse_ts(row["ts"])
+        if why is not None:
+            continue
+        ts_by_cid[row["sid"]].append(dt)
 
     result = {}
     for s in kept:
         cid = transcripts.copy_id(s)
-        project = s.path.parent.name
-        entry = result.setdefault(project, {"retained": 0, "decision": 0})
-        dts = _parsed(ts_by_sid.get(cid, []))
-        for window_name, (start, end) in windows.items():
-            if start is None or end is None:
-                continue
-            if any(start <= dt <= end for dt in dts):
+        entry = result.setdefault(s.path.parent.name, {"retained": 0, "decision": 0})
+        for window_name, window in windows.items():
+            if any(_in_window(dt, window) for dt in ts_by_cid[cid]):
                 entry[window_name] += 1
     return result
 
@@ -336,74 +473,106 @@ def _zero_pop_window():
     }
 
 
+def _is_delivered_item(source, key):
+    """R69: whether one deliveries row IS a delivered item (see DELIVERY_UNITS). RAISES
+    ValueError for a source this module does not declare."""
+    if source == "usage_deliveries_json":
+        return key is not None
+    if source in ("usage_output_json", "transcript_hook"):
+        return True
+    raise ValueError(
+        f"deliveries.source {source!r} is not one of {DELIVERY_SOURCES}; its delivered-item "
+        "unit is undefined, so it cannot be counted."
+    )
+
+
 def _window_counts(conn, windows):
     """One pass each over turns, tool_events and deliveries. Buckets every row into the
-    DECISION window and the RETAINED window simultaneously (a row inside decision is also
-    inside retained, since decision is a suffix of retained, but each is computed
-    independently against `windows` rather than assumed), tracking population (top-level /
-    subagent / all) for turns and the global observed ts span. A row with a NULL or
-    unparseable ts is skipped from every window bucket but still counted via `skipped_ts`
-    (Minor ruling) -- it never crashes coverage().
+    DECISION window and the RETAINED window independently (by _in_window), tracks population
+    (top-level / subagent / all) for turns and the observed ts span, and computes the whole-DB
+    breakdowns: turns by kind, tool_events by join_method (overall and by UTC day), the first
+    exact join, and deliveries by source (table rows and delivered items). A row with a NULL or
+    unparseable ts is counted in the whole-DB breakdowns, skipped from every window, day and
+    span, and counted in skipped_ts[table][cause] (R71). A turn kind, join method or delivery
+    source outside its declared set RAISES ValueError (R70).
     """
-    turns_by_kind = {}
+    turns_windows = {kind: _zero_pop_window() for kind in TURN_KINDS}
+    turns_by_kind = {kind: 0 for kind in TURN_KINDS}
     tool_events = {"total": _zero_flat_window(), AGENT_TOOL_NAME: _zero_flat_window()}
+    tool_events_by_method = {method: 0 for method in JOIN_METHODS}
+    tool_events_by_day = {}
+    first_exact = None
     deliveries = {
         "total": _zero_flat_window(),
         "transfer_filtered": _zero_flat_window(),
         "with_tool_use_id": _zero_flat_window(),
     }
-    data_min = None
-    data_max = None
-    skipped_ts = 0
-
-    def _parse(ts_raw):
-        if not ts_raw:
-            return None
-        try:
-            return join.utc(ts_raw)
-        except (ValueError, TypeError):
-            return None
+    deliveries_by_source = {source: {"rows": 0, "items": 0} for source in DELIVERY_SOURCES}
+    skipped_ts = {table: {"null": 0, "unparseable": 0} for table in _TS_TABLES}
+    span = {"min": None, "max": None}
 
     def _bump_span(dt):
-        nonlocal data_min, data_max
-        if data_min is None or dt < data_min:
-            data_min = dt
-        if data_max is None or dt > data_max:
-            data_max = dt
+        if span["min"] is None or dt < span["min"]:
+            span["min"] = dt
+        if span["max"] is None or dt > span["max"]:
+            span["max"] = dt
 
     for row in conn.execute("SELECT agent_path, kind, ts FROM turns"):
-        dt = _parse(row["ts"])
-        if dt is None:
-            skipped_ts += 1
+        kind = row["kind"]
+        if kind not in turns_by_kind:
+            raise ValueError(f"turns.kind {kind!r} is not one of {TURN_KINDS}")
+        turns_by_kind[kind] += 1
+        dt, why = _parse_ts(row["ts"])
+        if why is not None:
+            skipped_ts["turns"][why] += 1
             continue
         _bump_span(dt)
         pop = "subagent" if row["agent_path"] else "top-level"
-        bucket = turns_by_kind.setdefault(row["kind"], _zero_pop_window())
-        for window_name, (start, end) in windows.items():
-            if start is not None and end is not None and start <= dt <= end:
+        bucket = turns_windows[kind]
+        for window_name, window in windows.items():
+            if _in_window(dt, window):
                 bucket[window_name][pop] += 1
                 bucket[window_name]["all"] += 1
 
-    for row in conn.execute("SELECT name, ts FROM tool_events"):
-        dt = _parse(row["ts"])
-        if dt is None:
-            skipped_ts += 1
+    for row in conn.execute("SELECT name, ts, join_method FROM tool_events"):
+        method = row["join_method"]
+        if method not in tool_events_by_method:
+            raise ValueError(f"tool_events.join_method {method!r} is not one of {JOIN_METHODS}")
+        tool_events_by_method[method] += 1
+        dt, why = _parse_ts(row["ts"])
+        if why is not None:
+            skipped_ts["tool_events"][why] += 1
             continue
         _bump_span(dt)
-        for window_name, (start, end) in windows.items():
-            if start is not None and end is not None and start <= dt <= end:
+        day = tool_events_by_day.setdefault(
+            dt.date().isoformat(), {m: 0 for m in JOIN_METHODS}
+        )
+        day[method] += 1
+        if method == "exact" and (first_exact is None or dt < first_exact[0]):
+            first_exact = (dt, row["ts"])
+        for window_name, window in windows.items():
+            if _in_window(dt, window):
                 tool_events["total"][window_name] += 1
                 if row["name"] == AGENT_TOOL_NAME:
                     tool_events[AGENT_TOOL_NAME][window_name] += 1
 
-    for row in conn.execute("SELECT engine_or_hook, tool_use_id, ts FROM deliveries"):
-        dt = _parse(row["ts"])
-        if dt is None:
-            skipped_ts += 1
+    for row in conn.execute(
+        "SELECT source, engine_or_hook, key, tool_use_id, ts FROM deliveries"
+    ):
+        is_item = _is_delivered_item(row["source"], row["key"])
+        per_source = deliveries_by_source[row["source"]]
+        per_source["rows"] += 1
+        if is_item:
+            per_source["items"] += 1
+        dt, why = _parse_ts(row["ts"])
+        if why is not None:
+            skipped_ts["deliveries"][why] += 1
             continue
         _bump_span(dt)
-        for window_name, (start, end) in windows.items():
-            if start is not None and end is not None and start <= dt <= end:
+        if not is_item:
+            continue
+        for window_name, window in windows.items():
+            if _in_window(dt, window):
                 deliveries["total"][window_name] += 1
                 if row["engine_or_hook"] in TRANSFER_DELIVERY_MARKERS:
                     deliveries["transfer_filtered"][window_name] += 1
@@ -411,11 +580,16 @@ def _window_counts(conn, windows):
                     deliveries["with_tool_use_id"][window_name] += 1
 
     return {
-        "turns": turns_by_kind,
+        "turns": turns_windows,
+        "turns_by_kind": turns_by_kind,
         "tool_events": tool_events,
+        "tool_events_by_method": tool_events_by_method,
+        "tool_events_by_day": tool_events_by_day,
+        "first_exact_tool_event_ts": first_exact[1] if first_exact is not None else None,
         "deliveries": deliveries,
-        "data_min": data_min,
-        "data_max": data_max,
+        "deliveries_by_source": deliveries_by_source,
+        "data_min": span["min"],
+        "data_max": span["max"],
         "skipped_ts": skipped_ts,
     }
 
@@ -423,16 +597,16 @@ def _window_counts(conn, windows):
 def _field_window_count(win, field):
     """Returns (decision_count, retained_count, population_label) for a known coverage field
     name. RAISES KeyError for anything else -- R60: a MISSING or typo'd coverage field must
-    raise, never silently read as 0.
+    raise, never silently read as 0. Every lookup below is a subscript (R70).
     """
     if field is None:
         return (None, None, "n/a")
     if field == "assistant_text_turns":
-        b = win["turns"].get("assistant_text", _zero_pop_window())
+        b = win["turns"]["assistant_text"]
         return (b["decision"]["all"], b["retained"]["all"], "all")
     if field == "prompt_interrupt_turns":
-        p = win["turns"].get("prompt", _zero_pop_window())
-        i = win["turns"].get("interrupt", _zero_pop_window())
+        p = win["turns"]["prompt"]
+        i = win["turns"]["interrupt"]
         dec = p["decision"]["all"] + i["decision"]["all"]
         ret = p["retained"]["all"] + i["retained"]["all"]
         return (dec, ret, "all")
@@ -449,7 +623,7 @@ def _field_window_count(win, field):
         t = win["tool_events"][AGENT_TOOL_NAME]
         return (t["decision"], t["retained"], "all")
     if field == "delegation_turns":
-        b = win["turns"].get("delegation", _zero_pop_window())
+        b = win["turns"]["delegation"]
         return (b["decision"]["all"], b["retained"]["all"], "all")
     if field == "subagent_turns":
         dec = sum(b["decision"]["subagent"] for b in win["turns"].values())
@@ -463,16 +637,15 @@ def _field_window_count(win, field):
 
 def _top_level_subset(win, field):
     """The top-level-only subset of a field's count, for cells whose primary number is "all"
-    (R62's population line) but whose basis also cites a top-level breakdown (matching the
-    reviewer's own citation shape: "assistant_text 4,375 (3,736 top-level)"). Returns None for
+    (R62's population line) but whose basis also cites a top-level breakdown. Returns None for
     a field with no meaningful top-level/subagent split.
     """
     if field == "assistant_text_turns":
-        b = win["turns"].get("assistant_text", _zero_pop_window())
+        b = win["turns"]["assistant_text"]
         return (b["decision"]["top-level"], b["retained"]["top-level"])
     if field == "prompt_interrupt_turns":
-        p = win["turns"].get("prompt", _zero_pop_window())
-        i = win["turns"].get("interrupt", _zero_pop_window())
+        p = win["turns"]["prompt"]
+        i = win["turns"]["interrupt"]
         return (
             p["decision"]["top-level"] + i["decision"]["top-level"],
             p["retained"]["top-level"] + i["retained"]["top-level"],
@@ -486,27 +659,27 @@ def _all_declared_fields():
     list means a typo'd or renamed field in the table is validated (and raises) the moment
     coverage() runs -- there is no way for the two to drift apart.
     """
-    fields = {spec["field"] for spec in _BASE_TABLE.values() if spec.get("field")}
+    fields = {spec["field"] for spec in _BASE_TABLE.values() if spec["field"] is not None}
     fields.add("delegation_turns")
     return sorted(fields)
 
 
 def coverage(events_db, corpus_dir):
-    """R57/R60-R67 signature. Reads corpus_dir/manifest.json and events_db (opened read-only,
-    closed on every exit path including a raise) and returns every coverage number the map
-    needs: per-field DECISION-window and RETAINED-window counts (R62), the A1.6 appendix
-    breakdowns render_map now also renders (R60), and the raw events_meta counters.
+    """R57/R60-R71. Reads corpus_dir/manifest.json and events_db (opened read-only, closed on
+    every exit path including a raise) and returns every coverage number the map needs:
+    per-field DECISION-window and RETAINED-window counts (R62), the A1.6 appendix breakdowns
+    render_map renders (R60), and the raw events_meta counters. Every events_meta and manifest
+    read is a subscript: a missing counter raises KeyError (R70).
 
     RAISES ValueError if:
     - the exclusions recomputed here (transcripts.exclusions() over join.SPEC_EXCLUDED_SIDS,
       exactly as build_events would with its own default) disagree with events_meta's
-      persisted kept/excluded counts; OR turns.sid is not a subset of the recomputed kept
-      cids; OR the recomputed excluded cids intersect turns.sid (R64: three independent
-      checks -- a build with a DIFFERENT excluded_sids set than coverage() assumes can trip
-      any one of them even when the first two counts happen to coincide, which is exactly
-      what the reviewer's swap fixture demonstrates);
-    - manifest.bounds.retained.start_utc is later than the earliest surviving top-level entry,
-      or any observed ts falls after retained.end_utc (R61).
+      persisted kept/excluded counts, or turns.sid is not a subset of the recomputed kept cids
+      (R64; the reviewer's swap fixture trips it). The excluded cids and the kept cids partition
+      the sessions, so the subset check also rules out an excluded cid in turns.sid;
+    - manifest.bounds is unset, or retained.start_utc is later than the earliest kept top-level
+      entry, or any observed ts is at or after retained.end_utc (R61, half-open per R71);
+    - a turn kind, join method or delivery source is outside its declared set (R70).
 
     RAISES KeyError if a _BASE_TABLE cell names a field with no window-count dispatcher branch
     (R60).
@@ -543,7 +716,6 @@ def coverage(events_db, corpus_dir):
         kept_cids = {
             transcripts.copy_id(s) for s in sessions_list if transcripts.copy_id(s) not in excl
         }
-        excluded_cids = set(excl.keys())
         turn_sids = {row["sid"] for row in conn.execute("SELECT DISTINCT sid FROM turns")}
         if not turn_sids.issubset(kept_cids):
             raise ValueError(
@@ -551,79 +723,35 @@ def coverage(events_db, corpus_dir):
                 f"{sorted(turn_sids - kept_cids)} -- events.db was built with a different "
                 "excluded_sids set than coverage() assumes."
             )
-        if excluded_cids & turn_sids:
-            raise ValueError(
-                "R64: the recomputed excluded cids intersect turns.sid: "
-                f"{sorted(excluded_cids & turn_sids)} -- a session events.db actually kept "
-                "(it has turns) is one coverage() recomputes as excluded; events.db was "
-                "built with a different excluded_sids set than coverage() assumes."
-            )
 
-        bounds = manifest.get("bounds") or {}
-        windows = {}
-        for window_name in ("retained", "decision"):
-            w = bounds.get(window_name) or {}
-            start_raw, end_raw = w.get("start_utc"), w.get("end_utc")
-            start = join.utc(start_raw) if start_raw else None
-            end = join.utc(end_raw) if end_raw else None
-            windows[window_name] = (start, end)
-
+        bounds = manifest["bounds"]
+        windows = _windows_from_bounds(bounds)
         win = _window_counts(conn, windows)
 
-        kept_first_ts = [
-            s.first_ts
-            for s in sessions_list
-            if transcripts.copy_id(s) not in excl and s.first_ts
-        ]
-        earliest_top_level_ts = (
-            min(join.utc(t) for t in kept_first_ts) if kept_first_ts else None
-        )
-
+        earliest = _earliest_kept_top_level(sessions_list, excl)
         retained_start, retained_end = windows["retained"]
-        if earliest_top_level_ts is not None and retained_start is not None:
-            if retained_start > earliest_top_level_ts:
-                raise ValueError(
-                    "R61: manifest.bounds.retained.start_utc "
-                    f"({retained_start.isoformat()}) is later than the earliest surviving "
-                    f"top-level entry ({earliest_top_level_ts.isoformat()}) -- the retained "
-                    "window must start at or before the oldest kept transcript."
-                )
-        if win["data_max"] is not None and retained_end is not None:
-            if win["data_max"] > retained_end:
-                raise ValueError(
-                    f"R61: an observed ts ({win['data_max'].isoformat()}) falls after "
-                    f"manifest.bounds.retained.end_utc ({retained_end.isoformat()}) -- the "
-                    "retained window must cover every observed ts."
-                )
+        earliest_dt = join.utc(earliest["ts"]) if earliest["ts"] is not None else None
+        if earliest_dt is not None and retained_start > earliest_dt:
+            raise ValueError(
+                "R61: manifest.bounds.retained.start_utc "
+                f"({retained_start.isoformat()}) is later than the earliest kept top-level "
+                f"entry ({earliest_dt.isoformat()}) -- the retained window must start at or "
+                "before the oldest kept transcript."
+            )
+        if win["data_max"] is not None and win["data_max"] >= retained_end:
+            raise ValueError(
+                f"R61: an observed ts ({win['data_max'].isoformat()}) is at or after "
+                f"manifest.bounds.retained.end_utc ({retained_end.isoformat()}) -- the "
+                "half-open retained window must cover every observed ts."
+            )
 
-        tool_events_by_method = {}
-        for row in conn.execute(
-            "SELECT join_method, COUNT(*) c FROM tool_events GROUP BY join_method"
-        ):
-            tool_events_by_method[row["join_method"]] = row["c"]
-
-        tool_events_by_day = {}
-        for row in conn.execute(
-            "SELECT substr(ts, 1, 10) AS day, join_method, COUNT(*) c FROM tool_events "
-            "GROUP BY day, join_method ORDER BY day"
-        ):
-            tool_events_by_day.setdefault(row["day"], {})[row["join_method"]] = row["c"]
-
-        first_exact_row = conn.execute(
-            "SELECT MIN(ts) ts FROM tool_events WHERE join_method = 'exact'"
-        ).fetchone()
-        first_exact_tool_event_ts = first_exact_row["ts"] if first_exact_row else None
-
-        heuristic_total = int(meta.get("tool_events_heuristic", 0))
-        heuristic_via_called_at = int(meta.get("heuristic_via_called_at", 0))
-
-        deliveries_by_source = {}
-        for row in conn.execute("SELECT source, COUNT(*) c FROM deliveries GROUP BY source"):
-            deliveries_by_source[row["source"]] = row["c"]
-
-        turns_by_kind = {}
-        for row in conn.execute("SELECT kind, COUNT(*) c FROM turns GROUP BY kind"):
-            turns_by_kind[row["kind"]] = row["c"]
+        tool_events_total_count = int(meta["tool_events_total"])
+        heuristic_total = int(meta["tool_events_heuristic"])
+        heuristic_via_called_at = int(meta["heuristic_via_called_at"])
+        hook_success_only = int(meta["hook_success_only"])
+        hook_success_twins_dropped = int(meta["hook_success_twins_dropped"])
+        # R67 / Amendment 5(f): N is build_events' own counter, read, never recomputed.
+        usage_rows_unmapped = int(meta["deliveries_unmapped_session"])
 
         attribution = transcripts.attribute_entries(sessions_list, excl)
         divergent_duplicate_unowned = _divergent_duplicate_unowned(
@@ -632,29 +760,32 @@ def coverage(events_db, corpus_dir):
         kept_sessions_with_zero_turns = _kept_sessions_with_zero_turns(
             sessions_list, excl, conn, attribution
         )
-
-        sessions_per_project = _sessions_per_project(sessions_list, excl, conn, manifest)
+        sessions_per_project = _sessions_per_project(sessions_list, excl, conn, windows)
         exclusions_by_reason = _exclusions_by_reason(excl)
         excluded_by_spec_detail = _excluded_by_spec_detail(sessions_list, excl)
 
-        # R63/R67/R60(b): usage rows are read once, straight from join's own loader -- never
-        # re-derived -- so "usage rows with no kept session", "of which K from the
-        # spec-excluded session" and the exact-join citation count all agree with what
-        # build_events actually saw.
+        # R60(b)/R67: usage rows are read once, straight from join's own loader, so M (rows
+        # read), K (of the unmapped, those from the spec-excluded session; no build counter
+        # exists for it) and the Amendment 4(a) count agree with what build_events saw.
         usage_rows = join._load_usage_rows(corpus_dir)
         kept_bare_sids = {s.sid for s in sessions_list if transcripts.copy_id(s) not in excl}
-        usage_rows_total = len(usage_rows)
-        usage_rows_unmapped = 0
-        usage_rows_unmapped_spec_excluded = 0
-        usage_rows_with_tool_use_id = 0
-        for row in usage_rows:
-            if row.get("tool_use_id"):
-                usage_rows_with_tool_use_id += 1
-            cc_sid = row.get("cc_session_id")
-            if cc_sid not in kept_bare_sids:
-                usage_rows_unmapped += 1
-                if cc_sid in join.SPEC_EXCLUDED_SIDS:
-                    usage_rows_unmapped_spec_excluded += 1
+        usage_rows_unmapped_spec_excluded = sum(
+            1 for r in usage_rows
+            if r["cc_session_id"] not in kept_bare_sids
+            and r["cc_session_id"] in join.SPEC_EXCLUDED_SIDS
+        )
+        usage_rows_with_tool_use_id = sum(1 for r in usage_rows if r["tool_use_id"])
+        latency_row_keys = {r["_row_key"] for r in usage_rows if r["latency_ms"] is not None}
+
+        joined_tool_events = (
+            win["tool_events_by_method"]["exact"] + win["tool_events_by_method"]["heuristic"]
+        )
+        joined_with_latency_ms = 0
+        for row in conn.execute(
+            "SELECT usage_row_id FROM tool_events WHERE join_method IN ('exact', 'heuristic')"
+        ):
+            if row["usage_row_id"] in latency_row_keys:
+                joined_with_latency_ms += 1
 
         field_results = {}
         for field in _all_declared_fields():
@@ -664,64 +795,60 @@ def coverage(events_db, corpus_dir):
         at_top = _top_level_subset(win, "assistant_text_turns")
         pi_top = _top_level_subset(win, "prompt_interrupt_turns")
         deleg = field_results["delegation_turns"]
+        d_tid = win["deliveries"]["with_tool_use_id"]
+        d_all = win["deliveries"]["total"]
 
-        joined_tool_events = (
-            tool_events_by_method.get("exact", 0) + tool_events_by_method.get("heuristic", 0)
+        # R70: one entry per rendered cell, None where the cell has no extra -- read with a
+        # subscript, so a mistyped cell key raises.
+        cell_extra = {key: None for key in _BASE_TABLE}
+        cell_extra[("transfer", "rediscovery")] = None
+        cell_extra[("mistakes", "opportunity")] = (
+            f"of which top-level -- decision: {at_top[0]}, retained: {at_top[1]}"
         )
-        tool_events_total_count = int(
-            meta.get("tool_events_total", sum(tool_events_by_method.values()))
+        cell_extra[("context", "opportunity")] = (
+            f"of which top-level -- decision: {at_top[0]}, retained: {at_top[1]}"
         )
-        deliveries_with_tid_dec = win["deliveries"]["with_tool_use_id"]["decision"]
-        deliveries_with_tid_ret = win["deliveries"]["with_tool_use_id"]["retained"]
-        deliveries_total_dec = win["deliveries"]["total"]["decision"]
-        deliveries_total_ret = win["deliveries"]["total"]["retained"]
-
-        cell_extra = {
-            ("mistakes", "opportunity"): (
-                f"of which top-level -- decision: {at_top[0]}, retained: {at_top[1]}"
-            ),
-            ("context", "opportunity"): (
-                f"of which top-level -- decision: {at_top[0]}, retained: {at_top[1]}"
-            ),
-            ("mistakes", "signal/request"): (
-                f"of which top-level -- decision: {pi_top[0]}, retained: {pi_top[1]}"
-            ),
-            ("context", "delivery/action"): (
-                "share carrying a tool_use_id -- decision: "
-                f"{deliveries_with_tid_dec} of {deliveries_total_dec}; retained: "
-                f"{deliveries_with_tid_ret} of {deliveries_total_ret}"
-            ),
-            ("background-worker", "signal/request"): (
-                "delegation turns (separate, never summed) -- decision: "
-                f"{deleg['decision']}, retained: {deleg['retained']}"
-            ),
-        }
+        cell_extra[("mistakes", "signal/request")] = (
+            f"of which top-level -- decision: {pi_top[0]}, retained: {pi_top[1]}"
+        )
+        cell_extra[("context", "delivery/action")] = (
+            "delivered items carrying a tool_use_id -- decision: "
+            f"{d_tid['decision']} of {d_all['decision']}; retained: "
+            f"{d_tid['retained']} of {d_all['retained']}"
+        )
+        cell_extra[("background-worker", "signal/request")] = (
+            "delegation turns (separate, never summed) -- decision: "
+            f"{deleg['decision']}, retained: {deleg['retained']}"
+        )
 
         return {
-            "corpus_id": manifest.get("corpus_id"),
+            "corpus_id": manifest["corpus_id"],
             "manifest_bounds": bounds,
             "meta": dict(meta),
+            "earliest_kept_top_level": earliest,
             "data_min_ts": win["data_min"].isoformat() if win["data_min"] else None,
             "data_max_ts": win["data_max"].isoformat() if win["data_max"] else None,
-            "skipped_ts_count": win["skipped_ts"],
-            "tool_events_by_method": tool_events_by_method,
-            "tool_events_by_day": tool_events_by_day,
-            "first_exact_tool_event_ts": first_exact_tool_event_ts,
+            "skipped_ts": win["skipped_ts"],
+            "tool_events_by_method": win["tool_events_by_method"],
+            "tool_events_by_day": win["tool_events_by_day"],
+            "first_exact_tool_event_ts": win["first_exact_tool_event_ts"],
+            "heuristic_total": heuristic_total,
             "heuristic_via_called_at": heuristic_via_called_at,
             "heuristic_rest": heuristic_total - heuristic_via_called_at,
             "joined_tool_events": joined_tool_events,
+            "joined_with_latency_ms": joined_with_latency_ms,
             "tool_events_total_count": tool_events_total_count,
-            "deliveries_by_source": deliveries_by_source,
-            "hook_success_only": int(meta.get("hook_success_only", 0)),
-            "hook_success_twins_dropped": int(meta.get("hook_success_twins_dropped", 0)),
-            "usage_rows_total": usage_rows_total,
+            "deliveries_by_source": win["deliveries_by_source"],
+            "hook_success_only": hook_success_only,
+            "hook_success_twins_dropped": hook_success_twins_dropped,
+            "usage_rows_total": len(usage_rows),
             "usage_rows_unmapped": usage_rows_unmapped,
             "usage_rows_unmapped_spec_excluded": usage_rows_unmapped_spec_excluded,
             "usage_rows_with_tool_use_id": usage_rows_with_tool_use_id,
             "sessions_per_project": sessions_per_project,
             "exclusions_by_reason": exclusions_by_reason,
             "excluded_by_spec_detail": excluded_by_spec_detail,
-            "turns_by_kind": turns_by_kind,
+            "turns_by_kind": win["turns_by_kind"],
             "divergent_duplicate_unowned": divergent_duplicate_unowned,
             "kept_sessions_with_zero_turns": kept_sessions_with_zero_turns,
             "fields": field_results,
@@ -734,7 +861,7 @@ def coverage(events_db, corpus_dir):
 def _resolve_cell(cov, outcome, link, spec):
     label = spec["label"]
     basis = spec["basis"]
-    field = spec.get("field")
+    field = spec["field"]
 
     if field is None:
         dec_number = None
@@ -746,8 +873,8 @@ def _resolve_cell(cov, outcome, link, spec):
         ret_number = entry["retained"]
         population = entry["population"]
 
-    extra = cov.get("cell_extra", {}).get((outcome, link))
-    if extra:
+    extra = cov["cell_extra"][(outcome, link)]
+    if extra is not None:
         basis = f"{basis} ({extra})"
 
     # R62: downgrade-on-zero reads the outcome's DECISION-bearing window -- decision for
@@ -785,50 +912,165 @@ def build_cells(cov):
     return cells
 
 
-def render_map(coverage, manifest):
-    """R60: renders the WHOLE document -- header, provenance, windows, the four label tables
-    plus the rediscovery row, and every A1.6 appendix breakdown (joins by method overall and
-    by day, delivery coverage by source, sessions per project and window, exclusions by
-    reason, turns by kind, divergent-duplicate unowned count, kept-sessions-with-zero-turns).
-    The committed map file must be byte-identical to this function's output for the build it
-    describes; there is no hand-editing step after it. Prose here is only (a) a data-derived
-    statement or (b) the fixed Amendment 4(a) citation -- never an inferred cause.
+def rendering_code_version(repo=None):
+    """R68: the RENDERING code's version -- {"head": `git -C <repo> rev-parse HEAD`, "dirty":
+    whether `git status --porcelain -- scripts/measure` is non-empty}, read at render time.
+    RAISES RuntimeError if git cannot answer: a map must never render an unknown version."""
+    repo = pathlib.Path(repo) if repo is not None else _REPO_ROOT
+    head = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True, text=True, timeout=30,
+    )
+    status = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain", "--", "scripts/measure"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if head.returncode != 0 or not head.stdout.strip() or status.returncode != 0:
+        raise RuntimeError(
+            f"rendering_code_version: git could not report HEAD and status for {repo}: "
+            f"{head.stderr.strip()} {status.stderr.strip()}"
+        )
+    return {"head": head.stdout.strip(), "dirty": bool(status.stdout.strip())}
+
+
+def _sources_from_manifest(manifest):
+    """R68: the frozen sources, derived from the manifest's `files` keys in archive.freeze's
+    layout: {"transcript_dirs": {(profile dir, project dir): {"top_level": n, "subagent": m}},
+    "usage_db_files": k}. A key in any other layout RAISES ValueError."""
+    per_dir = {}
+    usage_db_files = 0
+    for rel in manifest["files"]:
+        parts = rel.split("/")
+        if parts[0] == "transcripts" and len(parts) == 4:
+            kind = "top_level"
+        elif parts[0] == "transcripts" and len(parts) == 6 and parts[4] == "subagents":
+            kind = "subagent"
+        elif parts[0] == "usage_dbs" and len(parts) == 2:
+            usage_db_files += 1
+            continue
+        else:
+            raise ValueError(f"manifest files key {rel!r} matches no archive.freeze layout")
+        entry = per_dir.setdefault((parts[1], parts[2]), {"top_level": 0, "subagent": 0})
+        entry[kind] += 1
+    return {"transcript_dirs": per_dir, "usage_db_files": usage_db_files}
+
+
+def _table(lines, header, rows):
+    lines.append("| " + " | ".join(header) + " |")
+    lines.append("|" + "---|" * len(header))
+    for row in rows:
+        lines.append("| " + " | ".join(str(c) for c in row) + " |")
+
+
+def render_map(coverage, manifest, code_version=None):
+    """R60/R68: renders the WHOLE document -- the title, the fixed provisional sentence,
+    provenance, windows, the four label tables plus the rediscovery row, and every A1.6 appendix
+    breakdown. The committed map file must be byte-identical to this function's output for the
+    build it describes; there is no hand-editing step after it. Prose here is only (a) a
+    data-derived statement, (b) the fixed Amendment 4(a) citation, or (c) PROVISIONAL_SENTENCE --
+    never an inferred cause. Every read is a subscript (R70).
+
+    `code_version` is {"head", "dirty"}; None reads it with rendering_code_version() now.
+    RAISES ValueError if `coverage` was computed from a different manifest's corpus or bounds.
     """
+    if (coverage["corpus_id"] != manifest["corpus_id"]
+            or coverage["manifest_bounds"] != manifest["bounds"]):
+        raise ValueError(
+            "render_map: coverage was computed for corpus "
+            f"{coverage['corpus_id']!r} with bounds {coverage['manifest_bounds']!r}, but the "
+            f"manifest is {manifest['corpus_id']!r} with bounds {manifest['bounds']!r}."
+        )
+    if code_version is None:
+        code_version = rendering_code_version()
+
     lines = []
-    lines.append(f"# Observability map -- {coverage.get('corpus_id')}")
+    lines.append(f"# Observability map -- {coverage['corpus_id']}")
     lines.append("")
-    lines.append(f"Built: {manifest.get('created_utc')}.")
-    repos = manifest.get("repos") or {}
-    if repos:
-        repo_bits = "; ".join(f"{name} at {sha}" for name, sha in sorted(repos.items()))
-        lines.append(f"Repo HEAD at freeze time: {repo_bits}.")
+    lines.append(PROVISIONAL_SENTENCE)
+    lines.append("")
+
+    lines.append("## Provenance")
+    lines.append("")
+    dirty = (
+        "scripts/measure has uncommitted changes" if code_version["dirty"]
+        else "scripts/measure clean"
+    )
+    earliest = coverage["earliest_kept_top_level"]
+    sources = _sources_from_manifest(manifest)
+    repos = manifest["repos"]
+    repo_bits = "; ".join(f"{name} at {sha}" for name, sha in sorted(repos.items())) or "none"
+    lines.append(f"- corpus_id: {coverage['corpus_id']}")
+    lines.append(f"- freeze instant (manifest created_utc): {manifest['created_utc']}")
+    lines.append(
+        f"- rendering code: git HEAD {code_version['head']} at render time; {dirty}"
+    )
+    lines.append(f"- repos at freeze (manifest repos): {repo_bits}")
+    earliest_ts = earliest["ts"] if earliest["ts"] is not None else "none, no kept entry has one"
+    lines.append(
+        f"- earliest kept top-level entry ts: {earliest_ts} (top-level entries skipped by "
+        f"this scan: {earliest['entries_without_ts']} without a ts, "
+        f"{earliest['entries_unparseable_ts']} with an unparseable ts)"
+    )
+    lines.append(
+        f"- usage DBs: {sources['usage_db_files']} file(s) in the manifest's files, holding "
+        f"{manifest['counts']['usage_rows']} usage rows (manifest counts)"
+    )
+    lines.append("")
+    lines.append("Transcript sources, from the manifest's files:")
+    lines.append("")
+    dirs = sources["transcript_dirs"]
+    if dirs:
+        _table(
+            lines,
+            ("profile dir", "project dir", "top-level transcripts", "subagent transcripts"),
+            [
+                (profile, project, dirs[(profile, project)]["top_level"],
+                 dirs[(profile, project)]["subagent"])
+                for profile, project in sorted(dirs)
+            ],
+        )
+    else:
+        lines.append("none")
     lines.append("")
 
     lines.append("## Windows")
     lines.append("")
-    bounds = coverage.get("manifest_bounds") or {}
-    for window_name in ("retained", "decision"):
-        w = bounds.get(window_name) or {}
-        lines.append(f"- {window_name}: {w.get('start_utc')} to {w.get('end_utc')}")
+    lines.append("Both windows are half-open, [start, end).")
     lines.append("")
-    lines.append(
-        "Data span observed across turns, tool_events and deliveries: "
-        f"{coverage.get('data_min_ts')} to {coverage.get('data_max_ts')} "
-        f"({coverage.get('skipped_ts_count', 0)} rows skipped for a NULL or unparseable ts)."
-    )
+    bounds = coverage["manifest_bounds"]
+    for window_name in ("retained", "decision"):
+        w = bounds[window_name]
+        lines.append(f"- {window_name}: {w['start_utc']} to {w['end_utc']}")
+    lines.append("")
+    if coverage["data_min_ts"] is None:
+        lines.append("Data span observed across turns, tool_events and deliveries: no row "
+                     "carries a parseable ts.")
+    else:
+        lines.append(
+            "Data span observed across turns, tool_events and deliveries: "
+            f"{coverage['data_min_ts']} to {coverage['data_max_ts']}."
+        )
+    lines.append("")
+    skipped = coverage["skipped_ts"]
+    for cause, phrase in (("null", "a NULL or empty ts"), ("unparseable", "an unparseable ts")):
+        lines.append(
+            f"Rows skipped from every window, day and span for {phrase} -- "
+            + ", ".join(f"{table}: {skipped[table][cause]}" for table in _TS_TABLES)
+            + "."
+        )
     lines.append("")
 
     cells = build_cells(coverage)
-    by_outcome = {}
+    by_outcome = {outcome: [] for outcome in _OUTCOMES}
     for cell in cells:
-        by_outcome.setdefault(cell["outcome"], []).append(cell)
+        by_outcome[cell["outcome"]].append(cell)
 
     for outcome in _OUTCOMES:
         lines.append(f"## {outcome}")
         lines.append("")
         lines.append("| link | label | decision | retained | population | basis |")
         lines.append("|---|---|---|---|---|---|")
-        for cell in by_outcome.get(outcome, []):
+        for cell in by_outcome[outcome]:
             dec = "n/a" if cell["decision_number"] is None else str(cell["decision_number"])
             ret = "n/a" if cell["retained_number"] is None else str(cell["retained_number"])
             lines.append(
@@ -840,116 +1082,138 @@ def render_map(coverage, manifest):
     lines.append("## Appendix")
     lines.append("")
 
+    whole_db = (
+        "Window: retained, as the whole events DB (rows skipped above for their ts included)."
+    )
+
     lines.append("### A1.6 -- joins by method (overall)")
     lines.append("")
-    lines.append("| method | count |")
-    lines.append("|---|---|")
-    for method in sorted(coverage.get("tool_events_by_method", {})):
-        lines.append(f"| {method} | {coverage['tool_events_by_method'][method]} |")
+    lines.append(whole_db)
     lines.append("")
+    by_method = coverage["tool_events_by_method"]
+    _table(lines, ("method", "count"), [(m, by_method[m]) for m in JOIN_METHODS])
+    lines.append("")
+    first_exact = coverage["first_exact_tool_event_ts"]
     lines.append(
         "Amendment 4(a): tool_use_id was NULL on every usage row until 6f6349ca; it appears "
         "per session from that session's /mcp. Usage rows with a non-NULL tool_use_id: "
-        f"{coverage.get('usage_rows_with_tool_use_id', 0)}. First exact join ts (the "
-        f"transcript tool_use ts): {coverage.get('first_exact_tool_event_ts')}."
+        f"{coverage['usage_rows_with_tool_use_id']}. First exact join ts (the transcript "
+        f"tool_use ts): {first_exact if first_exact is not None else 'none, no exact join'}."
     )
     lines.append("")
     lines.append(
-        f"Heuristic joins: {coverage.get('tool_events_by_method', {}).get('heuristic', 0)} "
-        f"total, of which {coverage.get('heuristic_via_called_at', 0)} matched via called_at "
-        f"(started_at NULL) and {coverage.get('heuristic_rest', 0)} matched via started_at "
-        "directly."
+        f"Heuristic joins: {coverage['heuristic_total']} total, of which "
+        f"{coverage['heuristic_via_called_at']} matched via called_at (started_at NULL) and "
+        f"{coverage['heuristic_rest']} matched via started_at directly."
     )
     lines.append("")
     lines.append(
         "A1.5's latency share is measurable only for joined calls: "
-        f"{coverage.get('joined_tool_events', 0)} of "
-        f"{coverage.get('tool_events_total_count', 0)} tool_events are joined (exact + "
-        "heuristic); latency_ms is only present on the usage rows behind those."
+        f"{coverage['joined_tool_events']} of {coverage['tool_events_total_count']} "
+        "tool_events are joined (exact + heuristic), and "
+        f"{coverage['joined_with_latency_ms']} of those joined rows carry latency_ms on their "
+        "usage row."
     )
     lines.append("")
 
     lines.append("### A1.6 -- joins by method (by day)")
     lines.append("")
-    by_day = coverage.get("tool_events_by_day", {})
-    all_methods = sorted({m for day in by_day.values() for m in day})
-    if all_methods:
-        lines.append("| day | " + " | ".join(all_methods) + " |")
-        lines.append("|---|" + "---|" * len(all_methods))
-        for day in sorted(by_day):
-            row = by_day[day]
-            lines.append(
-                f"| {day} | " + " | ".join(str(row.get(m, 0)) for m in all_methods) + " |"
-            )
+    skipped_te = skipped["tool_events"]["null"] + skipped["tool_events"]["unparseable"]
+    lines.append(
+        "Window: retained, by UTC day of the tool_use ts; the "
+        f"{skipped_te} tool_events rows with a NULL or unparseable ts appear in the overall "
+        "table only."
+    )
+    lines.append("")
+    by_day = coverage["tool_events_by_day"]
+    if by_day:
+        _table(
+            lines,
+            ("day",) + JOIN_METHODS,
+            [(day,) + tuple(by_day[day][m] for m in JOIN_METHODS) for day in sorted(by_day)],
+        )
     else:
-        lines.append("(no tool_events)")
+        lines.append("none")
     lines.append("")
 
     lines.append("### A1.6 -- delivery coverage by source")
     lines.append("")
-    lines.append("| source | count |")
-    lines.append("|---|---|")
-    for source in sorted(coverage.get("deliveries_by_source", {})):
-        lines.append(f"| {source} | {coverage['deliveries_by_source'][source]} |")
+    lines.append(whole_db)
+    lines.append("")
+    by_source = coverage["deliveries_by_source"]
+    _table(
+        lines,
+        ("source", "delivered items", "table rows", "unit"),
+        [
+            (s, by_source[s]["items"], by_source[s]["rows"], DELIVERY_UNITS[s])
+            for s in DELIVERY_SOURCES
+        ],
+    )
     lines.append("")
     lines.append(
-        f"hook_success_only: {coverage.get('hook_success_only', 0)}; "
-        f"hook_success_twins_dropped: {coverage.get('hook_success_twins_dropped', 0)}."
+        f"hook_success_only: {coverage['hook_success_only']}; "
+        f"hook_success_twins_dropped: {coverage['hook_success_twins_dropped']}."
     )
     lines.append("")
     lines.append(
         "usage rows with no kept session: "
-        f"{coverage.get('usage_rows_unmapped', 0)} of {coverage.get('usage_rows_total', 0)} "
-        f"usage rows read (of which {coverage.get('usage_rows_unmapped_spec_excluded', 0)} "
-        "from the spec-excluded session)."
+        f"{coverage['usage_rows_unmapped']} of {coverage['usage_rows_total']} usage rows read "
+        f"(of which {coverage['usage_rows_unmapped_spec_excluded']} from the spec-excluded "
+        "session)."
     )
     lines.append("")
 
     lines.append("### A1.6 -- sessions per project and window")
     lines.append("")
-    lines.append("| project | retained | decision |")
-    lines.append("|---|---|---|")
-    for project in sorted(coverage.get("sessions_per_project", {})):
-        entry = coverage["sessions_per_project"][project]
-        lines.append(f"| {project} | {entry.get('retained', 0)} | {entry.get('decision', 0)} |")
+    lines.append(
+        "Window: both, as columns; a kept session is in a window if any of its turns' ts is."
+    )
+    lines.append("")
+    spp = coverage["sessions_per_project"]
+    _table(
+        lines,
+        ("project", "retained", "decision"),
+        [(p, spp[p]["retained"], spp[p]["decision"]) for p in sorted(spp)],
+    )
     lines.append("")
 
     lines.append("### A1.6 -- exclusions by reason")
     lines.append("")
-    lines.append("| reason | count |")
-    lines.append("|---|---|")
-    for reason in sorted(coverage.get("exclusions_by_reason", {})):
-        lines.append(f"| {reason} | {coverage['exclusions_by_reason'][reason]} |")
+    lines.append("Window: retained, as every session in the corpus.")
     lines.append("")
-    lines.append(f"excluded-by-spec, data-wise: {coverage.get('excluded_by_spec_detail', 'none')}")
+    ebr = coverage["exclusions_by_reason"]
+    _table(lines, ("reason", "count"), [(r, ebr[r]) for r in sorted(ebr)])
+    lines.append("")
+    lines.append(f"excluded-by-spec, data-wise: {coverage['excluded_by_spec_detail']}")
     lines.append("")
 
     lines.append("### A1.6 -- turns by kind")
     lines.append("")
-    lines.append("| kind | count |")
-    lines.append("|---|---|")
-    for kind in sorted(coverage.get("turns_by_kind", {})):
-        lines.append(f"| {kind} | {coverage['turns_by_kind'][kind]} |")
+    lines.append(whole_db)
+    lines.append("")
+    tbk = coverage["turns_by_kind"]
+    _table(lines, ("kind", "count"), [(k, tbk[k]) for k in sorted(tbk)])
     lines.append("")
 
     lines.append("### A1.6 -- divergent-duplicate unowned uuids")
     lines.append("")
-    dd = coverage.get("divergent_duplicate_unowned", {})
+    lines.append("Window: retained, as every divergent-duplicate copy in the corpus.")
+    lines.append("")
+    dd = coverage["divergent_duplicate_unowned"]
     if dd:
-        lines.append("| copy | unowned uuid count |")
-        lines.append("|---|---|")
-        for cid in sorted(dd):
-            lines.append(f"| {cid} | {len(dd[cid])} |")
+        _table(lines, ("copy", "unowned uuid count"), [(c, len(dd[c])) for c in sorted(dd)])
     else:
         lines.append("none")
     lines.append("")
 
     lines.append("### A1.6 -- kept sessions with zero turns")
     lines.append("")
-    zt = coverage.get("kept_sessions_with_zero_turns") or {"count": 0, "detail": "none"}
-    lines.append(f"count: {zt.get('count', 0)}.")
+    lines.append(whole_db)
     lines.append("")
-    lines.append(zt.get("detail", "none"))
+    zt = coverage["kept_sessions_with_zero_turns"]
+    lines.append(f"count: {zt['count']}.")
+    lines.append("")
+    lines.append(zt["detail"])
     lines.append("")
 
     return "\n".join(lines)

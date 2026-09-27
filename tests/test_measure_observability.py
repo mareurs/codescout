@@ -1,4 +1,4 @@
-"""Stage 1c tests: the observability map (Task 13, fix round 1).
+"""Stage 1c tests: the observability map (Task 13, fix round 2).
 
 Mirrors tests/test_measure_join.py's shape: unittest classes, modules loaded by path through
 importlib (never a real package import), fixture helpers copied from that file rather than
@@ -10,9 +10,11 @@ import importlib.util
 import json
 import pathlib
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 MEASURE = REPO_ROOT / "scripts" / "measure"
@@ -105,7 +107,10 @@ def _make_corpus(tmp_path, repos=None, bounds=None):
     manifest = {
         "corpus_id": "c-test", "created_utc": "2026-09-26T00:00:00Z",
         "bounds": bounds if bounds is not None else _DEFAULT_BOUNDS,
-        "files": {}, "counts": {}, "versions": {},
+        # R70: render_map reads counts.usage_rows with a subscript, so a fixture manifest must
+        # carry it; freeze-built fixtures (ProvenanceHeader, FinalizeBounds) carry real counts.
+        "files": {}, "counts": {"transcripts": 0, "subagent_transcripts": 0, "usage_rows": 0},
+        "versions": {},
         "repos": repos or {}, "exclusions": [],
     }
     (corpus_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True))
@@ -189,6 +194,76 @@ def _parse_outcome_table(rendered, outcome):
 _VALID_LABELS = {"measurable now", "needs adjudication", "unobservable"}
 
 
+# R68: render_map reads git when code_version is None. Fixture renders pass this fixed value so
+# they are hermetic; RenderingCodeVersionDefault is the one test of the git path.
+_CODE_VERSION = {"head": "f" * 40, "dirty": False}
+
+
+def _sections(rendered):
+    """{"## X" or "### X" heading: [its body lines]} for the rendered map. A body runs to the
+    next heading of ANY level, so each appendix section is isolated from its neighbours."""
+    out = {}
+    current = None
+    for line in rendered.splitlines():
+        if line.startswith("## ") or line.startswith("### "):
+            current = line
+            out[current] = []
+        elif current is not None:
+            out[current].append(line)
+    return out
+
+
+def _table_rows(body):
+    """The rows of the FIRST markdown table in `body`, as lists of stripped cells, header row
+    first, separator row dropped."""
+    rows = []
+    started = False
+    for line in body:
+        if line.startswith("|"):
+            started = True
+            if set(line.replace("|", "").strip()) <= {"-"}:
+                continue
+            rows.append([c.strip() for c in line.strip().strip("|").split("|")])
+        elif started:
+            break
+    return rows
+
+
+def _prose(body):
+    """The non-blank, non-table lines of a section body."""
+    return [line for line in body if line.strip() and not line.startswith("|")]
+
+
+def _freeze_fixture(tmp, profiles, usage_rows=(), corpus_id="fx-corpus"):
+    """A corpus built by the REAL archive.freeze, so its manifest (files keys, counts,
+    created_utc) has the shape Task 12's will. `profiles` is {profile_name: {name: [entries]}};
+    a name "<sid>/subagents/<agent>" writes a subagent file. Every profile's project dir is "p".
+    Returns (corpus_dir, manifest)."""
+    archive = _load("archive")
+    src = pathlib.Path(tmp) / "src"
+    dirs = []
+    for profile, files in profiles.items():
+        project = src / profile / "projects" / "p"
+        project.mkdir(parents=True, exist_ok=True)
+        for name, entries in files.items():
+            _write_lines(project / f"{name}.jsonl", entries)
+        dirs.append(str(project))
+    stage = pathlib.Path(tmp) / "stage"
+    _write_usage_db(stage, list(usage_rows))
+    manifest = archive.freeze(
+        corpus_id,
+        {
+            "transcript_dirs": dirs,
+            "usage_dbs": [str(stage / "usage_dbs" / "usage.db")],
+            "repos": {},
+            # Placeholder bounds, far from any fixture ts: finalize_bounds must replace both.
+            "bounds": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2000-01-02T00:00:00Z"},
+        },
+        str(pathlib.Path(tmp) / "out"),
+    )
+    return pathlib.Path(tmp) / "out" / corpus_id, manifest
+
+
 class ObservabilityMapShape(unittest.TestCase):
     def test_every_outcome_and_chain_link_has_a_label(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -211,7 +286,7 @@ class ObservabilityMapShape(unittest.TestCase):
                 self.assertTrue(cell["basis"])
 
             manifest = _load_manifest(corpus_dir)
-            rendered = observability.render_map(cov, manifest)
+            rendered = observability.render_map(cov, manifest, _CODE_VERSION)
             for outcome in ("mistakes", "context", "transfer", "background-worker"):
                 self.assertIn(outcome, rendered)
 
@@ -338,6 +413,14 @@ class BaseTableMatchesRuling(unittest.TestCase):
         }
         for key, field in expected_fields.items():
             self.assertEqual(observability._BASE_TABLE[key].get("field"), field, msg=str(key))
+
+    def test_background_worker_opportunity_basis_names_what_is_not_computed(self):
+        # Minor ruling, fix round 2: the basis must not promise an A1.5 family split the map
+        # never computes.
+        self.assertEqual(
+            observability._BASE_TABLE[("background-worker", "opportunity")]["basis"],
+            "tool calls (the A1.5 task-family split is not computed in this map)",
+        )
 
 
 class ExclusionsMismatchRaises(unittest.TestCase):
@@ -490,7 +573,11 @@ class ToolEventsByDay(unittest.TestCase):
             cov = observability.coverage(events_db, corpus_dir)
             self.assertEqual(set(cov["tool_events_by_day"].keys()), {"2026-09-20", "2026-09-21"})
             for day in ("2026-09-20", "2026-09-21"):
-                self.assertEqual(cov["tool_events_by_day"][day], {"not_codescout": 1})
+                # R70: every join method is PRESENT per day; absent ones are a present 0.
+                self.assertEqual(
+                    cov["tool_events_by_day"][day],
+                    {"exact": 0, "heuristic": 0, "none": 0, "not_codescout": 1},
+                )
             self.assertEqual(cov["tool_events_by_method"]["not_codescout"], 2)
 
 
@@ -558,6 +645,26 @@ class R61RetainedWindowDerivedFromData(unittest.TestCase):
             with self.assertRaises(ValueError) as ctx:
                 observability.coverage(events_db, corpus_dir)
             self.assertIn("R61: an observed ts", str(ctx.exception))
+
+    def test_observed_ts_exactly_at_retained_end_raises(self):
+        # R71: the window is half-open, so a ts EQUAL to retained.end_utc is outside it. A
+        # closed-interval check (`>` instead of `>=`) passes this fixture silently.
+        with tempfile.TemporaryDirectory() as tmp:
+            bounds = {
+                "retained": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2026-09-20T10:00:00Z"},
+                "decision": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2026-09-20T10:00:00Z"},
+            }
+            corpus_dir = _make_corpus(pathlib.Path(tmp), bounds=bounds)
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            _write_lines(proj / "sid1.jsonl", [
+                _entry("u0", "2026-09-20T09:59:59Z", "sid1", content="hi"),
+                _entry("u1", "2026-09-20T10:00:00Z", "sid1", content="exactly at the end"),
+            ])
+            events_db = pathlib.Path(tmp) / "events.db"
+            join.build_events(corpus_dir, events_db)
+            with self.assertRaises(ValueError) as ctx:
+                observability.coverage(events_db, corpus_dir)
+            self.assertIn("is at or after manifest.bounds.retained.end_utc", str(ctx.exception))
 
 
 class DecisionBearingWindowDowngrade(unittest.TestCase):
@@ -714,7 +821,8 @@ class KeptSessionsWithZeroTurns(unittest.TestCase):
                 conn.close()
             self.assertEqual(result["count"], 1)
             self.assertEqual(result["cids"], [small_cid])
-            self.assertIn(f"its uuids are owned by {big_cid}", result["detail"])
+            # Minor ruling: the owned FRACTION, not "its uuids are owned by".
+            self.assertEqual(result["detail"], f"{small_cid}: 3 of 3 uuids owned by {big_cid}")
 
 
 class ContextSignalCountsToolUseBlocks(unittest.TestCase):
@@ -792,8 +900,12 @@ class SubagentTurnsRealNonzero(unittest.TestCase):
             events_db = pathlib.Path(tmp) / "events.db"
             join.build_events(corpus_dir, events_db)
             cov = observability.coverage(events_db, corpus_dir)
-            self.assertGreater(cov["fields"]["subagent_turns"]["retained"], 0)
-            self.assertEqual(cov["fields"]["subagent_turns"]["population"], "subagent")
+            # Exact, in BOTH windows: a decision-only zeroing survived `> 0` on retained alone
+            # (fix round 2's mutant04b).
+            self.assertEqual(
+                cov["fields"]["subagent_turns"],
+                {"decision": 2, "retained": 2, "population": "subagent"},
+            )
 
 
 class UsageRowsUnmappedRendersRulingSentence(unittest.TestCase):
@@ -822,7 +934,7 @@ class UsageRowsUnmappedRendersRulingSentence(unittest.TestCase):
             self.assertEqual(cov["usage_rows_unmapped_spec_excluded"], 1)
 
             manifest = _load_manifest(corpus_dir)
-            rendered = observability.render_map(cov, manifest)
+            rendered = observability.render_map(cov, manifest, _CODE_VERSION)
             self.assertIn(
                 "usage rows with no kept session: 2 of 3 usage rows read "
                 "(of which 1 from the spec-excluded session).",
@@ -831,18 +943,77 @@ class UsageRowsUnmappedRendersRulingSentence(unittest.TestCase):
 
 
 class SkippedTimestampDoesNotCrash(unittest.TestCase):
+    """R71: NULL and unparseable ts rows are skipped AND counted, per table and per cause, in
+    coverage() and in render_map -- and neither a None day key nor an unparseable FIRST entry
+    (which becomes Session.first_ts) crashes anything."""
+
     def test_null_or_unparseable_ts_is_skipped_and_counted(self):
         with tempfile.TemporaryDirectory() as tmp:
             corpus_dir = _make_corpus(pathlib.Path(tmp))
             proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
             _write_lines(proj / "sid1.jsonl", [
-                _entry("u1", None, "sid1", content="hi"),
-                _entry("u2", "2026-09-20T10:00:00Z", "sid1", content="hi again"),
+                # FIRST in file order, so it is Session.first_ts: round 1's
+                # min(join.utc(first_ts)) raised ValueError on exactly this.
+                _entry("u-bad", "not-a-timestamp", "sid1", content="hi"),
+                _entry("u-null", None, "sid1", content="hi again"),
+                _agent_tool_use_entry("t-null", None, "sid1"),
+                _agent_tool_use_entry("t-bad", "garbage-ts", "sid1"),
+                _agent_tool_use_entry("t-ok", "2026-09-20T10:00:01Z", "sid1"),
+                _entry("u-ok", "2026-09-20T10:00:00Z", "sid1", content="a valid one"),
+            ])
+            marker = json.dumps([{"type": "text", "text": "<!-- operator-rule OP-1 -->\nbody"}])
+            _write_usage_db(corpus_dir, [
+                {"cc_session_id": "sid1", "called_at": None, "output_json": marker},
+                {"cc_session_id": "sid1", "called_at": "bogus", "output_json": marker},
+                {"cc_session_id": "sid1", "called_at": "2026-09-20T10:00:02Z", "output_json": marker},
             ])
             events_db = pathlib.Path(tmp) / "events.db"
             join.build_events(corpus_dir, events_db)
             cov = observability.coverage(events_db, corpus_dir)
-            self.assertGreaterEqual(cov["skipped_ts_count"], 1)
+
+            self.assertEqual(cov["skipped_ts"], {
+                "turns": {"null": 2, "unparseable": 2},        # u-null + t-null; u-bad + t-bad
+                "tool_events": {"null": 1, "unparseable": 1},  # t-null; t-bad
+                "deliveries": {"null": 1, "unparseable": 1},   # called_at None; "bogus"
+            })
+            # Skipped rows stay in the whole-DB tables; only the parseable one has a day.
+            self.assertEqual(cov["tool_events_by_method"]["not_codescout"], 3)
+            self.assertEqual(
+                cov["tool_events_by_day"],
+                {"2026-09-20": {"exact": 0, "heuristic": 0, "none": 0, "not_codescout": 1}},
+            )
+            self.assertEqual(cov["earliest_kept_top_level"], {
+                "ts": "2026-09-20T10:00:00Z", "entries_without_ts": 2,
+                "entries_unparseable_ts": 2,
+            })
+            # Only parseable rows are windowed: 1 of 3 deliveries, 1 of 3 tool_events.
+            self.assertEqual(cov["fields"]["deliveries_total"]["retained"], 1)
+            self.assertEqual(cov["fields"]["tool_events_total"]["retained"], 1)
+
+            rendered = observability.render_map(cov, _load_manifest(corpus_dir), _CODE_VERSION)
+            windows = _prose(_sections(rendered)["## Windows"])
+            self.assertIn(
+                "Rows skipped from every window, day and span for a NULL or empty ts -- "
+                "turns: 2, tool_events: 1, deliveries: 1.",
+                windows,
+            )
+            self.assertIn(
+                "Rows skipped from every window, day and span for an unparseable ts -- "
+                "turns: 2, tool_events: 1, deliveries: 1.",
+                windows,
+            )
+            by_day = _sections(rendered)["### A1.6 -- joins by method (by day)"]
+            self.assertIn(
+                "Window: retained, by UTC day of the tool_use ts; the 2 tool_events rows with a "
+                "NULL or unparseable ts appear in the overall table only.",
+                _prose(by_day),
+            )
+            self.assertEqual(_table_rows(by_day)[1:], [["2026-09-20", "0", "0", "0", "1"]])
+            self.assertIn(
+                "- earliest kept top-level entry ts: 2026-09-20T10:00:00Z (top-level entries "
+                "skipped by this scan: 2 without a ts, 2 with an unparseable ts)",
+                _prose(_sections(rendered)["## Provenance"]),
+            )
 
 
 class ExcludedBySpecDetail(unittest.TestCase):
@@ -876,9 +1047,14 @@ class MinorRulingSentencesRender(unittest.TestCase):
             join.build_events(corpus_dir, events_db)
             cov = observability.coverage(events_db, corpus_dir)
             manifest = _load_manifest(corpus_dir)
-            rendered = observability.render_map(cov, manifest)
-            self.assertIn("A1.5's latency share is measurable only for joined calls", rendered)
-            self.assertIn("share carrying a tool_use_id", rendered)
+            rendered = observability.render_map(cov, manifest, _CODE_VERSION)
+            self.assertIn(
+                "A1.5's latency share is measurable only for joined calls: 0 of 0 tool_events are "
+                "joined (exact + heuristic), and 0 of those joined rows carry latency_ms on their "
+                "usage row.",
+                rendered,
+            )
+            self.assertIn("delivered items carrying a tool_use_id", rendered)
 
 
 class SessionsPerProjectWindowMembership(unittest.TestCase):
@@ -991,7 +1167,7 @@ class RenderedTableIntegrity(unittest.TestCase):
             join.build_events(corpus_dir, events_db)
             cov = observability.coverage(events_db, corpus_dir)
             manifest = _load_manifest(corpus_dir)
-            rendered = observability.render_map(cov, manifest)
+            rendered = observability.render_map(cov, manifest, _CODE_VERSION)
 
             cells = {(c["outcome"], c["link"]): c for c in observability.build_cells(cov)}
             for outcome in observability._OUTCOMES:
@@ -1012,6 +1188,749 @@ class RenderedTableIntegrity(unittest.TestCase):
                     )
                     self.assertEqual(row["decision"], expected_dec)
                     self.assertEqual(row["retained"], expected_ret)
+
+
+def _codescout_tool_use_entry(uuid, ts, sid, tool, tool_use_id):
+    return _entry(
+        uuid, ts, sid, type_="assistant",
+        content=[{"type": "tool_use", "id": tool_use_id, "name": f"mcp__codescout__{tool}",
+                  "input": {}}],
+    )
+
+
+def _attachment_entry(uuid, ts, sid, atype, text, hook_event, hook_name):
+    e = _entry(uuid, ts, sid, type_="attachment")
+    del e["message"]
+    e["attachment"] = {
+        "type": atype, "content": text, "hookEvent": hook_event, "hookName": hook_name,
+    }
+    return e
+
+
+# R69: a REAL-shaped deliveries_json payload. Shape measured on the 2026-09-27 snapshot's usage DB
+# (probes/task13-fix2-real.txt): every record is {engine: str, ledger_keys: [str], blocks:
+# [{sha256: str, bytes: int}], hint: bool}, with as many blocks as keys. LOAD-BEARING: the
+# non-empty `blocks` are what make join.py emit the key-NULL block rows; with `blocks: []` (the
+# R63 fixture) there are none, and a count of table rows equals a count of deliveries.
+_REAL_SHAPED_DELIVERIES = [
+    {"engine": "guide-sections", "ledger_keys": ["librarian#Filter Syntax", "tracker-conventions"],
+     "blocks": [{"sha256": "a" * 64, "bytes": 1812}, {"sha256": "b" * 64, "bytes": 944}],
+     "hint": False},
+    {"engine": "session-opener", "ledger_keys": ["project-activation-bootstrap"],
+     "blocks": [{"sha256": "c" * 64, "bytes": 3001}], "hint": True},
+]
+
+_OP_RULE_OUTPUT = json.dumps([{"type": "text", "text": "<!-- operator-rule OP-1 -->\nbody"}])
+_NO_MARKER_OUTPUT = json.dumps([{"type": "text", "text": "no markers here"}])
+
+# The rich fixture's windows. LOAD-BEARING: retained.start_utc EQUALS the earliest KEPT top-level
+# entry (q1's), while the spec-excluded session is earlier still -- so counting excluded sessions
+# into the earliest-entry scan (mutant N7) trips R61's start check.
+_RICH_BOUNDS = {
+    "retained": {"start_utc": "2026-09-19T12:00:00Z", "end_utc": "2026-09-23T00:00:00Z"},
+    "decision": {"start_utc": "2026-09-21T00:00:00Z", "end_utc": "2026-09-22T00:00:00Z"},
+}
+
+
+def _rich_corpus(tmp):
+    """One fixture that reaches every appendix row with a known, non-trivial value. Returns
+    (corpus_dir, events_db, spec_sid). Every count asserted in AppendixRenderedIntegrity is
+    derived in the comments here."""
+    spec_sid = next(iter(join.SPEC_EXCLUDED_SIDS))
+    corpus_dir = _make_corpus(pathlib.Path(tmp), bounds=_RICH_BOUNDS)
+    p = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+    q = _session_dir(corpus_dir, "01-.claude-kat", "q")
+    _write_lines(p / "k1.jsonl", [
+        _entry("k1-p1", "2026-09-20T10:00:00Z", "k1", content="please fix the parser"),  # prompt
+        _interrupt_entry("k1-i1", "2026-09-20T10:00:01Z", "k1"),                         # interrupt
+        _assistant_text_entry("k1-a1", "2026-09-20T10:00:02Z", "k1"),                    # assistant_text
+        _codescout_tool_use_entry("k1-t1", "2026-09-20T10:00:03Z", "k1", "symbols", "tu-exact"),
+        _codescout_tool_use_entry("k1-t2", "2026-09-21T10:00:00Z", "k1", "grep", "tu-heur-a"),
+        _codescout_tool_use_entry("k1-t3", "2026-09-21T11:00:00Z", "k1", "grep", "tu-heur-b"),
+        _codescout_tool_use_entry("k1-t4", "2026-09-21T12:00:00Z", "k1", "tree", "tu-none"),
+        _agent_tool_use_entry("k1-t5", "2026-09-21T13:00:00Z", "k1"),                    # not_codescout
+        # h1 is a hac; h2 is its hook_success twin (same event, same text, 1 s apart) -> dropped;
+        # h3 has no twin -> kept as hook_success_only. So 2 transcript_hook rows.
+        _attachment_entry("k1-h1", "2026-09-21T13:00:05Z", "k1", "hook_additional_context",
+                          "ctx text", "SessionStart", "SessionStart:startup"),
+        _attachment_entry("k1-h2", "2026-09-21T13:00:06Z", "k1", "hook_success",
+                          "ctx text", "SessionStart", "SessionStart:startup"),
+        _attachment_entry("k1-h3", "2026-09-21T13:00:30Z", "k1", "hook_success",
+                          "other text", "PostToolUse", "PostToolUse:Bash"),
+    ])
+    _write_lines(_subagent_dir(corpus_dir, "00-.claude-sdd", "p", "k1") / "agent-1.jsonl", [
+        _entry("k1-s1", "2026-09-21T13:00:01Z", "k1", content="do the subtask"),  # delegation
+        _assistant_text_entry("k1-s2", "2026-09-21T13:00:02Z", "k1"),             # assistant_text
+    ])
+    # small: a KEPT copy whose 2 uuids are a strict subset of k1's, so k1 owns both and small
+    # gets zero turns -- "2 of 2 uuids owned by .claude-sdd/k1".
+    _write_lines(p / "small.jsonl", [
+        _entry("k1-p1", "2026-09-20T10:00:00Z", "small", content="please fix the parser"),
+        _interrupt_entry("k1-i1", "2026-09-20T10:00:01Z", "small"),
+    ])
+    _write_lines(p / "headless.jsonl", [
+        _entry("h-1", "2026-09-20T09:00:00Z", "headless", entrypoint="sdk-cli"),  # sdk-cli
+    ])
+    _write_lines(p / f"{spec_sid}.jsonl", [
+        _entry("spec-1", "2026-09-19T00:00:00Z", spec_sid),  # excluded-by-spec, earliest of all
+    ])
+    _write_lines(q / "q1.jsonl", [
+        _entry("q1-p1", "2026-09-19T12:00:00Z", "q1", content="hello"),  # the earliest KEPT entry
+    ])
+    _write_usage_db(corpus_dir, [
+        # exact join of k1-t1; latency_ms set
+        {"cc_session_id": "k1", "tool_name": "symbols", "tool_use_id": "tu-exact",
+         "called_at": "2026-09-20 10:00:04", "latency_ms": 12},
+        # heuristic join of k1-t2 via started_at (1 s); latency_ms set
+        {"cc_session_id": "k1", "tool_name": "grep", "started_at": "2026-09-21 10:00:01",
+         "called_at": "2026-09-21 10:00:01", "latency_ms": 7},
+        # heuristic join of k1-t3 via called_at (started_at NULL, 2 s); NO latency_ms
+        {"cc_session_id": "k1", "tool_name": "grep", "called_at": "2026-09-21 11:00:02"},
+        # 1 usage_output_json item, carrying a tool_use_id; no candidate claims "tu-d1"
+        {"cc_session_id": "k1", "tool_use_id": "tu-d1", "called_at": "2026-09-21 12:30:00",
+         "output_json": _OP_RULE_OUTPUT},
+        # 3 usage_deliveries_json items (3 ledger keys) in 6 rows (plus 3 block rows)
+        {"cc_session_id": "k1", "called_at": "2026-09-21 12:31:00",
+         "deliveries_json": json.dumps(_REAL_SHAPED_DELIVERIES)},
+        # unmapped: a session not in the corpus, and the spec-excluded session
+        {"cc_session_id": "ghost-sid", "called_at": "2026-09-21 12:32:00",
+         "output_json": _NO_MARKER_OUTPUT},
+        {"cc_session_id": spec_sid, "called_at": "2026-09-21 12:33:00",
+         "output_json": _NO_MARKER_OUTPUT},
+    ])
+    events_db = pathlib.Path(tmp) / "events.db"
+    join.build_events(corpus_dir, events_db)
+    return corpus_dir, events_db, spec_sid
+
+
+class AppendixRenderedIntegrity(unittest.TestCase):
+    """R70: parse-level tests of the rendered APPENDIX, like RenderedTableIntegrity for the
+    label tables -- every section, every row and every value, against the rich fixture's known
+    coverage. Kills N2 (Am.4(a) count), N4 (by-day rows dropped), N5 (heuristic_rest not
+    subtracted), N6 (first exact ts), N8 (zero-turn explanation) and N9 (exclusions rows)."""
+
+    def test_every_appendix_section_row_and_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir, events_db, spec_sid = _rich_corpus(tmp)
+            cov = observability.coverage(events_db, corpus_dir)
+            rendered = observability.render_map(cov, _load_manifest(corpus_dir), _CODE_VERSION)
+            sections = _sections(rendered)
+            whole_db = (
+                "Window: retained, as the whole events DB (rows skipped above for their ts "
+                "included)."
+            )
+
+            appendix = [h for h in sections if h.startswith("### ")]
+            self.assertEqual(appendix, [
+                "### A1.6 -- joins by method (overall)",
+                "### A1.6 -- joins by method (by day)",
+                "### A1.6 -- delivery coverage by source",
+                "### A1.6 -- sessions per project and window",
+                "### A1.6 -- exclusions by reason",
+                "### A1.6 -- turns by kind",
+                "### A1.6 -- divergent-duplicate unowned uuids",
+                "### A1.6 -- kept sessions with zero turns",
+            ])
+
+            body = sections["### A1.6 -- joins by method (overall)"]
+            self.assertEqual(_table_rows(body), [
+                ["method", "count"],
+                ["exact", "1"], ["heuristic", "2"], ["none", "1"], ["not_codescout", "1"],
+            ])
+            self.assertEqual(_prose(body), [
+                whole_db,
+                "Amendment 4(a): tool_use_id was NULL on every usage row until 6f6349ca; it "
+                "appears per session from that session's /mcp. Usage rows with a non-NULL "
+                "tool_use_id: 2. First exact join ts (the transcript tool_use ts): "
+                "2026-09-20T10:00:03.000Z.",
+                "Heuristic joins: 2 total, of which 1 matched via called_at (started_at NULL) "
+                "and 1 matched via started_at directly.",
+                "A1.5's latency share is measurable only for joined calls: 3 of 5 tool_events "
+                "are joined (exact + heuristic), and 2 of those joined rows carry latency_ms on "
+                "their usage row.",
+            ])
+
+            body = sections["### A1.6 -- joins by method (by day)"]
+            self.assertEqual(_table_rows(body), [
+                ["day", "exact", "heuristic", "none", "not_codescout"],
+                ["2026-09-20", "1", "0", "0", "0"],
+                ["2026-09-21", "0", "2", "1", "1"],
+            ])
+            self.assertEqual(_prose(body), [
+                "Window: retained, by UTC day of the tool_use ts; the 0 tool_events rows with a "
+                "NULL or unparseable ts appear in the overall table only.",
+            ])
+
+            body = sections["### A1.6 -- delivery coverage by source"]
+            self.assertEqual(_table_rows(body), [
+                ["source", "delivered items", "table rows", "unit"],
+                ["transcript_hook", "2", "2",
+                 "one per hook injection (a hook_success or hook_additional_context row)"],
+                ["usage_deliveries_json", "3", "6",
+                 "one per ledger key of a deliveries_json engine record; its block rows (key "
+                 "NULL) are digests of the same deliveries and are not counted"],
+                ["usage_output_json", "1", "1",
+                 "one per operator-rule or get_guide marker match in output_json"],
+            ])
+            self.assertEqual(_prose(body), [
+                whole_db,
+                "hook_success_only: 1; hook_success_twins_dropped: 1.",
+                "usage rows with no kept session: 2 of 7 usage rows read (of which 1 from the "
+                "spec-excluded session).",
+            ])
+
+            body = sections["### A1.6 -- sessions per project and window"]
+            self.assertEqual(_table_rows(body), [
+                ["project", "retained", "decision"], ["p", "1", "1"], ["q", "1", "0"],
+            ])
+            self.assertEqual(_prose(body), [
+                "Window: both, as columns; a kept session is in a window if any of its turns' "
+                "ts is.",
+            ])
+
+            body = sections["### A1.6 -- exclusions by reason"]
+            self.assertEqual(_table_rows(body), [
+                ["reason", "count"], ["excluded-by-spec", "1"], ["sdk-cli", "1"],
+            ])
+            self.assertEqual(_prose(body), [
+                "Window: retained, as every session in the corpus.",
+                f"excluded-by-spec, data-wise: sid {spec_sid} present in 1 profile(s): "
+                f".claude-sdd/{spec_sid}",
+            ])
+
+            body = sections["### A1.6 -- turns by kind"]
+            self.assertEqual(_table_rows(body), [
+                ["kind", "count"],
+                ["assistant_text", "2"], ["assistant_thinking", "0"], ["delegation", "1"],
+                ["interrupt", "1"], ["meta", "0"], ["prompt", "2"], ["tool_result", "0"],
+                ["tool_use", "5"],
+            ])
+            self.assertEqual(_prose(body), [whole_db])
+
+            body = sections["### A1.6 -- divergent-duplicate unowned uuids"]
+            self.assertEqual(_table_rows(body), [])
+            self.assertEqual(_prose(body), [
+                "Window: retained, as every divergent-duplicate copy in the corpus.", "none",
+            ])
+
+            body = sections["### A1.6 -- kept sessions with zero turns"]
+            self.assertEqual(_table_rows(body), [])
+            self.assertEqual(_prose(body), [
+                whole_db,
+                "count: 1.",
+                ".claude-sdd/small: 2 of 2 uuids owned by .claude-sdd/k1",
+            ])
+
+            windows = sections["## Windows"]
+            self.assertEqual(_prose(windows), [
+                "Both windows are half-open, [start, end).",
+                "- retained: 2026-09-19T12:00:00Z to 2026-09-23T00:00:00Z",
+                "- decision: 2026-09-21T00:00:00Z to 2026-09-22T00:00:00Z",
+                "Data span observed across turns, tool_events and deliveries: "
+                "2026-09-19T12:00:00+00:00 to 2026-09-21T13:00:30+00:00.",
+                "Rows skipped from every window, day and span for a NULL or empty ts -- "
+                "turns: 0, tool_events: 0, deliveries: 0.",
+                "Rows skipped from every window, day and span for an unparseable ts -- "
+                "turns: 0, tool_events: 0, deliveries: 0.",
+            ])
+
+    def test_every_label_cell_value_on_the_rich_fixture(self):
+        # Every cell's label, both windows' numbers and population, and the full basis of every
+        # cell that carries a number -- derived in _rich_corpus's comments against _RICH_BOUNDS
+        # (decision = 2026-09-21 only). Pins decision-window values that aggregate or retained-
+        # only assertions leave free.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir, events_db, _spec_sid = _rich_corpus(tmp)
+            cov = observability.coverage(events_db, corpus_dir)
+            rendered = observability.render_map(cov, _load_manifest(corpus_dir), _CODE_VERSION)
+        na = ("n/a", "n/a", "n/a")
+        unit = (
+            "counted as delivered items: one per output_json marker match, one per "
+            "deliveries_json ledger key (block rows not counted), one per transcript hook "
+            "injection"
+        )
+        expected = {
+            "mistakes": {
+                "opportunity": ("measurable now", "1", "2", "all",
+                                "decision points = assistant_text turns (of which top-level -- "
+                                "decision: 0, retained: 1)"),
+                "signal/request": ("needs adjudication", "0", "3", "all",
+                                   "prompt + interrupt rows are the candidate population; "
+                                   "whether each is a correction is judged (of which top-level "
+                                   "-- decision: 0, retained: 3)"),
+                "delivery/action": ("needs adjudication",) + na,
+                "observed use": ("needs adjudication",) + na,
+                "checked outcome": ("needs adjudication",) + na,
+            },
+            "context": {
+                "opportunity": ("measurable now", "1", "2", "all",
+                                "assistant_text turns (of which top-level -- decision: 0, "
+                                "retained: 1)"),
+                "signal/request": ("measurable now", "4", "5", "all",
+                                   "tool_use blocks (tool_events total)"),
+                "delivery/action": ("measurable now", "6", "6", "all",
+                                    f"deliveries by source, {unit} (delivered items carrying a "
+                                    "tool_use_id -- decision: 1 of 6; retained: 1 of 6)"),
+                "observed use": ("needs adjudication",) + na,
+                "checked outcome": ("needs adjudication",) + na,
+            },
+            "transfer": {
+                "opportunity": ("needs adjudication",) + na,
+                "signal/request": ("needs adjudication",) + na,
+                "delivery/action": ("measurable now", "4", "4", "all",
+                                    "deliveries whose engine_or_hook names a transfer-carrying "
+                                    "engine (TRANSFER_DELIVERY_MARKERS: operator-rule, get_guide, "
+                                    f"operator-rules, guide-sections, session-opener), {unit}"),
+                "observed use": ("needs adjudication",) + na,
+                "checked outcome": ("needs adjudication",) + na,
+                "rediscovery": ("needs adjudication",) + na,
+            },
+            "background-worker": {
+                "opportunity": ("measurable now", "4", "5", "all",
+                                "tool calls (the A1.5 task-family split is not computed in this "
+                                "map)"),
+                "signal/request": ("measurable now", "1", "1", "all",
+                                   "Agent tool_uses (delegation turns (separate, never summed) -- "
+                                   "decision: 1, retained: 1)"),
+                "delivery/action": ("measurable now", "2", "2", "subagent",
+                                    "subagent turns (agent_path set)"),
+                "observed use": ("needs adjudication",) + na,
+                "checked outcome": ("unobservable",) + na,
+            },
+        }
+        for outcome, rows in expected.items():
+            table = _parse_outcome_table(rendered, outcome)
+            self.assertEqual(set(table), set(rows), msg=outcome)
+            for link, want in rows.items():
+                got = table[link]
+                self.assertEqual(
+                    (got["label"], got["decision"], got["retained"], got["population"]),
+                    want[:4], msg=f"{outcome}/{link}",
+                )
+                if len(want) == 5:
+                    self.assertEqual(got["basis"], want[4], msg=f"{outcome}/{link}")
+
+
+class DeliveredItemsNotRows(unittest.TestCase):
+    """R69: a delivery cell counts DELIVERED ITEMS. For usage_deliveries_json that is the key
+    rows only -- the block rows are digests of the same deliveries."""
+
+    def test_a_real_shaped_engine_record_counts_its_keys_not_its_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            _write_lines(proj / "obs-sid.jsonl", [
+                _entry("u1", "2026-09-20T10:00:00Z", "obs-sid", content="hi"),
+                _attachment_entry("h1", "2026-09-20T10:00:01Z", "obs-sid",
+                                  "hook_additional_context", "ctx", "SessionStart",
+                                  "SessionStart:startup"),
+            ])
+            _write_usage_db(corpus_dir, [
+                {"cc_session_id": "obs-sid", "called_at": "2026-09-20T10:00:02Z",
+                 "deliveries_json": json.dumps(_REAL_SHAPED_DELIVERIES)},
+                {"cc_session_id": "obs-sid", "called_at": "2026-09-20T10:00:03Z",
+                 "tool_use_id": "tu-9", "output_json": _OP_RULE_OUTPUT},
+            ])
+            events_db = pathlib.Path(tmp) / "events.db"
+            join.build_events(corpus_dir, events_db)
+
+            # The fixture is load-bearing only if join.py really emitted block rows for it.
+            conn = sqlite3.connect(str(events_db))
+            try:
+                rows = conn.execute(
+                    "SELECT key IS NULL, COUNT(*) FROM deliveries "
+                    "WHERE source = 'usage_deliveries_json' GROUP BY key IS NULL"
+                ).fetchall()
+            finally:
+                conn.close()
+            self.assertEqual(sorted(rows), [(0, 3), (1, 3)])
+
+            cov = observability.coverage(events_db, corpus_dir)
+            self.assertEqual(cov["deliveries_by_source"], {
+                "transcript_hook": {"rows": 1, "items": 1},
+                "usage_deliveries_json": {"rows": 6, "items": 3},
+                "usage_output_json": {"rows": 1, "items": 1},
+            })
+            # 3 ledger keys + 1 marker + 1 hook; never the 8 table rows.
+            self.assertEqual(
+                cov["fields"]["deliveries_total"],
+                {"decision": 5, "retained": 5, "population": "all"},
+            )
+            # guide-sections x2 + session-opener + operator-rule; the SessionStart hook is not.
+            self.assertEqual(
+                cov["fields"]["transfer_filtered_deliveries"],
+                {"decision": 4, "retained": 4, "population": "all"},
+            )
+
+            rendered = observability.render_map(cov, _load_manifest(corpus_dir), _CODE_VERSION)
+            unit = (
+                "counted as delivered items: one per output_json marker match, one per "
+                "deliveries_json ledger key (block rows not counted), one per transcript hook "
+                "injection"
+            )
+            context = _parse_outcome_table(rendered, "context")["delivery/action"]
+            self.assertEqual((context["decision"], context["retained"]), ("5", "5"))
+            self.assertIn(unit, context["basis"])
+            self.assertIn(
+                "delivered items carrying a tool_use_id -- decision: 1 of 5; retained: 1 of 5",
+                context["basis"],
+            )
+            transfer = _parse_outcome_table(rendered, "transfer")["delivery/action"]
+            self.assertEqual((transfer["decision"], transfer["retained"]), ("4", "4"))
+            self.assertIn(unit, transfer["basis"])
+
+
+class HalfOpenWindows(unittest.TestCase):
+    """R71: every window membership test is half-open, [start, end): a row AT the decision
+    window's start is in it, a row AT its end is not -- for turns, tool_events, deliveries and
+    sessions-per-project alike."""
+
+    def test_start_is_inside_and_end_is_outside(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bounds = {
+                "retained": {"start_utc": "2026-09-20T00:00:00Z", "end_utc": "2026-09-23T00:00:00Z"},
+                "decision": {"start_utc": "2026-09-21T00:00:00Z", "end_utc": "2026-09-22T00:00:00Z"},
+            }
+            corpus_dir = _make_corpus(pathlib.Path(tmp), bounds=bounds)
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            _write_lines(proj / "s1.jsonl", [
+                _assistant_text_entry("a-start", "2026-09-21T00:00:00Z", "s1"),
+                _agent_tool_use_entry("t-start", "2026-09-21T00:00:00Z", "s1"),
+                _assistant_text_entry("a-end", "2026-09-22T00:00:00Z", "s1"),
+                _agent_tool_use_entry("t-end", "2026-09-22T00:00:00Z", "s1"),
+            ])
+            # s2's ONLY turn is exactly at the decision end: in retained, not in decision.
+            _write_lines(proj / "s2.jsonl", [
+                _entry("s2-p", "2026-09-22T00:00:00Z", "s2", content="late"),
+            ])
+            _write_usage_db(corpus_dir, [
+                {"cc_session_id": "s1", "called_at": "2026-09-21 00:00:00",
+                 "output_json": _OP_RULE_OUTPUT},
+                {"cc_session_id": "s1", "called_at": "2026-09-22 00:00:00",
+                 "output_json": _OP_RULE_OUTPUT},
+            ])
+            events_db = pathlib.Path(tmp) / "events.db"
+            join.build_events(corpus_dir, events_db)
+            cov = observability.coverage(events_db, corpus_dir)
+            for field in ("assistant_text_turns", "tool_events_total", "agent_tool_uses",
+                          "deliveries_total", "transfer_filtered_deliveries"):
+                self.assertEqual(
+                    (cov["fields"][field]["decision"], cov["fields"][field]["retained"]),
+                    (1, 2), msg=field,
+                )
+            self.assertEqual(cov["sessions_per_project"]["p"], {"retained": 2, "decision": 1})
+            # The top-level subsets ride the same predicate: a-start is top-level and in the
+            # decision window; s2-p (a prompt AT the end) is retained-only.
+            self.assertEqual(
+                cov["cell_extra"][("mistakes", "opportunity")],
+                "of which top-level -- decision: 1, retained: 2",
+            )
+            self.assertEqual(
+                cov["cell_extra"][("mistakes", "signal/request")],
+                "of which top-level -- decision: 0, retained: 1",
+            )
+
+
+class StrictReadsRaise(unittest.TestCase):
+    """R70: no `.get(..., default)` on a coverage, events_meta or closed-set key. A missing key
+    RAISES; only a PRESENT 0 reads 0. Kills N1 (a kind misspelt) and N3 (a counter misspelt)
+    by construction, and the general rule for every other key."""
+
+    def _simple(self, tmp):
+        corpus_dir = _make_corpus(pathlib.Path(tmp))
+        proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+        _write_lines(proj / "sid1.jsonl", [
+            _entry("u1", "2026-09-20T10:00:00Z", "sid1", content="hi"),
+            _assistant_text_entry("a1", "2026-09-20T10:00:01Z", "sid1"),
+            _agent_tool_use_entry("t1", "2026-09-20T10:00:02Z", "sid1"),
+        ])
+        _write_usage_db(corpus_dir, [
+            {"cc_session_id": "sid1", "called_at": "2026-09-20T10:00:03Z",
+             "output_json": _OP_RULE_OUTPUT},
+        ])
+        events_db = pathlib.Path(tmp) / "events.db"
+        join.build_events(corpus_dir, events_db)
+        return corpus_dir, events_db
+
+    def test_every_events_meta_counter_read_is_strict(self):
+        for key in ("sessions_kept", "sessions_excluded", "tool_events_total",
+                    "tool_events_heuristic", "heuristic_via_called_at", "hook_success_only",
+                    "hook_success_twins_dropped", "deliveries_unmapped_session"):
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as tmp:
+                corpus_dir, events_db = self._simple(tmp)
+                conn = sqlite3.connect(str(events_db))
+                conn.execute("DELETE FROM events_meta WHERE key = ?", (key,))
+                conn.commit()
+                conn.close()
+                with self.assertRaises(KeyError) as ctx:
+                    observability.coverage(events_db, corpus_dir)
+                self.assertIn(key, str(ctx.exception))
+
+    def test_every_coverage_key_render_map_reads_is_strict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir, events_db = self._simple(tmp)
+            cov = observability.coverage(events_db, corpus_dir)
+            manifest = _load_manifest(corpus_dir)
+            baseline = observability.render_map(cov, manifest, _CODE_VERSION)
+            # "meta" is returned for callers and never rendered; proven unread below rather
+            # than assumed.
+            for key in sorted(set(cov) - {"meta"}):
+                broken = dict(cov)
+                del broken[key]
+                with self.subTest(key=key), self.assertRaises(KeyError):
+                    observability.render_map(broken, manifest, _CODE_VERSION)
+            broken = dict(cov)
+            del broken["meta"]
+            self.assertEqual(observability.render_map(broken, manifest, _CODE_VERSION), baseline)
+
+    def test_a_missing_turn_kind_raises_and_a_present_zero_reads_zero(self):
+        def _win(drop=None):
+            return {
+                "turns": {
+                    k: observability._zero_pop_window()
+                    for k in observability.TURN_KINDS if k != drop
+                },
+                "tool_events": {
+                    "total": observability._zero_flat_window(),
+                    observability.AGENT_TOOL_NAME: observability._zero_flat_window(),
+                },
+                "deliveries": {
+                    "total": observability._zero_flat_window(),
+                    "transfer_filtered": observability._zero_flat_window(),
+                    "with_tool_use_id": observability._zero_flat_window(),
+                },
+            }
+        self.assertEqual(
+            observability._field_window_count(_win(), "assistant_text_turns"), (0, 0, "all")
+        )
+        for field, kind in (("assistant_text_turns", "assistant_text"),
+                            ("prompt_interrupt_turns", "prompt"),
+                            ("prompt_interrupt_turns", "interrupt"),
+                            ("delegation_turns", "delegation")):
+            with self.subTest(field=field, kind=kind), self.assertRaises(KeyError):
+                observability._field_window_count(_win(drop=kind), field)
+
+    def test_an_undeclared_closed_set_value_raises(self):
+        for sql, value in (("UPDATE turns SET kind = ?", "bogus-kind"),
+                           ("UPDATE tool_events SET join_method = ?", "bogus-method"),
+                           ("UPDATE deliveries SET source = ?", "bogus-source")):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as tmp:
+                corpus_dir, events_db = self._simple(tmp)
+                conn = sqlite3.connect(str(events_db))
+                conn.execute(sql, (value,))
+                conn.commit()
+                conn.close()
+                with self.assertRaises(ValueError) as ctx:
+                    observability.coverage(events_db, corpus_dir)
+                self.assertIn(value, str(ctx.exception))
+
+
+class ProvenanceHeader(unittest.TestCase):
+    """R68: the header is rendered from data -- corpus_id, the sources from the manifest's
+    files keys, the usage-DB row count, the kept earliest ts, the freeze instant, the rendering
+    code's version -- plus ONE fixed sentence, verbatim."""
+
+    def test_header_is_data_plus_the_one_fixed_sentence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir, manifest = _freeze_fixture(tmp, {
+                ".claude": {
+                    "s-a": [_entry("a1", "2026-09-20T09:00:00Z", "s-a", content="hi")],
+                    "s-a/subagents/agent-x": [
+                        _entry("a2", "2026-09-20T09:00:01Z", "s-a", content="sub"),
+                    ],
+                },
+                ".claude-sdd": {
+                    "s-b": [_entry("b1", "2026-09-20T10:00:00Z", "s-b", content="hi")],
+                    "s-c": [_entry("c1", "2026-09-20T11:00:00Z", "s-c", content="hi")],
+                },
+            }, usage_rows=[
+                {"cc_session_id": "s-a", "called_at": "2026-09-20 09:00:02"},
+                {"cc_session_id": "s-b", "called_at": "2026-09-20 10:00:02"},
+            ])
+            observability.finalize_bounds(corpus_dir)
+            events_db = pathlib.Path(tmp) / "events.db"
+            join.build_events(corpus_dir, events_db)
+            cov = observability.coverage(events_db, corpus_dir)
+            final = _load_manifest(corpus_dir)
+            created = manifest["created_utc"]
+
+            rendered = observability.render_map(
+                cov, final, {"head": "c0de" * 10, "dirty": True}
+            )
+            lines = rendered.splitlines()
+            self.assertEqual(lines[0], "# Observability map -- fx-corpus")
+            self.assertEqual(
+                lines[2],
+                "A map from any corpus other than the Task 12 freeze is provisional; Task 12 "
+                "regenerates this file from the frozen real corpus.",
+            )
+            provenance = _sections(rendered)["## Provenance"]
+            self.assertEqual(_prose(provenance), [
+                "- corpus_id: fx-corpus",
+                f"- freeze instant (manifest created_utc): {created}",
+                "- rendering code: git HEAD " + "c0de" * 10 + " at render time; scripts/measure "
+                "has uncommitted changes",
+                "- repos at freeze (manifest repos): none",
+                "- earliest kept top-level entry ts: 2026-09-20T09:00:00Z (top-level entries "
+                "skipped by this scan: 0 without a ts, 0 with an unparseable ts)",
+                "- usage DBs: 1 file(s) in the manifest's files, holding 2 usage rows "
+                "(manifest counts)",
+                "Transcript sources, from the manifest's files:",
+            ])
+            self.assertEqual(_table_rows(provenance), [
+                ["profile dir", "project dir", "top-level transcripts", "subagent transcripts"],
+                ["00-.claude", "p", "1", "1"],
+                ["01-.claude-sdd", "p", "2", "0"],
+            ])
+            windows = _prose(_sections(rendered)["## Windows"])
+            self.assertIn(f"- retained: 2026-09-20T09:00:00Z to {created}", windows)
+
+            clean = observability.render_map(cov, final, {"head": "c0de" * 10, "dirty": False})
+            self.assertIn(
+                "- rendering code: git HEAD " + "c0de" * 10 + " at render time; scripts/measure "
+                "clean",
+                clean.splitlines(),
+            )
+
+    def test_render_map_refuses_a_manifest_the_coverage_was_not_computed_from(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            _write_lines(proj / "sid1.jsonl", [_entry("u1", "2026-09-20T10:00:00Z", "sid1")])
+            events_db = pathlib.Path(tmp) / "events.db"
+            join.build_events(corpus_dir, events_db)
+            cov = observability.coverage(events_db, corpus_dir)
+            other = _load_manifest(corpus_dir)
+            other["bounds"] = {
+                "retained": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2098-01-01T00:00:00Z"},
+                "decision": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2098-01-01T00:00:00Z"},
+            }
+            with self.assertRaises(ValueError):
+                observability.render_map(cov, other, _CODE_VERSION)
+
+
+class RenderingCodeVersionDefault(unittest.TestCase):
+    """R68: with no code_version, render_map reads the RENDERING code's version at render time:
+    `git -C <repo> rev-parse HEAD` plus a dirty flag from `git status --porcelain --
+    scripts/measure`."""
+
+    def test_default_code_version_is_git_head_and_dirty_flag_at_render_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            _write_lines(proj / "sid1.jsonl", [_entry("u1", "2026-09-20T10:00:00Z", "sid1")])
+            events_db = pathlib.Path(tmp) / "events.db"
+            join.build_events(corpus_dir, events_db)
+            cov = observability.coverage(events_db, corpus_dir)
+            rendered = observability.render_map(cov, _load_manifest(corpus_dir))
+        head = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "status", "--porcelain", "--", "scripts/measure"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        state = "scripts/measure has uncommitted changes" if dirty else "scripts/measure clean"
+        self.assertIn(
+            f"- rendering code: git HEAD {head} at render time; {state}", rendered.splitlines()
+        )
+
+    def test_dirty_flag_reads_git_status_of_scripts_measure_only(self):
+        # A throwaway repo pins both halves of the flag in every state of THIS checkout: the
+        # test above can only observe whichever state the real tree happens to be in.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp)
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                     *args],
+                    capture_output=True, text=True, check=True,
+                ).stdout.strip()
+
+            git("init", "-q")
+            (repo / "scripts" / "measure").mkdir(parents=True)
+            (repo / "scripts" / "measure" / "m.py").write_text("x = 1\n")
+            (repo / "README").write_text("r\n")
+            git("add", "-A")
+            git("commit", "-q", "-m", "c")
+            head = git("rev-parse", "HEAD")
+
+            self.assertEqual(
+                observability.rendering_code_version(repo), {"head": head, "dirty": False}
+            )
+            (repo / "README").write_text("changed outside scripts/measure\n")
+            self.assertEqual(
+                observability.rendering_code_version(repo), {"head": head, "dirty": False}
+            )
+            (repo / "scripts" / "measure" / "m.py").write_text("x = 2\n")
+            self.assertEqual(
+                observability.rendering_code_version(repo), {"head": head, "dirty": True}
+            )
+
+
+class FinalizeBounds(unittest.TestCase):
+    """R71: the pipeline owns the bounds. finalize_bounds sets retained = [earliest KEPT
+    top-level entry ts, created_utc) and decision = [created_utc - 7 days, created_utc),
+    rewrites manifest.json, and coverage() checks against the SAME earliest-entry function."""
+
+    def test_bounds_come_from_kept_sessions_and_the_freeze_instant(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir, manifest = _freeze_fixture(tmp, {".claude-sdd": {
+                # The earliest entry is NOT first in file order: the scan is a min over every
+                # entry, not Session.first_ts.
+                "keep-a": [
+                    _entry("ka-1", "2026-09-20T10:00:05Z", "keep-a", content="later"),
+                    _entry("ka-0", "2026-09-20T10:00:00Z", "keep-a", content="earlier"),
+                ],
+                # LOAD-BEARING: an EXCLUDED session (sdk-cli) predating every kept entry pins
+                # "kept" -- an unfiltered scan returns 2026-09-19T08:00:00Z (mutant N7).
+                "headless": [
+                    _entry("h-0", "2026-09-19T08:00:00Z", "headless", entrypoint="sdk-cli"),
+                ],
+            }})
+            created = manifest["created_utc"]
+            created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            expected = {
+                "retained": {"start_utc": "2026-09-20T10:00:00Z", "end_utc": created},
+                "decision": {
+                    "start_utc": (created_dt - timedelta(days=7)).astimezone(timezone.utc)
+                    .strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "end_utc": created,
+                },
+            }
+            self.assertEqual(
+                observability.earliest_kept_top_level_ts(corpus_dir), "2026-09-20T10:00:00Z"
+            )
+
+            bounds = observability.finalize_bounds(corpus_dir)
+            self.assertEqual(bounds, expected)
+            on_disk = _load_manifest(corpus_dir)
+            self.assertEqual(on_disk["bounds"], expected)
+            # Nothing but the bounds changed.
+            for key in set(manifest) - {"bounds"}:
+                self.assertEqual(on_disk[key], manifest[key], msg=key)
+
+            events_db = pathlib.Path(tmp) / "events.db"
+            join.build_events(corpus_dir, events_db)
+            cov = observability.coverage(events_db, corpus_dir)
+            self.assertEqual(cov["earliest_kept_top_level"]["ts"], "2026-09-20T10:00:00Z")
+
+            # coverage() checks the SAME earliest-entry value: a start one second later raises.
+            on_disk["bounds"]["retained"]["start_utc"] = "2026-09-20T10:00:01Z"
+            (corpus_dir / "manifest.json").write_text(json.dumps(on_disk, indent=2, sort_keys=True))
+            with self.assertRaises(ValueError) as ctx:
+                observability.coverage(events_db, corpus_dir)
+            self.assertIn("R61: manifest.bounds.retained.start_utc", str(ctx.exception))
+
+    def test_no_parseable_kept_entry_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir, _manifest = _freeze_fixture(tmp, {".claude-sdd": {
+                "keep-a": [_entry("ka-0", "not-a-ts", "keep-a")],
+            }})
+            with self.assertRaises(ValueError):
+                observability.finalize_bounds(corpus_dir)
 
 
 if __name__ == "__main__":
