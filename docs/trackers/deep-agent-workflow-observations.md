@@ -662,7 +662,7 @@ No failed attempts beyond one refused pipe, which recovered on the next call.
 | Effects / recovery | SPLADE container restarted once, an action of the class the operator authorised. ROCm venv gained 3 packages. Outputs in `~/work/claude/rule-tell-runs/amd-smoke/`. New repo `~/work/claude/gpu-tuning` (`08e7acb`, `e5ec7af`). codescout bug `e83e92ce`. No rollback needed |
 | Outcome / basis | `good`, `verified-complete` for "AMD can run it": `smoke-done` with exit 0 twice; warm time 1.3× the A5000's (125 s against 95 s); 0 recompiles; bit-identical loss. The peak on the longest rows is unmeasured (gpu-tuning Q-7) |
 | Delegation candidate | A "can card X run workload Y" probe: a fixed-row smoke run cold then warm, logging time, `max_memory_allocated`, KFD VRAM, compile-cache delta and power. It's a deterministic script needing no judgement. Missing input: choosing the longest rows |
-| Rests on / grouping / overhead | gpu-tuning `docs/trackers/research.md` R-1 and R-5. codescout `docs/issues/2026-09-26-running-retrieval-stack-is-defined-nowhere.md`. Linked DCX-4. Capture about 12 min, estimated |
+| Rests on / grouping / overhead | gpu-tuning `docs/trackers/research.md` R-1 and R-5. codescout `docs/issues/archive/2026-09-26-running-retrieval-stack-is-defined-nowhere.md` (fixed `7a51ebd1`). Linked DCX-4. Capture about 12 min, estimated |
 
 ## DCS-12 — Session 571eb3d6 (resumed as 0cbae2f0): Stage 2 Steps 1–2, the AMD card as a second training device, the research fan-out, sixth post-compaction interval
 

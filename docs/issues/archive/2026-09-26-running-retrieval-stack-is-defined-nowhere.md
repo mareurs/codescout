@@ -1,11 +1,11 @@
 ---
-id: '1e385e13419237c6'
+id: e15c16825cef19a3
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the retrieval stack every session uses is defined nowhere, and six docs describe one that isn''t running'
 tags:
 - cluster/doc-contradicted-by-code
-closed: ''
+closed: 2026-09-27
 opened: 2026-09-26
 owner: marius
 related: []
@@ -122,7 +122,7 @@ N/A, with reason: this is documentation and deployment drift, with no code path 
 
 ## Resume
 
-Commit, gate result, SHA and patch-id are recorded below once they exist. After that, archive this file.
+Fixed on `experiments` in `7a51ebd1`, patch-id `993069eb31bd085c022069dace0a7443dcba1cb4`. `./scripts/gate.sh` passed: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0, and `retrieval_default_ports_match_published_compose_ports`, which parses this compose file, passed in both test lanes. Nothing left to resume. The one open follow-up is measurement, not repair: `sparse-amd`'s `--max-batch-requests 4` applies at its next recreate, when SPLADE returns from the `sparse-cpu` fallback; measure its VRAM and a reindex then.
 
 ## References
 
