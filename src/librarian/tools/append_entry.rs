@@ -1803,3 +1803,319 @@ mod tests {
         let _ = tmp;
     }
 }
+/// Doc-to-code gate: every `append_entry` recipe in `docs/TAXONOMY.md`'s *Main taxonomy* table
+/// must be one `call` accepts. Spec: docs/superpowers/specs/2026-09-27-taxonomy-append-recipes-test-design.md.
+#[cfg(test)]
+mod taxonomy_recipes {
+    use crate::util::markdown_fence::FenceState;
+
+    const CALL_OPENER: &str = "doc(action=\"append_entry\"";
+    const SECTION: &str = "## Main taxonomy";
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum Shape {
+        Prose,
+        Params {
+            collection: String,
+        },
+        /// The F-N row: `<topic>` in its target stands for every session log. The W-N row has
+        /// no call of its own ("Same"), so the template check requires W alongside F.
+        Template,
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct Recipe {
+        line: usize,
+        label: String,
+        id_prefix: String,
+        target: String,
+        shape: Shape,
+    }
+
+    #[derive(Debug, Default)]
+    struct Scan {
+        recipes: Vec<Recipe>,
+        unparseable: Vec<String>,
+        non_recipe_rows: Vec<String>,
+        rows_seen: usize,
+    }
+
+    fn at(line: usize, label: &str) -> String {
+        format!("docs/TAXONOMY.md:{line} ({label})")
+    }
+
+    /// Argument text of the call whose `(` is at byte `open`; `None` if it never closes.
+    /// Tracks double-quoted strings (with `\` escapes) and `([{` depth.
+    fn call_args(text: &str, open: usize) -> Option<&str> {
+        let bytes = text.as_bytes();
+        let (mut depth, mut in_str, mut i) = (0usize, false, open);
+        while i < bytes.len() {
+            let b = bytes[i];
+            if in_str {
+                match b {
+                    b'\\' => i += 1,
+                    b'"' => in_str = false,
+                    _ => {}
+                }
+            } else {
+                match b {
+                    b'"' => in_str = true,
+                    b'(' | b'[' | b'{' => depth += 1,
+                    b')' | b']' | b'}' => {
+                        depth = depth.checked_sub(1)?;
+                        if depth == 0 {
+                            if b == b')' {
+                                return Some(&text[open + 1..i]);
+                            }
+                            return None;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Value of `key="…"` at depth 0 of `args`, outside strings, at a word boundary.
+    fn top_level_arg(args: &str, key: &str) -> Option<String> {
+        let bytes = args.as_bytes();
+        let needle = format!("{key}=\"");
+        let (mut depth, mut in_str, mut i) = (0usize, false, 0);
+        while i < bytes.len() {
+            let b = bytes[i];
+            if in_str {
+                match b {
+                    b'\\' => i += 1,
+                    b'"' => in_str = false,
+                    _ => {}
+                }
+            } else if depth == 0
+                && bytes[i..].starts_with(needle.as_bytes())
+                && (i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_'))
+            {
+                let start = i + needle.len();
+                let len = args[start..].find('"')?;
+                return Some(args[start..start + len].to_string());
+            } else {
+                match b {
+                    b'"' => in_str = true,
+                    b'(' | b'[' | b'{' => depth += 1,
+                    b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+                    _ => {}
+                }
+            }
+            i += 1;
+        }
+        None
+    }
+
+    fn first_tracker_path(cell: &str) -> Option<String> {
+        cell.split('`')
+            .skip(1)
+            .step_by(2)
+            .find(|s| s.starts_with("docs/trackers/") && s.ends_with(".md"))
+            .map(str::to_string)
+    }
+
+    fn parse_row(line: &str) -> Result<(String, Option<String>, String), String> {
+        let mut calls: Vec<(String, Option<String>)> = Vec::new();
+        for (open, _) in line.match_indices(CALL_OPENER) {
+            let args = call_args(line, open + "doc".len())
+                .ok_or("the append_entry call never closes its `(`")?;
+            let prefix = top_level_arg(args, "id_prefix")
+                .ok_or("the append_entry call passes no id_prefix=\"…\"")?;
+            calls.push((prefix, top_level_arg(args, "entry_collection")));
+        }
+        if calls.windows(2).any(|w| w[0] != w[1]) {
+            return Err(format!(
+                "the row holds append_entry calls that disagree: {calls:?}"
+            ));
+        }
+        // Only the Lives-in cell (the second) is split out: it never holds a pipe, while the
+        // append-tool cell can hold unescaped ones inside a code span.
+        let lives_in = line.split(" | ").nth(1).unwrap_or_default();
+        let target = first_tracker_path(lives_in)
+            .ok_or("the Lives-in cell names no backticked docs/trackers/…md target")?;
+        let (prefix, collection) = calls.swap_remove(0);
+        Ok((prefix, collection, target))
+    }
+
+    fn scan_main_taxonomy(text: &str) -> Scan {
+        let mut scan = Scan::default();
+        let mut fence = FenceState::new();
+        let mut in_section = false;
+        for (idx, line) in text.lines().enumerate() {
+            if fence.feed(line) || fence.in_fence() {
+                continue;
+            }
+            if line.starts_with("## ") {
+                in_section = line.trim_end() == SECTION;
+                continue;
+            }
+            if !in_section || !line.starts_with("| **") {
+                continue;
+            }
+            scan.rows_seen += 1;
+            let label = line["| **".len()..]
+                .split(['*', '|'])
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if !line.contains(CALL_OPENER) {
+                scan.non_recipe_rows.push(label);
+                continue;
+            }
+            match parse_row(line) {
+                Ok((id_prefix, collection, target)) => {
+                    let shape = match collection {
+                        Some(collection) => Shape::Params { collection },
+                        None if target.contains("<topic>") => Shape::Template,
+                        None => Shape::Prose,
+                    };
+                    scan.recipes.push(Recipe {
+                        line: idx + 1,
+                        label,
+                        id_prefix,
+                        target,
+                        shape,
+                    });
+                }
+                Err(why) => scan
+                    .unparseable
+                    .push(format!("{}: {why}", at(idx + 1, &label))),
+            }
+        }
+        scan
+    }
+
+    /// A miniature TAXONOMY. Load-bearing details: the fenced ZZ row and the Q row under the
+    /// NEXT section must be ignored; the R row's `index_row="| {id} | … |"` has unescaped pipes
+    /// that break any cell-splitting parser; A has no call (not a recipe); B has a call with no
+    /// id_prefix (unparseable, line 12).
+    const FIXTURE: &str = r##"# T
+## Main taxonomy
+```sh
+| **ZZ-N** | `docs/trackers/in-fence.md` | c | `doc(action="append_entry", id="z", id_prefix="ZZ")` | p |
+```
+| Prefix | Lives in | Captures | Append tool | Promotes to |
+|---|---|---|---|---|
+| **R-N** | `docs/trackers/r.md` (artifact `abc`) | c | `doc(action="append_entry", id="abc", id_prefix="R", index_row="| {id} | … |", title=…)` | p |
+| **T-N** | `docs/trackers/t.md` | c | `doc(action="append_entry", id="t", entry_collection="observations", id_prefix="T", entry={…})` | p |
+| **F-N** | `docs/trackers/<topic>-session-log.md` | c | `doc(action="append_entry", id=<log's artifact id>, id_prefix="F", title=…)` | p |
+| **A-N** | `docs/trackers/a.md` | c | per the tracker's convention | p |
+| **B-N** | `docs/trackers/b.md` | c | `doc(action="append_entry", id="b", title=…)` | p |
+## Next section
+| **Q-N** | `docs/trackers/q.md` | c | `doc(action="append_entry", id="q", id_prefix="Q")` | p |
+"##;
+
+    fn open_of(row: &str) -> usize {
+        row.find(CALL_OPENER).unwrap() + "doc".len()
+    }
+
+    #[test]
+    fn a_call_span_closes_over_a_nested_literal() {
+        let row = r##"x `doc(action="append_entry", id_prefix="T", entry={a: [1, (2)]})` tail"##;
+        assert_eq!(
+            call_args(row, open_of(row)),
+            Some(r##"action="append_entry", id_prefix="T", entry={a: [1, (2)]}"##)
+        );
+    }
+
+    #[test]
+    fn a_paren_inside_a_quoted_string_does_not_close_the_call() {
+        let row = r##"`doc(action="append_entry", title="a ) b", id_prefix="R")`"##;
+        let args = call_args(row, open_of(row)).expect("closes at the real paren");
+        assert_eq!(top_level_arg(args, "id_prefix").as_deref(), Some("R"));
+    }
+
+    #[test]
+    fn an_unclosed_call_span_is_none() {
+        let row = r##"`doc(action="append_entry", id_prefix="R", entry={…)`"##;
+        assert_eq!(call_args(row, open_of(row)), None);
+    }
+
+    #[test]
+    fn only_a_top_level_argument_at_a_word_boundary_counts() {
+        // Three decoys, each load-bearing: a quoted mention, a nested object and a longer key all
+        // spell `id_prefix="…"`; only the last, top-level one is the argument.
+        let args =
+            r#"body="id_prefix=\"Q\"", entry={id_prefix="Z"}, xid_prefix="Y", id_prefix="R""#;
+        assert_eq!(top_level_arg(args, "id_prefix").as_deref(), Some("R"));
+    }
+
+    #[test]
+    fn the_scanner_classifies_each_row_and_ignores_fenced_and_foreign_rows() {
+        let scan = scan_main_taxonomy(FIXTURE);
+        let got: Vec<(&str, &str, Shape)> = scan
+            .recipes
+            .iter()
+            .map(|r| (r.label.as_str(), r.id_prefix.as_str(), r.shape.clone()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("R-N", "R", Shape::Prose),
+                (
+                    "T-N",
+                    "T",
+                    Shape::Params {
+                        collection: "observations".into()
+                    }
+                ),
+                ("F-N", "F", Shape::Template),
+            ]
+        );
+        assert_eq!(scan.recipes[0].target, "docs/trackers/r.md");
+        assert_eq!(scan.recipes[0].line, 8);
+        assert_eq!(scan.non_recipe_rows, vec!["A-N".to_string()]);
+        assert_eq!(scan.unparseable.len(), 1, "{:?}", scan.unparseable);
+        assert!(
+            scan.unparseable[0].starts_with("docs/TAXONOMY.md:12 (B-N)"),
+            "{:?}",
+            scan.unparseable
+        );
+        assert_eq!(
+            scan.rows_seen, 5,
+            "the fenced ZZ row and the Q row under the next section are not rows"
+        );
+    }
+
+    #[test]
+    fn two_calls_that_disagree_are_unparseable_not_a_guess() {
+        let row = r##"| **X-N** | `docs/trackers/x.md` | c | `doc(action="append_entry", id_prefix="X")` or `doc(action="append_entry", id_prefix="Y")` | p |"##;
+        let err = parse_row(row).unwrap_err();
+        assert!(err.contains("disagree"), "{err}");
+    }
+
+    #[test]
+    fn a_target_is_read_only_from_the_lives_in_cell() {
+        // Load-bearing: the Captures cell names a real-looking tracker. Binding to it would
+        // check the wrong file and pass.
+        let row = r##"| **X-N** | Same file as F-N | see `docs/trackers/other.md` | `doc(action="append_entry", id_prefix="X")` | p |"##;
+        let err = parse_row(row).unwrap_err();
+        assert!(
+            err.contains("Lives-in cell names no backticked docs/trackers"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_renamed_section_yields_no_rows() {
+        let scan =
+            scan_main_taxonomy(&FIXTURE.replace("## Main taxonomy", "## Main taxonomy (renamed)"));
+        assert_eq!(scan.rows_seen, 0);
+        assert!(scan.recipes.is_empty());
+    }
+
+    #[test]
+    fn crlf_scans_like_lf() {
+        let lf = scan_main_taxonomy(FIXTURE);
+        let crlf = scan_main_taxonomy(&FIXTURE.replace('\n', "\r\n"));
+        assert_eq!(crlf.recipes, lf.recipes);
+        assert_eq!(crlf.unparseable, lf.unparseable);
+        assert_eq!(crlf.rows_seen, lf.rows_seen);
+    }
+}
