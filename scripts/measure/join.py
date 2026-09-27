@@ -13,7 +13,7 @@ import re
 import sqlite3
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 _THIS_DIR = pathlib.Path(__file__).resolve().parent
 if str(_THIS_DIR) not in sys.path:
@@ -317,6 +317,14 @@ def _deliveries_from_attachment(entry, cid):
     a hook ran (exit code/duration, toolUseID); injected text is recorded as
     `hook_additional_context`. A hook emitting nothing (e.g. a Stop hook with no output)
     records no content, and produces no delivery row here.
+
+    R53: Claude Code records one hook injection TWICE for some hook events -- a
+    `hook_success` attachment (whose stdout carries the same additionalContext text) and a
+    companion `hook_additional_context` attachment, both sharing (toolUseID, hook event,
+    sha256). The returned dict carries a transient `_atype` tag (the attachment's own
+    `type`) so a later dedup pass (`_dedup_hook_deliveries`) can prefer the
+    `hook_additional_context` twin; `_atype` is stripped before any row reaches the
+    `deliveries` table.
     """
     att = entry.get("attachment")
     if not isinstance(att, dict):
@@ -351,6 +359,7 @@ def _deliveries_from_attachment(entry, cid):
             "sha256": hashlib.sha256(text.encode()).hexdigest(),
             "bytes": len(text.encode()),
             "tool_use_id": att.get("toolUseID"),
+            "_atype": atype,
         }
     ]
 
@@ -629,6 +638,49 @@ def _process_subagent_union(conn, sessions_list, excl, keeper, keeper_cid, corpu
     return tool_use_candidates, delivery_rows
 
 
+def _dedup_hook_deliveries(delivery_rows, counts):
+    """R53: one delivery per (toolUseID, hook event, sha256) among `transcript_hook`-sourced
+    rows -- Claude Code records one hook injection as BOTH a `hook_success` attachment and a
+    `hook_additional_context` attachment, and `_deliveries_from_attachment` emits a row for
+    each. `hook_additional_context` is Amendment 2(a)'s named record of injected text, so a
+    group's `hook_additional_context` member wins when one exists; a group with no such twin
+    (a lone `hook_success`) falls back to its one row and is counted in `hook_success_only`
+    so the build reports how often that happened. Non-`transcript_hook` rows (usage-row
+    deliveries) pass through untouched -- this dedup applies only to the source R53 names.
+    """
+    groups = {}
+    for d in delivery_rows:
+        if d.get("source") != "transcript_hook":
+            continue
+        gkey = (d.get("tool_use_id"), d.get("key"), d.get("sha256"))
+        groups.setdefault(gkey, []).append(d)
+
+    chosen = {}
+    for gkey, rows in groups.items():
+        preferred = next((r for r in rows if r.get("_atype") == "hook_additional_context"), None)
+        if preferred is not None:
+            chosen[gkey] = preferred
+        else:
+            chosen[gkey] = rows[0]
+            counts["hook_success_only"] = counts.get("hook_success_only", 0) + 1
+
+    emitted = set()
+    out = []
+    for d in delivery_rows:
+        if d.get("source") != "transcript_hook":
+            out.append(d)
+            continue
+        gkey = (d.get("tool_use_id"), d.get("key"), d.get("sha256"))
+        if gkey in emitted:
+            continue
+        emitted.add(gkey)
+        winner = chosen[gkey]
+        winner.pop("_atype", None)
+        out.append(winner)
+    return out
+
+
+
 def _find_usage_dbs(corpus_dir):
     d = pathlib.Path(corpus_dir) / "usage_dbs"
     if not d.is_dir():
@@ -644,7 +696,8 @@ def _load_usage_rows(corpus_dir):
         try:
             cur = conn.execute(
                 "SELECT id, tool_name, called_at, started_at, cc_session_id, agent_id, "
-                "input_json, output_json, deliveries_json, tool_use_id FROM tool_calls"
+                "input_json, output_json, deliveries_json, tool_use_id, latency_ms "
+                "FROM tool_calls"
             )
             for row in cur:
                 d = dict(row)
@@ -742,6 +795,7 @@ def _join_tool_events(conn, tool_use_candidates, usage_rows, counts, relations_m
 
         best = None
         best_diff = None
+        best_via_called_at = None
         for row in candidates:
             if row["_row_key"] in claimed:
                 continue
@@ -756,23 +810,40 @@ def _join_tool_events(conn, tool_use_candidates, usage_rows, counts, relations_m
                 continue
             if usage_input != transcript_input:
                 continue
+            # R54: `started_at` is NULL on every usage row before 2026-09-20 19:17:34 UTC
+            # (81% of the corpus), so the heuristic falls back to `called_at` -- measured
+            # completion time -- minus `latency_ms` (called_at - started_at - latency_ms
+            # averages ~11ms and is within 1s for 99.8% of rows carrying both). No
+            # latency_ms leaves called_at un-adjusted rather than dropping the row.
             started_at = row.get("started_at")
-            if not started_at or c_dt is None:
+            via_called_at = False
+            time_key = started_at
+            if not time_key:
+                time_key = row.get("called_at")
+                via_called_at = True
+            if not time_key or c_dt is None:
                 continue
             try:
-                row_dt = utc(started_at)
+                row_dt = utc(time_key)
             except ValueError:
                 continue
+            if via_called_at:
+                latency_ms = row.get("latency_ms")
+                if latency_ms:
+                    row_dt = row_dt - timedelta(milliseconds=latency_ms)
             diff = abs((row_dt - c_dt).total_seconds())
             if diff > JOIN_WINDOW_SECONDS:
                 continue
             if best is None or diff < best_diff:
                 best = row
                 best_diff = diff
+                best_via_called_at = via_called_at
 
         if best is not None:
             claimed.add(best["_row_key"])
             _insert(c, best["_row_key"], "heuristic")
+            if best_via_called_at:
+                counts["heuristic_via_called_at"] = counts.get("heuristic_via_called_at", 0) + 1
         else:
             _insert(c, None, "none")
 
@@ -956,6 +1027,8 @@ def build_events(corpus_dir, events_db, repo_paths=None, excluded_sids=SPEC_EXCL
         "subagent_entries_recovered_from_duplicates": 0,
         "subagent_duplicate_uuids_skipped": 0,
         "top_level_attribution_skipped": 0,
+        "hook_success_only": 0,
+        "heuristic_via_called_at": 0,
     }
 
     all_tool_use_candidates = []
@@ -979,6 +1052,11 @@ def build_events(corpus_dir, events_db, repo_paths=None, excluded_sids=SPEC_EXCL
         )
         all_tool_use_candidates.extend(sub_tool_use_candidates)
         delivery_rows.extend(sub_delivery_rows)
+
+    # R53: one delivery per (toolUseID, hook event, sha256) among the transcript_hook rows
+    # just collected -- Claude Code emits a hook_success/hook_additional_context twin for
+    # some hook invocations, and _deliveries_from_attachment produced a row for each.
+    delivery_rows = _dedup_hook_deliveries(delivery_rows, counts)
 
     # R50(c): a usage row whose session is out of the corpus or excluded (no kept session maps
     # to its bare cc_session_id) emits NOTHING and increments deliveries_unmapped_session --

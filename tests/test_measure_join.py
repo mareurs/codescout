@@ -69,7 +69,8 @@ def _entry(uuid, ts, sid, entrypoint="cli", type_="user", content="hello",
     return e
 
 
-def _attachment_entry(uuid, ts, sid, hook_name="SessionStart", content="shared hook text"):
+def _attachment_entry(uuid, ts, sid, hook_name="SessionStart", content="shared hook text",
+                       tool_use_id=None):
     return {
         "type": "attachment",
         "uuid": uuid,
@@ -80,7 +81,24 @@ def _attachment_entry(uuid, ts, sid, hook_name="SessionStart", content="shared h
             "hookName": hook_name,
             "hookEvent": hook_name,
             "content": content,
-            "toolUseID": None,
+            "toolUseID": tool_use_id,
+        },
+    }
+def _hook_success_entry(uuid, ts, sid, hook_name="SessionStart", content="shared hook text",
+                         tool_use_id=None):
+    # R53: the `hook_success` twin of `_attachment_entry` -- real-shaped, the injected text
+    # arrives via `stdout`'s JSON `hookSpecificOutput.additionalContext`, not `content`.
+    return {
+        "type": "attachment",
+        "uuid": uuid,
+        "timestamp": ts,
+        "sessionId": sid,
+        "attachment": {
+            "type": "hook_success",
+            "hookName": hook_name,
+            "hookEvent": hook_name,
+            "stdout": json.dumps({"hookSpecificOutput": {"additionalContext": content}}),
+            "toolUseID": tool_use_id,
         },
     }
 
@@ -133,7 +151,9 @@ def _candidate(cid, bare_sid, name, input_, ts, tool_use_id=None, agent_id=None)
 
 
 def _usage_row(row_key, tool_name, cc_session_id, input_json, started_at,
-               agent_id=None, tool_use_id=None):
+               agent_id=None, tool_use_id=None, called_at=None, latency_ms=None):
+    # R54: `called_at` defaults to `started_at` (today's shape); a caller testing the
+    # started_at-NULL fallback passes started_at=None and a distinct called_at explicitly.
     return {
         "_row_key": row_key,
         "tool_name": tool_name,
@@ -144,7 +164,8 @@ def _usage_row(row_key, tool_name, cc_session_id, input_json, started_at,
         "deliveries_json": None,
         "tool_use_id": tool_use_id,
         "started_at": started_at,
-        "called_at": started_at,
+        "called_at": called_at if called_at is not None else started_at,
+        "latency_ms": latency_ms,
     }
 
 
@@ -651,6 +672,84 @@ class JoinPrecedence(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["join_method"], "heuristic")
         self.assertEqual(rows[0]["usage_row_id"], "db:1")
+class CalledAtFallback(unittest.TestCase):
+    """R54: 81% of usage rows have `started_at` NULL (every row before 2026-09-20 19:17:34
+    UTC). The heuristic then falls back to `called_at` -- measured completion time -- minus
+    `latency_ms`, so it can still find a candidate that a `started_at`-only heuristic would
+    miss entirely.
+    """
+
+    def test_a_null_started_at_with_called_at_and_latency_ms_joins_heuristically(self):
+        conn = sqlite3.connect(":memory:")
+        join._create_schema(conn)
+        counts = _fresh_counts()
+
+        candidates = [_candidate(
+            "p/sid1", "sid1", "mcp__codescout__grep", {"pattern": "x"}, _iso(BASE),
+        )]
+        # called_at is 3s after the transcript ts; latency_ms=2500 pulls the adjusted time to
+        # 0.5s after it -- well inside JOIN_WINDOW_SECONDS. started_at=None means this row can
+        # only join through the called_at fallback.
+        usage_rows = [
+            _usage_row("db:1", "grep", "sid1", json.dumps({"pattern": "x"}), started_at=None,
+                       called_at=_sql_ts(BASE + timedelta(seconds=3)), latency_ms=2500),
+        ]
+
+        join._join_tool_events(conn, candidates, usage_rows, counts, {}, {})
+        conn.commit()
+        rows = _table_rows(conn, "tool_events")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["join_method"], "heuristic")
+        self.assertEqual(rows[0]["usage_row_id"], "db:1")
+        self.assertEqual(counts["heuristic_via_called_at"], 1)
+
+    def test_a_null_started_at_with_called_at_200_seconds_later_does_not_join(self):
+        conn = sqlite3.connect(":memory:")
+        join._create_schema(conn)
+        counts = _fresh_counts()
+
+        candidates = [_candidate(
+            "p/sid1", "sid1", "mcp__codescout__grep", {"pattern": "x"}, _iso(BASE),
+        )]
+        usage_rows = [
+            _usage_row("db:1", "grep", "sid1", json.dumps({"pattern": "x"}), started_at=None,
+                       called_at=_sql_ts(BASE + timedelta(seconds=200)), latency_ms=2500),
+        ]
+
+        join._join_tool_events(conn, candidates, usage_rows, counts, {}, {})
+        conn.commit()
+        rows = _table_rows(conn, "tool_events")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["join_method"], "none")
+        self.assertEqual(counts.get("heuristic_via_called_at", 0), 0)
+
+    def test_the_called_at_fallback_subtracts_latency_before_the_120_second_window_check(self):
+        conn = sqlite3.connect(":memory:")
+        join._create_schema(conn)
+        counts = _fresh_counts()
+
+        candidates = [_candidate(
+            "p/sid1", "sid1", "mcp__codescout__grep", {"pattern": "x"}, _iso(BASE),
+        )]
+        # Edge case that distinguishes "subtract latency_ms" from "ignore latency_ms": raw
+        # called_at is 122s after the transcript ts (OUTSIDE the 120s window), but
+        # latency_ms=3000 pulls the adjusted time to 119s after it (INSIDE the window). A
+        # fallback that ignores latency_ms would see 122s and reject this candidate.
+        usage_rows = [
+            _usage_row("db:1", "grep", "sid1", json.dumps({"pattern": "x"}), started_at=None,
+                       called_at=_sql_ts(BASE + timedelta(seconds=122)), latency_ms=3000),
+        ]
+
+        join._join_tool_events(conn, candidates, usage_rows, counts, {}, {})
+        conn.commit()
+        rows = _table_rows(conn, "tool_events")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["join_method"], "heuristic")
+        self.assertEqual(rows[0]["usage_row_id"], "db:1")
+        self.assertEqual(counts["heuristic_via_called_at"], 1)
 
 
 class UsageRowJoinsAtMostOnce(unittest.TestCase):
@@ -973,6 +1072,130 @@ class ForkGlobalUuidGate(unittest.TestCase):
 
             self.assertEqual(counts["top_level_attribution_skipped"], 5)
             self.assertEqual(counts["subagent_duplicate_uuids_skipped"], 2)
+class SubagentOwnershipOrder(unittest.TestCase):
+    """X06: `_order_like_attribution`'s global first-writer-wins order decides who owns a
+    subagent uuid shared across two UNRELATED kept sessions (different sids -- no exclusion
+    mechanism touches either copy), and must agree with what `attribute_entries` independently
+    computes for the same sessions' shared TOP-LEVEL uuid -- `_process_subagent_union`'s
+    seen_uuids gate is only correct when the caller visits kept sessions in that exact order
+    (R45). Before this test, nothing asserted WHICH copy_id won a shared subagent uuid, and
+    nothing cross-checked the two orderings against each other; reversing
+    `_order_like_attribution`'s sort flips 380 real subagent-uuid owners on the live corpus with
+    no test noticing (reviewer mutation X06).
+    """
+
+    def test_the_higher_uuid_count_session_owns_the_shared_uuid_and_agrees_with_attribute_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+
+            # sess-hi has 3 distinct top-level uuids (incl. the shared one), sess-lo has 2 --
+            # both `_order_like_attribution` and `attribute_entries` sort candidates by
+            # (-uuid_count, first_ts, copy_id), so sess-hi wins on count alone; first_ts is not
+            # made to matter, so this cannot pass by accidentally exercising the tie-break
+            # instead of the count comparison.
+            _write_lines(proj / "sess-hi.jsonl", [
+                _entry("shared-top-1", "2026-09-20T09:00:00Z", "sess-hi"),
+                _entry("hi2", "2026-09-20T09:00:01Z", "sess-hi"),
+                _entry("hi3", "2026-09-20T09:00:02Z", "sess-hi"),
+            ])
+            _write_lines(proj / "sess-lo.jsonl", [
+                _entry("shared-top-1", "2026-09-20T09:30:00Z", "sess-lo"),
+                _entry("lo2", "2026-09-20T09:30:01Z", "sess-lo"),
+            ])
+
+            shared_sub_entries = [_entry("shared-sub-1", "2026-09-20T10:00:00Z", "sess-hi")]
+            _write_lines(proj / "sess-hi" / "subagents" / "sub.jsonl", shared_sub_entries)
+            _write_lines(proj / "sess-lo" / "subagents" / "sub.jsonl", shared_sub_entries)
+
+            events_db = pathlib.Path(tmp) / "events.db"
+            join.build_events(corpus_dir, events_db, excluded_sids=set())
+
+            conn = sqlite3.connect(str(events_db))
+            turns = _table_rows(conn, "turns")
+
+            top_owner = [r for r in turns if r["uuid"] == "shared-top-1"]
+            sub_owner = [r for r in turns if r["uuid"] == "shared-sub-1"]
+            self.assertEqual(len(top_owner), 1)
+            self.assertEqual(len(sub_owner), 1)
+            self.assertEqual(top_owner[0]["sid"], ".claude-sdd/sess-hi")
+            self.assertEqual(sub_owner[0]["sid"], ".claude-sdd/sess-hi")
+
+            # Cross-check: `_order_like_attribution`'s order must agree with what
+            # `attribute_entries` independently decides for the same shared top-level uuid on
+            # the same sessions -- this is the check that catches the two orderings drifting
+            # apart from each other, since `_process_subagent_union` relies on the caller
+            # visiting kept sessions in `_order_like_attribution`'s order for its global
+            # seen_uuids gate to match attribute_entries' own top-level priority.
+            sessions_list = transcripts.sessions(corpus_dir)
+            excl = transcripts.exclusions(sessions_list, set())
+            ordered_cids = [
+                transcripts.copy_id(s) for s in join._order_like_attribution(sessions_list, excl)
+            ]
+            attribution = transcripts.attribute_entries(sessions_list, excl)
+            self.assertEqual(ordered_cids[0], ".claude-sdd/sess-hi")
+            self.assertEqual(attribution["shared-top-1"], ordered_cids[0])
+class SubagentAttachmentUnionGate(unittest.TestCase):
+    """X05: `_process_subagent_union`'s `seen_uuids` gate must be checked BEFORE the
+    attachment-type branch, not after -- otherwise a subagent ATTACHMENT whose uuid is shared
+    across the global union (the same physical hook-injection record copied into two kept
+    sessions' subagent directories, as a fork pair's shared subagent file is) is emitted once
+    PER KEEPER instead of once total, since the attachment path would bypass the very dedup
+    gate that plain entries are correctly subject to. Calls `_process_subagent_union` directly
+    (bypassing `build_events`/R53's `_dedup_hook_deliveries`) so this cannot be masked by that
+    separate, later, (tool_use_id, key, sha256)-keyed dedup pass -- the two duplicate rows this
+    test constructs share a uuid but nothing else, so only the seen_uuids gate can prevent the
+    second emission. Reviewer's own mutation of this ordering double-emitted 12 real subagent
+    deliverable attachments on the live corpus with no test noticing.
+    """
+
+    def test_a_subagent_attachment_shared_across_the_global_union_is_emitted_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            sub_dir_a = tmp_path / "fork-a" / "subagents"
+            sub_dir_b = tmp_path / "fork-b" / "subagents"
+            # Same uuid, same content -- a literal copy, as a fork pair's subagent file is --
+            # but each keeper's own call passes its OWN tool_use_id, so the two rows this
+            # emits (if the gate fails to block the second) do not share R53's dedup key
+            # either, and only the seen_uuids gate stands between one row and two.
+            shared_att_a = [_attachment_entry(
+                "sub_att1", "2026-09-21T10:05:00Z", "fork-a", tool_use_id="tu-a",
+            )]
+            shared_att_b = [_attachment_entry(
+                "sub_att1", "2026-09-21T10:05:00Z", "fork-a", tool_use_id="tu-b",
+            )]
+            _write_lines(sub_dir_a / "sub.jsonl", shared_att_a)
+            _write_lines(sub_dir_b / "sub.jsonl", shared_att_b)
+
+            keeper_a = transcripts.Session(
+                sid="fork-a", path=tmp_path / "fork-a.jsonl", profile=".claude-sdd",
+                entrypoint="cli", subagent_paths=[sub_dir_a / "sub.jsonl"], first_ts="t1",
+            )
+            keeper_b = transcripts.Session(
+                sid="fork-b", path=tmp_path / "fork-b.jsonl", profile=".claude-sdd",
+                entrypoint="cli", subagent_paths=[sub_dir_b / "sub.jsonl"], first_ts="t2",
+            )
+            sessions_list = [keeper_a, keeper_b]
+            excl = {}
+            conn = sqlite3.connect(":memory:")
+            join._create_schema(conn)
+            counts = _fresh_counts()
+            seen_uuids = set()
+
+            _, deliveries_a = join._process_subagent_union(
+                conn, sessions_list, excl, keeper_a, "fork-a", tmp_path, counts, seen_uuids,
+            )
+            _, deliveries_b = join._process_subagent_union(
+                conn, sessions_list, excl, keeper_b, "fork-b", tmp_path, counts, seen_uuids,
+            )
+
+            all_deliveries = deliveries_a + deliveries_b
+            self.assertEqual(len(all_deliveries), 1)
+            self.assertEqual(counts.get("subagent_duplicate_uuids_skipped"), 1)
+
+
+
+
 
 
 class ForkPrefixHeuristicJoin(unittest.TestCase):
@@ -1038,7 +1261,7 @@ class RealFormatHeuristicJoin(unittest.TestCase):
     see probes/task6-fix2-green.txt. It is not a regression test for a real bug (the root-cause
     probe in probes/task6-fix2-rootcause.txt found none); it is new coverage for a code path a
     real-corpus reconciliation showed was already correct. Its discriminating power is
-    demonstrated by mutant M38 in probes/task6-fix2-mutants.txt (swap the bucket key's bare_sid
+    demonstrated by mutant M18 in probes/task6-fix2-mutants.txt (swap the bucket key's bare_sid
     for cid in _join_tool_events), which this test kills -- see probes/task6-fix2-red.txt.
     """
 
@@ -1078,7 +1301,8 @@ class RealFormatHeuristicJoin(unittest.TestCase):
             conn.execute(
                 "CREATE TABLE tool_calls (id INTEGER PRIMARY KEY, tool_name TEXT, "
                 "called_at TEXT, started_at TEXT, cc_session_id TEXT, agent_id TEXT, "
-                "input_json TEXT, output_json TEXT, deliveries_json TEXT, tool_use_id TEXT)"
+                "input_json TEXT, output_json TEXT, deliveries_json TEXT, tool_use_id TEXT, "
+                "latency_ms INTEGER)"
             )
             # started_at: real usage.db shape -- "YYYY-MM-DD HH:MM:SS.mmm", no zone -- ~20ms
             # after the transcript-side tool_use timestamp above, well inside the 120s window.
@@ -1166,6 +1390,59 @@ class SubagentHookDeliveries(unittest.TestCase):
             hook_deliveries = [d for d in deliveries if d["source"] == "transcript_hook"]
             self.assertEqual(len(hook_deliveries), 1)
             self.assertEqual(hook_deliveries[0]["engine_or_hook"], "SessionStart")
+
+
+class HookDeliveryDedup(unittest.TestCase):
+    """R53: Claude Code records one hook injection as a `hook_success`/`hook_additional_context`
+    twin -- both sharing (toolUseID, hook event, sha256) -- and `_deliveries_from_attachment`
+    emits a row for each. `_dedup_hook_deliveries` collapses each such group to one row,
+    preferring the `hook_additional_context` copy; a lone `hook_success` (no twin) falls back
+    to itself and is counted in `hook_success_only`.
+    """
+
+    def test_a_hook_success_and_hook_additional_context_twin_yields_one_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+
+            _write_lines(proj / "sid1.jsonl", [
+                _entry("u1", "2026-09-20T10:00:00Z", "sid1"),
+                _hook_success_entry("hs1", "2026-09-20T11:00:00Z", "sid1",
+                                     hook_name="PostToolUse", content="same injected text",
+                                     tool_use_id="toolu_1"),
+                _attachment_entry("hc1", "2026-09-20T11:00:00Z", "sid1",
+                                   hook_name="PostToolUse", content="same injected text",
+                                   tool_use_id="toolu_1"),
+            ])
+
+            events_db = pathlib.Path(tmp) / "events.db"
+            counts = join.build_events(corpus_dir, events_db, excluded_sids=set())
+
+            deliveries = _table_rows(sqlite3.connect(str(events_db)), "deliveries")
+            hook_deliveries = [d for d in deliveries if d["source"] == "transcript_hook"]
+            self.assertEqual(len(hook_deliveries), 1)
+            self.assertEqual(hook_deliveries[0]["engine_or_hook"], "PostToolUse")
+            self.assertEqual(counts.get("hook_success_only", 0), 0)
+
+    def test_a_lone_hook_success_yields_one_row_and_is_counted_as_hook_success_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+
+            _write_lines(proj / "sid1.jsonl", [
+                _entry("u1", "2026-09-20T10:00:00Z", "sid1"),
+                _hook_success_entry("hs1", "2026-09-20T11:00:00Z", "sid1",
+                                     hook_name="PostToolUse", content="only copy",
+                                     tool_use_id="toolu_2"),
+            ])
+
+            events_db = pathlib.Path(tmp) / "events.db"
+            counts = join.build_events(corpus_dir, events_db, excluded_sids=set())
+
+            deliveries = _table_rows(sqlite3.connect(str(events_db)), "deliveries")
+            hook_deliveries = [d for d in deliveries if d["source"] == "transcript_hook"]
+            self.assertEqual(len(hook_deliveries), 1)
+            self.assertEqual(counts["hook_success_only"], 1)
 
 class ThinkingOnlyLines(unittest.TestCase):
     def test_a_thinking_only_assistant_line_is_kind_assistant_thinking_with_null_text(self):
@@ -1257,13 +1534,23 @@ class UnmappedUsageSession(unittest.TestCase):
             conn.execute(
                 "CREATE TABLE tool_calls (id INTEGER PRIMARY KEY, tool_name TEXT, "
                 "called_at TEXT, started_at TEXT, cc_session_id TEXT, agent_id TEXT, "
-                "input_json TEXT, output_json TEXT, deliveries_json TEXT, tool_use_id TEXT)"
+                "input_json TEXT, output_json TEXT, deliveries_json TEXT, tool_use_id TEXT, "
+                "latency_ms INTEGER)"
+            )
+            # R55/X07: a real, non-empty deliveries_json -- the pre-fix mutant (removing the
+            # `continue` after the deliveries_unmapped_session increment) would call
+            # _deliveries_from_usage_row(row) on this and emit 2 rows (one ledger_key row,
+            # one blocks row) under the bare/NULL sid; with a NULL deliveries_json neither
+            # version could ever fail len(deliveries) == 0.
+            unmapped_deliveries_json = json.dumps(
+                [{"engine": "get_guide", "ledger_keys": ["T-9"],
+                  "blocks": [{"sha256": "abc123", "bytes": 42}]}]
             )
             conn.execute(
                 "INSERT INTO tool_calls (tool_name, called_at, started_at, cc_session_id, "
                 "input_json, output_json, deliveries_json, tool_use_id) VALUES "
-                "('grep', ?, ?, 'not-a-kept-session', '{}', NULL, NULL, NULL)",
-                (_sql_ts(BASE), _sql_ts(BASE)),
+                "('grep', ?, ?, 'not-a-kept-session', '{}', NULL, ?, NULL)",
+                (_sql_ts(BASE), _sql_ts(BASE), unmapped_deliveries_json),
             )
             conn.commit()
             conn.close()
@@ -1362,6 +1649,24 @@ class GuideMarkerAnchoring(unittest.TestCase):
         }
         deliveries = join._deliveries_from_usage_row(row)
         self.assertEqual(deliveries, [])
+    def test_an_operator_rule_marker_quoted_mid_line_is_not_counted(self):
+        # X09: OP_RULE_RE carries its own `^[ \t]*` line-start anchor, separate from
+        # GUIDE_MARKER_RE's -- the test above only exercises the get_guide regex's anchor, so
+        # a mutation that de-anchors OP_RULE_RE specifically (dropping the `^[ \t]*` prefix or
+        # the MULTILINE flag) survived until this test existed. 3 real rows on the live corpus
+        # carry a mid-line-quoted operator-rule marker that the mutant counts.
+        block = "note: see <!-- operator-rule OP-7 -- some note --> for details"
+        row = {
+            "tool_name": "edit_file",
+            "called_at": _sql_ts(BASE),
+            "cc_session_id": "sid1",
+            "output_json": json.dumps([{"type": "text", "text": block}]),
+            "deliveries_json": None,
+            "tool_use_id": None,
+        }
+        deliveries = join._deliveries_from_usage_row(row)
+        self.assertEqual(deliveries, [])
+
 
     def test_the_closing_marker_alone_is_not_counted(self):
         block = "<!-- end auto-injected get_guide('librarian') -->"
