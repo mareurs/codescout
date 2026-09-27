@@ -1,10 +1,12 @@
 ---
 id: '4a6dad0c09f62967'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a buffer handle mentioned inside a quoted heredoc body is resolved as if it were an argument'
 tags:
 - cluster/addressing-without-an-escape-hatch
+claimed_at: 2026-09-27
+claimed_by: 48d1f0c8-9f60-43bb-a15e-17ec7995813a
 opened: 2026-09-21
 owner: marius
 related: []
@@ -188,6 +190,34 @@ Not fixed. Two candidate shapes, neither applied:
 Both need a word at the refusal site about what a caller can do, since today the answer is
 "nothing" — per `CLAUDE.md` § *Parsers Over a Namespace*, a documented limitation and a
 silent reinterpretation cost a reader very different amounts.
+
+**Shape (1) implemented 2026-09-27, plus a right boundary. Shape (2) declined, with reasons.**
+
+All four modes were re-verified live at HEAD before any code was written — none had been fixed — both at the bytes and through the running MCP `run_command`. Mode 4's reproduction minted a real handle and watched `/tmp/.tmpABeTwL` appear inside a quoted heredoc body at exit 0.
+
+**The substitution is offset-based, which this file said was the substance.** `REF_RE.find_iter(&masked)` collects spans (`output_buffer.rs:939`) and the rewrite walks them with a forward cursor (`:1099-1103`). **Every `result.replace(token, …)` is gone** — both the `@bg_` one and the main one; verified by grep, the only surviving `.replace(` in the file are a doc comment and an unrelated JSON-pretty call. The mask is computed once and feeds **both** scans, the `@cmd_/@file_/@tool_/@bg_` arm and the `@ack_` arm, whose own comment already listed *"a heredoc body"* among what it must not refuse and could not deliver it.
+
+| mode | closed? | by what |
+|---|---|---|
+| 1 — expired handle in a quoted heredoc body | **closed** | the mask |
+| 2 — `@cmd_deadbeef1` refused on its 8-hex prefix | **closed** | right boundary — and it closes an **unreported silent half**: a *live* prefix was being spliced into the middle of a longer word |
+| 3 — single-quoted `'@cmd_deadbeef'` | **open, deliberately** | see below |
+| 4 — live handle in a body, silently substituted | **closed** | mask **+** offset splice; the mask alone does not close it when the same handle also appears in command text |
+
+**Mode 3 stays open by design and is pinned as such.** Honouring quotes would be a silent regression the other way — `cat '@cmd_1a2b3c4d'` is an ordinary, correct way to name a buffer, and a quote-aware scan would quietly stop resolving it. So it is a documented limitation **stated at the refusal site**, which is what `IC-6` asks when no escape is affordable. `single_quoting_is_deliberately_not_an_escape_and_the_refusal_says_so` (`:1971`) pins **both halves**: the quoted LIVE handle still resolves, and the quoted expired one is still refused with the working escape named. Its comment says why it exists — *"so nobody credits the fix with coverage it does not provide"* — which is the annotate-inert-as-inert law applied to a deliberate non-closure.
+
+**Shape (2) was declined although this section calls it "necessary", and the ruling is ratified here rather than silently followed or silently ignored.** The reasoning rests on this file's own next clause — (2) *"would not, by itself, stop a live handle being rewritten"*. So (2) buys mentionability **only for expired handles**: a liveness-dependent, partial escape, whose price is deleting an alarm that is genuinely reached and acted on (an agent re-runs the command). Shape (1) already yields a **complete** escape — heredoc body, live or expired — so the refusal keeps its loudness *and* gains a real remedy, which is strictly better than trading one for the other. Preserving the diagnostic *and* passing through would have required `run_command/mod.rs`, outside the dispatched file set, so the combined form was structurally unavailable without stopping. **Recorded as a reasoned departure, not an omission.**
+
+## Fix provenance
+
+- **SHA:** `2219125f` (experiments-only) — positional; dies on a rebase of `experiments`.
+- **patch-id:** `bf63b03409996d54bfb6089c700e28e05484ca35` — content hash of the diff; survives rebase and cherry-pick. Derived through a file, never a pipe from `git show`.
+
+**Six mutation sites, all KILLED, none survived**, via `./scripts/mutation-probe.sh` in an isolated worktree — the shared tree was never mutated: the REF-scan mask, the right-boundary predicate, the offset splice, the ACK-scan mask, and the remedy text's two halves separately.
+
+**S3 is the load-bearing result and it settles this file's own ruling.** Keeping the mask but restoring a `String::replace` pass still rewrites the body occurrence, and **exactly one** test catches it — `the_same_handle_is_substituted_in_command_text_and_left_literal_in_the_body`. That is the measurement behind *"the offset-based rewrite is the substantive part of the change, not the masking call"*: the two halves are separable, and only the pair closes mode 4.
+
+**Operational note, because it will otherwise read as a failed fix.** `cargo rb` was not run, so the **live MCP binary still carries the old behaviour** — re-running the four reproductions through `run_command` will still show the bug until someone rebuilds the release binary and reconnects `/mcp`. All post-fix evidence is at the `resolve_refs` level, which is where the entire defect lives.
 
 ## Tests added
 
