@@ -933,3 +933,65 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: bash tests/gate-slot.sh
+
+  # ITS OWN JOB, appended at the END of the file on purpose (same convention as
+  # `gate-slot-tests` above), so no existing `ci.yml:<line>` citation shifts.
+  #
+  # WHY IT IS WIRED AT ALL. `scripts/probe_tool_surface.py` is the instrument
+  # `docs/PROBES.md` names for the `tools/list` wire surface. It used to enumerate the
+  # wire fields it knew (`surface[t["name"]] = {...}`, a fixed literal) and sum exactly
+  # those keys, so when `annotations` shipped (`71c827f9`, 2026-09-03) the new field
+  # counted as ZERO rather than being reported: the probe published `TOTAL 55719`
+  # against the in-tree gate's `56476` for four commits, and the probe's own printed
+  # cross-check instruction ("must print the same numbers... the delta is meaningless
+  # until they agree") sat on-screen at every run and was never acted on
+  # (docs/issues/archive/2026-09-03-probe-enumerates-wire-fields-so-a-new-one-counts-as-zero.md).
+  # The fix inverted `MODELLED_WIRE_KEYS` from default-exclude to default-report -- an
+  # unmodelled key is now printed with its byte cost -- but that alarm lived only on a
+  # hand-run's stdout: nothing checked the exit code, which the script always left at 0
+  # regardless. That is exactly "loudness is a property of a PATH, not of a failure"
+  # (CLAUDE.md, Testing Discipline) one level up from the original bug: an unwired
+  # detector is the same shape as the unmodelled field it detects, silent to anyone who
+  # never happens to run it by hand. This job is the path.
+  #
+  # This session (docs/issues/2026-09-24-residual-probe-unmodelled-field-check-in-ci.md)
+  # first taught the script to exit non-zero when `unmodelled` is non-empty, in both
+  # `--json` and text mode, then verified both directions by seeding the exact original
+  # failure: with `annotations` temporarily removed from `MODELLED_WIRE_KEYS`, the probe
+  # printed `!! 1 WIRE FIELD(S) OUTSIDE MODELLED_WIRE_KEYS, 757 chars: annotations` and
+  # exited 1; restored, it agrees with `cargo test --lib tool_surface_report_lengths`
+  # on all four numbers and exits 0. A check wired without ever being seen to fail is
+  # the exact thing the parent bug is about, so this is the observed red, not an
+  # assumed one.
+  #
+  # Builds the DEBUG binary (`cargo build --bin codescout`), matching the probe's own
+  # default `--binary target/debug/codescout` -- a wire-shape check needs no release
+  # optimization, and building debug is cheaper. Hermetic: `fetch_tools` drives that
+  # binary directly over stdio with no network, and the check does not depend on
+  # `usage.db` (gitignored, absent on a clean checkout -- the probe already treats a
+  # missing one as "unmeasured, not zero") or on any machine-local librarian catalog
+  # (`id = sha256(abs_path)` would mint different ids per runner anyway, per
+  # docs/adrs/2026-09-14-an-id-keyed-on-an-absolute-path-cannot-be-checked-off-the-machine.md,
+  # but this check never reads the catalog). Verified directly: with LIBRARIAN_WORKSPACE
+  # and LIBRARIAN_DB both unset and HOME pointed at a fresh empty directory, the probe
+  # still lists tools and reports zero unmodelled fields. The seed step below matches
+  # the `test`/`test-server-stack`/`audit-doc-refs` jobs' convention for determinism
+  # (the same tool-availability set every run) rather than because this check needs it.
+  tool-surface-probe-check:
+    name: probe_tool_surface unmodelled-wire-field check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
+      - uses: mozilla-actions/sccache-action@v0.0.7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ubuntu-latest-tool-surface-probe
+      - name: Seed empty librarian workspace
+        run: |
+          mkdir -p "$HOME/codescout-ci"
+          touch "$HOME/codescout-ci/workspace.toml"
+          echo "LIBRARIAN_WORKSPACE=$HOME/codescout-ci/workspace.toml" >> "$GITHUB_ENV"
+      - run: cargo build --bin codescout
+      - name: Run the unmodelled-wire-field check (fails if a new wire key is unmodelled)
+        run: python3 scripts/probe_tool_surface.py

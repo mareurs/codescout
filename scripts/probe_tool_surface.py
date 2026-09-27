@@ -195,12 +195,20 @@ def main():
     tot_prose = sum(prose_bytes(t.get("inputSchema", {})) for t in tools) + tot_desc
     tot_machine = TOTAL - tot_prose
 
+    # Exit status matches `unmodelled`, in BOTH output modes -- this is what lets a CI
+    # lane (or any other non-interactive caller) treat "a wire field this probe cannot
+    # size just shipped" as a failure rather than a line to notice on a hand-run. Before
+    # this, the script always returned 0: the loud-by-default report (trap 5, module
+    # docstring) was loud only to a human reading stdout, never to anything checking the
+    # exit code -- the exact "loudness is a property of a PATH" gap CLAUDE.md names.
+    exit_code = 1 if unmodelled else 0
+
     if a.json:
         print(json.dumps({"surface": surface, "calls": calls, "total": TOTAL,
                           "schema": tot_schema, "desc": tot_desc, "annot": tot_annot,
                           "unmodelled": dict(unmodelled),
                           "prose": tot_prose, "machine": tot_machine}, indent=1))
-        return
+        sys.exit(exit_code)
 
     print("tools %d   schema %d   desc %d   annot %d   TOTAL %d"
           % (len(surface), tot_schema, tot_desc, tot_annot, TOTAL))
@@ -256,6 +264,8 @@ def main():
         print("\nscope: no usage.db at %s — cost-per-call and never-passed are UNMEASURED,"
               % a.db)
         print("not zero. The two sections above are absent rather than empty.")
+
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
