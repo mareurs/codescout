@@ -52,7 +52,7 @@ Measured 2026-09-26/27 against `experiments` HEAD; re-verify before implementing
 - **Row:** a line starting with `| **`; its label is the bold text. **Cells are never split on `|`.**
 - **Recipe:** a row containing `doc(action="append_entry"`. A small walker reads the call span, tracking double-quoted strings and `{[(` depth to the matching `)`, and extracts `id_prefix="…"` and optional `entry_collection="…"`.
 - **Shape:** `entry_collection` present → params; target path contains `<topic>` → template; otherwise → prose.
-- **Target:** the first backticked `docs/trackers/…md` token in the row; the template shape expands to every `docs/trackers/*-session-log.md`.
+- **Target:** the first backticked `docs/trackers/…md` token in the row's *Lives in* cell (the second cell, which never holds a pipe) — never elsewhere in the row, so a tracker named in the Captures column cannot become the target; the template shape expands to every `docs/trackers/*-session-log.md`.
 - **W row:** carries no call. It is covered by the template check's `[F, W]` requirement, and the test's doc comment says so.
 - **Unparseable is loud.** A row containing the call opener whose span never closes, lacks `id_prefix`, lacks a target path, or holds two calls with different prefixes is recorded with its line number and fails.
 - **Non-vacuity:** at least one recipe of each shape must be found, or the test fails saying the parser lost a shape. No exact count is asserted.
@@ -80,9 +80,9 @@ Measured 2026-09-26/27 against `experiments` HEAD; re-verify before implementing
 | 4 | remove `expects_augmentation:` from `docs/trackers/provenance-subsystem.md` | params, no sidecar declared |
 | 5 | remove `[F, W]` from one declared session log | template, declared log missing F/W |
 | 6 | declare `[F, W]` in one exempt log | template, stale exemption |
-| 7 | add a new undeclared session log | template, new undeclared log |
+| 7 | delete one line from the test's exemption list (same guard input as a new undeclared log) | template, new undeclared log |
 | 8 | break `id_prefix=` in one TAXONOMY row | unparseable |
-| 9 | `OB` → `OBXX` in both the TAXONOMY row and its file | citable only |
+| 9 | `WIN` → `WINX` in the TAXONOMY row only | citable only — a params row, because a prose prefix that is not citable is also dropped by `declared_prefixes_from_frontmatter` |
 | 10 | make `declared_prefixes_from_frontmatter` return empty | proves the production reader is called |
 | 11 | break the walker's `entry_collection` needle | non-vacuity |
 
@@ -93,7 +93,9 @@ Measured 2026-09-26/27 against `experiments` HEAD; re-verify before implementing
 - Before implementing, record the deep-agent observation-window workflow entry (pre-action snapshot) in `docs/trackers/deep-agent-workflow-observations.md`.
 - Claim `5820a75840dd2d52`; on completion fill its Fix and Tests sections, record SHA and patch-id, archive via `doc(action="move")`, repoint inbound citations.
 - File two follow-up issues: the uncovered surfaces (CLAUDE.md, sidecar prompts, ledger templates), tagged `cluster/selector-narrower-than-its-population`; and the template shipping undeclared so its own recipe is refused on a fresh copy, tagged `cluster/doc-contradicted-by-code`.
-- One pathspec commit of this session's paths; the test is green on landing, so no gate/falsifier coupling applies.
+- Pathspec commits of this session's paths only, each green on landing, so no gate/falsifier coupling applies.
+
+**Amended 2026-09-27 while planning**, against the approved draft: the target is confined to the *Lives in* cell (a disambiguator the draft lacked); mutation 9 moved to a params row because `declared_prefixes_from_frontmatter` already filters non-citable prefixes, so the draft's prose mutation could not show the citable guard is load-bearing; mutation 7 is realised by deleting an exemption line; and the single commit became several green ones. Plan: `docs/superpowers/plans/2026-09-27-taxonomy-append-recipes-test.md`.
 
 ## Out of scope
 
