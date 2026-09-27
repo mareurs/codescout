@@ -1807,7 +1807,12 @@ mod tests {
 /// must be one `call` accepts. Spec: docs/superpowers/specs/2026-09-27-taxonomy-append-recipes-test-design.md.
 #[cfg(test)]
 mod taxonomy_recipes {
+    use crate::librarian::catalog::augmentation::declared_prefixes_from_frontmatter;
+    use crate::librarian::frontmatter::{self, Frontmatter};
+    use crate::librarian::tools::doctor::{parse_declaration, Declaration};
+    use crate::util::librarian_guard::is_citable_entry_prefix;
     use crate::util::markdown_fence::FenceState;
+    use std::path::{Path, PathBuf};
 
     const CALL_OPENER: &str = "doc(action=\"append_entry\"";
     const SECTION: &str = "## Main taxonomy";
@@ -1990,6 +1995,243 @@ mod taxonomy_recipes {
         }
         scan
     }
+    /// Session logs that declared no `entry_prefix` when this gate landed (2026-09-27), so the
+    /// F-N recipe is refused there. SHRINK-ONLY: declare `entry_prefix: [F, W]` in one, then
+    /// delete its line; the test reds until you do.
+    const TEMPLATE_EXEMPT: &[&str] = &[
+        "local-onnx-embedding-session-log.md",
+        "pr-review-session-log.md",
+        "release-promotion-session-log.md",
+        "structural-edit-gate-session-log.md",
+        "worktree-semantic-search-session-log.md",
+    ];
+
+    impl Recipe {
+        fn at(&self) -> String {
+            at(self.line, &self.label)
+        }
+    }
+
+    fn read_fm(path: &Path) -> Result<Option<Frontmatter>, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("cannot be read ({e})"))?;
+        frontmatter::parse(&text)
+            .map(|(fm, _)| fm)
+            .map_err(|e| format!("has frontmatter that does not parse ({e})"))
+    }
+
+    /// Mirrors `allocate_entry_id`, the only reader of the declaration: the prose path refuses
+    /// an empty declared set, and one lacking the recipe's prefix.
+    fn check_prose(root: &Path, r: &Recipe) -> Option<String> {
+        let fm = match read_fm(&root.join(&r.target)) {
+            Ok(fm) => fm,
+            Err(e) => {
+                return Some(format!(
+                "{}: routes {}-N writes to `{}`, which {e} — archived or moved? Update the row.",
+                r.at(),
+                r.id_prefix,
+                r.target
+            ))
+            }
+        };
+        let declared = declared_prefixes_from_frontmatter(fm.as_ref());
+        if declared.contains(&r.id_prefix) {
+            return None;
+        }
+        let refusal = if declared.is_empty() {
+            format!(
+                "allocate_entry_id: `{}` does not declare an entry_prefix",
+                r.target
+            )
+        } else {
+            format!(
+                "allocate_entry_id: `{}` is not declared by this ledger (it declares {})",
+                r.id_prefix,
+                declared.join(", ")
+            )
+        };
+        Some(format!(
+            "{}: prose recipe for id_prefix=\"{p}\" is refused — {refusal}. Repair ONE side: declare \
+         it (doc(action=\"update\", id=<artifact id of {t}>, patch={{extra: {{\"entry_prefix\": \
+         \"{p}\"}}}})), or correct the TAXONOMY row if the recipe is what is wrong.",
+            r.at(),
+            p = r.id_prefix,
+            t = r.target
+        ))
+    }
+
+    /// The params path checks no declaration; it refuses when no augmentation declares the
+    /// collection. Offline, the committed sidecar is what a fresh clone re-attaches.
+    fn check_params(root: &Path, r: &Recipe, collection: &str) -> Option<String> {
+        let fm = match read_fm(&root.join(&r.target)) {
+            Ok(fm) => fm.unwrap_or_default(),
+            Err(e) => {
+                return Some(format!(
+                    "{}: routes writes to `{}`, which {e}.",
+                    r.at(),
+                    r.target
+                ))
+            }
+        };
+        let missing = |what: &str| {
+            format!(
+                "{}: params recipe (entry_collection=\"{collection}\") targets `{}`, which {what} — on a \
+             fresh clone no augmentation re-attaches, so append_entry refuses it. Export the shape: \
+             librarian(action=\"doctor\", fix=\"export_augmentations\") (a dry run; then confirm=true).",
+                r.at(),
+                r.target
+            )
+        };
+        let sidecar = match fm.extra.get("expects_augmentation").map(parse_declaration) {
+            Some(Declaration::Declared { sidecar: Some(rel) }) => rel,
+            Some(Declaration::Declared { sidecar: None }) => {
+                return Some(missing(
+                    "declares `expects_augmentation: true` but names no committed sidecar",
+                ))
+            }
+            Some(Declaration::Unparseable) => {
+                return Some(missing(
+                    "carries an `expects_augmentation` value that declares nothing",
+                ))
+            }
+            Some(Declaration::Absent) | None => {
+                return Some(missing("declares no `expects_augmentation` sidecar"))
+            }
+        };
+        match crate::librarian::augmentation_sidecar::read(&root.join(&sidecar)) {
+            Err(e) => Some(format!("{}: sidecar `{sidecar}` does not read: {e:#}", r.at())),
+            Ok(s) if s.entry_collection.as_deref() == Some(collection) => None,
+            Ok(s) => Some(format!(
+                "{}: names entry_collection=\"{collection}\", but `{sidecar}` declares {:?} — append_entry \
+             refuses a collection the augmentation does not declare. Repair ONE side: the TAXONOMY \
+             row, or the augmentation.",
+                r.at(),
+                s.entry_collection
+            )),
+        }
+    }
+
+    fn check_template(root: &Path, r: &Recipe, exempt: &[&str]) -> Vec<String> {
+        let Some((dir, suffix)) = r.target.split_once("<topic>") else {
+            return vec![format!(
+                "{}: template target `{}` has no `<topic>`",
+                r.at(),
+                r.target
+            )];
+        };
+        let dir_path = root.join(dir);
+        let mut names: Vec<String> = match std::fs::read_dir(&dir_path) {
+            Ok(entries) => entries
+                .flatten()
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| n.ends_with(suffix))
+                .collect(),
+            Err(e) => return vec![format!("{}: cannot list `{dir}`: {e}", r.at())],
+        };
+        names.sort();
+        let mut out = Vec::new();
+        if names.is_empty() {
+            out.push(format!(
+                "{}: `{}` matches no file — the template shape went vacuous",
+                r.at(),
+                r.target
+            ));
+        }
+        for name in &names {
+            let rel = format!("{dir}{name}");
+            let declared = match read_fm(&dir_path.join(name)) {
+                Ok(fm) => declared_prefixes_from_frontmatter(fm.as_ref()),
+                Err(e) => {
+                    out.push(format!("{}: `{rel}` {e}", r.at()));
+                    continue;
+                }
+            };
+            let is_exempt = exempt.contains(&name.as_str());
+            let has_both = ["F", "W"].iter().all(|p| declared.iter().any(|d| d == p));
+            match (is_exempt, declared.is_empty(), has_both) {
+                (true, true, _) | (false, _, true) => {}
+                (true, false, _) => out.push(format!(
+                    "`{rel}` now declares {} — delete its line from TEMPLATE_EXEMPT \
+                 (src/librarian/tools/append_entry.rs); the list only shrinks.",
+                    declared.join(", ")
+                )),
+                (false, true, _) => out.push(format!(
+                    "{}: `{rel}` declares no entry_prefix, so the F-N recipe is refused there. If this log \
+                 is YOURS: declare it before appending, as docs/templates/session-log.md says \
+                 (doc(action=\"update\", id=<its artifact id>, patch={{extra: {{\"entry_prefix\": \
+                 [\"F\", \"W\"]}}}})). If it is NOT yours, it is likely a peer's log in progress — this \
+                 test reads the working tree: attribute it with scripts/file-provenance.py and ask \
+                 them; do not declare it for them.",
+                    r.at()
+                )),
+                (false, false, false) => out.push(format!(
+                    "{}: `{rel}` declares {} — a session log owns both F and W (the W-N row is \"Same\").",
+                    r.at(),
+                    declared.join(", ")
+                )),
+            }
+        }
+        for ex in exempt {
+            if !names.iter().any(|n| n == ex) {
+                out.push(format!(
+                    "TEMPLATE_EXEMPT names `{dir}{ex}`, which no longer exists — delete the line."
+                ));
+            }
+        }
+        out
+    }
+
+    /// Asserts the CODE contract per recipe shape. Params recipes are deliberately NOT required
+    /// to declare `entry_prefix` — only the prose path reads it (bug-fix-session-log:F-176).
+    /// Covers TAXONOMY only: CLAUDE.md, sidecar prompts and ledger templates also route writers
+    /// to append_entry and are not read here.
+    #[test]
+    fn every_taxonomy_append_entry_recipe_is_one_the_code_accepts() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let text = std::fs::read_to_string(root.join("docs/TAXONOMY.md"))
+            .expect("docs/TAXONOMY.md is the surface under test");
+        let scan = scan_main_taxonomy(&text);
+
+        let count =
+            |want: fn(&Shape) -> bool| scan.recipes.iter().filter(|r| want(&r.shape)).count();
+        let prose = count(|s| matches!(s, Shape::Prose));
+        let params = count(|s| matches!(s, Shape::Params { .. }));
+        let template = count(|s| matches!(s, Shape::Template));
+        let population = format!(
+            "examined {} rows under `{SECTION}`: {prose} prose, {params} params, {template} template \
+         recipe(s); rows with no recipe: {:?}",
+            scan.rows_seen, scan.non_recipe_rows
+        );
+        assert!(
+            prose > 0 && params > 0 && template > 0,
+            "a recipe shape is missing — the scanner lost it or the section moved; this is not a \
+         clean corpus. {population}"
+        );
+
+        let mut failures = scan.unparseable.clone();
+        for r in &scan.recipes {
+            if !is_citable_entry_prefix(&r.id_prefix) {
+                failures.push(format!(
+                    "{}: id_prefix=\"{}\" is refused by append_entry before either branch — an entry \
+                 token is `[A-Z]{{1,3}}-<n>`. Correct the TAXONOMY row.",
+                    r.at(),
+                    r.id_prefix
+                ));
+                continue;
+            }
+            match &r.shape {
+                Shape::Prose => failures.extend(check_prose(&root, r)),
+                Shape::Params { collection } => failures.extend(check_params(&root, r, collection)),
+                Shape::Template => failures.extend(check_template(&root, r, TEMPLATE_EXEMPT)),
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "{} TAXONOMY append_entry recipe finding(s) — each would be refused, or the gate cannot \
+         read it:\n  {}\n\n{population}",
+            failures.len(),
+            failures.join("\n  ")
+        );
+    }
 
     /// A miniature TAXONOMY. Load-bearing details: the fenced ZZ row and the Q row under the
     /// NEXT section must be ignored; the R row's `index_row="| {id} | … |"` has unescaped pipes
@@ -2117,5 +2359,162 @@ mod taxonomy_recipes {
         assert_eq!(crlf.recipes, lf.recipes);
         assert_eq!(crlf.unparseable, lf.unparseable);
         assert_eq!(crlf.rows_seen, lf.rows_seen);
+    }
+    fn recipe(target: &str, id_prefix: &str, shape: Shape) -> Recipe {
+        Recipe {
+            line: 1,
+            label: "X-N".into(),
+            id_prefix: id_prefix.into(),
+            target: target.into(),
+            shape,
+        }
+    }
+
+    fn put(root: &Path, rel: &str, text: &str) {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    }
+
+    #[test]
+    fn prose_check_mirrors_both_allocator_refusals() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        put(
+            root,
+            "docs/trackers/ok.md",
+            "---\nkind: tracker\nentry_prefix: R\n---\n# ok\n",
+        );
+        put(
+            root,
+            "docs/trackers/none.md",
+            "---\nkind: tracker\n---\n# none\n",
+        );
+        put(
+            root,
+            "docs/trackers/other.md",
+            "---\nkind: tracker\nentry_prefix: Q\n---\n# other\n",
+        );
+        assert_eq!(
+            check_prose(root, &recipe("docs/trackers/ok.md", "R", Shape::Prose)),
+            None
+        );
+        let none = check_prose(root, &recipe("docs/trackers/none.md", "R", Shape::Prose)).unwrap();
+        assert!(none.contains("does not declare an entry_prefix"), "{none}");
+        let other =
+            check_prose(root, &recipe("docs/trackers/other.md", "R", Shape::Prose)).unwrap();
+        assert!(
+            other.contains("is not declared by this ledger") && other.contains("declares Q"),
+            "{other}"
+        );
+        let gone = check_prose(root, &recipe("docs/trackers/gone.md", "R", Shape::Prose)).unwrap();
+        assert!(gone.contains("archived or moved"), "{gone}");
+    }
+
+    #[test]
+    fn params_check_reads_the_committed_sidecar_not_entry_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // No entry_prefix on purpose: the params path never reads one (bug-fix-session-log:F-176).
+        put(
+            root,
+            "docs/trackers/p.md",
+            "---\nkind: tracker\nexpects_augmentation: docs/augmentations/p.yaml\n---\n# p\n",
+        );
+        put(
+            root,
+            "docs/augmentations/p.yaml",
+            "prompt: \"p\"\nentry_collection: issues\n",
+        );
+        put(
+            root,
+            "docs/trackers/bare.md",
+            "---\nkind: tracker\n---\n# bare\n",
+        );
+        put(
+            root,
+            "docs/trackers/yes.md",
+            "---\nkind: tracker\nexpects_augmentation: true\n---\n# yes\n",
+        );
+        let p = |c: &str| {
+            recipe(
+                "docs/trackers/p.md",
+                "P",
+                Shape::Params {
+                    collection: c.into(),
+                },
+            )
+        };
+        assert_eq!(check_params(root, &p("issues"), "issues"), None);
+        let wrong = check_params(root, &p("items"), "items").unwrap();
+        assert!(wrong.contains("declares Some(\"issues\")"), "{wrong}");
+        let bare = check_params(
+            root,
+            &recipe("docs/trackers/bare.md", "P", Shape::Prose),
+            "issues",
+        )
+        .unwrap();
+        assert!(
+            bare.contains("declares no `expects_augmentation` sidecar"),
+            "{bare}"
+        );
+        let yes = check_params(
+            root,
+            &recipe("docs/trackers/yes.md", "P", Shape::Prose),
+            "issues",
+        )
+        .unwrap();
+        assert!(yes.contains("names no committed sidecar"), "{yes}");
+    }
+
+    #[test]
+    fn template_check_enforces_f_and_w_with_a_shrink_only_exemption_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        put(
+            root,
+            "docs/trackers/a-session-log.md",
+            "---\nentry_prefix: [F, W]\n---\n",
+        );
+        put(
+            root,
+            "docs/trackers/b-session-log.md",
+            "---\nkind: tracker\n---\n",
+        );
+        put(
+            root,
+            "docs/trackers/c-session-log.md",
+            "---\nentry_prefix: F\n---\n",
+        );
+        put(
+            root,
+            "docs/trackers/d-session-log.md",
+            "---\nentry_prefix: [F, W]\n---\n",
+        );
+        let r = recipe("docs/trackers/<topic>-session-log.md", "F", Shape::Template);
+        let out = check_template(root, &r, &["d-session-log.md", "gone-session-log.md"]);
+        let joined = out.join("\n");
+        assert!(
+            !joined.contains("a-session-log.md"),
+            "a declares [F, W]: {joined}"
+        );
+        assert!(
+            joined.contains("b-session-log.md` declares no entry_prefix")
+                && joined.contains("If this log is YOURS"),
+            "{joined}"
+        );
+        assert!(
+            joined.contains("c-session-log.md` declares F —"),
+            "{joined}"
+        );
+        assert!(
+            joined.contains("d-session-log.md` now declares F, W"),
+            "{joined}"
+        );
+        assert!(
+            joined.contains("gone-session-log.md`, which no longer exists"),
+            "{joined}"
+        );
+        assert_eq!(out.len(), 4, "{joined}");
     }
 }
