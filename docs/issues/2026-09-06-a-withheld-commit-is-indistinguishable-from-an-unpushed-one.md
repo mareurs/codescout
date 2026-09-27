@@ -158,6 +158,18 @@ Full instance, with the post-push byte-level verification and the notification t
 `docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md`
 § *Instance 2026-09-16 (second)*.
 
+### Instance 2026-09-23 — the last case before the rule, and it is CORROBORATION rather than a counterexample
+
+Push head `f918548c`, 2026-09-23 19:25 — one day before `a3dcff72` put the two-states rule in `CLAUDE.md`. 119 commits across 7 sessions reached `origin/experiments`; **39 carried sessionId `48d1f0c8-9f60-43bb-a15e-17ec7995813a`**, whose session was live and had told its own operator three times that nothing was pushed and that pushing was theirs to decide. Verified after a `git fetch` rather than off a local ref, which answers stale for an unfetched checkout: remote head `f918548c`, all sampled commits present, 119/39/7 matching the pushing session's own report exactly.
+
+**It went the way § *Resolution* says it should.** The pre-push foreign-session guard refused. The pushing session (`codescout-bb`, sessionId `09093108-1425-4f6d-9695-a9e3bb98ea0d`) put the count, the per-session split and the fact that the author was live in front of **its** operator, who authorised it; the push went through on `CODESCOUT_PUSH_ACK` naming the author's sid, and the author was told immediately, unprompted, with the ack's scope stated without being asked: *"it records MY operator's decision and does not speak for yours… I will not cite it later as though it were."* That is the mechanism-prompted, decided-in-advance path this file calls the expected one, executed by a party who had every opportunity to be sloppier.
+
+**And the author was not, in fact, withholding — which is the part worth recording.** The 39 were unpushed because *pushing had not been asked for*, which is every session's standing instruction, not because a specific veto was being held. That is exactly `observer-blindness:OB-20`'s measured state: asked *"is it withheld?"* the honest answer is **neither branch**, because an author mid-task holds nothing to give. The repeated *"that's your call"* statements were declining an authority, not exercising one, and a reader of this file should not mistake them for a veto that was overridden.
+
+**So this instance falsifies nothing and confirms two things.** That the ambiguity this file names was live right up to the day the rule landed; and that the resolved path works — guard fires, an operator decides with the split in front of them, the author is told. The one residual it does expose is not about publication at all: **the deciding operator was not the author's**, and no mechanism in the chain can make it be. The guard routes to whoever is pushing. `CLAUDE.md` § *Testing Discipline* already records that ceiling for this guard — a shape test buys **arrival**, never **answerability** — and this is that ceiling reached from the other side: the message arrived, the addressee could answer, and the answer was one only their principal could give.
+
+**Under the rule now in force this case is simply not the defect.** `a3dcff72`'s two-states rule says unpushed work stays committable and only a HELD change must stay uncommitted; these 39 were committed, so they were publishable by construction. The rule did not exist on 2026-09-23 and the author cannot be read as having broken it — but equally, nothing here argues the rule is wrong. It argues the rule is what was missing, and names the last instance of the gap it closed.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** the pusher failed to check what they were sending.
