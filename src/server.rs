@@ -1835,7 +1835,7 @@ impl ServerHandler for CodeScoutServer {
         // `RequestContext.meta` instead. That is why `call_tool_inner`'s reads of
         // `req.meta` (`conversation_from_meta`, `tool_use_id_from_meta`) saw `None`
         // on every live call. See
-        // docs/issues/2026-09-26-call-tool-inner-reads-meta-from-a-params-field-rmcp-never-fills.md.
+        // docs/issues/archive/2026-09-26-call-tool-inner-reads-meta-from-a-params-field-rmcp-never-fills.md.
         // Fold it back into `req.meta` here, before `call_tool_inner` runs, without
         // changing that function's signature. Precedence mirrors rmcp's own
         // `WithMeta` serializer, which merges the same two sources as
@@ -10795,7 +10795,7 @@ mod guide_hint_tests {
     /// `call_tool` ever sees it — the one entry point a hand-built
     /// `CallToolRequestParams` (as in the test above) cannot reach, which is
     /// exactly the defect's blind spot
-    /// (docs/issues/2026-09-26-call-tool-inner-reads-meta-from-a-params-field-rmcp-never-fills.md).
+    /// (docs/issues/archive/2026-09-26-call-tool-inner-reads-meta-from-a-params-field-rmcp-never-fills.md).
     #[tokio::test]
     async fn call_tool_records_the_wire_meta_tool_use_id() {
         let (dir, server) = make_server().await;

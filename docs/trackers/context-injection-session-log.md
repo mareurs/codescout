@@ -50,7 +50,7 @@ author to make.
 | F-14 | 2026-09-26 | med | architectural | mitigated | Said only the Stop hook sees chat prose; UserPromptSubmit already carries transcript_path and a sibling plugin tail-reads it |
 | F-15 | 2026-09-26 | med | architectural | mitigated | The engine key-disjointness gate computes over build-time corpora, so a session-authored corpus would be invisible to it |
 | F-16 | 2026-09-26 | med | plan-prose | mitigated | The spec's per-block delivery shape is not attributable at the coordinator — keys are per engine, not per block |
-| F-17 | 2026-09-26 | high | architectural | open | The live check found `tool_use_id` NULL on every row: rmcp puts `_meta` in RequestContext.meta, and the test built params in-process |
+| F-17 | 2026-09-26 | high | architectural | fixed-verified | The live check found `tool_use_id` NULL on every row: rmcp puts `_meta` in RequestContext.meta, and the test built params in-process |
 
 ## Wins Index
 
@@ -1600,7 +1600,7 @@ True of the `guide_ledger.rs` / `server.rs` / `guide_rearm.rs` shape at `HEAD` o
 
 **Lesson:** "Through the production funnel" means through the TRANSPORT, not the first function the harness can call. When a value arrives from the wire, the test's input must be bytes through the real deserializer. A struct built in-process, even by `serde_json::from_value`, is the exact shape the failure hides in. A plan step that runs the real binary against the real client is the instrument here, not a formality after the tests.
 
-**Fix:** bug `6e14221db0c20de9`, fix dispatched (Task 3 fix round 1): fold `req_ctx.meta` into `req.meta` in `call_tool`, with an end-to-end duplex-transport test.
+**Fix:** bug `922981c9afdd2a42` (archived), 6f6349ca (patch-id `6bff20b066abbae151bbfd9762d1a4dad6b2b65b`): fold `req_ctx.meta` into `req.meta` in `call_tool`, with an end-to-end duplex-transport test whose deletion mutant is killed on the assertion. **Verified live 2026-09-27:** session `0cbae2f0`, the first to reconnect to the rebuilt binary, recorded 85 non-NULL `tool_use_id`s (04:58:01–05:55:38 UTC), each occurring exactly once across its 7 transcript files. Status `fixed-verified`.
 
 ## Template for new entries
 

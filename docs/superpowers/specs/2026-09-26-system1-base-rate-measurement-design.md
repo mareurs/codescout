@@ -344,3 +344,12 @@ No probe read a correction, a miss, a judge verdict, or any quantity the go/no-g
   - operator interrupts: text exactly equal to `[Request interrupted by user]` or `[Request interrupted by user for tool use]` (R25). These are returned separately by `operator_interrupts()`, recorded as `turns.kind='interrupt'`, and treated by the miner as a correction signal (source `operator_interrupt`, corrector `operator`), with the next prompt carrying the correction text. Exact equality, so a prompt QUOTING the marker stays a prompt.
 
   On 132 transcripts, R26, R27 and R29 took `operator_messages` from 4,528 (already net of R25's interrupts) to 2,851, exactly 4,528 − (1,409 + 66 + 202). Interrupts are counted apart from prompts, so the readout can show both.
+
+### Amendment 4 — 2026-09-27, recorded when Part A was verified live
+
+**Source:** Task 3 Step 2 (the live exact-join check), which first FAILED, then its fix, 6f6349ca (bug `922981c9afdd2a42`, archived). Where this amendment and the body disagree, this amendment wins.
+
+- **(a) `tool_use_id` was NULL on every row until 6f6349ca.** rmcp moves a request's `_meta` into `RequestContext.meta`, and the shipped code read the params field, which is always empty on the wire. A call carries the id only when a binary at or after that commit serves it. Each Claude Code session gains that at its own `/mcp`, not at a single instant.
+
+  So the exact join is available per session, from that session's reconnect onward. Every earlier row joins heuristically or not at all. The first exact row is 2026-09-27 04:58:01.690 UTC (session `0cbae2f0`). The observability map reports exact vs heuristic joins by period, and the readout must not assume exact joins anywhere in `[T_live, …)`.
+- **(b) The live check was verified on another session (ruling R52).** The spec's check names this design session's own calls, but the property it checks belongs to the BINARY, and this session is excluded by spec. It was verified on `0cbae2f0`, the first session on the rebuilt binary: 85 of 85 rows carry a non-NULL `tool_use_id`, 85 are distinct, and each occurs exactly once as a `tool_use` id across its 7 transcript files. `deliveries_json` is non-NULL on 83; the other 2 are `recoverable_error`, the pinned NULL case. This also shows Claude Code 2.1.283 sends `claudecode/toolUseId`.

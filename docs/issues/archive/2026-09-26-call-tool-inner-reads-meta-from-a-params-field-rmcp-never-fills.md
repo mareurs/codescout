@@ -1,9 +1,9 @@
 ---
 kind: bug
-status: taken
+status: fixed
 tags:
 - cluster/accepted-parameter-silently-dropped
-closed: null
+closed: 2026-09-27
 opened: 2026-09-26
 owner: marius
 related: []
@@ -99,14 +99,14 @@ it passes against a production path that records NULL.
 
 ## Fix
 
-In `call_tool`, fold `req_ctx.meta` into `req.meta` before `call_tool_inner`,
-with a params-level key keeping precedence, the direction rmcp's own serializer
-merges in. The test drives `call_tool` through rmcp's real deserializer over
-an in-memory transport, so it covers the call site and not a hand-built struct.
+6f6349ca (patch-id `6bff20b066abbae151bbfd9762d1a4dad6b2b65b`) folds `req_ctx.meta` into `req.meta` inside `call_tool`. The params-level meta is the base and **context keys win on conflict**, the direction rmcp's own `WithMeta` serializer merges in ("params-level _meta as base, extensions-level _meta overwrites on conflict"). An empty merge stays `None`, so an absent `_meta` stays absent. The precedence decides nothing reachable: every production route (stdio and streamable HTTP) deserializes through `WithMeta`, so the params meta `call_tool` receives is always `None`, and peer-serve's `call_tool_by_name` bypasses `call_tool`. It is therefore deliberately untested. `call_tool_inner`'s signature is unchanged.
+
+Same misconception, outside this fix: `src/tools/progress.rs` documents the progress token as coming from `CallToolRequestParams._meta.progressToken`, but it is read from `RequestContext.meta`.
 
 ## Tests added
 
-(pending)
+- `call_tool_records_the_wire_meta_tool_use_id` (`src/server.rs`) serves `CodeScoutServer` over an in-memory duplex, sends NDJSON `initialize` → `initialized` → `tools/call` whose `_meta` carries the literal `claudecode/toolUseId`, and asserts the usage row. Deleting the fold was run in an isolated worktree (`scripts/mutation-probe.sh`): it compiles, and the test fails on the assertion (`None` vs `Some("toolu_wire1")`). That mutant is the pre-fix production state. The test lives in `guide_hint_tests`, so it runs only with the `librarian` feature, which the default lane and the shipped binary both enable.
+- `call_tool_inner_records_the_meta_tool_use_id`'s doc comment now says what it pins (the params-level read), not "the production funnel".
 
 ## Workarounds
 
@@ -115,9 +115,13 @@ every row recorded before the fix ships.
 
 ## Resume
 
-Fix dispatched from the system1 base-rate measurement SDD run (session
-`3c5b02df-b6ce-45f5-9d03-1194e38465c0`). After it lands: `./scripts/rb.sh`,
-the operator's `/mcp`, then re-run the plan Task 3 Step 2 live check.
+Fixed and verified live, 2026-09-27.
+
+- Gate on HEAD ee412408 (includes 6f6349ca): FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0. The wire test ran in the default lane, and `cross_process_write_lock` (the only end-to-end run of the no-`_meta` path) ran in both lanes.
+- Live exact join, from the first session to reconnect to the rebuilt binary (`0cbae2f0`, window 2026-09-27 04:58:01–05:55:38 UTC): 85 of 85 rows carry a non-NULL `tool_use_id`, 85 are distinct, and each occurs EXACTLY once as a `tool_use` id across that session's 7 transcript files (1 top-level, 6 subagent). `deliveries_json` is non-NULL on 83 of them; the other 2 are `recoverable_error`, the pinned "fan-out never ran" case.
+- That also settles Hypothesis 1: Claude Code 2.1.283 does send `claudecode/toolUseId`, because the recorded values match the transcript's own ids.
+
+Only calls served by a binary at or after 6f6349ca carry the id. Each session gains it at its own `/mcp`, so every earlier row joins heuristically (spec Amendment 4).
 
 ## References
 
