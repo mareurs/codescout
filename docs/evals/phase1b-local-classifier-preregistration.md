@@ -487,6 +487,60 @@ Predictions 1–5 are the text committed in `2e4743e0`, before Step 4's smoke ru
 - Step 5 needs each checkpoint's Step 4 temperatures, thresholds and final menu, plus the 12 surviving clean texts.
 - A Step 5 script is written, tested and reviewed before the gate runs. Each checkpoint then runs the gate once.
 
+### Step 5's script, 2026-09-27 (written after Step 4, before any gate run)
+
+**Added after registration:** `phase1b/step5_gate.py` and `tests/test_phase1b_step5.py` (sha256 `32a7735a2174dc1b…` and `c912b853c5ec6f91…`). The driver, `step5.sh`, runs the nine checkpoints in turn and then `--summary`. No checkpoint has scored a gate text.
+
+**It is the adapter § *Carried unchanged* names.** It follows `scripts/phase1-local-trained.py`. The gate and span gate are `scripts/phase1-span-selector.py`'s code, unchanged, with the same pass criteria and one run each.
+- The judge reads each checkpoint's Step 4 temperatures and precision thresholds. They were fit over own plus admitted cross cells, where phase 1 used the run's own-cell files.
+- `JUDGED` is the checkpoint's own final menu, then the common menu. Each result carries both.
+- The texts are phase 1's 10 plus the 12 new clean texts that survived Step 1, 22 in all, each clean text expecting no rule. The span gate keeps the phase-1 span texts whose rule is on the menu.
+- A menu that is not gate-able fails, as § *Step 4* says.
+
+**One departure from phase 1's adapter, decided before the gate: the claim is the unit with the highest raw logit.** Phase 1's adapter took the first unit with the highest P.
+- Sigmoid is monotone, so P, and every fire decision, are unchanged. Only the choice of claim can differ, and only where float saturation ties P at exactly 1.0.
+- That happens when z/T exceeds about 36.8, so for any z above about 9.2 at T = 0.25. `d_semicolon` sits at T = 0.25 at every NC seed.
+- In a tie, phase 1's rule quotes the first unit, whatever its logit. In each span text the violating sentence comes second.
+- An Opus review found this, and it was reproduced on the real `span-semicolon` text. Logits 12, 30 and 5 at T = 0.25 give P = 1.0, 1.0 and 0.99999…. The first-P rule then quotes the innocent first sentence and fails the span gate; the raw-logit rule quotes the violating one.
+- The registration says "the claim is the argmax unit", and in exact arithmetic both rules pick that unit.
+- Each judged row records `ties_at_p`, so whether the choice changed any claim can be read afterwards.
+
+**Before the gate, the script refuses to run unless:**
+- the checkpoint is the one its name says (arm and seed against Step 4's run directory);
+- its sha256 is the one Step 4 scored, and so is the scored file's;
+- the head order agrees across the manifest, the run and Step 4;
+- the common menu covers these nine checkpoints and is their intersection;
+- every file a verdict depends on is committed, unchanged since HEAD, and recorded by sha256;
+- the device is the RTX A5000 under CUDA;
+- a neutral text scored twice moves no logit by 1e-4 or more, and no logit is non-finite;
+- recomputed own-cell and cross-cell logits on the frozen val rows equal Step 4's scored values exactly.
+
+**Each checkpoint's gate runs once.**
+- Two files are created exclusively just before the gate: the result, and a marker beside `best.pt`. A second invocation is refused whatever paths it is given.
+- Every gate and span text is scored in the main thread, as parity was, before `sel`'s thread pool reads the scores.
+- A failure after that point leaves the result marked crashed, with its traceback and every row and error so far. The reservation stands.
+
+**Review, 2026-09-27.** An independent Opus review found no blocker and eight findings that needed action.
+- Findings 1–8 are addressed:
+  - the claim tie;
+  - evidence lost on a crash, and errors kept only as a count;
+  - no code provenance;
+  - reservation by path only;
+  - an unchecked common menu;
+  - an unread `clean-12` cell counted as not firing;
+  - scoring on the gate's threads;
+  - NaN logits.
+- Of its bookkeeping points, refusals are now recorded and the result is written atomically.
+- A seed that did not learn would still be gated. The summary counts it as a failure, and all nine learned.
+
+**Tests: 81, model faked; the gate code, segmenter and registration are the real ones.**
+- 109 mutations, one per guarded site, were each run in an isolated worktree through `scripts/mutation-probe.sh`. All 109 were killed on the final bytes.
+- Earlier rounds found three test defects, each fixed and its mutation re-run:
+  - A head-order case was refused by both halves of the check, so neither half was tested alone.
+  - A no-span-text menu had no case.
+  - The `git status` flag test used a file pathspec, where the flag cannot change the output.
+- The third round also found a gap in the code. An ignored, uncommitted file read as committed, so `--ignored=matching` was added.
+
 ## Step 1 — the cross-rule audit (decides which cells become negatives)
 
 **The cells in question.** For a text whose row is about rule A, a cell (unit, B) with B ≠ A, over every unit of the text. These are the cells phase 1 masked.
