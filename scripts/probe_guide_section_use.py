@@ -114,14 +114,36 @@ PROFILES = [".claude", ".claude-sdd", ".claude-kat"]
 # docs/issues/archive/2026-09-03-probe-mechanism-filter-omits-the-renamed-doc-tool.md
 #
 # `"doc"` is slightly greedy under a substring test: it would also match a hypothetical
-# `mcp__codescout__docs_*`. No such tool exists in the registry today. If one is added,
-# tighten `is_mechanism_tool` to match the full `mcp__codescout__<name>` form rather than
-# widening this tuple further -- widening is what made this defect possible.
+# `mcp__codescout__docs_*`. No such tool exists in the registry today, and this is no
+# longer just a comment saying so: `mechanism_tools_registry_problems()` below checks it
+# against a LIVE registry snapshot whenever main() can reach one. If a colliding tool is
+# ever added, tighten `is_mechanism_tool` to match the full `mcp__codescout__<name>` form
+# rather than widening this tuple further -- widening is what made this defect possible,
+# and the check below will say so instead of staying silent the way it did the first time.
+# docs/issues/2026-09-24-residual-mechanism-tools-from-served-registry.md
 MECHANISM_TOOLS = (
     "doc",
     "librarian",
     "artifact",   # legacy -> doc: pre-ceb5b57a name; usage.db is historical so both must match
 )
+
+# Which of the names above this file currently expects to be LIVE (i.e. not retired) in the
+# served registry. "artifact" is deliberately excluded -- a retired name by definition does
+# not answer a live registry, and existence-checking a name already known to be gone would
+# just be a second, noisier way of saying what the `legacy ->` comment above already says.
+#
+# Deliberately NOT named `*_TOOLS`: that would open a SECOND block under
+# `provenance_probes_reference_only_real_tool_names`'s bare-name scan
+# (`^[A-Z][A-Z_0-9]*_TOOLS\s*=`, src/server.rs), and "artifact"'s absence from it would then
+# need its own `legacy ->` marker there too, to avoid a false failure. Simplest is to not
+# create the block: this tuple is read only by the Python functions below, at RUN TIME --
+# which is also why it can't just reuse the `# legacy -> doc:` comment on the line above.
+# That text is a Python comment, invisible to anything but the Rust regex that reads the
+# SOURCE FILE. The two checks answer related but different questions: Rust asks "does every
+# non-legacy name in every scripts/*_TOOLS block exist, statically, in the source"; Python
+# asks "is THIS probe's specific doc/librarian assumption still true, right now, against a
+# live binary" -- neither can stand in for the other.
+_MECHANISM_TOOLS_EXPECTED_LIVE = ("doc", "librarian")
 
 GUIDE_DIR = Path(__file__).resolve().parent.parent / "src" / "prompts" / "guides"
 FROZEN_FRAME = (
@@ -210,6 +232,90 @@ def strip_prose(obj):
 def is_mechanism_tool(name: str) -> bool:
     """True for calls that OPERATE the librarian, false for calls that merely mention it."""
     return any(t in name for t in MECHANISM_TOOLS)
+
+
+def live_tool_names(binary: str | None = None) -> set[str] | None:
+    """Live MCP tool names via a real `tools/list` handshake, or None if unreachable.
+
+    Reuses `probe_tool_surface.py`'s `fetch_tools` -- the transport that already performs
+    this exact handshake -- imported the same way `tests/test_probe_augmentation_restore.py`
+    imports its own subject, rather than hand-rolling a second `initialize` / `tools/list`
+    exchange that could drift from the first one independently.
+
+    Returns None, and NEVER raises, when there is no way to ask right now: no binary on
+    disk, or any failure during the handshake (crashed process, malformed reply, a binary
+    that exists but does not speak this protocol). This script's actual job (module
+    docstring) is offline analysis of already-recorded transcripts, which must keep working
+    on a machine with no fresh `target/debug/codescout` -- the same reasoning `docs/
+    PROBES.md` gives for `probe_tool_surface.py`'s own binary-optional design. A caller that
+    needs "no binary" apart from "checked, found nothing wrong" gets that from the None.
+    """
+    binary = binary or str(Path(__file__).resolve().parent.parent / "target/debug/codescout")
+    if not Path(binary).exists():
+        return None
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "probe_tool_surface", Path(__file__).resolve().parent / "probe_tool_surface.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+        tools = module.fetch_tools(binary)
+    except Exception:
+        return None
+    return {t["name"] for t in tools}
+
+
+def mechanism_tools_registry_problems(live: set[str]) -> list[str]:
+    """Check MECHANISM_TOOLS against one live registry snapshot (`live`, a set of names).
+
+    Pure function taking `live` as data -- it never spawns a process itself -- specifically
+    so a test can hand it a FABRICATED registry (a rename, an extra colliding tool) without
+    needing a real build on disk, and so a red produced against a fake registry is
+    reproducible without racing the shared `target/` this checkout's other sessions build in.
+
+    Two INDEPENDENT checks. A registry can fail either, both, or neither -- report every
+    problem found, never just the first hit:
+
+    1. EXISTENCE. Every name `_MECHANISM_TOOLS_EXPECTED_LIVE` calls live must actually be a
+       registered tool. This is the parent bug's failure mode, replayed as a standing check
+       instead of a manual before/after comparison: the `artifact` -> `doc` rename would
+       have failed this the day it happened instead of going unnoticed for days.
+       docs/issues/archive/2026-09-03-probe-mechanism-filter-omits-the-renamed-doc-tool.md
+    2. BOUNDEDNESS. No live tool OUTSIDE `MECHANISM_TOOLS` may satisfy the substring test
+       `is_mechanism_tool` actually runs. The "`doc` is slightly greedy" comment above
+       `MECHANISM_TOOLS` named this as a risk that was true but unenforced; this enforces it.
+
+    What this does NOT do, and cannot: decide which tool names conceptually belong in
+    MECHANISM_TOOLS. `Tool` (src/tools/core/types.rs) carries no category/kind field
+    distinguishing "operates the librarian mechanism" from any other tool, so that
+    membership judgement has no registry surface to derive from -- the same documented
+    ceiling `write_capable` already carries in `provenance_probes_reference_only_real_tool_
+    names` (src/server.rs): "kept explicit because the registry cannot answer it." What CAN
+    be checked, and is checked here, is whether the hand-made judgement still agrees with a
+    live registry -- existence and boundedness, never membership itself.
+    """
+    problems = []
+    for name in _MECHANISM_TOOLS_EXPECTED_LIVE:
+        if name not in live:
+            problems.append(
+                f"MECHANISM_TOOLS expects {name!r} to be a live tool, but the served "
+                f"registry has no tool by that name -- likely a rename this file was not "
+                f"updated for, exactly like the 2026-09-02 artifact -> doc collapse"
+            )
+    unexpected = sorted(t for t in live if t not in MECHANISM_TOOLS and is_mechanism_tool(t))
+    if unexpected:
+        problems.append(
+            "is_mechanism_tool's substring test also matches live tool(s) "
+            f"{unexpected!r}, which MECHANISM_TOOLS never intended to name -- the "
+            "\"doc is slightly greedy\" comment above MECHANISM_TOOLS said this COULD "
+            "happen; it has, and every session this ships a section-use report for would "
+            "silently count that tool's calls as librarian activity until the tuple is "
+            "narrowed"
+        )
+    return problems
+
 
 
 
@@ -612,6 +718,25 @@ def main() -> int:
     if args.frame_attrition:
         frame_attrition()
         return 0
+
+    # REFUSE rather than trust a hand list nobody re-checked. Skipped (not refused) when
+    # there is no live binary to ask -- see `live_tool_names`'s docstring for why offline
+    # transcript analysis, this script's actual job, must not be blocked by a missing build.
+    # docs/issues/2026-09-24-residual-mechanism-tools-from-served-registry.md
+    live = live_tool_names()
+    if live is not None:
+        problems = mechanism_tools_registry_problems(live)
+        if problems:
+            print(
+                "REFUSING to run: MECHANISM_TOOLS disagrees with the served registry a "
+                "live binary just answered for --\n  "
+                + "\n  ".join(problems)
+                + "\n  Fix scripts/probe_guide_section_use.py's MECHANISM_TOOLS (and, if "
+                "the boundedness check fired, is_mechanism_tool's substring test) before "
+                "trusting this probe's output again.",
+                file=sys.stderr,
+            )
+            return 2
 
     # REFUSE rather than report. `--topic` accepts all ten registered topics, but
     # `SECTION_SIGNATURES` is keyed by section HEADING and today only
