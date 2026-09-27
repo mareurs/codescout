@@ -1023,6 +1023,88 @@ class ForkPrefixHeuristicJoin(unittest.TestCase):
         self.assertEqual(rows[0]["join_method"], "none")
 
 
+class RealFormatHeuristicJoin(unittest.TestCase):
+    """Fix round 2: a build_events-level test using REAL-shaped values end to end, rather than
+    the hand-built _candidate()/_usage_row() dicts every heuristic-join test above uses (which
+    call _join_tool_events directly and never exercise _tool_use_candidates_from_entry, _fmt_ts,
+    or _load_usage_rows). A real UUID-shaped sessionId, an ISO '...Z' transcript timestamp with
+    milliseconds, an 'mcp__codescout__<tool>' name, a present agentId, and a usage.db row whose
+    started_at is real usage.db shape -- 'YYYY-MM-DD HH:MM:SS.mmm', no zone -- exercise the full
+    transcript-parse + usage.db-load + join pipeline the coordinator named as the suspect
+    surface (candidate keying/bucketing, R50's ts normalization, R49's fork admission) that the
+    round-1 50-test suite + 36 killed mutants never covered with real-format fixtures.
+
+    Measured fix round 2 (2026-09-27): this test PASSES against HEAD (1e32b228) unmodified --
+    see probes/task6-fix2-green.txt. It is not a regression test for a real bug (the root-cause
+    probe in probes/task6-fix2-rootcause.txt found none); it is new coverage for a code path a
+    real-corpus reconciliation showed was already correct. Its discriminating power is
+    demonstrated by mutant M38 in probes/task6-fix2-mutants.txt (swap the bucket key's bare_sid
+    for cid in _join_tool_events), which this test kills -- see probes/task6-fix2-red.txt.
+    """
+
+    REAL_SID = "8f3a1c2d-4e5b-4a6c-9d7e-1a2b3c4d5e6f"
+
+    def test_a_real_shaped_tool_use_joins_heuristically_through_build_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            corpus_dir = _make_corpus(tmp_path)
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+
+            tool_input = {"pattern": "TODO", "glob": "*.rs"}
+            entries = [
+                _entry("u1", "2026-09-26T10:00:00.000Z", self.REAL_SID),
+                {
+                    "type": "assistant",
+                    "uuid": "a1",
+                    "timestamp": "2026-09-26T10:00:01.500Z",
+                    "sessionId": self.REAL_SID,
+                    "agentId": "agent-real-1",
+                    "entrypoint": "cli",
+                    "message": {
+                        "id": "m1",
+                        "content": [
+                            {"type": "tool_use", "id": "toolu_01AbC",
+                             "name": "mcp__codescout__grep", "input": tool_input},
+                        ],
+                    },
+                },
+            ]
+            _write_lines(proj / f"{self.REAL_SID}.jsonl", entries)
+
+            usage_dbs_dir = corpus_dir / "usage_dbs"
+            usage_dbs_dir.mkdir(parents=True)
+            db_path = usage_dbs_dir / "u1.db"
+            conn = sqlite3.connect(str(db_path))
+            conn.execute(
+                "CREATE TABLE tool_calls (id INTEGER PRIMARY KEY, tool_name TEXT, "
+                "called_at TEXT, started_at TEXT, cc_session_id TEXT, agent_id TEXT, "
+                "input_json TEXT, output_json TEXT, deliveries_json TEXT, tool_use_id TEXT)"
+            )
+            # started_at: real usage.db shape -- "YYYY-MM-DD HH:MM:SS.mmm", no zone -- ~20ms
+            # after the transcript-side tool_use timestamp above, well inside the 120s window.
+            conn.execute(
+                "INSERT INTO tool_calls (tool_name, called_at, started_at, cc_session_id, "
+                "agent_id, input_json, output_json, deliveries_json, tool_use_id) VALUES "
+                "('grep', '2026-09-26 10:00:01.520', '2026-09-26 10:00:01.520', ?, "
+                "'agent-real-1', ?, NULL, NULL, NULL)",
+                (self.REAL_SID, json.dumps(tool_input)),
+            )
+            conn.commit()
+            conn.close()
+
+            events_db = tmp_path / "events.db"
+            counts = join.build_events(corpus_dir, events_db, excluded_sids=set())
+
+            tool_events = _table_rows(sqlite3.connect(str(events_db)), "tool_events")
+            grep_events = [r for r in tool_events if r["name"] == "mcp__codescout__grep"]
+            self.assertEqual(len(grep_events), 1)
+            self.assertEqual(grep_events[0]["join_method"], "heuristic")
+            self.assertEqual(counts["tool_events_heuristic"], 1)
+            self.assertEqual(counts["tool_events_exact"], 0)
+            self.assertEqual(counts["tool_events_none"], 0)
+
+
+
 class EventsMetaPersistence(unittest.TestCase):
     def test_every_build_counter_is_persisted_to_events_meta(self):
         with tempfile.TemporaryDirectory() as tmp:
