@@ -278,6 +278,31 @@ not restore" instruction.
 
 Append below. Newest run first.
 
+### taxonomy-append-recipes-test — 2026-09-27
+
+Plan: `docs/superpowers/plans/2026-09-27-taxonomy-append-recipes-test.md` ·
+Spec: `docs/superpowers/specs/2026-09-27-taxonomy-append-recipes-test-design.md` ·
+executed inline (`superpowers:executing-plans`), final whole-branch review on Opus ·
+code `95ff5e64`, `8fd92e0a`, review fix pass `59204281` · **11 rulings, 0 overturned, 1 amended.**
+
+| ruling | class | cost if wrong | verdict |
+|---|---|---|---|
+| 1 — work on `experiments` in the shared checkout, no worktree | isolation | a peer commit captures uncommitted work | held — every commit pathspec-scoped; peers' staged paths were present at every commit and never captured |
+| 2 — the committed plan's three-backtick fence around a fixture holding a three-backtick fence was fixed mid-run (`a3349921`) | plan defect | none to code | held — parity flip had made Task 2/4 code parse as prose and minted a bogus heading |
+| 3 — ran a second `rustfmt` pass after `fmt-mine.sh` reported formatted and the commit hook refused | tooling | none | held — reproduced twice (two constructs); filed `d1eff909c0d8a73a` |
+| 4 — re-ran mutation step 6 with a replacement not containing its find literal | plan defect | none; a refused probe runs nothing | held |
+| 5 — added three class `**Members:**` lines to the bookkeeping commit when the cluster hook refused | process | three ledger lines | held |
+| 6 — DISCHARGED the archived parent's `TRACKED` caveat rather than repointing it | scope | doctor stops reporting a caveat someone wanted open | held, **amended** — its resolution text over-claimed coverage of I-N, which has no TAXONOMY row; corrected in the fix pass after the final review caught it |
+| 7 — left a peer campaign's frozen `seed-manifest.jsonl` naming the residual's old path | scope | one stale path in a data file | open |
+| 8 — built the review package by hand, path-scoped, because peer commits interleave on the branch | process | none; `git log` showed only this plan's commits touch the file | held |
+| 9 — re-graded review Minor m1 (inert decoy credited as coverage) to Important | calibration | two unit tests | held — its string rule then had an observed red (R1) |
+| 10 — re-graded review Minor m2 (prose remedy's scalar patch would replace existing namespaces) to Important | calibration | one message | held — a remedy that does harm graded by its effect |
+| 11 — re-graded review Minors m4/m6 (my own over-claims in two records) to Important | calibration | two sentences | held |
+
+**The lesson this run earned: a mutation set the author derives from the plan tests the guards the author named, and the final review mutated along axes nobody named.** All 11 prescribed mutations were KILLED with exactly one finding each, and the Opus review still confirmed six more survivors, one a real false pass: the template check hard-coded `F` and never read the recipe's own prefix, and a recipe row the scanner could not read dropped out of the population silently. Both are claims about the *selector* — which rows are recipes, which prefix a recipe carries — while the prescribed set mutated only the corpus the selector already admitted. That is `cluster/selector-narrower-than-its-population` arriving inside the test for it, and it is why CLAUDE.md's rule budgets the Opus pass even when every prescribed red is observed.
+
+**Also recorded:** a pre-flight guard in the fix-pass probe runner (refuse any mutation whose replacement contains its own find text) caught three of my own probe definitions before they ran; `mutation-probe.sh` refuses the same shape only at runtime, after the worktree sync.
+
 ### request-aware-response-envelopes — 2026-09-01
 
 Plan: `docs/superpowers/plans/2026-09-01-request-aware-response-envelopes.md` ·

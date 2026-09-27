@@ -62,6 +62,10 @@ Follow-ups filed: `fc491a58e7a9b561` (the other surfaces that route to `append_e
 
 Step 6's planned replacement contained its own find literal, so the probe correctly refused it as not applied (rc 2, nothing run); it was re-run with an equivalent input.
 
+### Final review and fix pass — 2026-09-27
+
+The Opus whole-branch review returned *with fixes*: 0 Critical, 5 Important, and 6 surviving mutations confirmed against a no-op baseline, one of them a real false pass (the template check hard-coded `F` instead of reading the recipe's own prefix). All closed in `59204281` (patch-id `419348f523e3becb41f5a993d6f53d8672f811a1`); the module now holds 21 tests. The fix-pass mutation round re-probed every bound, as CLAUDE.md requires after changing any: the no-op baseline SURVIVED and 24/24 mutations were KILLED with their named markers — the reviewer's survivors, one per new guard, and the original eleven above. Gate `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`.
+
 ## References
 
 - `docs/issues/archive/2026-09-02-two-trackers-have-no-open-append-path.md` — parent

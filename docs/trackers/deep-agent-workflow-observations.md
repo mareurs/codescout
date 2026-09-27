@@ -701,6 +701,8 @@ No failed attempts beyond one refused pipe, which recovered on the next call.
 
 **Trajectory deviations, each ledgered as a ruling:** (1) the plan's Task 1 fence was three backticks around a fixture holding a three-backtick fence, flipping fence parity for the rest of the plan (fixed, `a3349921`); (2) the pre-commit rustfmt check refused a file `fmt-mine.sh` had just reported formatted — reproduced as rustfmt 1.9.0 needing two passes, filed `d1eff909c0d8a73a`; (3) the cluster-member hook required three class-ledger lines in the same commit as the new bug files (`fd237517`); (4) archiving the residual re-keyed it, so seven files were repointed and the parent's caveat discharged. Check actually established: the gate reds on each named defect and is green on today's corpus; it establishes nothing about the three surfaces out of scope (`fc491a58e7a9b561`).
 
+**Outcome update, dated 2026-09-27, final review:** the Opus whole-branch review (a child agent of this session, fresh context) returned *with fixes* — 5 Important findings, 6 surviving mutations confirmed against a no-op baseline, one a real false pass. The verdict above was therefore `verified-complete` only for the checks the plan named; the corrected outcome stays `good` after one fix pass (`59204281`): 21 tests, no-op baseline SURVIVED, 24/24 re-probed mutations KILLED, gate `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`. During the review the shared tree was red on a peer's uncommitted row (session `82cff72e`); the gate's finding reached that peer as a message and they landed the fix (`2a67a654`) themselves.
+
 ## DCS-13 — Session b4de6398 — IC-11 residuals: long_docs gate and the TAXONOMY recipe gate
 
 **Valid:** dated 2026-09-27
@@ -719,7 +721,7 @@ No failed attempts beyond one refused pipe, which recovered on the next call.
 
 **Overhead:** about 6 tool calls for DWF-13 and this receipt, estimated from the transcript rather than timed.
 
-**Pending:** DWF-13's final-review outcome.
+**Pending:** none — DWF-13's final-review outcome was recorded 2026-09-27. Correction to *Identity* above: one child agent ran after this receipt was first written, the Opus whole-branch reviewer (fresh context, read-only plus isolated mutation probes); its work is inside DWF-13's outcome, under the child's observed identity.
 
 ## Template for new entries
 
