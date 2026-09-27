@@ -353,3 +353,23 @@ No probe read a correction, a miss, a judge verdict, or any quantity the go/no-g
 
   So the exact join is available per session, from that session's reconnect onward. Every earlier row joins heuristically or not at all. The first exact row is 2026-09-27 04:58:01.690 UTC (session `0cbae2f0`). The observability map reports exact vs heuristic joins by period, and the readout must not assume exact joins anywhere in `[T_live, …)`.
 - **(b) The live check was verified on another session (ruling R52).** The spec's check names this design session's own calls, but the property it checks belongs to the BINARY, and this session is excluded by spec. It was verified on `0cbae2f0`, the first session on the rebuilt binary: 85 of 85 rows carry a non-NULL `tool_use_id`, 85 are distinct, and each occurs exactly once as a `tool_use` id across its 7 transcript files. `deliveries_json` is non-NULL on 83; the other 2 are `recoverable_error`, the pinned NULL case. This also shows Claude Code 2.1.283 sends `claudecode/toolUseId`.
+
+### Amendment 5 — 2026-09-27, recorded when Stage 1b (Task 6) landed
+
+**Source:** Task 6 (`scripts/measure/join.py`, commits 2a5d6155, 1e32b228, bfab5fc4, 399a5ab9, 00286ae6), four Opus reviews that each ran the code over the live corpus, and rulings R40–R56. Where this amendment and the body disagree, this amendment wins. As with Amendment 3, these followed shape and count probes of the corpus only. No correction, miss, verdict or go/no-go quantity was read.
+
+- **(a) `turns.kind`** is one of `prompt|interrupt|delegation|assistant_text|assistant_thinking|tool_use|tool_result|meta`.
+  - `prompt` and `interrupt` come ONLY from Task 5's `operator_messages()` and `operator_interrupts()`, applied to top-level entries.
+  - In a subagent file, a non-tool user entry is `delegation` (the parent model's brief), never `prompt`. Before this rule, briefs made up 19% of prompt rows. An interrupt marker there stays `interrupt`.
+  - A thinking-only assistant line is `assistant_thinking` with text NULL. Thinking is never stored.
+- **(b) The spec's exclusion is applied by default.** `build_events` excludes `3c5b02df` unless told otherwise.
+- **(c) Every uuid passes one gate.** Top-level uuids are owned per `attribute_entries`. Subagent entries come from the union of a kept session's copies' subagent files, first writer wins across all kept sessions in attribution order. Every skip is counted.
+- **(d) `tool_events.join_method` is one of `exact|heuristic|none|not_codescout`.** `not_codescout` marks a tool_use that cannot have a usage row by construction, so it is never a join failure. The heuristic key is: bare sid (plus the fork-of target's sid for a fork); agent, which is hard when recorded; tool; arguments, minus the principal stamp; and time within 120 s, each row used once.
+
+  For time, the heuristic uses `started_at`, and when that is NULL, `called_at − latency_ms`. 81% of usage rows predate `started_at`, and on rows with both, the derivation is within 1 s in 99.8% of cases.
+
+  Measured on a 70k-row snapshot: exact 85, heuristic about 59.3k (about 51.9k of them via `called_at`), none about 26k, not_codescout about 28.6k.
+- **(e) One delivery per injection.** Claude Code records some hook injections twice, as `hook_success` stdout and as `hook_additional_context`. A `hook_success` is a twin only of a `hook_additional_context` in the same session copy, the same transcript file and the same hook event. The text must be equal, or equal to one element of a merged one, within 5 s. toolUseID is not part of the key. Measured: twins sit at most 1.7 s apart, and the nearest non-twin is at least 12 s away.
+
+  An untwinned `hook_success` counts as a delivery (`hook_success_only`: compact reloads and UserPromptSubmit stdout, which did reach the model). Two `hook_additional_context` rows are never merged. `deliveries_json = '[]'` means delivered nothing, and never falls back to parsing `output_json`. Markers count only in their anchored opening form.
+- **(f) Build counters live in `events_meta`,** so Task 13 reads them and never re-derives them. `build_events` refuses an existing DB, and every `ts` is normalized to ISO UTC.
