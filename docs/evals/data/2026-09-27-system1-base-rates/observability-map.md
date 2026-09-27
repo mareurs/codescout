@@ -1,78 +1,74 @@
-# Observability map — System 1 base-rate measurement (Task 13)
+# Observability map -- task13-fix1-real
 
-Spec A1.6 requires this map before any Codex-judge call: for every outcome and every
-causal-chain link, a label (measurable now / needs adjudication / unobservable) plus the
-coverage number from the events database that justifies it, or the reason none exists.
+Built: 2026-09-27T20:47:03Z.
+Repo HEAD at freeze time: codescout at 66a05f759c2964824f9a921e933f76d5a30ea7d2.
 
-**Provenance of this run.** Built 2026-09-27 from a scratch, codescout-project-only corpus
-(corpus id scratch-2026-09-27-codescout), frozen via archive.freeze from the three Claude
-Code profiles' codescout transcript directories (the main, sdd and kat profiles) plus this
-repo's own usage database. It does NOT include the contrast project (MRV-poc). Task 12
-freezes the real corpus (codescout plus the contrast project) and this map's coverage() /
-render_map() functions are re-run against it then, per Task 13's Step 5 — the labels and
-table shapes below are expected to carry over; the raw counts below are this scratch run's
-own and are expected to change.
+## Windows
 
-- Retained window (everything since the oldest surviving transcript, spec A1.2): 2026-08-26T00:00:00Z to 2026-09-27T10:06:17Z.
-- Decision window (last 7 days; the only window the mistakes go/no-go rule reads, spec A1.2): 2026-09-20T10:06:17Z to 2026-09-27T10:06:17Z.
-- Corpus totals: 138 transcript sessions seen, 119 kept, 19 excluded; 736 subagent transcripts; 71059 usage-database rows folded in.
-- Exclusions recomputed at coverage-build time via transcripts.exclusions(transcripts.sessions(corpus_dir), join.SPEC_EXCLUDED_SIDS) agreed exactly with the events database's own persisted sessions_kept / sessions_excluded counters (R57's mismatch check did not raise).
+- retained: 2026-08-03T20:49:16Z to 2026-09-27T20:46:57Z
+- decision: 2026-09-20T20:46:57Z to 2026-09-27T20:46:57Z
 
-## mistakes (operator-caught addressable misses; this outcome decides go/no-go)
+Data span observed across turns, tool_events and deliveries: 2026-08-03T20:49:16.531000+00:00 to 2026-09-27T16:03:40.261000+00:00 (0 rows skipped for a NULL or unparseable ts).
 
-| link | label | coverage | basis |
-|---|---|---|---|
-| opportunity | measurable now | 47401 | decision points = assistant_text turns |
-| signal/request | needs adjudication | 2660 | prompt + interrupt rows are the candidate population; whether each is a correction is judged |
-| delivery/action | needs adjudication | n/a | deliveries before the decision; their relevance is judged |
-| observed use | needs adjudication | n/a | next_action_aligned (Amendment 2(c)) |
-| checked outcome | needs adjudication | n/a | the Codex judge, plus the operator's 25-item spot-check |
+## mistakes
 
-## context (Outcome 2)
+| link | label | decision | retained | population | basis |
+|---|---|---|---|---|---|
+| opportunity | measurable now | 3904 | 47404 | all | decision points = assistant_text turns (of which top-level -- decision: 3544, retained: 38989) |
+| signal/request | needs adjudication | 363 | 2662 | all | prompt + interrupt rows are the candidate population; whether each is a correction is judged (of which top-level -- decision: 363, retained: 2654) |
+| delivery/action | needs adjudication | n/a | n/a | n/a | deliveries before the decision exist, but their relevance to the mistake is judged, not counted |
+| observed use | needs adjudication | n/a | n/a | n/a | whether the assistant's next action aligned with the correction is judged (Amendment 2(c)) |
+| checked outcome | needs adjudication | n/a | n/a | n/a | the Codex judge, plus the operator's 25-item spot-check, decide this |
 
-| link | label | coverage | basis |
-|---|---|---|---|
-| opportunity | measurable now | 47401 | assistant_text turns |
-| signal/request | measurable now | 114551 | tool_use requests |
-| delivery/action | measurable now | 7875 | deliveries by source, with join coverage |
-| observed use | needs adjudication | n/a | evidence_used |
-| checked outcome | needs adjudication | n/a | the judge, plus the spot-check |
+## context
 
-## transfer (Outcome 3)
+| link | label | decision | retained | population | basis |
+|---|---|---|---|---|---|
+| opportunity | measurable now | 3904 | 47404 | all | assistant_text turns (of which top-level -- decision: 3544, retained: 38989) |
+| signal/request | measurable now | 12669 | 114560 | all | tool_use blocks (tool_events total) |
+| delivery/action | measurable now | 774 | 7874 | all | deliveries by source (share carrying a tool_use_id -- decision: 272 of 774; retained: 3718 of 7874) |
+| observed use | needs adjudication | n/a | n/a | n/a | whether the delivered context was used in the assistant's next action is judged |
+| checked outcome | needs adjudication | n/a | n/a | n/a | the judge, plus the spot-check, decide this |
 
-| link | label | coverage | basis |
-|---|---|---|---|
-| opportunity | needs adjudication | n/a | lesson applicability is judged |
-| signal/request | needs adjudication | n/a | the lesson inventory is Task 7, not yet built; state that reason |
-| delivery/action | measurable now | 4095 | operator-rule (OP-N) and get_guide deliveries |
-| observed use | needs adjudication | n/a | applied / missed |
-| checked outcome | needs adjudication | n/a | the judge, plus the spot-check |
-| rediscovery (extra row) | needs adjudication | n/a | always: it needs semantic matching (A1.4) |
+## transfer
 
-## background-worker (A1.5)
+| link | label | decision | retained | population | basis |
+|---|---|---|---|---|---|
+| opportunity | needs adjudication | n/a | n/a | n/a | lesson applicability is judged |
+| signal/request | needs adjudication | n/a | n/a | n/a | the lesson inventory is Task 7, not yet built, so there is no candidate population to count |
+| delivery/action | measurable now | 508 | 4162 | all | deliveries whose engine_or_hook names a transfer-carrying engine (TRANSFER_DELIVERY_MARKERS: operator-rule, get_guide, operator-rules, guide-sections, session-opener) |
+| observed use | needs adjudication | n/a | n/a | n/a | whether a transferred lesson was applied or missed is judged |
+| checked outcome | needs adjudication | n/a | n/a | n/a | the judge, plus the spot-check, decide this |
+| rediscovery | needs adjudication | n/a | n/a | n/a | always: it needs semantic matching (A1.4) |
 
-| link | label | coverage | basis |
-|---|---|---|---|
-| opportunity | measurable now | 114552 | tool calls by A1.5 task family |
-| signal/request | measurable now | 1200 | Agent tool_uses plus delegation turns |
-| delivery/action | measurable now | 112220 | subagent turns (agent_path set) |
-| observed use | needs adjudication | n/a | did the parent use the result |
-| checked outcome | unobservable | n/a | there is no counterfactual; A1.5 measures opportunity size, not delegability or saving |
+## background-worker
 
-## Coverage appendix (Amendment 1 A1.6 / R57 required breakdowns)
+| link | label | decision | retained | population | basis |
+|---|---|---|---|---|---|
+| opportunity | measurable now | 12669 | 114560 | all | tool calls by A1.5 task family |
+| signal/request | measurable now | 94 | 628 | all | Agent tool_uses (delegation turns (separate, never summed) -- decision: 68, retained: 572) |
+| delivery/action | measurable now | 9167 | 112220 | subagent | subagent turns (agent_path set) |
+| observed use | needs adjudication | n/a | n/a | n/a | whether the parent used the subagent's result is judged |
+| checked outcome | unobservable | n/a | n/a | n/a | there is no counterfactual; A1.5 measures opportunity size, not delegability or saving |
 
-### tool_events by join method
+## Appendix
 
-Overall: exact 85, heuristic 59618, none 26201, not_codescout 28648 (total 114552).
+### A1.6 -- joins by method (overall)
 
-Heuristic time-source split: heuristic_via_called_at 51857, the rest of the heuristic joins 7761.
+| method | count |
+|---|---|
+| exact | 85 |
+| heuristic | 59616 |
+| none | 26210 |
+| not_codescout | 28649 |
 
-First exact-joined tool event timestamp in this corpus: 2026-09-27T04:58:01.005Z. Exact joins
-are a small share of the total (85 of 114552) in this run — the usage database's own
-retention window is much shorter than the transcripts' retained window, so most tool events
-outside its coverage fall back to heuristic or none rather than an exact join.
+Amendment 4(a): tool_use_id was NULL on every usage row until 6f6349ca; it appears per session from that session's /mcp. Usage rows with a non-NULL tool_use_id: 85. First exact join ts (the transcript tool_use ts): 2026-09-27T04:58:01.005Z.
 
-By UTC day (method: count; a day with no row for a method had zero of that method):
+Heuristic joins: 59616 total, of which 51848 matched via called_at (started_at NULL) and 7768 matched via started_at directly.
+
+A1.5's latency share is measurable only for joined calls: 59701 of 114560 tool_events are joined (exact + heuristic); latency_ms is only present on the usage rows behind those.
+
+### A1.6 -- joins by method (by day)
 
 | day | exact | heuristic | none | not_codescout |
 |---|---|---|---|---|
@@ -84,7 +80,7 @@ By UTC day (method: count; a day with no row for a method had zero of that metho
 | 2026-08-25 | 0 | 0 | 2930 | 134 |
 | 2026-08-26 | 0 | 0 | 6664 | 298 |
 | 2026-08-27 | 0 | 0 | 6908 | 735 |
-| 2026-08-28 | 0 | 9 | 1766 | 652 |
+| 2026-08-28 | 0 | 0 | 1775 | 652 |
 | 2026-08-31 | 0 | 2803 | 9 | 1446 |
 | 2026-09-01 | 0 | 6217 | 39 | 2504 |
 | 2026-09-02 | 0 | 11311 | 122 | 4177 |
@@ -110,30 +106,55 @@ By UTC day (method: count; a day with no row for a method had zero of that metho
 | 2026-09-24 | 0 | 4796 | 1049 | 511 |
 | 2026-09-25 | 0 | 1046 | 224 | 227 |
 | 2026-09-26 | 0 | 788 | 108 | 206 |
-| 2026-09-27 | 85 | 620 | 446 | 95 |
+| 2026-09-27 | 85 | 627 | 446 | 96 |
 
-### deliveries
+### A1.6 -- delivery coverage by source
 
-By source: transcript_hook 3712, usage_deliveries_json 68, usage_output_json 4095 (total 7875).
+| source | count |
+|---|---|
+| transcript_hook | 3712 |
+| usage_deliveries_json | 70 |
+| usage_output_json | 4092 |
 
-hook_success_only: 318. hook_success_twins_dropped: 3839. deliveries_unmapped_session: 11151.
+hook_success_only: 318; hook_success_twins_dropped: 3839.
 
-### sessions per project, by window
+usage rows with no kept session: 11786 of 71692 usage rows read (of which 492 from the spec-excluded session).
 
-This corpus contains a single project (the codescout project directory, present under all
-three profiles, so its kept sessions are unioned across profiles into one row): retained 118,
-decision 24. events_meta's persisted sessions_kept is 119 — the one-session gap is a kept
-session none of whose turns' timestamps fall inside either window, so it is counted as kept
-overall but in neither window's membership check.
+### A1.6 -- sessions per project and window
 
-### exclusions by reason
+| project | retained | decision |
+|---|---|---|
+| -home-marius-work-claude-codescout | 118 | 23 |
 
-duplicate-prefix-of: 10. excluded-by-spec: 2. sdk-cli: 7. Total 19, matching events_meta's
-persisted sessions_excluded.
+### A1.6 -- exclusions by reason
 
-### divergent-duplicate unowned uuids
+| reason | count |
+|---|---|
+| duplicate-prefix-of | 10 |
+| excluded-by-spec | 2 |
+| sdk-cli | 7 |
 
-None in this corpus. Its 19 exclusions are all duplicate-prefix-of (10) or the other two
-reasons above; no divergent-duplicate-of collapse occurred here, so Amendment 3's documented
-cost (uuids in a diverged tail that no kept transcript owns) does not apply to this run. Task
-12's real-corpus rerun may find a nonzero count.
+excluded-by-spec, data-wise: sid 3c5b02df-b6ce-45f5-9d03-1194e38465c0 present in 2 profile(s): .claude-kat/3c5b02df-b6ce-45f5-9d03-1194e38465c0, .claude-sdd/3c5b02df-b6ce-45f5-9d03-1194e38465c0
+
+### A1.6 -- turns by kind
+
+| kind | count |
+|---|---|
+| assistant_text | 47404 |
+| assistant_thinking | 70917 |
+| delegation | 572 |
+| interrupt | 142 |
+| meta | 18456 |
+| prompt | 2520 |
+| tool_result | 114554 |
+| tool_use | 114559 |
+
+### A1.6 -- divergent-duplicate unowned uuids
+
+none
+
+### A1.6 -- kept sessions with zero turns
+
+count: 1.
+
+.claude-kat/d8a1f024-ebf2-463b-996e-b7a908b34169: its uuids are owned by .claude-sdd/571eb3d6-c879-43f6-b3f9-5a51e744e1af
