@@ -35,7 +35,7 @@ Fixed in the working tree: preserve per-lane failures through explicit PID waits
 
 Evidence and reproduction: `docs/evals/data/2026-09-24-rule-tell/phase1b/codex-stop-review/shell-verification.json` and `verify_shell_fixes.py`. Review: `docs/research/2026-09-27-codex-phase1b-stop-review.md`.
 
-No models, training jobs, held-out evaluations, or full Rust gate rerun. Changes are uncommitted; no fix SHA or patch-id exists yet. The historical outputs are unchanged. Archive after integration and the applicable repository gate.
+No models, training jobs, held-out evaluations, or full Rust gate rerun. **Committed in `c991f226`, patch-id `f0bd8c00dafbb5ece2e7e98a445af9f9d7f9559a`**, after the integrating session re-observed a red (removing `step5.sh`'s final `exit "$fail"` fails 2 of the 8 tests). The historical outputs are unchanged; the as-run script bytes are in `08a5544e` and `5a477c51`. Archive after the applicable repository gate.
 
 ## References
 

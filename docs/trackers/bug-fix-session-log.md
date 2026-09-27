@@ -17074,7 +17074,7 @@ At that point `df` showed 64G free, and no process was still building into a leg
 
 **Severity:** med — downstream automation can consume a false completion status; the recorded run has no observed affected child failure.
 
-**Status:** fixed-verified — in the working tree; uncommitted; focused shell checks only, no fresh whole-repository Rust gate.
+**Status:** fixed-verified — committed in `c991f226` (patch-id `f0bd8c00dafbb5ece2e7e98a445af9f9d7f9559a`); focused shell checks only, no fresh whole-repository Rust gate.
 
 **Valid:** dated 2026-09-27
 
