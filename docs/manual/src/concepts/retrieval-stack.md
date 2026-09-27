@@ -19,9 +19,9 @@
 | Service | Default port | Image / binary | Role |
 |---|---|---|---|
 | Qdrant | `6334` (gRPC), `6333` (HTTP) | `qdrant/qdrant:v1.17.0` | Vector storage. Two collections: `code_chunks`, `memories`. |
-| Dense embedder | `48081` (HTTP) | `llama.cpp:server` running `CodeRankEmbed-Q4_K_M.gguf` (default) | Text → 768-dim dense vector. Speaks TEI protocol; switchable to OpenAI protocol for Ollama / OpenAI / Anthropic-compatible endpoints. |
-| Sparse SPLADE | `48084` (HTTP) | `text-embeddings-inference` running `prithivida/Splade_PP_en_v1` | Text → sparse vector for lexical complement. |
-| Reranker | `48083` (HTTP) | `text-embeddings-inference` running `BAAI/bge-reranker-base` (CPU) or `bge-reranker-v2-m3` (GPU) | Cross-encoder pairwise re-rank of fused candidates. |
+| Dense embedder | `48081` (HTTP) | `llama.cpp` `llama-server` running `CodeRankEmbed-Q4_K_M.gguf` (default) | Text → 768-dim dense vector over the OpenAI-shaped `/v1/embeddings`, so Ollama / OpenAI / vLLM endpoints also work. |
+| Sparse SPLADE | `48084` (HTTP) | `text-embeddings-inference` running `prithivida/Splade_PP_en_v1` (CUDA image on `gpu`, built for ROCm on `amd`, CPU image on `sparse-cpu`) | Text → sparse vector for lexical complement. |
+| Reranker | `48083` (HTTP) | `llama.cpp` `llama-server --reranking` running `bge-reranker-v2-m3-Q4_K_M.gguf` on both GPU profiles | Cross-encoder pairwise re-rank of fused candidates. **Opt-in:** codescout calls it only when `CODESCOUT_RERANK=1`. |
 
 codescout connects to these services on `127.0.0.1`. There is no per-project
 substrate — the stack is shared across all projects on a machine.
@@ -29,12 +29,17 @@ substrate — the stack is shared across all projects on a machine.
 ## Bring up the stack
 
 ```bash
-# CPU profile (default — works on any Linux/macOS machine, ~3 GB RAM idle):
-docker compose --profile cpu up -d
-
-# GPU profile (CUDA — uses NVIDIA runtime, ~2.5 GB VRAM idle):
+# GPU profile (NVIDIA CUDA — uses the NVIDIA runtime, ~2.5 GB VRAM idle):
 docker compose --profile gpu up -d
+
+# AMD profile (ROCm — RX 7xxx, /dev/kfd + /dev/dri passthrough):
+docker compose --env-file .env.amd --profile amd up -d
 ```
+
+There is no CPU profile any more (retired 2026-07-27; recover it from
+`git log -- docker-compose.yml` if a machine needs one). The `sparse-cpu` profile
+is not a CPU stack: it moves only the sparse leg off a GPU host's card — see
+[Moving the sparse leg to CPU](sparse-amd.md#moving-the-sparse-leg-to-cpu).
 
 The dense embedder needs a GGUF model file. First-run setup:
 
@@ -103,7 +108,11 @@ reranker *is* published as GGUF (`gpustack/bge-reranker-v2-m3-GGUF`, verified
 locally — see [Bring up the stack](#bring-up-the-stack) for why.
 
 The SPLADE model is pulled by the `sparse-amd` container at first launch
-into the `huggingface-cache` volume; no manual download needed.
+into the compose `model_cache` volume; no manual download needed.
+
+To free the card without breaking search, the sparse leg can move to TEI's CPU
+image on the same port (`sparse-cpu` profile) — see
+[Moving the sparse leg to CPU](sparse-amd.md#moving-the-sparse-leg-to-cpu).
 
 **Host requirements:**
 - AMD GPU (RX 7xxx / MI series), gfx1100+ recommended
@@ -224,10 +233,10 @@ export CODESCOUT_QUERY_PREFIX="search_query: "
 
 You still need Qdrant + the reranker + the sparse service running from the
 docker-compose stack — Ollama only replaces the dense leg. Stop the compose
-`dense-cpu` or `dense-gpu` container so the port is free:
+`dense-gpu` or `dense-amd` container so the port is free:
 
 ```bash
-docker compose --profile cpu stop dense-cpu
+docker compose --profile gpu stop dense-gpu   # or: --profile amd stop dense-amd
 ```
 
 ### llama.cpp (standalone)

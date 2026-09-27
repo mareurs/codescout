@@ -90,15 +90,26 @@ N/A. This is a drift record, and the reproduction is the whole diagnosis.
 
 ## Fix
 
-Proposed; needs an operator decision.
+**Chosen: (a), restore the `amd` services.** The operator asked on 2026-09-27 to move SPLADE off the card for the AMD training window and bring it back later, which needs a definition to stop and start from.
 
-1. **Decide what this repo defines for this host.** Either:
-   - **(a)** restore the `amd` services from `4036bb9a^:docker-compose.yml`, in the file or as a separate `docker-compose.amd.yml`, updated to what the live containers run (`--max-batch-tokens 2048 --max-client-batch-size 8`, `PYTORCH_HIP_ALLOC_CONF`), so the running containers have a definition again; or
-   - **(b)** keep the repo NVIDIA-only and state, in the compose header and the manual, that an AMD host's stack is maintained outside it.
-2. **Correct surfaces 1–7 in one pass** against the chosen state. Make one manual page authoritative, and have the other link to it rather than restate it.
-3. **Re-verify:** `docker compose --profile <p> config --services` lists every running service of project `codescout-retrieval`, and no running container of that project is an orphan.
+**Done 2026-09-27:**
+1. **Restored the three `amd` services** in `docker-compose.yml`: `dense-amd`, `sparse-amd` and `reranker-amd`, taken from `4036bb9a^` and checked flag for flag against `docker inspect` of the live containers. They follow the file's current conventions: log rotation, `init: true`, and healthchecks that POST the model path instead of `/health` (F-2). The unread `PYTORCH_ROCM_ARCH` build arg was dropped.
+2. **Added `--max-batch-requests 4` to `sparse-amd`** (the Q-1 cap). It takes effect when the service is next recreated. I checked it starts beside `--max-client-batch-size 8` on a throwaway TEI container, and `/info` reported both. Its effect on throughput is not yet measured.
+3. **Added a `sparse-cpu` profile:** TEI's CPU image serving the same model on the same host port, for freeing the card without a client change.
+4. **Corrected surfaces 1–7:** the compose header, the sparse comment (now per profile), `sparse-amd.md` (status, PR #860 merged 2026-09-15 and Instinct-only, health body, the service snippet replaced by a pointer to the compose file), `retrieval-stack.md`, and the `.env.amd` header.
 
-Relevant once a definition exists: the live SPLADE has no cap on batch count (`warmup_rocm{… max_bs=None}` in its logs), and `--max-batch-requests` is the candidate cap. A card-level analysis lives outside this repo, in `~/work/claude/gpu-tuning`, `docs/trackers/research.md` R-5 and Q-1.
+**Found while fixing, and fixed in the same pass:**
+- `retrieval-stack.md` still presented a `cpu` profile as the default (`--profile cpu up`, `stop dense-cpu`). No such profile has existed since `4036bb9a`.
+- Its table described a TEI `bge-reranker-base` reranker. Both GPU profiles actually serve `bge-reranker-v2-m3` from llama.cpp, and reranking is opt-in (`CODESCOUT_RERANK=1`, `src/retrieval/config.rs:153`).
+- It named a `huggingface-cache` volume; the actual volume is `model_cache` (`docker inspect`).
+
+**Found and documented, not fixed:** recreating `dense-amd` from the file needs `CODESCOUT_MODEL_DIR` pointing at a directory holding `CodeRankEmbed-Q4_K_M.gguf`. The repo's `./models` holds only a `CodeRankEmbed/` source directory, and the live container was created with a different model directory. `.env.amd`'s header now says to read the live mount before recreating.
+
+**Verified:**
+- `docker compose config -q` passes.
+- Profile `amd` lists `dense-amd`, `qdrant`, `reranker-amd` and `sparse-amd`, and no running container of project `codescout-retrieval` is an orphan.
+- The swap to `sparse-cpu` ran through the new definition, and `semantic_search` succeeded through it.
+- `audit_doc_refs` on both manual pages found 0 high and 0 medium findings.
 
 ## Tests added
 
@@ -106,12 +117,12 @@ N/A, with reason: this is documentation and deployment drift, with no code path 
 
 ## Workarounds
 
-- In this checkout on this host, don't run `docker compose … --remove-orphans` or `docker compose --profile gpu up`.
-- Recreate or reconfigure a live container only from `docker inspect <container>`.
+- **Resolved by the fix:** with `--profile amd` the live containers are defined services again, so `--remove-orphans` no longer targets them. Whether Compose also spares them when `--profile amd` is *not* passed (services in an inactive profile) is unverified: testing it for real risks deleting the live stack. So always pass `--profile amd` on this host.
+- **Still true on the AMD host:** `docker compose --profile gpu up` would try to bind 127.0.0.1:48081, :48083 and :48084, which the `amd` services hold. Use `--profile amd` (and `sparse-cpu` for the sparse swap) there.
 
 ## Resume
 
-The operator chooses (a) or (b) in Fix step 1. Nothing is claimed.
+Commit, gate result, SHA and patch-id are recorded below once they exist. After that, archive this file.
 
 ## References
 

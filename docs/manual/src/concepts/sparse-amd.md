@@ -1,14 +1,16 @@
 # SPLADE on ROCm (`sparse-amd`)
 
-> **Status:** stable since v0.12.0. The image is built from a not-yet-merged
-> upstream PR and verified on gfx1100. Other RDNA3 / CDNA arches will probably
-> work but have not been tested by us. If upstream PR #860 ships, this page
-> will simplify to a one-line pointer at the official ROCm image.
+> **Status:** stable since v0.12.0. The image is built from source at TEI commit
+> `1588129f93`, on the branch of upstream PR #860. That PR merged on 2026-09-15
+> (`d246fbf`) but targets AMD Instinct (MI300/MI325), so upstream still ships no
+> image for Radeon/RDNA cards. It runs on gfx1101 (RX 7800 XT); other RDNA3 arches
+> are untested by us.
 
-The default `amd` profile keeps SPLADE on CPU because upstream
-[text-embeddings-inference][tei] (TEI) does not ship a ROCm release. The
-`sparse-amd` service brings sparse encoding onto the GPU by building TEI from
-source against ROCm 7.1 + PyTorch 2.8.
+The `amd` profile runs SPLADE on the GPU through the `sparse-amd` service, which
+builds [text-embeddings-inference][tei] (TEI) from source against ROCm 7.1 +
+PyTorch 2.8. To free the card for something else, the `sparse-cpu` profile serves
+the same model on the same port from TEI's CPU image; see
+[Moving the sparse leg to CPU](#moving-the-sparse-leg-to-cpu).
 
 On a 21k-chunk codescout reindex this drops sparse CPU usage from ~3200 %
 (saturating 32 cores) to ~121 % (the Rust router thread plus light Python
@@ -18,10 +20,10 @@ overhead) and finishes the full re-embed in 6 m 36 s.
 
 ## Why this is experimental
 
-- **Upstream PR not merged.** The AMD path lives on PR
-  [#860 (`fa-varlen` branch)][pr]. We pin commit `1588129f93…` because
-  `requirements-amd.txt` and `Dockerfile-amd` landed there post-v1.9.3. If
-  PR #860 changes, you may need to rebuild.
+- **Upstream ROCm support is Instinct-only.** The AMD path landed as PR
+  [#860 (`fa-varlen` branch)][pr], merged 2026-09-15, with CI for MI300/MI325
+  only. We pin commit `1588129f93…` from that branch because
+  `requirements-amd.txt` and `Dockerfile-amd` landed there post-v1.9.3.
 - **gfx1100 has no upstream flash-attention.** Upstream PR #860 builds
   ROCm/flash-attention pinned to gfx942 (MI300). RDNA3 is not supported by
   that fork. Our Dockerfile skips the flash-attn build and relies on PyTorch
@@ -46,12 +48,15 @@ PyTorch). Subsequent runs reuse the image.
 Verify:
 
 ```bash
-curl 127.0.0.1:48084/health     # {"status":"Ok"}
 curl -X POST 127.0.0.1:48084/embed_sparse \
      -H 'Content-Type: application/json' \
      -d '{"inputs":"async fn cancel()"}'
 # → [[{"index":..., "value":...}, ...]]   sparse activations
 ```
+
+`/health` answers HTTP 200 with an **empty** body, and only says the router is up;
+the `/embed_sparse` call above is the check that exercises the model, which is
+why the compose healthcheck uses it.
 
 The container logs `Python backend ready in 5.157s` and
 `ROCm / HIP version: 7.1.25424` on startup. If you see
@@ -60,28 +65,22 @@ check `/dev/kfd` and `/dev/dri` permissions on the host.
 
 ## Compose service
 
-```yaml
-sparse-amd:
-  profiles: [amd]
-  build:
-    context: ./docker/sparse-amd
-    dockerfile: Dockerfile
-    args:
-      TEI_REF: 1588129f932125a780ab97ccb300e7774b02d230
-      PYTORCH_ROCM_ARCH: gfx1100
-  image: codescout/sparse-amd:tei-1588129f93
-  container_name: codescout-sparse-amd
-  ports: ["127.0.0.1:48084:80"]
-  devices: [/dev/kfd, /dev/dri]
-  group_add: ["44", "992"]   # video, render — numeric: rocm/pytorch image lacks 'render' group
-  shm_size: 8g
-```
+The service is `sparse-amd` in `docker-compose.yml`; this page deliberately does not
+restate it, because a copy here drifted from the file once already (it showed a
+`PYTORCH_ROCM_ARCH` build arg the Dockerfile never reads — its only `ARG` is
+`TEI_REF`). Two parts of that definition are worth knowing before you edit it:
 
-The numeric `group_add` is intentional. Docker resolves group names against
-the **image's** `/etc/group`, not the host's. `rocm/pytorch` does not declare
-a `render` group, so passing the name fails with
-`Unable to find group render`. GIDs 44 (video) and 992 (render) match the
-defaults on Debian/Ubuntu hosts — adjust if your host differs.
+- **Numeric `group_add` (`"44"`, `"992"`).** Docker resolves group names against
+  the **image's** `/etc/group`, not the host's. `rocm/pytorch` does not declare a
+  `render` group, so passing the name fails with `Unable to find group render`.
+  GIDs 44 (video) and 992 (render) match the defaults on Debian/Ubuntu hosts —
+  adjust if your host differs (`getent group video render`).
+- **`--max-batch-tokens 2048` and `--max-batch-requests 4`.** The token cap counts
+  real tokens only, and nothing capped the batch *count*: the server grew from
+  2.89 GiB right after a restart to 5.30 GiB after 12 days of serving (measured
+  2026-09-26). The request cap bounds each padded batch at 4 × 512 tokens. Its
+  effect on reindex throughput is not yet measured against the 6 m 36 s baseline
+  above.
 
 ## Deviations from upstream PR #860
 
@@ -115,6 +114,39 @@ both of which match.
 CODESCOUT_SPARSE_EMBEDDER_URL=http://127.0.0.1:48084
 ```
 
+## Moving the sparse leg to CPU
+
+When the card is needed for something else — a training run that needs the
+~2.9 GiB SPLADE holds — move the sparse leg to TEI's CPU image instead of turning
+it off. `sparse-cpu` serves the same model on the same host port, so codescout
+keeps calling `127.0.0.1:48084` with no client change and no `/mcp` reconnect:
+
+```bash
+docker compose --profile amd stop sparse-amd
+docker compose --profile sparse-cpu up -d --no-deps sparse-cpu
+# ...and back:
+docker compose --profile sparse-cpu stop sparse-cpu
+docker compose --profile amd up -d --no-deps sparse-amd
+```
+
+**Why not `CODESCOUT_DISABLE_SPARSE=1` and stop the container?** Each codescout
+server reads that flag once, at startup. Every open session would need `/mcp` to
+pick it up, and any that did not would fail every `semantic_search` and index
+build with `embed sparse send` until SPLADE came back — there is no dense-only
+fallback. Chunks indexed while the flag is on also carry empty sparse vectors,
+which needs `index(action="build", force=true)` after re-enabling.
+
+**What the CPU path costs.** It runs float32 where the GPU runs float16, so a
+query embedded on CPU differs slightly from chunks embedded on the GPU. Measured
+2026-09-27 on five probes (code and prose): cosine ≥ 0.99997 between each probe's
+two vectors, and the same token indices apart from one or two extra near-zero
+weights (< 0.004) on the CPU side. Individual small weights can differ by more
+than their own size, so compare vectors, not entries. A temporary swap needs no
+reindex. Idle, the CPU server holds ~1.1 GiB of RAM and ~0.3% CPU; the swap itself
+leaves `:48084` down for about a minute (57 s measured, mostly TEI's CPU warmup),
+and a full reindex on CPU saturates the cores, which is what this page's GPU build
+was made to avoid.
+
 ## Known issues
 
 - **Image size ~12 GB.** Runtime stage carries the full `rocm/pytorch`
@@ -122,5 +154,5 @@ CODESCOUT_SPARSE_EMBEDDER_URL=http://127.0.0.1:48084
   libraries onto a smaller base is feasible but not yet attempted.
 - **Cold start 5 s.** The Python backend imports torch + transformers at
   startup. Live latency after warm is in the same ballpark as TEI-on-CUDA.
-- **gfx1100 only verified.** gfx1030, gfx1101, MI series should work
-  (PyTorch SDPA is arch-agnostic) but have not been tested.
+- **Verified on gfx1101 (RX 7800 XT) only.** gfx1100, gfx1030 and the MI series
+  should work (PyTorch SDPA is arch-agnostic) but have not been tested by us.

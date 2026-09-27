@@ -1,15 +1,21 @@
 name: codescout-retrieval
 
-# Single-profile retrieval stack: gpu (NVIDIA CUDA).
+# Two GPU profiles, one per host this repo runs on:
 #
-#   docker compose --profile gpu up -d
+#   docker compose --profile gpu up -d     # NVIDIA CUDA host
+#   docker compose --profile amd up -d     # AMD ROCm host (RX 7xxx), wired by .env.amd
 #
-# The cpu and amd profiles were removed 2026-07-27 — this repo targets one NVIDIA
-# host. Recover them from git history if another machine needs them:
+# plus a CPU fallback for the sparse leg alone, for a GPU host whose card is
+# needed for something else (see sparse-cpu at the end of this file):
+#
+#   docker compose --profile sparse-cpu up -d --no-deps sparse-cpu
+#
+# The amd profile was removed on 2026-07-27 and restored on 2026-09-27: the AMD
+# host kept serving every session from containers the removed profile had
+# created, so nothing in the repo could recreate or change them. Do not remove
+# it again while a host runs it. The cpu profile stays retired; recover it from
+# git history if a machine needs it:
 #   git log --oneline -- docker-compose.yml
-# The amd profile also depended on docker/sparse-amd/Dockerfile (TEI built from
-# source — HF publishes no prebuilt TEI ROCm image) and on .env.cpu / .env.amd.
-# Those files are left in place; delete them separately if they are also dead.
 #
 # Dense embedder is llama-server (gguf) — CodeRankEmbed-Q4_K_M scored highest on
 # the legacy-natural bench (30/60) and runs ≤1GB VRAM. Sparse is splade-pp via
@@ -126,16 +132,18 @@ services:
   # ------------------------------------------------------------------ SPARSE
   # Splade_PP_en_v1 on TEI.
   #
-  # DISABLED 2026-07-28 — CODESCOUT_DISABLE_SPARSE=1 is set in .env.gpu/.env.amd,
-  # so codescout skips the sparse leg at both query and index time and this
-  # service is stopped. Left defined here for the re-enable path. Re-enabling
-  # needs `index(action="build", force=true)`: chunks indexed while it was off
-  # carry an empty sparse vector (Qdrant accepts them; they never match).
+  # Sparse leg state differs by profile. gpu: DISABLED since 2026-07-28 —
+  # .env.gpu sets CODESCOUT_DISABLE_SPARSE=1, so codescout skips the sparse leg
+  # at both query and index time and this service is stopped; it stays defined
+  # for the re-enable path. amd: ENABLED (.env.amd re-enabled it 2026-08-07).
+  # Re-enabling on a host that indexed without it needs
+  # `index(action="build", force=true)`: chunks indexed while it was off carry an
+  # empty sparse vector (Qdrant accepts them; they never match).
   #
-  # VRAM note carried over from the deleted sparse-amd service: SPLADE projects
+  # VRAM note shared with sparse-amd below: SPLADE projects
   # every token to a vocab-sized ([tokens x 30522] f16) tensor, so peak memory
   # scales with --max-batch-tokens. TEI's default of 16384 measured ~13.7 GiB on
-  # a 16 GiB card, which is why the amd service capped it at 2048.
+  # a 16 GiB card, which is why sparse-amd caps it at 2048.
   #
   # The "~726 MiB on a 6 GiB card, discrepancy unexplained" claim that stood here
   # was wrong, and there is no discrepancy: 726 MiB was the IDLE footprint, being
@@ -209,7 +217,7 @@ services:
   # llama-server serves the same model in ~0.5 GiB.
   # See docs/issues/2026-07-27-reranker-gpu-tei-cuda-oom.md
   #
-  # Mirrors the (now deleted) reranker-amd service: same Q4_K_M GGUF on
+  # Mirrors reranker-amd below: same Q4_K_M GGUF on
   # llama-server, CUDA image instead of ROCm. Note this service is deliberately
   # NOT subject to the TEI compute-capability pin described above sparse-gpu —
   # llama.cpp ships a single CUDA image built with ARCHS=500..1200, so this
@@ -276,6 +284,250 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    networks: [retrieval_net]
+
+  # ================================================================== AMD
+  # The amd profile: the same three legs on an AMD ROCm card via /dev/kfd and
+  # /dev/dri passthrough. Flags, groups, shm and allocator env match the
+  # containers the AMD host has run since 2026-05-20; log rotation, tini and the
+  # model-path healthchecks follow this file's conventions (see dense-gpu).
+  # Fetch the GGUFs with: ./scripts/fetch-models.sh --amd
+  dense-amd:
+    profiles: [amd]
+    image: rocm/llama.cpp:llama.cpp-b6652.amd0_rocm7.0.0_ubuntu24.04_server
+    container_name: codescout-dense-amd
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    init: true  # see dense-gpu
+    command:
+      - --model
+      - /models/CodeRankEmbed-Q4_K_M.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --embedding
+      - --pooling
+      - mean
+      - --ctx-size
+      - "65536"
+      - --batch-size
+      - "4096"
+      - --ubatch-size
+      - "4096"
+      - --parallel
+      - "16"
+      - --n-gpu-layers
+      - "999"
+      - --flash-attn
+      - "on"
+    ports:
+      - "127.0.0.1:48081:8080"
+    volumes:
+      - ${CODESCOUT_MODEL_DIR:-./models}:/models:ro
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+      - render
+    # Embedding path, not /health - see dense-gpu.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -m 10 -X POST http://127.0.0.1:8080/v1/embeddings
+          -H 'Content-Type: application/json'
+          -d '{"input":"health"}' -o /dev/null || exit 1
+      interval: 15s
+      timeout: 15s
+      retries: 10
+      start_period: 60s
+    networks: [retrieval_net]
+
+  sparse-amd:
+    profiles: [amd]
+    # TEI built from source (docker/sparse-amd/Dockerfile, whose only build arg
+    # is TEI_REF). Upstream's ROCm support, huggingface/text-embeddings-inference
+    # PR #860 (merged 2026-09-15), targets Instinct MI300/MI325 only, so there is
+    # no RDNA image to pull. Runs on gfx1101 (RX 7800 XT) on the AMD host.
+    build:
+      context: ./docker/sparse-amd
+      dockerfile: Dockerfile
+      args:
+        TEI_REF: 1588129f932125a780ab97ccb300e7774b02d230
+    image: codescout/sparse-amd:tei-1588129f93
+    container_name: codescout-sparse-amd
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    init: true  # see dense-gpu
+    command:
+      - --model-id
+      - prithivida/Splade_PP_en_v1
+      - --pooling
+      - splade
+      - --dtype
+      - float16
+      - --auto-truncate
+      # See the VRAM note above sparse-gpu: peak memory scales with the batch.
+      - --max-batch-tokens
+      - "2048"
+      # --max-batch-tokens alone did not bound it: nothing capped the batch
+      # COUNT (warmup logs `max_bs=None`), and the server grew from 2.89 GiB right
+      # after a restart to 5.30 GiB after 12 days of serving (measured
+      # 2026-09-26). Capping requests bounds each padded batch at 4 x 512 tokens.
+      # Checked to start beside --max-client-batch-size 8 (/info reports both).
+      # Reindex throughput with the cap is not yet measured: compare against the
+      # 6m36s / 21k-chunk baseline in docs/manual/src/concepts/sparse-amd.md.
+      - --max-batch-requests
+      - "4"
+      - --max-client-batch-size
+      - "8"
+      - --hostname
+      - 0.0.0.0
+      - --port
+      - "80"
+    environment:
+      PYTORCH_HIP_ALLOC_CONF: expandable_segments:True
+    ports:
+      - "127.0.0.1:48084:80"
+    volumes:
+      - model_cache:/data
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      # GIDs, not names: the rocm/pytorch base image's /etc/group has no
+      # `render` entry, and group_add resolves names against the image, not the
+      # host. 44 = video, 992 = render on this host; check with
+      # `getent group video render` elsewhere. The llama.cpp services use names
+      # because their base image carries both groups.
+      - "44"
+      - "992"
+    shm_size: 8g
+    # SPLADE path, not /health - see dense-gpu. TEI listens on 80 in-container.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -m 10 -X POST http://127.0.0.1/embed_sparse
+          -H 'Content-Type: application/json'
+          -d '{"inputs":"health"}' -o /dev/null || exit 1
+      interval: 15s
+      timeout: 15s
+      retries: 10
+      start_period: 120s
+    networks: [retrieval_net]
+
+  reranker-amd:
+    profiles: [amd]
+    image: rocm/llama.cpp:llama.cpp-b6652.amd0_rocm7.0.0_ubuntu24.04_server
+    container_name: codescout-reranker-amd
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    init: true  # see dense-gpu
+    command:
+      - --model
+      - /models/bge-reranker-v2-m3-Q4_K_M.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --reranking
+      - --pooling
+      - rank
+      - --ctx-size
+      - "8192"
+      - --batch-size
+      - "2048"
+      - --ubatch-size
+      - "2048"
+      - --parallel
+      - "8"
+      - --n-gpu-layers
+      - "999"
+      - --flash-attn
+      - "on"
+    ports:
+      - "127.0.0.1:48083:8080"
+    volumes:
+      - ${CODESCOUT_MODEL_DIR:-./models}:/models:ro
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+      - render
+    # Rerank path, not /health - see reranker-gpu.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -m 10 -X POST http://127.0.0.1:8080/v1/rerank
+          -H 'Content-Type: application/json'
+          -d '{"query":"health","documents":["health"]}' -o /dev/null || exit 1
+      interval: 15s
+      timeout: 15s
+      retries: 10
+      start_period: 60s
+    networks: [retrieval_net]
+
+  # ============================================================ SPARSE ON CPU
+  # The same SPLADE model on TEI's CPU image and the SAME host port, for a GPU
+  # host whose card is needed for something else. No client change and no /mcp
+  # reconnect: codescout keeps calling 127.0.0.1:48084. It cannot run beside
+  # sparse-amd or sparse-gpu, which bind that port too. Swap:
+  #   docker compose --profile amd stop sparse-amd
+  #   docker compose --profile sparse-cpu up -d --no-deps sparse-cpu
+  # and back:
+  #   docker compose --profile sparse-cpu stop sparse-cpu
+  #   docker compose --profile amd up -d --no-deps sparse-amd
+  # CPU runs float32 where the GPU runs float16, so a query embedded here differs
+  # slightly from chunks embedded on the GPU. Measured 2026-09-27 on 5 probes:
+  # cosine >= 0.99997 between the two vectors of each probe, the same token
+  # indices apart from 1-2 extra near-zero weights (< 0.004) on the CPU side;
+  # a temporary swap needs no reindex. A full reindex on CPU saturates the cores
+  # (sparse-amd.md).
+  sparse-cpu:
+    profiles: [sparse-cpu]
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8@sha256:8de25e75ce39617f17f2f6c77d60a4f75b65e779ed5005420eb1400072a15c1c
+    container_name: codescout-sparse-cpu
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    init: true  # see dense-gpu
+    command: ["--model-id", "prithivida/Splade_PP_en_v1", "--pooling", "splade", "--dtype", "float32", "--auto-truncate"]
+    ports:
+      - "127.0.0.1:48084:80"
+    volumes:
+      - model_cache:/data
+    # SPLADE path, not /health - see dense-gpu.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -m 10 -X POST http://127.0.0.1/embed_sparse
+          -H 'Content-Type: application/json'
+          -d '{"inputs":"health"}' -o /dev/null || exit 1
+      interval: 15s
+      timeout: 15s
+      retries: 10
+      start_period: 60s
     networks: [retrieval_net]
 
 volumes:
