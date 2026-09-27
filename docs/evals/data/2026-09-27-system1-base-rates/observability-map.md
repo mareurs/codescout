@@ -1,14 +1,35 @@
-# Observability map -- task13-fix1-real
+# Observability map -- scratch-2026-09-28-codescout
 
-Built: 2026-09-27T20:47:03Z.
-Repo HEAD at freeze time: codescout at 66a05f759c2964824f9a921e933f76d5a30ea7d2.
+A map from any corpus other than the Task 12 freeze is provisional; Task 12 regenerates this file from the frozen real corpus.
+
+## Provenance
+
+- corpus_id: scratch-2026-09-28-codescout
+- freeze instant (manifest created_utc): 2026-09-27T21:15:04Z
+- rendering code: git HEAD 09f800eae26120fb996dcb65ecf7033a5da5c52d at render time; scripts/measure clean
+- repos at freeze (manifest repos): codescout at 715dd87aa69f7c7b85375e2540b6b6417157ebc8
+- earliest kept top-level entry ts: 2026-08-03T20:49:16.290Z (top-level entries skipped by this scan: 138645 without a ts, 0 with an unparseable ts)
+- usage DBs: 1 file(s) in the manifest's files, holding 71807 usage rows (manifest counts)
+
+Transcript sources, from the manifest's files:
+
+| profile dir | project dir | top-level transcripts | subagent transcripts |
+|---|---|---|---|
+| 00-.claude | -home-marius-work-claude-codescout | 45 | 289 |
+| 01-.claude-sdd | -home-marius-work-claude-codescout | 59 | 295 |
+| 02-.claude-kat | -home-marius-work-claude-codescout | 34 | 155 |
 
 ## Windows
 
-- retained: 2026-08-03T20:49:16Z to 2026-09-27T20:46:57Z
-- decision: 2026-09-20T20:46:57Z to 2026-09-27T20:46:57Z
+Both windows are half-open, [start, end).
 
-Data span observed across turns, tool_events and deliveries: 2026-08-03T20:49:16.531000+00:00 to 2026-09-27T16:03:40.261000+00:00 (0 rows skipped for a NULL or unparseable ts).
+- retained: 2026-08-03T20:49:16.290Z to 2026-09-27T21:15:04Z
+- decision: 2026-09-20T21:15:04Z to 2026-09-27T21:15:04Z
+
+Data span observed across turns, tool_events and deliveries: 2026-08-03T20:49:16.531000+00:00 to 2026-09-27T16:03:40.261000+00:00.
+
+Rows skipped from every window, day and span for a NULL or empty ts -- turns: 0, tool_events: 0, deliveries: 0.
+Rows skipped from every window, day and span for an unparseable ts -- turns: 0, tool_events: 0, deliveries: 0.
 
 ## mistakes
 
@@ -26,7 +47,7 @@ Data span observed across turns, tool_events and deliveries: 2026-08-03T20:49:16
 |---|---|---|---|---|---|
 | opportunity | measurable now | 3904 | 47404 | all | assistant_text turns (of which top-level -- decision: 3544, retained: 38989) |
 | signal/request | measurable now | 12669 | 114560 | all | tool_use blocks (tool_events total) |
-| delivery/action | measurable now | 774 | 7874 | all | deliveries by source (share carrying a tool_use_id -- decision: 272 of 774; retained: 3718 of 7874) |
+| delivery/action | measurable now | 739 | 7839 | all | deliveries by source, counted as delivered items: one per output_json marker match, one per deliveries_json ledger key (block rows not counted), one per transcript hook injection (delivered items carrying a tool_use_id -- decision: 269 of 739; retained: 3715 of 7839) |
 | observed use | needs adjudication | n/a | n/a | n/a | whether the delivered context was used in the assistant's next action is judged |
 | checked outcome | needs adjudication | n/a | n/a | n/a | the judge, plus the spot-check, decide this |
 
@@ -36,7 +57,7 @@ Data span observed across turns, tool_events and deliveries: 2026-08-03T20:49:16
 |---|---|---|---|---|---|
 | opportunity | needs adjudication | n/a | n/a | n/a | lesson applicability is judged |
 | signal/request | needs adjudication | n/a | n/a | n/a | the lesson inventory is Task 7, not yet built, so there is no candidate population to count |
-| delivery/action | measurable now | 508 | 4162 | all | deliveries whose engine_or_hook names a transfer-carrying engine (TRANSFER_DELIVERY_MARKERS: operator-rule, get_guide, operator-rules, guide-sections, session-opener) |
+| delivery/action | measurable now | 473 | 4127 | all | deliveries whose engine_or_hook names a transfer-carrying engine (TRANSFER_DELIVERY_MARKERS: operator-rule, get_guide, operator-rules, guide-sections, session-opener), counted as delivered items: one per output_json marker match, one per deliveries_json ledger key (block rows not counted), one per transcript hook injection |
 | observed use | needs adjudication | n/a | n/a | n/a | whether a transferred lesson was applied or missed is judged |
 | checked outcome | needs adjudication | n/a | n/a | n/a | the judge, plus the spot-check, decide this |
 | rediscovery | needs adjudication | n/a | n/a | n/a | always: it needs semantic matching (A1.4) |
@@ -45,7 +66,7 @@ Data span observed across turns, tool_events and deliveries: 2026-08-03T20:49:16
 
 | link | label | decision | retained | population | basis |
 |---|---|---|---|---|---|
-| opportunity | measurable now | 12669 | 114560 | all | tool calls by A1.5 task family |
+| opportunity | measurable now | 12669 | 114560 | all | tool calls (the A1.5 task-family split is not computed in this map) |
 | signal/request | measurable now | 94 | 628 | all | Agent tool_uses (delegation turns (separate, never summed) -- decision: 68, retained: 572) |
 | delivery/action | measurable now | 9167 | 112220 | subagent | subagent turns (agent_path set) |
 | observed use | needs adjudication | n/a | n/a | n/a | whether the parent used the subagent's result is judged |
@@ -54,6 +75,8 @@ Data span observed across turns, tool_events and deliveries: 2026-08-03T20:49:16
 ## Appendix
 
 ### A1.6 -- joins by method (overall)
+
+Window: retained, as the whole events DB (rows skipped above for their ts included).
 
 | method | count |
 |---|---|
@@ -66,9 +89,11 @@ Amendment 4(a): tool_use_id was NULL on every usage row until 6f6349ca; it appea
 
 Heuristic joins: 59616 total, of which 51848 matched via called_at (started_at NULL) and 7768 matched via started_at directly.
 
-A1.5's latency share is measurable only for joined calls: 59701 of 114560 tool_events are joined (exact + heuristic); latency_ms is only present on the usage rows behind those.
+A1.5's latency share is measurable only for joined calls: 59701 of 114560 tool_events are joined (exact + heuristic), and 59701 of those joined rows carry latency_ms on their usage row.
 
 ### A1.6 -- joins by method (by day)
+
+Window: retained, by UTC day of the tool_use ts; the 0 tool_events rows with a NULL or unparseable ts appear in the overall table only.
 
 | day | exact | heuristic | none | not_codescout |
 |---|---|---|---|---|
@@ -110,23 +135,29 @@ A1.5's latency share is measurable only for joined calls: 59701 of 114560 tool_e
 
 ### A1.6 -- delivery coverage by source
 
-| source | count |
-|---|---|
-| transcript_hook | 3712 |
-| usage_deliveries_json | 70 |
-| usage_output_json | 4092 |
+Window: retained, as the whole events DB (rows skipped above for their ts included).
+
+| source | delivered items | table rows | unit |
+|---|---|---|---|
+| transcript_hook | 3712 | 3712 | one per hook injection (a hook_success or hook_additional_context row) |
+| usage_deliveries_json | 35 | 70 | one per ledger key of a deliveries_json engine record; its block rows (key NULL) are digests of the same deliveries and are not counted |
+| usage_output_json | 4092 | 4092 | one per operator-rule or get_guide marker match in output_json |
 
 hook_success_only: 318; hook_success_twins_dropped: 3839.
 
-usage rows with no kept session: 11786 of 71692 usage rows read (of which 492 from the spec-excluded session).
+usage rows with no kept session: 11901 of 71807 usage rows read (of which 516 from the spec-excluded session).
 
 ### A1.6 -- sessions per project and window
+
+Window: both, as columns; a kept session is in a window if any of its turns' ts is.
 
 | project | retained | decision |
 |---|---|---|
 | -home-marius-work-claude-codescout | 118 | 23 |
 
 ### A1.6 -- exclusions by reason
+
+Window: retained, as every session in the corpus.
 
 | reason | count |
 |---|---|
@@ -137,6 +168,8 @@ usage rows with no kept session: 11786 of 71692 usage rows read (of which 492 fr
 excluded-by-spec, data-wise: sid 3c5b02df-b6ce-45f5-9d03-1194e38465c0 present in 2 profile(s): .claude-kat/3c5b02df-b6ce-45f5-9d03-1194e38465c0, .claude-sdd/3c5b02df-b6ce-45f5-9d03-1194e38465c0
 
 ### A1.6 -- turns by kind
+
+Window: retained, as the whole events DB (rows skipped above for their ts included).
 
 | kind | count |
 |---|---|
@@ -151,10 +184,14 @@ excluded-by-spec, data-wise: sid 3c5b02df-b6ce-45f5-9d03-1194e38465c0 present in
 
 ### A1.6 -- divergent-duplicate unowned uuids
 
+Window: retained, as every divergent-duplicate copy in the corpus.
+
 none
 
 ### A1.6 -- kept sessions with zero turns
 
+Window: retained, as the whole events DB (rows skipped above for their ts included).
+
 count: 1.
 
-.claude-kat/d8a1f024-ebf2-463b-996e-b7a908b34169: its uuids are owned by .claude-sdd/571eb3d6-c879-43f6-b3f9-5a51e744e1af
+.claude-kat/d8a1f024-ebf2-463b-996e-b7a908b34169: 1187 of 1187 uuids owned by .claude-sdd/571eb3d6-c879-43f6-b3f9-5a51e744e1af
