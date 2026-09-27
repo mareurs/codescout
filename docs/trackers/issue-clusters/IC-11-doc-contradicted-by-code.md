@@ -15,7 +15,7 @@ topic: issue clusters and rule promotion
 
 **Slug:** `cluster/doc-contradicted-by-code`
 **Claim:** A document states a behaviour the code contradicts. The statement was *true when written*; the code later gained or lost the capability. Nothing checks prose against code systematically, and the corrective pass that *does* happen is a hand-enumerated sweep whose completeness is unfalsifiable — it reports the surfaces it changed, never the ones it missed. Unlike a wrong statement, this defect has no authoring error to find.
-**Members:** **+1: `running-retrieval-stack-is-defined-nowhere` (2026-09-26)**: the first member where the contradicting truth is **deployed state rather than source**.
+**Members:** **+1: `session-log-template-recipe-is-refused-on-a-fresh-copy` (2026-09-27)**: `docs/templates/session-log.md` prescribes a prose `append_entry(id_prefix="F")` recipe while shipping without the frontmatter that recipe requires, so the template's own instruction is refused on the file it creates — prose asserting a capability the code denies until a precondition the same prose mentions only elsewhere. The assert-direction half of this class, as in the parent `two-trackers-have-no-open-append-path`. — **+1: `running-retrieval-stack-is-defined-nowhere` (2026-09-26)**: the first member where the contradicting truth is **deployed state rather than source**.
 - **The code lost the capability.** `4036bb9a` removed the `amd` compose profile.
 - **Surfaces still describing it:**
   - `docker-compose.yml`'s header, which says the repo *"targets one NVIDIA host"* (true for the machine it was consolidated on);
