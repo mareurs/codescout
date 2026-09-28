@@ -2120,7 +2120,7 @@ fn resync_snapshot_row(
 /// writes; these three did not, so every write left `doctor` reporting `row_behind_file`
 /// until a `reindex`. It runs inside the caller's transaction, so a rollback takes the
 /// refresh with it and the row keeps describing whatever a failed commit restores.
-/// docs/issues/2026-09-28-update-entry-snapshot-resync-leaves-the-catalog-row-behind-its-file.md
+/// docs/issues/archive/2026-09-28-update-entry-snapshot-resync-leaves-the-catalog-row-behind-its-file.md
 fn record_written_file(
     tx: &rusqlite::Transaction<'_>,
     artifact_id: &str,
@@ -2850,7 +2850,7 @@ mod tests {
     /// The row's content columns must describe the file this module just wrote. `doctor`'s
     /// `row_behind_file` compares exactly `file_sha256` with the file's hash, so a writer that
     /// leaves the row behind makes every ledger it touches read as needing a `reindex`.
-    /// docs/issues/2026-09-28-update-entry-snapshot-resync-leaves-the-catalog-row-behind-its-file.md
+    /// docs/issues/archive/2026-09-28-update-entry-snapshot-resync-leaves-the-catalog-row-behind-its-file.md
     fn assert_row_describes_file(cat: &Catalog, id: &str, path: &std::path::Path, writer: &str) {
         let row = crate::librarian::catalog::artifact::get(cat, id)
             .unwrap()

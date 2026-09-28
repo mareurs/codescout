@@ -773,7 +773,7 @@ No failed attempts beyond one refused pipe, which recovered on the next call.
 
 **Pending:** none.
 
-**Update 2026-09-28, same session, after this receipt was first written:** the review-catches promotion pass (`6e416ff5`, `83e70554`) and one bug filed from it (`cf45b26e`, `49a01cb32b73e7e7`). No new DWF or DCX sample was taken for this stretch; the routine samples above stand. The interval now ends about 2026-09-28 05:30Z.
+**Update 2026-09-28, same session, after this receipt was first written:** the review-catches promotion pass (`6e416ff5`, `83e70554`) and one bug filed from it (`cf45b26e`, `60fcfdf99e3288c6`), then fixed (`6a6a321e`) and archived. No new DWF or DCX sample was taken for this stretch; the routine samples above stand. The interval now ends about 2026-09-28 07:30Z.
 
 ## Template for new entries
 

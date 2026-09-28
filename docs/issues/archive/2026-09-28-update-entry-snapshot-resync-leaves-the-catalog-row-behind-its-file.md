@@ -1,12 +1,13 @@
 ---
-id: '49a01cb32b73e7e7'
+id: 60fcfdf99e3288c6
 kind: bug
-status: open
+status: archived
 title: update_entry's snapshot resync writes the ledger file but leaves the catalog row's hash behind it
 tags:
 - librarian
 - catalog
 - cluster/unclassified
+closed: 2026-09-28
 opened: 2026-09-28
 severity: low
 ---
@@ -32,7 +33,23 @@ Low as observed. `reindex` repairs it and `doctor` names it. The catalog row des
 
 ## Fix direction
 
-Have `resync_snapshot_row` (or `update_entry` after it) refresh the artifact row's `file_sha256` and `file_mtime` for the bytes it wrote, inside the same transaction, as `update.rs` does. Regression test: after an `update_entry` that resyncs a row, `doctor` reports no `row_behind_file` for that artifact. A control should show the test reds with the refresh removed.
+**Fixed 2026-09-28 in `6a6a321e`, patch-id `1fae1b1d51136476730eb4a9233b136c328649e7`, and the scope was wider than filed.** The regression tests were written before the fix, one per writer in `src/librarian/catalog/augmentation.rs`. They showed the same gap at all three sites that write an artifact's file inside a catalog transaction:
+
+- `allocate_entry_id` (the high-water mark, plus a section and its index row);
+- `append_entry` (a section);
+- `resync_snapshot_row` (one table row).
+
+So a per-site fix to the resync path, the one this file first named, would have left every `append_entry` producing the same finding. The two live `row_behind_file` findings on peer ledgers the same morning (`context-injection-session-log.md`, `reconnaissance-patterns.md`, both last written by appended entries) fit that. The fourth write, `restore_section_after_failed_commit`, restores the original bytes after a rollback, so the row still describes them and it needs no change.
+
+`record_written_file()` updates `file_sha256` and `file_mtime` for the bytes just written, inside the caller's transaction, so a rollback takes the refresh with it. It uses the same derivation as `update.rs`: `sha_of_bytes` over the written bytes, and the file's own mtime in milliseconds.
+
+**Verification:**
+
+- **Red before the fix.** Three tests (`*_leaves_the_row_describing_*`) seed a row whose columns describe no file and assert both columns equal the file on disk afterwards. All three failed on the `file_sha256` assertion.
+- **Mutations, via `scripts/mutation-probe.sh` in an isolated worktree, all KILLED.** Removing each call reds only that writer's test, with the other 106 in the module green. Hashing the wrong bytes, and zeroing the mtime, each red all three. The mtime mutation shows that assertion is load-bearing, since the hash assertion runs first and passes under it.
+- **Gate:** `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, with the three tests present by name in the default lane.
+
+The running MCP server predates the fix. It takes effect after a release build (`./scripts/rb.sh`) and `/mcp` in each session; until then live ledgers still drift, and `reindex` repairs them.
 
 ## References
 
