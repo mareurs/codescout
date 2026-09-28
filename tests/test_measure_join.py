@@ -2207,6 +2207,7 @@ class QueuedPromptAndRejectionRows(unittest.TestCase):
                 ("prompt", "attachment", "no, the other parser", "2026-09-20T10:00:02.500Z", None),
             )
             # R130: q-equal counts too, beside the equal-text prompt p2 -- once each.
+            self.assertIn("q-equal", by_uuid)
             self.assertEqual(
                 (by_uuid["q-equal"]["kind"], by_uuid["q-equal"]["role"], by_uuid["q-equal"]["text"]),
                 ("prompt", "attachment", "and run the tests"),
