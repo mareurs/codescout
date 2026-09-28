@@ -14,6 +14,7 @@ LEAST the same length, and every line inside an open fence is opaque content, ne
 
 Run: ~/work/claude/prompt-engineering/.venv/bin/python -m pytest tests/test_measure_lessons.py -v
 """
+import collections
 import dataclasses
 import pathlib
 import re
@@ -192,11 +193,20 @@ def _parse_id_entries(text, id_re, entry_level):
     Fence-aware (R85): a fenced line shaped like a heading (e.g. a `# a shell comment` inside a
     ```bash block) never ends or starts an entry -- it is body content of whichever entry is
     open, so a Status line that follows a fenced comment is still reached.
+
+    R99 (fix round 3): a REPEATED entry id (e.g. two `## R-5` headings) is disambiguated via
+    `_dedupe_slug` against a used-ids set scoped to this one call, so the second occurrence keys
+    in as `"R-5-2"` -- not the same key overwriting the first entry's body in `entries`, and not
+    the same id emitted twice in `order`. The disambiguated id is what every caller (and the
+    fixed-up `entries[op_id]`/`entries[r_id]` lookup) sees; a row-less disambiguated id (no
+    matching index-table entry, e.g. an OP-N's second occurrence) is naturally excluded by the
+    existing "row-less section is ABSENT" rule those callers already apply -- no special-casing.
     """
     lines = text.splitlines()
     fenced = _fence_flags(lines)
     entries = {}
     order = []
+    used_ids = set()
     current_id = None
     body = []
 
@@ -212,7 +222,7 @@ def _parse_id_entries(text, id_re, entry_level):
                 m = id_re.match(heading_text)
                 if m:
                     flush()
-                    current_id = m.group(1)
+                    current_id = _dedupe_slug(m.group(1), used_ids)
                     order.append(current_id)
                     body = []
                     continue
@@ -363,15 +373,20 @@ def _emit_partitioned_lessons(
     prefix onto the section-prose lesson's `.text` (e.g. "## Some Heading"), or None for a span
     with no real heading (the CLAUDE.md preamble), whose prose lesson carries no such prefix.
     Shared by `_claude_md_lessons`'s per-section loop and its preamble span (R86 fix round 1).
+
+    R99 (fix round 3): a bullet's lead-slug is disambiguated via `_dedupe_slug` against a FRESH
+    `used_lead_ids` set, scoped to this one call (i.e. per section/preamble span) -- not a
+    per-natural-slug counter. The counter form minted the SAME suffix for two different natural
+    slugs in document order (`Foo bar.`, `Foo bar.`, `Foo bar 2.` -> `foo-bar`, `foo-bar-2`,
+    `foo-bar-2`: the counter never checked whether `foo-bar-2` was already itself a natural
+    slug); `_dedupe_slug`'s full-set re-check is the same fix R87 already made for heading slugs.
     """
-    lead_seen = {}
+    used_lead_ids = set()
     for bullet_text in bold_bullets:
         slug = _lead_slug(_bullet_lead_source(bullet_text))
-        lead_seen[slug] = lead_seen.get(slug, 0) + 1
-        n = lead_seen[slug]
-        suffix = "" if n == 1 else f"-{n}"
+        lead_id_slug = _dedupe_slug(slug, used_lead_ids)
         lessons.append(Lesson(
-            id=f"{id_prefix}#{heading_id_slug}/{slug}{suffix}",
+            id=f"{id_prefix}#{heading_id_slug}/{lead_id_slug}",
             source=source_label,
             text=bullet_text.strip(),
             dated=True,
@@ -472,9 +487,11 @@ def _operator_rules_lessons(text, source_label):
     """R81: an OP-N lesson exists iff its `## OP-N` section exists AND its index-table row (at
     this same text/commit) reads exactly "active". A row reading anything else (e.g. "retired"),
     and a `## OP-N` section with NO index row at all, are both treated as ABSENT -- not raised,
-    because a row-less section is exactly the R81 "iff" failing on its status half. The id stays
-    a bare `operator-rules.md#OP-N` (R87 repo-qualifies only `source`, never `id`, for
-    `lessons_at`).
+    because a row-less section is exactly the R81 "iff" failing on its status half. The id this
+    helper mints is bare (`operator-rules.md#OP-N`); `lessons_at` repo-qualifies BOTH `id` and
+    `source` afterward, in its own single post-processing step over every source's already-built
+    lessons (R87/R96(a)). So ids ARE repo-qualified in the value `lessons_at` actually returns --
+    only this helper's own, pre-post-processing return value is not.
     """
     statuses = _parse_op_table_statuses(text)
     entries, order = _parse_id_entries(text, _OP_ID_RE, 2)
@@ -589,7 +606,9 @@ def _memory_lessons(repo, sha, repo_name):
     `*.anchors.toml`) are skipped. R87: `_dedupe_slug` disambiguates repeated `##` headings
     within one file (fresh `used_ids` per file, checking the full set rather than a per-slug
     counter, so a disambiguated id cannot itself collide with a third heading's own natural
-    slug -- fix round 2); `source` is repo-qualified (`source`, never `id`).
+    slug -- fix round 2). `source` is repo-qualified here, at construction; `id` is repo-qualified
+    later, by `lessons_at`'s own post-processing step over every source's lessons -- so both `id`
+    and `source` ARE repo-qualified in what `lessons_at` returns (R87/R96(a)).
     """
     lessons = []
     for path in sorted(_git_ls_tree(repo, sha, ".codescout/memories")):
@@ -637,6 +656,15 @@ def _repo_name(repo):
     `repo.resolve().name` there -- the two computations diverge only under a worktree.
     Falls back to the repo path's own basename if git cannot answer at all (not a git
     repository).
+
+    R100 (fix round 3, accepted known limit -- no code change): a submodule, a
+    `--separate-git-dir` checkout, or a bare repository can each place the common dir's PARENT
+    at something other than the checkout a human would call "the repo" (a submodule's common
+    dir parent is the superproject's `.git/modules/<name>` entry; `--separate-git-dir` and a
+    bare repo have no working-tree directory at all to name), so the basename this function
+    returns in those layouts need not equal the checkout's own name. This pipeline's repos are
+    ordinary checkouts and worktrees, where the guarantee above holds; the limit is accepted
+    rather than generalized against, since neither case occurs in this pipeline's inputs.
     """
     try:
         out = subprocess.run(
@@ -652,6 +680,47 @@ def _repo_name(repo):
 
 
 
+def _require_commit(repo, sha):
+    """R98 (fix round 3): raise ValueError if `sha` does not resolve to a commit in `repo`.
+
+    Covers a non-git directory, an unknown sha, and a typo -- every case where the CALLER passed
+    something that cannot be a commit. Without this, `lessons_at` fell through every `_git_show`
+    call (each returns None on a non-zero `git show`, the same signal a genuinely-absent-at-this-
+    commit path gives) and silently returned `[]`: a typo'd sha would have zeroed Task 9's
+    denominator with nothing anywhere to say why.
+    """
+    proc = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--verify", f"{sha}^{{commit}}"],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise ValueError(
+            f"{sha!r} does not resolve to a commit in {repo!r} (R98): {proc.stderr.strip()}"
+        )
+
+
+def _require_unique_ids(lessons, context):
+    """R99 (fix round 3): raise ValueError naming any id that repeats in `lessons`.
+
+    Every disambiguating site upstream (heading slugs via `_dedupe_slug` in `_claude_md_lessons`
+    and `_memory_lessons`, lead slugs in `_emit_partitioned_lessons`, tracker entry ids in
+    `_parse_id_entries`) prevents a collision it can itself see -- but each disambiguates against
+    only ITS OWN used-ids set, scoped to one heading, one file, or one tracker. This is the
+    return-time backstop over the WHOLE assembled list, which is the only place a collision
+    between two independent SOURCES becomes visible: e.g. a memory file `foo.md`'s own `## Bar`
+    heading (`memory:foo#bar`) and a second memory file literally named `foo#bar.md` (also
+    `memory:foo#bar`) -- neither disambiguator's used-ids set ever contains the other's
+    candidate, so nothing upstream of this guard can catch it.
+    """
+    counts = collections.Counter(l.id for l in lessons)
+    dupes = sorted(i for i, n in counts.items() if n > 1)
+    if dupes:
+        raise ValueError(f"{context}: duplicate lesson ids {dupes!r} (R99)")
+    return lessons
+
+
+
 def lessons_at(repo, sha):
     """All lessons that existed at `sha` -- a pure function of the commit (every read goes
     through `git show`/`git ls-tree`, never the working tree).
@@ -662,8 +731,16 @@ def lessons_at(repo, sha):
     `lessons_at`'s own return value gains the prefix (fix round 2 -- R87's header already said
     ids are repo-qualified, its sub-bullets omitted it by drafting error, and round 1's docstring
     here said the opposite: "id stays the bare, unqualified form it always was").
+
+    R98 (fix round 3): raises ValueError if `sha` does not resolve to a commit in `repo` -- a
+    non-git directory, an unknown sha, or a typo would otherwise fall through every `_git_show`
+    call and silently return `[]`, zeroing Task 9's denominator with nothing to say why.
+
+    R99 (fix round 3): raises ValueError if the assembled list contains a duplicate id (see
+    `_require_unique_ids`) just before returning.
     """
     repo = pathlib.Path(repo)
+    _require_commit(repo, sha)
     repo_name = _repo_name(repo)
     lessons = []
 
@@ -690,7 +767,8 @@ def lessons_at(repo, sha):
 
     lessons.extend(_memory_lessons(repo, sha, repo_name))
 
-    return [dataclasses.replace(l, id=f"{repo_name}:{l.id}") for l in lessons]
+    lessons = [dataclasses.replace(l, id=f"{repo_name}:{l.id}") for l in lessons]
+    return _require_unique_ids(lessons, f"lessons_at({repo}, {sha!r})")
 
 
 # --- public: undated_lessons ---------------------------------------------------------------------
@@ -726,14 +804,22 @@ def undated_lessons(path, repo, sha):
     R79/R84: the generated operator-rules block (which duplicates dated OP-N rules already
     counted once, from operator-rules.md, by `lessons_at`) is excluded so it is never
     double-counted as undated. Detected by BEGIN/END markers first; where markers are absent, by
-    exact text equality (after whitespace normalization) against each OP-N section's
-    `**Imperative:**` line, read via `git show <sha>:docs/trackers/operator-rules.md` in `repo`
-    -- NEVER the working tree, and never a default (`repo`/`sha` are required; see
-    `_op_imperative_bodies`).
+    exact text equality (after whitespace normalization) against each ACTIVE OP-N section's
+    `**Imperative:**` line (R97 -- a retired rule's Imperative is not in this reference set), read
+    via `git show <sha>:docs/trackers/operator-rules.md` in `repo` -- NEVER the working tree, and
+    never a default (`repo`/`sha` are required; see `_op_imperative_bodies`).
 
     R87: `id` and `source` are the fixed literal "global-CLAUDE.md" -- never `path`'s actual
     filesystem location -- so the SAME content read from different profile directories
     (`~/.claude`, `~/.claude-sdd`, `~/.claude-kat`) yields byte-identical `Lesson.id`s.
+
+    R98 (fix round 3): `_op_imperative_bodies` -> `_git_show` already raises (FileNotFoundError)
+    when `sha` does not resolve at all, for the same reason a genuinely-absent-at-that-sha path
+    raises -- `git show <sha>:<path>` cannot tell the two apart, and this function does not need
+    its own separate sha-resolution check the way `lessons_at` does (R98's own guard lives there).
+
+    R99 (fix round 3): raises ValueError if the assembled list contains a duplicate id (see
+    `_require_unique_ids`) just before returning.
     """
     path = pathlib.Path(path)
     text = path.read_text()
@@ -746,4 +832,4 @@ def undated_lessons(path, repo, sha):
     lessons = []
     for lesson in _claude_md_lessons(stripped, "global-CLAUDE.md", "global-CLAUDE.md"):
         lessons.append(dataclasses.replace(lesson, dated=False))
-    return lessons
+    return _require_unique_ids(lessons, f"undated_lessons({path}, {repo}, {sha!r})")

@@ -53,6 +53,8 @@ def _commit_all(root, message):
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", message)
     return _git(root, "rev-parse", "HEAD").strip()
+
+
 def _qualified_id(root, bare_id):
     """The `lessons_at` id/source string R96(a) mints for `bare_id`: `<repo-name>:<bare_id>`,
     repo name = the checkout directory's own basename. Deliberately NOT `lessons._repo_name`,
@@ -436,6 +438,7 @@ class PreambleCoverage(unittest.TestCase):
         found = lessons._claude_md_lessons(claude_text, "CLAUDE.md", "codescout:CLAUDE.md")
         ids = {l.id for l in found}
         self.assertNotIn("CLAUDE.md#-preamble", ids)
+
     def test_a_real_section_titled_preamble_does_not_collide_with_the_synthetic_preamble_id(self):
         claude_text = (
             "Actual preamble text before any heading.\n\n"
@@ -453,6 +456,41 @@ class PreambleCoverage(unittest.TestCase):
         self.assertIn(
             "real section that happens to be titled Preamble", real_preamble_lesson.text,
         )
+
+    def test_a_real_preamble_section_keeps_its_id_whether_or_not_preamble_text_precedes_it(self):
+        # P7: a mutant that pre-reserves the "preamble" slug whenever there is NO preamble text
+        # (an `else: used_ids.add("preamble")` branch) forces a real "## Preamble" section to be
+        # disambiguated to "preamble-2" at c1 (no preamble text above it) while it stays
+        # "preamble" at c2 (preamble text added above it) -- the real section's id must be
+        # IDENTICAL at both commits regardless of whether preamble text exists.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _init_repo(root)
+            _write(root, "CLAUDE.md", "## Preamble\n\nBody of the real preamble section.\n")
+            c1 = _commit_all(root, "c1")
+            at_c1 = [l for l in lessons.lessons_at(root, c1) if "CLAUDE.md#" in l.id]
+            self.assertEqual(
+                sorted(l.id for l in at_c1), [_qualified_id(root, "CLAUDE.md#preamble")],
+            )
+
+            _write(root, "CLAUDE.md", (
+                "Some preamble text added above.\n\n"
+                "## Preamble\n\nBody of the real preamble section.\n"
+            ))
+            c2 = _commit_all(root, "c2")
+            at_c2 = [l for l in lessons.lessons_at(root, c2) if "CLAUDE.md#" in l.id]
+            self.assertEqual(
+                sorted(l.id for l in at_c2),
+                sorted([
+                    _qualified_id(root, "CLAUDE.md#-preamble"),
+                    _qualified_id(root, "CLAUDE.md#preamble"),
+                ]),
+            )
+
+            # The invariant P7 breaks: the REAL section's id must not move between commits.
+            real_c1 = next(l for l in at_c1 if l.id.endswith("#preamble"))
+            real_c2 = next(l for l in at_c2 if l.id.endswith("#preamble"))
+            self.assertEqual(real_c1.id, real_c2.id)
 
     def test_preamble_id_is_stable_across_commits_even_when_a_real_preamble_section_is_added_later(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -582,6 +620,20 @@ class WrappedBoldLeadIsNotDropped(unittest.TestCase):
         self.assertIn("quebec", bullets[0].id)
 
 
+
+class ShortBoldLeadGetsADirectIdAssertion(unittest.TestCase):
+    def test_a_short_bold_lead_gets_the_expected_id_and_full_bullet_text(self):
+        # P6: a direct id-level assertion for a plain short bold lead, so the only test able to
+        # kill a mutant here is not the (unrelated) runaway-fence fixture.
+        text = "## Section\n\n- **Short lead.** Rest of the bullet text goes here.\n"
+        found = lessons._claude_md_lessons(text, "CLAUDE.md", "x")
+        bullets = [(l.id, l.text) for l in found if "/" in l.id]
+        self.assertEqual(
+            bullets,
+            [("CLAUDE.md#section/short-lead", "- **Short lead.** Rest of the bullet text goes here.")],
+        )
+
+
 # --- R87: frozen dataclass, repo-qualified source, path-free undated ids -------------------------
 
 
@@ -656,6 +708,29 @@ class LeadSlugCollisionCounterIsPerSection(unittest.TestCase):
         bullet_ids = sorted(l.id for l in found if "/" in l.id)
         self.assertEqual(len(bullet_ids), 2)
         self.assertTrue(all(not i.endswith("-2") for i in bullet_ids))
+
+    def test_repeated_lead_within_one_section_gets_three_distinct_ids(self):
+        # 7b: the second "Foo bar." collides with the first and is disambiguated to "-2" --
+        # but the THIRD bullet's own natural slug ("foo-bar-2") then collides with that very
+        # disambiguated id. `_dedupe_slug` must be checked against the full per-section used-id
+        # set (not a per-natural-slug counter) so all three still come out distinct.
+        claude_text = (
+            "## Section\n\n"
+            "- **Foo bar.** First occurrence.\n"
+            "- **Foo bar.** Second occurrence, same natural slug as the first.\n"
+            "- **Foo bar 2.** Third occurrence.\n"
+        )
+        found = lessons._claude_md_lessons(claude_text, "CLAUDE.md", "codescout:CLAUDE.md")
+        bullet_ids = [l.id for l in found if "/" in l.id]
+        self.assertEqual(len(bullet_ids), len(set(bullet_ids)))
+        self.assertEqual(
+            bullet_ids,
+            [
+                "CLAUDE.md#section/foo-bar",
+                "CLAUDE.md#section/foo-bar-2",
+                "CLAUDE.md#section/foo-bar-2-2",
+            ],
+        )
 
 
 class LeadSlugWordCountIsEight(unittest.TestCase):
@@ -1075,6 +1150,22 @@ class R97RetiredRuleImperativeIsNotInTheReferenceSet(unittest.TestCase):
             self.assertNotIn("Do the retired thing, never counted.", bodies)
 
 
+    def test_a_proposed_rules_imperative_is_excluded_same_as_retired(self):
+        # P10: the reference-set site must be "ACTIVE per R81", not "not retired" -- a status of
+        # "proposed" (neither active nor retired) must be excluded exactly like a retired one.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _init_repo(root)
+            _write(root, "docs/trackers/operator-rules.md", (
+                "## Index\n\n| ID | Status |\n|---|---|\n| OP-1 | active |\n| OP-2 | proposed |\n\n"
+                "## OP-1 — Active rule\n\n**Imperative:** Do the active thing.\n\n"
+                "## OP-2 — Proposed rule\n\n**Imperative:** Do the proposed thing.\n"
+            ))
+            c1 = _commit_all(root, "c1")
+            bodies = lessons._op_imperative_bodies(root, c1)
+            self.assertEqual(bodies, ["Do the active thing."])
+
+
 class OpTableStatusParsingIsFenceAware(unittest.TestCase):
     def test_a_fenced_example_index_row_reading_active_does_not_resurrect_a_retired_rule(self):
         text = (
@@ -1117,6 +1208,36 @@ class RunawayFenceOpenerIsRefused(unittest.TestCase):
         self.assertIn(
             "CLAUDE.md#bravo-heading/bravo-bullet-lead-words-here-and-more", ids,
         )
+
+
+    def test_a_tilde_fence_whose_info_string_contains_a_backtick_still_opens_normally(self):
+        # P4: the backtick-in-info refusal is backtick-fence-specific -- a ~~~ fence with a
+        # backtick in its info string must still open and close like any other tilde fence.
+        text = (
+            "## Section\n\n"
+            "~~~lang`with-backtick\n"
+            "fenced content\n"
+            "~~~\n"
+            "- **Real bullet.** After the tilde fence, should be parsed normally.\n"
+        )
+        found = lessons._claude_md_lessons(text, "CLAUDE.md", "x")
+        ids = [l.id for l in found]
+        self.assertIn("CLAUDE.md#section/real-bullet", ids)
+        self.assertIn("CLAUDE.md#section", ids)
+
+    def test_an_indented_backtick_opener_with_a_backtick_in_its_info_string_is_still_refused(self):
+        # P5: the refusal must still apply when the backtick opener is indented -- an indented
+        # opener never opens a fence at all, so content after it (including a bogus closer) is
+        # ordinary prose.
+        text = (
+            "## Section\n\n"
+            "   ```lang`with-backtick\n"
+            "- **Real bullet.** Should still be parsed; the indented opener never opened a fence.\n"
+        )
+        found = lessons._claude_md_lessons(text, "CLAUDE.md", "x")
+        ids = [l.id for l in found]
+        self.assertIn("CLAUDE.md#section/real-bullet", ids)
+        self.assertIn("CLAUDE.md#section", ids)
 
 
 class FieldLineParsingIsFenceAware(unittest.TestCase):
@@ -1187,6 +1308,18 @@ class R84ReferenceSetIsReadAtTheShaNeverTheWorkingTreeOrHead(unittest.TestCase):
             _write(root, "docs/trackers/operator-rules.md",
                    _op_rules_with_imperative("Imperative A, true at c1."))
             c1 = _commit_all(root, "c1")
+
+            # A genuine uncommitted working-tree edit -- the file on disk now names Imperative C,
+            # but c1 is still the sha being queried and must not see it.
+            _write(root, "docs/trackers/operator-rules.md",
+                   _op_rules_with_imperative("Imperative C, uncommitted working-tree edit."))
+            bodies_with_dirty_tree = lessons._op_imperative_bodies(root, c1)
+            self.assertIn("Imperative A, true at c1.", bodies_with_dirty_tree)
+            self.assertNotIn(
+                "Imperative C, uncommitted working-tree edit.", bodies_with_dirty_tree,
+            )
+
+            # Commit that working-tree edit under a different imperative (B), moving HEAD to c2.
             _write(root, "docs/trackers/operator-rules.md",
                    _op_rules_with_imperative("Imperative B, only true after c1."))
             _commit_all(root, "c2")
@@ -1194,6 +1327,7 @@ class R84ReferenceSetIsReadAtTheShaNeverTheWorkingTreeOrHead(unittest.TestCase):
             bodies = lessons._op_imperative_bodies(root, c1)
             self.assertIn("Imperative A, true at c1.", bodies)
             self.assertNotIn("Imperative B, only true after c1.", bodies)
+            self.assertNotIn("Imperative C, uncommitted working-tree edit.", bodies)
 
 
 class HeadingSlugDisambiguationAvoidsATripleCollision(unittest.TestCase):
@@ -1215,10 +1349,14 @@ class HeadingSlugDisambiguationAvoidsATripleCollision(unittest.TestCase):
 
     def test_three_identical_headings_get_three_distinct_ids(self):
         # Unlike the fixture above (whose third heading's OWN natural slug happens to
-        # equal the second heading's disambiguated id), this fixture forces the
-        # disambiguator to increment past "-2" for the SAME natural slug three times --
-        # the direct test of "re-derives against the full used-ids set, keeps
-        # incrementing until free" rather than "stop at the first free-looking candidate".
+        # equal the second heading's disambiguated id), this fixture forces a SECOND
+        # heading to take "-2" and a THIRD to need one increment past it -- but that is
+        # still only ONE increment total (check "-2": taken; increment to "-3": free), which
+        # a single `if` that increments then uses the result WITHOUT rechecking would also
+        # get right. It does NOT distinguish `_dedupe_slug`'s `while` loop from a single `if`
+        # (P9 survives this fixture). The direct test for that is
+        # `test_two_increments_are_needed_when_natural_slugs_occupy_dash_2_and_dash_3` below,
+        # whose fourth heading needs the loop to check "-2" AND "-3" before landing on "-4".
         text = (
             "## Notes\n\nFirst notes section prose.\n\n"
             "## Notes\n\nSecond notes section prose.\n\n"
@@ -1229,6 +1367,28 @@ class HeadingSlugDisambiguationAvoidsATripleCollision(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
         self.assertEqual(
             set(ids), {"CLAUDE.md#notes", "CLAUDE.md#notes-2", "CLAUDE.md#notes-3"},
+        )
+
+    def test_two_increments_are_needed_when_natural_slugs_occupy_dash_2_and_dash_3(self):
+        # 7a / P9: headings "Notes", "Notes 2", "Notes 3" each take their OWN natural slug
+        # first, so when a fourth "Notes" heading repeats the very first one, disambiguation
+        # must check "-2" (taken by the second heading's natural slug), THEN "-3" (taken by the
+        # third heading's natural slug) before landing on the first actually-free candidate,
+        # "-4" -- two increments past the initial guess, not one. A single `if` (P9) stops after
+        # incrementing once and returns "notes-3" without rechecking it, which COLLIDES with the
+        # third heading's own id.
+        text = (
+            "## Notes\n\nFirst notes section prose.\n\n"
+            "## Notes 2\n\nSecond notes section prose.\n\n"
+            "## Notes 3\n\nThird notes section prose.\n\n"
+            "## Notes\n\nFourth notes section prose (repeats the very first heading).\n"
+        )
+        found = lessons._claude_md_lessons(text, "CLAUDE.md", "x")
+        ids = [l.id for l in found]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(
+            set(ids),
+            {"CLAUDE.md#notes", "CLAUDE.md#notes-2", "CLAUDE.md#notes-3", "CLAUDE.md#notes-4"},
         )
 
     def test_memory_file_three_way_heading_collision_gets_three_unique_ids(self):
@@ -1260,6 +1420,85 @@ class HeadingSlugDisambiguationAvoidsATripleCollision(unittest.TestCase):
         ids = [l.id for l in found]
         dupes = {i for i in ids if ids.count(i) > 1}
         self.assertEqual(dupes, set())
+
+
+
+class R99DuplicateOutputIdsRaiseAtReturnTime(unittest.TestCase):
+    def test_lessons_at_raises_value_error_naming_the_duplicated_id(self):
+        # A memory heading "## Bar" in foo.md and a headingless file foo#bar.md both produce the
+        # id "memory:foo#bar" -- a real (if contrived) way two disambiguating sites can still
+        # collide, which is exactly what the return-time R99 guard exists to catch.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _init_repo(root)
+            _write(root, ".codescout/memories/foo.md", "## Bar\n\nx\n")
+            _write(root, ".codescout/memories/foo#bar.md", "no heading\n")
+            c1 = _commit_all(root, "c1")
+            with self.assertRaises(ValueError) as ctx:
+                lessons.lessons_at(root, c1)
+            self.assertIn("duplicate", str(ctx.exception).lower())
+            self.assertIn("memory:foo#bar", str(ctx.exception))
+
+
+
+class RepeatedTrackerEntryHeadingIsDisambiguated(unittest.TestCase):
+    def test_a_repeated_tracker_entry_heading_gets_a_dash_2_id_and_keeps_both_bodies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _init_repo(root)
+            _write(root, "docs/trackers/reconnaissance-patterns.md", (
+                "## R-5 — first\n\n**Status:** promoted — a.\n\n"
+                "## R-5 — duplicated heading\n\n**Status:** promoted — b.\n"
+            ))
+            c1 = _commit_all(root, "c1")
+            found = lessons._tracker_lessons(
+                lessons._git_show(root, c1, "docs/trackers/reconnaissance-patterns.md"),
+                lessons._R_ID_RE, 2, "reconnaissance-patterns.md", "x",
+            )
+            ids = [l.id for l in found]
+            self.assertEqual(ids, ["reconnaissance-patterns.md#R-5", "reconnaissance-patterns.md#R-5-2"])
+            self.assertTrue(any("a." in l.text for l in found))
+            self.assertTrue(any("b." in l.text for l in found))
+
+
+
+class R98UnresolvableShaRaisesValueError(unittest.TestCase):
+    def test_lessons_at_raises_on_an_unknown_sha(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / "repo"
+            _init_repo(root)
+            _write(root, "CLAUDE.md", "hello\n")
+            _commit_all(root, "c1")
+            with self.assertRaises(ValueError) as ctx:
+                lessons.lessons_at(root, "not-a-real-sha")
+            self.assertIn("not-a-real-sha", str(ctx.exception))
+
+    def test_lessons_at_raises_on_a_non_git_directory(self):
+        # The non-git directory is a SIBLING of the repo, never nested inside it -- nesting it
+        # would let git walk up and find the enclosing .git, silently defeating the test.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / "repo"
+            _init_repo(root)
+            _write(root, "CLAUDE.md", "hello\n")
+            _commit_all(root, "c1")
+            non_git = pathlib.Path(tmp) / "not-a-repo"
+            non_git.mkdir()
+            with self.assertRaises(ValueError):
+                lessons.lessons_at(non_git, "HEAD")
+
+    def test_undated_lessons_raises_on_an_unknown_sha_too(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _init_repo(root)
+            _write(root, "docs/trackers/operator-rules.md", (
+                "## Index\n\n| ID | Status |\n|---|---|\n| OP-1 | active |\n\n"
+                "## OP-1 — Synthetic rule\n\n**Imperative:** Do the thing.\n"
+            ))
+            _commit_all(root, "c1")
+            global_path = pathlib.Path(tmp) / "global-CLAUDE.md"
+            global_path.write_text("## Section\n\nSome undated prose.\n")
+            with self.assertRaises(Exception):
+                lessons.undated_lessons(global_path, root, "not-a-real-sha")
 
 
 class LeadSlugDerivesFromTheBoldSpanNotFullText(unittest.TestCase):
