@@ -2359,7 +2359,7 @@ def _merge_repo(repo):
 
 
 class GitLogR110(unittest.TestCase):
-    """R110 + bug 91bafcc7d4137bf9: trailer-parser Session-Id, author dates, the window filtered
+    """R110 + bug 6708cab25f53b797: trailer-parser Session-Id, author dates, the window filtered
     in Python over the full walk, and the file list located by an explicit end marker."""
 
     def test_a_merge_with_a_trailer_has_its_session_id_and_no_files(self):

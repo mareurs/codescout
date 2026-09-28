@@ -1,13 +1,14 @@
 ---
-id: '91bafcc7d4137bf9'
+id: 6708cab25f53b797
 kind: bug
-status: open
+status: archived
 title: 'BUG: join''s git-log parser reads a merge commit''s trailer block as its file list, so session_id is NULL'
 tags:
 - cluster/addressing-without-an-escape-hatch
 - measure
 - git
 - parser
+closed: 2026-09-28
 ---
 
 **Valid:** dated 2026-09-28
@@ -43,19 +44,23 @@ None beyond the reproduction; the docstring already states the mechanism.
 
 ## Fix
 
-Not yet fixed. Shape: emit an explicit end-of-body marker in the pretty format (e.g. `%B%x00` then the file list), so the file section is located by the marker rather than by the last blank line. A merge then has an empty file list and its trailers stay in the body. Add a fixture with a two-parent merge carrying a `Session-Id:` trailer. Scheduled for the system1 plan's final whole-branch review fix dispatch (Task 6 is closed).
+Fixed in Task 14 (spec Amendment 7, R110) at `cfe231272789da2ccb485ca5e0565c0d143f5a76`, patch-id `62ffc1a63c86156f07347fcc7ecf6b57c6274c52` (`git show cfe23127 | git patch-id --stable`), on `experiments`.
+
+`_run_git_log` now writes an explicit end-of-message marker (`%x1e`, `_GIT_BODY_END`) right after `%B`, and the `--name-only` file list is whatever follows the LAST such marker -- never the last blank line. A merge (git prints no file section for one) and an `--allow-empty` commit therefore have `files == []` and keep their trailer block in the message. `session_id` is read from git's own trailer parser, `%(trailers:key=Session-Id,valueonly)`, as a separate pretty-format field (first non-empty line), the same definition as `miner.session_id_of`. A merge's `files` is always `[]`, not the files the merge brought in.
+
+Real data, fresh scratch freeze of 2026-09-28 (same corpus, base `e22b5640` vs the fix): all 6 merge rows named above now carry a non-NULL `session_id`; `commits.session_id IS NULL` fell 1855 -> 1849; `files_json` changed on 14 commits, all 2-parent merges, every one now `[]` (the other 8 had a non-`Session-Id` last paragraph read as files). The commit set itself is unchanged (4252 = 4252).
 
 ## Tests added
 
-None yet.
+`tests/test_measure_join.py`: `GitLogR110::test_a_merge_with_a_trailer_has_its_session_id_and_no_files`, `GitLogR110::test_an_allow_empty_commit_has_no_files`, `OneSessionIdDefinition::test_join_and_miner_agree_on_a_two_parent_merge`. Each was observed RED against the pre-fix module (`None != 'S-MERGE'`; `(None, ['Session-Id: S-E']) != ('S-E', [])`), and the mutant that restores the last-blank-line split (`I9d`) is killed by the final suite.
 
 ## Workarounds
 
-`scripts/measure/miner.py` is unaffected: it skips merges before reading anything and reads Session-Ids with its own `session_id_of`. Any other reader of `events.db` `commits.session_id` or `files_json` must treat merge rows as unreliable.
+None needed after the fix.
 
 ## Resume
 
-Fix in the final-review dispatch. Then check whether any Task 10/11 consumer reads `commits.session_id` for merges.
+Done. A Task 10/11 consumer may now read `commits.session_id` on merges; `files_json` is `[]` for every merge.
 
 ## References
 

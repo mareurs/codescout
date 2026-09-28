@@ -941,7 +941,7 @@ def _join_tool_events(conn, tool_use_candidates, usage_rows, counts, relations_m
 _GIT_FIELD_SEP = "\x1f"
 # Leading marker, not a trailing one -- see _run_git_log's docstring for why.
 _GIT_RECORD_SEP = "\x00"
-# 91bafcc7d4137bf9: an explicit END-OF-MESSAGE marker written right after %B. --name-only's file
+# Bug 6708cab25f53b797: an explicit END-OF-MESSAGE marker written right after %B. --name-only's file
 # list follows it, so the file list is located by this marker -- never by the last blank line,
 # which for a merge (git prints no file list for one) is the start of the trailer block.
 _GIT_BODY_END = "\x1e"
@@ -959,7 +959,7 @@ def _run_git_log(repo_path, sha, start_utc, end_utc):
     between one marker and the next. Measured empirically against a real two-commit fixture
     repo (2026-09-26) before trusting this -- the trailing-separator version was wrong.
 
-    Bug 91bafcc7d4137bf9: the file list is whatever follows the explicit end-of-message marker
+    Bug 6708cab25f53b797: the file list is whatever follows the explicit end-of-message marker
     _GIT_BODY_END (written right after %B), so a commit git prints no file section for -- a
     merge (git log diffs a merge against nothing by default) or an --allow-empty commit -- has
     `files == []` and its trailer block stays in its message. A merge's `files` is therefore
