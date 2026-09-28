@@ -13,6 +13,8 @@ R23's fork EXCLUSION — see below):
   scratchpad-project            project slug names a scratchpad checkout
   excluded-by-spec              sid explicitly named by the caller (e.g. this measurement's
                                  own controlling session, or a session named in the plan)
+  fork-of-excluded:<copy>       R106: shares a FORK_PREFIX_LEN uuid prefix with an
+                                 excluded-by-spec copy (a fork inherits its parent's entries)
   duplicate-prefix-of:<copy>    R22: same sessionId in two profiles, this copy's uuid list is
                                  a verified exact prefix of the kept copy's
   divergent-duplicate-of:<copy> R22: same sessionId in two profiles, neither is a prefix of the
@@ -35,6 +37,12 @@ carrying neither field — text starting with `<task-notification>`), (R27) the
 `<command-message>...</command-message>` skill-command wrapper (the real order skill commands
 are written in, which the original `<command-name>`-only check missed), and (R29) a bare slash
 command with no arguments (stripped text matching `^/[a-z][a-z0-9-]*$`, e.g. `/compact`).
+
+Task 14 (spec Amendment 7): operator_messages() also keeps (R103) a `queued_command`
+attachment the operator typed mid-turn, and identifies the operator POSITIVELY (R104) wherever an
+entry carries an `origin`; operator_rejections() (R105) returns tool-rejection feedback;
+exclusions() propagates the spec exclusion to forks (R106); sessions() flags a changed entrypoint
+(R107); read_jsonl() survives a torn UTF-8 line (R113).
 """
 import json
 import pathlib
@@ -75,27 +83,67 @@ INTERRUPT_MARKERS = (
     "[Request interrupted by user for tool use]",
 )
 
+# R104: POSITIVE identification. A type:user entry carrying an `origin` dict is an operator
+# message only if origin.kind == "human" (measured 2026-09-28: all 2592 kept prompts carry it).
+# These leading tags are the FALLBACK for origin-less (older) entries only -- machine channels
+# the harness writes as type:user text. Several are open tags that carry attributes
+# (`<cross-session-message from=...>`), hence no closing ">" on those.
+ORIGINLESS_FALLBACK_TAGS = (
+    "<cross-session-message",
+    "<teammate-message",
+    "<agent-message",
+    "<bash-input>",
+    "<bash-stdout>",
+    "<bash-stderr>",
+    "<local-command-stderr>",
+    "<system-reminder>",
+)
+
+# R103: a message the operator types while the agent runs is written as a `type:"attachment"`
+# entry whose attachment.type is this. Measured 2026-09-28 on the Task 14 freeze (138 sessions):
+# 2095 such attachments; commandMode "prompt" 1262 (attachment origin human 171, peer 1091),
+# "task-notification" 833; every attachment.prompt a str; no entry-level origin on any.
+QUEUED_COMMAND_TYPE = "queued_command"
+
+# R105: the harness marker a tool_result carries when the operator rejects a tool use and types
+# feedback. Measured 2026-09-28: 10 blocks in 9 kept sessions, one block per entry.
+REJECTION_MARKER = "the user said:"
+
 _PROFILE_DIR_RE = re.compile(r"^\d+-(.+)$")
 
 
-def read_jsonl(path):
+def read_jsonl(path, stats=None):
     """Read a transcript file line by line. Returns (entries, skipped_count).
 
     A malformed line (JSON decode failure — e.g. a process killed mid-write leaves a
     truncated final line) is counted and skipped rather than raising, per Review Focus 4.
     Blank lines are skipped without counting as malformed.
+
+    R113: the file is decoded as UTF-8 with errors="replace", so a torn multi-byte sequence
+    becomes U+FFFD instead of raising UnicodeDecodeError and aborting a whole build. The return
+    shape is unchanged; the documented extension is `stats`: pass a dict and this ADDS to it
+    (so one dict can accumulate across files) `skipped` (the same count as the return value)
+    and `replaced_lines` -- lines that contain U+FFFD after decoding. That count cannot tell a
+    decode replacement from a U+FFFD the writer put there itself, so it is an upper bound on
+    torn lines, never a lower one.
     """
     entries = []
     skipped = 0
-    with open(path, "r") as f:
+    replaced = 0
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
         for raw_line in f:
             line = raw_line.strip()
             if not line:
                 continue
+            if "�" in line:
+                replaced += 1
             try:
                 entries.append(json.loads(line))
             except json.JSONDecodeError:
                 skipped += 1
+    if stats is not None:
+        stats["skipped"] = stats.get("skipped", 0) + skipped
+        stats["replaced_lines"] = stats.get("replaced_lines", 0) + replaced
     return entries, skipped
 
 
@@ -105,9 +153,19 @@ def _message_text(entry):
     Content qualifies only if it is a string, or a list whose first item is a {"type":
     "text", ...} dict (the shape a real prompt takes when it carries attachments, e.g. an
     imagePasteIds sibling key) — per Review Focus 3 / fact 2.
+
+    R103: a `queued_command` attachment (a message typed while the agent ran) carries no
+    `message`; its text is `attachment.prompt` when that is a str (all 2095 measured are), so
+    join records a queued prompt through this same function. Any other attachment is None.
     """
     message = entry.get("message")
     if not isinstance(message, dict):
+        if entry.get("type") == "attachment":
+            att = entry.get("attachment")
+            if isinstance(att, dict) and att.get("type") == QUEUED_COMMAND_TYPE:
+                prompt = att.get("prompt")
+                if isinstance(prompt, str):
+                    return prompt
         return None
     content = message.get("content")
     if isinstance(content, str):
@@ -133,49 +191,108 @@ def _is_task_notification(entry):
     return False
 
 
-def operator_messages(entries):
-    """Keep only type=="user" entries that are real human prompts.
+def _normalize_ws(text):
+    """R103's dedupe key: whitespace-normalized text (runs of whitespace -> one space)."""
+    return " ".join(text.split())
 
-    Excludes (Review Focus 3): isMeta entries (skill-loading injections etc, whether their
-    content is a list or a string), compaction summaries (isCompactSummary), tool results
-    (message.content a list not leading with a "text" item — so not recognized by
-    _message_text at all), messages wrapped in <command-name>, <local-command-stdout>,
-    <local-command-caveat> or (R27) <command-message> (slash-command scaffolding, not the
-    operator's own words — see COMMAND_WRAPPER_TAGS for why <command-message> had to join
-    this tuple rather than being checked separately: it is the FIRST tag in the real
-    skill-command wrapper order, so a <command-name>-only check missed every one of it),
-    (R25) operator-interrupt markers (see operator_interrupts() — the same text extraction
-    and the same strip()-equality check decide both functions, so there is exactly one place
-    that decision is made), (R26) harness task-notification entries (structural
-    promptSource/origin.kind check via _is_task_notification(), with a text-prefix fallback
-    for older entries carrying neither field), and (R29) a bare slash command with no
-    arguments (e.g. "/compact" — BARE_SLASH_COMMAND_RE, anchored so a real prompt that
-    merely starts with a slash-command-shaped token followed by more words still counts).
+
+def _is_operator_user_entry(entry):
+    """The type:"user" half of operator_messages() -- see its docstring for every exclusion."""
+    if entry.get("type") != "user":
+        return False
+    # R104: the old-layout top-level agent-<id>.jsonl opens with the parent model's brief as an
+    # isSidechain type:user entry; a sidechain entry is never the operator speaking.
+    if entry.get("isSidechain"):
+        return False
+    if entry.get("isMeta"):
+        return False
+    if entry.get("isCompactSummary"):
+        return False
+    if _is_task_notification(entry):
+        return False
+    # R104: positive identification wherever the harness says who spoke.
+    origin = entry.get("origin")
+    has_origin = isinstance(origin, dict)
+    if has_origin and origin.get("kind") != "human":
+        return False
+    text = _message_text(entry)
+    if text is None:
+        return False
+    stripped = text.strip()
+    if stripped in INTERRUPT_MARKERS:
+        return False
+    if text.startswith(COMMAND_WRAPPER_TAGS):
+        return False
+    if text.startswith(TASK_NOTIFICATION_TAG):
+        return False
+    if not has_origin and text.startswith(ORIGINLESS_FALLBACK_TAGS):
+        return False
+    if BARE_SLASH_COMMAND_RE.match(stripped):
+        return False
+    return True
+
+
+def _is_queued_operator_prompt(entry):
+    """R103: a `queued_command` attachment the operator typed mid-turn. ALL must hold:
+    attachment.type == "queued_command", attachment.commandMode == "prompt", and the
+    ATTACHMENT's own attachment.origin.kind == "human" -- never an entry-level origin, which
+    no measured attachment carries: every prompt-mode attachment carries an attachment origin
+    (1091 peer + 171 human), so reading the wrong field would admit every peer message. An
+    attachment with no origin never counts. Not isMeta (the ledger's R103) and not isSidechain
+    (R104). Its text must be a str (_message_text)."""
+    if entry.get("type") != "attachment":
+        return False
+    if entry.get("isMeta") or entry.get("isSidechain"):
+        return False
+    att = entry.get("attachment")
+    if not isinstance(att, dict):
+        return False
+    if att.get("type") != QUEUED_COMMAND_TYPE or att.get("commandMode") != "prompt":
+        return False
+    origin = att.get("origin")
+    if not (isinstance(origin, dict) and origin.get("kind") == "human"):
+        return False
+    return _message_text(entry) is not None
+
+
+def operator_messages(entries):
+    """Keep only the entries that are the operator speaking, in file order (R2: the ONE
+    definition -- join's turns.kind='prompt' is exactly this set).
+
+    A type=="user" entry is kept unless it is: (R104) an isSidechain entry; an isMeta entry
+    (skill-loading injections etc, whether their content is a list or a string); a compaction
+    summary (isCompactSummary); (R26) a harness task-notification (structural
+    promptSource/origin.kind check via _is_task_notification(), with the TASK_NOTIFICATION_TAG
+    text-prefix fallback); (R104) an entry whose `origin` dict names anyone but the human
+    (origin.kind != "human"); a tool result (message.content a list not leading with a "text"
+    item -- so not recognized by _message_text at all); (R25) an operator-interrupt marker (see
+    operator_interrupts() -- the same text extraction and the same strip()-equality check decide
+    both functions); a message wrapped in <command-name>, <local-command-stdout>,
+    <local-command-caveat> or (R27) <command-message> (slash-command scaffolding -- see
+    COMMAND_WRAPPER_TAGS for why <command-message> had to join that tuple); (R104) for an
+    ORIGIN-LESS entry only, text starting with one of ORIGINLESS_FALLBACK_TAGS (machine channels
+    written as user text); or (R29) a bare slash command with no arguments (e.g. "/compact" --
+    BARE_SLASH_COMMAND_RE, anchored so a real prompt that merely starts with a
+    slash-command-shaped token followed by more words still counts).
+
+    R103: a `queued_command` attachment the operator typed mid-turn is kept too (see
+    _is_queued_operator_prompt), UNLESS its whitespace-normalized text equals that of a kept
+    type:user operator message LATER in the same `entries` list -- the same message, echoed as
+    a prompt once the turn ended; the user entry is kept and the attachment dropped. A kept
+    user message EARLIER in the list never dedupes it.
     """
-    kept = []
-    for entry in entries:
-        if entry.get("type") != "user":
-            continue
-        if entry.get("isMeta"):
-            continue
-        if entry.get("isCompactSummary"):
-            continue
-        if _is_task_notification(entry):
-            continue
-        text = _message_text(entry)
-        if text is None:
-            continue
-        stripped = text.strip()
-        if stripped in INTERRUPT_MARKERS:
-            continue
-        if text.startswith(COMMAND_WRAPPER_TAGS):
-            continue
-        if text.startswith(TASK_NOTIFICATION_TAG):
-            continue
-        if BARE_SLASH_COMMAND_RE.match(stripped):
-            continue
-        kept.append(entry)
-    return kept
+    kept_reversed = []
+    later_user_texts = set()
+    for entry in reversed(entries):
+        if _is_operator_user_entry(entry):
+            kept_reversed.append(entry)
+            later_user_texts.add(_normalize_ws(_message_text(entry)))
+        elif _is_queued_operator_prompt(entry):
+            if _normalize_ws(_message_text(entry)) in later_user_texts:
+                continue
+            kept_reversed.append(entry)
+    kept_reversed.reverse()
+    return kept_reversed
 
 
 def operator_interrupts(entries):
@@ -203,6 +320,57 @@ def operator_interrupts(entries):
     return kept
 
 
+def _tool_result_text(block):
+    """A tool_result block's text: its `content` when a str, else the joined text items of a
+    list-shaped `content`; None for any other shape."""
+    content = block.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            item["text"]
+            for item in content
+            if isinstance(item, dict) and item.get("type") == "text"
+            and isinstance(item.get("text"), str)
+        )
+    return None
+
+
+def operator_rejections(entries):
+    """R105: tool-rejection feedback, the operator's most explicit correction. Returns, in file
+    order, one {"uuid", "ts", "text"} per type:"user" entry whose message.content LIST holds a
+    tool_result block whose text contains REJECTION_MARKER; "text" is everything after the
+    marker's first occurrence, stripped. A marker inside a plain text block (not a tool_result)
+    never counts. Every measured entry holds exactly one such block; if one ever held several,
+    their texts are joined with a blank line, so the entry still yields ONE dict (one turns row).
+
+    Known latent shape, measured 2026-09-28: a tool_result that merely QUOTES the marker (e.g. a
+    grep over these docs) matches too -- 1 such block, in the review session 82cff72e, which R106
+    excludes; the 10 genuine blocks are all is_error=True and carry the harness's "The user
+    doesn't want to proceed with this tool use" prefix. The rule as ruled does not check either.
+    """
+    out = []
+    for entry in entries:
+        if entry.get("type") != "user":
+            continue
+        message = entry.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        texts = []
+        for block in content:
+            if not (isinstance(block, dict) and block.get("type") == "tool_result"):
+                continue
+            text = _tool_result_text(block)
+            if text and REJECTION_MARKER in text:
+                texts.append(text.split(REJECTION_MARKER, 1)[1].strip())
+        if texts:
+            out.append(
+                {"uuid": entry.get("uuid"), "ts": entry.get("timestamp"), "text": "\n\n".join(texts)}
+            )
+    return out
+
+
 @dataclass
 class Session:
     sid: str
@@ -213,6 +381,10 @@ class Session:
     subagent_paths: list = field(default_factory=list)
     first_ts: str = None
     last_ts: str = None
+    # R107: the LAST non-empty entrypoint in the file, and whether it differs from the first
+    # (`entrypoint`). The session's class stays first-entry; the flag only makes a change visible.
+    last_entrypoint: str = None
+    entrypoint_changed: bool = False
 
 
 def copy_id(session):
@@ -247,12 +419,15 @@ def sessions(corpus_dir):
                 entries, _skipped = read_jsonl(jsonl)
 
                 entrypoint = None
+                last_entrypoint = None
                 first_ts = None
                 last_ts = None
                 first_uuids = []
                 for entry in entries:
-                    if entrypoint is None and entry.get("entrypoint"):
-                        entrypoint = entry.get("entrypoint")
+                    if entry.get("entrypoint"):
+                        if entrypoint is None:
+                            entrypoint = entry.get("entrypoint")
+                        last_entrypoint = entry.get("entrypoint")
                     ts = entry.get("timestamp")
                     if ts:
                         if first_ts is None:
@@ -277,6 +452,8 @@ def sessions(corpus_dir):
                         subagent_paths=subagent_paths,
                         first_ts=first_ts,
                         last_ts=last_ts,
+                        last_entrypoint=last_entrypoint,
+                        entrypoint_changed=entrypoint != last_entrypoint,
                     )
                 )
     return result
@@ -293,12 +470,22 @@ def _full_timeline(path):
     return [(e.get("uuid"), e.get("timestamp")) for e in entries if e.get("uuid") is not None]
 
 
+def _prefix_key(session):
+    """The fork-detection key: the tuple of a copy's first FORK_PREFIX_LEN uuids, or None when
+    it has fewer. Two copies share a prefix of at least FORK_PREFIX_LEN iff their keys are equal.
+    The ONE definition behind relations()' fork groups and exclusions()' R106 stage A2."""
+    if len(session.first_uuids) < FORK_PREFIX_LEN:
+        return None
+    return tuple(session.first_uuids[:FORK_PREFIX_LEN])
+
+
 def exclusions(sessions_list, excluded_sids):
     """Build the exclusion map for a list of Session objects.
 
     Returns {copy_id(session): reason}. Staged, highest priority first, so a copy already
     excluded by an earlier stage is never re-labelled by a later one:
-      A excluded-by-spec  B sdk-cli  C scratchpad-project  D R22 same-sid duplicates
+      A excluded-by-spec  A2 fork-of-excluded:<copy> (R106)  B sdk-cli  C scratchpad-project
+      D R22 same-sid duplicates
 
     R28: forks (formerly stage E, `fork-of:<sid>`) are NO LONGER an exclusion reason — see
     module docstring and relations()/attribute_entries() for the replacement model.
@@ -309,6 +496,27 @@ def exclusions(sessions_list, excluded_sids):
     for s in sessions_list:
         if s.sid in excluded_sids:
             excl[copy_id(s)] = "excluded-by-spec"
+
+    # --- A2: R106 fork propagation -- fork-of-excluded:<copy> ---
+    # A copy sharing a FORK_PREFIX_LEN uuid prefix (the relations() key, _prefix_key) with an
+    # excluded-by-spec copy inherits that copy's entries, so it is excluded too. Seeded from the
+    # SPEC reason only, never from every excluded copy: an R22 duplicate shares its prefix with
+    # its own KEPT keeper by construction, and sdk-cli/scratchpad forks are R28's
+    # reporting-only relations. The match is symmetric ("shares a prefix"), so a kept copy that
+    # an excluded session was itself forked FROM is excluded too -- R106's whole-session grain,
+    # disclosed; measured 2026-09-28, no copy shares a prefix with either spec sid.
+    spec_prefixes = {}
+    for s in sorted(sessions_list, key=copy_id):
+        key = _prefix_key(s)
+        if key is not None and excl.get(copy_id(s)) == "excluded-by-spec":
+            spec_prefixes.setdefault(key, copy_id(s))
+    for s in sessions_list:
+        cid = copy_id(s)
+        if cid in excl:
+            continue
+        key = _prefix_key(s)
+        if key is not None and key in spec_prefixes:
+            excl[cid] = f"fork-of-excluded:{spec_prefixes[key]}"
 
     # --- B: sdk-cli (headless) ---
     for s in sessions_list:
@@ -417,9 +625,9 @@ def relations(sessions_list, exclusions_map):
 
     groups = {}
     for s in representatives:
-        if len(s.first_uuids) < FORK_PREFIX_LEN:
+        key = _prefix_key(s)
+        if key is None:
             continue
-        key = tuple(s.first_uuids[:FORK_PREFIX_LEN])
         groups.setdefault(key, []).append(s)
 
     rels = {}
@@ -516,3 +724,20 @@ def write_exclusions(corpus_dir, exclusions_map):
         {"sid": sid, "reason": reason} for sid, reason in sorted(exclusions_map.items())
     ]
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+
+
+def read_exclusions(corpus_dir):
+    """R106: the inverse of write_exclusions() -- manifest.json's `exclusions` as the
+    {copy_id: reason} map exclusions() returns, so a reader (observability.coverage) compares
+    the recorded set with its own recomputation. A manifest without the key RAISES KeyError."""
+    manifest = json.loads((pathlib.Path(corpus_dir) / "manifest.json").read_text())
+    return {rec["sid"]: rec["reason"] for rec in manifest["exclusions"]}
+
+
+def entrypoint_changed_count(sessions_list, exclusions_map):
+    """R107: the number of KEPT copies (copy_id not in exclusions_map) whose first and last
+    entrypoint differ (Session.entrypoint_changed). Measured 2026-09-28: 0."""
+    return sum(
+        1 for s in sessions_list
+        if copy_id(s) not in exclusions_map and s.entrypoint_changed
+    )

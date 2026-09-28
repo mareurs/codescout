@@ -953,6 +953,305 @@ class WriteExclusions(unittest.TestCase):
                 ],
             )
 
+    def test_read_exclusions_is_the_inverse_of_write_exclusions(self):
+        # R106: the manifest form observability reads back.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            excl = {".claude-kat/b": "sdk-cli", ".claude-sdd/a": "fork-of-excluded:.claude-sdd/x"}
+            transcripts.write_exclusions(corpus_dir, excl)
+            self.assertEqual(transcripts.read_exclusions(corpus_dir), excl)
+
+
+# --- Task 14 (spec Amendment 7) -----------------------------------------------------------
+
+
+def _queued(uuid, ts, text, mode="prompt", origin_kind="human", entry_origin=None):
+    """A real-shaped `queued_command` attachment (R103). origin_kind=None writes NO attachment
+    origin at all; entry_origin sets an ENTRY-level origin, which no real attachment carries."""
+    att = {"type": "queued_command", "commandMode": mode, "prompt": text}
+    if origin_kind is not None:
+        att["origin"] = {"kind": origin_kind}
+    e = {"type": "attachment", "uuid": uuid, "timestamp": ts, "sessionId": "s1",
+         "entrypoint": "cli", "attachment": att}
+    if entry_origin is not None:
+        e["origin"] = {"kind": entry_origin}
+    return e
+
+
+def _with_origin(entry, kind):
+    entry["origin"] = {"kind": kind}
+    return entry
+
+
+class QueuedOperatorMessages(unittest.TestCase):
+    """R103: a message the operator typed while the agent ran is a queued_command attachment."""
+
+    def test_a_peer_queued_command_stays_out(self):
+        peer = _queued("q1", "2026-09-20T10:00:00Z", "a peer's message", origin_kind="peer")
+        self.assertEqual(transcripts.operator_messages([peer]), [])
+
+    def test_a_task_notification_queued_command_stays_out(self):
+        # Both measured task-notification shapes: no origin, and origin task-notification. The
+        # human-origin one also stays out: commandMode is what makes it a notification.
+        for origin_kind in (None, "task-notification", "human"):
+            with self.subTest(origin_kind=origin_kind):
+                note = _queued("q1", "2026-09-20T10:00:00Z", "a background task finished",
+                               mode="task-notification", origin_kind=origin_kind)
+                self.assertEqual(transcripts.operator_messages([note]), [])
+
+    def test_an_origin_less_prompt_mode_queued_command_stays_out(self):
+        bare = _queued("q1", "2026-09-20T10:00:00Z", "no origin at all", origin_kind=None)
+        self.assertEqual(transcripts.operator_messages([bare]), [])
+
+    def test_a_human_queued_command_enters_once_with_its_prompt_as_text(self):
+        human = _queued("q1", "2026-09-20T10:00:00Z", "stop, that is the wrong file")
+        got = transcripts.operator_messages([human])
+        self.assertEqual(got, [human])
+        self.assertEqual(transcripts._message_text(human), "stop, that is the wrong file")
+
+    def test_the_attachments_own_origin_decides_never_an_entry_level_one(self):
+        # LOAD-BEARING: each fixture's two origins disagree. Reading the entry-level origin
+        # admits the first and drops the second; reading the attachment's does the opposite.
+        entry_human_att_peer = _queued("q1", "2026-09-20T10:00:00Z", "peer text",
+                                       origin_kind="peer", entry_origin="human")
+        entry_peer_att_human = _queued("q2", "2026-09-20T10:00:01Z", "operator text",
+                                       origin_kind="human", entry_origin="peer")
+        got = transcripts.operator_messages([entry_human_att_peer, entry_peer_att_human])
+        self.assertEqual(got, [entry_peer_att_human])
+
+    def test_a_human_queued_command_matching_a_later_kept_prompt_is_deduped(self):
+        # LOAD-BEARING: the later prompt differs only in whitespace -- the key is normalized.
+        queued = _queued("q1", "2026-09-20T10:00:00Z", "use  the other\nfile")
+        later = _entry("u2", "2026-09-20T10:00:05Z", "s1", content=" use the other file ")
+        got = transcripts.operator_messages([queued, later])
+        self.assertEqual(got, [later])
+
+    def test_a_human_queued_command_matching_an_earlier_kept_prompt_is_not_deduped(self):
+        earlier = _entry("u1", "2026-09-20T10:00:00Z", "s1", content="use the other file")
+        queued = _queued("q2", "2026-09-20T10:00:05Z", "use the other file")
+        got = transcripts.operator_messages([earlier, queued])
+        self.assertEqual(got, [earlier, queued])
+
+    def test_a_later_user_entry_that_is_not_kept_does_not_dedupe(self):
+        # The dedupe partner must be a KEPT operator message: a later isMeta entry carrying the
+        # same text is not the operator speaking, so the queued message stays.
+        queued = _queued("q1", "2026-09-20T10:00:00Z", "use the other file")
+        later_meta = _entry("u2", "2026-09-20T10:00:05Z", "s1", content="use the other file",
+                            is_meta=True)
+        got = transcripts.operator_messages([queued, later_meta])
+        self.assertEqual(got, [queued])
+
+    def test_file_order_is_kept_across_both_kinds(self):
+        p1 = _entry("u1", "2026-09-20T10:00:00Z", "s1", content="first")
+        q = _queued("q2", "2026-09-20T10:00:01Z", "second, typed mid-turn")
+        p3 = _entry("u3", "2026-09-20T10:00:02Z", "s1", content="third")
+        self.assertEqual(transcripts.operator_messages([p1, q, p3]), [p1, q, p3])
+
+
+class PositiveIdentification(unittest.TestCase):
+    """R104: an entry that carries an origin counts only if origin.kind == "human"."""
+
+    def test_a_synthetic_peer_origin_user_entry_stays_out_and_a_human_one_is_kept(self):
+        peer = _with_origin(_entry("u1", "2026-09-20T10:00:00Z", "s1", content="hello"), "peer")
+        human = _with_origin(_entry("u2", "2026-09-20T10:00:01Z", "s1", content="hello"), "human")
+        self.assertEqual(transcripts.operator_messages([peer, human]), [human])
+
+    def test_each_fallback_tag_excludes_an_origin_less_entry(self):
+        for tag in (
+            "<cross-session-message from=\"x\">", "<teammate-message>", "<agent-message>",
+            "<bash-input>", "<bash-stdout>", "<bash-stderr>", "<local-command-stderr>",
+            "<system-reminder>",
+        ):
+            with self.subTest(tag=tag):
+                e = _entry("u1", "2026-09-20T10:00:00Z", "s1", content=f"{tag}body")
+                self.assertEqual(transcripts.operator_messages([e]), [])
+
+    def test_the_fallback_tags_do_not_apply_to_a_human_origin_entry(self):
+        # The tags are the FALLBACK for origin-less entries; where the harness names the human,
+        # that positive identification decides.
+        e = _with_origin(
+            _entry("u1", "2026-09-20T10:00:00Z", "s1", content="<system-reminder> quoted"), "human"
+        )
+        self.assertEqual(transcripts.operator_messages([e]), [e])
+
+    def test_an_is_sidechain_user_entry_is_never_an_operator_message(self):
+        # The old-layout top-level agent-<id>.jsonl opens with the parent's brief, isSidechain.
+        brief = _entry("u1", "2026-09-20T10:00:00Z", "agent-1", content="do the subtask")
+        brief["isSidechain"] = True
+        real = _entry("u2", "2026-09-20T10:00:01Z", "agent-1", content="a real prompt")
+        real["isSidechain"] = False
+        self.assertEqual(transcripts.operator_messages([brief, real]), [real])
+
+
+class OperatorRejections(unittest.TestCase):
+    """R105: tool-rejection feedback carries the harness marker `the user said:`."""
+
+    _REJECTED = (
+        "The user doesn't want to proceed with this tool use. The tool use was rejected. "
+        "To tell you how to proceed, the user said:\n  edit the test file instead  "
+    )
+
+    def test_a_marker_in_a_tool_result_yields_one_with_the_text_after_it(self):
+        for shape, content in (
+            ("str", self._REJECTED),
+            ("list", [{"type": "text", "text": self._REJECTED}]),
+        ):
+            with self.subTest(shape=shape):
+                e = _entry("u1", "2026-09-20T10:00:00Z", "s1", content=[
+                    {"type": "tool_result", "tool_use_id": "t1", "is_error": True,
+                     "content": content},
+                ])
+                self.assertEqual(
+                    transcripts.operator_rejections([e]),
+                    [{"uuid": "u1", "ts": "2026-09-20T10:00:00Z",
+                      "text": "edit the test file instead"}],
+                )
+
+    def test_a_tool_result_without_the_marker_yields_none(self):
+        e = _entry("u1", "2026-09-20T10:00:00Z", "s1", content=[
+            {"type": "tool_result", "tool_use_id": "t1", "content": "ok, the file was written"},
+        ])
+        self.assertEqual(transcripts.operator_rejections([e]), [])
+
+    def test_a_marker_inside_a_text_block_yields_none(self):
+        e = _entry("u1", "2026-09-20T10:00:00Z", "s1", content=[
+            {"type": "text", "text": "earlier the user said: use the other file"},
+        ])
+        self.assertEqual(transcripts.operator_rejections([e]), [])
+
+    def test_a_rejection_is_not_an_operator_message(self):
+        e = _entry("u1", "2026-09-20T10:00:00Z", "s1", content=[
+            {"type": "tool_result", "tool_use_id": "t1", "content": self._REJECTED},
+        ])
+        self.assertEqual(transcripts.operator_messages([e]), [])
+
+
+class ReadJsonlTornUtf8(unittest.TestCase):
+    """R113: a torn multi-byte sequence must not raise; lines with U+FFFD are counted."""
+
+    def test_a_torn_multibyte_line_does_not_raise_and_is_counted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "session.jsonl"
+            path.write_bytes(
+                b'{"type": "user", "uuid": "a"}\n'
+                # "caf" + the first byte of a 2-byte sequence: still valid JSON once replaced.
+                b'{"type": "user", "uuid": "b", "t": "caf\xc3"}\n'
+                # A process killed mid-character: torn UTF-8 AND torn JSON.
+                b'{"type": "user", "uuid": "c", "t": "\xe2\x82'
+            )
+            stats = {}
+            try:
+                entries, skipped = transcripts.read_jsonl(path, stats=stats)
+            except UnicodeDecodeError as e:  # the defect is the raise: report it as a failure
+                self.fail(f"read_jsonl raised on a torn UTF-8 line: {e}")
+            self.assertEqual([e["uuid"] for e in entries], ["a", "b"])
+            self.assertEqual(entries[1]["t"], "caf�")
+            self.assertEqual(skipped, 1)
+            self.assertEqual(stats, {"skipped": 1, "replaced_lines": 2})
+
+    def test_stats_accumulate_across_calls_and_a_clean_file_adds_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "session.jsonl"
+            path.write_bytes(b'{"type": "user", "uuid": "a", "t": "\xc3"}\n')
+            clean = pathlib.Path(tmp) / "clean.jsonl"
+            clean.write_bytes(b'{"type": "user", "uuid": "b"}\n')
+            stats = {}
+            try:
+                transcripts.read_jsonl(path, stats=stats)
+                transcripts.read_jsonl(path, stats=stats)
+                transcripts.read_jsonl(clean, stats=stats)
+            except UnicodeDecodeError as e:  # the defect is the raise: report it as a failure
+                self.fail(f"read_jsonl raised on a torn UTF-8 line: {e}")
+            self.assertEqual(stats, {"skipped": 0, "replaced_lines": 2})
+
+
+def _timeline(sid, prefix, n_own, t0=0):
+    """`prefix` shared uuids then n_own uuids unique to `sid`, one second apart."""
+    uuids = list(prefix) + [f"{sid}-own{i}" for i in range(n_own)]
+    return [_entry(u, f"2026-09-20T10:00:{t0 + i:02d}Z", sid) for i, u in enumerate(uuids)]
+
+
+class ForkOfExcluded(unittest.TestCase):
+    """R106: a copy sharing a FORK_PREFIX_LEN uuid prefix with an excluded-by-spec copy is
+    excluded too, reason fork-of-excluded:<that copy>."""
+
+    SPEC = "3c5b02df-b6ce-45f5-9d03-1194e38465c0"
+
+    def test_a_fork_of_a_spec_excluded_session_is_excluded_with_its_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            shared = [f"sh{i}" for i in range(transcripts.FORK_PREFIX_LEN)]
+            _write_lines(proj / f"{self.SPEC}.jsonl", _timeline(self.SPEC, shared, 2))
+            _write_lines(proj / "fork-sid.jsonl", _timeline("fork-sid", shared, 3, t0=20))
+            _write_lines(proj / "other-sid.jsonl", _timeline("other-sid", [], 6))
+            excl = transcripts.exclusions(transcripts.sessions(corpus_dir), {self.SPEC})
+            self.assertEqual(excl[f".claude-sdd/{self.SPEC}"], "excluded-by-spec")
+            self.assertEqual(
+                excl.get(".claude-sdd/fork-sid"), f"fork-of-excluded:.claude-sdd/{self.SPEC}"
+            )
+            self.assertNotIn(".claude-sdd/other-sid", excl)
+
+    def test_a_shorter_shared_prefix_is_not_a_fork(self):
+        # LOAD-BEARING: fork-sid shares FORK_PREFIX_LEN - 1 uuids, then diverges -- one short.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            shared = [f"sh{i}" for i in range(transcripts.FORK_PREFIX_LEN - 1)]
+            _write_lines(proj / f"{self.SPEC}.jsonl", _timeline(self.SPEC, shared, 3))
+            _write_lines(proj / "fork-sid.jsonl", _timeline("fork-sid", shared, 3, t0=20))
+            excl = transcripts.exclusions(transcripts.sessions(corpus_dir), {self.SPEC})
+            self.assertNotIn(".claude-sdd/fork-sid", excl)
+
+    def test_a_fork_of_an_sdk_cli_session_is_not_propagated(self):
+        # Propagation is seeded by the spec exclusion only: a fork of a headless session keeps
+        # R28's reporting-only status.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            shared = [f"sh{i}" for i in range(transcripts.FORK_PREFIX_LEN)]
+            headless = _timeline("headless", shared, 2)
+            for e in headless:
+                e["entrypoint"] = "sdk-cli"
+            _write_lines(proj / "headless.jsonl", headless)
+            _write_lines(proj / "fork-sid.jsonl", _timeline("fork-sid", shared, 3, t0=20))
+            excl = transcripts.exclusions(transcripts.sessions(corpus_dir), {self.SPEC})
+            self.assertEqual(excl[".claude-sdd/headless"], "sdk-cli")
+            self.assertNotIn(".claude-sdd/fork-sid", excl)
+
+
+class EntrypointChanged(unittest.TestCase):
+    """R107: a kept session whose first and last entrypoint differ is flagged and counted."""
+
+    def test_sessions_flags_a_changed_entrypoint_and_the_count_covers_kept_copies_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            _write_lines(proj / "changed.jsonl", [
+                _entry("c0", "2026-09-20T10:00:00Z", "changed", entrypoint="cli"),
+                _entry("c1", "2026-09-20T10:00:01Z", "changed", entrypoint="sdk-ts"),
+            ])
+            _write_lines(proj / "same.jsonl", [
+                _entry("s0", "2026-09-20T10:00:00Z", "same", entrypoint="cli"),
+                _entry("s1", "2026-09-20T10:00:01Z", "same", entrypoint="cli"),
+            ])
+            # Excluded (sdk-cli first) although its entrypoint changes: not counted.
+            _write_lines(proj / "headless.jsonl", [
+                _entry("h0", "2026-09-20T10:00:00Z", "headless", entrypoint="sdk-cli"),
+                _entry("h1", "2026-09-20T10:00:01Z", "headless", entrypoint="cli"),
+            ])
+            sess = {s.sid: s for s in transcripts.sessions(corpus_dir)}
+            self.assertTrue(sess["changed"].entrypoint_changed)
+            self.assertEqual(
+                (sess["changed"].entrypoint, sess["changed"].last_entrypoint), ("cli", "sdk-ts")
+            )
+            self.assertFalse(sess["same"].entrypoint_changed)
+            self.assertTrue(sess["headless"].entrypoint_changed)
+            sessions_list = list(sess.values())
+            excl = transcripts.exclusions(sessions_list, set())
+            self.assertEqual(excl[".claude-sdd/headless"], "sdk-cli")
+            self.assertEqual(transcripts.entrypoint_changed_count(sessions_list, excl), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
