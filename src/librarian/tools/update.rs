@@ -688,7 +688,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `terminal_status_without_fix_anchor` stops looking, so it is the last moment the guide's
     // "record the pair AT archive time" can be enforced. Checked against `new_content`, the file
     // as it will be written, so adding the section and archiving in one call passes.
-    // docs/issues/2026-09-28-archived-without-fix-provenance-is-unchecked.md
+    // docs/issues/archive/2026-09-28-archived-without-fix-provenance-is-unchecked.md
     if patch.status.as_deref() == Some("archived") {
         super::doctor::refuse_unanchored_archive(&row.kind, &row.status, &new_content, "update")?;
     }
@@ -3583,7 +3583,7 @@ text
 
     // --- The archive guard: a `fixed`/`mitigated` bug may not leave doctor's
     // `terminal_status_without_fix_anchor` population unanchored.
-    // docs/issues/2026-09-28-archived-without-fix-provenance-is-unchecked.md
+    // docs/issues/archive/2026-09-28-archived-without-fix-provenance-is-unchecked.md
 
     /// A structured pointer in the exact shape `doctor` parses. LOAD-BEARING: both bullets,
     /// backticked, outside any fence — a prose mention of the same hashes discharges nothing.

@@ -6636,7 +6636,7 @@ pub(crate) fn in_archive_dir(path: &Path) -> bool {
 /// time" can be enforced, and before this guard both passed silently. Measured 2026-09-28 at
 /// `8dfc251e`: 30 of the 54 bug files archived 2026-09-21..27 carry neither a pointer nor
 /// `no_fix_commit:` (an upper bound, since it includes `wontfix`).
-/// docs/issues/2026-09-28-archived-without-fix-provenance-is-unchecked.md
+/// docs/issues/archive/2026-09-28-archived-without-fix-provenance-is-unchecked.md
 ///
 /// `content` is the file AS IT WILL BE after the call, so an `update` that adds the section and
 /// archives in one call passes. `wontfix` and every non-bug kind are out of scope, as they are

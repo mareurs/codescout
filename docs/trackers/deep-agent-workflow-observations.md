@@ -779,7 +779,7 @@ No failed attempts beyond one refused pipe, which recovered on the next call.
 
 - A release build (`./scripts/rb.sh`) and a `reindex`.
 - A live check of `6a6a321e`: an `update_entry` resync of `review-catches:RC-2` left `doctor`'s `row_behind_file` at 0. It was reverted, leaving no diff.
-- The archive pass `8dfc251e`. Five Codex bugs were archived with Fix provenance, and three were kept open with an `unverified:` caveat. It produced bug `f9e51dc0a0af8693`, `bug-fix-session-log:F-181` and `bug-fix-session-log:F-182`, and a confirmation note under `tool-usage-patterns:T-25`.
+- The archive pass `8dfc251e`. Five Codex bugs were archived with Fix provenance, and three were kept open with an `unverified:` caveat. It produced bug `d59ef0849a8f45cb`, `bug-fix-session-log:F-181` and `bug-fix-session-log:F-182`, and a confirmation note under `tool-usage-patterns:T-25`.
 
 No new DWF or DCX sample was taken; the routine samples above stand. The interval now ends about 10:50Z. Commits since the previous update: `fd0b4181`, `8dfc251e`, and the one carrying this update. Overhead for this update: about 3 tool calls.
 

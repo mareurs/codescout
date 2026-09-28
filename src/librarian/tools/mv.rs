@@ -232,7 +232,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // `terminal_status_without_fix_anchor` (which skips archive paths) exactly as
         // `update`'s flip to `archived` does, so the same guard runs here. A record already
         // under `archive/` was already outside that check, so a move within it is not guarded.
-        // docs/issues/2026-09-28-archived-without-fix-provenance-is-unchecked.md
+        // docs/issues/archive/2026-09-28-archived-without-fix-provenance-is-unchecked.md
         if super::doctor::in_archive_dir(&new_full) && !super::doctor::in_archive_dir(&old_full) {
             let content = std::fs::read_to_string(&old_full)?;
             super::doctor::refuse_unanchored_archive(&row.kind, &row.status, &content, "move")?;
@@ -2691,7 +2691,7 @@ mod tests {
     // --- The archive guard at the move surface. Moving a `fixed`/`mitigated` bug under an
     // `archive` directory takes it out of doctor's `terminal_status_without_fix_anchor` (which
     // skips archive paths) exactly as `update`'s flip to `archived` does.
-    // docs/issues/2026-09-28-archived-without-fix-provenance-is-unchecked.md
+    // docs/issues/archive/2026-09-28-archived-without-fix-provenance-is-unchecked.md
 
     /// LOAD-BEARING: the exact shape `doctor` parses — two labelled bullets, backticked.
     const FIX_PROVENANCE: &str =
