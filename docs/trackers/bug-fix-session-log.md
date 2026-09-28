@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 177
-entry_high_water_W: 145
+entry_high_water_F: 180
+entry_high_water_W: 146
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -67,6 +67,9 @@ entry_high_water_W: 145
 |----|------|---------:|----------|--------|-------|
 | F-176 | 2026-09-26 | med | documentation | open | **A residual's literal wording is stronger than the code contract it guards — `entry_prefix` gates only the prose append path.** Residual `5820a758` asks that every TAXONOMY `append_entry` recipe target a tracker declaring `entry_prefix`; at HEAD only the prose branch checks it, so a literal test reds WIN-N and PV-N, which work. Also: recipe ids are machine-local `sha256(abs_path)`, and 5 of 20 session logs declare no `F`. |
 | F-177 | 2026-09-27 | med | eval-harness | fixed-verified | **Codex: Phase1b wrappers erase failed-child status.** Seven injected-failure cases returned zero; working-tree fixes pass eight tests and kill nine applied mutations. Historical model failures remain valid. |
+| F-178 | 2026-09-28 | med | self-friction | fixed-verified | **A hand-written augmentation sidecar stored `params_schema` as a JSON string, and my round-trip check could not see it.** `from_row` compares a parsed mapping, so the file drifted from commit; `to_row` would have restored a string-valued schema on a fresh clone. Two green tests could not express it; `doc(augment)`'s write-through refused and `doctor` named it. |
+| F-179 | 2026-09-28 | high | self-friction | fixed-verified | **I built a promotion-queue ledger whose queue lived only in catalog params, which never travel.** `to_row` restores params empty, so a fresh clone would have had 54 prose sections and an empty queue, silently. Now mirrored in a body `## Index` that `update_entry` keeps current through a declared `snapshot_anchor`. |
+| F-180 | 2026-09-28 | low | self-friction | open | **I produced an artifact id from memory twice in one session, and both were wrong.** A 16-hex id reads as a held fact but is a path hash; the correct one was in my own compaction summary. Loud refusal both times; the check is a `doc(find)` by `rel_path` before the first write. |
 | F-175 | 2026-09-24 | high | self-friction | open | **A killed mutant kept running: a looping M4 mutant of `gate.sh` survived its suite and filled the machine's `/tmp` (tmpfs) with about 867K lock files.** Case F killed `$!` of a backgrounded function, a wrapper subshell (the bug fixed in case D minutes earlier, not swept to the other site). The mutation verdict (KILLED) was correct and said nothing about the survivor. It stopped only on inode exhaustion. My kill and my delete were both refused by the classifier; escalated to the operator. |
 | F-174 | 2026-09-24 | high | cross-session | mitigated | **Saving a script that every session runs from the working tree IS publishing it.** My uncommitted `gate.sh` pool change was picked up by 2 peers within about two minutes. Each started a COLD build in a new slot while its warm legacy tree sat unused, on a disk at 97%. I stopped my own run by pgid, deleted my slot under its own lock, and watched disk with `fuser` (a read-only check; `flock` would perturb leasing). |
 | F-173 | 2026-09-24 | high | self-friction | mitigated | **Recommended `flock -o` as strictly safer before running it; the two lock modes fail in opposite directions, and `-o` fails toward the race it was meant to prevent.** With `-o`, SIGKILLing the holder frees the slot while cargo keeps running in it, a correctness failure. Without `-o`, a daemon (sccache, measured) pins a slot for its lifetime, a disk-only failure. Choose the mode that fails toward disk. Plan revised before any code. |
@@ -252,6 +255,7 @@ entry_high_water_W: 145
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-144 | 2026-09-16 | med | **The discriminator was already in the output OF THE RUN THAT ESTABLISHED THE FINDING** — three sessions, three instruments, one evening: `FutureWarning` ×3, a `FAILED` with no `left:`/`right:` lines, a `64 vs 99` line count. Worse than CLAUDE.md's "assert on the name": nobody chose a proxy, the answer was on screen in the scrollback being read to write up the result. Each caught only by a peer stating a checkable fact that collided. | validated |
+| W-146 | 2026-09-28 | med | **A scout scoped to one question read the whole function and found the mechanism I was about to hand-maintain.** Checking whether `update_entry` is safe to parallelize surfaced `resync_snapshot_row`: with a declared `snapshot_anchor`, each patched row's body line is re-rendered in the params transaction. | A policy ("edit the Index line in the same commit") written into three surfaces the day before, 54 hand edits of a 12-column table, and silent decay at the first forgotten one. Instead: 54/54 `row_resynced: true`, 54/54 lines matched params, and one gap in the mechanism filed (`49a01cb32b73e7e7`) | validated |
 | W-142 | 2026-09-15 | high | `git add` writes a complete tree to the object store and `git restore --staged` only un-references it, so staged content survives as an unreachable blob and `git fsck --unreachable` recovers it byte-exact | A peer's 35 uncommitted lines, deleted by me, were recovered exactly; no backup of mine predated their write, so the staged blob was the only copy outside their context | validated |
 | W-137 | 2026-09-15 | — | reproduction-before-plan | **The reproduction refuted the record's own root-cause lead in both particulars, before any code was read.** See the entry for the full counterfactual. | validated |
 | W-134 | 2026-09-14 | med | **A pinned throwaway project probes a security-config gate live, by behaviour rather than build metadata.** After a rebuild, `workspace(status)` reported `git_sha: 3d9cd206, git_dirty: true` — and a dirty build is exactly the case a sha cannot settle. Pinned `workspace=` at a temp project whose own `.codescout/project.toml` sets `file_write_enabled = false`: `memory(action="write")` was REFUSED with cause `ConfiguredOff`, and `memory(action="list")` through the SAME pin returned `0 topics` as the control — which is what makes the refusal a measurement rather than an unresolvable path. A `read_only`-based probe self-defeats, because `call_tool_inner` upgrades a pinned workspace to writable for write tools; the config flag is the only route that reaches the arm | One activation, one probe and one restore — plus a `read_only` probe that would have silently read as *"gate absent"*. That is the honest counterfactual, NOT the "six broken peers" first claimed and retracted in `F-145` | validated |
@@ -17081,6 +17085,85 @@ At that point `df` showed 64G free, and no process was still building into a leg
 **Rests on:** `docs/issues/archive/2026-09-27-codex-phase1b-shell-failures-return-success.md`; `docs/evals/data/2026-09-24-rule-tell/phase1b/codex-stop-review/shell-verification.json`; `run-status-checks.json` in the same directory.
 
 **Handoff:** `docs/research/2026-09-27-codex-phase1b-stop-review.md` records the code fixes, new ranking/calibration measurements, and a bounded next-step recommendation.
+
+## F-178 — A hand-written augmentation sidecar stored params_schema as a JSON string, and my round-trip check could not see it
+
+**Observed:** 2026-09-28, while switching `docs/trackers/review-catches.md` to a `snapshot_anchor`. `doc(action="augment", merge=true)` changing only `render_template` returned *"the augmentation WAS updated, but its committed sidecar was NOT republished"*: the sidecar disagreed with the catalog on `params_schema`. `doctor` named it `sidecar_shape_drift`.
+
+**Expected:** the sidecar I generated by hand on 2026-09-27 (`2a67a654`) to be correct. Before committing it I had checked that it "round-trips equal" to the catalog row.
+
+**Got:** it stored `params_schema` as a quoted JSON **string**. `AugmentationSidecar::from_row` parses the catalog's JSON text into a mapping, and `drifting_fields` compares structurally, so a string never equals it: the committed file had drifted from the moment it was committed. `to_row` serializes the value back with `serde_json::to_string`, so a fresh clone would have restored a schema that is a JSON string literal rather than an object (read in source; what schema validation then does was not run). My "round-trips equal" check compared text parsed from the CLI's JSON against text parsed from the YAML, so both sides were strings and the check could not express the defect. Two green tests could not express it either: `every_taxonomy_append_entry_recipe_is_one_the_code_accepts` checks `entry_collection`, and `every_committed_sidecar_parses_and_carries_no_params` checks parsing, and a string parses.
+
+**Cause:** I reproduced the file's surface shape instead of its serializer (`serde_yml::to_string(&AugmentationSidecar::from_row(..))`), then verified it against a representation that shared my mistake.
+
+**Fix:** rewrote `params_schema` as a YAML mapping, then re-ran the authored `render_template` augment so `write_through` republished the file in canonical form (`83e70554`). `doctor` reports no drift for the artifact; both tests pass on the new bytes.
+
+**Severity:** med — latent until a fresh clone, then a malformed schema on a restored ledger; caught by a guard before that.
+
+**Status:** fixed-verified — `83e70554`.
+
+**Valid:** dated 2026-09-28
+
+**Rests on:** `src/librarian/augmentation_sidecar.rs` (`from_row`, `to_row`, `drifting_fields`, `write_through`); `docs/augmentations/docs-trackers-review-catches.yaml`.
+
+**Lesson:** a hand-written copy of a serialized artifact is verified only by comparing it in the reader's representation, through the reader's own code path. When a tool can write the file, let it — here `write_through` could have produced it from the start.
+
+## F-179 — I built a promotion-queue ledger whose queue lived only in catalog params, which never travel
+
+**Observed:** 2026-09-28. After `update_entry` changed RC-18, RC-43 and RC-44 in `docs/trackers/review-catches.md`, `git status` listed the ledger file as unchanged: the rows had moved, and git saw nothing.
+
+**Expected:** that the RC ledger I built on 2026-09-27 (`2a67a654`) was durable, because its augmentation sidecar was committed and the catalog held its 54 rows.
+
+**Got:** every structured field that makes it a promotion queue lived only in the catalog's params rows (`reviewer`, `author`, `outcome`, `fix`, `bug`, `cluster`, `lesson_home`, `promotion`, `promoted_to`, `source`). The catalog is machine-local and not in git. The sidecar restores shape only: `AugmentationSidecar::to_row` sets `params: "{}"` by construction ("a restore gives you a working tracker with no rows"). A fresh clone would therefore have had the 54 prose sections and an empty queue, with nothing reporting a loss.
+
+**Cause:** I read "commit the sidecar" as "the ledger travels" without asking which half the sidecar carries.
+
+**Fix:** a body `## Index` table mirroring every row (`e099eafe`), then made self-maintaining: the ledger declares a `snapshot_anchor`, and its `render_template` renders the Index's exact rows, so `update_entry` re-renders a row's line inside its params transaction (`83e70554`; all 54 updates returned `row_resynced: true`, and a Python render of params matched all 54 lines).
+
+**Severity:** high — silent loss of the queue's state on any other machine; found only because a file failed to change.
+
+**Status:** fixed-verified — `e099eafe`, `83e70554`.
+
+**Valid:** dated 2026-09-28
+
+**Rests on:** `src/librarian/augmentation_sidecar.rs` (`to_row`); `src/librarian/catalog/augmentation.rs` (`resync_snapshot_row`); bug `49a01cb32b73e7e7` (the resync path leaves the catalog row's hash behind the file, found while verifying this fix).
+
+**Lesson:** for any augmented tracker, ask where each field lives: params rows are catalog-only on every ledger, so a field a reader needs on another machine must also be in the body. A declared `snapshot_anchor` keeps that copy current without a policy anyone has to remember.
+
+## F-180 — I produced an artifact id from memory twice in one session, and both were wrong
+
+**Observed:** 2026-09-28. I called `doc(action="update", id=<a recalled 16-hex id>, …)` to edit F-177 in this ledger and got `unknown id`. The id was recalled, not looked up. Before this session's compaction I had made the same move with `c0e7ce0b…` and corrected it by `doc(action="find")` to `2dd9d90bc83f9f49`; that correction was in the compaction summary I was working from.
+
+**Expected:** an artifact id is looked up (`doc(action="find", filter={"rel_path": …})`, the file's frontmatter, or `CLAUDE.md`/`TAXONOMY.md` where the id is published), never produced from memory.
+
+**Got:** two plausible 16-hex strings, both wrong. Each cost one refused call; neither did damage, because an unknown id is refused rather than resolved to a different artifact.
+
+**Cause:** a 16-hex id reads as a fact I already hold. It is a hash (`sha256(abs_path)`), and nothing about a wrong one looks wrong.
+
+**Severity:** low — one refused call each, loud refusal, no side effect.
+
+**Status:** open — the habit, not a mechanism. The cheap check is the one I used: `doc(action="find", filter={"rel_path": {"eq": "<path>"}})` before the first write to an artifact in a session.
+
+**Valid:** dated 2026-09-28
+
+**Rests on:** this session's transcript (session `82cff72e-0245-48cb-ab07-45a1c3d0d388`).
+
+## W-146 — A scout scoped to one question read the whole function and found the mechanism I was about to hand-maintain
+
+**Observed:** 2026-09-28. I had 54 `update_entry` calls to make on one ledger and wanted to issue them in parallel batches, so I read `update_entry` (`src/librarian/catalog/augmentation.rs`) to check that concurrent calls serialize. They do: a single `IMMEDIATE` transaction covers the read, the patch and the write. The same body also called `resync_snapshot_row`, and reading it surfaced a mechanism I had not known existed. A ledger that declares `snapshot_anchor` and a row-rendering `render_template` gets each patched row's body line re-rendered inside the params transaction, and a failed splice rolls the params write back.
+
+**Pattern:** when a scout is scoped to one question (is this safe to parallelize?), read the whole function body rather than grepping for the answer. The adjacent call is often the thing you are about to rebuild by hand.
+
+**Counterfactual:** the day before, I had answered the same problem (a body table that must track params) with a policy written into three places: the ledger's own how-to, TAXONOMY's RC-N recipe and the augmentation prompt all said "edit the row's Index line in the same commit". Without this read, the promotion pass meant 54 hand edits of a 12-column table, and every future `update_entry` relied on someone remembering. The first forgotten edit would have gone stale silently, because nothing compared the two. With it, all 54 updates returned `row_resynced: true`, a Python render of params matched all 54 table lines, and the three instructions were reworded to say the tool does it. Two secondary effects of the read:
+
+- parallel batches: one test call, then 5 messages carrying the other 53, instead of 54 sequential calls;
+- the resync path's one gap, which leaves the catalog row's hash behind (bug `49a01cb32b73e7e7`, reproduced and filed).
+
+**Status:** validated
+
+**Valid:** dated 2026-09-28
+
+**Rests on:** `src/librarian/catalog/augmentation.rs` (`update_entry`, `resync_snapshot_row`); commit `83e70554`; `bug-fix-session-log:F-179` (the gap this closed).
 
 ## Template for new entries
 
