@@ -1,16 +1,71 @@
 schema_version: 1
 prompt: |-
-  To act — distributing lessons: take catches with `promotion` = `pending` (doc(get, entry_filter={"promotion":{"eq":"pending"}})), group them by `lesson_home`, and read each row's `### RC-N` section. Check the lesson is not already in that home (grep it). Then write it there in that home's own conventions, and set the row's `promotion` to `promoted` and `promoted_to` to `<path>@<sha>` with doc(update_entry). A lesson an existing rule already states is `duplicate`, with `promoted_to` naming the rule. A lesson specific to one campaign is `not-promotable`.
+  To act — distributing lessons: take catches with `promotion` = `pending` (doc(get, entry_filter={"promotion":{"eq":"pending"}})), group them by `lesson_home`, and read each row's `### RC-N` section. Check the lesson is not already in that home (grep it). Then write it there in that home's own conventions, and set the row's `promotion` to `promoted` and `promoted_to` to `<path>@<sha>` (for a home outside git, `<path> (<date>, not in git)`) with doc(update_entry), which also re-renders the row's line in the body's `## Index` table: the ledger declares a `snapshot_anchor`. A lesson an existing rule already states is `duplicate`, with `promoted_to` naming the rule. A lesson specific to one campaign is `not-promotable`.
 
-  To add a catch: one row per defect or corrected claim that a reviewer other than the author caught. A bug file and the review finding it came from are one row. Call doc(append_entry, entry_collection="catches", id_prefix="RC", entry={...}). In the same session, add a `### RC-N — <title>` section under `## Catches` with doc(update, patch={body_edits:[...]}). The heading is what makes RC-N citable. `reviewer` names the party that caught it: Codex and its model, an Opus review subagent, or a human. `author` is the authoring session's sessionId when known.
+  To add a catch: one row per defect or corrected claim that a reviewer other than the author caught. A bug file and the review finding it came from are one row. Call doc(append_entry, entry_collection="catches", id_prefix="RC", entry={...}, index_row="| {id} | ... |"), giving the row in the Index table's 12-column shape so it lands in the only copy of the row a fresh clone gets. In the same session, add a `### RC-N — <title>` section under `## Catches` with doc(update, patch={body_edits:[...]}). The heading is what makes RC-N citable. `reviewer` names the party that caught it: Codex and its model, an Opus review subagent, or a human. `author` is the authoring session's sessionId when known.
 
   Never renumber. Never rewrite the `catches` array with doc(augment, merge=true): that replaces it. Change one row with doc(update_entry). Defect classes go to OB-N or IC-N, and mechanisms to I-N (test-escape-hardening); this ledger holds instances and their lessons. Readers: the maintenance rules above are not yours beyond this.
 entry_collection: catches
-params_schema: '{"properties":{"catches":{"items":{"additionalProperties":true,"properties":{"author":{"type":"string"},"bug":{"type":"string"},"cluster":{"type":"string"},"date":{"type":"string"},"fix":{"type":"string"},"id":{"pattern":"^RC-\\d+$","type":"string"},"lesson_home":{"type":"string"},"outcome":{"enum":["fixed","claim-corrected","accepted-no-change","rejected","open"],"type":"string"},"promoted_to":{"type":"string"},"promotion":{"enum":["pending","promoted","duplicate","not-promotable"],"type":"string"},"reviewer":{"type":"string"},"source":{"type":"string"},"title":{"type":"string"}},"required":["id","title","date","reviewer","outcome","promotion"],"type":"object"},"type":"array"}},"required":["catches"],"type":"object"}'
+params_schema:
+  properties:
+    catches:
+      items:
+        additionalProperties: true
+        properties:
+          author:
+            type: string
+          bug:
+            type: string
+          cluster:
+            type: string
+          date:
+            type: string
+          fix:
+            type: string
+          id:
+            pattern: ^RC-\d+$
+            type: string
+          lesson_home:
+            type: string
+          outcome:
+            enum:
+            - fixed
+            - claim-corrected
+            - accepted-no-change
+            - rejected
+            - open
+            type: string
+          promoted_to:
+            type: string
+          promotion:
+            enum:
+            - pending
+            - promoted
+            - duplicate
+            - not-promotable
+            type: string
+          reviewer:
+            type: string
+          source:
+            type: string
+          title:
+            type: string
+        required:
+        - id
+        - title
+        - date
+        - reviewer
+        - outcome
+        - promotion
+        type: object
+      type: array
+  required:
+  - catches
+  type: object
 render_template: |-
   **Catches:** {{ catches|length }} · promotion pending {{ catches|selectattr("promotion","equalto","pending")|list|length }} · promoted {{ catches|selectattr("promotion","equalto","promoted")|list|length }}
 
-  | ID | Date | Reviewer | Catch | Outcome | Lesson home | Promotion |
-  |---|---|---|---|---|---|---|
-  {% for c in catches %}| {{ c.id }} | {{ c.date }} | {{ c.reviewer }} | {{ c.title }} | {{ c.outcome }} | {{ c.lesson_home or "—" }} | {{ c.promotion }} |
+  | ID | Date | Reviewer | Author | Outcome | Fix | Bug | Cluster | Lesson home | Promotion | Promoted to | Source |
+  |---|---|---|---|---|---|---|---|---|---|---|---|
+  {% for c in catches %}| {{ c.id }} | {{ c.date }} | {{ c.reviewer }} | {{ c.author or "—" }} | {{ c.outcome }} | {{ c.fix or "—" }} | {% if c.bug %}`{{ c.bug }}`{% else %}—{% endif %} | {{ c.cluster or "—" }} | {{ c.lesson_home or "—" }} | {{ c.promotion }} | {{ c.promoted_to or "—" }} | {{ c.source or "—" }} |
   {% endfor %}
