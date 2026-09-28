@@ -6596,6 +6596,74 @@ fn declares_fix_provenance_heading(content: &str) -> bool {
     false
 }
 
+/// Whether a bug record says where its fix came from: a parseable `## Fix provenance` pointer
+/// ([`structured_fix_pointers`]), or a non-empty `no_fix_commit:` stating that nothing was
+/// committed. An empty `no_fix_commit` counts as absent, like `unverified:`: presence is what a
+/// reader queries.
+///
+/// **The one predicate behind `terminal_status_without_fix_anchor` and the archive guards in
+/// `update` and `move` ([`refuse_unanchored_archive`]).** The guards exist because the check
+/// stops looking at exactly the transition its rule is for, so the two must agree on what
+/// "anchored" means: a second copy of this logic would let a record pass one and fail the other.
+pub(crate) fn declares_fix_anchor(content: &str) -> bool {
+    if !structured_fix_pointers(content).is_empty() {
+        return true;
+    }
+    let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(content) else {
+        return false;
+    };
+    match fm.extra.get("no_fix_commit") {
+        None | Some(Value::Null) => false,
+        Some(Value::String(s)) => !s.trim().is_empty(),
+        Some(other) => !other.to_string().is_empty(),
+    }
+}
+
+/// Whether any component of `path` is `archive`. A component, not a substring, so a directory
+/// such as `archived-notes/` does not count.
+pub(crate) fn in_archive_dir(path: &Path) -> bool {
+    path.components()
+        .any(|c| c.as_os_str() == std::ffi::OsStr::new("archive"))
+}
+
+/// Refuse to take a `fixed`/`mitigated` bug out of `terminal_status_without_fix_anchor`'s
+/// population unless it declares its fix anchor ([`declares_fix_anchor`]).
+///
+/// **Why at the transition, not in the check.** The check selects live `fixed`/`mitigated`
+/// records and skips archive paths, deliberately: of 355 archived files, 297 predated the rule
+/// and are "stale instructions, not open debt". So the flip to `archived` (in `update`) and the
+/// move under `archive/` (in `move`) are the last moments the guide's "record the pair AT archive
+/// time" can be enforced, and before this guard both passed silently. Measured 2026-09-28 at
+/// `8dfc251e`: 30 of the 54 bug files archived 2026-09-21..27 carry neither a pointer nor
+/// `no_fix_commit:` (an upper bound, since it includes `wontfix`).
+/// docs/issues/2026-09-28-archived-without-fix-provenance-is-unchecked.md
+///
+/// `content` is the file AS IT WILL BE after the call, so an `update` that adds the section and
+/// archives in one call passes. `wontfix` and every non-bug kind are out of scope, as they are
+/// for the check.
+pub(crate) fn refuse_unanchored_archive(
+    kind: &str,
+    status: &str,
+    content: &str,
+    surface: &str,
+) -> Result<()> {
+    if kind != "bug" || !matches!(status, "fixed" | "mitigated") || declares_fix_anchor(content) {
+        return Ok(());
+    }
+    Err(LibrarianRecoverableError::with_hint(
+        format!(
+            "doc(action=\"{surface}\") refused: this `{status}` bug declares no fix anchor, and \
+             archiving it would take it out of `terminal_status_without_fix_anchor`, the only \
+             check that asks for one"
+        ),
+        "Add a `## Fix provenance` section with two bullets, `- **SHA:** `<sha>` (`experiments`)` \
+         and `- **patch-id:** `<id>`` from `git show <sha> | git patch-id --stable`, via \
+         doc(action=\"update\", patch={body_edits: [...]}); one update may add it and archive in \
+         the same call. If nothing was committed, declare `no_fix_commit: \"<reason>\"` via \
+         patch.extra instead. Then archive.",
+    ))
+}
+
 /// `archived_fix_sha_unresolvable`: an archived bug file whose declared fix SHA no longer
 /// names an object in this repo.
 ///
@@ -6853,29 +6921,14 @@ fn scan_terminal_status_without_fix_anchor(
         // Archived records are out of scope. Match a path COMPONENT rather than a substring,
         // so a repo that happens to live under a directory named `archive` does not silence
         // its entire issue tree.
-        if path
-            .components()
-            .any(|c| c.as_os_str() == std::ffi::OsStr::new("archive"))
-        {
+        if in_archive_dir(path) {
             continue;
         }
         let Ok(content) = std::fs::read_to_string(path) else {
             continue;
         };
-        if !structured_fix_pointers(&content).is_empty() {
+        if declares_fix_anchor(&content) {
             continue;
-        }
-        if let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&content) {
-            if let Some(raw) = fm.extra.get("no_fix_commit") {
-                let declared = match raw {
-                    Value::Null => String::new(),
-                    Value::String(s) => s.trim().to_string(),
-                    other => other.to_string(),
-                };
-                if !declared.is_empty() {
-                    continue;
-                }
-            }
         }
 
         if !scope.admit("terminal_status_without_fix_anchor", id, abs_path) {
@@ -7041,10 +7094,7 @@ fn scan_non_terminal_status_with_fix_anchor(
         let path = Path::new(abs_path);
         // Same path-COMPONENT test as the sibling: a repo living under a directory named
         // `archive` must not silence its whole issue tree.
-        if path
-            .components()
-            .any(|c| c.as_os_str() == std::ffi::OsStr::new("archive"))
-        {
+        if in_archive_dir(path) {
             continue;
         }
         let Ok(content) = std::fs::read_to_string(path) else {
@@ -7296,10 +7346,7 @@ fn scan_open_bug_cited_from_source(
         }
         // Same path-COMPONENT test as the sibling checks: a repo living under a directory
         // named `archive` must not silence its whole issue tree.
-        if path
-            .components()
-            .any(|c| c.as_os_str() == std::ffi::OsStr::new("archive"))
-        {
+        if in_archive_dir(path) {
             continue;
         }
         let Ok(rel) = path.strip_prefix(&cp.git_root) else {

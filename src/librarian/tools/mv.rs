@@ -228,6 +228,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             )));
         }
 
+        // Moving a `fixed`/`mitigated` bug under `archive/` takes it out of doctor's
+        // `terminal_status_without_fix_anchor` (which skips archive paths) exactly as
+        // `update`'s flip to `archived` does, so the same guard runs here. A record already
+        // under `archive/` was already outside that check, so a move within it is not guarded.
+        // docs/issues/2026-09-28-archived-without-fix-provenance-is-unchecked.md
+        if super::doctor::in_archive_dir(&new_full) && !super::doctor::in_archive_dir(&old_full) {
+            let content = std::fs::read_to_string(&old_full)?;
+            super::doctor::refuse_unanchored_archive(&row.kind, &row.status, &content, "move")?;
+        }
+
         if let Some(parent) = new_full.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -2676,5 +2686,154 @@ mod tests {
             !file_path.exists(),
             "worktree-born artifact must actually be moved, not refused"
         );
+    }
+
+    // --- The archive guard at the move surface. Moving a `fixed`/`mitigated` bug under an
+    // `archive` directory takes it out of doctor's `terminal_status_without_fix_anchor` (which
+    // skips archive paths) exactly as `update`'s flip to `archived` does.
+    // docs/issues/2026-09-28-archived-without-fix-provenance-is-unchecked.md
+
+    /// LOAD-BEARING: the exact shape `doctor` parses — two labelled bullets, backticked.
+    const FIX_PROVENANCE: &str =
+        "## Fix provenance\n\n- **SHA:** `5a72304c` (`experiments`)\n- **patch-id:** `e9f8df63b911`\n";
+
+    /// A bug at `rel`, catalogued at `status`, whose file body is `body` (hash-free unless a
+    /// test adds a pointer).
+    fn mk_bug_ctx(tmp: &std::path::Path, rel: &str, status: &str, body: &str) -> ToolContext {
+        let cat = Catalog::open_in_memory().unwrap();
+        let path = tmp.join(rel);
+        let row = ArtifactRow {
+            id: "bbccddee11223344".into(),
+            abs_path: path.clone(),
+            kind: "bug".into(),
+            status: status.into(),
+            title: Some("Example".into()),
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: None,
+            created_at: 0,
+            updated_at: 0,
+            file_mtime: 0,
+            file_sha256: String::new(),
+            confidence: 1.0,
+        };
+        artifact::upsert(&cat, &row).unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            format!("---\nid: bbccddee11223344\nkind: bug\nstatus: {status}\n---\n{body}"),
+        )
+        .unwrap();
+        TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "test-repo".into(),
+                path: tmp.to_path_buf(),
+            })
+            .build()
+    }
+
+    #[tokio::test]
+    async fn moving_an_unanchored_fixed_or_mitigated_bug_into_archive_is_refused_and_moves_nothing()
+    {
+        for status in ["fixed", "mitigated"] {
+            let tmp = tempfile::tempdir().unwrap();
+            let rel = "docs/issues/2026-09-28-example.md";
+            let dest = "docs/issues/archive/2026-09-28-example.md";
+            let ctx = mk_bug_ctx(tmp.path(), rel, status, "## Summary\n\nNo pointer here.\n");
+
+            let err = mv::call(
+                &ctx,
+                serde_json::json!({"id": "bbccddee11223344", "new_rel_path": dest}),
+            )
+            .await
+            .expect_err("an unanchored terminal bug must not be moved into archive/");
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains("## Fix provenance"),
+                "{status}: must name the section: {msg}"
+            );
+            assert!(
+                msg.contains("no_fix_commit"),
+                "{status}: must name the escape: {msg}"
+            );
+
+            assert!(
+                tmp.path().join(rel).exists(),
+                "{status}: the file must stay put"
+            );
+            assert!(
+                !tmp.path().join(dest).exists(),
+                "{status}: nothing may land in archive/"
+            );
+            assert!(
+                artifact::get(&ctx.catalog.lock(), "bbccddee11223344")
+                    .unwrap()
+                    .is_some(),
+                "{status}: the row must not be re-keyed"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn moving_an_anchored_fixed_bug_into_archive_succeeds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let body = format!("## Summary\n\nFixed.\n\n{FIX_PROVENANCE}");
+        let ctx = mk_bug_ctx(
+            tmp.path(),
+            "docs/issues/2026-09-28-example.md",
+            "fixed",
+            &body,
+        );
+        mv::call(
+            &ctx,
+            serde_json::json!({
+                "id": "bbccddee11223344",
+                "new_rel_path": "docs/issues/archive/2026-09-28-example.md"
+            }),
+        )
+        .await
+        .expect("a declared pointer discharges the guard");
+        assert!(tmp
+            .path()
+            .join("docs/issues/archive/2026-09-28-example.md")
+            .exists());
+    }
+
+    /// The controls. Each input is admitted by every move-guard condition EXCEPT the one it
+    /// names, so a mutation of that one condition is the only thing that can turn it red.
+    #[tokio::test]
+    async fn the_move_guard_leaves_non_archive_destinations_already_archived_bugs_and_archive_internal_moves_alone(
+    ) {
+        for (rel, status, dest, why) in [
+            (
+                "docs/issues/2026-09-28-example.md",
+                "fixed",
+                "docs/issues/2026-09-28-renamed.md",
+                "a destination outside archive/ keeps the record in doctor's population",
+            ),
+            (
+                "docs/issues/2026-09-28-example.md",
+                "archived",
+                "docs/issues/archive/2026-09-28-example.md",
+                "the documented flow flips status first, and `update` guarded that flip",
+            ),
+            (
+                "docs/issues/archive/2026-09-28-example.md",
+                "fixed",
+                "docs/issues/archive/old/2026-09-28-example.md",
+                "a record already under archive/ was already outside doctor's population",
+            ),
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let ctx = mk_bug_ctx(tmp.path(), rel, status, "## Summary\n\nNo pointer here.\n");
+            mv::call(
+                &ctx,
+                serde_json::json!({"id": "bbccddee11223344", "new_rel_path": dest}),
+            )
+            .await
+            .unwrap_or_else(|e| panic!("{rel} ({status}) -> {dest} must move ({why}): {e:#}"));
+        }
     }
 }

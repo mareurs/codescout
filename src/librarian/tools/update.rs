@@ -684,6 +684,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     }
 
+    // A `fixed`/`mitigated` bug's flip to `archived` is where doctor's
+    // `terminal_status_without_fix_anchor` stops looking, so it is the last moment the guide's
+    // "record the pair AT archive time" can be enforced. Checked against `new_content`, the file
+    // as it will be written, so adding the section and archiving in one call passes.
+    // docs/issues/2026-09-28-archived-without-fix-provenance-is-unchecked.md
+    if patch.status.as_deref() == Some("archived") {
+        super::doctor::refuse_unanchored_archive(&row.kind, &row.status, &new_content, "update")?;
+    }
+
     // Validate the params patch against the stored schema BEFORE writing the
     // file or upserting the row. merge_params (below) re-validates and persists;
     // pre-checking here keeps the update atomic — a schema violation must abort
@@ -3570,5 +3579,166 @@ text
         assert_eq!(payload["forced"], false);
         assert!(payload["prev_bytes"].is_number());
         assert!(payload["new_bytes"].is_number());
+    }
+
+    // --- The archive guard: a `fixed`/`mitigated` bug may not leave doctor's
+    // `terminal_status_without_fix_anchor` population unanchored.
+    // docs/issues/2026-09-28-archived-without-fix-provenance-is-unchecked.md
+
+    /// A structured pointer in the exact shape `doctor` parses. LOAD-BEARING: both bullets,
+    /// backticked, outside any fence — a prose mention of the same hashes discharges nothing.
+    const FIX_PROVENANCE: &str =
+        "## Fix provenance\n\n- **SHA:** `5a72304c` (`experiments`)\n- **patch-id:** `e9f8df63b911`\n";
+
+    /// One bug created through the tool, at `status`, with `body`. The body is hash-free on
+    /// purpose, so the only pointer a test sees is one it adds.
+    async fn mk_bug(ctx: &ToolContext, kind: &str, status: &str, body: &str) -> String {
+        let v = crate::librarian::tools::create::call(
+            ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "docs/issues/2026-09-28-example.md",
+                "kind": kind, "status": status, "title": "Example",
+                "tags": ["cluster/unclassified"], "body": body
+            }),
+        )
+        .await
+        .unwrap();
+        v["id"].as_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn archiving_a_fixed_or_mitigated_bug_with_no_fix_anchor_is_refused_and_writes_nothing() {
+        for status in ["fixed", "mitigated"] {
+            let tmp = TempDir::new().unwrap();
+            let ctx = mk_ctx(tmp.path().to_path_buf());
+            let id = mk_bug(&ctx, "bug", status, "## Summary\n\nNo pointer here.\n").await;
+            let path = artifact::get(&ctx.catalog.lock(), &id)
+                .unwrap()
+                .unwrap()
+                .abs_path;
+            let before = std::fs::read(&path).unwrap();
+
+            let err = call(
+                &ctx,
+                serde_json::json!({"id": id, "patch": {"status": "archived"}}),
+            )
+            .await
+            .expect_err("an unanchored terminal bug must not be archived");
+            let msg = format!("{err:#}");
+            // Both remedies, because either can be the right one: a commit that exists, or the
+            // declaration that none does. The shape is pinned, not the prose.
+            assert!(
+                msg.contains("## Fix provenance"),
+                "{status}: must name the section: {msg}"
+            );
+            assert!(
+                msg.contains("no_fix_commit"),
+                "{status}: must name the escape: {msg}"
+            );
+
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                before,
+                "{status}: a refusal writes nothing"
+            );
+            let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+            assert_eq!(
+                row.status, status,
+                "{status}: the catalog must not move either"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn archiving_passes_when_the_same_update_adds_the_provenance_section() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_bug(&ctx, "bug", "fixed", "## Summary\n\nFixed.\n").await;
+
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {
+                "status": "archived",
+                "body_edits": [{"heading": "## Summary", "action": "insert_after", "content": FIX_PROVENANCE}]
+            }}),
+        )
+        .await
+        .expect("the guard reads the file AS IT WILL BE WRITTEN, not as it was");
+        let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+        assert_eq!(row.status, "archived");
+    }
+
+    #[tokio::test]
+    async fn a_non_empty_no_fix_commit_discharges_the_archive_guard_and_an_empty_one_does_not() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_bug(&ctx, "bug", "mitigated", "## Summary\n\nA doc note.\n").await;
+
+        // Empty counts as absent, matching doctor: presence is what a reader queries.
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"status": "archived", "extra": {"no_fix_commit": ""}}}),
+        )
+        .await
+        .expect_err("an empty no_fix_commit declares nothing");
+
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {
+                "status": "archived",
+                "extra": {"no_fix_commit": "mitigation was a doc note; nothing was committed"}
+            }}),
+        )
+        .await
+        .expect("a stated reason discharges it");
+        let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+        assert_eq!(row.status, "archived");
+    }
+
+    /// The controls. Each input is admitted by every condition EXCEPT the one it names, so a
+    /// mutation of that one condition is the only thing that can turn it red.
+    #[tokio::test]
+    async fn the_archive_guard_leaves_wontfix_open_bugs_and_non_bugs_alone() {
+        for (kind, status, why) in [
+            (
+                "bug",
+                "wontfix",
+                "nothing was fixed, so no commit exists to point at",
+            ),
+            (
+                "bug",
+                "open",
+                "an open bug archived as a duplicate owes no fix pointer",
+            ),
+            (
+                "spec",
+                "fixed",
+                "only bug records are in doctor's population",
+            ),
+        ] {
+            let tmp = TempDir::new().unwrap();
+            let ctx = mk_ctx(tmp.path().to_path_buf());
+            let id = mk_bug(&ctx, kind, status, "## Summary\n\nNo pointer here.\n").await;
+            call(
+                &ctx,
+                serde_json::json!({"id": id, "patch": {"status": "archived"}}),
+            )
+            .await
+            .unwrap_or_else(|e| panic!("{kind}/{status} must archive ({why}): {e:#}"));
+        }
+    }
+
+    #[tokio::test]
+    async fn an_update_that_does_not_archive_is_not_guarded() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_bug(&ctx, "bug", "fixed", "## Summary\n\nNo pointer here.\n").await;
+        // An unanchored fixed bug stays reportable by doctor; editing it must stay possible.
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"title": "Renamed"}}),
+        )
+        .await
+        .expect("only the flip to `archived` leaves doctor's population");
     }
 }
