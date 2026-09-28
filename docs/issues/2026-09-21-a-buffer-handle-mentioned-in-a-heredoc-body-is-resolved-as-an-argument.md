@@ -219,6 +219,19 @@ All four modes were re-verified live at HEAD before any code was written — non
 
 **Operational note, because it will otherwise read as a failed fix.** `cargo rb` was not run, so the **live MCP binary still carries the old behaviour** — re-running the four reproductions through `run_command` will still show the bug until someone rebuilds the release binary and reconnects `/mcp`. All post-fix evidence is at the `resolve_refs` level, which is where the entire defect lives.
 
+**The operational note above is DISCHARGED.** The binary was rebuilt and `/mcp` reconnected on 2026-09-28, and all four modes were re-run through the live server. This is the end-to-end evidence that note said was pending; the unit-level results are no longer the only ones.
+
+| mode | before, live | after, live |
+|---|---|---|
+| 1 — expired handle in a quoted heredoc body | refused `buffer reference not found` | **`prose mentioning the handle @cmd_deadbeef as a measurement citation`**, exit 0 |
+| 2 — `echo harmless @cmd_deadbeef1` | refused on the 8-hex prefix | **`harmless @cmd_deadbeef1`**, exit 0 |
+| 3 — `echo '@cmd_deadbeef'` | refused, no escape offered | **still refused — and the hint now names the escape** |
+| 4 — LIVE handle in a quoted heredoc body | silently substituted to a temp path, exit 0 | **`prose citing the live handle @cmd_e6476ef7 inside a quoted heredoc body`**, exit 0 |
+
+**Mode 4's handle was minted in the same session** (`seq 1 4000` → `@cmd_e6476ef7`) and was live at the instant of the test — so this is the substitution path **declining**, not a lookup failing. That is the distinction the unit tests draw, now observed on the wire, and it is the one a reader would otherwise have to take on trust.
+
+**And the shared helper is confirmed at the SECOND refusal site, unplanned.** A stale `@bg_` handle refused in the same session returned the identical escape paragraph under `background job ref not found`. No unit test asserts about the two sites *together*; this is the only evidence that `mention_escape_hint` reaches both in the shipped binary, and it arrived by accident — the `@bg_` handle had gone stale because the rebuild replaced the server process that owned it.
+
 ## Tests added
 
 None — status is `open`, nothing is fixed. A regression test would assert both directions at
