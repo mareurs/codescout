@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 180
+entry_high_water_F: 182
 entry_high_water_W: 146
 ---
 
@@ -70,6 +70,8 @@ entry_high_water_W: 146
 | F-178 | 2026-09-28 | med | self-friction | fixed-verified | **A hand-written augmentation sidecar stored `params_schema` as a JSON string, and my round-trip check could not see it.** `from_row` compares a parsed mapping, so the file drifted from commit; `to_row` would have restored a string-valued schema on a fresh clone. Two green tests could not express it; `doc(augment)`'s write-through refused and `doctor` named it. |
 | F-179 | 2026-09-28 | high | self-friction | fixed-verified | **I built a promotion-queue ledger whose queue lived only in catalog params, which never travel.** `to_row` restores params empty, so a fresh clone would have had 54 prose sections and an empty queue, silently. Now mirrored in a body `## Index` that `update_entry` keeps current through a declared `snapshot_anchor`. |
 | F-180 | 2026-09-28 | low | self-friction | open | **I produced an artifact id from memory twice in one session, and both were wrong.** A 16-hex id reads as a held fact but is a path hash; the correct one was in my own compaction summary. Loud refusal both times; the check is a `doc(find)` by `rel_path` before the first write. |
+| F-181 | 2026-09-28 | med | plan-drift | fixed-verified | **A ledger's `outcome: fixed` is not an archive decision: three of eight "fixed" bugs said in their own Fix section that they were not ready.** The ledger records that a fix was committed; the archive trigger needs a regression test, which only the bug file states. Read before acting: 5 archived, 3 annotated (`8dfc251e`). |
+| F-182 | 2026-09-28 | med | tool-gap | promoted-to-bug-tracker | **doctor cannot see an archive made without Fix provenance, and I made two that morning.** `terminal_status_without_fix_anchor` skips every archived record by status, so the check stops at the transition its rule is for. Filed `f9e51dc0a0af8693`. |
 | F-175 | 2026-09-24 | high | self-friction | open | **A killed mutant kept running: a looping M4 mutant of `gate.sh` survived its suite and filled the machine's `/tmp` (tmpfs) with about 867K lock files.** Case F killed `$!` of a backgrounded function, a wrapper subshell (the bug fixed in case D minutes earlier, not swept to the other site). The mutation verdict (KILLED) was correct and said nothing about the survivor. It stopped only on inode exhaustion. My kill and my delete were both refused by the classifier; escalated to the operator. |
 | F-174 | 2026-09-24 | high | cross-session | mitigated | **Saving a script that every session runs from the working tree IS publishing it.** My uncommitted `gate.sh` pool change was picked up by 2 peers within about two minutes. Each started a COLD build in a new slot while its warm legacy tree sat unused, on a disk at 97%. I stopped my own run by pgid, deleted my slot under its own lock, and watched disk with `fuser` (a read-only check; `flock` would perturb leasing). |
 | F-173 | 2026-09-24 | high | self-friction | mitigated | **Recommended `flock -o` as strictly safer before running it; the two lock modes fail in opposite directions, and `-o` fails toward the race it was meant to prevent.** With `-o`, SIGKILLing the holder frees the slot while cargo keeps running in it, a correctness failure. Without `-o`, a daemon (sccache, measured) pins a slot for its lifetime, a disk-only failure. Choose the mode that fails toward disk. Plan revised before any code. |
@@ -17164,6 +17166,46 @@ At that point `df` showed 64G free, and no process was still building into a leg
 **Valid:** dated 2026-09-28
 
 **Rests on:** `src/librarian/catalog/augmentation.rs` (`update_entry`, `resync_snapshot_row`); commit `83e70554`; `bug-fix-session-log:F-179` (the gap this closed).
+
+## F-181 — A ledger's outcome: fixed is not an archive decision: three of eight "fixed" bugs said in their own Fix section that they were not ready
+
+**Valid:** dated 2026-09-28
+
+**Observed:** 2026-09-28. I proposed archiving the eight bugs the review-catches ledger lists as `outcome: fixed` (RC-4, 5, 7, 19, 21, 36, 37, 40). Before any write I read each file's own `## Fix` section. Two (`6e17aec199b30604`, `75fa59bbda9c1ce1`) say **"Not archived: no regression test"**, one of them with two open residuals; a third (`5d4e9ab75d686fed`) names a recurrence guard it did not add. `git grep` over `tests/` for `mine_pairs.py` and `context_before` found nothing, so no later commit had changed that.
+
+**Expected:** the ledger's `outcome: fixed` would mean "ready to archive".
+
+**Got:** it answers a different question, "was a fix committed?". The archive trigger asks "is there a regression test?", which only the bug file answers.
+
+**Cost if missed:** archiving hides a record from the triage `find`, so three open caveats would have left every queryable surface in one commit.
+
+**Resolution:** five archived with Fix provenance, and the other three annotated with it plus an `unverified:` caveat that `doctor` now reports under `terminal_status_with_caveat` (`8dfc251e`). The same read found that two of my own archives from earlier in the day lacked the section; that is F-182.
+
+**Severity:** med — would have hidden three open caveats; absorbed before any write.
+
+**Status:** fixed-verified.
+
+**Rests on:** `8dfc251e`; this session's transcript (session `82cff72e-0245-48cb-ab07-45a1c3d0d388`).
+
+## F-182 — doctor cannot see an archive made without Fix provenance, and I made two that morning
+
+**Valid:** dated 2026-09-28
+
+**Observed:** 2026-09-28. Earlier the same day I archived `e76b043bbdd97622` and `60fcfdf99e3288c6` without a `## Fix provenance` section: one had the SHA and patch-id in prose, the other only in its commit message. Nothing reported either. I found them only by grepping them for the section while archiving five others. Reading why: `doctor`'s `terminal_status_without_fix_anchor` skips every `archived` record by status (`terminal_status_without_fix_anchor_leaves_archived_records_alone`), a scope written for the 297 of 355 archived files that predated the rule.
+
+**Expected:** the rule the guide states for archive time would have a check that fires at archive time.
+
+**Got:** the check stops looking at exactly that transition, and its count dropping on archive reads as the repair. Of the archived bug files closed 2026-09-21 to 27, **30 of 54** have neither the section nor a `no_fix_commit:`, an upper bound that includes `wontfix` records and prose-only pairs.
+
+**Cost:** a fix pointer that survives only as prose, or only in a commit message, is lost at the next rebase that orphans its SHA.
+
+**Resolution:** both records given the section (`8dfc251e`); the check's blind spot filed as `f9e51dc0a0af8693` (`cluster/guard-narrower-than-its-name`), with two candidate remedies: scope the skip by date, or check at `doc(action="move")`.
+
+**Severity:** med — silent, and it hits the step the rule was written for.
+
+**Status:** promoted-to-bug-tracker.
+
+**Rests on:** `8dfc251e`; `src/librarian/tools/doctor.rs`; this session's transcript (session `82cff72e-0245-48cb-ab07-45a1c3d0d388`).
 
 ## Template for new entries
 

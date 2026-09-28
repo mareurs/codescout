@@ -775,6 +775,14 @@ No failed attempts beyond one refused pipe, which recovered on the next call.
 
 **Update 2026-09-28, same session, after this receipt was first written:** the review-catches promotion pass (`6e416ff5`, `83e70554`) and one bug filed from it (`cf45b26e`, `60fcfdf99e3288c6`), then fixed (`6a6a321e`) and archived. No new DWF or DCX sample was taken for this stretch; the routine samples above stand. The interval now ends about 2026-09-28 07:30Z.
 
+**Update 2026-09-28 10:50Z, same session, across a second compaction (about 09:13Z):**
+
+- A release build (`./scripts/rb.sh`) and a `reindex`.
+- A live check of `6a6a321e`: an `update_entry` resync of `review-catches:RC-2` left `doctor`'s `row_behind_file` at 0. It was reverted, leaving no diff.
+- The archive pass `8dfc251e`. Five Codex bugs were archived with Fix provenance, and three were kept open with an `unverified:` caveat. It produced bug `f9e51dc0a0af8693`, `bug-fix-session-log:F-181` and `bug-fix-session-log:F-182`, and a confirmation note under `tool-usage-patterns:T-25`.
+
+No new DWF or DCX sample was taken; the routine samples above stand. The interval now ends about 10:50Z. Commits since the previous update: `fd0b4181`, `8dfc251e`, and the one carrying this update. Overhead for this update: about 3 tool calls.
+
 ## Template for new entries
 
 Choose either the workflow field table or the session coverage fields. This is the append anchor, not a recorded episode.

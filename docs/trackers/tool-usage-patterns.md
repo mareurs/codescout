@@ -717,6 +717,12 @@ member is the worktree/activate write block at 22 hits — see T-26 and
 be high-friction either, so this was taxonomy hygiene rather than the priority queue this
 entry called it).
 
+#### Confirmation 2026-09-28 — six repeats in one session, each recovered in one call
+
+Session `82cff72e` hit `il3_pipe_to_trimmer` six times. Three were `git diff … | grep`, then `file-provenance.py … | head`, `pytest … | tail -1` and `git diff -U0 … | grep | grep -v`. The last two came while a task to record this very habit was open. Every refusal echoed the corrected form of the command it rejected, so fix (1) above has landed. Every one recovered on the next call, by running bare or by redirecting to a file under the job's tmp directory.
+
+This is a denominator, not a new gap. It matches TU-7's reading (frequent, harmless re-offence) and this entry's diagnosis that the shape is recomposed at compose time, after the rule has been read. It earns no T-N row under § *Scope and methodology*: a pipe shape is a composition mistake with the right tool, not a tool-selection gap.
+
 ### T-26 — grepping transcripts for friction is a wrong-tool choice with a measured false-positive rate
 
 **Tool:** `grep` (on transcript JSONL) vs structured telemetry · **Verdict:** wrong-tool · **Session:** `851504c5` + 5 dispatched POV agents
