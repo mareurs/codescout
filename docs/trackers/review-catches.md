@@ -145,7 +145,7 @@ Each entry below is condensed from its source document, which remains authoritat
 
 **Missed:** D goes through Step 4, which refits both temperature and threshold.
 **Found by:** reading the sentence against Step 4.
-**Outcome:** open. The sentence is unchanged and no decision is recorded.
+**Outcome:** claim-corrected, 2026-09-28, in `8254d636` (patch-id `da9a0d7d52a01ec03b5c936c885b714306ffba7b`). A dated correction beside the registered sentence says that D controls for the combined post-training procedure and separates neither half.
 **Lesson:** a control taken through a procedure that refits two things controls their combination, not one of them.
 
 ### RC-19 — The Stage 2 freeze asserted counts taken before segmentation, not the positive rows it wrote
@@ -296,7 +296,7 @@ Each entry below is condensed from its source document, which remains authoritat
 
 **Missed:** hitting the bound does not prove separation in general, even though all 17 cases here were in fact separated.
 **Found by:** checking all 17 cases against their calibration logits.
-**Outcome:** open. The sentence is unchanged.
+**Outcome:** claim-corrected, 2026-09-28, in `8254d636` (patch-id `da9a0d7d52a01ec03b5c936c885b714306ffba7b`). A dated correction beside the registered sentence rests the conclusion on the logit check rather than on the bound.
 **Lesson:** a parameter on its bound does not prove the property. Check the logits directly.
 
 ### RC-44 — The Phase 1b Stage-2 shell wrappers exited 0 after a child failed
