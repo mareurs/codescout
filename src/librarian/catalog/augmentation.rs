@@ -908,6 +908,7 @@ pub fn append_entry(
                      allocated"
                 ))
             })?;
+            record_written_file(&tx, artifact_id, path, &updated)?;
             written_section = Some((path.to_string(), doc, updated));
             // `snapshot_missing` was derived from a body read taken BEFORE this write, so
             // it still lists the id whose row was just added. Reporting it would ask the
@@ -1837,6 +1838,7 @@ pub fn allocate_entry_id(
              id was allocated"
         ))
     })?;
+    record_written_file(&tx, artifact_id, &abs_path, &updated)?;
 
     tx.commit()?;
 
@@ -2105,7 +2107,43 @@ fn resync_snapshot_row(
              {abs_path} failed: {e} — the params change was rolled back"
         ))
     })?;
+    record_written_file(tx, artifact_id, &abs_path, &text)?;
     Ok(SnapshotRow::Rewritten)
+}
+
+/// Bring an artifact row's content columns up to bytes this transaction just wrote to its
+/// file, so the catalog does not fall behind the file it describes.
+///
+/// Three writers here edit such a file: `allocate_entry_id` (the high-water mark, plus a
+/// section and its index row), `append_entry` (a section) and `resync_snapshot_row` (one
+/// table row). `doc(action="update")` refreshes `file_sha256` and `file_mtime` when it
+/// writes; these three did not, so every write left `doctor` reporting `row_behind_file`
+/// until a `reindex`. It runs inside the caller's transaction, so a rollback takes the
+/// refresh with it and the row keeps describing whatever a failed commit restores.
+/// docs/issues/2026-09-28-update-entry-snapshot-resync-leaves-the-catalog-row-behind-its-file.md
+fn record_written_file(
+    tx: &rusqlite::Transaction<'_>,
+    artifact_id: &str,
+    path: &str,
+    written: &str,
+) -> Result<()> {
+    // Same derivation as `doc(action="update")`: the file's own mtime in milliseconds,
+    // falling back to now only when the filesystem cannot report one.
+    let file_mtime = std::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+    tx.execute(
+        "UPDATE artifact SET file_sha256 = ?1, file_mtime = ?2 WHERE id = ?3",
+        rusqlite::params![
+            crate::librarian::util::sha_of_bytes(written.as_bytes()),
+            file_mtime,
+            artifact_id
+        ],
+    )?;
+    Ok(())
 }
 
 /// Splice a [`PendingSection`] — and its optional index row — into `doc`, returning the
@@ -2805,6 +2843,125 @@ mod tests {
         assert_eq!(row.artifact_id, "art1");
         assert_eq!(row.prompt, "test prompt");
         assert_eq!(row.refresh_count, 0);
+    }
+
+    // ---- a file this module writes keeps its artifact row current --------------------------
+
+    /// The row's content columns must describe the file this module just wrote. `doctor`'s
+    /// `row_behind_file` compares exactly `file_sha256` with the file's hash, so a writer that
+    /// leaves the row behind makes every ledger it touches read as needing a `reindex`.
+    /// docs/issues/2026-09-28-update-entry-snapshot-resync-leaves-the-catalog-row-behind-its-file.md
+    fn assert_row_describes_file(cat: &Catalog, id: &str, path: &std::path::Path, writer: &str) {
+        let row = crate::librarian::catalog::artifact::get(cat, id)
+            .unwrap()
+            .expect("the artifact row exists");
+        let on_disk = crate::librarian::util::sha_of_bytes(&std::fs::read(path).unwrap());
+        assert_eq!(
+            row.file_sha256, on_disk,
+            "{writer} rewrote the file, so the row's file_sha256 must hash the bytes it wrote; \
+             otherwise doctor reports row_behind_file until a reindex"
+        );
+        let mtime = std::fs::metadata(path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        assert_eq!(
+            row.file_mtime, mtime,
+            "{writer} rewrote the file, so the row's file_mtime must be the file's own mtime"
+        );
+    }
+
+    /// An artifact row whose content columns describe no file at all.
+    fn stale_art(id: &str, path: &std::path::Path) -> ArtifactRow {
+        let mut art = sample_art(id);
+        art.abs_path = path.to_path_buf();
+        // LOAD-BEARING: `abc` is no file's sha256 and `1` no real mtime, so the assertions pass
+        // only if the writer stored fresh values. `sample_art`'s `now` mtime can equal the
+        // file's to the millisecond and let a missing mtime refresh through.
+        art.file_sha256 = "abc".to_string();
+        art.file_mtime = 1;
+        art
+    }
+
+    #[test]
+    fn allocate_entry_id_leaves_the_row_describing_the_file_it_wrote() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        // No section: recording the high-water mark alone rewrites the frontmatter, the
+        // smallest input on which this writer touches the file.
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: F\n---\n\n# Ledger\n\n\
+             ## Template for new entries\n\nboilerplate\n",
+        )
+        .unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &stale_art("art1", &md)).unwrap();
+
+        allocate_entry_id(&mut cat, "art1", "F", None).unwrap();
+
+        assert_row_describes_file(&cat, "art1", &md, "allocate_entry_id");
+    }
+
+    #[test]
+    fn append_entry_leaves_the_row_describing_the_section_it_wrote() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let (md, _) = ledger_fixture(dir.path(), &mut cat);
+        art_upsert(&cat, &stale_art("art1", &md)).unwrap();
+        let section = PendingSection {
+            title: "first".to_string(),
+            body: "the prose".to_string(),
+            anchor_heading: "## Template for new entries".to_string(),
+            index_row: None,
+        };
+
+        append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({}),
+            &[],
+            Some(&section),
+        )
+        .unwrap();
+
+        assert_row_describes_file(&cat, "art1", &md, "append_entry");
+    }
+
+    #[test]
+    fn update_entry_resync_leaves_the_row_describing_the_table_it_rewrote() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("queue.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nsnapshot_anchor: '| ID | status |'\n---\n\n# Q\n\n\
+             | ID | status |\n| T-1 | open |\n\ntail\n",
+        )
+        .unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &stale_art("art1", &md)).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("tasks".to_string());
+        a.params = r#"{"tasks":[{"id":"T-1","status":"open"}]}"#.to_string();
+        a.render_template = Some(
+            "| ID | status |\n{% for t in tasks %}| {{ t.id }} | {{ t.status }} |\n{% endfor %}"
+                .to_string(),
+        );
+        upsert(&cat, &a).unwrap();
+
+        update_entry(&mut cat, "art1", "tasks", "T-1", json!({"status": "done"})).unwrap();
+
+        let text = std::fs::read_to_string(&md).unwrap();
+        assert!(
+            text.contains("| T-1 | done |"),
+            "the row must have been re-rendered, or this test exercises no write at all: {text}"
+        );
+        assert_row_describes_file(&cat, "art1", &md, "update_entry's snapshot resync");
     }
 
     // ---- prefix uniqueness -----------------------------------------------------------------
