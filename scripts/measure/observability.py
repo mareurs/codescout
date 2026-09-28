@@ -121,9 +121,11 @@ _BASE_TABLE = {
     },
     ("mistakes", "signal/request"): {
         "label": "needs adjudication",
-        "basis": "prompt + interrupt rows are the candidate population; whether each is a "
-                 "correction is judged",
-        "field": "prompt_interrupt_turns",
+        # R128: R105 made a tool rejection an operator correction candidate, so the field and
+        # its wording name all three kinds.
+        "basis": "prompt + interrupt + rejection rows are the candidate population; whether "
+                 "each is a correction is judged",
+        "field": "prompt_interrupt_rejection_turns",
     },
     ("mistakes", "delivery/action"): {
         "label": "needs adjudication",
@@ -658,11 +660,10 @@ def _field_window_count(win, field):
     if field == "assistant_text_turns":
         b = win["turns"]["assistant_text"]
         return (b["decision"]["all"], b["retained"]["all"], "all")
-    if field == "prompt_interrupt_turns":
-        p = win["turns"]["prompt"]
-        i = win["turns"]["interrupt"]
-        dec = p["decision"]["all"] + i["decision"]["all"]
-        ret = p["retained"]["all"] + i["retained"]["all"]
+    if field == "prompt_interrupt_rejection_turns":
+        kinds = [win["turns"][k] for k in ("prompt", "interrupt", "rejection")]
+        dec = sum(b["decision"]["all"] for b in kinds)
+        ret = sum(b["retained"]["all"] for b in kinds)
         return (dec, ret, "all")
     if field == "tool_events_total":
         t = win["tool_events"]["total"]
@@ -697,12 +698,11 @@ def _top_level_subset(win, field):
     if field == "assistant_text_turns":
         b = win["turns"]["assistant_text"]
         return (b["decision"]["top-level"], b["retained"]["top-level"])
-    if field == "prompt_interrupt_turns":
-        p = win["turns"]["prompt"]
-        i = win["turns"]["interrupt"]
+    if field == "prompt_interrupt_rejection_turns":
+        kinds = [win["turns"][k] for k in ("prompt", "interrupt", "rejection")]
         return (
-            p["decision"]["top-level"] + i["decision"]["top-level"],
-            p["retained"]["top-level"] + i["retained"]["top-level"],
+            sum(b["decision"]["top-level"] for b in kinds),
+            sum(b["retained"]["top-level"] for b in kinds),
         )
     return None
 
@@ -857,7 +857,7 @@ def coverage(events_db, corpus_dir):
         excluded_by_spec_detail = _excluded_by_spec_detail(sessions_list, excl)
 
         # R60(b)/R67: usage rows are read once, straight from join's own loader, so M (rows
-        # read), K (of the unmapped, those from the spec-excluded session; no build counter
+        # read), K (of the unmapped, those from the spec-excluded sessions; no build counter
         # exists for it) and the Amendment 4(a) count agree with what build_events saw.
         usage_rows = join._load_usage_rows(corpus_dir)
         kept_bare_sids = {s.sid for s in sessions_list if transcripts.copy_id(s) not in excl}
@@ -885,7 +885,7 @@ def coverage(events_db, corpus_dir):
             field_results[field] = {"decision": dec, "retained": ret, "population": pop}
 
         at_top = _top_level_subset(win, "assistant_text_turns")
-        pi_top = _top_level_subset(win, "prompt_interrupt_turns")
+        pi_top = _top_level_subset(win, "prompt_interrupt_rejection_turns")
         deleg = field_results["delegation_turns"]
         d_tid = win["deliveries"]["with_tool_use_id"]
         d_all = win["deliveries"]["total"]
@@ -1261,7 +1261,7 @@ def render_map(coverage, manifest, code_version=None):
         "usage rows with no kept session: "
         f"{coverage['usage_rows_unmapped']} of {coverage['usage_rows_total']} usage rows read "
         f"(of which {coverage['usage_rows_unmapped_spec_excluded']} from the spec-excluded "
-        "session)."
+        "sessions)."
     )
     lines.append("")
 

@@ -424,7 +424,7 @@ class BaseTableMatchesRuling(unittest.TestCase):
         # "tool_use_turns", which the fixed coverage() doesn't even declare).
         expected_fields = {
             ("mistakes", "opportunity"): "assistant_text_turns",
-            ("mistakes", "signal/request"): "prompt_interrupt_turns",
+            ("mistakes", "signal/request"): "prompt_interrupt_rejection_turns",
             ("mistakes", "delivery/action"): None,
             ("mistakes", "observed use"): None,
             ("mistakes", "checked outcome"): None,
@@ -965,7 +965,7 @@ class UsageRowsUnmappedRendersRulingSentence(unittest.TestCase):
             rendered = observability.render_map(cov, manifest, _CODE_VERSION)
             self.assertIn(
                 "usage rows with no kept session: 2 of 3 usage rows read "
-                "(of which 1 from the spec-excluded session).",
+                "(of which 1 from the spec-excluded sessions).",
                 rendered,
             )
 
@@ -1133,22 +1133,30 @@ class SessionsPerProjectWindowMembership(unittest.TestCase):
 
 
 class InterruptsCountTowardMistakesSignal(unittest.TestCase):
-    """Mutant #7: interrupts dropped from the mistakes signal/request field."""
+    """Mutant #7: interrupts dropped from the mistakes signal/request field; R128: rejections
+    count toward it too."""
 
     def test_interrupts_and_prompts_both_count(self):
+        # LOAD-BEARING: one row of EACH of the three kinds, so dropping any one kind from the
+        # field changes the count (3 -> 2).
         with tempfile.TemporaryDirectory() as tmp:
             corpus_dir = _make_corpus(pathlib.Path(tmp))
             proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
             _write_lines(proj / "sid1.jsonl", [
                 _entry("p1", "2026-09-20T10:00:00Z", "sid1", content="a real prompt"),
                 _interrupt_entry("i1", "2026-09-20T10:00:01Z", "sid1"),
+                _entry("r1", "2026-09-20T10:00:02Z", "sid1", content=[
+                    {"type": "tool_result", "tool_use_id": "t1", "is_error": True,
+                     "content": "The tool use was rejected. To tell you how to proceed, "
+                                "the user said:\nnot that file"},
+                ]),
             ])
             events_db = pathlib.Path(tmp) / "events.db"
             join.build_events(corpus_dir, events_db)
             cov = observability.coverage(events_db, corpus_dir)
             self.assertEqual(
-                cov["fields"]["prompt_interrupt_turns"],
-                {"decision": 2, "retained": 2, "population": "all"},
+                cov["fields"]["prompt_interrupt_rejection_turns"],
+                {"decision": 3, "retained": 3, "population": "all"},
             )
 
 
@@ -1424,7 +1432,7 @@ class AppendixRenderedIntegrity(unittest.TestCase):
                 whole_db,
                 "hook_success_only: 1; hook_success_twins_dropped: 1.",
                 "usage rows with no kept session: 2 of 7 usage rows read (of which 1 from the "
-                "spec-excluded session).",
+                "spec-excluded sessions).",
             ])
 
             body = sections["### A1.6 -- sessions per project and window"]
@@ -1506,9 +1514,9 @@ class AppendixRenderedIntegrity(unittest.TestCase):
                                 "decision points = assistant_text turns (of which top-level -- "
                                 "decision: 0, retained: 1)"),
                 "signal/request": ("needs adjudication", "0", "3", "all",
-                                   "prompt + interrupt rows are the candidate population; "
-                                   "whether each is a correction is judged (of which top-level "
-                                   "-- decision: 0, retained: 3)"),
+                                   "prompt + interrupt + rejection rows are the candidate "
+                                   "population; whether each is a correction is judged (of "
+                                   "which top-level -- decision: 0, retained: 3)"),
                 "delivery/action": ("needs adjudication",) + na,
                 "observed use": ("needs adjudication",) + na,
                 "checked outcome": ("needs adjudication",) + na,
@@ -1635,8 +1643,9 @@ class HalfOpenWindows(unittest.TestCase):
     """R71: every window membership test is half-open, [start, end): a row AT the decision
     window's start is in it, a row just before it is not -- for turns, tool_events, deliveries
     and sessions-per-project alike. R111 makes decision.end == retained.end, so no row can sit
-    AT the decision end without tripping R61's end raise (R61RetainedWindowDerivedFromData
-    pins that); the end half of `_in_window` is covered there, not here."""
+    AT the decision end without tripping R61's end raise: the end half of `_in_window` is
+    unreachable (a closed end there is semantically inert), and R61's `>=` is pinned there
+    (R61RetainedWindowDerivedFromData)."""
 
     def test_start_is_inside_and_just_before_it_is_outside(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1757,8 +1766,9 @@ class StrictReadsRaise(unittest.TestCase):
             observability._field_window_count(_win(), "assistant_text_turns"), (0, 0, "all")
         )
         for field, kind in (("assistant_text_turns", "assistant_text"),
-                            ("prompt_interrupt_turns", "prompt"),
-                            ("prompt_interrupt_turns", "interrupt"),
+                            ("prompt_interrupt_rejection_turns", "prompt"),
+                            ("prompt_interrupt_rejection_turns", "interrupt"),
+                            ("prompt_interrupt_rejection_turns", "rejection"),
                             ("delegation_turns", "delegation")):
             with self.subTest(field=field, kind=kind), self.assertRaises(KeyError):
                 observability._field_window_count(_win(drop=kind), field)
@@ -2022,7 +2032,7 @@ class FinalizeBounds(unittest.TestCase):
             events_db = pathlib.Path(tmp) / "events.db"
             join.build_events(corpus_dir, events_db)
             cov = observability.coverage(events_db, corpus_dir)  # R61's end raise stays silent
-            self.assertEqual(cov["fields"]["prompt_interrupt_turns"]["retained"], 2)
+            self.assertEqual(cov["fields"]["prompt_interrupt_rejection_turns"]["retained"], 2)
 
     def test_the_end_floors_a_fractional_created_utc(self):
         # R75's floor: archive never writes a fraction, but a manifest that carries one must not
@@ -2170,9 +2180,21 @@ class WindowInvariantsR111(unittest.TestCase):
              "decision": {"start_utc": "2026-09-20T00:00:01Z", "end_utc": "2026-09-26T00:00:01Z"}},
             "2026-09-26T00:00:00Z",
         ),
+        # m-1: both ends agree with T + 1 s, but the decision window is 8 days long -- a check
+        # that refuses only a SHORTER window admits it.
+        "length 8 days": (
+            {"retained": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2026-09-26T00:00:01Z"},
+             "decision": {"start_utc": "2026-09-18T00:00:01Z", "end_utc": "2026-09-26T00:00:01Z"}},
+            "2026-09-26T00:00:00Z",
+        ),
         # both ends agree and the length is 7 days, but created_utc floors to a later T.
         "end != floor(created) + 1 s": (
             _DEFAULT_BOUNDS, "2026-09-26T00:00:05Z",
+        ),
+        # m-1: the ends agree and the length is 7 days, but both end LATER than floor(created)
+        # + 1 s (2026-09-25T23:59:01Z) -- a check that refuses only an EARLIER end admits it.
+        "end later than floor(created) + 1 s": (
+            _DEFAULT_BOUNDS, "2026-09-25T23:59:00Z",
         ),
         # R75's off-by-one: the end is created_utc itself, not floor(created) + 1 s.
         "end == created, not created + 1 s": (
@@ -2280,6 +2302,36 @@ class Task14MapRows(unittest.TestCase):
             rendered = observability.render_map(cov, _load_manifest(corpus_dir), _CODE_VERSION)
             rows = _table_rows(_sections(rendered)["### A1.6 -- turns by kind"])
             self.assertIn(["rejection", "1"], rows)
+    def test_a_rejection_counts_in_the_mistakes_signal_cell_all_and_top_level(self):
+        # R128: the cell names prompt + interrupt + rejection. LOAD-BEARING: the fixture's ONLY
+        # operator-candidate row is one top-level rejection (no prompt, no interrupt), so a
+        # field that drops rejection from its all-population count OR from its top-level subset
+        # reads 0 there.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            _write_lines(proj / "sid1.jsonl", [
+                _assistant_text_entry("a1", "2026-09-20T10:00:00Z", "sid1"),
+                _entry("r1", "2026-09-20T10:00:01Z", "sid1", content=[
+                    {"type": "tool_result", "tool_use_id": "t1", "is_error": True,
+                     "content": "The tool use was rejected. To tell you how to proceed, "
+                                "the user said:\nnot that file"},
+                ]),
+            ])
+            events_db = pathlib.Path(tmp) / "events.db"
+            join.build_events(corpus_dir, events_db)
+            cov = observability.coverage(events_db, corpus_dir)
+            cells = {(c["outcome"], c["link"]): c for c in observability.build_cells(cov)}
+            cell = cells[("mistakes", "signal/request")]
+            self.assertEqual(
+                (cell["decision_number"], cell["retained_number"], cell["population"]),
+                (1, 1, "all"),
+            )
+            self.assertEqual(
+                cell["basis"],
+                "prompt + interrupt + rejection rows are the candidate population; whether each "
+                "is a correction is judged (of which top-level -- decision: 1, retained: 1)",
+            )
 
     def test_entrypoint_changed_is_read_from_the_build_and_rendered(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2316,11 +2368,30 @@ class Task14MapRows(unittest.TestCase):
         # The sentence is TRUE: the inventory module it names exists.
         self.assertTrue((MEASURE / "lessons.py").is_file())
         basis = observability._BASE_TABLE[("transfer", "delivery/action")]["basis"]
-        self.assertIn(
-            "(TRANSFER_DELIVERY_MARKERS: get_guide, guide-sections, operator-rule, "
-            "operator-rules, session-opener)",
-            basis,
+        # m-8: the expected list is DERIVED from the constant, never typed here.
+        markers = ", ".join(sorted(observability.TRANSFER_DELIVERY_MARKERS))
+        self.assertIn(f"(TRANSFER_DELIVERY_MARKERS: {markers})", basis)
+
+    def test_the_delivery_basis_marker_list_is_built_from_the_constant(self):
+        # m-8: pins the DERIVATION, not the bytes. The module's own source runs with one extra
+        # marker in TRANSFER_DELIVERY_MARKERS: a basis built from the constant names it, and a
+        # typed literal -- in any order -- cannot. The anchor must occur once, so a moved
+        # definition fails loudly here instead of silently probing nothing.
+        src = (MEASURE / "observability.py").read_text()
+        anchor = "TRANSFER_DELIVERY_MARKERS = frozenset(\n"
+        self.assertEqual(src.count(anchor), 1, "the constant's definition line moved")
+        patched = src.replace(
+            anchor, 'TRANSFER_DELIVERY_MARKERS = frozenset({"zz-derivation-probe"}) | frozenset(\n'
         )
+        probe = importlib.util.module_from_spec(
+            importlib.util.spec_from_loader("observability_marker_derivation_probe", loader=None)
+        )
+        probe.__file__ = str(MEASURE / "observability.py")
+        exec(compile(patched, probe.__file__, "exec"), probe.__dict__)
+        self.assertIn("zz-derivation-probe", probe.TRANSFER_DELIVERY_MARKERS)
+        basis = probe._BASE_TABLE[("transfer", "delivery/action")]["basis"]
+        markers = ", ".join(sorted(probe.TRANSFER_DELIVERY_MARKERS))
+        self.assertIn(f"(TRANSFER_DELIVERY_MARKERS: {markers})", basis)
 
 
 if __name__ == "__main__":
