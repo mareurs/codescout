@@ -392,3 +392,27 @@ No probe read a correction, a miss, a judge verdict, or any quantity the go/no-g
   3. Require `parse_errors_skipped == 0`, or report it.
   4. If `coverage()` raises on a window, stop for a ruling. Bounds are never hand-edited.
   5. For the prospective read, union usage rows across freezes by `id` (item (b)).
+
+### Amendment 7 — 2026-09-28, recorded after a cross-session review, before Task 9
+
+**Source:** a review requested by the operator and run by session `82cff72e-0245-48cb-ab07-45a1c3d0d388`. It used four Opus reviewers on Tasks 4–8 and 13 plus a design review of Tasks 9–12, on synthetic input only. The controller verified its claims and took count-only shape probes on the Task 8 scratch corpus (138 sessions, 119 kept). Rulings R103–R113 are in the SDD ledger. Where this amendment and the body disagree, this amendment wins. **Nothing here changes the go/no-go rule.**
+
+- **(a) Who spoke: the operator population.**
+  1. **Mid-turn messages count (R103).** A message the operator types while the agent runs is recorded as a `type:attachment` entry with `attachment.type == "queued_command"`. In the corpus, 2089 such attachments were split as follows:
+     - 829 `commandMode: task-notification`;
+     - 1089 `origin.kind: peer`;
+     - 171 `origin.kind: human`. Only 25 of these equal a kept prompt, so about 146 operator messages were dropped. They skew toward corrections, which biased the result toward NO-GO.
+
+     `operator_messages` now includes a `queued_command` attachment iff two conditions hold. Its `commandMode` must be `"prompt"`. And the attachment's own `origin.kind` must be `"human"`: the origin field on the attachment itself, not an entry-level one. An attachment with no origin never counts. In the corpus, every prompt-mode attachment carries an origin (1089 peer + 171 human = 1260). So a filter that read the wrong field would admit every peer message, and would turn the latent peer-leak into a live one. One that equals a later kept prompt in the same session is deduplicated.
+  2. **Positive identification (R104).** An entry that carries an `origin` counts only if `origin.kind == "human"`. Tag exclusions remain the fallback for older entries without an origin. Measured: all 2592 kept prompts already had `origin.kind == "human"`, so today nothing changes.
+  3. **Tool-rejection feedback is an operator correction (R105).** A `tool_result` carrying the harness marker `the user said:` becomes a candidate with source `operator_rejection` and corrector `operator`. The corpus holds 10 such blocks in 9 sessions.
+  4. **Exclusions are recorded in the manifest and propagate to forks (R106).** "Sessions whose task was this measurement" is {`3c5b02df-b6ce-45f5-9d03-1194e38465c0` (the design and execution session), `82cff72e-0245-48cb-ab07-45a1c3d0d388` (review work inside the decision window, self-disclosed)}. A transcript that shares an excluded copy's uuid prefix is excluded too. 82cff72e shares 0 uuids with 3c5b02df.
+  5. A kept session whose first and last `entrypoint` differ is counted and shown (R107). The corpus holds none.
+- **(b) Lessons.**
+  1. **Dating (R108).** A lesson existed at a decision point iff the AUTHOR date of the commit that first introduced the lesson's anchor line precedes the decision timestamp. The anchor line is the heading, the bold lead, or the `## R-N` line. The search is limited to the lesson's own source path, and it matches the anchor with whitespace normalized. So rule text first drafted in a session log or bug file dates from its promotion into the lesson source, not from the draft. That closes the inflating direction. A lesson moved between sources dates from the move, a disclosed deflation. `experiments` is rebased after every ship, which restamps committer dates, so an origin timestamp is never mapped to a commit by committer date. The review showed that mapping errs in both directions, including inflation. A lesson deleted before the freeze is absent from the inventory, a disclosed deflation.
+  2. **Assignment (R109).** The judge names the most specific applicable lesson. A catch-all rule (OP-1, "always verify") is credited only when no specific lesson applies. The gate requires the served rule on every case whose record names one. The readout reports catch-all-only misses separately.
+- **(c) Windows and dates.**
+  1. The decision window is effectively `[T−7d+1s, T+1s)`, where `T = floor(created_utc)`. `finalize_bounds` and `coverage()` raise unless decision end == retained end == `T+1s` and decision start == end − 7d (R111).
+  2. **Commit timestamps are author dates.** The window is filtered in Python over the full history from the manifest SHA; `git --since` stops walking at the first older committer date. `Session-Id` is read from git's trailer parser, never from the first matching body line (R110).
+  3. The go/no-go denominator is the body's own rule: a top-level transcript with at least one decision point in the window. A miss is placed by its origin timestamp. The observability map's any-turn session count is descriptive and labelled as such (R112).
+- **(d) Disclosure.** Every probe behind this amendment counted shapes: leading tags, origin kinds, `commandMode`, and hash equality. None read a correction, a miss, or a rate.
