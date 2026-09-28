@@ -6,7 +6,7 @@ A map from any corpus other than the Task 12 freeze is provisional; Task 12 rege
 
 - corpus_id: scratch-2026-09-28-task14
 - freeze instant (manifest created_utc): 2026-09-28T17:29:48Z
-- rendering code: git HEAD ab6bebfe0f46fa340d6dfdd0959a0d6b13854b67 at render time; scripts/measure clean
+- rendering code: git HEAD 1ceb11b91499d70daaa396a3ae4f254a88d56951 at render time; scripts/measure clean
 - repos at freeze (manifest repos): codescout at e22b56403662ae7d9fcef4336750980e1b22a759
 - earliest kept top-level entry ts: 2026-08-03T20:49:16.290Z (the minimum over the kept top-level entries that carry a parseable ts)
 - 137903 of 594159 kept top-level entries carry no ts field (absent, null or empty) and 0 carry an unparseable ts; the no-ts entries by entry type: last-prompt 26538, mode 26420, permission-mode 26420, atis-latch 26365, ai-title 26248, agent-name 5519, cost-state 292, artifact-autoreact-ledger 54, bridge-session 29, artifact-comment-monitor 15, agent-setting 3
@@ -37,7 +37,7 @@ Rows skipped from every window, day and span for an unparseable ts -- turns: 0, 
 | link | label | decision | retained | population | basis |
 |---|---|---|---|---|---|
 | opportunity | measurable now | 3439 | 47251 | all | decision points = assistant_text turns (of which top-level -- decision: 3240, retained: 38840) |
-| signal/request | needs adjudication | 355 | 2805 | all | prompt + interrupt rows are the candidate population; whether each is a correction is judged (of which top-level -- decision: 355, retained: 2797) |
+| signal/request | needs adjudication | 360 | 2835 | all | prompt + interrupt + rejection rows are the candidate population; whether each is a correction is judged (of which top-level -- decision: 360, retained: 2827) |
 | delivery/action | needs adjudication | n/a | n/a | n/a | deliveries before the decision exist, but their relevance to the mistake is judged, not counted |
 | observed use | needs adjudication | n/a | n/a | n/a | whether the assistant's next action aligned with the correction is judged (Amendment 2(c)) |
 | checked outcome | needs adjudication | n/a | n/a | n/a | the Codex judge, plus the operator's 25-item spot-check, decide this |
@@ -147,7 +147,7 @@ Window: retained, as the whole events DB (rows skipped above for their ts includ
 
 hook_success_only: 318; hook_success_twins_dropped: 3837.
 
-usage rows with no kept session: 15587 of 75210 usage rows read (of which 1762 from the spec-excluded session).
+usage rows with no kept session: 15587 of 75210 usage rows read (of which 1762 from the spec-excluded sessions).
 
 ### A1.6 -- sessions per project and window
 
@@ -182,7 +182,7 @@ Window: retained, as the whole events DB (rows skipped above for their ts includ
 | delegation | 570 |
 | interrupt | 141 |
 | meta | 18182 |
-| prompt | 2664 |
+| prompt | 2684 |
 | rejection | 10 |
 | tool_result | 114095 |
 | tool_use | 114109 |
