@@ -40,12 +40,19 @@ def _git_show(repo, sha, path):
     A pure read of the git object -- deliberately never the working tree. `git show <sha>:<path>`
     exits non-zero when the path is absent at that commit (added later, deleted, or never
     existed); that is not an error here, every source this module reads is optional per-commit.
+
+    R113 (fix round 4): decoded as UTF-8 with `errors="replace"`, never the locale's encoding
+    with strict errors -- a blob holding an undecodable byte yields U+FFFD in its text instead of
+    a UnicodeDecodeError that would abort the whole inventory. `text=True` is kept, so line
+    endings are still universal-newline translated exactly as before.
     """
     proc = subprocess.run(
         ["git", "show", f"{sha}:{path}"],
         cwd=str(repo),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if proc.returncode != 0:
         return None
@@ -58,16 +65,23 @@ def _git_ls_tree(repo, sha, path):
     `git ls-tree -r <sha> --name-only -- <path>` reads the commit's tree object -- never
     `git ls-files`, which reads the working tree's index and would leak untracked or
     since-modified content (R83's tracked-vs-working-tree rule).
+
+    R113 (fix round 4): `-z` makes git print each path verbatim, NUL-terminated. Without it,
+    git C-quotes a non-ASCII path (`".codescout/memories/caf\\303\\251.md"`, core.quotePath's
+    default), and the quoted form fails every caller's `.endswith(".md")`, so the memory was
+    silently dropped. Paths decode as strict UTF-8: a path that is not valid UTF-8 raises instead
+    of being dropped or mangled into one `git show` cannot find.
     """
     proc = subprocess.run(
-        ["git", "ls-tree", "-r", sha, "--name-only", "--", path],
+        ["git", "ls-tree", "-r", "-z", sha, "--name-only", "--", path],
         cwd=str(repo),
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     if proc.returncode != 0:
         return []
-    return [line for line in proc.stdout.splitlines() if line]
+    return [name for name in proc.stdout.split("\0") if name]
 
 
 # --- fence-awareness (R85) ----------------------------------------------------------------------
@@ -182,7 +196,8 @@ def _split_sections(text, min_level, max_level):
 
 def _parse_id_entries(text, id_re, entry_level):
     """Split `text` into (entry_id -> body) for headings at exactly `entry_level` whose text
-    matches `id_re` (group 1 = id). Returns (entries dict, ids in document order).
+    matches `id_re` (group 1 = id). Returns (entries dict, ids in document order, base_ids),
+    where `base_ids` maps each returned id to its NATURAL id (group 1 as written).
 
     A heading at or shallower than `entry_level` that does NOT match `id_re` (a tracker's own
     prose section header, e.g. "## History") ends the current entry's body without starting a
@@ -198,14 +213,22 @@ def _parse_id_entries(text, id_re, entry_level):
     `_dedupe_slug` against a used-ids set scoped to this one call, so the second occurrence keys
     in as `"R-5-2"` -- not the same key overwriting the first entry's body in `entries`, and not
     the same id emitted twice in `order`. The disambiguated id is what every caller (and the
-    fixed-up `entries[op_id]`/`entries[r_id]` lookup) sees; a row-less disambiguated id (no
-    matching index-table entry, e.g. an OP-N's second occurrence) is naturally excluded by the
-    existing "row-less section is ABSENT" rule those callers already apply -- no special-casing.
+    fixed-up `entries[op_id]`/`entries[r_id]` lookup) sees.
+
+    R115 (fix round 4): anything keyed by the id AS WRITTEN must be looked up through
+    `base_ids`, never with the disambiguated id. operator-rules.md's index table is keyed `OP-N`,
+    so a second `## OP-N` section (`OP-N-2`) takes its status from the one `OP-N` row. Round 3
+    looked it up as `OP-N-2`, found no row, and silently dropped the section and its Imperative.
+
+    Known and accepted (fix round 4): a disambiguated `-n` id is NOT stable across commits --
+    deleting the first of two `## R-5` sections moves the survivor from `R-5-2` to `R-5`. There
+    are 0 repeated entry headings in the 583 historical commits that touch these sources.
     """
     lines = text.splitlines()
     fenced = _fence_flags(lines)
     entries = {}
     order = []
+    base_ids = {}
     used_ids = set()
     current_id = None
     body = []
@@ -223,6 +246,7 @@ def _parse_id_entries(text, id_re, entry_level):
                 if m:
                     flush()
                     current_id = _dedupe_slug(m.group(1), used_ids)
+                    base_ids[current_id] = m.group(1)
                     order.append(current_id)
                     body = []
                     continue
@@ -234,7 +258,7 @@ def _parse_id_entries(text, id_re, entry_level):
         if current_id is not None:
             body.append(line)
     flush()
-    return entries, order
+    return entries, order, base_ids
 
 
 def _first_field_line(body, field_re):
@@ -415,8 +439,9 @@ def _claude_md_lessons(text, id_prefix, source_label):
 
     R80: a bullet's id is `<id_prefix>#<heading-slug>/<lead-slug>`, lead-slug from the bullet's
     bold lead (its first 8 words); `-<n>` on a lead-slug collision WITHIN THE SAME SECTION only,
-    counted in document order. R87: a HEADING-slug collision is disambiguated across the WHOLE
-    document via `_dedupe_slug`, which checks the full set of ids already minted -- not merely a
+    minted by `_dedupe_slug` against that section's full set of used lead ids (R99, fix round 3).
+    R87: a HEADING-slug collision is disambiguated across the WHOLE document via `_dedupe_slug`,
+    which checks the full set of ids already minted -- not merely a
     per-natural-slug counter -- so a disambiguated slug from an earlier collision cannot itself
     collide with a third heading's own natural slug (fix round 2; the prior per-slug counter
     minted a duplicate id for `## Notes`, `## Notes`, `## Notes 2`).
@@ -431,6 +456,10 @@ def _claude_md_lessons(text, id_prefix, source_label):
 
     The section-prose lesson's id is the bare (possibly disambiguated) heading-slug, no
     `/lead-slug` suffix, so it can never collide with a bullet lesson's id in the same section.
+
+    For R108 dating (Task 9, Amendment 7 (b)1): a section-prose lesson's anchor line is its
+    section heading, and the `-preamble` prose lesson's anchor line is its first non-blank line
+    that is not a heading.
     """
     lessons = []
     used_ids = set()
@@ -492,12 +521,16 @@ def _operator_rules_lessons(text, source_label):
     `source` afterward, in its own single post-processing step over every source's already-built
     lessons (R87/R96(a)). So ids ARE repo-qualified in the value `lessons_at` actually returns --
     only this helper's own, pre-post-processing return value is not.
+
+    R115 (fix round 4): the status is looked up by the entry's BASE id. A repeated `## OP-N`
+    yields `OP-N` and `OP-N-2`, and the one `OP-N` row governs both: both are emitted when it
+    reads active, and neither when it does not.
     """
     statuses = _parse_op_table_statuses(text)
-    entries, order = _parse_id_entries(text, _OP_ID_RE, 2)
+    entries, order, base_ids = _parse_id_entries(text, _OP_ID_RE, 2)
     lessons = []
     for op_id in order:
-        if statuses.get(op_id) != "active":
+        if statuses.get(base_ids[op_id]) != "active":
             continue
         lessons.append(Lesson(
             id=f"operator-rules.md#{op_id}",
@@ -519,6 +552,10 @@ def _op_imperative_bodies(repo, sha):
     regardless of status, which could make such a paragraph match on the dated side too and be
     silently dropped from both.
 
+    R115 (fix round 4): the status is looked up by the entry's BASE id, the same way
+    `_operator_rules_lessons` looks it up, so both Imperatives of a repeated active `## OP-N`
+    enter the set.
+
     The generator (undated_lessons's real caller) emits only that one line per rule, so comparing
     whole section bodies (the pre-fix behaviour) could never match it.
 
@@ -536,10 +573,10 @@ def _op_imperative_bodies(repo, sha):
             "working-tree read."
         )
     statuses = _parse_op_table_statuses(text)
-    entries, order = _parse_id_entries(text, _OP_ID_RE, 2)
+    entries, order, base_ids = _parse_id_entries(text, _OP_ID_RE, 2)
     bodies = []
     for op_id in order:
-        if statuses.get(op_id) != "active":
+        if statuses.get(base_ids[op_id]) != "active":
             continue
         imperative = _first_field_line(entries[op_id], _IMPERATIVE_LINE_RE)
         if imperative:
@@ -577,7 +614,7 @@ def _tracker_lessons(text, id_re, entry_level, id_prefix, source_label):
     "promoted-to-permanent-docs". Never deduped across sources -- each Lesson keeps its own
     `source`, so an R-N and a T-N entry can never collide even if their bodies happened to match.
     """
-    entries, order = _parse_id_entries(text, id_re, entry_level)
+    entries, order, _base_ids = _parse_id_entries(text, id_re, entry_level)
     lessons = []
     for entry_id in order:
         status = _entry_status(entries[entry_id])
@@ -597,6 +634,18 @@ def _tracker_lessons(text, id_re, entry_level, id_prefix, source_label):
 _MEMORIES_PREFIX = ".codescout/memories/"
 
 
+def _memory_preamble_text(content):
+    """R114 (fix round 4): the text above a memory file's first `##` heading, with its heading
+    lines (e.g. a `# Title`) removed and the result stripped. Fence-aware (R85): a line inside a
+    fence is content even when it is shaped like a heading, so it is kept. Returns "" when
+    nothing but headings and blank lines precede the first `##`.
+    """
+    lines = _leading_preamble(content, 2, 2).splitlines()
+    fenced = _fence_flags(lines)
+    kept = [line for i, line in enumerate(lines) if fenced[i] or _heading_match(line) is None]
+    return "\n".join(kept).strip()
+
+
 def _memory_lessons(repo, sha, repo_name):
     """R83: each `##` section (never `###` -- a "###"-level sub-note is absorbed into its
     enclosing "##" section's body, same rule `_split_sections` always applied) of each TRACKED
@@ -609,6 +658,14 @@ def _memory_lessons(repo, sha, repo_name):
     slug -- fix round 2). `source` is repo-qualified here, at construction; `id` is repo-qualified
     later, by `lessons_at`'s own post-processing step over every source's lessons -- so both `id`
     and `source` ARE repo-qualified in what `lessons_at` returns (R87/R96(a)).
+
+    R114 (fix round 4): a file with at least one `##` section ALSO yields a preamble lesson, id
+    `memory:<rel-path-without-.md>#-preamble`, emitted before its sections. Its text is
+    `_memory_preamble_text`: every line above the first `##` except heading lines. It is emitted
+    only when that text is non-blank, so a title-only preamble yields nothing. `-preamble` is the
+    round-2 rule's literal, which `_slugify` can never produce from a real heading. For R108
+    dating (Task 9), this lesson's ANCHOR LINE is its first non-blank non-heading line, which is
+    the first line of its text.
     """
     lessons = []
     for path in sorted(_git_ls_tree(repo, sha, ".codescout/memories")):
@@ -629,6 +686,14 @@ def _memory_lessons(repo, sha, repo_name):
             ))
             continue
         used_ids = set()
+        preamble_text = _memory_preamble_text(content)
+        if preamble_text:
+            lessons.append(Lesson(
+                id=f"memory:{rel}#{_dedupe_slug('-preamble', used_ids)}",
+                source=source_label,
+                text=preamble_text,
+                dated=True,
+            ))
         for heading_text, body in sections:
             slug = _slugify(heading_text)
             slug_id = _dedupe_slug(slug, used_ids)
@@ -679,7 +744,6 @@ def _repo_name(repo):
         return pathlib.Path(repo).resolve().name
 
 
-
 def _require_commit(repo, sha):
     """R98 (fix round 3): raise ValueError if `sha` does not resolve to a commit in `repo`.
 
@@ -688,6 +752,13 @@ def _require_commit(repo, sha):
     call (each returns None on a non-zero `git show`, the same signal a genuinely-absent-at-this-
     commit path gives) and silently returned `[]`: a typo'd sha would have zeroed Task 9's
     denominator with nothing anywhere to say why.
+
+    Fix round 4 (item 5): returns the FULL commit hash it resolved, and callers use that hash for
+    every later git call. Round 3 verified the sha and then threw the hash away, so every
+    `git show`/`ls-tree` re-resolved the caller's string: for a symbolic `HEAD` or a branch name,
+    a peer committing mid-call in a shared checkout could tear one inventory across two commits.
+    The `^{commit}` peel is what makes an annotated tag resolve to its commit, and a tree or blob
+    sha raise here rather than pass verification.
     """
     proc = subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "--verify", f"{sha}^{{commit}}"],
@@ -698,6 +769,7 @@ def _require_commit(repo, sha):
         raise ValueError(
             f"{sha!r} does not resolve to a commit in {repo!r} (R98): {proc.stderr.strip()}"
         )
+    return proc.stdout.strip()
 
 
 def _require_unique_ids(lessons, context):
@@ -720,7 +792,6 @@ def _require_unique_ids(lessons, context):
     return lessons
 
 
-
 def lessons_at(repo, sha):
     """All lessons that existed at `sha` -- a pure function of the commit (every read goes
     through `git show`/`git ls-tree`, never the working tree).
@@ -738,9 +809,13 @@ def lessons_at(repo, sha):
 
     R99 (fix round 3): raises ValueError if the assembled list contains a duplicate id (see
     `_require_unique_ids`) just before returning.
+
+    Fix round 4 (item 5): `sha` is resolved ONCE, to the full commit hash `_require_commit`
+    returns, and that hash is what every later `git show`/`git ls-tree` receives. A symbolic
+    `sha` such as `HEAD` therefore cannot straddle a peer's mid-call commit.
     """
     repo = pathlib.Path(repo)
-    _require_commit(repo, sha)
+    sha = _require_commit(repo, sha)
     repo_name = _repo_name(repo)
     lessons = []
 
@@ -813,15 +888,19 @@ def undated_lessons(path, repo, sha):
     filesystem location -- so the SAME content read from different profile directories
     (`~/.claude`, `~/.claude-sdd`, `~/.claude-kat`) yields byte-identical `Lesson.id`s.
 
-    R98 (fix round 3): `_op_imperative_bodies` -> `_git_show` already raises (FileNotFoundError)
-    when `sha` does not resolve at all, for the same reason a genuinely-absent-at-that-sha path
-    raises -- `git show <sha>:<path>` cannot tell the two apart, and this function does not need
-    its own separate sha-resolution check the way `lessons_at` does (R98's own guard lives there).
+    R98 / fix round 4 (item 5): `sha` is resolved ONCE through `_require_commit`, the same
+    guard `lessons_at` uses, and the full hash it returns is what `_op_imperative_bodies` reads.
+    So an unresolvable `sha` raises ValueError (R98) here too. Before round 4 this function had
+    no sha check, and an unknown sha surfaced only as R84's FileNotFoundError from
+    `_op_imperative_bodies`, because `git show <sha>:<path>` cannot tell an unknown sha from an
+    absent path. For a resolvable sha whose tree lacks operator-rules.md, that FileNotFoundError
+    is still what is raised.
 
     R99 (fix round 3): raises ValueError if the assembled list contains a duplicate id (see
     `_require_unique_ids`) just before returning.
     """
     path = pathlib.Path(path)
+    sha = _require_commit(repo, sha)
     text = path.read_text()
     op_rule_bodies = _op_imperative_bodies(repo, sha)
 
@@ -832,4 +911,9 @@ def undated_lessons(path, repo, sha):
     lessons = []
     for lesson in _claude_md_lessons(stripped, "global-CLAUDE.md", "global-CLAUDE.md"):
         lessons.append(dataclasses.replace(lesson, dated=False))
+    # R99 backstop, UNREACHABLE today (fix round 4, item 6): every id above comes from ONE
+    # `_claude_md_lessons` call, whose heading slugs are unique across the file, whose lead
+    # slugs are unique within a section, and whose `_slugify` never emits `/` -- so no two ids
+    # can coincide (0 duplicates in 20,000 adversarial trials, fix-round-3 re-review). Kept as
+    # defense in depth; its predicate is unit-tested directly on `_require_unique_ids`.
     return _require_unique_ids(lessons, f"undated_lessons({path}, {repo}, {sha!r})")
