@@ -1338,6 +1338,16 @@ class GateItemTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 judge.run_gate(dry=False, complete=None, log_dir=None, **kwargs)
             self.assertIsNone(judge._CHANNEL)
+            # LOAD-BEARING: the spec's votes and population, so the R138 refusals (which run
+            # later) admit this input and only the log_dir guard can refuse it. With population
+            # None, R138 refused it first and the log_dir guard went untested (mutant Q5
+            # survived, fix round 1). A channel built here means the guard is gone.
+            never = mock.Mock(side_effect=AssertionError("a channel was built with no log dir"))
+            with mock.patch.object(judge, "CodexChannel", never), \
+                    self.assertRaisesRegex(ValueError, "needs log_dir"):
+                judge.run_gate(dry=False, complete=None, log_dir=None,
+                               **dict(kwargs, population=judge.GATE_POPULATION))
+            self.assertIsNone(judge._CHANNEL)
             reply = json.dumps({"is_correction": True, "origin_uuid": None, "is_decision_point": True,
                                 "is_mistake": True, "lessons": "uncovered", "lesson_outcomes": {},
                                 "detectability": "obtainable", "evidence_present_before": "no",
