@@ -9,6 +9,7 @@ closed: 2026-09-25
 opened: 2026-09-25
 owner: marius
 severity: low
+unverified: no guard fails when a direct run and test discovery disagree on the test count; only a comment keeps unittest.main() below the last TestCase.
 ---
 
 # Direct execution skips the new freeze regressions
@@ -25,7 +26,7 @@ This does not dispute the other session's reported 21-test run or its mutation k
 
 ## Expected correction
 
-Move the existing `if __name__ == '__main__': unittest.main()` after all test definitions. No fix applied in this review. Related: docs/issues/2026-09-25-codex-freeze-positive-count-guard.md. Cluster classification pending.
+Move the existing `if __name__ == '__main__': unittest.main()` after all test definitions. No fix applied in this review. Related: docs/issues/archive/2026-09-25-codex-freeze-positive-count-guard.md. Cluster classification pending.
 
 ## Fix
 
@@ -37,3 +38,10 @@ Move the existing `if __name__ == '__main__': unittest.main()` after all test de
 - Class: IC-3, `declared-not-wired`, whose members line names this file.
 
 **Not added:** a guard that fails when a direct run and discovery disagree on the test count. The fix makes the two agree today; nothing stops a future class being appended below the guard again, apart from the comment.
+
+## Fix provenance
+
+- **SHA:** `f0125e0e` (`experiments`)
+- **patch-id:** `f57b7cf16581abab25e3ae878ee25dc8cd7fe146`
+
+**Recorded 2026-09-28** by session `82cff72e`; the patch-id was re-derived from `f0125e0e` and matches. The direct run still reaches every test: `python3 -m pytest tests/test_stage2_synthetic.py` reported `21 passed` at HEAD (`fd0b4181`). **Not archived**, because the guard named under *Not added* above still does not exist, so nothing but a comment prevents a recurrence. The frontmatter `unverified:` carries that caveat where a query can read it.

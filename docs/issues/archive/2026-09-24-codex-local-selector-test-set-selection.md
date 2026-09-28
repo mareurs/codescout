@@ -1,13 +1,14 @@
 ---
-id: '9b128c319302592b'
+id: e5d326668615bbf7
 kind: bug
-status: fixed
+status: archived
 title: 'Codex review: local classifier plan uses held-out T to select C1'
 tags:
 - cluster/unclassified
 opened: 2026-09-24
 owner: marius
 severity: medium
+unverified: STANDING — the defect was a contradiction between two sections of a pre-registration and the fix is a text amendment, which no test can observe; verified by re-reading both sections after c061be8b.
 ---
 
 # Codex review: local classifier plan uses held-out T to select C1
@@ -37,3 +38,10 @@ Both conflicting sections were read directly. No model calls, training or permut
 **Verified** by reading both sections again after the amendment: the Stage 3 promise and the amended Stage 4 procedure now agree. No run existed to re-score, since Stages 2–4 have not started.
 
 **Class left `cluster/unclassified`, after looking.** The nearest class, `IC-11` (doc contradicted by code), requires a statement that was true when written and decayed; this contradiction was present from authoring, between two sections of one document. No other class claims a self-contradictory protocol.
+
+## Fix provenance
+
+- **SHA:** `c061be8b` (`experiments`)
+- **patch-id:** `aeb4cc2d4b059afd53ade49b8c13a18553cba66a`
+
+**Verified 2026-09-28, then archived** by session `82cff72e`. The patch-id was re-derived from `c061be8b` and matches the one recorded above. The defect was a contradiction between two sections of one document and the fix is a text amendment, so there is no regression test to run; the frontmatter `unverified:` records that as a standing limit rather than leaving it implied.

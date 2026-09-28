@@ -51,7 +51,7 @@ def row(set_, fold, source, gen, rule, text, sentence, label, rid, n):
 def check_menu_positives(train_rows: list[dict], menu: list[str], target: int = 50) -> dict[str, int]:
     """Positive rows per menu rule in the rows ACTUALLY WRITTEN to train, raising if any is
     under `target`. The earlier assertion compared pre-row item counts, so a row filter that
-    emptied train still passed (docs/issues/2026-09-25-codex-freeze-positive-count-guard.md)."""
+    emptied train still passed (docs/issues/archive/2026-09-25-codex-freeze-positive-count-guard.md)."""
     pos = {r: 0 for r in menu}
     for x in train_rows:
         if x["label"] == 1 and x["rule"] in pos:

@@ -51,6 +51,13 @@ So a per-site fix to the resync path, the one this file first named, would have 
 
 The running MCP server predates the fix. It takes effect after a release build (`./scripts/rb.sh`) and `/mcp` in each session; until then live ledgers still drift, and `reindex` repairs them.
 
+## Fix provenance
+
+- **SHA:** `6a6a321e` (`experiments`)
+- **patch-id:** `1fae1b1d51136476730eb4a9233b136c328649e7`
+
+Omitted when this record was archived; added the same day. The patch-id was derived from `6a6a321e` with `git show 6a6a321e | git patch-id --stable`.
+
 ## References
 
 - `src/librarian/catalog/augmentation.rs` (`update_entry`, `resync_snapshot_row`)

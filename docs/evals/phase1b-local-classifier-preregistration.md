@@ -203,7 +203,7 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
   *Corrected at registration:* the draft listed mining after the audit labelling, but the candidates are labelled in the same runs, so they are drawn first.
 
 - **Added after registration, 2026-09-26:** `phase1b/gen_codex_clean.py` (`58c91dad`), the Step 2 generator the registration did not commit. It implements the registered prompt and channel, edits no registered script, and has not run.
-- **Amended after registration, before any labelling, 2026-09-26:** `phase1b/run_labellers.py` (`14346eb4`, patch-id `c453deb0228aff223e47e6346ee778cdcab66d6f`), from a Codex preflight review (`docs/research/2026-09-26-codex-phase1b-labelling-preflight-review.md`; bugs `ea84bb940596ddf3`, `a7f3a7c8ad7d352a`).
+- **Amended after registration, before any labelling, 2026-09-26:** `phase1b/run_labellers.py` (`14346eb4`, patch-id `c453deb0228aff223e47e6346ee778cdcab66d6f`), from a Codex preflight review (`docs/research/2026-09-26-codex-phase1b-labelling-preflight-review.md`; bugs `5099ff75b5574f28`, `e26fe2d011bb2d0f`).
   - A terminal failure now stops pending batches in completion order; before, it went unseen behind a slower earlier batch.
   - An exclusive reservation refuses a relaunch; before, a second invocation re-ran every call and overwrote the first run's evidence.
   - It changes no prompt, item, retry budget or admission rule. It makes the registered "a second failure stops Step 1" and "one run" hold in the code.

@@ -1031,7 +1031,7 @@ If condition 1 fails, the agent labels are not admitted and Stage 2's mined rout
 
 **The review:** `docs/research/2026-09-25-codex-stage2-freeze-review.md`, at `d643c001`. It confirmed the hashes, the row targets and labels against their sources, the quarantine, and the top-up and re-audit selections. It found no source-group or 8-token overlap between train and the other sets.
 
-**One defect, verified by reproduction:** `docs/issues/2026-09-25-codex-freeze-positive-count-guard.md`, class IC-24.
+**One defect, verified by reproduction:** `docs/issues/archive/2026-09-25-codex-freeze-positive-count-guard.md`, class IC-24.
 
 - **What was wrong:** the freeze's assertion compared train-fold positive **items**, counted before rows are built, with `trainable.json`. This section described it as verifying frozen positive **rows**.
 - **The reproduction:** a probe that removed every positive train row in memory still exited 0, with **0** train positives written.

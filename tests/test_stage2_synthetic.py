@@ -114,7 +114,7 @@ def _rows(rule, pos, neg=0):
 
 
 class FreezeMenuGuard(unittest.TestCase):
-    """check_menu_positives counts WRITTEN train rows (docs/issues/2026-09-25-codex-freeze-positive-count-guard.md)."""
+    """check_menu_positives counts WRITTEN train rows (docs/issues/archive/2026-09-25-codex-freeze-positive-count-guard.md)."""
 
     def test_exactly_the_target_passes(self):
         self.assertEqual(fz.check_menu_positives(_rows("a", 50), ["a"]), {"a": 50})

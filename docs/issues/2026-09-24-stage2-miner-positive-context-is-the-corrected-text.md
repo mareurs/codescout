@@ -1,12 +1,13 @@
 ---
 kind: bug
 status: fixed
-title: 'Stage 2 miner stored the corrected text as the positive sentence''s context'
+title: Stage 2 miner stored the corrected text as the positive sentence's context
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
 opened: 2026-09-24
 owner: marius
 severity: high
+unverified: 'no regression test, and two residuals are open: 147 positives lie outside their context_before, and 6 rows already carry the twin on the old side (re-checked 2026-09-28: no file under tests/ names mine_pairs.py or context_before).'
 ---
 
 # Stage 2 miner stored the corrected text as the positive sentence's context
@@ -46,3 +47,10 @@ Both must be handled before any fold is built.
 **Class `cluster/value-correct-in-a-frame-its-name-does-not-state` (IC-24).** The paragraph was exactly right for the corrected sentence, the twin. It was stored under a name, beside the positive, that states the positive's frame.
 
 **Not archived:** no regression test, and the two residuals are open.
+
+## Fix provenance
+
+- **SHA:** `a63adc78` (`experiments`)
+- **patch-id:** `2c568203f402597d7f6958b8dd616225a1646772`
+
+**Recorded 2026-09-28** by session `82cff72e`; the patch-id was re-derived from `a63adc78` and matches. **Still not archived**, for the reasons above: no file under `tests/` names `mine_pairs.py` or `context_before` (re-checked the same day), and both residuals are unaddressed. The frontmatter `unverified:` carries that caveat where a query can read it.

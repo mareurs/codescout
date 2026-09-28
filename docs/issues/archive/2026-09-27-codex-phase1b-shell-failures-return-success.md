@@ -38,6 +38,13 @@ No models, training jobs, held-out evaluations, or full Rust gate rerun. **Commi
 
 **Verified 2026-09-28, then archived** by the integrating session (`82cff72e`). `./scripts/gate.sh` ran in a leased slot and returned `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`. That covers the repository and never runs this fix's own test, which is Python. So the regression suite was run separately at HEAD (`fd6291a2`): `python3 -m unittest discover -s tests -p test_phase1b_stage2_shell.py` reported `Ran 8 tests ... OK`.
 
+## Fix provenance
+
+- **SHA:** `c991f226` (`experiments`)
+- **patch-id:** `f0bd8c00dafbb5ece2e7e98a445af9f9d7f9559a`
+
+The pair was stated in prose above when this record was archived; it is restated here in the shape `doctor` reads. The patch-id was re-derived from `c991f226` on 2026-09-28 and matches.
+
 ## References
 
 - `docs/evals/data/2026-09-24-rule-tell/phase1b/stage2/lanes.sh`

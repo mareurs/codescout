@@ -57,7 +57,7 @@ A slow batch 0 delays observation of a twice-failed batch 1. The worker that fai
 
 **Action:** bounded, failure-aware scheduling with a shared terminal-stop signal; preserve item order only when assembling results. Running calls may finish; pending work must not start after terminal failure is recorded. Add the blocked-earlier / failed-later regression.
 
-Bug: `docs/issues/2026-09-26-codex-labeller-stop-ordering.md` (`ea84bb940596ddf3`).
+Bug: `docs/issues/archive/2026-09-26-codex-labeller-stop-ordering.md` (`5099ff75b5574f28`).
 
 ### P2 — relaunch repeats model calls and overwrites run evidence
 
@@ -67,7 +67,7 @@ Bug: `docs/issues/2026-09-26-codex-labeller-stop-ordering.md` (`ea84bb940596ddf3
 
 **Action:** refuse reuse before calling either model, reserve the destination exclusively, and preserve attempt history. Resumption, if added, must not reset the registered retry budget or discard accepted work. There is no reason to change or redraw the committed inputs.
 
-Bug: `docs/issues/2026-09-26-codex-labeller-run-overwrite.md` (`a7f3a7c8ad7d352a`).
+Bug: `docs/issues/archive/2026-09-26-codex-labeller-run-overwrite.md` (`e26fe2d011bb2d0f`).
 
 ### Measurement caveat — 412 versus 412 does not establish absence of shared context
 

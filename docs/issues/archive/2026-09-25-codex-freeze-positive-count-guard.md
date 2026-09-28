@@ -1,7 +1,7 @@
 ---
-id: '65605f410dde3474'
+id: fe4baee34fb48c15
 kind: bug
-status: fixed
+status: archived
 title: 'Codex: Stage 2 freeze asserts pre-segmentation counts instead of emitted positives'
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
@@ -52,3 +52,10 @@ Found by the review, whose probe was reproduced by the registering session (sess
 One mutation per guard site, each run in an isolated worktree, each killed: counting negatives (2 fail), moving the boundary by one (3 fail), and counting off-menu rules (1 fail).
 
 **Not unit-tested:** the per-rule reconciliation assert inside `main`. It is exercised only by the real freeze run, which passes it for all 14 menu rules.
+
+## Fix provenance
+
+- **SHA:** `da67db02` (`experiments`)
+- **patch-id:** `99a0f1838c3548255280b22d3ed134fb018fe7e6`
+
+**Verified 2026-09-28, then archived** by session `82cff72e`. The patch-id was re-derived from `da67db02` and matches the one recorded above. `./scripts/gate.sh` was green earlier the same day at `6a6a321e` (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`), whose history contains `da67db02`; that gate runs no Python. So the regression suite was run separately at HEAD (`fd0b4181`): `python3 -m pytest tests/test_stage2_synthetic.py` reported `21 passed`, which includes the five `FreezeMenuGuard` cases.

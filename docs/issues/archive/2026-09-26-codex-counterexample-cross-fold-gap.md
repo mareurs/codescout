@@ -1,7 +1,7 @@
 ---
-id: '8c17b1dbcf88a097'
+id: 4fc5455c19f81132
 kind: bug
-status: fixed
+status: archived
 title: 'Codex: counterexample miner omits cross-fold overlap among new candidates'
 tags:
 - cluster/guard-narrower-than-its-name
@@ -68,3 +68,10 @@ Nine mutations were run, each in an isolated worktree through `scripts/mutation-
 | fold priority reversed | 3 |
 | final check off | 2 |
 | final check ignoring frozen rows | 1 |
+
+## Fix provenance
+
+- **SHA:** `96b52f0c` (`experiments`)
+- **patch-id:** `ee65c6ff9f755e52e96d05b51b2db8efada7aef8`
+
+**Verified 2026-09-28, then archived** by session `82cff72e`. The patch-id was re-derived from `96b52f0c` and matches the one recorded above. `./scripts/gate.sh` was green earlier the same day at `6a6a321e` (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`), whose history contains `96b52f0c`; that gate runs no Python. So the regression suite was run separately at HEAD (`fd0b4181`): `python3 -m pytest tests/test_phase1b_mining.py` reported `22 passed`, the count the Tests section records.

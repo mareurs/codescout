@@ -8,6 +8,7 @@ tags:
 opened: 2026-09-24
 owner: marius
 severity: medium
+unverified: 'no regression test pins the pair count: mine_pairs.py has no test suite, and no file under tests/ names it (re-checked 2026-09-28).'
 ---
 
 # Codex review: mined-pair shingle census omits document pairs
@@ -37,3 +38,10 @@ No folds or training are asserted to exist. This is a wrong published census, no
 **Class `cluster/value-correct-in-a-frame-its-name-does-not-state` (IC-24).** The 20 is exactly right as the number of *star edges* that connect the overlapping documents, which is enough for grouping them into folds. It was published under the name "document pairs sharing a shingle", a different frame. Not `IC-20`: nothing stopped early, and the true count was always computable.
 
 **Not archived:** no regression test pins the pair count; the script is a candidate-build tool with no test suite.
+
+## Fix provenance
+
+- **SHA:** `a63adc78` (`experiments`)
+- **patch-id:** `2c568203f402597d7f6958b8dd616225a1646772`
+
+**Recorded 2026-09-28** by session `82cff72e`; the patch-id was re-derived from `a63adc78` and matches. **Still not archived**, for the reason above: no file under `tests/` names `mine_pairs.py` or its pair count (re-checked the same day). The frontmatter `unverified:` carries that caveat where a query can read it.

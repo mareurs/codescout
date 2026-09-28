@@ -1,7 +1,7 @@
 ---
-id: ea84bb940596ddf3
+id: 5099ff75b5574f28
 kind: bug
-status: fixed
+status: archived
 title: 'Codex: ordered labeller results delay terminal failure and start pending calls'
 tags:
 - codex
@@ -70,6 +70,13 @@ Implemented in the shared working tree. `run_claude_batches` holds at most the w
 `tests/test_phase1b_audit.py::LabellerMain` now exercises the real main path with fake models, including a slow first batch, later terminal failure, suppression of an in-flight batch's retry, preserved output order and exit 4. The complete Python audit file passes 43 tests. Eight applied mutations against the nine new tests were all killed, including reintroducing the ordered-map scheduler. Evidence: `docs/evals/data/2026-09-24-rule-tell/phase1b/codex-preflight-review/fix-verification.json`.
 
 **Re-verified at commit with `scripts/mutation-probe.sh`** (isolated worktrees, not in-memory): the worker-side stop signal survived, because the controller's `finally` also sets it and both tests released the blocked batch only after the controller had seen the failure. A seam test now holds the controller in its first `wait` (`test_workers_see_a_terminal_failure_before_the_controller_does`, 5 of 5 passes, mutation killed). The item-order test was racy (the ordering mutation survived one run in two) and now releases batch 0 on batch 2's start (3 of 3 kills). The refill loop's stop check survives by design, commented in the code: every attempt re-checks the signal, so it can save a submission but never a model call. 45 tests; 59 of 60 mutations killed over the Step 1-2 scripts.
+
+## Fix provenance
+
+- **SHA:** `14346eb4` (`experiments`)
+- **patch-id:** `c453deb0228aff223e47e6346ee778cdcab66d6f`
+
+**Verified 2026-09-28, then archived** by session `82cff72e`. The patch-id was re-derived from `14346eb4` and matches the one recorded above. `./scripts/gate.sh` was green earlier the same day at `6a6a321e` (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`), whose history contains `14346eb4`; that gate runs no Python. So the regression suite was run separately at HEAD (`fd0b4181`): `python3 -m pytest tests/test_phase1b_audit.py` reported `45 passed`, the count the Tests section records.
 
 ## Workarounds
 

@@ -31,7 +31,7 @@ From docs/evals/data/2026-09-24-rule-tell/:
 
 ### High priority before training: held-out T is also a selection set
 
-Stage 3 in docs/evals/phase1-local-classifier-preregistration.md prohibits selecting on T; Stage 4 chooses the C1 local arm by T any-fire rate. Use validation for this choice, freeze it, and then inspect T. Filed as docs/issues/2026-09-24-codex-local-selector-test-set-selection.md. This is a prospective protocol flaw; no trained result is alleged contaminated.
+Stage 3 in docs/evals/phase1-local-classifier-preregistration.md prohibits selecting on T; Stage 4 chooses the C1 local arm by T any-fire rate. Use validation for this choice, freeze it, and then inspect T. Filed as docs/issues/archive/2026-09-24-codex-local-selector-test-set-selection.md. This is a prospective protocol flaw; no trained result is alleged contaminated.
 
 ### High priority before data freeze: a correction diff does not supply every negative label
 

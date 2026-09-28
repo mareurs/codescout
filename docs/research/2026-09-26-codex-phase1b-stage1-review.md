@@ -19,7 +19,7 @@ Actual --count-only execution reproduces every draft eligible count, including 2
 
 One in-memory mutation disabled all miner shingle checks. The existing 8-test mining module remained green: one applied mutation, one survivor. It currently exercises cue choice and clean-text consistency, not the filtering pipeline.
 
-Filed: docs/issues/2026-09-26-codex-counterexample-cross-fold-gap.md (`8c17b1dbcf88a097`). Final augmented-fold validation plus a deterministic collision policy and a new-versus-new regression are needed before mining/admission is relied on.
+Filed: docs/issues/archive/2026-09-26-codex-counterexample-cross-fold-gap.md (`4fc5455c19f81132`). Final augmented-fold validation plus a deterministic collision policy and a new-versus-new regression are needed before mining/admission is relied on.
 
 ## Stage 1 results independently reproduced offline
 

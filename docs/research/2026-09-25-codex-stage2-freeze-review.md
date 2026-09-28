@@ -17,7 +17,7 @@ Reviewed campaign changes after `71125e36` through `d643c001684fe675fc682acffee6
 
 Observed rather than inferred: baseline freeze redirected to /tmp returned 0 and reproduced all six committed JSONL files byte for byte. An in-memory mutation dropping every positive train row also returned 0, emitted zero train positives, and passed the assertion. **One candidate mutation applied; one survived.** No shared code or data edited. Fix the check on emitted rows, explicitly reconcile segmentation drops, and correct the preregistration claim before relying on this gate.
 
-Filed: docs/issues/2026-09-25-codex-freeze-positive-count-guard.md (`65605f410dde3474`).
+Filed: docs/issues/archive/2026-09-25-codex-freeze-positive-count-guard.md (`fe4baee34fb48c15`).
 
 ## What the offline measurements establish
 

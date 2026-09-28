@@ -1,7 +1,7 @@
 ---
-id: a7f3a7c8ad7d352a
+id: e26fe2d011bb2d0f
 kind: bug
-status: fixed
+status: archived
 title: 'Codex: labeller relaunch spends again and overwrites prior evidence'
 tags:
 - codex
@@ -66,6 +66,13 @@ Implemented `reserve_run`: refuse any prior raw directory, run header or label f
 The new LabellerMain tests cover every prior artifact class, nested entry while a run is in progress, and a controlled race where both starters first observe no header. They require zero model calls on refusal and preservation of prior evidence. The complete Python audit file passes 43 tests. All eight applied mutations against the nine new tests were killed, including skipped reservation and non-exclusive creation; saved in `docs/evals/data/2026-09-24-rule-tell/phase1b/codex-preflight-review/fix-verification.json`.
 
 **Re-verified at commit with `scripts/mutation-probe.sh`:** exclusive creation of the labels file survived, because the reservation already refuses labels present at the start. A new test plants a labels file mid-run (`test_labels_are_never_overwritten_even_when_one_appears_mid_run`); the mutation is now killed. 45 tests; 59 of 60 mutations killed over the Step 1-2 scripts.
+
+## Fix provenance
+
+- **SHA:** `14346eb4` (`experiments`)
+- **patch-id:** `c453deb0228aff223e47e6346ee778cdcab66d6f`
+
+**Verified 2026-09-28, then archived** by session `82cff72e`. The patch-id was re-derived from `14346eb4` and matches the one recorded above. `./scripts/gate.sh` was green earlier the same day at `6a6a321e` (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`), whose history contains `14346eb4`; that gate runs no Python. So the regression suite was run separately at HEAD (`fd0b4181`): `python3 -m pytest tests/test_phase1b_audit.py` reported `45 passed`, the count the Tests section records.
 
 ## Workarounds
 
