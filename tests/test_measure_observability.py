@@ -93,20 +93,47 @@ def _interrupt_entry(uuid, ts, sid):
 
 # R61: a bounds-less manifest used to resolve both windows to (None, None), which zeroed every
 # window-gated field regardless of real data -- confirmed a real bug in the round-0 fixture
-# helper. Default both windows wide open so a fixture that doesn't care about window bounds
-# still gets real, non-spuriously-downgraded counts.
+# helper. R111 (Task 14): coverage() now RAISES unless decision.end == retained.end ==
+# floor(created_utc) + 1 s and decision is exactly 7 days, so the default is what
+# finalize_bounds writes for the fixture's created_utc (2026-09-26T00:00:00Z), with retained
+# opened back to 2000. LOAD-BEARING: fixture data must sit in [2026-09-19T00:00:01Z,
+# 2026-09-26T00:00:01Z) to count in the decision window, and before 2026-09-26T00:00:01Z at all.
+_DEFAULT_CREATED_UTC = "2026-09-26T00:00:00Z"
 _DEFAULT_BOUNDS = {
-    "retained": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2099-01-01T00:00:00Z"},
-    "decision": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2099-01-01T00:00:00Z"},
+    "retained": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2026-09-26T00:00:01Z"},
+    "decision": {"start_utc": "2026-09-19T00:00:01Z", "end_utc": "2026-09-26T00:00:01Z"},
 }
 
 
-def _make_corpus(tmp_path, repos=None, bounds=None):
+def _valid_bounds(end_utc, retained_start="2000-01-01T00:00:00Z"):
+    """R111-valid windows ending at `end_utc` (a whole-second "...Z"): retained =
+    [retained_start, end), decision = the 7 days before end. _make_corpus derives the matching
+    created_utc (end - 1 s) from them."""
+    end = datetime.strptime(end_utc, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return {
+        "retained": {"start_utc": retained_start, "end_utc": end_utc},
+        "decision": {
+            "start_utc": (end - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "end_utc": end_utc,
+        },
+    }
+
+
+def _make_corpus(tmp_path, repos=None, bounds=None, created_utc=None):
+    """A hand-built manifest. With `bounds` and no `created_utc`, created_utc is derived as
+    retained.end - 1 s, so floor(created_utc) + 1 s == retained.end (R111); a test of a WRONG
+    window passes `created_utc` explicitly."""
     corpus_dir = tmp_path / "corpus"
     (corpus_dir / "manifest.json").parent.mkdir(parents=True, exist_ok=True)
+    if bounds is None:
+        bounds = _DEFAULT_BOUNDS
+        created_utc = created_utc or _DEFAULT_CREATED_UTC
+    elif created_utc is None:
+        end = datetime.strptime(bounds["retained"]["end_utc"], "%Y-%m-%dT%H:%M:%SZ")
+        created_utc = (end - timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     manifest = {
-        "corpus_id": "c-test", "created_utc": "2026-09-26T00:00:00Z",
-        "bounds": bounds if bounds is not None else _DEFAULT_BOUNDS,
+        "corpus_id": "c-test", "created_utc": created_utc,
+        "bounds": bounds,
         # R70: render_map reads counts.usage_rows with a subscript, so a fixture manifest must
         # carry it; freeze-built fixtures (ProvenanceHeader, FinalizeBounds) carry real counts.
         "files": {}, "counts": {"transcripts": 0, "subagent_transcripts": 0, "usage_rows": 0},
@@ -431,10 +458,11 @@ class BaseTableMatchesRuling(unittest.TestCase):
 
 class ExclusionsMismatchRaises(unittest.TestCase):
     def test_mismatch_between_recomputed_and_persisted_exclusions_raises(self):
-        # join.SPEC_EXCLUDED_SIDS' sole member is this very session's own sid -- R44's spec-level
-        # force-exclude. Forcing it KEPT at build time (excluded_sids=set()) disagrees with
-        # coverage()'s hardcoded recompute, which always uses the real join.SPEC_EXCLUDED_SIDS.
-        spec_sid = next(iter(join.SPEC_EXCLUDED_SIDS))
+        # join.SPEC_EXCLUDED_SIDS holds this very session's own sid (R44's spec-level
+        # force-exclude; R106 added the review session). Forcing it KEPT at build time
+        # (excluded_sids=set()) disagrees with coverage()'s hardcoded recompute, which always
+        # uses the real join.SPEC_EXCLUDED_SIDS.
+        spec_sid = sorted(join.SPEC_EXCLUDED_SIDS)[0]
         with tempfile.TemporaryDirectory() as tmp:
             corpus_dir = _make_corpus(pathlib.Path(tmp))
             proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
@@ -620,10 +648,7 @@ class MissingCoverageFieldRaises(unittest.TestCase):
 class R61RetainedWindowDerivedFromData(unittest.TestCase):
     def test_retained_start_after_earliest_entry_raises(self):
         with tempfile.TemporaryDirectory() as tmp:
-            bounds = {
-                "retained": {"start_utc": "2026-09-25T00:00:00Z", "end_utc": "2099-01-01T00:00:00Z"},
-                "decision": {"start_utc": "2026-09-25T00:00:00Z", "end_utc": "2099-01-01T00:00:00Z"},
-            }
+            bounds = _valid_bounds("2026-09-27T00:00:00Z", retained_start="2026-09-25T00:00:00Z")
             corpus_dir = _make_corpus(pathlib.Path(tmp), bounds=bounds)
             proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
             _write_lines(proj / "sid1.jsonl", [
@@ -637,10 +662,7 @@ class R61RetainedWindowDerivedFromData(unittest.TestCase):
 
     def test_observed_ts_after_retained_end_raises(self):
         with tempfile.TemporaryDirectory() as tmp:
-            bounds = {
-                "retained": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2026-09-20T00:00:00Z"},
-                "decision": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2026-09-20T00:00:00Z"},
-            }
+            bounds = _valid_bounds("2026-09-20T00:00:00Z")
             corpus_dir = _make_corpus(pathlib.Path(tmp), bounds=bounds)
             proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
             _write_lines(proj / "sid1.jsonl", [
@@ -656,10 +678,7 @@ class R61RetainedWindowDerivedFromData(unittest.TestCase):
         # R71: the window is half-open, so a ts EQUAL to retained.end_utc is outside it. A
         # closed-interval check (`>` instead of `>=`) passes this fixture silently.
         with tempfile.TemporaryDirectory() as tmp:
-            bounds = {
-                "retained": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2026-09-20T10:00:00Z"},
-                "decision": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2026-09-20T10:00:00Z"},
-            }
+            bounds = _valid_bounds("2026-09-20T10:00:00Z")
             corpus_dir = _make_corpus(pathlib.Path(tmp), bounds=bounds)
             proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
             _write_lines(proj / "sid1.jsonl", [
@@ -679,10 +698,8 @@ class DecisionBearingWindowDowngrade(unittest.TestCase):
 
     def test_decision_window_downgrade_for_mistakes(self):
         with tempfile.TemporaryDirectory() as tmp:
-            bounds = {
-                "retained": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2099-01-01T00:00:00Z"},
-                "decision": {"start_utc": "2026-09-25T00:00:00Z", "end_utc": "2026-09-26T00:00:00Z"},
-            }
+            # decision = [2026-09-28, 2026-10-05): the 09-20 row is retained-only.
+            bounds = _valid_bounds("2026-10-05T00:00:00Z")
             corpus_dir = _make_corpus(pathlib.Path(tmp), bounds=bounds)
             proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
             _write_lines(proj / "sid1.jsonl", [
@@ -701,10 +718,8 @@ class DecisionBearingWindowDowngrade(unittest.TestCase):
 
     def test_retained_window_gates_non_mistakes_outcomes(self):
         with tempfile.TemporaryDirectory() as tmp:
-            bounds = {
-                "retained": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2099-01-01T00:00:00Z"},
-                "decision": {"start_utc": "2026-09-25T00:00:00Z", "end_utc": "2026-09-26T00:00:00Z"},
-            }
+            # decision = [2026-09-28, 2026-10-05): the 09-20 row is retained-only.
+            bounds = _valid_bounds("2026-10-05T00:00:00Z")
             corpus_dir = _make_corpus(pathlib.Path(tmp), bounds=bounds)
             proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
             _write_lines(proj / "sid1.jsonl", [
@@ -770,7 +785,7 @@ class TransferDeliveryFilterMembers(unittest.TestCase):
 
 class R64SwapFixtureRaises(unittest.TestCase):
     def test_swap_fixture_raises_on_turn_sid_not_subset_of_kept(self):
-        spec_sid = next(iter(join.SPEC_EXCLUDED_SIDS))
+        spec_sid = sorted(join.SPEC_EXCLUDED_SIDS)[0]
         with tempfile.TemporaryDirectory() as tmp:
             corpus_dir = _make_corpus(pathlib.Path(tmp))
             proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
@@ -782,6 +797,13 @@ class R64SwapFixtureRaises(unittest.TestCase):
             ])
             events_db = pathlib.Path(tmp) / "events.db"
             join.build_events(corpus_dir, events_db, excluded_sids={"other"})
+            # R106's manifest check would refuse this swap FIRST (the manifest records the
+            # build's {other} exclusion). Record the recomputed map instead, so every other guard
+            # admits the input and only R64's subset check can fire.
+            transcripts.write_exclusions(
+                corpus_dir,
+                transcripts.exclusions(transcripts.sessions(corpus_dir), join.SPEC_EXCLUDED_SIDS),
+            )
             with self.assertRaises(ValueError) as ctx:
                 observability.coverage(events_db, corpus_dir)
             self.assertIn(
@@ -916,7 +938,7 @@ class SubagentTurnsRealNonzero(unittest.TestCase):
 
 class UsageRowsUnmappedRendersRulingSentence(unittest.TestCase):
     def test_unmapped_usage_rows_render_the_ruling_sentence(self):
-        spec_sid = next(iter(join.SPEC_EXCLUDED_SIDS))
+        spec_sid = sorted(join.SPEC_EXCLUDED_SIDS)[0]
         with tempfile.TemporaryDirectory() as tmp:
             corpus_dir = _make_corpus(pathlib.Path(tmp))
             proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
@@ -1046,7 +1068,7 @@ class SkippedTimestampDoesNotCrash(unittest.TestCase):
 
 class ExcludedBySpecDetail(unittest.TestCase):
     def test_a_spec_sid_present_in_two_profiles_is_explained(self):
-        spec_sid = next(iter(join.SPEC_EXCLUDED_SIDS))
+        spec_sid = sorted(join.SPEC_EXCLUDED_SIDS)[0]
         with tempfile.TemporaryDirectory() as tmp:
             corpus_dir = _make_corpus(pathlib.Path(tmp))
             proj_sdd = _session_dir(corpus_dir, "00-.claude-sdd", "p")
@@ -1092,10 +1114,8 @@ class SessionsPerProjectWindowMembership(unittest.TestCase):
 
     def test_membership_is_ts_based_not_vacuously_true(self):
         with tempfile.TemporaryDirectory() as tmp:
-            bounds = {
-                "retained": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2099-01-01T00:00:00Z"},
-                "decision": {"start_utc": "2026-09-25T00:00:00Z", "end_utc": "2026-09-26T00:00:00Z"},
-            }
+            # decision = [2026-09-19, 2026-09-26): 09-25 is inside it, 09-01 retained-only.
+            bounds = _valid_bounds("2026-09-26T00:00:00Z")
             corpus_dir = _make_corpus(pathlib.Path(tmp), bounds=bounds)
             proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
             _write_lines(proj / "sid-in-decision.jsonl", [
@@ -1254,17 +1274,17 @@ _NO_MARKER_OUTPUT = json.dumps([{"type": "text", "text": "no markers here"}])
 # The rich fixture's windows. LOAD-BEARING: retained.start_utc EQUALS the earliest KEPT top-level
 # entry (q1's), while the spec-excluded session is earlier still -- so counting excluded sessions
 # into the earliest-entry scan (mutant N7) trips R61's start check.
-_RICH_BOUNDS = {
-    "retained": {"start_utc": "2026-09-19T12:00:00Z", "end_utc": "2026-09-23T00:00:00Z"},
-    "decision": {"start_utc": "2026-09-21T00:00:00Z", "end_utc": "2026-09-22T00:00:00Z"},
-}
+# R111: decision = the 7 days before retained.end, so the end is 2026-09-28 to make decision =
+# [2026-09-21, 2026-09-28) -- LOAD-BEARING: no fixture row is later than 2026-09-21T13:00:30Z,
+# so the decision window holds exactly the 2026-09-21 rows, as it did when it was one day long.
+_RICH_BOUNDS = _valid_bounds("2026-09-28T00:00:00Z", retained_start="2026-09-19T12:00:00Z")
 
 
 def _rich_corpus(tmp):
     """One fixture that reaches every appendix row with a known, non-trivial value. Returns
     (corpus_dir, events_db, spec_sid). Every count asserted in AppendixRenderedIntegrity is
     derived in the comments here."""
-    spec_sid = next(iter(join.SPEC_EXCLUDED_SIDS))
+    spec_sid = sorted(join.SPEC_EXCLUDED_SIDS)[0]
     corpus_dir = _make_corpus(pathlib.Path(tmp), bounds=_RICH_BOUNDS)
     p = _session_dir(corpus_dir, "00-.claude-sdd", "p")
     q = _session_dir(corpus_dir, "01-.claude-kat", "q")
@@ -1412,8 +1432,9 @@ class AppendixRenderedIntegrity(unittest.TestCase):
                 ["project", "retained", "decision"], ["p", "1", "1"], ["q", "1", "0"],
             ])
             self.assertEqual(_prose(body), [
-                "Window: both, as columns; a kept session is in a window if any of its turns' "
-                "ts is.",
+                "Window: both, as columns. Each count is the number of sessions with any turn in "
+                "the window (descriptive; the go/no-go denominator is sessions with ≥1 "
+                "decision point, spec § Scope).",
             ])
 
             body = sections["### A1.6 -- exclusions by reason"]
@@ -1424,14 +1445,16 @@ class AppendixRenderedIntegrity(unittest.TestCase):
                 "Window: retained, as every session in the corpus.",
                 f"excluded-by-spec, data-wise: sid {spec_sid} present in 1 profile(s): "
                 f".claude-sdd/{spec_sid}",
+                "entrypoint_changed (kept sessions whose first and last entrypoint differ; each "
+                "keeps its first entrypoint's class): 0.",
             ])
 
             body = sections["### A1.6 -- turns by kind"]
             self.assertEqual(_table_rows(body), [
                 ["kind", "count"],
                 ["assistant_text", "2"], ["assistant_thinking", "0"], ["delegation", "1"],
-                ["interrupt", "1"], ["meta", "0"], ["prompt", "2"], ["tool_result", "0"],
-                ["tool_use", "5"],
+                ["interrupt", "1"], ["meta", "0"], ["prompt", "2"], ["rejection", "0"],
+                ["tool_result", "0"], ["tool_use", "5"],
             ])
             self.assertEqual(_prose(body), [whole_db])
 
@@ -1452,8 +1475,8 @@ class AppendixRenderedIntegrity(unittest.TestCase):
             windows = sections["## Windows"]
             self.assertEqual(_prose(windows), [
                 "Both windows are half-open, [start, end).",
-                "- retained: 2026-09-19T12:00:00Z to 2026-09-23T00:00:00Z",
-                "- decision: 2026-09-21T00:00:00Z to 2026-09-22T00:00:00Z",
+                "- retained: 2026-09-19T12:00:00Z to 2026-09-28T00:00:00Z",
+                "- decision: 2026-09-21T00:00:00Z to 2026-09-28T00:00:00Z",
                 "Data span observed across turns, tool_events and deliveries: "
                 "2026-09-19T12:00:00.000Z to 2026-09-21T13:00:30.000Z.",
                 "Rows skipped from every window, day and span for a NULL or empty ts -- "
@@ -1507,8 +1530,8 @@ class AppendixRenderedIntegrity(unittest.TestCase):
                 "signal/request": ("needs adjudication",) + na,
                 "delivery/action": ("measurable now", "4", "4", "all",
                                     "deliveries whose engine_or_hook names a transfer-carrying "
-                                    "engine (TRANSFER_DELIVERY_MARKERS: operator-rule, get_guide, "
-                                    f"operator-rules, guide-sections, session-opener), {unit}"),
+                                    "engine (TRANSFER_DELIVERY_MARKERS: get_guide, guide-sections, "
+                                    f"operator-rule, operator-rules, session-opener), {unit}"),
                 "observed use": ("needs adjudication",) + na,
                 "checked outcome": ("needs adjudication",) + na,
                 "rediscovery": ("needs adjudication",) + na,
@@ -1610,31 +1633,31 @@ class DeliveredItemsNotRows(unittest.TestCase):
 
 class HalfOpenWindows(unittest.TestCase):
     """R71: every window membership test is half-open, [start, end): a row AT the decision
-    window's start is in it, a row AT its end is not -- for turns, tool_events, deliveries and
-    sessions-per-project alike."""
+    window's start is in it, a row just before it is not -- for turns, tool_events, deliveries
+    and sessions-per-project alike. R111 makes decision.end == retained.end, so no row can sit
+    AT the decision end without tripping R61's end raise (R61RetainedWindowDerivedFromData
+    pins that); the end half of `_in_window` is covered there, not here."""
 
-    def test_start_is_inside_and_end_is_outside(self):
+    def test_start_is_inside_and_just_before_it_is_outside(self):
         with tempfile.TemporaryDirectory() as tmp:
-            bounds = {
-                "retained": {"start_utc": "2026-09-20T00:00:00Z", "end_utc": "2026-09-23T00:00:00Z"},
-                "decision": {"start_utc": "2026-09-21T00:00:00Z", "end_utc": "2026-09-22T00:00:00Z"},
-            }
+            # decision = [2026-09-21T00:00:00Z, 2026-09-28T00:00:00Z).
+            bounds = _valid_bounds("2026-09-28T00:00:00Z", retained_start="2026-09-20T00:00:00Z")
             corpus_dir = _make_corpus(pathlib.Path(tmp), bounds=bounds)
             proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
             _write_lines(proj / "s1.jsonl", [
                 _assistant_text_entry("a-start", "2026-09-21T00:00:00Z", "s1"),
                 _agent_tool_use_entry("t-start", "2026-09-21T00:00:00Z", "s1"),
-                _assistant_text_entry("a-end", "2026-09-22T00:00:00Z", "s1"),
-                _agent_tool_use_entry("t-end", "2026-09-22T00:00:00Z", "s1"),
+                _assistant_text_entry("a-before", "2026-09-20T23:59:59.999Z", "s1"),
+                _agent_tool_use_entry("t-before", "2026-09-20T23:59:59.999Z", "s1"),
             ])
-            # s2's ONLY turn is exactly at the decision end: in retained, not in decision.
+            # s2's ONLY turn is 1 ms before the decision start: in retained, not in decision.
             _write_lines(proj / "s2.jsonl", [
-                _entry("s2-p", "2026-09-22T00:00:00Z", "s2", content="late"),
+                _entry("s2-p", "2026-09-20T23:59:59.999Z", "s2", content="early"),
             ])
             _write_usage_db(corpus_dir, [
                 {"cc_session_id": "s1", "called_at": "2026-09-21 00:00:00",
                  "output_json": _OP_RULE_OUTPUT},
-                {"cc_session_id": "s1", "called_at": "2026-09-22 00:00:00",
+                {"cc_session_id": "s1", "called_at": "2026-09-20 23:59:59.999",
                  "output_json": _OP_RULE_OUTPUT},
             ])
             events_db = pathlib.Path(tmp) / "events.db"
@@ -1648,7 +1671,7 @@ class HalfOpenWindows(unittest.TestCase):
                 )
             self.assertEqual(cov["sessions_per_project"]["p"], {"retained": 2, "decision": 1})
             # The top-level subsets ride the same predicate: a-start is top-level and in the
-            # decision window; s2-p (a prompt AT the end) is retained-only.
+            # decision window; s2-p (a prompt just before the start) is retained-only.
             self.assertEqual(
                 cov["cell_extra"][("mistakes", "opportunity")],
                 "of which top-level -- decision: 1, retained: 2",
@@ -1657,6 +1680,7 @@ class HalfOpenWindows(unittest.TestCase):
                 cov["cell_extra"][("mistakes", "signal/request")],
                 "of which top-level -- decision: 0, retained: 1",
             )
+
 
 
 class StrictReadsRaise(unittest.TestCase):
@@ -1962,6 +1986,8 @@ class FinalizeBounds(unittest.TestCase):
             self.assertEqual(cov["earliest_kept_top_level"]["ts"], "2026-09-20T10:00:00Z")
 
             # coverage() checks the SAME earliest-entry value: a start one second later raises.
+            # Re-read the manifest: build_events has since recorded its exclusions in it (R106).
+            on_disk = _load_manifest(corpus_dir)
             on_disk["bounds"]["retained"]["start_utc"] = "2026-09-20T10:00:01Z"
             (corpus_dir / "manifest.json").write_text(json.dumps(on_disk, indent=2, sort_keys=True))
             with self.assertRaises(ValueError) as ctx:
@@ -2034,10 +2060,7 @@ reviewer's probe_before_start.py shape: a KEPT session whose subagent turn and u
 delivery predate every top-level entry, with retained.start = the earliest top-level entry."""
 
     def _corpus(self, tmp, subagent_ts, called_at):
-        bounds = {
-            "retained": {"start_utc": "2026-09-20T10:00:00Z", "end_utc": "2026-09-23T00:00:00Z"},
-            "decision": {"start_utc": "2026-09-21T00:00:00Z", "end_utc": "2026-09-22T00:00:00Z"},
-        }
+        bounds = _valid_bounds("2026-09-23T00:00:00Z", retained_start="2026-09-20T10:00:00Z")
         corpus_dir = _make_corpus(pathlib.Path(tmp), bounds=bounds)
         proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
         _write_lines(proj / "k1.jsonl", [
@@ -2105,6 +2128,199 @@ corrupted in turn, so a check covering only some methods is caught."""
                 with self.assertRaises(ValueError) as ctx:
                     observability.coverage(events_db, corpus_dir)
                 self.assertIn(f"events_meta.tool_events_{method}", str(ctx.exception))
+
+
+# --- Task 14 (spec Amendment 7) -----------------------------------------------------------
+
+
+def _one_session_corpus(tmp, bounds=None, created_utc=None):
+    corpus_dir = _make_corpus(pathlib.Path(tmp), bounds=bounds, created_utc=created_utc)
+    proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+    _write_lines(proj / "sid1.jsonl", [
+        _entry("u1", "2026-09-20T10:00:00Z", "sid1", content="hi"),
+        _assistant_text_entry("a1", "2026-09-20T10:00:01Z", "sid1"),
+    ])
+    events_db = pathlib.Path(tmp) / "events.db"
+    join.build_events(corpus_dir, events_db)
+    return corpus_dir, events_db
+
+
+class WindowInvariantsR111(unittest.TestCase):
+    """R111 / Amendment 7(c)1: coverage() and finalize_bounds RAISE unless decision.end ==
+    retained.end == floor(created_utc) + 1 s and decision.start == decision.end - 7 days. Every
+    wrong window below keeps its data (2026-09-20) inside both windows, so R61/R76 admit it and
+    only R111 can refuse."""
+
+    _WRONG = {
+        # decision ends a day early (still exactly 7 days long); retained.end == T + 1 s.
+        "decision end != retained end": (
+            {"retained": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2026-09-26T00:00:01Z"},
+             "decision": {"start_utc": "2026-09-18T00:00:01Z", "end_utc": "2026-09-25T00:00:01Z"}},
+            "2026-09-26T00:00:00Z",
+        ),
+        # decision.end == T + 1 s, but retained runs a day longer.
+        "retained end != decision end": (
+            {"retained": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2026-09-27T00:00:01Z"},
+             "decision": {"start_utc": "2026-09-19T00:00:01Z", "end_utc": "2026-09-26T00:00:01Z"}},
+            "2026-09-26T00:00:00Z",
+        ),
+        # both ends agree with T + 1 s, but the decision window is 6 days long.
+        "length != 7 days": (
+            {"retained": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2026-09-26T00:00:01Z"},
+             "decision": {"start_utc": "2026-09-20T00:00:01Z", "end_utc": "2026-09-26T00:00:01Z"}},
+            "2026-09-26T00:00:00Z",
+        ),
+        # both ends agree and the length is 7 days, but created_utc floors to a later T.
+        "end != floor(created) + 1 s": (
+            _DEFAULT_BOUNDS, "2026-09-26T00:00:05Z",
+        ),
+        # R75's off-by-one: the end is created_utc itself, not floor(created) + 1 s.
+        "end == created, not created + 1 s": (
+            _DEFAULT_BOUNDS, "2026-09-26T00:00:01Z",
+        ),
+    }
+
+    def test_coverage_raises_on_each_wrong_window(self):
+        for name, (bounds, created) in self._WRONG.items():
+            with self.subTest(window=name), tempfile.TemporaryDirectory() as tmp:
+                corpus_dir, events_db = _one_session_corpus(tmp, bounds, created)
+                with self.assertRaises(ValueError) as ctx:
+                    observability.coverage(events_db, corpus_dir)
+                self.assertIn("R111:", str(ctx.exception))
+
+    def test_a_valid_window_passes(self):
+        # Control: the same fixture on finalize_bounds' own window for its created_utc.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir, events_db = _one_session_corpus(tmp)
+            cov = observability.coverage(events_db, corpus_dir)
+            self.assertEqual(cov["fields"]["assistant_text_turns"]["decision"], 1)
+
+    def test_finalize_bounds_checks_its_own_output_before_writing(self):
+        # The check is stated independently of DECISION_WINDOW_DAYS, the constant the bounds are
+        # COMPUTED with: a computation that drifts from 7 days is refused, and nothing is written.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            _write_lines(proj / "s1.jsonl", [_entry("e-0", "2026-09-25T23:59:00Z", "s1")])
+            before = (corpus_dir / "manifest.json").read_text()
+            saved = observability.DECISION_WINDOW_DAYS
+            observability.DECISION_WINDOW_DAYS = 6
+            try:
+                with self.assertRaises(ValueError) as ctx:
+                    observability.finalize_bounds(corpus_dir)
+            finally:
+                observability.DECISION_WINDOW_DAYS = saved
+            self.assertIn("R111:", str(ctx.exception))
+            self.assertEqual((corpus_dir / "manifest.json").read_text(), before)
+
+
+class ManifestExclusionsR106(unittest.TestCase):
+    """R106/R1: coverage() reads the exclusions build_events recorded in the manifest back, and
+    RAISES unless they are exactly the map it recomputes."""
+
+    def _corpus(self, tmp):
+        corpus_dir = _make_corpus(pathlib.Path(tmp))
+        proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+        _write_lines(proj / "kept.jsonl", [_entry("k1", "2026-09-20T10:00:00Z", "kept")])
+        _write_lines(proj / "headless.jsonl", [
+            _entry("h1", "2026-09-20T10:00:00Z", "headless", entrypoint="sdk-cli"),
+        ])
+        events_db = pathlib.Path(tmp) / "events.db"
+        join.build_events(corpus_dir, events_db)
+        return corpus_dir, events_db
+
+    def test_the_recorded_map_is_read_back_and_a_changed_reason_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir, events_db = self._corpus(tmp)
+            self.assertEqual(transcripts.read_exclusions(corpus_dir),
+                             {".claude-sdd/headless": "sdk-cli"})
+            observability.coverage(events_db, corpus_dir)  # control: the recorded map agrees
+            # Same copy, same counts, same turns: only the recorded REASON differs.
+            transcripts.write_exclusions(corpus_dir, {".claude-sdd/headless": "scratchpad-project"})
+            with self.assertRaises(ValueError) as ctx:
+                observability.coverage(events_db, corpus_dir)
+            self.assertIn("R106: manifest.exclusions records", str(ctx.exception))
+
+    def test_a_build_under_another_spec_set_is_refused_by_the_manifest_check(self):
+        # The R64 swap fixture WITHOUT its manifest rewrite: counts agree, the recorded set
+        # does not.
+        spec_sid = sorted(join.SPEC_EXCLUDED_SIDS)[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            _write_lines(proj / f"{spec_sid}.jsonl", [_entry("u1", "2026-09-20T10:00:00Z", spec_sid)])
+            _write_lines(proj / "other.jsonl", [_entry("u2", "2026-09-20T10:00:00Z", "other")])
+            events_db = pathlib.Path(tmp) / "events.db"
+            join.build_events(corpus_dir, events_db, excluded_sids={"other"})
+            with self.assertRaises(ValueError) as ctx:
+                observability.coverage(events_db, corpus_dir)
+            self.assertIn("R106: manifest.exclusions records", str(ctx.exception))
+
+
+class Task14MapRows(unittest.TestCase):
+    """R105's rejection kind, R107's entrypoint_changed and R113's transfer basis, on the map."""
+
+    def test_a_rejection_row_is_a_declared_kind_and_is_rendered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            _write_lines(proj / "sid1.jsonl", [
+                _assistant_text_entry("a1", "2026-09-20T10:00:00Z", "sid1"),
+                _entry("r1", "2026-09-20T10:00:01Z", "sid1", content=[
+                    {"type": "tool_result", "tool_use_id": "t1", "is_error": True,
+                     "content": "The tool use was rejected. To tell you how to proceed, "
+                                "the user said:\nnot that file"},
+                ]),
+            ])
+            events_db = pathlib.Path(tmp) / "events.db"
+            join.build_events(corpus_dir, events_db)
+            cov = observability.coverage(events_db, corpus_dir)
+            self.assertEqual(cov["turns_by_kind"]["rejection"], 1)
+            self.assertEqual(cov["turns_by_kind"]["tool_result"], 0)
+            rendered = observability.render_map(cov, _load_manifest(corpus_dir), _CODE_VERSION)
+            rows = _table_rows(_sections(rendered)["### A1.6 -- turns by kind"])
+            self.assertIn(["rejection", "1"], rows)
+
+    def test_entrypoint_changed_is_read_from_the_build_and_rendered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            _write_lines(proj / "changed.jsonl", [
+                _entry("c0", "2026-09-20T10:00:00Z", "changed", entrypoint="cli"),
+                _entry("c1", "2026-09-20T10:00:01Z", "changed", entrypoint="sdk-ts"),
+            ])
+            events_db = pathlib.Path(tmp) / "events.db"
+            join.build_events(corpus_dir, events_db)
+            cov = observability.coverage(events_db, corpus_dir)
+            self.assertEqual(cov["entrypoint_changed"], 1)
+            rendered = observability.render_map(cov, _load_manifest(corpus_dir), _CODE_VERSION)
+            self.assertIn(
+                "entrypoint_changed (kept sessions whose first and last entrypoint differ; each "
+                "keeps its first entrypoint's class): 1.",
+                _prose(_sections(rendered)["### A1.6 -- exclusions by reason"]),
+            )
+            # R70: a strict read -- the counter missing from events_meta raises.
+            conn = sqlite3.connect(str(events_db))
+            conn.execute("DELETE FROM events_meta WHERE key = 'entrypoint_changed'")
+            conn.commit()
+            conn.close()
+            with self.assertRaises(KeyError):
+                observability.coverage(events_db, corpus_dir)
+
+    def test_the_transfer_signal_basis_is_true_and_the_marker_list_is_the_constant(self):
+        self.assertEqual(
+            observability._BASE_TABLE[("transfer", "signal/request")]["basis"],
+            "the lesson inventory is scripts/measure/lessons.py, which this map does not join, "
+            "so there is no candidate population to count here",
+        )
+        # The sentence is TRUE: the inventory module it names exists.
+        self.assertTrue((MEASURE / "lessons.py").is_file())
+        basis = observability._BASE_TABLE[("transfer", "delivery/action")]["basis"]
+        self.assertIn(
+            "(TRANSFER_DELIVERY_MARKERS: get_guide, guide-sections, operator-rule, "
+            "operator-rules, session-opener)",
+            basis,
+        )
 
 
 if __name__ == "__main__":

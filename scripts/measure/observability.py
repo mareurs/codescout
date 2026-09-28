@@ -70,7 +70,7 @@ TRANSFER_DELIVERY_MARKERS = frozenset(
 # zero-filled up front so an absent value is a PRESENT 0; a value outside the set raises.
 TURN_KINDS = (
     "prompt", "interrupt", "delegation", "assistant_text", "assistant_thinking", "tool_use",
-    "tool_result", "meta",
+    "tool_result", "meta", "rejection",
 )
 JOIN_METHODS = ("exact", "heuristic", "none", "not_codescout")
 
@@ -175,15 +175,15 @@ _BASE_TABLE = {
     },
     ("transfer", "signal/request"): {
         "label": "needs adjudication",
-        "basis": "the lesson inventory is Task 7, not yet built, so there is no candidate "
-                 "population to count",
+        "basis": "the lesson inventory is scripts/measure/lessons.py, which this map does not "
+                 "join, so there is no candidate population to count here",
         "field": None,
     },
     ("transfer", "delivery/action"): {
         "label": "measurable now",
         "basis": "deliveries whose engine_or_hook names a transfer-carrying engine "
-                 "(TRANSFER_DELIVERY_MARKERS: operator-rule, get_guide, operator-rules, "
-                 f"guide-sections, session-opener), counted as {DELIVERY_UNIT_PHRASE}",
+                 f"(TRANSFER_DELIVERY_MARKERS: {', '.join(sorted(TRANSFER_DELIVERY_MARKERS))}), "
+                 f"counted as {DELIVERY_UNIT_PHRASE}",
         "field": "transfer_filtered_deliveries",
     },
     ("transfer", "observed use"): {
@@ -331,6 +331,34 @@ def earliest_kept_top_level_ts(corpus_dir):
     return ts
 
 
+# R111: the decision window's fixed length, stated INDEPENDENTLY of DECISION_WINDOW_DAYS (which
+# finalize_bounds computes with) so the invariant check is not the computation it checks.
+_R111_DECISION_LENGTH = timedelta(days=7)
+
+
+def _check_window_invariants(bounds, created_utc):
+    """R111 / Amendment 7(c)1: with T = floor(created_utc), RAISE ValueError unless
+    decision.end == retained.end == T + 1 s and decision.start == decision.end - 7 days -- the
+    effective decision window [T - 7 d + 1 s, T + 1 s). retained.start is not constrained here
+    (R61/R76 check it against the data). Called by finalize_bounds on what it is about to write
+    and by coverage() on what the manifest holds. A missing key raises KeyError (R70)."""
+    expected_end = join.utc(created_utc).replace(microsecond=0) + timedelta(seconds=1)
+    retained_end = join.utc(bounds["retained"]["end_utc"])
+    decision_start = join.utc(bounds["decision"]["start_utc"])
+    decision_end = join.utc(bounds["decision"]["end_utc"])
+    if not decision_end == retained_end == expected_end:
+        raise ValueError(
+            f"R111: decision.end_utc ({bounds['decision']['end_utc']}), retained.end_utc "
+            f"({bounds['retained']['end_utc']}) and floor(created_utc {created_utc}) + 1 s "
+            f"({_iso_z(expected_end)}) must be one instant."
+        )
+    if decision_start != decision_end - _R111_DECISION_LENGTH:
+        raise ValueError(
+            f"R111: decision.start_utc ({bounds['decision']['start_utc']}) must be exactly 7 days "
+            f"before decision.end_utc ({bounds['decision']['end_utc']})."
+        )
+
+
 def finalize_bounds(corpus_dir):
     """R71/R75: set manifest.bounds from data and rewrite corpus_dir/manifest.json. With
     end = floor(manifest.created_utc) + 1 s: retained = [earliest_kept_top_level_ts, end) and
@@ -342,7 +370,8 @@ def finalize_bounds(corpus_dir):
     second is copied yet can carry a ts >= created_utc (reproduced 5/5 by the round-2 reviewer's
     probe_floor.py). Every copied ts is earlier than the instant created_utc was read, which is
     earlier than floor(created_utc) + 1 s -- provided the writers' clock is the freezing host's.
-    RAISES ValueError if the earliest kept entry is not before that end (an empty window)."""
+    RAISES ValueError if the earliest kept entry is not before that end (an empty window), and
+    (R111) if the bounds it computed break _check_window_invariants -- before writing anything."""
     corpus_dir = pathlib.Path(corpus_dir)
     manifest_path = corpus_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
@@ -363,6 +392,7 @@ def finalize_bounds(corpus_dir):
             "end_utc": end,
         },
     }
+    _check_window_invariants(bounds, created)  # R111: raise before anything is written
     manifest["bounds"] = bounds
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
     return bounds
@@ -701,6 +731,10 @@ def coverage(events_db, corpus_dir):
       persisted kept/excluded counts, or turns.sid is not a subset of the recomputed kept cids
       (R64; the reviewer's swap fixture trips it). The excluded cids and the kept cids partition
       the sessions, so the subset check also rules out an excluded cid in turns.sid;
+    - (R106) manifest.exclusions -- recorded by build_events via transcripts.write_exclusions --
+      is not exactly the recomputed exclusion map;
+    - (R111) the manifest's windows break _check_window_invariants: decision.end == retained.end
+      == floor(created_utc) + 1 s and decision.start == decision.end - 7 days;
     - manifest.bounds is unset, or retained.start_utc is later than the earliest kept top-level
       entry, or any observed ts is at or after retained.end_utc (R61, half-open per R71), or any
       events-DB row's ts is before retained.start_utc (R76);
@@ -739,6 +773,16 @@ def coverage(events_db, corpus_dir):
                 "events.db was built with a different excluded_sids set than coverage() "
                 "assumes, so every count below would be measuring the wrong corpus."
             )
+        # R106/R1: build_events RECORDED its exclusion map, reasons included, in the manifest;
+        # the recorded map must be exactly the one recomputed here.
+        recorded_excl = transcripts.read_exclusions(corpus_dir)
+        if recorded_excl != excl:
+            raise ValueError(
+                "R106: manifest.exclusions records "
+                f"{sorted(recorded_excl.items())!r}, but transcripts.exclusions() recomputes "
+                f"{sorted(excl.items())!r} -- the corpus was built with a different exclusion set "
+                "than coverage() assumes."
+            )
 
         kept_cids = {
             transcripts.copy_id(s) for s in sessions_list if transcripts.copy_id(s) not in excl
@@ -753,6 +797,7 @@ def coverage(events_db, corpus_dir):
 
         bounds = manifest["bounds"]
         windows = _windows_from_bounds(bounds)
+        _check_window_invariants(bounds, manifest["created_utc"])  # R111
         win = _window_counts(conn, windows)
 
         earliest = _earliest_kept_top_level(sessions_list, excl)
@@ -797,6 +842,8 @@ def coverage(events_db, corpus_dir):
         hook_success_twins_dropped = int(meta["hook_success_twins_dropped"])
         # R67 / Amendment 5(f): N is build_events' own counter, read, never recomputed.
         usage_rows_unmapped = int(meta["deliveries_unmapped_session"])
+        # R107: build_events' own counter of kept sessions whose entrypoint changed.
+        entrypoint_changed = int(meta["entrypoint_changed"])
 
         attribution = transcripts.attribute_entries(sessions_list, excl)
         divergent_duplicate_unowned = _divergent_duplicate_unowned(
@@ -893,6 +940,7 @@ def coverage(events_db, corpus_dir):
             "sessions_per_project": sessions_per_project,
             "exclusions_by_reason": exclusions_by_reason,
             "excluded_by_spec_detail": excluded_by_spec_detail,
+            "entrypoint_changed": entrypoint_changed,
             "turns_by_kind": win["turns_by_kind"],
             "divergent_duplicate_unowned": divergent_duplicate_unowned,
             "kept_sessions_with_zero_turns": kept_sessions_with_zero_turns,
@@ -1220,7 +1268,9 @@ def render_map(coverage, manifest, code_version=None):
     lines.append("### A1.6 -- sessions per project and window")
     lines.append("")
     lines.append(
-        "Window: both, as columns; a kept session is in a window if any of its turns' ts is."
+        "Window: both, as columns. Each count is the number of sessions with any turn in the "
+        "window (descriptive; the go/no-go denominator is sessions with ≥1 decision point, "
+        "spec § Scope)."
     )
     lines.append("")
     spp = coverage["sessions_per_project"]
@@ -1239,6 +1289,11 @@ def render_map(coverage, manifest, code_version=None):
     _table(lines, ("reason", "count"), [(r, ebr[r]) for r in sorted(ebr)])
     lines.append("")
     lines.append(f"excluded-by-spec, data-wise: {coverage['excluded_by_spec_detail']}")
+    lines.append("")
+    lines.append(
+        "entrypoint_changed (kept sessions whose first and last entrypoint differ; each keeps "
+        f"its first entrypoint's class): {coverage['entrypoint_changed']}."
+    )
     lines.append("")
 
     lines.append("### A1.6 -- turns by kind")
