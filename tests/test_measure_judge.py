@@ -629,6 +629,24 @@ class VerdictTests(unittest.TestCase):
             for f in fields:  # the schema offers the abstention it is parsed as
                 self.assertIn(f'"{f}": true or false or null', prompt, (mode, f))
 
+    def test_an_unknown_origin_uuid_is_an_abstention_distinct_from_null(self):
+        # m-a: `null` names the decision point shown (None, no flag); "unknown" is the judge
+        # abstaining (None, abstain:origin_uuid); a uuid never offered keeps its own flag.
+        reply = {"is_correction": True, "is_decision_point": True, "lessons": "uncovered",
+                 "detectability": "obtainable", "quote": "x" * 20}
+        got = {}
+        for label, value in (("null", None), ("unknown", "unknown"), ("not offered", "zzz")):
+            v = judge.parse_verdict(json.dumps(dict(reply, origin_uuid=value)), mode="correction",
+                                    offered_uuids=["a1"])
+            got[label] = (v.origin_uuid, sorted(f for f in v.flags if "origin_uuid" in f))
+        self.assertEqual(got, {"null": (None, []), "unknown": (None, ["abstain:origin_uuid"]),
+                               "not offered": (None, ["origin_uuid_not_offered"])})
+        prompt = _rendered_template("correction")
+        self.assertIn('"origin_uuid": "<a uuid copied from the origin candidates>" or null or '
+                      '"unknown"', prompt)
+        self.assertIn('`"unknown"` when you cannot tell which it corrects', " ".join(prompt.split()))
+        self.assertNotIn("origin_uuid", _rendered_template("audit"))
+
 
 # --- judge(): votes and majority -------------------------------------------------------------------
 
@@ -801,13 +819,13 @@ class _FakeRunner:
     argv with its stdin and env, and answers `codex --version`, the precondition's `test -e`
     (0 for a path the jail binds back or one listed in `visible`, else 1 -- a jail whose binds
     work), and `codex exec` (writing `reply` to its `-o` file and `events` as its --json
-    stdout)."""
+    stdout, or `stdout` verbatim when given)."""
 
     def __init__(self, visible=(), version="codex-cli 0.154.0", reply="{}", events=None,
-                 bound_visible=True):
+                 bound_visible=True, stdout=None):
         self.visible, self.version, self.reply = {str(p) for p in visible}, version, reply
         self.events = _CLEAN_EVENTS if events is None else events
-        self.bound_visible = bound_visible
+        self.bound_visible, self.stdout = bound_visible, stdout
         self.calls, self.workdir_was_empty = [], []
 
     def __call__(self, argv, input=None, env=None, **_kw):
@@ -824,7 +842,8 @@ class _FakeRunner:
             work = pathlib.Path(cmd[cmd.index("-C") + 1])
             self.workdir_was_empty.append(list(work.iterdir()) == [])
             pathlib.Path(cmd[cmd.index("-o") + 1]).write_text(self.reply)
-            out = "".join(json.dumps(e) + "\n" for e in self.events)
+            out = (self.stdout if self.stdout is not None
+                   else "".join(json.dumps(e) + "\n" for e in self.events))
             return subprocess.CompletedProcess(argv, 0, out, "codex stderr")
         raise AssertionError(f"unexpected command {argv!r}")
 
@@ -983,6 +1002,56 @@ class ChannelTests(unittest.TestCase):
                     else:
                         self.assertEqual(vote["flags"], [])
                         self.assertIs(out["majority"]["is_mistake"], True)
+
+    def test_a_vote_whose_stream_holds_no_event_fails_closed(self):
+        # m-c: an empty or unparseable --json stream shows nothing the tool check could read, so
+        # the vote is `call_failed` (and re-issued, R137), never admitted on its reply.
+        reply = json.dumps({"is_decision_point": True, "is_mistake": True, "lessons": "uncovered",
+                            "lesson_outcomes": {}, "detectability": "obtainable",
+                            "evidence_present_before": "no", "evidence_used": "no",
+                            "quote": "Nothing reads the table."})
+        with tempfile.TemporaryDirectory() as tmp:
+            home, _real = _home_dir(tmp)
+            for label, stdout in (("empty", ""), ("blank lines", "\n\n"),
+                                  ("nothing parseable", "not json\n[1, 2]\n")):
+                ch = judge.CodexChannel(runner=_FakeRunner(reply=reply, stdout=stdout),
+                                        home_dir=home, uid=4242)
+                try:
+                    vote = judge.judge(_doc_input(), votes=1, complete=ch.complete)["votes"][0]
+                finally:
+                    ch.close()
+                with self.subTest(label):
+                    self.assertEqual([a["failure"] for a in vote.get("attempts") or []],
+                                     ["call_failed"] * 3)
+                    self.assertTrue(any("holds no event" in f for f in vote["flags"]), vote["flags"])
+                    self.assertIsNone(vote["is_mistake"])
+
+    def test_the_precondition_hides_the_repo_the_gate_runs_on(self):
+        # m-d: the channel checks the `repo` it is built for (its realpath), and REPO_ROOT as well
+        # when the two differ; run_gate builds its channel for the repo it reads.
+        with tempfile.TemporaryDirectory() as tmp:
+            home, _real = _home_dir(tmp)
+            fake = _FakeRunner()
+            ch = judge.CodexChannel(runner=fake, home_dir=home, uid=4242, repo="/x")
+            ch.close()
+            checked = [c["argv"][-1] for c in fake.ran("sandbox")]
+            root = os.path.realpath(judge.REPO_ROOT)
+            self.assertEqual(checked[:4], ["/x", "/x/" + judge.RTD_DOC, root,
+                                           os.path.join(root, judge.RTD_DOC)])
+            same = _FakeRunner()
+            judge.CodexChannel(runner=same, home_dir=home, uid=4242, repo=judge.REPO_ROOT).close()
+            self.assertEqual([c["argv"][-1] for c in same.ran("sandbox")].count(root), 1)
+            fixture, _c = _fixture_gate_repo(tmp)
+            built = mock.Mock(version="codex-cli 0.155.0")  # refused right after it is built
+            with mock.patch.object(judge, "CodexChannel", return_value=built) as factory, \
+                    self.assertRaisesRegex(ValueError, "R138"):
+                judge.run_gate(dry=False, complete=None, repo=fixture,
+                               rtd_doc=fixture / "eval/rtd.md",
+                               controls_doc=fixture / "eval/controls.md",
+                               global_claude_md=_global_claude_md(tmp),
+                               log_dir=pathlib.Path(tmp) / "logs")
+            self.assertEqual(factory.call_args, mock.call(repo=fixture))
+            self.assertIsNone(judge._CHANNEL)
 
     def test_the_header_describes_the_channel_from_the_argv_it_builds(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1535,6 +1604,29 @@ class GateItemTests(unittest.TestCase):
         self.assertIn("- check: OP-N lesson ids listed by those 1: 0; by the other 1 controls: 1",
                       text)
 
+    def test_the_gate_report_counts_retries(self):
+        # m-e: R137's re-issues are disclosed in the text report. LOAD-BEARING: every item's
+        # vote 1 is unparseable on its first attempt (5 votes re-issued once), and CTL1-1's
+        # vote 2 fails on all three attempts (1 more vote re-issued, and it stays failed).
+        good = json.dumps({"is_correction": True, "origin_uuid": None, "is_decision_point": True,
+                           "is_mistake": False, "lessons": [], "lesson_outcomes": {},
+                           "detectability": None, "evidence_present_before": "yes",
+                           "evidence_used": "yes", "quote": "a claim quoted here"})
+
+        def fake(prompt, log_path=None):
+            if log_path.name.startswith("CTL1-1_audit.vote2."):
+                raise RuntimeError("codex exec exit 1")
+            return "not json" if log_path.name.endswith(".vote1.try1.log") else good
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _c = _fixture_gate_repo(tmp)
+            with mock.patch.object(judge, "_codex_version", return_value="codex-cli test"):
+                res = judge.run_gate(dry=False, complete=fake, log_dir=pathlib.Path(tmp) / "logs",
+                                     **self._gate_kwargs(root, tmp, population=None))
+        self.assertIn('- retries (R137, descriptive): 6 of 15 votes took more than 1 attempt; '
+                      'failed attempts by kind {"call_failed": 3, "unparseable": 5}; 1 votes '
+                      'failed on every attempt', judge.format_gate(res))
+
 
 # --- the prompt ------------------------------------------------------------------------------------
 
@@ -1622,8 +1714,16 @@ class PromptTests(unittest.TestCase):
                              "world turned out"):
                     self.assertIn(case, in_trace)
                 self.assertNotIn("claims more than it shows", p)
-                self.assertIn("at most a warning sign", obtainable)
+                # R147: obtainable and external split on the SIGNAL axis, text_detectable's.
+                self.assertIn("at least one warning sign that points at the problem", obtainable)
                 self.assertIn("one bounded lookup", obtainable)
+                self.assertIn("a claim whose only support is a reference the material does not "
+                              "show", obtainable)  # m-b: distinct from in-trace case 3
+                self.assertNotIn("at most a warning sign", p)
+                external = _bullet(p, "- `external`:")
+                self.assertIn("the material shows no sign of the problem", external)
+                self.assertIn("even if one lookup elsewhere would have revealed it", external)
+                self.assertIn("needed more than one bounded lookup", external)
                 # Delivered on stdin (R133 a): there is no file to speak of.
                 self.assertIn("Judge only from what this message contains.", p)
                 self.assertNotIn("this file", p)

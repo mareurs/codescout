@@ -682,7 +682,9 @@ def parse_verdict(raw, mode=None, offered_uuids=None, offered_lessons=None):
 
     if "origin_uuid" in fields and present("origin_uuid"):
         x = obj["origin_uuid"]
-        if x is not None:
+        if x == "unknown":  # m-a: the prompt's abstention; `null` names the decision point shown
+            flags.append("abstain:origin_uuid")
+        elif x is not None:
             if isinstance(x, str) and x in (offered_uuids or ()):
                 v.origin_uuid = x
             else:
@@ -847,6 +849,19 @@ def tool_events(stdout):
     return dict(bad)
 
 
+def stream_event_count(stdout):
+    """m-c: how many `--json` lines are JSON objects. A vote whose stream holds none -- empty, or
+    nothing parseable -- shows nothing a tool check could read, so it fails CLOSED, as
+    `call_failed` (and R137 re-issues it)."""
+    n = 0
+    for line in (stdout or "").splitlines():
+        try:
+            n += isinstance(json.loads(line), dict)
+        except ValueError:
+            pass
+    return n
+
+
 def jail_argv(home_dir, uid, rw_paths):
     """R133(e): the bubblewrap prefix of every codex process the channel starts. The filesystem
     is read-only, the home directory, /tmp and /run/user/<uid> are empty tmpfs mounts (hiding the
@@ -951,11 +966,15 @@ class CodexChannel:
         return jail_argv(self.home_dir, self.uid, (self.home, self.auth, work))
 
     def hidden_paths(self):
-        """R133(f): what the jail must hide -- the repository, the answer key, every Claude
-        profile, and the session scratch root."""
-        return [self.repo, self.repo / RTD_DOC, self.home_dir / ".claude",
-                self.home_dir / ".claude-sdd", self.home_dir / ".claude-kat",
-                pathlib.Path(f"/tmp/claude-{self.uid}")]
+        """R133(f): what the jail must hide -- the repository the gate runs on (its realpath, and
+        REPO_ROOT too when that differs, m-d) with its answer key, every Claude profile, and the
+        session scratch root."""
+        repos = [pathlib.Path(os.path.realpath(self.repo))]
+        if pathlib.Path(os.path.realpath(REPO_ROOT)) != repos[0]:
+            repos.append(pathlib.Path(os.path.realpath(REPO_ROOT)))
+        return [p for r in repos for p in (r, r / RTD_DOC)] + [
+            self.home_dir / ".claude", self.home_dir / ".claude-sdd", self.home_dir / ".claude-kat",
+            pathlib.Path(f"/tmp/claude-{self.uid}")]
 
     def check_jail(self):
         """R133(f): inside the same jail a vote runs in, `test -e` under Codex's read-only
@@ -996,6 +1015,9 @@ class CodexChannel:
                           env=self._env())
             if log_path is not None:  # R133(h): under --log-dir only, and read by counts only
                 pathlib.Path(log_path).write_text(p.stdout + "\n--- stderr ---\n" + p.stderr)
+            if not stream_event_count(p.stdout):  # m-c: nothing to check is a failure
+                raise RuntimeError(f"codex exec exit {p.returncode}: its --json stream holds no "
+                                   "event (its log holds the rest)")
             bad = tool_events(p.stdout)
             if bad:
                 raise ToolCallError(bad)
@@ -1012,10 +1034,12 @@ class CodexChannel:
 _CHANNEL = None
 
 
-def codex_channel():
+def codex_channel(repo=None):
+    """The process's Codex channel, built on first use. `repo` is the repository the channel's
+    jail precondition must show hidden (m-d; default REPO_ROOT)."""
     global _CHANNEL
     if _CHANNEL is None:
-        _CHANNEL = CodexChannel()
+        _CHANNEL = CodexChannel() if repo is None else CodexChannel(repo=repo)
     return _CHANNEL
 
 
@@ -1660,7 +1684,7 @@ def run_gate(complete=None, dry=False, repo=REPO_ROOT, rtd_doc=None, controls_do
     try:
         ch = None
         if own_channel:
-            ch = codex_channel()
+            ch = codex_channel(repo)  # m-d: the jail must hide the repo this gate reads
             if ch.version != CODEX_CLI_VERSION:
                 raise ValueError(f"R138: a live gate needs {CODEX_CLI_VERSION}; `codex --version` "
                                  f"gives {ch.version!r}")
@@ -1755,6 +1779,18 @@ def _quote_failure_line(results):
             "control fires carry at least one such vote")
 
 
+def _retry_line(results):
+    """m-e, descriptive: R137's re-issues -- votes that took more than one attempt, failed
+    attempts by kind, and votes whose every attempt failed."""
+    votes = [v for r in results for v in r["votes"]]
+    kinds = collections.Counter(a["failure"] for v in votes for a in v.get("attempts", [])
+                                if a["failure"] is not None)
+    multi = sum(1 for v in votes if len(v.get("attempts", [])) > 1)
+    failed = sum(1 for v in votes if _failure(Verdict(flags=v["flags"])) is not None)
+    return (f"- retries (R137, descriptive): {multi} of {len(votes)} votes took more than 1 "
+            f"attempt; failed attempts by kind {json.dumps(dict(kinds), sort_keys=True)}; "
+            f"{failed} votes failed on every attempt")
+
 
 def format_gate(res):
     """The gate report as text: header, the per-item table, totals, lesson inventory per freeze,
@@ -1808,6 +1844,7 @@ def format_gate(res):
         out.append(f"- control fires by prompt section (descriptive): "
                    f"{json.dumps(dict(by_prompt), sort_keys=True)}")
         out.append(_quote_failure_line(res["results"]))
+        out.append(_retry_line(res["results"]))
         out += ["", "| id | expected | detectability | is_mistake | lessons | split fields | flags |",
                 "|---|---|---|---|---|---|---|"]
         for r in res["results"]:
