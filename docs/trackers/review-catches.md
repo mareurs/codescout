@@ -102,6 +102,8 @@ not repeated here.
 | RC-52 | 2026-09-27 | Opus review subagent (claude-opus-5-5) | 82cff72e | fixed | 5a477c51 (patch-id 0f92d94f10cf7ef443b9abbf584834cd83901c24) | — | — | memory:eval-design | promoted | .codescout/memories/eval-design.md@6e416ff5 § A threshold decision is only as sound as the numbers it compares | docs/evals/phase1b-local-classifier-preregistration.md (Step 5's script) |
 | RC-53 | 2026-09-27 | Opus review subagent (claude-opus-5-5) | 82cff72e | fixed | 5a477c51 (patch-id 0f92d94f10cf7ef443b9abbf584834cd83901c24) | — | — | memory:eval-design | promoted | .codescout/memories/eval-design.md@6e416ff5 § A one-shot evaluation owes a run contract | docs/evals/phase1b-local-classifier-preregistration.md (Step 5's script) |
 | RC-54 | 2026-09-27 | Opus review subagent (claude-opus-5-5) | 82cff72e | fixed | 5a477c51 (patch-id 0f92d94f10cf7ef443b9abbf584834cd83901c24) | — | — | CLAUDE.md § Testing Discipline | duplicate | CLAUDE.md § Testing Discipline (the monotone law, and its twin: a case exercises only the guard it names); concrete shape in ~/.buddy/memory/testing-snow-leopard/assert-on-what-was-written.md | docs/evals/phase1b-local-classifier-preregistration.md (Step 5's script) |
+| RC-55 | 2026-09-28 | peer session 3c5b02df (Claude, codescout-38) | 82cff72e | fixed | a0b265cf (patch-id 2013104cfec03940d4ebfb144b0535420c7b0645) | — | — | memory:eval-design | pending | — | docs/superpowers/specs/2026-09-26-system1-base-rate-measurement-design.md § Amendment 7 (b)2 (R109) |
+| RC-56 | 2026-09-28 | peer session 3c5b02df (Claude, codescout-38) | 82cff72e | fixed | a0b265cf (patch-id 2013104cfec03940d4ebfb144b0535420c7b0645) | — | — | memory:eval-design | duplicate | .codescout/memories/eval-design.md@6e416ff5 § A claim covers exactly the population and procedure that produced it | docs/superpowers/specs/2026-09-26-system1-base-rate-measurement-design.md § Amendment 7 (b)2 (R109) |
 
 ## Catches
 
@@ -433,6 +435,22 @@ Each entry below is condensed from its source document, which remains authoritat
 **Missed:** the summary fixture set own and common gate-ability to the same value, so a test could not tell which one the code read. The only end-to-end test asserted FAIL, which cannot catch a run wrongly recorded as FAIL.
 **Found by:** the reviewer's in-memory mutation lens: these mutants survived all 54 tests.
 **Lesson:** a fixture that sets two fields equal cannot test which one is read, and a FAIL-only end-to-end test is monotone toward failure. It is an instance of `CLAUDE.md` § *Testing Discipline*'s monotone and fixture-annotation laws.
+
+### RC-55 — Review advice to make lesson assignment a judge-gate pass condition would have changed the fixed go/no-go rule
+
+**Valid:** dated 2026-09-28
+
+**Missed:** reviewing the System 1 base-rate measurement's design, I recommended that the judge gate *require* the specific lesson each RTD case serves, and said this could be added before any data "without touching the go/no-go rule". But the rule's INCONCLUSIVE clause includes "the judge fails its gate", and the gate's thresholds are fixed in the spec. So a new pass condition changes when the rule returns INCONCLUSIVE.
+**Found by:** the measurement's author, writing Amendment 7 (R109). It recorded lesson-assignment agreement as REPORTED beside the gate instead (`a0b265cf`).
+**Lesson:** a validity gate that can send the verdict to INCONCLUSIVE is part of the decision rule. Adding, removing or tightening one of its pass conditions after registration changes the rule, even before any data exists; report the new check beside the gate instead.
+
+### RC-56 — The review said every RTD gate case records the rule it serves; only the 4 bool prompts do, and 3 of 21 name no law
+
+**Valid:** dated 2026-09-28
+
+**Missed:** the same review told its author that "each gate case in rule-tell-detection.md already records its 'rule served'", after reading one case: RTD-3's bool prompt. Only the four bool prompts (RTD-3, 8, 9 and 10) carry a "rule served" line. Every one of the 21 cases carries a `rule:` field, and three (RTD-8, RTD-9 and RTD-15) record that no law in the corpus names their tell (`docs/evals/rule-tell-detection.md:465`), so `uncovered` is their expected answer.
+**Found by:** the measurement's author, checking the premise before revising R109.
+**Lesson:** an instance of `eval-design` § *A claim covers exactly the population and procedure that produced it*: one member read, the population claimed. Here it also changed the recommendation's reach, because three cases have no specific lesson to agree on.
 
 ## History
 

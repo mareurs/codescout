@@ -1090,6 +1090,10 @@ per-rule thresholds fitted on four positives (RC-20).
   establish neither equivalence nor an effect, so say which one you are not claiming.
 - Report the denominator beside every fitted threshold: four positives is a fragility
   statement, not a calibration.
+- A validity gate that can send the verdict to INCONCLUSIVE (a judge gate, a spot-check
+  floor) is part of the rule. Adding, removing or tightening one of its pass conditions
+  after registration changes the rule, even before any data exists. Put a new check
+  **beside** the gate, as a reported number (`review-catches:RC-55`).
 
 ## A claim covers exactly the population and procedure that produced it
 

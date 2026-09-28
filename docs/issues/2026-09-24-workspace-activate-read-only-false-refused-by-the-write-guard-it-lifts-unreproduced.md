@@ -46,6 +46,18 @@ On a server rebuilt at `c07f71ee`+, with no subagent or peer sharing it, in thre
 
 So the lead above holds and is not intermittent: the activate call is gated by the CURRENT activation's read-only state, so a read-only activation guards the only call that leaves it, including a call to a DIFFERENT root. The step-5 success in the original sequence fits the peer-reactivation reading it offered. The per-call pin is the working escape (step 3) and the refusal names it first, so a reader following the text in order recovers; the second remedy it names is the one that cannot work.
 
+### Third observation, 2026-09-28 (session `82cff72e-0245-48cb-ab07-45a1c3d0d388`): the refusal cleared with no pinned activate
+
+Server `git_sha fd0b4181` (dirty), pid 2496171, home project `/home/marius/work/claude/codescout`.
+
+1. Four Opus review subagents shared this server in parallel. One of them reported that its first call, `workspace(activate, codescout, read_only=true)`, came back with the write refusal. So the state may already have been read-only from a sibling, or its own call may have set it; which one is unknown.
+2. About 16:10Z, after all four had finished and with no other caller on the server, `doc(action="append_entry")` from the controller was refused with the `ActivatedReadOnly` text naming the home root.
+3. `workspace(action="activate", path="/home/marius/work/claude/codescout", read_only=false)`, with no `workspace=` pin, was **refused with the same text.**
+4. The workaround ran next: three writes, each pinned with `workspace="/home/marius/work/claude/codescout"` (two `append_entry` and one `edit_file`), and all succeeded. Then one read (`doc(action="find")`).
+5. About 16:25Z, the identical call from step 3, still unpinned, returned `status: ok`, `read_only: false`.
+
+**What this adds to the deterministic reproduction above, and what it leaves open.** Step 3 fits that reading: the activate call is gated by the current read-only state. Step 5 does not. Nothing re-activated the project between steps 3 and 5, as far as this session can see: no subagent was running, and the only calls were pinned writes and one read. Yet the unpinned call succeeded. Either a pinned call resets the process-wide activation, or something outside this session changed it. Neither is verified. The discriminating probe: from a read-only activation, make one pinned write, then an unpinned `workspace(activate, read_only=false)`, and a control without the pinned write.
+
 ## Environment
 
 codescout server pid 3289089, `git_sha 396f04c4` (dirty), profile `~/.claude-kat`, CLI Claude Code, 2026-09-24.
