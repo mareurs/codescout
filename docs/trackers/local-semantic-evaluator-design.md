@@ -93,6 +93,33 @@ Recorded so a later reader does not re-litigate it. No planner/critic hierarchy,
 - Test class separability under the frozen encoder before committing to rung 3.
 - Revisit at the 2026-09-25 observation-window review, which on today's evidence would convene over a single historical seed.
 
+## Evidence since the amendment — 28 September 2026
+
+Two evidence streams bear on this design. Neither was run to test it, and neither changes a decision here: implementation stays deferred under § *Observation period before implementation*. They are recorded so the next reader does not have to find them again.
+
+**1. A trained local rule selector stopped under its own registered rule.** The rule-tell campaign needed a selector that, given a draft, names the rule it breaks and the sentence that breaks it: the reminder shape its phase 2 found to work. Every selector tried so far has failed:
+
+- Jev (hosted) chose `none` on 10 of 10 real drafts.
+- A Haiku per-rule judge failed the gate twice, on precision.
+- Phase 1's per-rule heads on JevK5 (LoRA) caught every applicable violation, and fired on 5 of 5 clean texts.
+- Phase 1b added audited cross-rule negatives. No checkpoint of nine passed. Firing on clean text fell to 2 of 17: the two texts that carry a rule's surface cue with no violation (`docs/evals/phase1b-local-classifier-preregistration.md` § *Step 5 — the gate*).
+
+Under its own rules, the local route stops for that data and backbone. The Codex stop review recommends, before any further training, a small independently adjudicated development set from real traces, with clean cases that keep the rule's cue, and a rule-conditioned baseline measured on it.
+
+**How it bears on rung 3, and how it does not.** That campaign fine-tuned a generative backbone, not a head on a frozen MiniLM embedding, and its classes were rule violations in drafts, not this design's decision classes. So it leaves rung 3's open question unanswered: whether a frozen encoder separates codescout's decision classes. What it does show is the failure a learned selector is most likely to meet here: every selector fired on text that carries a class's surface cue without belonging to the class. Rung 3's separability test should include negatives of that kind (cue present, class absent) from the start.
+
+**2. Whether a System 1 is worth building is being measured before any detector exists.** `docs/superpowers/specs/2026-09-26-system1-base-rate-measurement-design.md` (plan: `docs/superpowers/plans/2026-09-26-system1-base-rate-measurement.md`; run by session `3c5b02df`) measures the base rate of addressable operator-caught misses per codescout session: a lesson that already existed applied, was missed, and the operator caught it.
+
+- **The rule, fixed before any data was read:** GO if the 95% session-bootstrap lower bound is at least 0.3 per session over the 7 days before the freeze; NO-GO if the upper bound is below 0.3; otherwise INCONCLUSIVE, followed by a 21-day prospective window.
+- **What it measures:** a ceiling, not a benefit.
+- **Status:** the readout is pending. A NO-GO would weaken the case for the detector work in rungs 2–3. A GO would also supply adjudicated real cases, usable as evaluation data but not as training input, since its judge is Codex.
+
+**What it means for rung 0.**
+
+- Its Part A added two record-only `usage.db` fields, `tool_use_id` and `deliveries_json`. They give exact call-to-transcript joins and a record of which engine delivered what.
+- Its events database (`scripts/measure/join.py`) already reconstructs per-session call sequences from `usage.db` joined to transcripts. That is rung 0's derivation with the transcript half added, so rung 0 should start from it rather than a new query.
+- One bound it measured applies to rung 0 directly: `usage.db` deletes `tool_calls` rows older than 30 days on each write, except rows a `pika_observations` entry references (`src/usage/db.rs:405-415`; the measurement spec's Amendment 6(b)). A corpus derived from it decays unless it is frozen.
+
 ## Mission and the decision boundary
 
 The user outcome is a completed, reviewable task, not a high-confidence label. For an eligible task, the runtime should gather the right evidence, choose a permitted next action, observe its result, revise its plan, and stop on a task-specific completion condition. Context is part of that causal loop: a source excerpt is useful when it changes the next tool call, probe, patch, or verification choice. It can also be delivered to the host assistant at a call boundary, so the host and local worker share a legible account of what happened.
