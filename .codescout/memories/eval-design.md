@@ -1026,3 +1026,130 @@ contaminated" does not mean "X is false". The first framing there was rejected f
 selection (F-38) and I then treated it as refuted rather than unsupported — and spent a
 whole pass proving the opposite of the truth. Unsupported and false need different next
 actions: one wants better evidence, the other wants a new hypothesis.
+
+## Promoted from the rule-tell review catches (2026-09-28)
+
+The seven sections below distil 32 catches a reviewer other than the author made during the
+rule-tell campaign (2026-09-24 to 27); each cites its rows in `docs/trackers/review-catches.md`,
+which holds what was missed, how it was found and the fix. They are instances, and the
+sections are the classes: read the row before reusing a number.
+
+## A missing judgment is not a NO
+
+A row, group or cell that was never scored is **absent**, and an absent verdict read as "did not
+fire" is the most flattering error an eval can make: it lowers every false-positive count and
+nothing errors. Rule-tell shipped it three times. A scorer accepted incomplete rule sweeps and
+scored a partial group as a clean text (`review-catches:RC-1`); another accepted rows files
+missing whole case/side texts and reported zero incomplete groups (RC-9); and two gate
+predictions would have counted an unjudged or errored cell as "did not fire" (RC-50).
+
+- Before any metric, check the **expected** population (every case, side and rule the design
+  names) for membership and uniqueness, not the grid of whatever happens to be present.
+- Carry "not judged" and "errored" as their own states through aggregation, and make every
+  reader of a cell refuse one that was not judged.
+- This is § *Before believing any count*'s denominator rule one level down: there it was runs
+  that died before logging, here it is cells inside runs that did log.
+
+## A one-shot evaluation owes a run contract
+
+"Run once" is a property the runner enforces, not a promise the operator keeps. Nine rule-tell
+catches were one runner contract missing one clause at a time, each found by a reviewer rather
+than by a failure:
+
+- **Reserve the output exclusively before spending**, keyed to the thing run: a marker beside
+  the checkpoint, not a path the caller chose (`review-catches:RC-37`, RC-48).
+- **Check cheap preconditions first**, before any model call or output file (RC-38).
+- **Record what produced the verdict**: refuse a dirty tree, and write HEAD plus the sha256 of
+  every file the verdict depends on (RC-47).
+- **Fix the sample by construction, not by seed**: commit a deterministic extractor and an
+  ordered manifest (RC-28).
+- **Keep per-row evidence before aggregating**: each ballot, its verdict and its provenance
+  (RC-10).
+- **Fail durably**: write a crash record holding the traceback, partial rows and error texts
+  before re-raising; record every refusal; write results through a temporary file and a rename
+  (RC-46, RC-53).
+- **Propagate status through every wrapper**: a script that ends on `echo` or a bare `wait`
+  reports success whatever its children did (RC-44).
+
+`docs/evals/data/2026-09-24-rule-tell/phase1b/step5_gate.py` implements the reservation,
+precondition, provenance and durable-failure clauses, and its tests killed 109 of 109
+mutations; start from its shape rather than from a blank file.
+
+## Freeze the whole decision rule, per comparator, before any data
+
+Pre-registering "the metric" leaves free the parts that actually decide a verdict. Rule-tell's
+registrations left four open, and a reviewer found each: the audit size and its denominator
+(`max(10%, 8)` gives 9.5 at 95 pairs, `review-catches:RC-29`); a shortcut prediction named
+against one set while its rule was defined on another, with the probe's tokenisation unfrozen
+(RC-33); a "not below" prediction marked *holds* at 7/8 beside a 9/10 comparator (RC-13); and
+per-rule thresholds fitted on four positives (RC-20).
+
+- Freeze the formula, the unit, the aggregation, the rounding and the invalid-answer policy,
+  and name the set each prediction's rule is computed on.
+- Check a comparative prediction against **each** comparator separately. Cells this small
+  establish neither equivalence nor an effect, so say which one you are not claiming.
+- Report the denominator beside every fitted threshold: four positives is a fragility
+  statement, not a calibration.
+
+## A claim covers exactly the population and procedure that produced it
+
+§ *A number can be real and still describe the wrong subject*, at the level of a sentence
+rather than a number. Six rule-tell claims were each true of something narrower than they said:
+
+- a verbatim quote proves the sentence exists, not that it is the violation, so measure claim
+  correctness separately from rule correctness (`review-catches:RC-2`);
+- a score taken before the decision point describes that turn, not what the agent writes after
+  its tool call returns (RC-3);
+- "would bring no rule to 50 positives" went beyond a ten-row sample (RC-6);
+- "four of five texts" counted two properties separately, and only three meet both: count the
+  conjunction itself (RC-12);
+- a recall bound on regrouping fixed outputs was called a bound on changing the specification
+  (RC-14);
+- "the loss only fell from there" read running means logged every 200 rows as a trajectory
+  (RC-42).
+
+Before writing the sentence, name the population, the unit and the procedure the evidence came
+from, and check that the claim quantifies over nothing wider.
+
+## Compare arms only on the surface they share
+
+Arms that were each filtered, pruned or derived separately differ by their filters as well as by
+their treatment. Rule-tell met this four times: arms compared on final pass/fail after each
+pruned its own heads (`review-catches:RC-17`, which became the registered common menu); two
+generators' test sets filtered independently, breaking their pairing (RC-32); a top-up sized to
+reach 50 before the final filters, which could still fall short after the freeze (RC-35); and a
+derived input, the intersection over nine runs, never checked against its derivation, with the
+pooled results never checked to share it (RC-49).
+
+- Compute the shared surface (the heads both arms keep, the ids that survive in both sets) and
+  read the causal comparison only there, with each arm's own-surface result beside it.
+- Size anything that must survive filters from what survives **every later** filter.
+- Check a derived input against its derivation where it is used, and check that everything
+  pooled was computed on it.
+
+## A control isolates exactly what it varies
+
+Two rule-tell controls were read as isolating one mechanism while varying something else. A
+judge-channel control compared 412 against 412 tokens to show that synced skills add nothing,
+but both directories had synced them, so it removed nothing (`review-catches:RC-39`; the
+blocked-sync control in `90e0965d` did). And a diagnostic arm taken through a procedure that
+refits both temperatures and thresholds was said to control "the threshold half" (RC-18): it
+controls their combination.
+
+- Before reading a control, write down the one thing it removes, then check that the treatment
+  side still has it and the control side does not.
+- A control taken through a procedure that refits several things controls their combination,
+  never one of them.
+
+## A threshold decision is only as sound as the numbers it compares
+
+Four rule-tell catches sat in the arithmetic under a verdict rather than in its logic:
+
+- **Saturation ties.** `sigmoid(z/T)` is exactly 1.0 in float64 once z/T passes about 36.8, so
+  "the first unit with the highest P" quoted an innocent sentence on a tie. Choose by the raw
+  logit and record ties (`review-catches:RC-45`). A positive whose score exactly ties a clean
+  text cannot be separated by any threshold on that rule (RC-11).
+- **NaN.** A decision written as "NO if p < t" returns YES on NaN. Refuse non-finite values
+  before comparing (RC-52).
+- **Same path.** Compute the scores a verdict reads on the path parity verified: the gate
+  scored in worker threads while parity was checked in the main thread (RC-51).
