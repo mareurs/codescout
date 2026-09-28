@@ -1134,20 +1134,31 @@ class GateTests(unittest.TestCase):
 def _fixture_gate_repo(tmp):
     """A synthetic corpus in the RTD / controls formats. doc.md's positive ONE is replaced in
     place at c2 (so it is ABSENT at the correction sha), and positive TWO is corrected by an
-    APPENDED retraction at c3 (so, read at c3, its context would carry its own correction)."""
+    APPENDED retraction at c3 (so, read at c3, its context would carry its own correction).
+
+    LOAD-BEARING for R140/R144: operator-rules.md first appears at c1, so a control originating
+    at c0 (CTL1-1) predates it -- its undated set must come from the reference sha (the tree),
+    since `undated_lessons` raises at c0. `## Gamma note` exists in CLAUDE.md at c1 and c2 only,
+    and CTLX-1's text B names c2 as its origin, so Gamma is a dated lesson at CTLX-1's origin
+    (c2) and absent at the tree (c3): only a freeze at the ORIGIN lists it. (B's origin is the
+    fixture's metadata; its text itself exists from c0 on.)"""
     root = pathlib.Path(tmp) / "repo"
     _init_repo(root)
-    _write(root, "docs/trackers/operator-rules.md", _OP_RULES)
-    _write(root, "CLAUDE.md", "# P\n\n## Alpha rules\n\n- **Always state the window.** Because.\n"
-                              "\n## Beta\n\nA quiet control sentence that is fine.\n"
-                              "\nAnother control line, also fine.\n")
+    claude_md = ("# P\n\n## Alpha rules\n\n- **Always state the window.** Because.\n"
+                 "\n## Beta\n\nA quiet control sentence that is fine.\n"
+                 "\nAnother control line, also fine.\n")
+    gamma = "\n## Gamma note\n\nA passing remark.\n"
+    _write(root, "CLAUDE.md", claude_md)
     c0 = _commit(root, "base", 1)
+    _write(root, "docs/trackers/operator-rules.md", _OP_RULES)
+    _write(root, "CLAUDE.md", claude_md + gamma)
     _write(root, "docs/sub/doc.md", "Intro paragraph.\n\nPOSITIVE ONE: all nine rows are closed.\n\n"
                                     "POSITIVE TWO: nothing reads the table.\n\nClosing paragraph.\n")
     c1 = _commit(root, "publish", 2)
     _write(root, "docs/sub/doc.md", "Intro paragraph.\n\nNEGATIVE ONE: seven of nine rows are closed.\n\n"
                                     "POSITIVE TWO: nothing reads the table.\n\nClosing paragraph.\n")
     c2 = _commit(root, "correct in place", 3)
+    _write(root, "CLAUDE.md", claude_md)
     _write(root, "docs/sub/doc.md", "Intro paragraph.\n\nNEGATIVE ONE: seven of nine rows are closed.\n\n"
                                     "POSITIVE TWO: nothing reads the table.\n\nClosing paragraph.\n\n"
                                     "NEGATIVE TWO: the sweep reads the table.\n")
@@ -1254,7 +1265,7 @@ Another control line, also fine.
 - **source:** `CLAUDE.md:5` and `CLAUDE.md:11`
 - **why_it_resembles:** elaboration.
 - **never_corrected:** A, needle `state the window` — one commit, `{c0[:8]}` 2026-01-01. B, needle
-  `Another control` — one commit, `{c0[:8]}` 2026-01-01.
+  `Another control` — one commit, `{c2[:8]}` 2026-01-03.
 
 ## Answer key
 
@@ -1301,7 +1312,15 @@ class GateItemTests(unittest.TestCase):
             pair = by_id["CTLX-1/audit"]
             self.assertIn("Always state the window.", pair["decision"])
             self.assertIn("Another control line", pair["decision"])
-            self.assertEqual(pair["lesson_freeze_sha"], c["c3"])
+            # R140/R144: a control's repo lessons are frozen at its LATEST introducing commit
+            # (CTLX-1: c0 for A, c2 for B), never at the controls' tree (c3); its undated set's
+            # reference sha is the tree, for every control.
+            self.assertEqual(pair["lesson_freeze_sha"], c["c2"])
+            self.assertEqual(join.utc(pair["lesson_decision_ts"]), join.utc(_day(3)))
+            self.assertEqual(by_id["CTL1-1/audit"]["lesson_freeze_sha"], c["c0"])
+            for cid in ("CTL1-1/audit", "CTLX-1/audit"):
+                self.assertEqual(by_id[cid]["lesson_undated_sha"], c["c3"])
+            self.assertNotIn("lesson_undated_sha", one)  # RTD items: unchanged (R144 item 3)
             for it in items:  # every gate input builds, and none refuses as a leak
                 judge.build_input(it, None, [], it["mode"])
 
@@ -1469,6 +1488,52 @@ class GateItemTests(unittest.TestCase):
         self.assertIn(disclosure, live)
         self.assertIn("- quote_not_verbatim (descriptive): 0 of 1 majority flags and 1 of 2 "
                       "control fires carry at least one such vote", live)
+
+    def test_a_control_older_than_the_operator_rules_file_reads_its_undated_set_at_the_tree(self):
+        # R144 (completes R140). CTL1-1 originates at c0, before operator-rules.md (c1): its repo
+        # lessons come from c0 and its undated set from the tree (c3) -- undated_lessons would
+        # raise at c0 -- and the report discloses it. CTLX-1 (origin c2) lists Gamma, a lesson
+        # only its origin holds. See _fixture_gate_repo's docstring.
+        reply = json.dumps({"is_correction": True, "origin_uuid": None, "is_decision_point": True,
+                            "is_mistake": False, "lessons": [], "lesson_outcomes": {},
+                            "detectability": None, "evidence_present_before": "yes",
+                            "evidence_used": "yes", "quote": "a claim quoted here"})
+        seen, lock = {}, threading.Lock()
+
+        def fake(prompt, log_path=None):
+            decision = prompt.split("===== BEGIN DECISION POINT =====")[1].split(
+                "===== END DECISION POINT =====")[0].strip()
+            with lock:
+                seen.setdefault(decision, prompt)
+            return reply
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root, c = _fixture_gate_repo(tmp)
+            kwargs = self._gate_kwargs(root, tmp, population=None)
+            with mock.patch.object(judge, "_codex_version", return_value="codex-cli test"):
+                res = judge.run_gate(dry=False, complete=fake, votes=1,
+                                     log_dir=pathlib.Path(tmp) / "logs", **kwargs)
+
+        def index(prefix):
+            prompt = next(p for d, p in seen.items() if d.startswith(prefix))
+            return prompt.split("===== BEGIN LESSON INDEX")[1].split("===== END LESSON INDEX =====")[0]
+
+        ctl1, ctlx = index("A quiet control sentence"), index("(A)")
+        self.assertIn("(global-CLAUDE.md; undated)", ctl1)  # read with the tree as reference sha
+        self.assertNotIn("#OP-", ctl1)
+        self.assertIn("CLAUDE.md#gamma-note (", ctlx)  # dated c1, before its origin c2; gone at c3
+        self.assertIn("operator-rules.md#OP-1 (", ctlx)
+        self.assertIn((c["c0"], c["c3"]), {(s["freeze_sha"], s["undated_sha"])
+                                           for s in res["lesson_stats"]})
+        self.assertEqual(res["op_rules_origin"],
+                         {"controls": ["CTL1-1"], "first_added": c["c1"], "op_ids_listed": 0,
+                          "other_controls": 1, "op_ids_listed_elsewhere": 1})
+        text = judge.format_gate(res)
+        self.assertIn("origin disclosure: 1 control (CTL1-1) originates before "
+                      f"docs/trackers/operator-rules.md existed (first added {c['c1'][:8]}); at "
+                      "those commits the OP-N rules are in neither lesson set", text)
+        self.assertIn("- check: OP-N lesson ids listed by those 1: 0; by the other 1 controls: 1",
+                      text)
 
 
 # --- the prompt ------------------------------------------------------------------------------------

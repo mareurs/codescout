@@ -364,14 +364,19 @@ def _index_entry(lesson, status, anchor, date, undatable=False):
             "undatable": undatable}
 
 
-def lessons_for(repo, freeze_sha, decision_ts, global_claude_md=GLOBAL_CLAUDE_MD, stats=None):
+def lessons_for(repo, freeze_sha, decision_ts, global_claude_md=GLOBAL_CLAUDE_MD, stats=None,
+                undated_sha=None):
     """R118: the lessons a decision at `decision_ts` could have applied, as index entries.
 
     `lessons_at(freeze_sha)`, each dated by R125 and kept iff dated STRICTLY before
     `decision_ts` (compared with `join.utc`), marked `dated`. A repo lesson whose date cannot be
     derived is listed `undated` and counted in `stats["lesson_undatable"]`. Then every lesson of
-    the operator's global CLAUDE.md, via `undated_lessons` at the same freeze sha (R101), listed
-    `undated`; `global_claude_md=None` omits them (fixtures only)."""
+    the operator's global CLAUDE.md, via `undated_lessons` at `undated_sha` (default: the freeze
+    sha; R101), listed `undated`; `global_claude_md=None` omits them (fixtures only).
+
+    R144: `undated_sha` is only the reference commit `undated_lessons` reads operator-rules.md at
+    to strip the global file's copy of the OP-N rules; the global lessons themselves have no
+    commit to freeze at. See `_control_items` for why the controls pass their tree."""
     repo = pathlib.Path(repo)
     sha = _resolve(repo, freeze_sha)
     cutoff = join.utc(decision_ts)
@@ -393,7 +398,8 @@ def lessons_for(repo, freeze_sha, decision_ts, global_claude_md=GLOBAL_CLAUDE_MD
         else:
             stats["lesson_after_decision"] += 1
     if global_claude_md is not None:
-        for lesson in _lessons.undated_lessons(global_claude_md, repo, sha):
+        ref = sha if undated_sha is None else _resolve(repo, undated_sha)
+        for lesson in _lessons.undated_lessons(global_claude_md, repo, ref):
             stats["lesson_global"] += 1
             out.append(_index_entry(lesson, "undated", None, None))
     return out
@@ -1397,7 +1403,9 @@ def _control_items(repo, parsed):
             drift.append(blob.count("\n", 0, s) + 1 - a)
         if not p["commits"]:
             raise ValueError(f"{p['id']}: never_corrected names no introducing commit")
-        dates = [_author_date(repo, _resolve(repo, c)) for c in p["commits"]]
+        commits = [_resolve(repo, c) for c in p["commits"]]
+        dates = [_author_date(repo, c) for c in commits]
+        latest = max(range(len(commits)), key=lambda i: join.utc(dates[i]))
         decision = (p["texts"][0][1] if len(p["texts"]) == 1
                     else "\n\n".join(f"({label}) {text}" for label, text in p["texts"]))
         items.append({
@@ -1409,9 +1417,18 @@ def _control_items(repo, parsed):
                        "line_drift": drift, "shape": p["shape"], "for_prompt": p["for_prompt"]},
             "expected": {"text_detectable": None, "peer_yes": False, "lesson": None,
                          "control": True},
-            # Never corrected: its lessons are those at the controls' tree, dated before the
-            # LATEST commit that introduced its text.
-            "lesson_freeze_sha": tree, "lesson_decision_ts": max(dates, key=join.utc),
+            # R140/R144: never corrected, so its REPO lessons are `lessons_at` its LATEST
+            # introducing commit -- the spec's "as they stood at the origin commit" -- dated
+            # before that commit's author date.
+            "lesson_freeze_sha": commits[latest], "lesson_decision_ts": dates[latest],
+            # R144: its UNDATED (global CLAUDE.md) set is read with ONE fixed reference sha, the
+            # controls' tree. `undated_lessons` needs operator-rules.md at its sha, and 8 of the
+            # 52 real controls originate before that file existed. The choice is output-neutral
+            # only because the operator's global CLAUDE.md carries the BEGIN/END operator-rules
+            # markers, so the OP-N copy is stripped by marker and the sha's OP bodies go unused.
+            # If that file ever loses its markers, the stripping falls back to equality against
+            # the OP-N bodies AT THIS SHA, and the undated set becomes sha-dependent.
+            "lesson_undated_sha": tree,
         })
     return items
 
@@ -1540,6 +1557,43 @@ def _shown(path, repo):
     except ValueError:
         return p.name
 
+OP_RULES_PATH = "docs/trackers/operator-rules.md"
+_OP_ID_IN_LESSON = re.compile(r"#OP-\d+\b")
+
+
+def _op_rules_origin(repo, items, inputs):
+    """R144, descriptive: the controls whose origin commit (their lesson freeze) predates
+    operator-rules.md, the commit that first added it, and -- the check on the disclosure's claim
+    that the OP-N rules are in neither lesson set there -- the count of OP-N lesson ids those
+    controls list, beside the same count for every other control."""
+    first = _git(repo, "log", "--reverse", "--diff-filter=A", "--format=%H", "--",
+                 OP_RULES_PATH).split()
+    before, others = [], []
+    for it, inp in zip(items, inputs):
+        if it["kind"] != "control":
+            continue
+        absent = _lessons._git_show(repo, it["lesson_freeze_sha"], OP_RULES_PATH) is None
+        (before if absent else others).append((it, inp))
+
+    def op_ids(pairs):
+        return sum(1 for _it, inp in pairs for e in inp["lessons"] if _OP_ID_IN_LESSON.search(e["id"]))
+
+    return {"controls": [it["case"] for it, _inp in before], "first_added": first[0] if first else None,
+            "op_ids_listed": op_ids(before), "other_controls": len(others),
+            "op_ids_listed_elsewhere": op_ids(others)}
+
+
+def _op_rules_origin_lines(o):
+    n = len(o["controls"])
+    first = o["first_added"][:8] if o["first_added"] else "never"
+    return [f"origin disclosure: {n} control{'' if n == 1 else 's'} ({', '.join(o['controls'])}) "
+            f"originate{'s' if n == 1 else ''} before {OP_RULES_PATH} existed (first added {first}); "
+            "at those commits the OP-N rules are in neither lesson set",
+            f"- check: OP-N lesson ids listed by those {n}: {o['op_ids_listed']}; by the other "
+            f"{o['other_controls']} controls: {o['op_ids_listed_elsewhere']}"]
+
+
+
 def _leak_found(scan):
     """R135(d): True when `_leak_scan` reports anything at all."""
     return bool(scan["own_correction_in_evidence_or_index"] or scan["gate_id_tokens_by_item"]
@@ -1638,11 +1692,12 @@ def _gate(ch, complete, dry, repo, rtd_doc, controls_doc, global_claude_md, vote
 
     lesson_cache, lesson_stats, inputs = {}, {}, []
     for it in items:
-        key = (it["lesson_freeze_sha"], it["lesson_decision_ts"])
+        key = (it["lesson_freeze_sha"], it["lesson_decision_ts"],
+               it.get("lesson_undated_sha") or it["lesson_freeze_sha"])
         if key not in lesson_cache:
             stats = {}
             lesson_cache[key] = lessons_for(repo, key[0], key[1], global_claude_md=global_claude_md,
-                                            stats=stats)
+                                            stats=stats, undated_sha=key[2])
             lesson_stats[key] = stats
         inputs.append(build_input(it, None, lesson_cache[key], it["mode"]))
 
@@ -1658,8 +1713,9 @@ def _gate(ch, complete, dry, repo, rtd_doc, controls_doc, global_claude_md, vote
               "largest": largest}
     totals["est_tokens_all_votes"] = totals["est_tokens"] * votes
     result = {"dry": dry, "rows": rows, "totals": totals, "leak_scan": _leak_scan(items, inputs),
-              "lesson_stats": [{"freeze_sha": k[0], "decision_ts": k[1], **v}
-                               for k, v in lesson_stats.items()]}
+              "lesson_stats": [{"freeze_sha": k[0], "decision_ts": k[1], "undated_sha": k[2], **v}
+                               for k, v in lesson_stats.items()],
+              "op_rules_origin": _op_rules_origin(repo, items, inputs)}
     result["header"] = gate_header(repo, rtd_path, ctl_path, votes, dry,
                                    version=None if ch is None else ch.version,
                                    channel=None if ch is None else ch.describe())
@@ -1720,11 +1776,13 @@ def format_gate(res):
         big = t["largest"]
         out.append(f"largest item: {big['id']} ({big['prompt_chars']} chars, "
                    f"{big['est_tokens']} est tokens)")
-    out += ["", "lesson inventory per (freeze sha, decision ts):",
-            "| freeze sha | decision ts | dated kept | after decision | undatable | global undated |",
-            "|---|---|---|---|---|---|"]
-    out += [f"| {s['freeze_sha'][:12]} | {s['decision_ts']} | {s['lesson_dated']} | "
-            f"{s['lesson_after_decision']} | {s['lesson_undatable']} | {s['lesson_global']} |"
+    out += ["", "lesson inventory per (freeze sha, decision ts, undated reference sha):",
+            "| freeze sha | decision ts | undated ref | dated kept | after decision | undatable | "
+            "global undated |",
+            "|---|---|---|---|---|---|---|"]
+    out += [f"| {s['freeze_sha'][:12]} | {s['decision_ts']} | {s['undated_sha'][:12]} | "
+            f"{s['lesson_dated']} | {s['lesson_after_decision']} | {s['lesson_undatable']} | "
+            f"{s['lesson_global']} |"
             for s in res["lesson_stats"]]
     lk = res["leak_scan"]
     own = lk["own_correction_in_evidence_or_index"]
@@ -1734,6 +1792,7 @@ def format_gate(res):
             f"- items whose rendered prompt carries gate-id tokens: "
             f"{len(lk['gate_id_tokens_by_item'])} {json.dumps(lk['gate_id_tokens_by_item'], sort_keys=True)}",
             "", f"context disclosure: {CONTEXT_DISCLOSURE}",
+            *_op_rules_origin_lines(res["op_rules_origin"]),
             "", f"complete() calls: {res['calls']}"]
     if not res["dry"]:
         s = res["score"]
