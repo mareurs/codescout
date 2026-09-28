@@ -6,7 +6,10 @@ Task 9 adds the `gate` subcommand; later tasks add theirs.
                                        prompt sizes; makes NO model call (R121, Task 9a)
     run.py gate --out <file> --log-dir <dir>
                                        the real gate (Task 9b, only after the prompt's sha256 is
-                                       registered in the spec's Amendments); exit 1 when it fails
+                                       registered in the spec's Amendments); exit 1 when it fails.
+                                       It refuses to start with --votes other than 3, with
+                                       --any-population, with a --log-dir inside the repository,
+                                       or on any codex other than codex-cli 0.154.0 (R133, R138)
 
 Run from the repo root with ~/work/claude/prompt-engineering/.venv/bin/python.
 """
@@ -32,12 +35,14 @@ def _parser():
     g.add_argument("--controls-doc", help=f"default: <repo>/{judge.CONTROLS_DOC}")
     g.add_argument("--global-claude-md", default=str(judge.GLOBAL_CLAUDE_MD),
                    help="the operator's global CLAUDE.md (R118's undated lessons)")
-    g.add_argument("--votes", type=int, default=3)
-    g.add_argument("--log-dir", help="one Codex log per vote (live runs)")
+    g.add_argument("--votes", type=int, default=3,
+                   help="votes per item; a live gate refuses anything but 3 (R138)")
+    g.add_argument("--log-dir", help="one Codex log per vote attempt (live runs); outside the repo")
     g.add_argument("--out", help="write the report here (default: stdout)")
     g.add_argument("--json-out", help="also write the full result as JSON")
     g.add_argument("--any-population", action="store_true",
-                   help="skip the spec's 21/8/4/52 population check (synthetic fixtures only)")
+                   help="skip the spec's 21/8/4/52 population check (dry runs and synthetic "
+                        "fixtures only; a live gate refuses it, R138)")
     return ap
 
 

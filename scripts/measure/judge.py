@@ -4,7 +4,9 @@ Spec: docs/superpowers/specs/2026-09-26-system1-base-rate-measurement-design.md 
 (Codex), Amendment 1 (A1.3, A1.4) and Amendment 7 (b). Rulings R116-R126 (leakage, bounded
 context, lesson dating, the Verdict extension, gate items from documents, the 9a/9b split, the
 Codex channel, the lesson INDEX, run.py) are in
-.superpowers/sdd/2026-09-26-system1-base-rate-measurement/task-9-context.md.
+.superpowers/sdd/2026-09-26-system1-base-rate-measurement/task-9-context.md; fix round 1's R133-R142
+(the jailed channel, the detectability definitions, retries, the live-gate refusals) are in
+task-9-fix1-brief.md beside it.
 
 - `lessons_for` (R118/R125): the lesson inventory frozen at a commit, each repo lesson dated by the
   AUTHOR date of the commit that first introduced its anchor line, kept iff dated strictly before
@@ -14,7 +16,9 @@ Codex channel, the lesson INDEX, run.py) are in
   protection is structural: the pre-correction blob).
 - `Verdict`, `parse_verdict`, `verify_quote` (R119): the typed judge output. A missing or invalid
   field parses to None / "unknown" / {} and is FLAGGED, never defaulted.
-- `judge` (R122): three votes, majority per field, every vote and the disagreement kept.
+- `judge` (R122/R137): three votes, majority per field, every vote, every attempt and the
+  disagreement kept; `CodexChannel` (R133) runs codex in a bubblewrap jail that hides the
+  repository, and refuses to start until a precondition shows the jail hides it.
 - `gate_items`, `score_gate`, `run_gate` (R120/R121): the gate over the 21 RTD cases and the 52
   never-corrected controls, and its dry form (every input built and every prompt rendered, with
   no model call).
@@ -31,6 +35,7 @@ import hashlib
 import importlib.util
 import json
 import math
+import os
 import pathlib
 import re
 import shutil
@@ -53,8 +58,9 @@ CONTROLS_DOC = "docs/evals/rule-tell-controls.md"
 # The operator's global CLAUDE.md (R118's undated source), derived at run time -- never a
 # home-literal path in a tracked file (R39).
 GLOBAL_CLAUDE_MD = pathlib.Path.home() / ".claude" / "CLAUDE.md"
-# R122: the model pin and `codex_complete` are LOADED BY PATH from the rule-tell campaign, never
-# copied, so this judge runs on exactly that campaign's channel.
+# R122: the model pin is LOADED BY PATH from the rule-tell campaign, never copied. R133 amends
+# R122's "through `codex_complete`": that function's channel can read the answer key, so the
+# judge owns its channel (`CodexChannel`), and the campaign's files are left as they are.
 _GS_PATH = REPO_ROOT / "docs/evals/data/2026-09-24-rule-tell/stage2/generate_synthetic.py"
 
 MODES = ("correction", "audit")
@@ -69,7 +75,10 @@ CONTEXT_MAX_TURNS = 12          # R117
 CONTEXT_MAX_CHARS = 20_000      # R117
 ORIGIN_CANDIDATES_MAX = 5       # R117
 ORIGIN_CANDIDATE_CHARS = 400    # display cap per origin candidate (its full text is in context)
-DOC_CONTEXT_CHARS = 1_500       # R120: up to this many chars on EACH side of a document span
+# R120: up to this many chars on EACH side of a document span -- a radius, not a total. Kept at
+# 1,500 per side by R142 (review concern 1): under a 750-per-side reading RTD-15's falsifier
+# would sit at the window's edge.
+DOC_CONTEXT_CHARS = 1_500       # R120 / R142: per side
 LESSON_INDEX_ENTRY_MAX = 300    # R124
 MIN_QUOTE_CHARS = 12            # phase 1's verify_span MIN_SPAN: shorter "quotes" match anywhere
 MAX_CONCURRENT_CALLS = 3        # R122
@@ -635,7 +644,8 @@ def _extract_json(raw):
 def parse_verdict(raw, mode=None, offered_uuids=None, offered_lessons=None):
     """R119: parse one judge reply. Every field the mode's schema names is read; one that is
     missing parses to None / "unknown" / {} and is flagged `missing:<field>`, and one with a value
-    outside its type is flagged `invalid:<field>` -- never defaulted to yes / applied / True.
+    outside its type is flagged `invalid:<field>` -- never defaulted to yes / applied / True. A
+    `null` boolean is the prompt's abstention (R139): None, flagged `abstain:<field>`.
     `origin_uuid` must be one of `offered_uuids` (none offered = none valid), else None. With
     `offered_lessons`, a lesson id outside the index is dropped and flagged; a list left empty by
     that becomes "abstain". `mode=None` reads both modes' fields."""
@@ -659,6 +669,8 @@ def parse_verdict(raw, mode=None, offered_uuids=None, offered_lessons=None):
         if f in fields and present(f):
             if isinstance(obj[f], bool):
                 setattr(v, f, obj[f])
+            elif obj[f] is None:  # R139: the prompt's abstention, never a type error
+                flags.append(f"abstain:{f}")
             else:
                 flags.append(f"invalid:{f}")
 
@@ -762,11 +774,117 @@ def _gs():
     return _GS
 
 
-def _codex_version():
+CODEX_CLI_VERSION = "codex-cli 0.154.0"  # R138: a live gate refuses any other `codex --version`
+GATE_VOTES = 3                           # R138: a live gate refuses any other vote count
+MAX_ATTEMPTS_PER_VOTE = 3                # R137: the first attempt and up to 2 re-issues
+RETRY_FAILURES = ("call_failed", "unparseable", "tool_call")  # R137: the kinds re-issued
+CODEX_CALL_TIMEOUT = 1200                # seconds per `codex exec` (the campaign's value)
+PRECONDITION_TIMEOUT = 120               # seconds per `codex sandbox ... test -e`
+_STRIPPED_ENV = ("OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL")  # subscription only
+# R133(b)(c): every flag of the `codex exec` call. The prompt is not an argument: the rendered
+# frozen file goes on stdin (the `-` PROMPT), with no wrapper instruction, so it is the whole
+# user message.
+_CODEX_EXEC_FLAGS = ("--skip-git-repo-check", "--sandbox", "read-only", "-c",
+                     "approval_policy=never", "--ephemeral", "--json", "--strict-config")
+# R133(d): appended to the fresh CODEX_HOME's config.toml. Both keys were measured recognised by
+# codex-cli 0.154.0 under --strict-config (a bogus key in the same position fails with "unknown
+# configuration field"), and `codex features list` reads `in_app_updates` false with it.
+_CODEX_CONFIG_EXTRA = 'forced_login_method = "chatgpt"\n\n[features]\nin_app_updates = false\n'
+# R133(g): the `--json` events that are no exec, tool or file read. codex-cli 0.154.0 emits
+# `thread.started`, `turn.started|completed|failed`, `error`, and `item.started|updated|completed`
+# whose `item.type` names the item. Anything else -- a command execution, a file change, an MCP,
+# collaboration or web-search call, a plan update, an event or item type these lists do not
+# know, or a line that is not a JSON object -- makes the vote a `tool_call` failure: fail closed.
+_JSON_EVENTS_OK = frozenset({"thread.started", "turn.started", "turn.completed", "turn.failed",
+                             "error"})
+_JSON_ITEM_EVENTS = frozenset({"item.started", "item.updated", "item.completed"})
+_JSON_ITEMS_OK = frozenset({"agent_message", "reasoning", "error"})
+
+
+class ToolCallError(RuntimeError):
+    """R133(g): a vote's `--json` stream shows an exec, tool or file-read event. Carries counts by
+    kind only, never an event's content."""
+
+    def __init__(self, counts):
+        self.counts = dict(counts)
+        super().__init__(json.dumps(self.counts, sort_keys=True))
+
+
+class JailError(RuntimeError):
+    """R133(f): the judge's jail does not hide what it must, or cannot see its own workdir."""
+
+
+def tool_events(stdout):
+    """Counts, by kind, of the `--json` events in `stdout` that the allow-lists above do not
+    admit; {} for a vote that used no tool."""
+    bad = collections.Counter()
+    for line in (stdout or "").splitlines():
+        if not line.strip():
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            ev = None
+        if not isinstance(ev, dict):
+            bad["unparsed_line"] += 1
+            continue
+        kind = ev.get("type")
+        if kind in _JSON_EVENTS_OK:
+            continue
+        if kind in _JSON_ITEM_EVENTS:
+            item = ev.get("item")
+            itype = item.get("type") if isinstance(item, dict) else None
+            if itype not in _JSON_ITEMS_OK:
+                bad[f"item:{itype}"] += 1
+            continue
+        bad[f"event:{kind}"] += 1
+    return dict(bad)
+
+
+def jail_argv(home_dir, uid, rw_paths):
+    """R133(e): the bubblewrap prefix of every codex process the channel starts. The filesystem
+    is read-only, the home directory, /tmp and /run/user/<uid> are empty tmpfs mounts (hiding the
+    repository with its answer keys and history, every Claude profile, and session scratch
+    copies), and exactly `rw_paths` are bound back read-write at their own paths. Measured on
+    codex-cli 0.154.0: codex still starts with /run/user/<uid> hidden, so it is hidden."""
+    argv = ["bwrap", "--die-with-parent", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+            "--tmpfs", str(home_dir), "--tmpfs", "/tmp", "--tmpfs", f"/run/user/{uid}"]
+    for p in rw_paths:
+        argv += ["--bind", str(p), str(p)]
+    return argv + ["--"]
+
+
+def codex_exec_argv(work):
+    """R133(a)-(c): one vote's `codex exec`; `work` is an empty directory."""
+    work = pathlib.Path(work)
+    return ["codex", "exec", *_CODEX_EXEC_FLAGS, "-o", str(work / "last.txt"), "-C", str(work), "-"]
+
+
+def precondition_argv(path):
+    """R133(f): a local command under Codex's own read-only sandbox, never a model call."""
+    return ["codex", "sandbox", "-c", "sandbox_mode=read-only", "--", "test", "-e", str(path)]
+
+
+def describe_channel(argv):
+    """The header's channel description, derived from an argv the builders above produced (R138):
+    never a hand-written string that could drift from what runs."""
+    extra = " ".join(_CODEX_CONFIG_EXTRA.split())
+    return (" ".join(argv) + " (prompt on stdin); env: CODEX_HOME=<CODEX_HOME>, without "
+            + "/".join(_STRIPPED_ENV) + "; config.toml: model, model_reasoning_effort, " + extra)
+
+
+def _placeholder_argv():
+    work = pathlib.Path("<workdir>")
+    return (jail_argv("<home>", "<uid>", ("<CODEX_HOME>", "<auth.json target>", work))
+            + codex_exec_argv(work))
+
+
+
+def _codex_version(runner=None):
     """`codex --version` for every output header (R122). A version query, not a model call."""
     try:
-        p = subprocess.run(["codex", "--version"], capture_output=True, text=True, timeout=30,
-                           stdin=subprocess.DEVNULL)
+        p = (runner or subprocess.run)(["codex", "--version"], capture_output=True, text=True,
+                                       timeout=30, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return f"unavailable ({type(exc).__name__})"
     if p.returncode != 0:
@@ -775,30 +893,111 @@ def _codex_version():
     return text.splitlines()[0] if text else "?"
 
 
-def new_codex_home(model, effort):
+def new_codex_home(model, effort, auth_source=None):
     """`run_labellers.new_codex_home`'s pattern: a fresh CODEX_HOME holding only an auth.json
-    symlink and a config.toml that pins the model and effort."""
+    symlink (to `auth_source`, default `~/.codex/auth.json`) and a config.toml that pins the model
+    and effort; R133(d) appends `_CODEX_CONFIG_EXTRA` (subscription login only, no in-app
+    updates)."""
     home = pathlib.Path(tempfile.mkdtemp(prefix="codex-judge-home-"))
-    (home / "auth.json").symlink_to(pathlib.Path.home() / ".codex" / "auth.json")
+    src = pathlib.Path.home() / ".codex" / "auth.json" if auth_source is None else auth_source
+    # Linked to the RESOLVED file, which is what the jail binds back (R133 e): a link to a link
+    # would dangle inside the jail, whose home directory is an empty tmpfs.
+    (home / "auth.json").symlink_to(os.path.realpath(src))
     (home / "config.toml").write_text(
-        f'model = "{model}"\nmodel_reasoning_effort = "{effort}"\n')
+        f'model = "{model}"\nmodel_reasoning_effort = "{effort}"\n' + _CODEX_CONFIG_EXTRA)
     return home
 
 
 class CodexChannel:
-    """R122: one fresh CODEX_HOME per run, the model and effort imported from
-    generate_synthetic.py, subscription only (`codex_complete` strips the API keys). Constructed
-    only when `judge` is called without a `complete`; Task 9a never constructs one."""
+    """R122 / R133: the judge's own Codex channel. One fresh CODEX_HOME per run (the model and
+    effort imported from generate_synthetic.py), subscription only (the API-key variables are
+    stripped and `forced_login_method` is set), and every codex process inside `jail_argv`'s
+    bubblewrap jail with only the CODEX_HOME, the file its auth link resolves to, and one empty
+    workdir bound back. Constructing it RUNS THE JAIL PRECONDITION (`check_jail`), so no vote can
+    be cast on a channel whose jail has not been shown to hide the answers. `runner` stands in for
+    `subprocess.run` (tests); `home_dir` and `uid` default to the running user's."""
 
-    def __init__(self):
+    def __init__(self, runner=None, home_dir=None, uid=None, repo=REPO_ROOT):
         gs = _gs()
         self.model, self.effort = gs.CODEX_MODEL, gs.CODEX_EFFORT
-        self.version = _codex_version()
-        self.home = new_codex_home(self.model, self.effort)
-        self._codex_complete = gs.codex_complete
+        self._run = runner or subprocess.run
+        self.home_dir = pathlib.Path.home() if home_dir is None else pathlib.Path(home_dir)
+        self.uid = os.getuid() if uid is None else uid
+        self.repo = pathlib.Path(repo)
+        self.version = _codex_version(self._run)
+        self.home = new_codex_home(self.model, self.effort,
+                                   auth_source=self.home_dir / ".codex" / "auth.json")
+        try:
+            # R133(e): resolved at run time and bound at its own path, so a token refresh can
+            # write the real file. Bound, never read.
+            self.auth = pathlib.Path(os.path.realpath(self.home / "auth.json"))
+            self.precondition = self.check_jail()
+        except BaseException:
+            self.close()
+            raise
+
+    def _env(self):
+        env = {k: v for k, v in os.environ.items() if k not in _STRIPPED_ENV}
+        env["CODEX_HOME"] = str(self.home)
+        return env
+
+    def jail(self, work):
+        return jail_argv(self.home_dir, self.uid, (self.home, self.auth, work))
+
+    def hidden_paths(self):
+        """R133(f): what the jail must hide -- the repository, the answer key, every Claude
+        profile, and the session scratch root."""
+        return [self.repo, self.repo / RTD_DOC, self.home_dir / ".claude",
+                self.home_dir / ".claude-sdd", self.home_dir / ".claude-kat",
+                pathlib.Path(f"/tmp/claude-{self.uid}")]
+
+    def check_jail(self):
+        """R133(f): inside the same jail a vote runs in, `test -e` under Codex's read-only
+        sandbox must give 1 (absent) for every `hidden_paths` entry and 0 for the workdir;
+        anything else raises JailError naming the path. Returns the rows (path, rc, expect)."""
+        work = pathlib.Path(tempfile.mkdtemp(prefix="codex-judge-work-"))
+        try:
+            rows = []
+            for path, expect in [(p, 1) for p in self.hidden_paths()] + [(work, 0)]:
+                p = self._run(self.jail(work) + precondition_argv(path), capture_output=True,
+                              text=True, timeout=PRECONDITION_TIMEOUT, env=self._env(),
+                              stdin=subprocess.DEVNULL)
+                rows.append({"path": str(path), "rc": p.returncode, "expect": expect})
+            bad = [r for r in rows if r["rc"] != r["expect"]]
+            if bad:
+                raise JailError("R133: the judge's jail refuses to start: " + "; ".join(
+                    f"{r['path']} gave rc {r['rc']}, must give {r['expect']} "
+                    f"({'hidden' if r['expect'] else 'visible'})" for r in bad))
+            return rows
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def describe(self):
+        """`describe_channel` over the argv this channel builds, its paths shown as labels."""
+        work = pathlib.Path("<workdir>")
+        labels = {str(self.home_dir): "<home>", str(self.home): "<CODEX_HOME>",
+                  str(self.auth): "<auth.json target>", f"/run/user/{self.uid}": "/run/user/<uid>"}
+        return describe_channel([labels.get(a, a) for a in self.jail(work) + codex_exec_argv(work)])
 
     def complete(self, prompt, log_path=None):
-        return self._codex_complete(prompt, self.home, log_path)
+        """One vote: the rendered prompt on stdin, `--json` stdout to `log_path` (with stderr).
+        Raises ToolCallError when the stream shows a tool event, RuntimeError on a non-zero exit;
+        returns the last agent message."""
+        work = pathlib.Path(tempfile.mkdtemp(prefix="codex-judge-work-"))
+        try:
+            p = self._run(self.jail(work) + codex_exec_argv(work), input=prompt,
+                          capture_output=True, text=True, timeout=CODEX_CALL_TIMEOUT,
+                          env=self._env())
+            if log_path is not None:  # R133(h): under --log-dir only, and read by counts only
+                pathlib.Path(log_path).write_text(p.stdout + "\n--- stderr ---\n" + p.stderr)
+            bad = tool_events(p.stdout)
+            if bad:
+                raise ToolCallError(bad)
+            if p.returncode != 0:
+                raise RuntimeError(f"codex exec exit {p.returncode} (its log holds the rest)")
+            return (work / "last.txt").read_text()
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
 
     def close(self):
         shutil.rmtree(self.home, ignore_errors=True)
@@ -845,11 +1044,23 @@ def _majority(verdicts):
     return majority, disagreement
 
 
+def _failure(v):
+    """R137: the failure kind (one of RETRY_FAILURES) a vote attempt carries, or None."""
+    for f in v.flags:
+        kind = f.split(":", 1)[0]
+        if kind in RETRY_FAILURES:
+            return kind
+    return None
+
+
 def judge(item, votes=3, complete=None, log_dir=None):
-    """R122: `votes` calls on `item` (a `build_input` result), at most 3 concurrently, each with
-    its own log path; every vote parsed (R119), quote-checked, and kept with its raw reply,
-    beside the per-field majority and disagreement. `complete(prompt, log_path) -> str` is
-    injectable; the default is the Codex channel."""
+    """R122: `votes` votes on `item` (a `build_input` result), at most 3 concurrently; every
+    attempt has its own log path, is parsed (R119) and quote-checked, and is kept with its raw
+    reply, beside the per-field majority and disagreement. R137, pre-registered: an attempt that
+    is `call_failed`, `unparseable` or `tool_call` is re-issued, up to MAX_ATTEMPTS_PER_VOTE
+    attempts in all; the vote is the first attempt that is none of those, and a vote whose every
+    attempt failed stays failed. `complete(prompt, log_path) -> str` is injectable; the default is
+    the Codex channel."""
     if complete is None:
         complete = codex_channel().complete
     if log_dir is not None:
@@ -857,10 +1068,12 @@ def judge(item, votes=3, complete=None, log_dir=None):
         log_dir.mkdir(parents=True, exist_ok=True)
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", item["id"])
 
-    def one(k):
-        log_path = None if log_dir is None else log_dir / f"{safe}.vote{k + 1}.log"
+    def attempt(k, a):
+        log_path = None if log_dir is None else log_dir / f"{safe}.vote{k + 1}.try{a + 1}.log"
         try:
             raw = complete(item["prompt"], log_path)
+        except ToolCallError as exc:  # R133(g): a failed vote of its own kind, never dropped
+            return Verdict(mode=item["mode"], flags=[f"tool_call:{exc}"]), ""
         except Exception as exc:  # noqa: BLE001 -- recorded on the vote, never silently dropped
             return Verdict(mode=item["mode"],
                            flags=[f"call_failed:{type(exc).__name__}: {str(exc)[:200]}"]), ""
@@ -868,12 +1081,23 @@ def judge(item, votes=3, complete=None, log_dir=None):
                           offered_lessons=item["offered_lessons"])
         return verify_quote(v, item["pre_evidence"]), raw
 
+    def one(k):
+        tries = []
+        for a in range(MAX_ATTEMPTS_PER_VOTE):
+            v, raw = attempt(k, a)
+            tries.append({"attempt": a + 1, "failure": _failure(v), "flags": list(v.flags),
+                          "raw": raw})
+            if tries[-1]["failure"] is None:
+                break
+        return v, raw, tries
+
     with cf.ThreadPoolExecutor(max_workers=max(1, min(MAX_CONCURRENT_CALLS, votes))) as ex:
         results = list(ex.map(one, range(votes)))
-    verdicts = [v for v, _raw in results]
+    verdicts = [v for v, _raw, _tries in results]
     majority, disagreement = _majority(verdicts)
     return {"id": item["id"], "mode": item["mode"],
-            "votes": [dict(dataclasses.asdict(v), raw=raw) for v, raw in results],
+            "votes": [dict(dataclasses.asdict(v), raw=raw, attempts=tries)
+                      for v, raw, tries in results],
             "majority": majority, "disagreement": disagreement,
             "split_fields": sorted(f for f, n in disagreement.items() if n > 1)}
 
@@ -1316,7 +1540,13 @@ def _shown(path, repo):
     except ValueError:
         return p.name
 
-def gate_header(repo, rtd_doc, controls_doc, votes, dry, version=None):
+def _leak_found(scan):
+    """R135(d): True when `_leak_scan` reports anything at all."""
+    return bool(scan["own_correction_in_evidence_or_index"] or scan["gate_id_tokens_by_item"]
+                or scan["gate_id_tokens_in_template"])
+
+
+def gate_header(repo, rtd_doc, controls_doc, votes, dry, version=None, channel=None):
     gs = _gs()
     repo = pathlib.Path(repo)
     return {
@@ -1324,16 +1554,27 @@ def gate_header(repo, rtd_doc, controls_doc, votes, dry, version=None):
         "codex_version": version if version is not None else _codex_version(),
         "model": gs.CODEX_MODEL, "effort": gs.CODEX_EFFORT,
         "model_source": str(_GS_PATH.relative_to(REPO_ROOT)),
-        "channel": "codex exec --sandbox read-only --ephemeral; fresh CODEX_HOME per run "
-                   "(auth.json symlink + config.toml); OPENAI_API_KEY/CODEX_API_KEY/"
-                   "OPENAI_BASE_URL stripped",
+        "channel": channel if channel is not None else describe_channel(_placeholder_argv()),
         "prompt": f"{PROMPT_PATH.relative_to(REPO_ROOT)} sha256 {_sha256(PROMPT_PATH)}",
         "rtd_doc": f"{_shown(rtd_doc, repo)} sha256 {_sha256(rtd_doc)}",
         "controls_doc": f"{_shown(controls_doc, repo)} sha256 {_sha256(controls_doc)}",
         "repo_head": _resolve(repo, "HEAD"),
         "votes_per_item": votes,
+        "retry_policy": f"R137: a {'/'.join(RETRY_FAILURES)} attempt is re-issued, up to "
+                        f"{MAX_ATTEMPTS_PER_VOTE} attempts per vote; every attempt is recorded",
         "token_estimate": f"ceil(chars / {CHARS_PER_TOKEN}) -- an estimate, not a tokenizer count",
     }
+
+
+def _refuse_log_dir_inside(log_dir, *roots):
+    """R133(h): vote logs live only under --log-dir, OUTSIDE the repository, so no log can be
+    committed or read back as data."""
+    d = pathlib.Path(log_dir).resolve()
+    for root in roots:
+        r = pathlib.Path(root).resolve()
+        if d == r or r in d.parents:
+            raise ValueError(f"R133: --log-dir {d} is inside the repository {r}; vote logs live "
+                             "outside it")
 
 
 def run_gate(complete=None, dry=False, repo=REPO_ROOT, rtd_doc=None, controls_doc=None,
@@ -1342,12 +1583,43 @@ def run_gate(complete=None, dry=False, repo=REPO_ROOT, rtd_doc=None, controls_do
     """R120/R121. Builds all gate inputs (lessons at each item's own freeze sha and decision
     time) and renders every prompt. `dry=True` stops there and makes NO `complete` call; the calls
     actually made are counted either way. Otherwise every item is judged and scored; `passed`
-    False makes the measurement INCONCLUSIVE by rule (plan Task 9 Step 6). A live run on the
-    Codex channel needs `log_dir`: each vote's log is the only record of what Codex did."""
+    False makes the measurement INCONCLUSIVE by rule (plan Task 9 Step 6).
+
+    A live run refuses to start (no vote cast): without `log_dir`, or with it inside the
+    repository (R133 h); while the leak scan reports anything (R135 d). A live run on the Codex
+    channel -- no `complete` injected -- also refuses any `votes` but GATE_VOTES, any
+    `population` but the spec's (R138: the flags stay for dry runs and fixtures), and any
+    `codex --version` but CODEX_CLI_VERSION; building the channel runs its jail precondition
+    (R133 f) before the first vote."""
     global _CHANNEL
     repo = pathlib.Path(repo)
     if not dry and complete is None and log_dir is None:
         raise ValueError("a live gate on the Codex channel needs log_dir (R122: one log per call)")
+    if not dry and log_dir is not None:
+        _refuse_log_dir_inside(log_dir, repo, REPO_ROOT)
+    own_channel = not dry and complete is None
+    if own_channel and votes != GATE_VOTES:
+        raise ValueError(f"R138: a live gate casts {GATE_VOTES} votes per item, not {votes}")
+    if own_channel and population != GATE_POPULATION:
+        raise ValueError("R138: a live gate checks the spec's population; --any-population is "
+                         "for dry runs and fixtures only")
+    try:
+        ch = None
+        if own_channel:
+            ch = codex_channel()
+            if ch.version != CODEX_CLI_VERSION:
+                raise ValueError(f"R138: a live gate needs {CODEX_CLI_VERSION}; `codex --version` "
+                                 f"gives {ch.version!r}")
+        return _gate(ch, complete, dry, repo, rtd_doc, controls_doc, global_claude_md, votes,
+                     log_dir, population)
+    finally:
+        if own_channel and _CHANNEL is not None:
+            _CHANNEL.close()
+            _CHANNEL = None
+
+
+def _gate(ch, complete, dry, repo, rtd_doc, controls_doc, global_claude_md, votes, log_dir,
+          population):
     rtd_path = pathlib.Path(rtd_doc or repo / RTD_DOC)
     ctl_path = pathlib.Path(controls_doc or repo / CONTROLS_DOC)
     items = gate_items(repo, rtd_path, ctl_path)
@@ -1362,7 +1634,7 @@ def run_gate(complete=None, dry=False, repo=REPO_ROOT, rtd_doc=None, controls_do
     def counted(prompt, log_path=None):
         with lock:
             calls.append(log_path)
-        return (complete or codex_channel().complete)(prompt, log_path)
+        return (complete or ch.complete)(prompt, log_path)
 
     lesson_cache, lesson_stats, inputs = {}, {}, []
     for it in items:
@@ -1388,25 +1660,44 @@ def run_gate(complete=None, dry=False, repo=REPO_ROOT, rtd_doc=None, controls_do
     result = {"dry": dry, "rows": rows, "totals": totals, "leak_scan": _leak_scan(items, inputs),
               "lesson_stats": [{"freeze_sha": k[0], "decision_ts": k[1], **v}
                                for k, v in lesson_stats.items()]}
-    own_channel = not dry and complete is None
     result["header"] = gate_header(repo, rtd_path, ctl_path, votes, dry,
-                                   version=codex_channel().version if own_channel else None)
+                                   version=None if ch is None else ch.version,
+                                   channel=None if ch is None else ch.describe())
     if dry:
         result.update(calls=len(calls), passed=None)
         return result
-    try:
-        results = []
-        for it, inp in zip(items, inputs):
-            r = judge(inp, votes=votes, complete=counted, log_dir=log_dir)
-            results.append(dict(r, kind=it["kind"], case=it["case"], expected=it["expected"],
-                                for_prompt=it["source"].get("for_prompt")))
-    finally:
-        if own_channel and _CHANNEL is not None:
-            _CHANNEL.close()
-            _CHANNEL = None
+    if _leak_found(result["leak_scan"]):
+        raise LeakageError("R135: a live gate refuses to start while the leak scan reports "
+                           f"anything: {json.dumps(result['leak_scan'], sort_keys=True)}")
+    results = []
+    for it, inp in zip(items, inputs):
+        r = judge(inp, votes=votes, complete=counted, log_dir=log_dir)
+        results.append(dict(r, kind=it["kind"], case=it["case"], expected=it["expected"],
+                            for_prompt=it["source"].get("for_prompt")))
     score = score_gate(results, population)
     result.update(results=results, score=score, passed=score["passed"], calls=len(calls))
     return result
+
+
+# R142 (review concern 2): a transfer limit, printed in every gate report.
+CONTEXT_DISCLOSURE = ("gate document items include text after the decision point from the same "
+                      "pre-correction blob; session items never do")
+
+
+def _quote_failure_line(results):
+    """R142 (review concern 4), descriptive: how many majority flags (the text_detectable yes
+    column's `is_mistake` True) and control fires carry at least one `quote_not_verbatim` vote --
+    a quote-failed vote keeps its `is_mistake`, so these still count."""
+    def carries(r):
+        return any("quote_not_verbatim" in v["flags"] for v in r["votes"])
+
+    pop = _population(results)
+    flagged = [r for r in pop["audit_rtd"] if r["majority"].get("is_mistake") is True]
+    fires = [r for r in pop["controls"] if r["majority"].get("is_mistake") is True]
+    return (f"- quote_not_verbatim (descriptive): {sum(map(carries, flagged))} of "
+            f"{len(flagged)} majority flags and {sum(map(carries, fires))} of {len(fires)} "
+            "control fires carry at least one such vote")
+
 
 
 def format_gate(res):
@@ -1442,6 +1733,7 @@ def format_gate(res):
             f"- gate-id tokens in the template: {lk['gate_id_tokens_in_template']}",
             f"- items whose rendered prompt carries gate-id tokens: "
             f"{len(lk['gate_id_tokens_by_item'])} {json.dumps(lk['gate_id_tokens_by_item'], sort_keys=True)}",
+            "", f"context disclosure: {CONTEXT_DISCLOSURE}",
             "", f"complete() calls: {res['calls']}"]
     if not res["dry"]:
         s = res["score"]
@@ -1456,6 +1748,7 @@ def format_gate(res):
                                         and r["majority"].get("is_mistake") is True)
         out.append(f"- control fires by prompt section (descriptive): "
                    f"{json.dumps(dict(by_prompt), sort_keys=True)}")
+        out.append(_quote_failure_line(res["results"]))
         out += ["", "| id | expected | detectability | is_mistake | lessons | split fields | flags |",
                 "|---|---|---|---|---|---|---|"]
         for r in res["results"]:

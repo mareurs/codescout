@@ -231,6 +231,19 @@ class LeakageTests(unittest.TestCase):
         with self.assertRaises(judge.LeakageError):
             judge.build_input(item, None, [], "audit")
 
+    def test_an_item_decision_ts_that_disagrees_with_the_events_db_is_refused(self):
+        # R135(e), Task 10's path: the item's decision_ts must be the events db's own ts for the
+        # decision turn. LOAD-BEARING: the item's ts is LATER than the db's, so every context
+        # turn is still strictly before it and the leakage guard admits the input -- only the
+        # consistency check can refuse it (a plain ValueError, not a LeakageError).
+        with tempfile.TemporaryDirectory() as tmp:
+            db = self._db(tmp, "2026-09-26T10:00:01Z")
+            item = dict(self._audit_item(), decision_ts="2026-09-26T10:00:09Z")
+            with self.assertRaisesRegex(ValueError, "disagrees with the events db") as cm:
+                judge.build_input(item, db, [], "audit")
+            self.assertNotIsInstance(cm.exception, judge.LeakageError)
+            judge.build_input(self._audit_item(), db, [], "audit")  # the db's own ts is accepted
+
 
 # --- R117: bounded context and origin candidates ---------------------------------------------------
 
@@ -462,6 +475,57 @@ class LessonDatingTests(unittest.TestCase):
             self.assertIn("First sentence here.", long_line)
             self.assertNotIn("ENDMARK", index)
 
+    def _assert_every_id_resolves(self, root, sha, kinds):
+        lessons = judge._lessons.lessons_at(root, sha)
+        cache = {}
+        unresolved = [l.id for l in lessons if judge._lesson_anchor(root, sha, l, cache) is None]
+        self.assertEqual(unresolved, [])
+        paths = {l.source.partition(":")[2] for l in lessons}
+        for kind in kinds:
+            self.assertIn(kind, paths)  # not vacuous: every source kind named is present
+        self.assertTrue(any(p.startswith(".codescout/memories/") for p in paths), paths)
+        return lessons
+
+    def test_every_lessons_at_id_resolves_to_an_anchor_for_every_source_kind(self):
+        # R141: judge.py re-derives lessons.py's id minting to find each lesson's anchor; a drift
+        # between the two would silently turn dated lessons `undatable`. LOAD-BEARING shapes:
+        # a CLAUDE.md preamble, bullets, section prose and a repeated heading; OP, R and T
+        # entries (T at level 3); a memory with a preamble and sections, and a section-less one.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            _write(root, "CLAUDE.md", "# P\n\nPreamble prose.\n\n## Rules\n\n"
+                                      "- **Bold lead one.** body\n- **Bold lead two.** body\n\n"
+                                      "Section prose.\n\n## Notes\n\nx.\n\n## Notes\n\ny.\n")
+            _write(root, "docs/trackers/reconnaissance-patterns.md",
+                   "# R\n\n## R-1 — a pattern\n\n**Status:** promoted\n\nBody.\n")
+            _write(root, "docs/trackers/tool-usage-patterns.md",
+                   "# T\n\n## Entries\n\n### T-1 — a pattern\n\n**Status:** promoted\n\nBody.\n")
+            _write(root, ".codescout/memories/m.md",
+                   "# M\n\nMemory preamble.\n\n## One\n\nx\n\n## Two\n\ny\n")
+            _write(root, ".codescout/memories/sub/flat.md", "# Flat\n\nNo sections here.\n")
+            sha = _commit(root, "every source kind", 1)
+            kinds = ("CLAUDE.md", "docs/trackers/operator-rules.md",
+                     "docs/trackers/reconnaissance-patterns.md",
+                     "docs/trackers/tool-usage-patterns.md")
+            ids = {l.id.partition(":")[2] for l in self._assert_every_id_resolves(root, sha, kinds)}
+            for bare in ("CLAUDE.md#-preamble", "CLAUDE.md#rules/bold-lead-one", "CLAUDE.md#rules",
+                         "CLAUDE.md#notes-2", "operator-rules.md#OP-1",
+                         "reconnaissance-patterns.md#R-1", "tool-usage-patterns.md#T-1",
+                         "memory:m#-preamble", "memory:m#two", "memory:sub/flat"):
+                self.assertIn(bare, ids)
+
+    def test_every_lessons_at_id_resolves_at_the_controls_tree(self):
+        # R141, on the real repo at the controls' tree; skipped only when its objects are absent.
+        # Its four source kinds: no tool-usage entry is promoted there, so T-N has no lesson.
+        probe = subprocess.run(["git", "-C", str(REPO_ROOT), "cat-file", "-e", "27eded91^{commit}"],
+                               capture_output=True)
+        if probe.returncode != 0:
+            self.skipTest("commit 27eded91 is not in this clone")
+        kinds = ("CLAUDE.md", "docs/trackers/operator-rules.md",
+                 "docs/trackers/reconnaissance-patterns.md")
+        self.assertGreater(len(self._assert_every_id_resolves(
+            REPO_ROOT, judge._resolve(REPO_ROOT, "27eded91"), kinds)), 200)
+
 
 # --- R119: the Verdict ----------------------------------------------------------------------------
 
@@ -541,6 +605,30 @@ class VerdictTests(unittest.TestCase):
                                        offered_lessons=["L-1", "L-2"])
         self.assertEqual(only_bad.lessons, "abstain")
 
+    def test_a_null_boolean_is_an_abstention_not_a_type_error(self):
+        # R139: `null` is the prompt's abstention -- None, flagged abstain:<field>.
+        reply = dict(AUDIT_FULL, is_mistake=None, is_decision_point=None)
+        v = judge.parse_verdict(json.dumps(reply), mode="audit", offered_lessons=["L-1", "L-2"])
+        for f in ("is_mistake", "is_decision_point"):
+            self.assertIsNone(getattr(v, f))
+            self.assertIn(f"abstain:{f}", v.flags)
+            self.assertNotIn(f"invalid:{f}", v.flags)
+        c = judge.parse_verdict(json.dumps({"is_correction": None, "origin_uuid": None,
+                                            "is_decision_point": True, "lessons": [],
+                                            "detectability": None, "quote": ""}),
+                                mode="correction")
+        self.assertIsNone(c.is_correction)
+        self.assertIn("abstain:is_correction", c.flags)
+        typed = judge.parse_verdict(json.dumps(dict(AUDIT_FULL, is_mistake="yes")), mode="audit",
+                                    offered_lessons=["L-1", "L-2"])
+        self.assertIn("invalid:is_mistake", typed.flags)  # a string is still a type error
+        self.assertIsNone(typed.is_mistake)
+        for mode, fields in (("audit", ("is_decision_point", "is_mistake")),
+                             ("correction", ("is_correction", "is_decision_point"))):
+            prompt = _rendered_template(mode)
+            for f in fields:  # the schema offers the abstention it is parsed as
+                self.assertIn(f'"{f}": true or false or null', prompt, (mode, f))
+
 
 # --- judge(): votes and majority -------------------------------------------------------------------
 
@@ -612,28 +700,149 @@ class MajorityTests(unittest.TestCase):
         self.assertEqual(len(out["votes"]), 6)
         self.assertEqual(state["peak"], 3)  # R122: at most 3 concurrent calls, and they do overlap
 
-    def test_a_failed_call_is_recorded_on_its_vote_never_dropped(self):
-        reply = json.dumps({"is_decision_point": True, "is_mistake": True, "lessons": "uncovered",
-                            "lesson_outcomes": {}, "detectability": "obtainable",
-                            "evidence_present_before": "no", "evidence_used": "no",
-                            "quote": "Nothing reads the table."})
-        calls = []
+    def test_a_failed_attempt_is_reissued_at_most_twice_and_every_attempt_kept(self):
+        # R137, pre-registered: call_failed / unparseable / tool_call is re-issued, up to 3
+        # attempts per vote; the vote is the first attempt that is none of those.
+        good = json.dumps({"is_decision_point": True, "is_mistake": True, "lessons": "uncovered",
+                           "lesson_outcomes": {}, "detectability": "obtainable",
+                           "evidence_present_before": "no", "evidence_used": "no",
+                           "quote": "Nothing reads the table."})
+        boom = RuntimeError("codex exec exit 1")
+        tool = judge.ToolCallError({"item:command_execution": 1})
+        cases = {  # name: (what each successive call does, failures recorded, vote is_mistake)
+            "fails twice, then answers": ([boom, boom, good],
+                                          ["call_failed", "call_failed", None], True),
+            "fails every time": ([boom, boom, boom, good], ["call_failed"] * 3, None),
+            "unparseable, then answers": (["no json here", good], ["unparseable", None], True),
+            "a tool call, then answers": ([tool, good], ["tool_call", None], True),
+            # A parseable reply with a flagged field is a vote, not a failure: never re-issued.
+            "missing a field": ([json.dumps({"is_mistake": True}), good], [None], True),
+        }
+        for name, (script, failures, is_mistake) in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                calls = []
 
-        def flaky(prompt, log_path=None):
-            calls.append(log_path)
-            if len(calls) == 2:
-                raise RuntimeError("codex exec exit 1: boom")
-            return reply
+                def scripted(prompt, log_path=None, script=script, calls=calls):
+                    calls.append(log_path)
+                    step = script[len(calls) - 1]
+                    if isinstance(step, Exception):
+                        raise step
+                    return step
 
-        out = judge.judge(_doc_input(), votes=3, complete=flaky)
-        self.assertEqual(len(out["votes"]), 3)
-        failed = [v for v in out["votes"] if any(f.startswith("call_failed:") for f in v["flags"])]
-        self.assertEqual(len(failed), 1)
-        self.assertIsNone(failed[0]["is_mistake"])
-        self.assertIs(out["majority"]["is_mistake"], True)  # 2 of 3 still agree
+                out = judge.judge(_doc_input(), votes=1, complete=scripted,
+                                  log_dir=pathlib.Path(tmp))
+                vote = out["votes"][0]
+                attempts = vote.get("attempts") or []
+                self.assertEqual(len(calls), len(failures))
+                self.assertEqual([a["failure"] for a in attempts], failures)
+                self.assertEqual(len({str(p) for p in calls}), len(calls))  # its own log each
+                self.assertIs(vote["is_mistake"], is_mistake)
+                if failures[-1] is not None:  # a vote whose every attempt failed stays failed
+                    self.assertTrue(any(f.startswith("call_failed:") for f in vote["flags"]))
+
+    def test_lesson_outcomes_take_a_strict_majority_per_lesson(self):
+        # R135(b), the A1.4 transfer input: 2 of 3 `missed` gives `missed`; an applied / missed
+        # / absent split for one id omits that id.
+        lessons = [{"id": i, "source": "s", "status": "dated", "anchor": "a", "first_sentence": "b"}
+                   for i in ("L-1", "L-2")]
+        base = {"is_decision_point": True, "is_mistake": True, "lessons": ["L-1"],
+                "detectability": "obtainable", "evidence_present_before": "yes",
+                "evidence_used": "no", "quote": "Nothing reads the table."}
+        fake = _FakeComplete([
+            json.dumps(dict(base, lesson_outcomes={"L-1": "missed", "L-2": "applied"})),
+            json.dumps(dict(base, lesson_outcomes={"L-1": "missed", "L-2": "missed"})),
+            json.dumps(dict(base, lesson_outcomes={"L-1": "applied"}))])
+        out = judge.judge(_doc_input(lessons=lessons), votes=3, complete=fake)
+        self.assertEqual(out["majority"]["lesson_outcomes"], {"L-1": "missed"})
+        self.assertEqual(out["disagreement"]["lesson_outcomes"], 3)
+
+    def test_judge_checks_a_quote_against_the_pre_evidence_never_the_prompt(self):
+        # R135(a): the prompt SHOWS the correction, so a quote of it is found in the prompt; it
+        # is not pre-decision evidence, so the vote abstains. A context quote keeps its lessons.
+        lessons = [{"id": "L-1", "source": "s", "status": "dated", "anchor": "a",
+                    "first_sentence": "b"}]
+        item = _doc_input("correction", lessons=lessons)
+        base = {"is_correction": True, "origin_uuid": None, "is_decision_point": True,
+                "lessons": ["L-1"], "detectability": "in-trace"}
+        for quote, verified in (("False as written: the sweep reads it.", False),
+                                ("Later the sweep reads it.", True)):
+            with self.subTest(quote=quote):
+                self.assertIn(quote, item["prompt"])
+                fake = _FakeComplete([json.dumps(dict(base, quote=quote))])
+                vote = judge.judge(item, votes=1, complete=fake)["votes"][0]
+                if verified:
+                    self.assertEqual((vote["lessons"], vote["detectability"]), (["L-1"], "in-trace"))
+                    self.assertNotIn("quote_not_verbatim", vote["flags"])
+                else:
+                    self.assertEqual((vote["lessons"], vote["detectability"]), ("abstain", None))
+                    self.assertIn("quote_not_verbatim", vote["flags"])
+                    self.assertIs(vote["is_correction"], True)  # the rest of the answer stands
+
 
 
 # --- R122: the Codex channel (built, never called) -------------------------------------------------
+
+
+_CLEAN_EVENTS = [  # a --json stream with no tool, exec or file-read event (codex-cli 0.154.0 shapes)
+    {"type": "thread.started", "thread_id": "t-1"}, {"type": "turn.started"},
+    {"type": "item.started", "item": {"id": "i0", "type": "reasoning", "text": "r"}},
+    {"type": "item.updated", "item": {"id": "i0", "type": "reasoning", "text": "r2"}},
+    {"type": "item.completed", "item": {"id": "i1", "type": "agent_message", "text": "a"}},
+    {"type": "item.completed", "item": {"id": "i2", "type": "error", "message": "fallback"}},
+    {"type": "error", "message": "Reconnecting... 2/5"},
+    {"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}},
+]
+_TOOL_EVENT = {"type": "item.started",
+               "item": {"id": "i9", "type": "command_execution", "command": "cat answers.md"}}
+
+
+class _FakeRunner:
+    """Stands in for `subprocess.run` under CodexChannel and starts no process. It records every
+    argv with its stdin and env, and answers `codex --version`, the precondition's `test -e`
+    (0 for a path the jail binds back or one listed in `visible`, else 1 -- a jail whose binds
+    work), and `codex exec` (writing `reply` to its `-o` file and `events` as its --json
+    stdout)."""
+
+    def __init__(self, visible=(), version="codex-cli 0.154.0", reply="{}", events=None,
+                 bound_visible=True):
+        self.visible, self.version, self.reply = {str(p) for p in visible}, version, reply
+        self.events = _CLEAN_EVENTS if events is None else events
+        self.bound_visible = bound_visible
+        self.calls, self.workdir_was_empty = [], []
+
+    def __call__(self, argv, input=None, env=None, **_kw):
+        argv = list(argv)
+        self.calls.append({"argv": argv, "input": input, "env": dict(env or {})})
+        cmd = argv[argv.index("--") + 1:] if argv[0] == "bwrap" else argv
+        bound = {argv[i + 1] for i, a in enumerate(argv) if a == "--bind"}
+        if cmd[:2] == ["codex", "--version"]:
+            return subprocess.CompletedProcess(argv, 0, self.version + "\n", "")
+        if cmd[:2] == ["codex", "sandbox"]:
+            seen = cmd[-1] in self.visible or (self.bound_visible and cmd[-1] in bound)
+            return subprocess.CompletedProcess(argv, 0 if seen else 1, "", "")
+        if cmd[:2] == ["codex", "exec"]:
+            work = pathlib.Path(cmd[cmd.index("-C") + 1])
+            self.workdir_was_empty.append(list(work.iterdir()) == [])
+            pathlib.Path(cmd[cmd.index("-o") + 1]).write_text(self.reply)
+            out = "".join(json.dumps(e) + "\n" for e in self.events)
+            return subprocess.CompletedProcess(argv, 0, out, "codex stderr")
+        raise AssertionError(f"unexpected command {argv!r}")
+
+    def ran(self, word):
+        return [c for c in self.calls if word in c["argv"]]
+
+
+def _home_dir(tmp):
+    """A stand-in home: `.codex/auth.json` is a LINK to a file elsewhere (LOAD-BEARING: only a
+    chained link tells the resolved file, which the jail binds, from the link path). Its content
+    is a placeholder and is never read."""
+    home = pathlib.Path(tmp) / "home"
+    real = pathlib.Path(tmp) / "store" / "auth-real.json"
+    real.parent.mkdir(parents=True)
+    real.write_text("placeholder")
+    (home / ".codex").mkdir(parents=True)
+    (home / ".codex" / "auth.json").symlink_to(real)
+    return home, real
 
 
 class ChannelTests(unittest.TestCase):
@@ -645,30 +854,158 @@ class ChannelTests(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in home.iterdir()), ["auth.json", "config.toml"])
             self.assertTrue((home / "auth.json").is_symlink())  # the link, never its content
             self.assertEqual(os.readlink(home / "auth.json"),
-                             str(pathlib.Path.home() / ".codex" / "auth.json"))
+                             os.path.realpath(pathlib.Path.home() / ".codex" / "auth.json"))
+            # R133(d): subscription login only, and no in-app update.
             self.assertEqual((home / "config.toml").read_text(),
-                             'model = "gpt-6-astra"\nmodel_reasoning_effort = "medium"\n')
+                             'model = "gpt-6-astra"\nmodel_reasoning_effort = "medium"\n'
+                             'forced_login_method = "chatgpt"\n\n[features]\n'
+                             'in_app_updates = false\n')
         finally:
             shutil.rmtree(home)
 
-    def test_the_channel_routes_every_call_through_codex_complete_on_its_own_home(self):
-        # Constructed with the version query patched and `codex_complete` replaced by a
-        # recorder: the wiring is exercised, no codex process is started.
-        with mock.patch.object(judge, "_codex_version", return_value="codex-cli test"):
-            ch = judge.CodexChannel()
-        try:
-            self.assertEqual((ch.model, ch.effort, ch.version),
-                             ("gpt-6-astra", "medium", "codex-cli test"))
-            self.assertEqual((ch.home / "config.toml").read_text(),
-                             'model = "gpt-6-astra"\nmodel_reasoning_effort = "medium"\n')
-            seen = []
-            ch._codex_complete = lambda prompt, home, log_path=None: seen.append(
-                (prompt, home, log_path)) or "{}"
-            self.assertEqual(ch.complete("the prompt", pathlib.Path("v1.log")), "{}")
-            self.assertEqual(seen, [("the prompt", ch.home, pathlib.Path("v1.log"))])
-        finally:
+    def test_a_vote_goes_on_stdin_inside_the_jail_with_three_paths_bound(self):
+        # R133(a)-(e), with a fake runner: the argv, the bind list, stdin and env are exactly
+        # what a real vote would get, and no process starts.
+        keys = {"OPENAI_API_KEY": "k1", "CODEX_API_KEY": "k2", "OPENAI_BASE_URL": "k3"}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, keys):
+            home, real = _home_dir(tmp)
+            fake = _FakeRunner(reply='{"ok": 1}')
+            ch = judge.CodexChannel(runner=fake, home_dir=home, uid=4242)
+            try:
+                self.assertEqual((ch.model, ch.effort, ch.version),
+                                 ("gpt-6-astra", "medium", "codex-cli 0.154.0"))
+                self.assertEqual(os.readlink(ch.home / "auth.json"), str(real))
+                prompt = "THE RENDERED PROMPT\nsecond line"
+                log = pathlib.Path(tmp) / "v1.log"
+                self.assertEqual(ch.complete(prompt, log), '{"ok": 1}')
+                ex = fake.ran("exec")
+                self.assertEqual(len(ex), 1)
+                argv = ex[0]["argv"]
+                sep = argv.index("--")
+                cmd = argv[sep + 1:]
+                work = cmd[cmd.index("-C") + 1] if "-C" in cmd else "?"
+                self.assertEqual(argv[:sep], [
+                    "bwrap", "--die-with-parent", "--ro-bind", "/", "/", "--dev", "/dev",
+                    "--proc", "/proc", "--tmpfs", str(home), "--tmpfs", "/tmp",
+                    "--tmpfs", "/run/user/4242",
+                    "--bind", str(ch.home), str(ch.home), "--bind", str(real), str(real),
+                    "--bind", work, work])
+                self.assertEqual(cmd, [
+                    "codex", "exec", "--skip-git-repo-check", "--sandbox", "read-only", "-c",
+                    "approval_policy=never", "--ephemeral", "--json", "--strict-config",
+                    "-o", str(pathlib.Path(work) / "last.txt"), "-C", work, "-"])
+                self.assertEqual(ex[0]["input"], prompt)  # the whole user message, on stdin
+                self.assertFalse(any("RENDERED PROMPT" in a or "task.md" in a for a in argv))
+                self.assertEqual(fake.workdir_was_empty, [True])
+                self.assertFalse(pathlib.Path(work).exists())
+                env = ex[0]["env"]
+                self.assertFalse(set(keys) & set(env))  # subscription only
+                self.assertEqual(env.get("CODEX_HOME"), str(ch.home))
+                self.assertIn('"turn.completed"', log.read_text())  # the --json stream is logged
+            finally:
+                ch.close()
+            self.assertFalse(ch.home.exists())
+
+    def test_the_jail_precondition_refuses_a_visible_answer_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, _real = _home_dir(tmp)
+            fake = _FakeRunner()
+            ch = judge.CodexChannel(runner=fake, home_dir=home, uid=4242)
             ch.close()
-        self.assertFalse(ch.home.exists())
+            hidden = [str(judge.REPO_ROOT), str(judge.REPO_ROOT / judge.RTD_DOC),
+                      str(home / ".claude"), str(home / ".claude-sdd"), str(home / ".claude-kat"),
+                      "/tmp/claude-4242"]
+            rows = ch.precondition
+            self.assertEqual([r["path"] for r in rows][:6], hidden)
+            self.assertEqual([r["rc"] for r in rows], [1] * 6 + [0])  # the workdir is visible
+            pre = fake.ran("sandbox")
+            self.assertEqual(len(pre), 7)
+            for c in pre:  # inside the SAME jail a vote runs in; a local command, not a model call
+                sep = c["argv"].index("--")
+                self.assertEqual(c["argv"][:15], [
+                    "bwrap", "--die-with-parent", "--ro-bind", "/", "/", "--dev", "/dev",
+                    "--proc", "/proc", "--tmpfs", str(home), "--tmpfs", "/tmp",
+                    "--tmpfs", "/run/user/4242"])
+                self.assertEqual(c["argv"].count("--bind"), 3)
+                self.assertEqual(c["argv"][sep + 1:sep + 8],
+                                 ["codex", "sandbox", "-c", "sandbox_mode=read-only", "--", "test",
+                                  "-e"])
+            self.assertEqual(fake.ran("exec"), [])
+            for path in hidden:
+                with self.subTest(visible=path):
+                    f = _FakeRunner(visible=[path])
+                    with self.assertRaisesRegex(judge.JailError, re.escape(path)):
+                        judge.CodexChannel(runner=f, home_dir=home, uid=4242)
+                    self.assertEqual(f.ran("exec"), [])
+            blind = _FakeRunner(bound_visible=False)  # a jail that cannot see its own workdir
+            with self.assertRaisesRegex(judge.JailError, "visible"):
+                judge.CodexChannel(runner=blind, home_dir=home, uid=4242)
+
+    def test_a_vote_whose_stream_shows_a_tool_event_is_a_failed_tool_call_vote(self):
+        stream = "".join(json.dumps(e) + "\n" for e in _CLEAN_EVENTS) + "\n"
+        self.assertEqual(judge.tool_events(stream), {})
+        for ev, kind in (
+                (_TOOL_EVENT, "item:command_execution"),
+                ({"type": "item.completed", "item": {"type": "file_change"}}, "item:file_change"),
+                ({"type": "item.completed", "item": {"type": "mcp_tool_call"}}, "item:mcp_tool_call"),
+                ({"type": "item.completed", "item": {"type": "collab_tool_call"}},
+                 "item:collab_tool_call"),
+                ({"type": "item.started", "item": {"type": "web_search"}}, "item:web_search"),
+                ({"type": "item.updated", "item": {"type": "todo_list"}}, "item:todo_list"),
+                ({"type": "item.completed", "item": {"type": "a_future_kind"}}, "item:a_future_kind"),
+                ({"type": "item.completed"}, "item:None"),
+                ({"type": "a.future.event"}, "event:a.future.event")):
+            with self.subTest(kind=kind):  # an unknown kind fails closed
+                self.assertEqual(judge.tool_events(stream + json.dumps(ev) + "\n"), {kind: 1})
+        self.assertEqual(judge.tool_events(stream + "not a json line\n"), {"unparsed_line": 1})
+        reply = json.dumps({"is_decision_point": True, "is_mistake": True, "lessons": "uncovered",
+                            "lesson_outcomes": {}, "detectability": "obtainable",
+                            "evidence_present_before": "no", "evidence_used": "no",
+                            "quote": "Nothing reads the table."})
+        with tempfile.TemporaryDirectory() as tmp:
+            home, _real = _home_dir(tmp)
+            for events, tool in ((_CLEAN_EVENTS, False), (_CLEAN_EVENTS + [_TOOL_EVENT], True)):
+                ch = judge.CodexChannel(runner=_FakeRunner(reply=reply, events=events),
+                                        home_dir=home, uid=4242)
+                try:
+                    out = judge.judge(_doc_input(), votes=1, complete=ch.complete,
+                                      log_dir=pathlib.Path(tmp) / "logs")
+                finally:
+                    ch.close()
+                vote = out["votes"][0]
+                with self.subTest(tool=tool):
+                    if tool:  # recorded as a failed vote, never dropped, and re-issued (R137)
+                        self.assertIn('tool_call:{"item:command_execution": 1}', vote["flags"])
+                        self.assertIsNone(vote["is_mistake"])
+                        self.assertIsNone(out["majority"]["is_mistake"])
+                        self.assertEqual([a["failure"] for a in vote.get("attempts") or []],
+                                         ["tool_call"] * 3)
+                    else:
+                        self.assertEqual(vote["flags"], [])
+                        self.assertIs(out["majority"]["is_mistake"], True)
+
+    def test_the_header_describes_the_channel_from_the_argv_it_builds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, _real = _home_dir(tmp)
+            ch = judge.CodexChannel(runner=_FakeRunner(), home_dir=home, uid=4242)
+            ch.close()
+            live = ch.describe()
+        dry = judge.gate_header(REPO_ROOT, REPO_ROOT / judge.RTD_DOC,
+                                REPO_ROOT / judge.CONTROLS_DOC, 3, True, version="v")["channel"]
+        self.assertEqual(live, dry)  # the live description is the dry one, with its paths labelled
+        for part in ("--tmpfs <home> --tmpfs /tmp --tmpfs /run/user/<uid>",
+                     "--bind <CODEX_HOME> <CODEX_HOME> --bind <auth.json target> "
+                     "<auth.json target> --bind <workdir> <workdir> --",
+                     "codex exec --skip-git-repo-check --sandbox read-only -c approval_policy=never "
+                     "--ephemeral --json --strict-config -o <workdir>/last.txt -C <workdir> - ",
+                     "OPENAI_API_KEY/CODEX_API_KEY/OPENAI_BASE_URL", 'forced_login_method = "chatgpt"'):
+            self.assertIn(part, dry)
+        self.assertNotIn(tmp, live)
+        with mock.patch.object(judge, "_CODEX_EXEC_FLAGS", judge._CODEX_EXEC_FLAGS + ("--zz-probe",)):
+            probed = judge.gate_header(REPO_ROOT, REPO_ROOT / judge.RTD_DOC,
+                                       REPO_ROOT / judge.CONTROLS_DOC, 3, True, version="v")
+        self.assertIn("--strict-config --zz-probe -o", probed["channel"])  # derived, not written
+
 
 
 # --- R120 / the gate -------------------------------------------------------------------------------
@@ -727,6 +1064,31 @@ class GateTests(unittest.TestCase):
         res = _gate_results()[:-1]  # 51 controls
         with self.assertRaises(ValueError):
             judge.score_gate(res)
+
+    def test_the_leak_scan_reports_each_kind_of_leak(self):
+        # R135(c), a positive control per branch, beside a clean input it must not report: the
+        # dry gate's "0 of 81" is a claim only a detector seen firing can make.
+        def entry(text):
+            return {"id": "L-1", "source": "s", "status": "dated", "anchor": text,
+                    "first_sentence": ""}
+
+        items = [{"id": "clean", "must_not_contain": ["absent everywhere"]},
+                 {"id": "gate-id", "must_not_contain": []},
+                 {"id": "in-evidence", "must_not_contain": ["the negative, verbatim"]},
+                 {"id": "in-index", "must_not_contain": ["the other negative"]}]
+        inputs = [{"prompt": "fine", "pre_evidence": "fine", "lessons": [entry("fine")]},
+                  {"prompt": "see RTD-1 here", "pre_evidence": "", "lessons": []},
+                  {"prompt": "", "pre_evidence": "x the negative,\n verbatim y", "lessons": []},
+                  {"prompt": "", "pre_evidence": "", "lessons": [entry("the other negative")]}]
+        with tempfile.TemporaryDirectory() as tmp:
+            leaky = pathlib.Path(tmp) / "template.md"
+            leaky.write_text("a template naming rule-tell\n")
+            with mock.patch.object(judge, "PROMPT_PATH", leaky):
+                scan = judge._leak_scan(items, inputs)
+        self.assertEqual(scan["gate_id_tokens_by_item"], {"gate-id": 1})
+        self.assertEqual(scan["own_correction_in_evidence_or_index"], ["in-evidence", "in-index"])
+        self.assertEqual(scan["gate_id_tokens_in_template"], 1)
+        self.assertEqual(judge._leak_scan(items[:1], inputs[:1])["gate_id_tokens_in_template"], 0)
 
     def test_the_real_documents_yield_21_correction_and_60_audit_items(self):
         probe = subprocess.run(["git", "-C", str(REPO_ROOT), "cat-file", "-e",
@@ -992,8 +1354,133 @@ class GateItemTests(unittest.TestCase):
             self.assertIn("| RTD-2/correction | obtainable | obtainable | None |", text)
             self.assertIn("complete() calls: 15", text)
 
+    def _gate_kwargs(self, root, tmp, **extra):
+        return dict(repo=root, rtd_doc=root / "eval/rtd.md", controls_doc=root / "eval/controls.md",
+                    global_claude_md=_global_claude_md(tmp), **extra)
+
+    def test_a_live_gate_refuses_to_start_while_the_leak_scan_reports_anything(self):
+        # R135(d): the detector is a gate. Each of the scan's three findings refuses alone.
+        clean = {"own_correction_in_evidence_or_index": [], "gate_id_tokens_by_item": {},
+                 "gate_id_tokens_in_template": 0}
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _c = _fixture_gate_repo(tmp)
+            kwargs = self._gate_kwargs(root, tmp, population=None,
+                                       log_dir=pathlib.Path(tmp) / "logs")
+            for finding in ({"own_correction_in_evidence_or_index": ["RTD-1/correction"]},
+                            {"gate_id_tokens_by_item": {"CTL1-1/audit": 1}},
+                            {"gate_id_tokens_in_template": 1}):
+                with self.subTest(finding=sorted(finding)), \
+                        mock.patch.object(judge, "_leak_scan", return_value=dict(clean, **finding)), \
+                        mock.patch.object(judge, "_codex_version", return_value="codex-cli test"):
+                    fake = _FakeComplete([])
+                    with self.assertRaises(judge.LeakageError):
+                        judge.run_gate(dry=False, complete=fake, **kwargs)
+                    self.assertEqual(fake.calls, [])
+                    dry = judge.run_gate(dry=True, complete=fake, **kwargs)  # a dry run reports it
+                    self.assertEqual(dry["leak_scan"], dict(clean, **finding))
+
+    def test_a_live_gate_on_the_codex_channel_refuses_non_spec_parameters(self):
+        # R138: 3 votes, the spec's population and codex-cli 0.154.0, or no live gate; the flags
+        # stay for dry runs and for fixtures (a `complete` injected).
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _c = _fixture_gate_repo(tmp)
+            kwargs = self._gate_kwargs(root, tmp, log_dir=pathlib.Path(tmp) / "logs")
+            never = mock.Mock(side_effect=AssertionError("a channel was built for a refused gate"))
+            with mock.patch.object(judge, "CodexChannel", never):
+                for bad in ({"votes": 2}, {"votes": 4}, {"population": None}):
+                    with self.subTest(bad=str(bad)):
+                        with self.assertRaisesRegex(ValueError, "R138"):
+                            judge.run_gate(dry=False, complete=None, **dict(kwargs, **bad))
+            for version, refused_by in (("codex-cli 0.155.0", "R138"),
+                                        (judge.CODEX_CLI_VERSION or "?", "gate population")):
+                ch = mock.Mock(version=version)
+                ch.describe.return_value = "described"
+                with self.subTest(version=version), \
+                        mock.patch.object(judge, "CodexChannel", return_value=ch):
+                    # The pinned version passes this check and meets the next one: the fixture's
+                    # population is not the spec's.
+                    with self.assertRaisesRegex(ValueError, refused_by):
+                        judge.run_gate(dry=False, complete=None, **kwargs)
+                    ch.complete.assert_not_called()
+                    ch.close.assert_called_once()
+                    self.assertIsNone(judge._CHANNEL)
+            reply = json.dumps({"is_correction": True, "origin_uuid": None, "is_decision_point": True,
+                                "is_mistake": True, "lessons": "uncovered", "lesson_outcomes": {},
+                                "detectability": "obtainable", "evidence_present_before": "no",
+                                "evidence_used": "unknown", "quote": "a claim quoted here"})
+            fake = _FakeComplete([reply] * 5)
+            with mock.patch.object(judge, "_codex_version", return_value="codex-cli test"):
+                res = judge.run_gate(dry=False, complete=fake, **dict(kwargs, votes=1,
+                                                                      population=None))
+                self.assertEqual(res["calls"], 5)
+                self.assertTrue(judge.run_gate(dry=True, **dict(kwargs, votes=2, population=None))["dry"])
+
+    def test_a_live_gate_keeps_its_vote_logs_outside_the_repo(self):
+        # R133(h): a vote log is never committed, so none may be written inside the repository.
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _c = _fixture_gate_repo(tmp)
+            kwargs = self._gate_kwargs(root, tmp, population=None)
+            for inside in (root / "logs", judge.REPO_ROOT / "never-created-vote-logs"):
+                with self.subTest(log_dir=inside.name):
+                    fake = _FakeComplete([])
+                    try:
+                        with self.assertRaisesRegex(ValueError, "outside"):
+                            judge.run_gate(dry=False, complete=fake, log_dir=inside, **kwargs)
+                        self.assertEqual(fake.calls, [])
+                        self.assertFalse(inside.exists())
+                    finally:
+                        shutil.rmtree(inside, ignore_errors=True)
+
+    def test_the_gate_report_discloses_context_and_quote_failures(self):
+        # R142 (concerns 2 and 4): two descriptive lines. LOAD-BEARING: only CTL1-1's votes quote
+        # text that is nowhere in its evidence, so exactly one of the two control fires, and
+        # none of the RTD-1/audit flag, carries a quote_not_verbatim vote.
+        disclosure = ("context disclosure: gate document items include text after the decision "
+                      "point from the same pre-correction blob; session items never do")
+        base = {"is_correction": True, "origin_uuid": None, "is_decision_point": True,
+                "is_mistake": True, "lessons": "uncovered", "lesson_outcomes": {},
+                "detectability": "obtainable", "evidence_present_before": "no",
+                "evidence_used": "unknown", "quote": "a claim quoted here"}
+        fabricated = dict(base, detectability="in-trace", quote="a sentence found nowhere at all")
+
+        def fake(prompt, log_path=None):
+            decision = prompt.split("===== BEGIN DECISION POINT =====")[1].split(
+                "===== END DECISION POINT =====")[0]
+            return json.dumps(fabricated if "A quiet control sentence" in decision else base)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _c = _fixture_gate_repo(tmp)
+            kwargs = self._gate_kwargs(root, tmp, population=None)
+            with mock.patch.object(judge, "_codex_version", return_value="codex-cli test"):
+                dry = judge.format_gate(judge.run_gate(dry=True, **kwargs))
+                live = judge.format_gate(judge.run_gate(dry=False, complete=fake,
+                                                        log_dir=pathlib.Path(tmp) / "logs", **kwargs))
+        self.assertIn(disclosure, dry)
+        self.assertIn(disclosure, live)
+        self.assertIn("- quote_not_verbatim (descriptive): 0 of 1 majority flags and 1 of 2 "
+                      "control fires carry at least one such vote", live)
+
 
 # --- the prompt ------------------------------------------------------------------------------------
+
+
+def _rendered_template(mode):
+    """The frozen template exactly as the judge would see it, every placeholder empty."""
+    return judge.render_prompt({"mode": mode, "lessons": [], "context": [], "decision": "",
+                                "origin_candidates": [], "correction": ""})
+
+
+def _bullet(text, lead):
+    """The bullet of `text` that starts with `lead`, up to the next bullet or blank line."""
+    lines = text.splitlines()
+    i = next(k for k, ln in enumerate(lines) if ln.lstrip().startswith(lead))
+    out = [lines[i]]
+    for ln in lines[i + 1:]:
+        if not ln.strip() or ln.lstrip().startswith("- "):
+            break
+        out.append(ln)
+    return " ".join(" ".join(out).split())
+
 
 
 class PromptTests(unittest.TestCase):
@@ -1028,6 +1515,58 @@ class PromptTests(unittest.TestCase):
             for field in ("positive", "negative"):
                 probe = " ".join(case[field].split())[:40]
                 self.assertNotIn(probe, norm_template, (case["case"], field))
+
+    def test_the_rendered_prompt_copies_no_20_char_run_of_the_rtd_doc(self):
+        # R134: the frozen text may use general terms only. Compared whitespace-normalised over
+        # every 20-char window, in both modes; a positive control shows the check can fire.
+        rtd = (REPO_ROOT / judge.RTD_DOC).read_text()
+        doc = " ".join(rtd.split())
+        grams = {doc[i:i + 20] for i in range(len(doc) - 19)}
+
+        def shared(text):
+            t = " ".join(text.split())
+            return [t[i:i + 20] for i in range(len(t) - 19) if t[i:i + 20] in grams]
+
+        for mode in judge.MODES:
+            with self.subTest(mode=mode):
+                self.assertEqual(shared(_rendered_template(mode)), [])
+        sentence = " ".join(judge.parse_rtd_cases(rtd)[0]["positive"].split())
+        self.assertGreaterEqual(len(sentence), 20)
+        self.assertTrue(shared(_rendered_template("audit") + "\n" + sentence))
+
+    def test_detectability_is_defined_by_the_text_detectable_mirror(self):
+        # R134 (review I2): `in-trace` is what the material shown shows wrong; a warning sign
+        # alone is `obtainable`. The spec's mirror of text_detectable yes / partial.
+        for mode in judge.MODES:
+            with self.subTest(mode=mode):
+                p = _rendered_template(mode)
+                in_trace, obtainable = _bullet(p, "- `in-trace`:"), _bullet(p, "- `obtainable`:")
+                for case in ("contradicts itself or other material shown",
+                             "does not hold on the material shown",
+                             "no evidence of the kind it cites could establish, however the "
+                             "world turned out"):
+                    self.assertIn(case, in_trace)
+                self.assertNotIn("claims more than it shows", p)
+                self.assertIn("at most a warning sign", obtainable)
+                self.assertIn("one bounded lookup", obtainable)
+                # Delivered on stdin (R133 a): there is no file to speak of.
+                self.assertIn("Judge only from what this message contains.", p)
+                self.assertNotIn("this file", p)
+                # m1: what verify_quote does -- the rest of the answer stands.
+                self.assertIn("its detectability and lessons are discarded; the rest of the "
+                              "answer stands", " ".join(p.split()))
+
+    def test_lesson_outcomes_cover_every_applicable_lesson(self):
+        # R136 (review m2, A1.4): every lesson the judge finds applicable, independent of the
+        # most-specific rule, which still governs `lessons`.
+        p = _rendered_template("audit")
+        outcomes = _bullet(p, "- `lesson_outcomes`:")
+        self.assertIn("for EVERY lesson you find applies to this decision point, whether or not "
+                      "it is the most specific one", outcomes)
+        self.assertIn("The most-specific rule narrows `lessons` only", outcomes)
+        self.assertNotIn("by the same most-specific rule", " ".join(p.split()))
+        self.assertIn("For `lessons`, name the most specific lesson",
+                      _bullet(p, "- **The most specific lesson.**"))
 
 
 if __name__ == "__main__":
