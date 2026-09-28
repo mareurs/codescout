@@ -10,7 +10,7 @@ tags:
 - context
 topic: deep-agent-observation
 time_scope: '2026-09-18_to_2026-10-02'
-entry_high_water_DCX: 4
+entry_high_water_DCX: 5
 entry_prefix:
 - DCX
 snapshot_anchor: '| ID | Date UTC | Sampling | Capture key | Observation |'
@@ -85,6 +85,7 @@ Group by canonical incident, session/task and source lineage. First report cover
 | DCX-2 | 2026-09-24 | routine-first | sebf651ec-open-bug-verify-sweep-brief | verifier brief contents for 34-bug sweep |
 | DCX-3 | 2026-09-25 | routine-first | se4fbc7ef-medium-tier-verify-brief | Verifier brief for the 18-bug medium-tier re-verification |
 | DCX-4 | 2026-09-26 | enrichment (retrospective) | 571eb3d6/explore-brief-splade-vram | Explore brief for SPLADE's 2.9 GiB; its one log-testable VERIFIED claim did not hold |
+| DCX-5 | 2026-09-28 | routine-first (retrospective) | 82cff72e/phase1b-s2/gpu-claim-warning | GPU-claim warning routed on the fork notice's self-reported name; reached a different process from the twin |
 
 ## DCX-1 — Historical seed — recipient-specific guide delivery
 
@@ -167,6 +168,25 @@ It returned five verdicts: 1 partially fixed, 3 still live with narrowed claims,
 | Outcome / basis | `mixed`, delivery `on-time`. **Good:** the agent built on the measured numbers instead of re-measuring, and its drift findings became bug `2026-09-26-running-retrieval-stack-is-defined-nowhere`, each re-verified by the coordinator. **Bad:** one claim labelled VERIFIED (by source read) did not survive the one runtime check available; its label overstated its evidence class |
 | Counterfactual / missingness | `not-observed`. No briefless dispatch was tried. The subagent's own tool calls were not inspected |
 | Rests on / related | gpu-tuning `docs/trackers/research.md` R-5, Q-2 (commit `08e7acb`). codescout `docs/issues/archive/2026-09-26-running-retrieval-stack-is-defined-nowhere.md` (filed `e83e92ce`, fixed `7a51ebd1`). Companion workflow episode in the DWF ledger, key `571eb3d6/amd-second-card` |
+
+## DCX-5 — Which session to warn before taking the GPU: routed on the fork notice's self-reported name, which resolved to a different process from the twin the operator identifies
+
+**Status:** observed
+**Valid:** dated 2026-09-28
+
+| Field | Record |
+|---|---|
+| Status / Valid | `observed`; dated 2026-09-28 |
+| Sampling / capture mode | `routine-first`, `retrospective`: the first context decision after this session's fork, captured 2026-09-28 from its transcript after the outcome was known |
+| Identity / capture key | Session `82cff72e-0245-48cb-ab07-45a1c3d0d388`, main loop, self-collected; model claude-opus-5-5 per system context. Key `82cff72e/phase1b-s2/gpu-claim-warning` |
+| Time / substrate | Decision 2026-09-26 11:55:01Z; capture 2026-09-28. Shared checkout `/home/marius/work/claude/codescout` on `experiments`, HEAD `0ff91320` (per `git log` at 11:54:44Z) |
+| Objective / trigger | About to launch six GPU runs on the machine's only A5000. The session this one was forked from shared the plan and the operator's "continue", so a duplicate launch would collide on the GPU and in the run directories |
+| Pre-action evidence | (1) The harness `<fork-source>` notice at 11:53:24Z: forked from "a session whose self-reported name is 'codescout-f8'", with history shared up to 11:52:04Z. (2) `ListAgents`: own row "Automated onboarding documentation roadmap item ⑂", no `codescout-f8` (the listing is profile-scoped). (3) Socket table at 11:54:46Z: pid 2264384, `.claude-sdd`, idle, `codescout-f8`, sid `571eb3d6`; and pid 1715810, `.claude-sdd`, busy, "Automated onboarding documentation roadmap item", sid `0cbae2f0`. Both had cwd in this checkout. (4) `git log`: `82d18742` (Steps 1–2) carries `Session-Id: 571eb3d6`. (5) GPU idle, no training process |
+| Context decision | Routed on the notice's name, corroborated by the commit trailer: messaged `uds:.../2264384.sock` that this session was taking the N/NC runs and to reply if it had started anything. The busy name-twin (1715810, `0cbae2f0`) was in the same table and was not messaged. No further candidate search. `CLAUDE.md` § *Reaching a Peer Session* ("take the sessionId, not the name") was in context |
+| Observed sequence | `SendMessage` returned success (queued; the recipient runs another permission mode). Soon after, the operator said this is the main session and "the other one is the fork … exploring whether we can run both AMD and NVIDIA at the same time", so the twin was doing GPU work too. The message was never approved: a delivery notice on 2026-09-27 reported it expired, after the operator closed that session ("a fork that I didn't know what it was doing"). The same day the operator named the other session as `0cbae2f0` (socket then 1604523), and DCS-12 records "571eb3d6, resumed as 0cbae2f0" |
+| Outcome / basis | `bad`, delivery `on-time`. The warning went to a process other than the one the operator identifies as the twin and was never read. No collision followed, because the twin did not launch N/NC runs (its recorded work was the AMD card, DWF-12) and this session had independently verified the A5000 idle. Which process was the fork's source is **not established**: the notice's name resolved to 2264384, and the operator's identification points to 1715810's session |
+| Counterfactual / missingness | `not-observed`: no message to 1715810 was tried. The recipient's own state was never inspected |
+| Rests on / related | `CLAUDE.md` § *Reaching a Peer Session*; IC-8's member `sendmessage-returns-success-for-a-message-held-for-approval`; DCS-12; companion DWF-14 (key `82cff72e/phase1b-s2-step3-4`) |
 
 ## Template for new entries
 

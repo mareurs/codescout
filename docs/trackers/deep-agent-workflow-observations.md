@@ -14,8 +14,8 @@ entry_prefix:
 - DWF
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
-entry_high_water_DWF: 13
-entry_high_water_DCS: 13
+entry_high_water_DWF: 14
+entry_high_water_DCS: 14
 ---
 
 # Deep-agent workflow observations and session coverage
@@ -111,6 +111,8 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DCS-12 | 2026-09-26 | coverage | session-receipt | 571eb3d6→0cbae2f0/post-compaction-2026-09-26 |
 | DWF-13 | 2026-09-27 | workflow | enrichment | b4de6398:taxonomy-recipes-test |
 | DCS-13 | 2026-09-27 | coverage | session-receipt | b4de6398:session |
+| DWF-14 | 2026-09-28 | workflow | routine-first (retrospective) | 82cff72e/phase1b-s2-step3-4 |
+| DCS-14 | 2026-09-28 | coverage | session-receipt | 82cff72e/fork-2026-09-26-to-28 |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -722,6 +724,45 @@ No failed attempts beyond one refused pipe, which recovered on the next call.
 **Overhead:** about 6 tool calls for DWF-13 and this receipt, estimated from the transcript rather than timed.
 
 **Pending:** none — DWF-13's final-review outcome was recorded 2026-09-27. Correction to *Identity* above: one child agent ran after this receipt was first written, the Opus whole-branch reviewer (fresh context, read-only plus isolated mutation probes); its work is inside DWF-13's outcome, under the child's observed identity.
+
+## DWF-14 — Phase-1b Stage 2 Steps 3–4: six N/NC training runs and nine checkpoints through Step 4 on one A5000 — verified by per-child exits, not the wrapper's
+
+**Status:** observed
+**Valid:** dated 2026-09-28
+
+| Field | Record |
+|---|---|
+| Status / Valid | `observed`; dated 2026-09-28 |
+| Sampling / capture mode | `routine-first`, `retrospective`: captured 2026-09-28 from this session's transcript and commits, after the outcome was known. Pre-action facts below are the ones the transcript shows were available then |
+| Identity / key / times | Session `82cff72e-0245-48cb-ab07-45a1c3d0d388`, main loop, self-collected; model claude-opus-5-5 per system context. Key `82cff72e/phase1b-s2-step3-4`. Start 2026-09-26 11:51:48Z (operator's "continue"), launch 11:57Z, finish 16:17Z (`08a5544e`); capture 2026-09-28 |
+| Task / authority / substrate | Train arms N and NC (recipe `s1-r1`, seeds 20260935, 20260937, 20260940), then take all nine checkpoints (B, N, NC) through Step 4 as registered in `docs/evals/phase1b-local-classifier-preregistration.md`. Authority: the operator's "continue". Shared checkout `/home/marius/work/claude/codescout` on `experiments`, base `82d18742` (Steps 1–2 results, committed before the fork); run dir `~/work/claude/rule-tell-runs/phase1b-s2`; one RTX A5000 |
+| Pre-action evidence | 11:51:54Z `nvidia-smi`: A5000 with about 20 GB free and no compute process. 11:54:44Z `ps`: no `train_arm`, `score_run` or `step4` process. Stage 1's run layout (`phase1b/stage1/s1-r1-*`) and the prereg's Step 3 and Step 4 text. Uncertainty then: whether the session this one forked from would also act on "continue" (the context decision is DCX, key `82cff72e/phase1b-s2/gpu-claim-warning`) |
+| Initial next action / completion check | Write `lanes.sh` (two lanes, one per arm, seeds in turn) and `step4.sh` (waits on the lanes, refuses unless all six runs exit 0), launch, and commit the launch note before any result exists. Check: each child's own ` exit N` line in `lanes.log` and `step4.log`, Step 4's parity (max abs dz = 0) and its nine output files |
+| Trajectory | 11:57Z `lanes.sh` launched in the background with `LANES_EXIT` appended to `lanes.out`; 11:59Z `step4.sh` queued behind it; 12:00Z launch note committed (`58076d5a`). Monitors on `lanes.log`, `lanes.out` and `step4.log`, re-armed at each 30-minute expiry. Per-run exits reported as they landed: N 20260935 exit 0 at about 13:13Z (about 74 min), NC 20260935 at 13:18Z, the N lane done at 15:43Z, NC 20260940 at about 16:00Z. Step 4 ran; 16:14Z its nine `step4-*.json` read; 16:17Z scripts, logs, those JSONs and `common.json` committed (`08a5544e`) |
+| Effects / recovery | Commits `58076d5a`, `08a5544e`. No retries, no intervention, no rollback needed. Concurrency: two lanes on one GPU, plus a fork twin sharing the plan (warned; see the DCX entry) |
+| Outcome / basis | `good`, `verified-complete` for the check named above: all six training children and every Step 4 child exited 0 on their own log lines, and Step 4's parity was exact. **Established later, not at the time:** Codex's stop review (2026-09-27) found that `lanes.sh` and `step4.sh` themselves exit 0 after a failed child, so the wrapper statuses appended here (`LANES_EXIT`, `STEP4_EXIT`) could not express a failure. The check actually used could; Codex recomputed every child status as 0. Bug `e76b043bbdd97622`, fixed `c991f226`, `review-catches:RC-44` |
+| Delegation candidate | Bounded: "launch N registered training runs on one GPU, wait, verify each child's exit and the parity check, commit the artifacts". Deterministic alternative: runners that propagate status (the `c991f226` fix) plus a script over per-child exit lines. Missing inputs: a machine-readable completion record per child, and a pre-launch check that no other session holds the GPU |
+| Rests on / grouping / overhead | The prereg's Step 3 launch note and Steps 3–4 results; commits above; grouped with the DCX entry under `82cff72e/phase1b-s2`. Capture overhead about 8 tool calls, estimated from the transcript, not timed |
+
+## DCS-14 — Session 82cff72e (fork of the rule-tell session) — phase-1b Stage 2 Steps 3–5, the Codex stop review, the review-catches ledger
+
+**Valid:** dated 2026-09-28
+
+**Identity:** session `82cff72e-0245-48cb-ab07-45a1c3d0d388`, main loop, self-collected. The operator calls it the main session; the harness registry marks it as the fork (⑂) of the rule-tell session. That session is DCS-12's `571eb3d6`, resumed as `0cbae2f0`, which does not cover this one. Model claude-opus-5-5 per system context. Child agents, both Opus general-purpose: the review of `step5_gate.py` (2026-09-27 05:15Z; its catches are `review-catches:RC-45`..`RC-54`) and the reviewer-catch inventory that seeded the RC ledger (09:11Z). Their work sits inside the commits and RC rows below and was not sampled separately.
+
+**Interval / workspace:** from the fork, 2026-09-26 11:52:04Z, to about 2026-09-28 04:20Z. It spans one compaction (2026-09-27 09:40Z); the stretch before it is known from the transcript and commits. `/home/marius/work/claude/codescout` on `experiments`, shared checkout; run dirs under `~/work/claude/rule-tell-runs/`.
+
+**Coverage:** `partial`, `retrospective`. Nothing was captured before its decision point; both samples were written on 2026-09-28 from the transcript.
+
+**DWF:** routine-first `DWF-14` (Steps 3–4: six N/NC training runs and nine checkpoints through Step 4, key `82cff72e/phase1b-s2-step3-4`). Enrichment not recorded. Candidates were the Step 5 gate script and its mutation campaign (`5a477c51`, 109 of 109 killed), the gate runs (`a5372e00`) and the Codex stop-review integration (`c991f226`).
+
+**DCX:** routine-first `DCX-5` (the GPU-claim warning, key `82cff72e/phase1b-s2/gpu-claim-warning`). Enrichment none.
+
+**Gaps:** child agents' own tool calls were not inspected. `usage.db` was not read for this receipt; native Bash, Write and Edit are denied in this profile, so the session's shell work went through `run_command`. Commits in the interval: `58076d5a`, `08a5544e`, `5a477c51`, `a5372e00`, `c991f226`, `65a1df15`, `2a67a654`, `8254d636`, `fd6291a2`, `34189aeb`, `e099eafe`.
+
+**Overhead:** about 12 tool calls for DWF-14, DCX-5 and this receipt, most of them transcript reads. Estimated from the transcript, not timed.
+
+**Pending:** none.
 
 ## Template for new entries
 
