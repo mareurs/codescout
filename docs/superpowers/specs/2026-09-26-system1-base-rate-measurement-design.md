@@ -373,3 +373,22 @@ No probe read a correction, a miss, a judge verdict, or any quantity the go/no-g
 
   An untwinned `hook_success` counts as a delivery (`hook_success_only`: compact reloads and UserPromptSubmit stdout, which did reach the model). Two `hook_additional_context` rows are never merged. `deliveries_json = '[]'` means delivered nothing, and never falls back to parsing `output_json`. Markers count only in their anchored opening form.
 - **(f) Build counters live in `events_meta`,** so Task 13 reads them and never re-derives them. `build_events` refuses an existing DB, and every `ts` is normalized to ISO UTC.
+
+### Amendment 6 — 2026-09-28, recorded during Task 13 (the observability map)
+
+**Source:** Task 13's two reviews, and the controller's reading of `src/usage/db.rs`. Where this amendment and the body disagree, this amendment wins.
+
+- **(a) The retained window is derived from data.** A1.2's parenthetical start "(2026-08-26)" was a spec-time estimate. The corpus's oldest surviving top-level entry is 2026-08-03T20:49:16Z. The retained window is `[earliest KEPT top-level entry, freeze instant)`, computed by `observability.finalize_bounds` after the freeze, and `coverage()` raises when data falls outside it. The decision window, `[T−7d, T)`, is unchanged in definition.
+- **(b) `usage.db` keeps only 30 days.** `write_record` deletes every `tool_calls` row older than 30 days on each write (`src/usage/db.rs`), while transcripts are kept 3650 days. So a tool call older than 30 days at freeze time can never join to its usage row.
+
+  Three consequences:
+  - The go/no-go reads only the 7-day decision window, so it is unaffected.
+  - The retained-window join coverage shrinks every day the real freeze waits, so Task 12 freezes as soon as the pipeline allows (ruling R72).
+  - The INCONCLUSIVE path's prospective read spans `[T−7d, T_live+21d)`, which is 28 days or more. A single freeze at its end would already have lost that window's earliest usage rows. The prospective read therefore unions `usage.db` rows across every freeze by row `id`, and the observability map reports the per-freeze row ranges.
+- **(c) A delivery is counted once, as a delivered ITEM.** For one `deliveries_json` engine record, the events DB holds a key row (`key` set) and a block-digest row (`key` NULL). Measured: all 35 NULL-key `usage_deliveries_json` rows are block digests, each paired with a key row, and the other two sources have no NULL-key rows. So delivery counts use key rows only, and every delivery cell names its unit. Counting rows had inflated the transfer delivery count by 7.4%, and the error grew with every post-Part-A delivery, since all of them go through `deliveries_json`.
+- **(d) The freeze procedure (Task 12, ruling R78).** A session active during the freeze publishes wrong numbers without crashing. Measured: a usage snapshot taken before the transcripts were copied published 4 joinable calls as `none`. So:
+  1. Freeze only while every kept session is idle; the operator coordinates this. Afterwards, check each kept session's last-row gap to the usage-snapshot instant, and re-freeze under a new `corpus_id` if any gap is shorter than the longest in-flight call.
+  2. Use `archive.freeze`'s own order (transcripts, then the usage backup), and record the backup instant.
+  3. Require `parse_errors_skipped == 0`, or report it.
+  4. If `coverage()` raises on a window, stop for a ruling. Bounds are never hand-edited.
+  5. For the prospective read, union usage rows across freezes by `id` (item (b)).
