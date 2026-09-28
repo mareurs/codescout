@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 189
+entry_high_water_R: 190
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-190 | 2026-09-28 | hit (1 instance, 2 premises) | **Open the artifact a spec cites for reuse, and grep it for the cited capability before dispatch.** Spec L106 said the miner reuses `mine_pairs.py`'s parent-commit blame. The module has none (`grep -rl blame` exits 1), and its `commits()` drops hunk headers, body and trailers. The plan's positive control cited "the commits named in" a census whose list is committed nowhere. Rulings R88 (implement blame per bug 95f8edf02e65851e) and R94 (independent controls) replaced both. | system1 measurement SDD ledger R88, R94 |
 | R-189 | 2026-09-28 | miss (1 instance, caught by the next review) | **A rule about a POPULATION is a hypothesis about every member: enumerate the classes before writing the key.** R53 generalized a hook-twin key (toolUseID) from 1,838 PreToolUse/PostToolUse pairs to every hook event. SubagentStart twins differ in toolUseID, and SessionStart's is a constant, so the session-less key collapsed 333 distinct deliveries across 14 sessions. R56 (session, file, event, text, 5 s) was measured per event first. Recon applies to the controller's own rulings, not only to code. | system1 measurement SDD ledger R53 → R56; spec Amendment 5(e) |
 | R-188 | 2026-09-28 | hit (1 instance) | **Scout the GRAIN of an upstream exclusion against the consumer's input.** Before Task 6 (events DB), a probe found 6 of 9 cross-profile sids with subagent files present in only one copy; R22's whole-session exclusion would have silently dropped them. R40 unioned subagent files over every copy of a kept sid; the live control recovered 929 entries from 614 files. A missing file produces no row to be wrong about, so nothing downstream could see it. | system1 measurement SDD ledger R40; `docs/superpowers/specs/2026-09-26-system1-base-rate-measurement-design.md` Amendment 5(c) |
 | R-187 | 2026-09-23 | hit → rule | **The judge was already built and calibrated in the sibling repo `CLAUDE.md` names — and the gap the lookup closed was a MISSING ARM, not a duplicated instrument.** One turn from dispatching a hand-rolled fork to score 285 blind tasks. `prompt-engineering` holds `PanelJudge` (cross-family; disagreement *withholds* the grade rather than voting), a `max_spread` calibrated at n=64 whose own refresh rule says thresholds do not transfer corpora, `skill-eval-playbook:L-13` (the precision law this corpus was built to embody, three months earlier), and § *The shape* rule 4 — *"a positive control is not optional when arms tie"* — which the pre-registration lacked, on exactly the tie `A-10` predicts. Law G. The instruction (*"Don't hand-roll scoring"*) was visible, current and correctly worded throughout, so this is applicability-recognition, not decay — the same partition the eval it serves exists to measure | `docs/evals/rule-injection-timing-preregistration.md` (arm 3 + judge registered); `prompt-engineering:src/prompt_tdd/judge.py` `PanelJudge`, `cross-family-panel-calibration`, `skill-eval-playbook:L-13`, `prompt-tdd-operating-guide` § *The shape that avoids most of this*; kin R-55/R-60/R-87 |
@@ -8737,6 +8738,26 @@ The 1,838 pairs had all been PreToolUse/PostToolUse twins, the one event class w
 **Counterfactual:** Recon at the ruling, not the code: one `group by hook event` over the snapshot before writing R53 would have shown the toolUseID premise failing for two of the five events. It cost one extra fix round, and it nearly shipped a cross-session collapse of the delivery source that feeds metric 7.
 
 **Pattern:** A rule about a POPULATION is a hypothesis about every member. Before writing a key, a filter or a dedupe rule that will run over a heterogeneous population (event types, sources, profiles), enumerate the population's classes and check the rule's premise per class. A sample that satisfies the premise is evidence only about the classes it contains. This is the ruling-level twin of the CLAUDE.md law "an assertion computed over a population cannot verify a claim about a member". The controller was writing rules for implementers, and the reconnaissance skill's "read the actual shape" had not been applied to its own rulings.
+
+## R-190 — Open the artifact a spec cites for reuse — a citation of reuse is a claim about someone else's file
+
+**Valid:** dated 2026-09-28
+
+**Status:** open
+
+**Verdict:** hit (1 instance, 2 premises).
+
+**Observed:** 2026-09-28. Before dispatching Task 8 (the correction miner) of the system1 measurement SDD run, the controller read the module the spec cites as the thing to reuse. Spec L106 says the miner "reuses the correction markers and parent-commit blame from `mine_pairs.py`".
+
+`grep -rl blame` over the whole rule-tell stage2 directory exits 1. The module supplies the markers (`MARKER_RE`, `NOTE_RE`) and `change_blocks()`. Its `commits()` parses a pre-built patch file and discards the `@@` hunk headers, so it gives no line numbers, no body and no trailers: every field the corrector rule needs.
+
+The same scout found the plan's Step 6 positive control ("the correction commits named in the rule-injection census") names nothing. The census's list and code are committed nowhere, and its regex is published with an ellipsis.
+
+**Seam:** a spec's attribution of a CAPABILITY to another module ("reuses X's blame"), and a plan's reference to a POPULATION held by another document ("the commits named in"). Both read as settled facts, and neither had been opened by the plan's author.
+
+**Counterfactual:** the implementer would have loaded `mine_pairs.commits()` as instructed, found no blame, and either improvised a corrector rule the reading-rule bug (`95f8edf02e65851e`) warns against (the parent commit's trailer), or reported BLOCKED. The positive control would have been either unrunnable or re-derived from the miner's own predicate, a vacuous self-check. Rulings R88 and R94 went into the dispatch instead, and R94 adds an independent selection check drawn from bug-file fix SHAs.
+
+**Pattern:** when a spec says "reuses <capability> from <module>" or a plan says "the <things> named in <document>", open the cited artifact and grep for the capability or the list before dispatch. A citation of reuse is a claim about someone else's file, written by a party who may have remembered it rather than read it. A cheap, decisive check: one grep for the capability's verb (`blame`), or for the list's shape (SHAs), in the cited file.
 
 ## Template for new entries
 
