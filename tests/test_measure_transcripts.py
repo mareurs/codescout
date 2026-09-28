@@ -1003,6 +1003,15 @@ class QueuedOperatorMessages(unittest.TestCase):
         bare = _queued("q1", "2026-09-20T10:00:00Z", "no origin at all", origin_kind=None)
         self.assertEqual(transcripts.operator_messages([bare]), [])
 
+    def test_an_is_meta_or_sidechain_queued_command_stays_out(self):
+        # The ledger's R103 "not isMeta", and R104's "a sidechain entry is never the operator":
+        # each flag alone keeps an otherwise-admitted human prompt-mode attachment out.
+        for flag in ("isMeta", "isSidechain"):
+            with self.subTest(flag=flag):
+                q = _queued("q1", "2026-09-20T10:00:00Z", "an injected-looking message")
+                q[flag] = True
+                self.assertEqual(transcripts.operator_messages([q]), [])
+
     def test_a_human_queued_command_enters_once_with_its_prompt_as_text(self):
         human = _queued("q1", "2026-09-20T10:00:00Z", "stop, that is the wrong file")
         got = transcripts.operator_messages([human])
