@@ -3,8 +3,8 @@
 Proposes correction CANDIDATES (never confirmed labels -- a later LLM judge confirms each
 one) from two sources:
 
-  - operator candidates: a top-level `prompt`/`interrupt` turn with an earlier top-level
-    `assistant_text` turn in the same session (R89);
+  - operator candidates: a top-level `prompt`/`interrupt`/`rejection` turn with an earlier
+    top-level `assistant_text` turn in the same session (R89, R105);
   - commit candidates: a git commit whose subject/body/added-lines match a
     correction-shaped selector (R90), attributed to its origin by blaming the REMOVED
     side of each hunk at the commit's parent (R88, R91) -- never the correcting commit's
@@ -14,8 +14,9 @@ one) from two sources:
 Recall-oriented by design: a false candidate costs one judge call later and is not a
 bias, so no lexical filter is applied to operator candidates (R89).
 
-Full ruling ledger (R88-R95): .superpowers/sdd/2026-09-26-system1-base-rate-measurement/
-task-8-context.md.
+Full ruling ledger (R88-R95, and R102/R105/R110 from fix round 1):
+.superpowers/sdd/2026-09-26-system1-base-rate-measurement/task-8-context.md and
+task-8-fix1-brief.md.
 """
 import importlib.util
 import re
@@ -46,7 +47,9 @@ class Candidate:
     cid: str
     sid: str
     detected_ts: str
-    source: str  # operator_message | correction_commit | review_commit | retraction | operator_interrupt
+    # operator_message | operator_interrupt | operator_rejection | correction_commit |
+    # review_commit | retraction
+    source: str
     corrector: str  # operator | self | peer-session | review
     origin_hint: dict  # {"uuid"|"sha": ..., "ts": ...}
     text: str
@@ -56,9 +59,6 @@ class Candidate:
 _CORRECTION_SUBJECT_RE = re.compile(r"\b(?:retract|correct|falsif|withdr[ae]w|overstat)", re.I)
 # R90(iv): word-boundary "review" -- "preview" must NOT match.
 _REVIEW_RE = re.compile(r"\breview", re.I)
-# Same regex join._run_git_log uses over %B, MULTILINE (R91: "Both Session-Ids come from
-# ONE function, session_id_of").
-_SESSION_ID_RE = re.compile(r"^Session-Id:\s*(\S+)", re.M)
 # A trailer-shaped line: "Key: value". Used only to trim the TRAILING contiguous block of
 # such lines off a commit body (R90(i): "the body with trailer lines removed") -- a
 # "Review: ..." paragraph earlier in the body, separated by a blank line, must survive.
@@ -88,14 +88,34 @@ def _commit_body(repo_path, sha):
 
 def session_id_of(repo_path, sha):
     """The ONE function both the correcting commit's and the antecedent's Session-Id come
-    from (R91), so the two are read the same way. Equals commits.session_id on the fixture
-    (SessionIdOfMatchesCommitsTable)."""
-    m = _SESSION_ID_RE.search(_commit_body(repo_path, sha))
-    return m.group(1) if m else None
+    from (R91), so the two are read the same way.
+
+    R110: the value comes from git's own trailer parser
+    (`%(trailers:key=Session-Id,valueonly)`, first non-empty line), never from a regex over
+    the body. A prose line that merely STARTS "Session-Id:" above the real trailer block is
+    not a trailer, and a first-match search would read it.
+
+    Equals commits.session_id on an ordinary commit, but not on every commit:
+      - on a merge, join._run_git_log reads the trailer block as the file list, so
+        commits.session_id is NULL while the trailer exists. That is bug 91bafcc7d4137bf9,
+        filed in 4bd5006d and not fixed (Task 6 is closed). The miner skips merges before it
+        ever reads a Session-Id, so the difference never reaches a candidate.
+      - on a body with a prose line starting "Session-Id:" above the trailer, join's
+        first-match regex reads the prose value, until Task 14 aligns join to R110.
+    """
+    raw = _git(repo_path, "log", "-1", "--format=%(trailers:key=Session-Id,valueonly)", sha)
+    for line in raw.splitlines():
+        line = line.strip()
+        if line:
+            return line
+    return None
 
 
 def _commit_ts_of(repo_path, sha):
-    raw = _git(repo_path, "log", "-1", "--format=%cI", sha).strip()
+    # R110: the AUTHOR date (%aI), never the committer date. `experiments` is rebased after
+    # every ship, which restamps committer dates, so %cI says when a commit was last rewritten,
+    # not when its lines were written. Used for the antecedent's origin ts.
+    raw = _git(repo_path, "log", "-1", "--format=%aI", sha).strip()
     return join._fmt_ts(raw)
 
 
@@ -152,16 +172,22 @@ def _parse_diff(diff_text):
     return files
 
 
-def _blame_shas(repo_path, parent_sha, path, start, count):
+def _blame_shas(repo_path, parent_sha, path, start, count, stats):
     """Distinct commit shas (order preserved) attributing lines [start, start+count) of
-    `path` at `parent_sha`, via `git blame --porcelain -L start,+count`."""
+    `path` at `parent_sha`, via `git blame --porcelain -L start,+count`.
+
+    R102: returns None, never [], when `git blame` itself exits non-zero, and counts it in
+    `blame_git_failures`. A failed blame means the antecedent is UNKNOWN, which must never read
+    like a pure addition (no antecedent). Reachable without fault injection: a submodule
+    pointer (gitlink) shows in `git diff` as a one-line hunk, but blaming it exits 128."""
     out = subprocess.run(
         ["git", "-C", str(repo_path), "blame", "--porcelain", "-L", f"{start},+{count}",
          parent_sha, "--", path],
         capture_output=True, text=True, errors="replace",
     )
     if out.returncode != 0:
-        return []
+        _bump(stats, "blame_git_failures")
+        return None
     shas = []
     for line in out.stdout.splitlines():
         m = _BLAME_SHA_RE.match(line)
@@ -175,28 +201,35 @@ def _is_examined(subject, stripped_body, added_lines, is_review):
         bool(MARKER_RE.search(subject))
         or bool(MARKER_RE.search(stripped_body))
         or any(MARKER_RE.search(line) for line in added_lines)
+        # R90(ii) is INERT (M7): every NOTE_RE word is a MARKER_RE word, so no test can reach it.
         or any(NOTE_RE.match(line) for line in added_lines)
         or bool(_CORRECTION_SUBJECT_RE.search(subject))
         or is_review
     )
 
 
-def _antecedents_of(repo_path, parent_sha, files):
-    """[(antecedent_sha, via_note_only), ...], one entry per (hunk, distinct blamed sha)."""
+def _antecedents_of(repo_path, parent_sha, files, stats):
+    """([(antecedent_sha, via_note_only), ...], blame_failed): one entry per (hunk, distinct
+    blamed sha), and whether any blame FAILED (R102)."""
     out = []
+    blame_failed = False
     for path, hunks in files:
         for h in hunks:
             a, b, added = h["a"], h["b"], h["added"]
             if b > 0:
-                for asha in _blame_shas(repo_path, parent_sha, path, a, b):
-                    out.append((asha, False))
+                shas, via_note = _blame_shas(repo_path, parent_sha, path, a, b, stats), False
             elif b == 0 and a >= 1 and any(NOTE_RE.match(line) for line in added):
                 # R91: a pure addition whose added lines match NOTE_RE blames the single
                 # line directly before the insertion point -- a retraction of the sentence
                 # it annotates.
-                for asha in _blame_shas(repo_path, parent_sha, path, a, 1):
-                    out.append((asha, True))
-    return out
+                shas, via_note = _blame_shas(repo_path, parent_sha, path, a, 1, stats), True
+            else:
+                continue
+            if shas is None:
+                blame_failed = True
+                continue
+            out.extend((asha, via_note) for asha in shas)
+    return out, blame_failed
 
 
 def _sid_by_bare(conn):
@@ -208,7 +241,8 @@ def _sid_by_bare(conn):
 
 
 def _bump(stats, key):
-    stats[key] = stats.get(key, 0) + 1
+    if stats is not None:  # candidates() always passes a dict; a direct helper call may not
+        stats[key] = stats.get(key, 0) + 1
 
 
 def _operator_candidates(conn, stats):
@@ -227,7 +261,7 @@ def _operator_candidates(conn, stats):
             if kind == "assistant_text":
                 last_assistant = (uuid, ts)
                 continue
-            if kind not in ("prompt", "interrupt"):
+            if kind not in ("prompt", "interrupt", "rejection"):
                 continue  # delegation, meta, tool_result, tool_use, assistant_thinking: never candidates
             if last_assistant is None:
                 _bump(stats, "operator_no_prior_assistant_text")
@@ -239,7 +273,7 @@ def _operator_candidates(conn, stats):
                     source="operator_message", corrector="operator",
                     origin_hint=origin_hint, text=text,
                 ))
-            else:  # interrupt
+            elif kind == "interrupt":
                 next_text = ""
                 for j in range(i + 1, len(srows)):
                     if srows[j][3] == "prompt":
@@ -249,6 +283,12 @@ def _operator_candidates(conn, stats):
                     cid=f"op:{sid}:{uuid}", sid=sid, detected_ts=ts,
                     source="operator_interrupt", corrector="operator",
                     origin_hint=origin_hint, text=next_text,
+                ))
+            else:  # rejection (R105; join emits it from Task 14): origin as a prompt, own text.
+                cands.append(Candidate(
+                    cid=f"op:{sid}:{uuid}", sid=sid, detected_ts=ts,
+                    source="operator_rejection", corrector="operator",
+                    origin_hint=origin_hint, text=text,
                 ))
     return cands
 
@@ -270,9 +310,12 @@ def _commit_candidates_for_row(repo_path, repo, sha, ts, subject, sid_map, stats
     if not _is_examined(subject, stripped_body, added_all, is_review):
         return []
 
-    antecedents = _antecedents_of(repo_path, parent_sha, files)
+    antecedents, blame_failed = _antecedents_of(repo_path, parent_sha, files, stats)
     if not antecedents:
-        _bump(stats, "no_antecedent")
+        # R102: after a FAILED blame the antecedent is unknown, not absent. It is already
+        # counted in blame_git_failures, and never as no_antecedent (a pure addition).
+        if not blame_failed:
+            _bump(stats, "no_antecedent")
         return []
 
     via_note_only: dict[str, bool] = {}

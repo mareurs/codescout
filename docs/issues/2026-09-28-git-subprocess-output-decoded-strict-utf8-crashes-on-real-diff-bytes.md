@@ -89,20 +89,43 @@ patch-id --stable`), on branch `experiments`.
 
 ## Tests added
 
-`tests/test_measure_miner.py::NonUtf8GitOutputDoesNotRaise`, 2 cases:
-- `test_a_diff_containing_an_invalid_utf8_byte_does_not_raise` (exercises
-  `_git`'s code path, a commit diff);
-- `test_blame_porcelain_output_with_an_invalid_utf8_summary_line_does_not_raise`
-  (exercises `_blame_shas`'s code path, a `git blame --porcelain` summary
-  line).
+`tests/test_measure_miner.py::NonUtf8GitOutputDoesNotRaise`, 2 cases. Both call only
+`miner.candidates()`, never `_git()` or `_blame_shas()` directly. Both catch a
+`UnicodeDecodeError` and turn it into an assertion failure (`self.fail`), so a regression
+reds as an assertion rather than an error.
 
-Both write raw non-UTF-8 bytes to a fixture file via a `_write_bytes` test
-helper and assert `candidates()`/`_blame_shas()` returns without raising.
-Full suite (21 tests, including these 2) passes: 21 passed in 1.47s. Both
-regression cases were also independently exercised as a side effect of
-Step 5's `M6_swap_self_peer_session` mutant (3 failures instead of the
-other mutants' 1, one of them being the new UTF-8 regression test), showing
-they are not vacuous against at least one unrelated mutation too.
+- `test_a_diff_containing_an_invalid_utf8_byte_does_not_raise`: byte `0x93` is in the
+  correcting commit's ADDED file line. The diff (`_git`) carries it, while blame at the
+  parent reads the antecedent's clean line, so this case isolates `_git`'s decoding.
+- `test_blame_porcelain_output_with_an_invalid_utf8_content_line_does_not_raise`: byte
+  `0x93` is in the antecedent's FILE line that the correcting commit removes.
+  `git blame --porcelain` echoes that line raw, so `_blame_shas` must decode it. The diff
+  carries it too, on the `-` line.
+
+**Correction (Task 8 fix round 1, after the Opus review's item I2).** Up to `0931fe00`
+this section made three claims that the bytes contradict:
+
+- It said both cases write raw non-UTF-8 bytes to a fixture file. The blame case wrote
+  `0x93` into a commit MESSAGE instead. Git transcodes a non-UTF-8 message at commit time
+  (git 2.55 stores it as `C2 93`, which is valid UTF-8), so the byte never reached
+  `_blame_shas`, and that case passed on the pre-fix code.
+- It said the cases assert that `candidates()`/`_blame_shas()` return without raising. Both
+  call only `candidates()`.
+- It said an `M6` (swap self/peer-session) kill showed both cases are not vacuous. At
+  `0931fe00`, `M6` failed only the diff case, through its `corrector` assertion. A kill of
+  an unrelated mutant says nothing about the encoding fix.
+
+Observed reds since fix round 1, on the committed bytes
+(`.superpowers/sdd/2026-09-26-system1-base-rate-measurement/probes/task8-fix1-red.txt`):
+
+- `R2` (`errors="replace"` dropped from `_blame_shas` only) reds the blame case;
+- `R1` (dropped from `_git` only) reds the diff case, and the blame case too, whose diff
+  also carries the byte;
+- the pre-fix bytes (`R20`, both dropped) red both cases.
+
+Sibling sites that still decode strictly (review item M8): `join._run_git_log`, and the
+scratch `census_probe.py`. Noted here, not changed: Task 6 is closed, and the probe is not
+committed.
 
 ## Workarounds
 
@@ -117,6 +140,8 @@ N/A -- fixed, not left open.
 
 - `scripts/measure/miner.py` (`_git`, `_blame_shas`)
 - `tests/test_measure_miner.py` (`NonUtf8GitOutputDoesNotRaise`)
+- `.superpowers/sdd/2026-09-26-system1-base-rate-measurement/task-8-review.md` (I2)
+- `.superpowers/sdd/2026-09-26-system1-base-rate-measurement/probes/task8-fix1-red.txt`
 - `.superpowers/sdd/2026-09-26-system1-base-rate-measurement/probes/task8-mutants.txt`
 - `.superpowers/sdd/2026-09-26-system1-base-rate-measurement/probes/task8-green.txt`
 - Commit `176015f214595deb9c9ec99dbfd2321284bae345` (the real commit whose diff
