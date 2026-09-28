@@ -1091,8 +1091,10 @@ class AttributionUnit(unittest.TestCase):
                    content=[{"type": "tool_result", "content": "ok"}]),
             _entry("u4", "2026-09-20T10:00:03Z", "sid1", is_meta=True),
             # R105 is top-level only: a rejection inside a subagent file is no rejection.
+            # LOAD-BEARING: is_error True (R127), so the fixture IS a rejection at top level and
+            # only the subagent path can refuse it.
             _entry("u5", "2026-09-20T10:00:04Z", "sid1",
-                   content=[{"type": "tool_result", "content": _REJECTED_TEXT}]),
+                   content=[{"type": "tool_result", "is_error": True, "content": _REJECTED_TEXT}]),
         ]
         prompt_uuids, interrupt_uuids, delegation_uuids, rejections = join._classify_uuids(
             entries, True
@@ -1105,12 +1107,23 @@ class AttributionUnit(unittest.TestCase):
     def test_top_level_rejections_map_uuid_to_feedback(self):
         entries = [
             _entry("u1", "2026-09-20T10:00:00Z", "sid1",
-                   content=[{"type": "tool_result", "content": _REJECTED_TEXT}]),
+                   content=[{"type": "tool_result", "is_error": True, "content": _REJECTED_TEXT}]),
             _entry("u2", "2026-09-20T10:00:01Z", "sid1",
                    content=[{"type": "tool_result", "content": "ok"}]),
         ]
         _p, _i, _d, rejections = join._classify_uuids(entries, False)
         self.assertEqual(rejections, {"u1": "edit the test instead"})
+    def test_a_sidechain_interrupt_marker_stays_interrupt_on_both_paths(self):
+        # R132: isSidechain is not an interrupt filter -- every subagent entry is a sidechain,
+        # and the marker is the operator's Esc in whichever chain was running. LOAD-BEARING:
+        # isSidechain True on an exact marker with no origin, so only a sidechain filter in
+        # operator_interrupts could turn it into delegation (subagent) or drop it (top-level).
+        m = _entry("u1", "2026-09-20T10:00:00Z", "sid1", content="[Request interrupted by user]")
+        m["isSidechain"] = True
+        for is_subagent in (False, True):
+            with self.subTest(is_subagent=is_subagent):
+                _p, interrupt_uuids, delegation_uuids, _r = join._classify_uuids([m], is_subagent)
+                self.assertEqual((interrupt_uuids, delegation_uuids), ({"u1"}, set()))
 
 
 class SubagentClassification(unittest.TestCase):
@@ -2165,8 +2178,9 @@ class QueuedPromptAndRejectionRows(unittest.TestCase):
             _queued_entry("q-human", "2026-09-20T10:00:02.5Z", "sid1", "no, the other parser"),
             _queued_entry("q-peer", "2026-09-20T10:00:03Z", "sid1", "a peer's note",
                           origin_kind="peer"),
-            # Deduped: the same words arrive later as a kept prompt (whitespace differs).
-            _queued_entry("q-dup", "2026-09-20T10:00:04Z", "sid1", "and  run the tests"),
+            # R130: NOT deduped -- byte-equal to the later kept prompt p2, and still a prompt row
+            # of its own: the queued message and the prompt are two operator messages.
+            _queued_entry("q-equal", "2026-09-20T10:00:04Z", "sid1", "and run the tests"),
             _entry("p2", "2026-09-20T10:00:05Z", "sid1", content="and run the tests"),
             _rejection_entry("r1", "2026-09-20T10:00:06Z", "sid1"),
             _entry("tr1", "2026-09-20T10:00:07Z", "sid1",
@@ -2192,12 +2206,17 @@ class QueuedPromptAndRejectionRows(unittest.TestCase):
                 (row["kind"], row["role"], row["text"], row["ts"], row["agent_path"]),
                 ("prompt", "attachment", "no, the other parser", "2026-09-20T10:00:02.500Z", None),
             )
-            self.assertEqual(counts["prompts_queued"], 1)
-            # The peer message and the deduped one are not the operator's own new words: no row.
-            self.assertNotIn("q-peer", by_uuid)
-            self.assertNotIn("q-dup", by_uuid)
+            # R130: q-equal counts too, beside the equal-text prompt p2 -- once each.
             self.assertEqual(
-                sorted(r["uuid"] for r in turns if r["kind"] == "prompt"), ["p1", "p2", "q-human"]
+                (by_uuid["q-equal"]["kind"], by_uuid["q-equal"]["role"], by_uuid["q-equal"]["text"]),
+                ("prompt", "attachment", "and run the tests"),
+            )
+            self.assertEqual(counts["prompts_queued"], 2)
+            # The peer message is not the operator's own words: no row.
+            self.assertNotIn("q-peer", by_uuid)
+            self.assertEqual(
+                sorted(r["uuid"] for r in turns if r["kind"] == "prompt"),
+                ["p1", "p2", "q-equal", "q-human"],
             )
 
     def test_a_rejection_is_one_rejection_row_replacing_tool_result(self):
@@ -2486,6 +2505,20 @@ class OneSessionIdDefinition(unittest.TestCase):
             for sha, commit in by_sha.items():
                 self.assertEqual(commit["session_id"], miner.session_id_of(repo, sha), sha)
             self.assertEqual(by_sha[merge_sha]["session_id"], "S-MERGE")
+    def test_join_and_miner_agree_on_two_session_id_trailers_and_the_first_wins(self):
+        # m-5: two Session-Id values in ONE trailer block. Both modules take the FIRST
+        # non-empty value (git prints the values in message order). LOAD-BEARING: the two
+        # values differ, so a last-value reader in either module disagrees.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp) / "repo"
+            _git_init(repo)
+            sha = _dated_commit(
+                repo, "a.txt", "feat: two trailers\n\nSession-Id: S-FIRST\nSession-Id: S-SECOND",
+                "2026-06-01T00:00:00Z",
+            )
+            (commit,) = join._run_git_log(repo, sha, None, None)
+            self.assertEqual(commit["session_id"], "S-FIRST")
+            self.assertEqual(miner.session_id_of(repo, sha), "S-FIRST")
 
 
 if __name__ == "__main__":

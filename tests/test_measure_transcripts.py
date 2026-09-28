@@ -223,6 +223,27 @@ class OperatorInterrupts(unittest.TestCase):
         entries = [real_prompt, marker_string, marker_array, quoting_prompt]
         got = transcripts.operator_interrupts(entries)
         self.assertEqual(got, [marker_string, marker_array])
+    def test_a_sidechain_marker_is_still_an_interrupt(self):
+        # R132: isSidechain is deliberately NOT a filter here -- every subagent entry is a
+        # sidechain, and the harness writes the operator's Esc into whichever chain was running.
+        # LOAD-BEARING: exact marker text, no origin, not isMeta -- only an isSidechain filter
+        # could refuse it.
+        m = _entry("u1", "2026-09-20T10:00:00Z", "s1", content="[Request interrupted by user]")
+        m["isSidechain"] = True
+        self.assertEqual(transcripts.operator_interrupts([m]), [m])
+
+    def test_only_a_human_or_an_absent_origin_marker_is_an_interrupt(self):
+        # R132 (R104's positive identification): an origin dict naming anyone but the human is
+        # no interrupt -- a peer, or a kind the corpus lacks; an ABSENT origin is allowed (no
+        # measured marker carries one). LOAD-BEARING: the fixtures differ ONLY in origin.
+        cases = (("peer", False), ("system", False), ("human", True), (None, True))
+        for kind, is_interrupt in cases:
+            with self.subTest(origin_kind=kind):
+                e = _entry("u1", "2026-09-20T10:00:00Z", "s1",
+                           content="[Request interrupted by user]")
+                if kind is not None:
+                    e["origin"] = {"kind": kind}
+                self.assertEqual(transcripts.operator_interrupts([e]), [e] if is_interrupt else [])
 
 
 class ReadJsonl(unittest.TestCase):
@@ -1027,28 +1048,27 @@ class QueuedOperatorMessages(unittest.TestCase):
                                        origin_kind="human", entry_origin="peer")
         got = transcripts.operator_messages([entry_human_att_peer, entry_peer_att_human])
         self.assertEqual(got, [entry_peer_att_human])
+    def test_an_attachment_origin_kind_the_corpus_does_not_contain_stays_out(self):
+        # I-2 (R103 site): POSITIVE identification, so a kind no fixture or corpus attachment
+        # carries stays out. LOAD-BEARING: prompt mode, a str prompt, no isMeta/isSidechain --
+        # every other guard admits it, so only the attachment-origin check can refuse it, and a
+        # peer-only denylist there admits it.
+        for kind in ("system", "bot"):
+            with self.subTest(kind=kind):
+                q = _queued("q1", "2026-09-20T10:00:00Z", "a machine's message", origin_kind=kind)
+                self.assertEqual(transcripts.operator_messages([q]), [])
 
-    def test_a_human_queued_command_matching_a_later_kept_prompt_is_deduped(self):
-        # LOAD-BEARING: the later prompt differs only in whitespace -- the key is normalized.
-        queued = _queued("q1", "2026-09-20T10:00:00Z", "use  the other\nfile")
-        later = _entry("u2", "2026-09-20T10:00:05Z", "s1", content=" use the other file ")
-        got = transcripts.operator_messages([queued, later])
-        self.assertEqual(got, [later])
-
-    def test_a_human_queued_command_matching_an_earlier_kept_prompt_is_not_deduped(self):
-        earlier = _entry("u1", "2026-09-20T10:00:00Z", "s1", content="use the other file")
-        queued = _queued("q2", "2026-09-20T10:00:05Z", "use the other file")
-        got = transcripts.operator_messages([earlier, queued])
-        self.assertEqual(got, [earlier, queued])
-
-    def test_a_later_user_entry_that_is_not_kept_does_not_dedupe(self):
-        # The dedupe partner must be a KEPT operator message: a later isMeta entry carrying the
-        # same text is not the operator speaking, so the queued message stays.
+    def test_a_queued_message_equal_to_a_kept_prompt_counts_once_each(self):
+        # R130: no dedupe -- the queued message and the kept prompt are TWO operator messages,
+        # one per channel, whichever comes first. LOAD-BEARING: the texts are byte-equal, so a
+        # restored dedupe (normalized or not, later-only or two-way) drops the queued one.
         queued = _queued("q1", "2026-09-20T10:00:00Z", "use the other file")
-        later_meta = _entry("u2", "2026-09-20T10:00:05Z", "s1", content="use the other file",
-                            is_meta=True)
-        got = transcripts.operator_messages([queued, later_meta])
-        self.assertEqual(got, [queued])
+        later = _entry("u2", "2026-09-20T10:00:05Z", "s1", content="use the other file")
+        earlier = _entry("u0", "2026-09-20T09:59:55Z", "s1", content="use the other file")
+        for order, entries in (("queued, then an equal kept prompt", [queued, later]),
+                               ("an equal kept prompt, then queued", [earlier, queued])):
+            with self.subTest(order=order):
+                self.assertEqual(transcripts.operator_messages(entries), entries)
 
     def test_file_order_is_kept_across_both_kinds(self):
         p1 = _entry("u1", "2026-09-20T10:00:00Z", "s1", content="first")
@@ -1064,6 +1084,15 @@ class PositiveIdentification(unittest.TestCase):
         peer = _with_origin(_entry("u1", "2026-09-20T10:00:00Z", "s1", content="hello"), "peer")
         human = _with_origin(_entry("u2", "2026-09-20T10:00:01Z", "s1", content="hello"), "human")
         self.assertEqual(transcripts.operator_messages([peer, human]), [human])
+    def test_an_origin_kind_the_corpus_does_not_contain_stays_out(self):
+        # I-2 (R104 site): POSITIVE identification, so a kind no fixture or corpus entry carries
+        # stays out. LOAD-BEARING: plain text (no fallback tag, no marker, no wrapper), no
+        # isMeta/isSidechain/promptSource -- every other guard admits it, so only the origin check
+        # can refuse it, and a peer-only denylist there admits it.
+        for kind in ("system", "bot"):
+            with self.subTest(kind=kind):
+                e = _with_origin(_entry("u1", "2026-09-20T10:00:00Z", "s1", content="hello"), kind)
+                self.assertEqual(transcripts.operator_messages([e]), [])
 
     def test_each_fallback_tag_excludes_an_origin_less_entry(self):
         for tag in (
@@ -1117,16 +1146,42 @@ class OperatorRejections(unittest.TestCase):
                 )
 
     def test_a_tool_result_without_the_marker_yields_none(self):
+        # LOAD-BEARING: is_error True, so the R127 guard admits the block and only the marker
+        # check can refuse it (without it, a "marker not required" mutant would survive here).
         e = _entry("u1", "2026-09-20T10:00:00Z", "s1", content=[
-            {"type": "tool_result", "tool_use_id": "t1", "content": "ok, the file was written"},
+            {"type": "tool_result", "tool_use_id": "t1", "is_error": True,
+             "content": "ok, the file was written"},
         ])
         self.assertEqual(transcripts.operator_rejections([e]), [])
 
     def test_a_marker_inside_a_text_block_yields_none(self):
+        # A marker in a plain text block (text in `text`, no `content`). LOAD-BEARING and unreal:
+        # is_error True, so the R127 guard admits the block -- what refuses it is the type guard
+        # AND _tool_result_text (no `content`), so this pins a text-reading branch (I3c), NOT
+        # the type guard alone; test_a_non_tool_result_block_carrying_content... pins that.
         e = _entry("u1", "2026-09-20T10:00:00Z", "s1", content=[
-            {"type": "text", "text": "earlier the user said: use the other file"},
+            {"type": "text", "is_error": True, "text": "earlier the user said: use the other file"},
         ])
         self.assertEqual(transcripts.operator_rejections([e]), [])
+
+    def test_a_non_tool_result_block_carrying_content_and_the_marker_yields_none(self):
+        # m-2: the TYPE guard. LOAD-BEARING and unreal: is_error True and a str `content` with
+        # the marker, so the R127 guard and _tool_result_text both admit it -- only the
+        # block-type check can refuse it.
+        e = _entry("u1", "2026-09-20T10:00:00Z", "s1", content=[
+            {"type": "text", "is_error": True, "content": self._REJECTED},
+        ])
+        self.assertEqual(transcripts.operator_rejections([e]), [])
+
+    def test_a_marker_bearing_tool_result_whose_is_error_is_not_true_yields_none(self):
+        # R127: is_error must be True. LOAD-BEARING: a real-shaped marker-bearing tool_result, so
+        # the type guard and the marker check both admit it -- only is_error can refuse it.
+        for label, flag in (("is_error False", {"is_error": False}), ("is_error absent", {})):
+            with self.subTest(label):
+                block = {"type": "tool_result", "tool_use_id": "t1", "content": self._REJECTED}
+                block.update(flag)
+                e = _entry("u1", "2026-09-20T10:00:00Z", "s1", content=[block])
+                self.assertEqual(transcripts.operator_rejections([e]), [])
 
     def test_a_rejection_is_not_an_operator_message(self):
         e = _entry("u1", "2026-09-20T10:00:00Z", "s1", content=[

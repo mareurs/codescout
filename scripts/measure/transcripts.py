@@ -84,7 +84,8 @@ INTERRUPT_MARKERS = (
 )
 
 # R104: POSITIVE identification. A type:user entry carrying an `origin` dict is an operator
-# message only if origin.kind == "human" (measured 2026-09-28: all 2592 kept prompts carry it).
+# message only if origin.kind == "human" (measured on freeze scratch-2026-09-28-task14, per entry
+# in its 118 kept top-level copies: all 2572 kept type:user operator messages carry it).
 # These leading tags are the FALLBACK for origin-less (older) entries only -- machine channels
 # the harness writes as type:user text. Several are open tags that carry attributes
 # (`<cross-session-message from=...>`), hence no closing ">" on those.
@@ -100,13 +101,15 @@ ORIGINLESS_FALLBACK_TAGS = (
 )
 
 # R103: a message the operator types while the agent runs is written as a `type:"attachment"`
-# entry whose attachment.type is this. Measured 2026-09-28 on the Task 14 freeze (138 sessions):
-# 2095 such attachments; commandMode "prompt" 1262 (attachment origin human 171, peer 1091),
-# "task-notification" 833; every attachment.prompt a str; no entry-level origin on any.
+# entry whose attachment.type is this. Measured on freeze scratch-2026-09-28-task14, per entry in
+# its 118 kept top-level copies: 2081 such attachments; commandMode "prompt" 1257 (attachment
+# origin human 169, peer 1088), "task-notification" 824; every attachment.prompt a str; no
+# entry-level origin on any.
 QUEUED_COMMAND_TYPE = "queued_command"
 
 # R105: the harness marker a tool_result carries when the operator rejects a tool use and types
-# feedback. Measured 2026-09-28: 10 blocks in 9 kept sessions, one block per entry.
+# feedback. Measured on freeze scratch-2026-09-28-task14: 10 blocks, one per entry, in 9 of its
+# 118 kept top-level copies (R127 also requires is_error == True -- operator_rejections).
 REJECTION_MARKER = "the user said:"
 
 _PROFILE_DIR_RE = re.compile(r"^\d+-(.+)$")
@@ -155,8 +158,9 @@ def _message_text(entry):
     imagePasteIds sibling key) — per Review Focus 3 / fact 2.
 
     R103: a `queued_command` attachment (a message typed while the agent ran) carries no
-    `message`; its text is `attachment.prompt` when that is a str (all 2095 measured are), so
-    join records a queued prompt through this same function. Any other attachment is None.
+    `message`; its text is `attachment.prompt` when that is a str (all 2081 are, per entry in the
+    118 kept top-level copies of freeze scratch-2026-09-28-task14), so join records a queued
+    prompt through this same function. Any other attachment is None.
     """
     message = entry.get("message")
     if not isinstance(message, dict):
@@ -189,11 +193,6 @@ def _is_task_notification(entry):
     if isinstance(origin, dict) and origin.get("kind") == "task-notification":
         return True
     return False
-
-
-def _normalize_ws(text):
-    """R103's dedupe key: whitespace-normalized text (runs of whitespace -> one space)."""
-    return " ".join(text.split())
 
 
 def _is_operator_user_entry(entry):
@@ -237,7 +236,8 @@ def _is_queued_operator_prompt(entry):
     attachment.type == "queued_command", attachment.commandMode == "prompt", and the
     ATTACHMENT's own attachment.origin.kind == "human" -- never an entry-level origin, which
     no measured attachment carries: every prompt-mode attachment carries an attachment origin
-    (1091 peer + 171 human), so reading the wrong field would admit every peer message. An
+    (1088 peer + 169 human, per entry in the 118 kept top-level copies of freeze
+    scratch-2026-09-28-task14), so reading the wrong field would admit every peer message. An
     attachment with no origin never counts. Not isMeta (the ledger's R103) and not isSidechain
     (R104). Its text must be a str (_message_text)."""
     if entry.get("type") != "attachment":
@@ -276,33 +276,35 @@ def operator_messages(entries):
     slash-command-shaped token followed by more words still counts).
 
     R103: a `queued_command` attachment the operator typed mid-turn is kept too (see
-    _is_queued_operator_prompt), UNLESS its whitespace-normalized text equals that of a kept
-    type:user operator message LATER in the same `entries` list -- the same message, echoed as
-    a prompt once the turn ended; the user entry is kept and the attachment dropped. A kept
-    user message EARLIER in the list never dedupes it.
+    _is_queued_operator_prompt). R130: NO dedupe -- an attachment whose text equals a kept
+    type:user prompt, earlier or later, is a separate operator message, and each counts once.
+    The measurement that removed the dedupe (the two channels are disjoint; the equal-text
+    matches were repeated short operator messages) is spec Amendment 7 (a)1.
     """
-    kept_reversed = []
-    later_user_texts = set()
-    for entry in reversed(entries):
-        if _is_operator_user_entry(entry):
-            kept_reversed.append(entry)
-            later_user_texts.add(_normalize_ws(_message_text(entry)))
-        elif _is_queued_operator_prompt(entry):
-            if _normalize_ws(_message_text(entry)) in later_user_texts:
-                continue
-            kept_reversed.append(entry)
-    kept_reversed.reverse()
-    return kept_reversed
+    return [e for e in entries if _is_operator_user_entry(e) or _is_queued_operator_prompt(e)]
 
 
 def operator_interrupts(entries):
-    """R25: return exactly the entries operator_messages() drops as interrupt markers.
+    """R25/R132: return the entries that are operator-interrupt markers.
 
-    Same structural filters as operator_messages() (type=="user", not isMeta, not a
-    compaction summary) and the same _message_text() extraction — this and
-    operator_messages() are the only two places INTERRUPT_MARKERS is consulted, and both
-    consult it via strip()-equality, never substring, so a prompt that merely quotes a
-    marker is excluded here and kept there.
+    Structural filters: type=="user", not isMeta, not a compaction summary, and (R104's
+    positive identification, with _is_operator_user_entry()'s exact semantics) an entry whose
+    `origin` is a dict naming anyone but the human (origin.kind != "human") is no interrupt; an
+    ABSENT origin is allowed -- no measured marker carries one. Then the same _message_text()
+    extraction as operator_messages(), and strip()-equality with INTERRUPT_MARKERS, never
+    substring -- this and operator_messages() are the only two places INTERRUPT_MARKERS is
+    consulted, so a prompt that merely quotes a marker is excluded here and kept there.
+
+    R132: isSidechain is deliberately NOT a filter here. The harness writes a marker on the
+    operator's Esc into whichever chain was running, so a marker in a subagent file (every
+    subagent entry is isSidechain) is still the operator acting, and join._classify_uuids keeps
+    it `interrupt` inside a subagent file. R104's isSidechain exclusion exists for the parent
+    model's BRIEF in an old-layout top-level agent-<id>.jsonl, not for markers. So R25's "exactly
+    the entries operator_messages() drops as interrupt markers" holds for NON-sidechain entries
+    only: a sidechain marker is returned here, and operator_messages() drops it as a sidechain
+    before its marker check. (R26's promptSource == "system" check is not applied here either;
+    measured on freeze scratch-2026-09-28-task14, 0 of its 183 marker entries, per entry over
+    all 895 top-level and subagent files, carry a promptSource or an origin.)
     """
     kept = []
     for entry in entries:
@@ -311,6 +313,9 @@ def operator_interrupts(entries):
         if entry.get("isMeta"):
             continue
         if entry.get("isCompactSummary"):
+            continue
+        origin = entry.get("origin")
+        if isinstance(origin, dict) and origin.get("kind") != "human":
             continue
         text = _message_text(entry)
         if text is None:
@@ -337,17 +342,19 @@ def _tool_result_text(block):
 
 
 def operator_rejections(entries):
-    """R105: tool-rejection feedback, the operator's most explicit correction. Returns, in file
-    order, one {"uuid", "ts", "text"} per type:"user" entry whose message.content LIST holds a
-    tool_result block whose text contains REJECTION_MARKER; "text" is everything after the
-    marker's first occurrence, stripped. A marker inside a plain text block (not a tool_result)
-    never counts. Every measured entry holds exactly one such block; if one ever held several,
-    their texts are joined with a blank line, so the entry still yields ONE dict (one turns row).
+    """R105/R127: tool-rejection feedback, the operator's most explicit correction. Returns, in
+    file order, one {"uuid", "ts", "text"} per type:"user" entry whose message.content LIST holds
+    a block that passes all three checks, in this order: its type is "tool_result"; (R127) its
+    `is_error` is True; and its text contains REJECTION_MARKER. "text" is everything after the
+    marker's first occurrence, stripped. A marker inside any other block type never counts, nor
+    does a tool_result whose is_error is False or absent -- one that merely QUOTES the marker
+    (e.g. a grep over these docs) is no rejection. Every measured entry holds exactly one such
+    block; if one ever held several, their texts are joined with a blank line, so the entry
+    still yields ONE dict (one turns row).
 
-    Known latent shape, measured 2026-09-28: a tool_result that merely QUOTES the marker (e.g. a
-    grep over these docs) matches too -- 1 such block, in the review session 82cff72e, which R106
-    excludes; the 10 genuine blocks are all is_error=True and carry the harness's "The user
-    doesn't want to proceed with this tool use" prefix. The rule as ruled does not check either.
+    Measured on freeze scratch-2026-09-28-task14, per block: the 10 marker-bearing tool_result
+    blocks in its 118 kept top-level copies are all is_error=True; one more, in the spec-excluded
+    review copy 82cff72e, is a quote (is_error absent, no harness prefix).
     """
     out = []
     for entry in entries:
@@ -360,6 +367,8 @@ def operator_rejections(entries):
         texts = []
         for block in content:
             if not (isinstance(block, dict) and block.get("type") == "tool_result"):
+                continue
+            if block.get("is_error") is not True:
                 continue
             text = _tool_result_text(block)
             if text and REJECTION_MARKER in text:
