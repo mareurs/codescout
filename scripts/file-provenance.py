@@ -728,7 +728,21 @@ def main(argv: list[str]) -> int:
 
         mine = bool(me) and me in who_set
         peers = sorted(w for w in who_set if w != me)
-        verdict = "MINE" if mine and not peers else ("SHARED" if mine else "PEER")
+        # Item 3 of d567a429109f6fd8: a window-excluded write is invisible to the
+        # verdict a reader ACTS on. A hunk-split commit of a shared file can move the
+        # floor past a still-uncommitted peer write, so a dated peer write outside the
+        # window downgrades MINE to SHARED -- but only when the path is actually dirty
+        # right now, so a synthetic/never-touched fixture (no real bytes on disk) is
+        # unaffected. Gated on worktree_is_dirty() rather than unconditionally, because
+        # a hidden write against a CLEAN path is already baked into HEAD and answers
+        # nothing about live uncommitted bytes.
+        hidden_peer = mine and not peers and any(
+            w != me for w, when in records
+            if when is not None and floor is not None and _key(when) < floor)
+        if hidden_peer and worktree_is_dirty(rel, root):
+            verdict = "SHARED"
+        else:
+            verdict = "MINE" if mine and not peers else ("SHARED" if mine else "PEER")
         print(f"{verdict:9} {rel}")
         if floor:
             print(f"          window: writes at or after {floor}")

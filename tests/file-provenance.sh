@@ -626,6 +626,16 @@ tool_use "$A" mcp__codescout__edit_file '{"path":"src/committed.rs","old_string"
 out="$(run src/committed.rs)"
 has "a write AFTER it is the dirty-state author" "$out" "MINE"
 hasnt "and the pre-commit author stays excluded" "$out" "$PEER"
+
+# Item 3 of d567a429109f6fd8: a hunk-split commit of a shared file can move the
+# floor past a still-uncommitted PEER write, so file-provenance's own transcript-only
+# fixtures above never actually dirty the file on disk and stay MINE. Here the file
+# really is dirty -- the case the verdict downgrade exists for.
+echo "v2 uncommitted" > "$T/repo/src/committed.rs"
+out="$(run src/committed.rs)"
+has "a DIRTY path with a peer write the window hid downgrades to SHARED" "$out" "SHARED"
+hasnt "and is no longer reported as sole MINE" "$out" "MINE"
+has "the caveat still names the hidden write" "$out" "predate the window"
 # MINE is the verdict a reader acts on to license a commit -- so it is the one that most
 # needs the same "writes exist outside the window" caveat UNKNOWN already prints. Before
 # this case existed the caveat was scoped to the empty-who_set branch only, so a hidden
