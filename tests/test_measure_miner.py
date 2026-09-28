@@ -841,10 +841,10 @@ class SessionIdOfMatchesCommitsTable(unittest.TestCase):
             repo_dir = pathlib.Path(td) / "repo"
             _init_repo(repo_dir)
             _write(repo_dir, "doc.md", "content\n")
-            # "Session-Id:" appears MID-line here, so join's line-anchored regex and git's
-            # trailer parser both read S-abc-123, while an unanchored search reads S-MIDLINE.
-            # Keep this fixture free of any prose line STARTING "Session-Id:": join still uses
-            # a first-match regex until Task 14 aligns it (R110), and such a line splits the two.
+            # "Session-Id:" appears MID-line here, so git's trailer parser -- which join and the
+            # miner both read since Task 14 (R110) -- reads S-abc-123, while an unanchored
+            # search reads S-MIDLINE. A prose line STARTING "Session-Id:" no longer splits the
+            # two: tests/test_measure_join.py::OneSessionIdDefinition pins that case.
             sha_1 = _commit(repo_dir, "docs: a change\n\nThe old Session-Id: S-MIDLINE is gone.",
                             session_id="S-abc-123")
             _write(repo_dir, "other.md", "more\n")

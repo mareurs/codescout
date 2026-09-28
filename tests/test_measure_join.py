@@ -267,7 +267,10 @@ def _make_git_repo(root):
     (root / "a.txt").write_text("2")
     (root / "b.txt").write_text("1")
     run("add", "a.txt", "b.txt")
-    run("commit", "-q", "-m", "fix: tweak a and add b\n\nSession-Id: sess-456\nBody-Line-2")
+    # R110: Session-Id is git's trailer parser, which reads only the LAST paragraph as trailers
+    # -- so the extra body line sits above it (a non-trailer line after it would leave git no
+    # trailer block; 0 such commits in this repo's history, measured 2026-09-28).
+    run("commit", "-q", "-m", "fix: tweak a and add b\n\nBody-Line-2\n\nSession-Id: sess-456")
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
     ).stdout.strip()
@@ -1072,10 +1075,13 @@ class AttributionUnit(unittest.TestCase):
             _entry("u1", "2026-09-20T10:00:00Z", "sid1", content="do the thing"),
             _entry("u2", "2026-09-20T10:00:01Z", "sid1", content="[Request interrupted by user]"),
         ]
-        prompt_uuids, interrupt_uuids, delegation_uuids = join._classify_uuids(entries, False)
+        prompt_uuids, interrupt_uuids, delegation_uuids, rejections = join._classify_uuids(
+            entries, False
+        )
         self.assertEqual(prompt_uuids, {"u1"})
         self.assertEqual(interrupt_uuids, {"u2"})
         self.assertEqual(delegation_uuids, set())
+        self.assertEqual(rejections, {})
 
     def test_subagent_never_produces_prompt(self):
         entries = [
@@ -1084,11 +1090,27 @@ class AttributionUnit(unittest.TestCase):
             _entry("u3", "2026-09-20T10:00:02Z", "sid1",
                    content=[{"type": "tool_result", "content": "ok"}]),
             _entry("u4", "2026-09-20T10:00:03Z", "sid1", is_meta=True),
+            # R105 is top-level only: a rejection inside a subagent file is no rejection.
+            _entry("u5", "2026-09-20T10:00:04Z", "sid1",
+                   content=[{"type": "tool_result", "content": _REJECTED_TEXT}]),
         ]
-        prompt_uuids, interrupt_uuids, delegation_uuids = join._classify_uuids(entries, True)
+        prompt_uuids, interrupt_uuids, delegation_uuids, rejections = join._classify_uuids(
+            entries, True
+        )
         self.assertEqual(prompt_uuids, set())
         self.assertEqual(interrupt_uuids, {"u2"})
         self.assertEqual(delegation_uuids, {"u1"})
+        self.assertEqual(rejections, {})
+
+    def test_top_level_rejections_map_uuid_to_feedback(self):
+        entries = [
+            _entry("u1", "2026-09-20T10:00:00Z", "sid1",
+                   content=[{"type": "tool_result", "content": _REJECTED_TEXT}]),
+            _entry("u2", "2026-09-20T10:00:01Z", "sid1",
+                   content=[{"type": "tool_result", "content": "ok"}]),
+        ]
+        _p, _i, _d, rejections = join._classify_uuids(entries, False)
+        self.assertEqual(rejections, {"u1": "edit the test instead"})
 
 
 class SubagentClassification(unittest.TestCase):
@@ -1128,7 +1150,7 @@ class SpecExclusionDefault(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             corpus_dir = _make_corpus(pathlib.Path(tmp))
             proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
-            spec_sid = next(iter(join.SPEC_EXCLUDED_SIDS))
+            spec_sid = sorted(join.SPEC_EXCLUDED_SIDS)[0]
             _write_lines(proj / f"{spec_sid}.jsonl", [
                 _entry("k1", "2026-09-20T10:00:00Z", spec_sid),
             ])
@@ -2101,6 +2123,369 @@ class GuideMarkerAnchoring(unittest.TestCase):
         self.assertEqual(len(deliveries), 1)
         self.assertEqual(deliveries[0]["engine_or_hook"], "operator-rule")
         self.assertEqual(deliveries[0]["key"], "OP-7")
+
+
+# --- Task 14 (spec Amendment 7) -----------------------------------------------------------
+
+miner = _load("miner")
+
+_REJECTED_TEXT = (
+    "The user doesn't want to proceed with this tool use. The tool use was rejected. "
+    "To tell you how to proceed, the user said:\n edit the test instead "
+)
+
+
+def _queued_entry(uuid, ts, sid, text, origin_kind="human", mode="prompt"):
+    """A real-shaped R103 `queued_command` attachment (origin on the ATTACHMENT)."""
+    return {
+        "type": "attachment", "uuid": uuid, "timestamp": ts, "sessionId": sid,
+        "attachment": {"type": "queued_command", "commandMode": mode, "prompt": text,
+                       "origin": {"kind": origin_kind}},
+    }
+
+
+def _rejection_entry(uuid, ts, sid):
+    return _entry(uuid, ts, sid, content=[
+        {"type": "tool_result", "tool_use_id": "t-rej", "is_error": True,
+         "content": _REJECTED_TEXT},
+    ])
+
+
+class QueuedPromptAndRejectionRows(unittest.TestCase):
+    """R103/R105 recording: a queued human prompt is a `prompt` row under the attachment's uuid
+    and ts; a rejection is ONE `rejection` row (it replaces tool_result); top-level only."""
+
+    def _build(self, tmp):
+        corpus_dir = _make_corpus(pathlib.Path(tmp))
+        proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+        _write_lines(proj / "sid1.jsonl", [
+            _entry("p1", "2026-09-20T10:00:00Z", "sid1", content="fix the parser"),
+            {"type": "assistant", "uuid": "a1", "timestamp": "2026-09-20T10:00:01Z",
+             "sessionId": "sid1", "message": {"content": [{"type": "text", "text": "done"}]}},
+            _queued_entry("q-human", "2026-09-20T10:00:02.5Z", "sid1", "no, the other parser"),
+            _queued_entry("q-peer", "2026-09-20T10:00:03Z", "sid1", "a peer's note",
+                          origin_kind="peer"),
+            # Deduped: the same words arrive later as a kept prompt (whitespace differs).
+            _queued_entry("q-dup", "2026-09-20T10:00:04Z", "sid1", "and  run the tests"),
+            _entry("p2", "2026-09-20T10:00:05Z", "sid1", content="and run the tests"),
+            _rejection_entry("r1", "2026-09-20T10:00:06Z", "sid1"),
+            _entry("tr1", "2026-09-20T10:00:07Z", "sid1",
+                   content=[{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]),
+        ])
+        _write_lines(proj / "sid1" / "subagents" / "sub.jsonl", [
+            _entry("s-brief", "2026-09-20T10:01:00Z", "sid1", content="the parent's brief"),
+            _queued_entry("s-queued", "2026-09-20T10:01:01Z", "sid1", "typed at a subagent"),
+            _rejection_entry("s-rej", "2026-09-20T10:01:02Z", "sid1"),
+        ])
+        events_db = pathlib.Path(tmp) / "events.db"
+        counts = join.build_events(corpus_dir, events_db, excluded_sids=set())
+        turns = _table_rows(sqlite3.connect(str(events_db)), "turns")
+        return counts, turns
+
+    def test_a_queued_human_prompt_is_a_prompt_row_under_the_attachments_uuid_and_ts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            counts, turns = self._build(tmp)
+            by_uuid = {r["uuid"]: r for r in turns}
+            self.assertIn("q-human", by_uuid)
+            row = by_uuid["q-human"]
+            self.assertEqual(
+                (row["kind"], row["role"], row["text"], row["ts"], row["agent_path"]),
+                ("prompt", "attachment", "no, the other parser", "2026-09-20T10:00:02.500Z", None),
+            )
+            self.assertEqual(counts["prompts_queued"], 1)
+            # The peer message and the deduped one are not the operator's own new words: no row.
+            self.assertNotIn("q-peer", by_uuid)
+            self.assertNotIn("q-dup", by_uuid)
+            self.assertEqual(
+                sorted(r["uuid"] for r in turns if r["kind"] == "prompt"), ["p1", "p2", "q-human"]
+            )
+
+    def test_a_rejection_is_one_rejection_row_replacing_tool_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _counts, turns = self._build(tmp)
+            rows = [r for r in turns if r["uuid"] == "r1"]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(
+                (rows[0]["kind"], rows[0]["role"], rows[0]["text"], rows[0]["ts"]),
+                ("rejection", "user", "edit the test instead", "2026-09-20T10:00:06.000Z"),
+            )
+            by_uuid = {r["uuid"]: r for r in turns}
+            self.assertEqual(by_uuid["tr1"]["kind"], "tool_result")
+
+    def test_subagent_entries_stay_delegation_and_tool_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _counts, turns = self._build(tmp)
+            by_uuid = {r["uuid"]: r for r in turns}
+            self.assertEqual(by_uuid["s-brief"]["kind"], "delegation")
+            self.assertEqual(by_uuid["s-rej"]["kind"], "tool_result")
+            self.assertNotIn("s-queued", by_uuid)
+            self.assertEqual({r["kind"] for r in turns if r["agent_path"]},
+                             {"delegation", "tool_result"})
+
+
+class TopLevelInterruptKind(unittest.TestCase):
+    """The top-level call site's interrupt argument: a top-level interrupt marker is an
+    `interrupt` row, never the `meta` it falls through to without it."""
+
+    def test_a_top_level_interrupt_marker_is_an_interrupt_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            _write_lines(proj / "sid1.jsonl", [
+                _entry("p1", "2026-09-20T10:00:00Z", "sid1", content="do the thing"),
+                _entry("i1", "2026-09-20T10:00:01Z", "sid1",
+                       content="[Request interrupted by user]"),
+            ])
+            events_db = pathlib.Path(tmp) / "events.db"
+            join.build_events(corpus_dir, events_db, excluded_sids=set())
+            by_uuid = {r["uuid"]: r for r in _table_rows(sqlite3.connect(str(events_db)), "turns")}
+            self.assertEqual(by_uuid["i1"]["kind"], "interrupt")
+            self.assertIsNone(by_uuid["i1"]["agent_path"])
+
+
+class ExclusionsRecordedInManifest(unittest.TestCase):
+    """R106/R1: build_events records the exclusion map, reasons included, in the manifest."""
+
+    REVIEW = "82cff72e-0245-48cb-ab07-45a1c3d0d388"
+
+    def test_the_spec_set_holds_both_measurement_sessions(self):
+        self.assertEqual(
+            join.SPEC_EXCLUDED_SIDS,
+            frozenset({"3c5b02df-b6ce-45f5-9d03-1194e38465c0", self.REVIEW}),
+        )
+
+    def test_a_default_build_records_the_review_session_and_its_fork(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            shared = [f"sh{i}" for i in range(transcripts.FORK_PREFIX_LEN)]
+            _write_lines(proj / f"{self.REVIEW}.jsonl", [
+                _entry(u, f"2026-09-20T10:00:0{i}Z", self.REVIEW) for i, u in enumerate(shared)
+            ])
+            _write_lines(proj / "fork-sid.jsonl", [
+                _entry(u, f"2026-09-20T10:00:0{i}Z", "fork-sid") for i, u in enumerate(shared)
+            ] + [_entry("fork-own", "2026-09-20T10:00:09Z", "fork-sid")])
+            _write_lines(proj / "kept-sid.jsonl", [
+                _entry("k1", "2026-09-20T10:00:00Z", "kept-sid", content="hello"),
+            ])
+            events_db = pathlib.Path(tmp) / "events.db"
+            counts = join.build_events(corpus_dir, events_db)
+            manifest = json.loads((corpus_dir / "manifest.json").read_text())
+            self.assertEqual(manifest["exclusions"], [
+                {"sid": ".claude-sdd/82cff72e-0245-48cb-ab07-45a1c3d0d388",
+                 "reason": "excluded-by-spec"},
+                {"sid": ".claude-sdd/fork-sid",
+                 "reason": "fork-of-excluded:.claude-sdd/82cff72e-0245-48cb-ab07-45a1c3d0d388"},
+            ])
+            self.assertEqual(
+                transcripts.read_exclusions(corpus_dir),
+                transcripts.exclusions(transcripts.sessions(corpus_dir), join.SPEC_EXCLUDED_SIDS),
+            )
+            self.assertEqual((counts["sessions_kept"], counts["sessions_excluded"]), (1, 2))
+            turn_sids = {r["sid"] for r in _table_rows(sqlite3.connect(str(events_db)), "turns")}
+            self.assertEqual(turn_sids, {".claude-sdd/kept-sid"})
+
+
+class NewBuildCounters(unittest.TestCase):
+    """R107 entrypoint_changed and R113 decode_replaced_lines reach events_meta."""
+
+    def test_entrypoint_changed_and_decode_replaced_lines_are_counted_and_persisted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            _write_lines(proj / "changed.jsonl", [
+                _entry("c0", "2026-09-20T10:00:00Z", "changed", entrypoint="cli"),
+                _entry("c1", "2026-09-20T10:00:01Z", "changed", entrypoint="sdk-ts"),
+            ])
+            _write_lines(proj / "same.jsonl", [
+                _entry("s0", "2026-09-20T10:00:00Z", "same"),
+            ])
+            with open(proj / "same.jsonl", "ab") as f:
+                f.write(b'{"type": "user", "uuid": "s1", "timestamp": "2026-09-20T10:00:01Z", '
+                        b'"message": {"content": "caf\xc3"}}\n')
+            events_db = pathlib.Path(tmp) / "events.db"
+            try:
+                counts = join.build_events(corpus_dir, events_db, excluded_sids=set())
+            except UnicodeDecodeError as e:  # the defect is the raise: report it as a failure
+                self.fail(f"build_events raised on a torn UTF-8 line: {e}")
+            self.assertEqual(counts.get("entrypoint_changed"), 1)
+            self.assertEqual(counts.get("decode_replaced_lines"), 1)
+            conn = sqlite3.connect(str(events_db))
+            meta = dict(conn.execute("SELECT key, value FROM events_meta").fetchall())
+            conn.close()
+            self.assertEqual((int(meta["entrypoint_changed"]), int(meta["decode_replaced_lines"])),
+                             (1, 1))
+
+
+def _git(repo, *args, env=None):
+    return subprocess.run(
+        ["git", *args], cwd=str(repo), check=True, capture_output=True, text=True, env=env,
+    ).stdout.strip()
+
+
+def _git_init(repo):
+    repo.mkdir(parents=True, exist_ok=True)
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "config", "user.email", "t@t")
+
+
+def _dated_commit(repo, name, message, author, committer=None, allow_empty=False):
+    """Commit `name` (a new file, unless allow_empty) with explicit author/committer dates."""
+    env = dict(os.environ, GIT_AUTHOR_DATE=author, GIT_COMMITTER_DATE=committer or author)
+    if allow_empty:
+        _git(repo, "commit", "-q", "--allow-empty", "-m", message, env=env)
+    else:
+        (repo / name).write_text(name)
+        _git(repo, "add", name)
+        _git(repo, "commit", "-q", "-m", message, env=env)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _merge_repo(repo):
+    """main: a -> c, side: b; then a --no-ff merge of side carrying a Session-Id trailer.
+    Returns the merge sha."""
+    _git_init(repo)
+    _dated_commit(repo, "a.txt", "feat: a\n\nSession-Id: S-A", "2026-06-01T00:00:00Z")
+    _git(repo, "checkout", "-q", "-b", "side")
+    _dated_commit(repo, "b.txt", "feat: b\n\nSession-Id: S-B", "2026-06-02T00:00:00Z")
+    _git(repo, "checkout", "-q", "main")
+    _dated_commit(repo, "c.txt", "feat: c\n\nSession-Id: S-C", "2026-06-03T00:00:00Z")
+    env = dict(os.environ, GIT_AUTHOR_DATE="2026-06-04T00:00:00Z",
+               GIT_COMMITTER_DATE="2026-06-04T00:00:00Z")
+    _git(repo, "merge", "-q", "--no-ff", "side", "-m",
+         "Merge branch side\n\nSome prose about the merge.\n\nSession-Id: S-MERGE", env=env)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+class GitLogR110(unittest.TestCase):
+    """R110 + bug 91bafcc7d4137bf9: trailer-parser Session-Id, author dates, the window filtered
+    in Python over the full walk, and the file list located by an explicit end marker."""
+
+    def test_a_merge_with_a_trailer_has_its_session_id_and_no_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp) / "repo"
+            merge_sha = _merge_repo(repo)
+            by_sha = {c["sha"]: c for c in join._run_git_log(repo, merge_sha, None, None)}
+            self.assertEqual(len(_git(repo, "rev-list", "--parents", "-n1", merge_sha).split()), 3)
+            self.assertEqual(by_sha[merge_sha]["session_id"], "S-MERGE")
+            # git log --name-only prints no file section for a merge: files is [], never the
+            # trailer lines.
+            self.assertEqual(by_sha[merge_sha]["files"], [])
+            # The ordinary commits around it keep their own files and trailers.
+            by_subject = {c["subject"]: c for c in by_sha.values()}
+            self.assertEqual((by_subject["feat: c"]["session_id"], by_subject["feat: c"]["files"]),
+                             ("S-C", ["c.txt"]))
+
+    def test_a_prose_session_id_line_above_the_trailer_loses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp) / "repo"
+            _git_init(repo)
+            sha = _dated_commit(
+                repo, "a.txt",
+                "docs: a change\n\nSession-Id: WRONG was the value a draft named.\n\n"
+                "Session-Id: S-REAL",
+                "2026-06-01T00:00:00Z",
+            )
+            (commit,) = join._run_git_log(repo, sha, None, None)
+            self.assertEqual((commit["session_id"], commit["files"]), ("S-REAL", ["a.txt"]))
+
+    def test_an_allow_empty_commit_has_no_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp) / "repo"
+            _git_init(repo)
+            _dated_commit(repo, "a.txt", "feat: a", "2026-06-01T00:00:00Z")
+            sha = _dated_commit(repo, None, "chore: empty\n\nA body paragraph.\n\nSession-Id: S-E",
+                                "2026-06-02T00:00:00Z", allow_empty=True)
+            by_sha = {c["sha"]: c for c in join._run_git_log(repo, sha, None, None)}
+            self.assertEqual((by_sha[sha]["session_id"], by_sha[sha]["files"]), ("S-E", []))
+
+    def test_ts_is_the_author_date_not_the_committer_date(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp) / "repo"
+            _git_init(repo)
+            sha = _dated_commit(repo, "a.txt", "feat: a", "2026-06-01T10:00:00Z",
+                                committer="2026-07-15T12:00:00Z")
+            (commit,) = join._run_git_log(repo, sha, None, None)
+            self.assertEqual(commit["ts"], "2026-06-01T10:00:00.000Z")
+
+    def test_a_commit_behind_an_older_committer_date_is_still_found(self):
+        # git's --since stops the walk at B (committer date restamped to before the window), so
+        # A -- in the window by BOTH dates -- is never reached. A Python filter on the author
+        # date over the full walk finds all three.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp) / "repo"
+            _git_init(repo)
+            _dated_commit(repo, "a.txt", "A", "2026-06-01T00:00:00Z")
+            _dated_commit(repo, "b.txt", "B", "2026-06-02T00:00:00Z",
+                          committer="2026-01-01T00:00:00Z")
+            head = _dated_commit(repo, "c.txt", "C", "2026-06-03T00:00:00Z")
+            commits = join._run_git_log(repo, head, "2026-03-01T00:00:00Z", "2026-12-01T00:00:00Z")
+            self.assertEqual(sorted(c["subject"] for c in commits), ["A", "B", "C"])
+
+    def test_the_window_is_half_open_on_the_author_date(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp) / "repo"
+            _git_init(repo)
+            _dated_commit(repo, "a.txt", "at-start", "2026-06-01T00:00:00Z")
+            _dated_commit(repo, "b.txt", "inside", "2026-06-02T00:00:00Z")
+            head = _dated_commit(repo, "c.txt", "at-end", "2026-06-03T00:00:00Z",
+                                 committer="2026-06-01T12:00:00Z")
+            commits = join._run_git_log(repo, head, "2026-06-01T00:00:00Z", "2026-06-03T00:00:00Z")
+            self.assertEqual(sorted(c["subject"] for c in commits), ["at-start", "inside"])
+
+    def test_a_non_utf8_commit_message_is_decoded_with_replacement(self):
+        # R113: a raw latin-1 byte in a message must not abort the build with UnicodeDecodeError.
+        # `git commit` itself re-encodes a non-UTF-8 message (it assumes latin-1), so the
+        # commit object is written directly -- the shape another tool or an old git can leave.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp) / "repo"
+            _git_init(repo)
+            (repo / "a.txt").write_text("a")
+            _git(repo, "add", "a.txt")
+            tree = _git(repo, "write-tree")
+            obj = (f"tree {tree}\nauthor t <t@t> 1780272000 +0000\n"
+                   "committer t <t@t> 1780272000 +0000\n\n").encode()
+            obj += b"feat: caf\xe9 in latin-1\n\nSession-Id: S-L1\n"
+            sha = subprocess.run(
+                ["git", "hash-object", "-t", "commit", "-w", "--stdin"], cwd=str(repo),
+                input=obj, capture_output=True, check=True,
+            ).stdout.decode().strip()
+            try:
+                (commit,) = join._run_git_log(repo, sha, None, None)
+            except UnicodeDecodeError as e:  # the defect is the raise: report it as a failure
+                self.fail(f"_run_git_log raised on a non-UTF-8 message: {e}")
+            self.assertEqual(commit["subject"], "feat: caf� in latin-1")
+            self.assertEqual((commit["session_id"], commit["files"]), ("S-L1", ["a.txt"]))
+            self.assertEqual(commit["ts"], "2026-06-01T00:00:00.000Z")
+
+
+class OneSessionIdDefinition(unittest.TestCase):
+    """10b: join._run_git_log's session_id EQUALS miner.session_id_of -- one Session-Id
+    definition across the two modules (R110), on the two shapes that used to split them."""
+
+    def test_join_and_miner_agree_on_a_prose_paragraph_above_the_trailer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp) / "repo"
+            _git_init(repo)
+            sha = _dated_commit(
+                repo, "a.txt",
+                "docs: a change\n\nSession-Id: WRONG was the value a draft named.\n\n"
+                "Session-Id: S-REAL",
+                "2026-06-01T00:00:00Z",
+            )
+            (commit,) = join._run_git_log(repo, sha, None, None)
+            self.assertEqual(commit["session_id"], miner.session_id_of(repo, sha))
+            self.assertEqual(commit["session_id"], "S-REAL")
+
+    def test_join_and_miner_agree_on_a_two_parent_merge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp) / "repo"
+            merge_sha = _merge_repo(repo)
+            by_sha = {c["sha"]: c for c in join._run_git_log(repo, merge_sha, None, None)}
+            for sha, commit in by_sha.items():
+                self.assertEqual(commit["session_id"], miner.session_id_of(repo, sha), sha)
+            self.assertEqual(by_sha[merge_sha]["session_id"], "S-MERGE")
 
 
 if __name__ == "__main__":

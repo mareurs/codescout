@@ -56,9 +56,15 @@ HOOK_TWIN_WINDOW_SECONDS = 5
 # R44: the spec's own § Scope excludes its own design session from the census by default --
 # "Excluded, each listed in the manifest with its reason: ... **this design session**
 # (`3c5b02df`)" (docs/superpowers/specs/2026-09-26-system1-base-rate-measurement-design.md
-# § Scope). A caller that needs no spec exclusion (e.g. a test fixture unrelated to the
-# real corpus) passes excluded_sids=set() explicitly.
-SPEC_EXCLUDED_SIDS = frozenset({"3c5b02df-b6ce-45f5-9d03-1194e38465c0"})
+# § Scope). R106 / Amendment 7(a)4: "sessions whose task was this measurement" also holds
+# `82cff72e` (review work inside the decision window, self-disclosed). build_events records the
+# resulting exclusions, with reasons, in the manifest (transcripts.write_exclusions), and
+# transcripts.exclusions() propagates them to forks. A caller that needs no spec exclusion (e.g.
+# a test fixture unrelated to the real corpus) passes excluded_sids=set() explicitly.
+SPEC_EXCLUDED_SIDS = frozenset({
+    "3c5b02df-b6ce-45f5-9d03-1194e38465c0",
+    "82cff72e-0245-48cb-ab07-45a1c3d0d388",
+})
 
 
 def utc(ts):
@@ -67,7 +73,7 @@ def utc(ts):
     Three shapes reach this function: usage.db's called_at/started_at ("YYYY-MM-DD
     HH:MM:SS[.ffffff]", space separator, no zone marker, but real UTC -- verified against a
     live server start); transcript timestamps (ISO "YYYY-MM-DDTHH:MM:SS[.ffffff]Z"); and,
-    R50(a), git's `%cI` commit dates -- ISO with a NUMERIC offset, e.g.
+    R50(a)/R110, git's `%aI` author dates -- ISO with a NUMERIC offset, e.g.
     "2026-09-14T10:00:00+02:00", which is never UTC by construction and so (unlike the
     other two shapes) is converted from its own offset rather than assumed UTC.
     """
@@ -80,7 +86,7 @@ def utc(ts):
         else:
             dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
         return dt.replace(tzinfo=timezone.utc)
-    # A numeric UTC offset in the last 6 characters (+HH:MM or -HH:MM) is git's %cI shape --
+    # A numeric UTC offset in the last 6 characters (+HH:MM or -HH:MM) is git's %aI shape --
     # the space-separated usage.db shape never carries one, so this check discriminates the
     # two without needing to know which caller we're being asked by.
     if re.search(r"[+-]\d{2}:\d{2}$", s):
@@ -199,19 +205,25 @@ def _compute_tokens(entries):
     return tokens_by_uuid
 
 
-def _entry_kind(entry, is_prompt, is_interrupt, is_delegation):
+def _entry_kind(entry, is_prompt, is_interrupt, is_delegation, is_rejection=False):
     """R43/R48: kind is one of
-    prompt|interrupt|delegation|assistant_text|assistant_thinking|tool_use|tool_result|meta.
+    prompt|interrupt|delegation|rejection|assistant_text|assistant_thinking|tool_use|
+    tool_result|meta.
 
-    is_prompt/is_interrupt/is_delegation come from `_classify_uuids`, computed once per file
-    over ALL its entries (never derived from this single entry) -- interrupt outranks
-    prompt, which outranks delegation, matching `_classify_uuids`' own precedence so the two
-    can never disagree about the same uuid.
+    is_prompt/is_interrupt/is_delegation/is_rejection come from `_classify_uuids`, computed once
+    per file over ALL its entries (never derived from this single entry) -- interrupt outranks
+    prompt, which outranks rejection, which outranks delegation, matching `_classify_uuids`' own
+    precedence so the two can never disagree about the same uuid.
+
+    R105: a rejection entry is a tool_result-shaped user entry; `rejection` REPLACES
+    `tool_result` for it (R35: one row per uuid, so the entry gets exactly one kind).
     """
     if is_interrupt:
         return "interrupt"
     if is_prompt:
         return "prompt"
+    if is_rejection:
+        return "rejection"
     if is_delegation:
         return "delegation"
     etype = entry.get("type")
@@ -239,8 +251,8 @@ def _entry_kind(entry, is_prompt, is_interrupt, is_delegation):
         ):
             return "tool_result"
         return "meta"
-    # system, or anything else not otherwise classified (attachment is handled separately,
-    # never reaching this function).
+    # system, or anything else not otherwise classified (an attachment reaches this function
+    # only as an R103 queued operator prompt, which is_prompt already returned).
     return "meta"
 
 
@@ -248,16 +260,20 @@ def _classify_uuids(entries, is_subagent):
     """R43: the ONE classification function both `_process_top_level_session` and
     `_process_subagent_union` call, replacing the copy-pasted logic previously at :384 and
     :458 (where C2 lived in the copy). Returns (prompt_uuids, interrupt_uuids,
-    delegation_uuids).
+    delegation_uuids, rejections), where `rejections` is {uuid: feedback text} (R105) --
+    membership (`uuid in rejections`) is the classification, the value is the row's text.
 
-    `operator_messages()`/`operator_interrupts()` apply to TOP-LEVEL entries only:
-    - is_subagent=False (top-level): prompt_uuids from operator_messages(), interrupt_uuids
-      from operator_interrupts(), delegation_uuids always empty.
-    - is_subagent=True (a subagent file): prompt_uuids is ALWAYS empty -- a subagent file
-      contributes zero `prompt` rows by construction (C2's fix). interrupt_uuids is still
-      computed from operator_interrupts() -- an exact interrupt marker stays `interrupt`
-      even inside a subagent file. delegation_uuids is every `type == "user"` entry that is
-      not already an interrupt uuid, not `isMeta`, not `isCompactSummary`, and not a
+    `operator_messages()`/`operator_interrupts()`/`operator_rejections()` apply to TOP-LEVEL
+    entries only:
+    - is_subagent=False (top-level): prompt_uuids from operator_messages() (R103: including a
+      queued operator prompt's ATTACHMENT uuid), interrupt_uuids from operator_interrupts(),
+      rejections from operator_rejections(), delegation_uuids always empty.
+    - is_subagent=True (a subagent file): prompt_uuids and rejections are ALWAYS empty -- a
+      subagent file contributes zero `prompt` rows by construction (C2's fix), and a rejection
+      inside one stays `tool_result` (R105 is top-level only). interrupt_uuids is still
+      computed from operator_interrupts() -- an exact interrupt marker stays `interrupt` even
+      inside a subagent file. delegation_uuids is every `type == "user"` entry that is not
+      already an interrupt uuid, not `isMeta`, not `isCompactSummary`, and not a
       tool_result-shaped user entry -- the parent model's brief, or a SendMessage
       continuation.
     """
@@ -268,7 +284,12 @@ def _classify_uuids(entries, is_subagent):
         prompt_uuids = {
             e.get("uuid") for e in transcripts.operator_messages(entries) if e.get("uuid") is not None
         }
-        return prompt_uuids, interrupt_uuids, set()
+        rejections = {
+            r["uuid"]: r["text"]
+            for r in transcripts.operator_rejections(entries)
+            if r["uuid"] is not None
+        }
+        return prompt_uuids, interrupt_uuids, set(), rejections
 
     delegation_uuids = set()
     for e in entries:
@@ -289,7 +310,7 @@ def _classify_uuids(entries, is_subagent):
         ):
             continue
         delegation_uuids.add(uuid)
-    return set(), interrupt_uuids, delegation_uuids
+    return set(), interrupt_uuids, delegation_uuids, {}
 
 
 def _tool_use_blocks(entry):
@@ -481,10 +502,16 @@ def _rel_to_corpus(path, corpus_dir):
         return str(path)
 
 
-def _write_turn(conn, counts, cid, agent_path, entry, kind, tokens_by_uuid):
+def _write_turn(conn, counts, cid, agent_path, entry, kind, tokens_by_uuid, text=None):
+    """One turns row. `text` defaults to transcripts._message_text(entry) -- for an R103 queued
+    operator prompt that is its attachment.prompt; an R105 rejection passes its feedback text
+    explicitly, since its entry's content is a tool_result. `role` is the entry's own `type`,
+    so a queued prompt's row reads role 'attachment', kind 'prompt' -- which keeps the queued
+    count derivable from the table (the readout discloses it, R103)."""
     uuid = entry.get("uuid")
     ts = _fmt_ts(entry.get("timestamp"))
-    text = transcripts._message_text(entry)
+    if text is None:
+        text = transcripts._message_text(entry)
     message = entry.get("message") if isinstance(entry.get("message"), dict) else {}
     message_id = message.get("id")
     tokens = tokens_by_uuid.get(uuid, 0)
@@ -525,10 +552,20 @@ def _process_top_level_session(conn, session, cid, attribution, counts):
     check also gates an attachment's delivery rows -- checked BEFORE a delivery is emitted,
     not after (the previous order let an attachment emit unconditionally, ahead of the
     attribution check). Every attribution miss increments the same skip counter.
+
+    R103: an attachment that is a queued operator prompt (its uuid is in prompt_uuids) is a
+    `prompt` turn, never a delivery; every other attachment stays a delivery source. R105: a
+    rejection entry is written ONCE, as kind `rejection` with its feedback text.
     """
-    entries, skipped = transcripts.read_jsonl(session.path)
+    read_stats = {}
+    entries, skipped = transcripts.read_jsonl(session.path, stats=read_stats)
     counts["parse_errors_skipped"] = counts.get("parse_errors_skipped", 0) + skipped
-    prompt_uuids, interrupt_uuids, delegation_uuids = _classify_uuids(entries, is_subagent=False)
+    counts["decode_replaced_lines"] = (
+        counts.get("decode_replaced_lines", 0) + read_stats["replaced_lines"]
+    )
+    prompt_uuids, interrupt_uuids, delegation_uuids, rejections = _classify_uuids(
+        entries, is_subagent=False
+    )
     tokens_by_uuid = _compute_tokens(entries)
 
     tool_use_candidates = []
@@ -542,11 +579,16 @@ def _process_top_level_session(conn, session, cid, attribution, counts):
                 counts.get("top_level_attribution_skipped", 0) + 1
             )
             continue
-        if e.get("type") == "attachment":
+        if e.get("type") == "attachment" and uuid not in prompt_uuids:
             delivery_rows.extend(_deliveries_from_attachment(e, cid))
             continue
-        kind = _entry_kind(e, uuid in prompt_uuids, uuid in interrupt_uuids, uuid in delegation_uuids)
-        _write_turn(conn, counts, cid, None, e, kind, tokens_by_uuid)
+        kind = _entry_kind(
+            e, uuid in prompt_uuids, uuid in interrupt_uuids, uuid in delegation_uuids,
+            uuid in rejections,
+        )
+        _write_turn(conn, counts, cid, None, e, kind, tokens_by_uuid, text=rejections.get(uuid))
+        if e.get("type") == "attachment":
+            counts["prompts_queued"] = counts.get("prompts_queued", 0) + 1
         if kind == "tool_use":
             tool_use_candidates.extend(
                 _tool_use_candidates_from_entry(e, cid, session.sid, e.get("timestamp"))
@@ -625,9 +667,15 @@ def _process_subagent_union(conn, sessions_list, excl, keeper, keeper_cid, corpu
     delivery_rows = []
     for name, path in sorted(by_name.items()):
         agent_path = _rel_to_corpus(path, corpus_dir)
-        entries, skipped = transcripts.read_jsonl(path)
+        read_stats = {}
+        entries, skipped = transcripts.read_jsonl(path, stats=read_stats)
         counts["parse_errors_skipped"] = counts.get("parse_errors_skipped", 0) + skipped
-        prompt_uuids, interrupt_uuids, delegation_uuids = _classify_uuids(entries, is_subagent=True)
+        counts["decode_replaced_lines"] = (
+            counts.get("decode_replaced_lines", 0) + read_stats["replaced_lines"]
+        )
+        prompt_uuids, interrupt_uuids, delegation_uuids, _rejections = _classify_uuids(
+            entries, is_subagent=True
+        )
         tokens_by_uuid = _compute_tokens(entries)
         recovered_source = name not in keeper_names
 
@@ -893,74 +941,92 @@ def _join_tool_events(conn, tool_use_candidates, usage_rows, counts, relations_m
 _GIT_FIELD_SEP = "\x1f"
 # Leading marker, not a trailing one -- see _run_git_log's docstring for why.
 _GIT_RECORD_SEP = "\x00"
+# 91bafcc7d4137bf9: an explicit END-OF-MESSAGE marker written right after %B. --name-only's file
+# list follows it, so the file list is located by this marker -- never by the last blank line,
+# which for a merge (git prints no file list for one) is the start of the trailer block.
+_GIT_BODY_END = "\x1e"
 
 
 def _run_git_log(repo_path, sha, start_utc, end_utc):
-    """R41/R50(b): `git log <sha> --name-only`, parsed into one dict per commit.
+    """R41/R50(b)/R110: `git log <sha> --name-only`, parsed into one dict per commit.
 
     The record separator goes at the FRONT of each commit's format string, not the back.
     `--name-only`'s file list is appended by git AFTER the whole pretty-printed commit
     (subject + body included) and BEFORE the next commit's formatted output begins -- so a
     separator placed after %B would split each commit's own header/body away from its own
     file list, which then lands at the START of the following split chunk instead. A leading
-    marker keeps one commit's entire block (header, body, blank line, file list) together
+    marker keeps one commit's entire block (header, body, end marker, file list) together
     between one marker and the next. Measured empirically against a real two-commit fixture
     repo (2026-09-26) before trusting this -- the trailing-separator version was wrong.
+
+    Bug 91bafcc7d4137bf9: the file list is whatever follows the explicit end-of-message marker
+    _GIT_BODY_END (written right after %B), so a commit git prints no file section for -- a
+    merge (git log diffs a merge against nothing by default) or an --allow-empty commit -- has
+    `files == []` and its trailer block stays in its message. A merge's `files` is therefore
+    always [], not the files the merge brought in.
+
+    R110 (one Session-Id definition with miner.session_id_of): `session_id` is git's own
+    trailer parser, `%(trailers:key=Session-Id,valueonly)`, as a SEPARATE pretty-format field --
+    its first non-empty line, stripped -- never a regex over %B, so a prose line that merely
+    starts "Session-Id:" above the real trailer block loses. `ts` is the AUTHOR date %aI: a
+    rebase (experiments is rebased after every ship) restamps committer dates, never author
+    dates.
+
+    R110: no `--since`/`--until`. git's --since stops walking at the first commit whose
+    COMMITTER date is older than the bound, so a rebased history can hide in-window commits
+    behind one restamped ancestor. The whole history from `sha` is walked and the window is
+    filtered HERE, on the author date, half-open [start_utc, end_utc) like every other window
+    (R71). A None bound is unbounded on that side.
+
+    R113: stdout is decoded as UTF-8 with errors="replace", so a non-UTF-8 byte in a commit
+    message cannot abort the build.
 
     R50(b): a git FAILURE (nonzero exit) returns `None`, distinct from `[]` -- a successful run
     that legitimately found zero commits in the retained window. The caller must not read a
     `None` as "no commits"; it increments `commits_git_failures` instead.
     """
-    fmt = f"%x00%H{_GIT_FIELD_SEP}%cI{_GIT_FIELD_SEP}%s{_GIT_FIELD_SEP}%B"
+    fmt = (
+        f"%x00%H{_GIT_FIELD_SEP}%aI{_GIT_FIELD_SEP}%s{_GIT_FIELD_SEP}"
+        f"%(trailers:key=Session-Id,valueonly){_GIT_FIELD_SEP}%B%x1e"
+    )
     cmd = ["git", "-C", str(repo_path), "log", sha, "--name-only", f"--pretty=format:{fmt}"]
-    if start_utc:
-        cmd.append(f"--since={start_utc}")
-    if end_utc:
-        cmd.append(f"--until={end_utc}")
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
+    )
     if proc.returncode != 0:
         return None
+    start_dt = utc(start_utc) if start_utc else None
+    end_dt = utc(end_utc) if end_utc else None
 
     commits = []
     for rec in proc.stdout.split(_GIT_RECORD_SEP):
         if not rec.strip():
             continue
-        parts = rec.split(_GIT_FIELD_SEP, 3)
-        if len(parts) < 4:
+        # maxsplit 4: %B (the last field) may itself contain the field separator.
+        parts = rec.split(_GIT_FIELD_SEP, 4)
+        if len(parts) < 5:
             continue
-        chash, cdate, subject, rest = parts
+        chash, adate, subject, trailer_values, rest = parts
+        # rpartition: the LAST end marker, since git C-quotes any control byte in a file name
+        # but a message body could in principle carry the marker byte itself.
+        _body, marker, file_section = rest.rpartition(_GIT_BODY_END)
+        if not marker:
+            continue
+        files = [ln for ln in file_section.split("\n") if ln.strip()]
+        session_id = next(
+            (ln.strip() for ln in trailer_values.splitlines() if ln.strip()), None
+        )
 
-        # %B's own trailing newline plus --name-only's forced blank-line separator leave a
-        # variable number of trailing newlines depending on whether this is the last commit
-        # in the stream (no next marker to absorb it against); rstrip normalizes that before
-        # the last-blank-line split.
-        rest = rest.rstrip("\n")
-        lines = rest.split("\n")
-        last_blank = -1
-        for i, ln in enumerate(lines):
-            if ln == "":
-                last_blank = i
-        if last_blank >= 0:
-            body_lines = lines[:last_blank]
-            files = [ln for ln in lines[last_blank + 1 :] if ln.strip()]
-        else:
-            # No blank line at all: a single-line message and (per the known limitation
-            # below) indistinguishable from a zero-file commit either way.
-            body_lines = lines
-            files = []
-
-        # Known limitation, not fixed here: a commit that touches NO files but carries a
-        # multi-paragraph body is indistinguishable from one whose last paragraph IS the
-        # file list, since --name-only omits the file section entirely rather than leaving
-        # it empty. Every real commit in this repo's convention touches at least one
-        # tracked file, so this is out of scope rather than silently mis-parsed in practice.
-        m = re.search(r"^Session-Id:\s*(\S+)", "\n".join(body_lines), re.MULTILINE)
-        session_id = m.group(1) if m else None
+        author_dt = utc(adate)
+        if start_dt is not None and author_dt < start_dt:
+            continue
+        if end_dt is not None and not author_dt < end_dt:
+            continue
 
         commits.append(
             {
                 "sha": chash,
-                "ts": _fmt_ts(cdate),
+                "ts": _fmt_ts(adate),
                 "subject": subject,
                 "session_id": session_id,
                 "files": files,
@@ -970,8 +1036,10 @@ def _run_git_log(repo_path, sha, start_utc, end_utc):
 
 
 def _build_commits(conn, manifest, repo_paths, counts):
-    """R41/R50(b): for each repo named in the manifest, run `git log <sha>` limited to the
-    manifest's retained bounds; parse the Session-Id: trailer and the --name-only file list.
+    """R41/R50(b)/R110: for each repo named in the manifest, walk `git log <sha>` in full and keep
+    the commits whose AUTHOR date lies in the manifest's retained bounds, half-open (the filter
+    is _run_git_log's, in Python, never git's --since); read the Session-Id trailer with git's
+    trailer parser and the --name-only file list after the explicit end-of-message marker.
     A manifest repo absent from repo_paths is skipped and counted, never an error.
 
     R50(b): `_run_git_log` returning `None` means the git invocation itself FAILED -- that is
@@ -1032,15 +1100,15 @@ def build_events(corpus_dir, events_db, repo_paths=None, excluded_sids=SPEC_EXCL
 
     manifest = json.loads((corpus_dir / "manifest.json").read_text())
 
-    # manifest["exclusions"] is write-only from build_events' point of view: archive.freeze()
-    # always emits an empty list, and its one known writer (transcripts.write_exclusions())
-    # produces copy_id-keyed {"sid", "reason"} records — output shape, not the bare-sid
-    # force-exclude SET transcripts.exclusions() takes as input. R44: the one spec-level
-    # force-exclude source is `excluded_sids` (SPEC_EXCLUDED_SIDS by default), passed straight
-    # into transcripts.exclusions(); build_events still recomputes the rest of the exclusion map
-    # fresh from sessions_list rather than reading (or misreading) that manifest field.
+    # R44: the one spec-level force-exclude source is `excluded_sids` (SPEC_EXCLUDED_SIDS by
+    # default), passed straight into transcripts.exclusions(), which also propagates it to forks
+    # (R106). R106/R1: the resulting map, reasons included, is then RECORDED in the manifest via
+    # transcripts.write_exclusions() -- the form observability.coverage() reads back
+    # (transcripts.read_exclusions) and checks against its own recomputation. Any exclusions the
+    # manifest carried before (archive.freeze writes []) are replaced, never read as input.
     sessions_list = transcripts.sessions(corpus_dir)
     excl = transcripts.exclusions(sessions_list, excluded_sids)
+    transcripts.write_exclusions(corpus_dir, excl)
     attribution = transcripts.attribute_entries(sessions_list, excl)
     kept_sessions = [s for s in sessions_list if transcripts.copy_id(s) not in excl]
     relations_map = transcripts.relations(sessions_list, excl)
@@ -1053,8 +1121,14 @@ def build_events(corpus_dir, events_db, repo_paths=None, excluded_sids=SPEC_EXCL
         "sessions_total": len(sessions_list),
         "sessions_kept": len(kept_sessions),
         "sessions_excluded": len(excl),
+        # R107: kept sessions whose first and last entrypoint differ (class stays first-entry).
+        "entrypoint_changed": transcripts.entrypoint_changed_count(sessions_list, excl),
         "turns": 0,
+        # R103: queued operator prompts written as turns.kind='prompt' (role 'attachment').
+        "prompts_queued": 0,
         "parse_errors_skipped": 0,
+        # R113: transcript lines holding U+FFFD after read_jsonl's errors="replace" decode.
+        "decode_replaced_lines": 0,
         "tool_events_total": 0,
         "tool_events_exact": 0,
         "tool_events_heuristic": 0,
