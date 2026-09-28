@@ -53,13 +53,26 @@ def _commit_all(root, message):
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", message)
     return _git(root, "rev-parse", "HEAD").strip()
+def _qualified_id(root, bare_id):
+    """The `lessons_at` id/source string R96(a) mints for `bare_id`: `<repo-name>:<bare_id>`,
+    repo name = the checkout directory's own basename. Deliberately NOT `lessons._repo_name`,
+    which does not exist before fix round 2 -- constructing the expected value this way keeps
+    every test that calls this helper a genuine behavioral assertion (not an AttributeError) when
+    run against a822828f for task7-fix2-red.txt. Valid for a plain, non-worktree fixture; it
+    agrees with `_repo_name` there, since a worktree is the only case where the two diverge
+    (R96(b), see WorktreeSafeRepoNaming below, which compares two `lessons_at` outputs directly
+    instead of using this helper).
+    """
+    return f"{pathlib.Path(root).resolve().name}:{bare_id}"
 
 
 def _op_rules_with_imperative(imperative_text=None, op_id="OP-1"):
     """A minimal synthetic docs/trackers/operator-rules.md fixture for R84 tests: an index-table
     row plus one `## OP-N` section carrying Imperative/Binding/Evidence fields. When
-    `imperative_text` is None, the file exists (so `_op_imperative_bodies` does not raise) but
-    declares no OP sections at all -- an empty reference set.
+    `imperative_text` is None, the file exists but declares no `## OP-N` sections at all -- an
+    empty reference set, which `_op_imperative_bodies` now REJECTS with `ValueError` (fix round 2,
+    R84/R97): there is no silent empty-reference-set fallback. Callers that need a populated,
+    non-colliding fixture (so `_op_imperative_bodies` does not raise) must pass `imperative_text`.
     """
     if imperative_text is None:
         return "## Index\n\n| ID | Status |\n|---|---|\n"
@@ -98,8 +111,8 @@ class BriefRequiredTests(unittest.TestCase):
             at_c1 = lessons.lessons_at(root, c1)
             at_c2 = lessons.lessons_at(root, c2)
 
-            claude_c1 = [l for l in at_c1 if l.id.startswith("CLAUDE.md#")]
-            claude_c2 = [l for l in at_c2 if l.id.startswith("CLAUDE.md#")]
+            claude_c1 = [l for l in at_c1 if "CLAUDE.md#" in l.id]
+            claude_c2 = [l for l in at_c2 if "CLAUDE.md#" in l.id]
 
             self.assertEqual(len(claude_c1), 1)
             self.assertEqual(len(claude_c2), 2)
@@ -122,7 +135,7 @@ class BriefRequiredTests(unittest.TestCase):
                 "- **Delta lesson written only to disk, never committed.** Body.\n"
             ))
 
-            claude = [l for l in lessons.lessons_at(root, c1) if l.id.startswith("CLAUDE.md#")]
+            claude = [l for l in lessons.lessons_at(root, c1) if "CLAUDE.md#" in l.id]
             self.assertEqual(len(claude), 1)
             self.assertFalse(any("Delta" in l.text for l in claude))
 
@@ -132,7 +145,9 @@ class UndatedGlobalLessons(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             _init_repo(root)
-            _write(root, "docs/trackers/operator-rules.md", _op_rules_with_imperative(None))
+            _write(root, "docs/trackers/operator-rules.md", _op_rules_with_imperative(
+                "Synthetic imperative text used only to keep this fixture's reference set "
+                "non-empty."))
             c1 = _commit_all(root, "c1")
             path = root / "CLAUDE.md"
             path.write_text(
@@ -154,9 +169,12 @@ class R79GeneratedBlockExclusion(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             _init_repo(root)
-            # No OP sections here -- isolates this test from the equality-fallback detector so
-            # only the marker detector can be responsible for the exclusion.
-            _write(root, "docs/trackers/operator-rules.md", _op_rules_with_imperative(None))
+            # A populated OP-1 section whose Imperative matches nothing in the fixture below --
+            # isolates this test from the equality-fallback detector so only the marker detector
+            # can be responsible for the exclusion (fix round 2: an empty reference set now
+            # raises, so this fixture must stay populated and non-colliding).
+            _write(root, "docs/trackers/operator-rules.md", _op_rules_with_imperative(
+                "This imperative deliberately matches no paragraph in the fixture below."))
             c1 = _commit_all(root, "c1")
             path = root / "CLAUDE.md"
             path.write_text(
@@ -271,6 +289,31 @@ class R84ImperativeLineReferenceSet(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 lessons.undated_lessons(path, root, c1)
 
+    def test_zero_active_op_sections_raises_value_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _init_repo(root)
+            _write(root, "docs/trackers/operator-rules.md", _op_rules_with_imperative(None))
+            c1 = _commit_all(root, "c1")
+            with self.assertRaises(ValueError):
+                lessons._op_imperative_bodies(root, c1)
+
+    def test_a_file_with_only_a_retired_op_section_raises_value_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _init_repo(root)
+            _write(root, "docs/trackers/operator-rules.md", (
+                "## Index\n\n"
+                "| ID | Status |\n"
+                "|---|---|\n"
+                "| OP-1 | retired |\n\n"
+                "## OP-1 — Retired synthetic rule\n\n"
+                "**Imperative:** Do the retired thing, never counted.\n"
+            ))
+            c1 = _commit_all(root, "c1")
+            with self.assertRaises(ValueError):
+                lessons._op_imperative_bodies(root, c1)
+
 
 # --- R85: fence-awareness ------------------------------------------------------------------------
 
@@ -292,9 +335,9 @@ class FenceAwareParsing(unittest.TestCase):
             c1 = _commit_all(root, "c1")
             ids = {
                 l.id for l in lessons.lessons_at(root, c1)
-                if l.id.startswith("reconnaissance-patterns.md#")
+                if "reconnaissance-patterns.md#" in l.id
             }
-            self.assertIn("reconnaissance-patterns.md#R-173", ids)
+            self.assertIn(_qualified_id(root, "reconnaissance-patterns.md#R-173"), ids)
 
     def test_a_fenced_heading_line_in_claude_md_does_not_split_the_section(self):
         claude_text = (
@@ -348,9 +391,16 @@ class SectionProseCoverageInvariant(unittest.TestCase):
         self.assertIn("/", found[0].id)
 class PreambleCoverage(unittest.TestCase):
     """R86 fix round 1: content before the first `##`/`###` heading (a CLAUDE.md title +
-    description) is its own pseudo-section, `CLAUDE.md#preamble`, so the coverage invariant
-    holds document-wide, not only from the first heading onward. Real-data probe found this gap
-    -- 2 non-blank preamble lines outside any lesson."""
+    description) is its own pseudo-section, so the coverage invariant holds document-wide, not
+    only from the first heading onward. Real-data probe found this gap -- 2 non-blank preamble
+    lines outside any lesson.
+
+    Fix round 2 (item 8): the synthetic preamble's id slug is the UNCONDITIONAL literal
+    `-preamble`, never plain `preamble` -- `_slugify` strips a leading `-` from any real heading's
+    slug, so no real `## Preamble` heading can ever produce `-preamble`. The two ids therefore
+    never collide, and the synthetic id is stable across commits even when a real section titled
+    "Preamble" is added later (New Breakage #2 in the fix-round-1 re-review).
+    """
 
     def test_preamble_before_the_first_heading_gets_its_own_lesson(self):
         claude_text = (
@@ -360,7 +410,7 @@ class PreambleCoverage(unittest.TestCase):
             "- **Romeo bullet in the real section.** Body.\n"
         )
         found = lessons._claude_md_lessons(claude_text, "CLAUDE.md", "codescout:CLAUDE.md")
-        preamble = next(l for l in found if l.id == "CLAUDE.md#preamble")
+        preamble = next(l for l in found if l.id == "CLAUDE.md#-preamble")
         self.assertIn("Preamble description line one", preamble.text)
         self.assertIn("Preamble description line two", preamble.text)
 
@@ -385,9 +435,8 @@ class PreambleCoverage(unittest.TestCase):
         claude_text = "## Real Section\n\n- **Sierra bullet, no preamble at all.** Body.\n"
         found = lessons._claude_md_lessons(claude_text, "CLAUDE.md", "codescout:CLAUDE.md")
         ids = {l.id for l in found}
-        self.assertNotIn("CLAUDE.md#preamble", ids)
-
-    def test_a_real_section_titled_preamble_disambiguates_against_the_synthetic_one(self):
+        self.assertNotIn("CLAUDE.md#-preamble", ids)
+    def test_a_real_section_titled_preamble_does_not_collide_with_the_synthetic_preamble_id(self):
         claude_text = (
             "Actual preamble text before any heading.\n\n"
             "## Preamble\n\n"
@@ -395,11 +444,49 @@ class PreambleCoverage(unittest.TestCase):
         )
         found = lessons._claude_md_lessons(claude_text, "CLAUDE.md", "codescout:CLAUDE.md")
         ids = sorted(l.id for l in found)
-        self.assertEqual(ids, ["CLAUDE.md#preamble", "CLAUDE.md#preamble-2"])
+        # Two distinct, non-colliding ids -- never "-preamble" plus "-preamble-2" or similar,
+        # because the synthetic slug ("-preamble") is not producible by any real heading's slug.
+        self.assertEqual(ids, ["CLAUDE.md#-preamble", "CLAUDE.md#preamble"])
+        synthetic_preamble_lesson = next(l for l in found if l.id == "CLAUDE.md#-preamble")
+        self.assertIn("Actual preamble text", synthetic_preamble_lesson.text)
         real_preamble_lesson = next(l for l in found if l.id == "CLAUDE.md#preamble")
-        self.assertIn("Actual preamble text", real_preamble_lesson.text)
-        second = next(l for l in found if l.id == "CLAUDE.md#preamble-2")
-        self.assertIn("real section that happens to be titled Preamble", second.text)
+        self.assertIn(
+            "real section that happens to be titled Preamble", real_preamble_lesson.text,
+        )
+
+    def test_preamble_id_is_stable_across_commits_even_when_a_real_preamble_section_is_added_later(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _init_repo(root)
+            _write(root, "CLAUDE.md", (
+                "Uniform preamble text present at both commits.\n\n"
+                "## Real Section\n\n"
+                "- **Tango bullet in the real section.** Body.\n"
+            ))
+            c1 = _commit_all(root, "c1")
+            _write(root, "CLAUDE.md", (
+                "Uniform preamble text present at both commits.\n\n"
+                "## Preamble\n\n"
+                "A real section titled Preamble, added only at c2.\n\n"
+                "## Real Section\n\n"
+                "- **Tango bullet in the real section.** Body.\n"
+            ))
+            c2 = _commit_all(root, "c2")
+
+            at_c1 = [l for l in lessons.lessons_at(root, c1) if "CLAUDE.md#" in l.id]
+            at_c2 = [l for l in lessons.lessons_at(root, c2) if "CLAUDE.md#" in l.id]
+            preamble_c1 = next(l for l in at_c1 if l.id.endswith("#-preamble"))
+            preamble_c2 = next(l for l in at_c2 if l.id.endswith("#-preamble"))
+
+            # The synthetic preamble id names the SAME content at both commits...
+            self.assertEqual(preamble_c1.id, preamble_c2.id)
+            self.assertIn("Uniform preamble text", preamble_c1.text)
+            self.assertIn("Uniform preamble text", preamble_c2.text)
+            # ...and the real "## Preamble" section added only at c2 takes the bare slug, never
+            # displacing the synthetic one.
+            real_preamble_c2 = next(l for l in at_c2 if l.id.endswith("#preamble"))
+            self.assertIn("A real section titled Preamble", real_preamble_c2.text)
+
 
 
 class BulletContinuationBoundaryPlacement(unittest.TestCase):
@@ -420,6 +507,39 @@ class BulletContinuationBoundaryPlacement(unittest.TestCase):
         self.assertNotIn("Trailing prose after Kilo", kilo.text)
         self.assertIn("Trailing prose after Kilo", prose.text)
         self.assertNotIn("Indented continuation line for Kilo", prose.text)
+
+    def test_a_blank_line_followed_by_indented_text_stays_continuation(self):
+        span_lines = [
+            "- Bullet text.",
+            "",
+            "  indented continuation line.",
+            "",
+            "non-indented trailing prose.",
+        ]
+        continuation, prose = lessons._bullet_continuation_split(span_lines)
+        self.assertEqual(
+            continuation,
+            ["- Bullet text.", "", "  indented continuation line.", ""],
+        )
+        self.assertEqual(prose, ["non-indented trailing prose."])
+
+    def test_a_directly_following_non_indented_line_stays_continuation(self):
+        span_lines = [
+            "- Bullet text.",
+            "directly following non-indented line, still continuation.",
+            "",
+            "trailing prose after a blank line.",
+        ]
+        continuation, prose = lessons._bullet_continuation_split(span_lines)
+        self.assertEqual(
+            continuation,
+            [
+                "- Bullet text.",
+                "directly following non-indented line, still continuation.",
+                "",
+            ],
+        )
+        self.assertEqual(prose, ["trailing prose after a blank line."])
 
 
 class HeadingSlugCollisionAcrossSections(unittest.TestCase):
@@ -483,9 +603,10 @@ class RepoQualifiedSourceAndPathFreeIds(unittest.TestCase):
             ))
             c1 = _commit_all(root, "c1")
             repo_name = root.resolve().name
-            found = [l for l in lessons.lessons_at(root, c1) if l.id.startswith("CLAUDE.md#")]
+            found = [l for l in lessons.lessons_at(root, c1) if "CLAUDE.md#" in l.id]
             self.assertTrue(found)
             self.assertTrue(all(l.source == f"{repo_name}:CLAUDE.md" for l in found))
+            self.assertTrue(all(l.id.startswith(f"{repo_name}:CLAUDE.md#") for l in found))
 
     def test_undated_lessons_ids_and_sources_are_path_free_and_identical_across_profiles(self):
         content = (
@@ -495,7 +616,9 @@ class RepoQualifiedSourceAndPathFreeIds(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             _init_repo(root)
-            _write(root, "docs/trackers/operator-rules.md", _op_rules_with_imperative(None))
+            _write(root, "docs/trackers/operator-rules.md", _op_rules_with_imperative(
+                "Synthetic imperative text used only to keep this fixture's reference set "
+                "non-empty."))
             c1 = _commit_all(root, "c1")
 
             profile_a = root / "profile-a"
@@ -569,7 +692,7 @@ class R80BulletIdentity(unittest.TestCase):
     @staticmethod
     def _find_by_text(found, needle):
         for l in found:
-            if l.id.startswith("CLAUDE.md#") and needle in l.text:
+            if "CLAUDE.md#" in l.id and needle in l.text:
                 return l.id
         return None
 
@@ -605,7 +728,7 @@ class R80BulletIdentity(unittest.TestCase):
             ))
             c1 = _commit_all(root, "c1")
 
-            found = [l for l in lessons.lessons_at(root, c1) if l.id.startswith("CLAUDE.md#")]
+            found = [l for l in lessons.lessons_at(root, c1) if "CLAUDE.md#" in l.id]
             ids = sorted(l.id for l in found)
             self.assertEqual(len(ids), 2)
             twos = [i for i in ids if i.endswith("-2")]
@@ -641,14 +764,14 @@ class R81OperatorRuleActivation(unittest.TestCase):
 
             ids_c1 = {
                 l.id for l in lessons.lessons_at(root, c1)
-                if l.id.startswith("operator-rules.md#")
+                if "operator-rules.md#" in l.id
             }
             ids_c2 = {
                 l.id for l in lessons.lessons_at(root, c2)
-                if l.id.startswith("operator-rules.md#")
+                if "operator-rules.md#" in l.id
             }
-            self.assertIn("operator-rules.md#OP-1", ids_c1)
-            self.assertNotIn("operator-rules.md#OP-1", ids_c2)
+            self.assertIn(_qualified_id(root, "operator-rules.md#OP-1"), ids_c1)
+            self.assertNotIn(_qualified_id(root, "operator-rules.md#OP-1"), ids_c2)
 
     def test_a_section_with_no_index_row_is_absent(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -667,10 +790,10 @@ class R81OperatorRuleActivation(unittest.TestCase):
             c1 = _commit_all(root, "c1")
             ids = {
                 l.id for l in lessons.lessons_at(root, c1)
-                if l.id.startswith("operator-rules.md#")
+                if "operator-rules.md#" in l.id
             }
-            self.assertIn("operator-rules.md#OP-1", ids)
-            self.assertNotIn("operator-rules.md#OP-2", ids)
+            self.assertIn(_qualified_id(root, "operator-rules.md#OP-1"), ids)
+            self.assertNotIn(_qualified_id(root, "operator-rules.md#OP-2"), ids)
 
 
 # --- R82: R-N / T-N promoted-status exact set ---------------------------------------------------
@@ -707,14 +830,19 @@ class R82PromotedStatusExactSet(unittest.TestCase):
             c1 = _commit_all(root, "c1")
 
             found = lessons.lessons_at(root, c1)
-            recon = [l for l in found if l.id.startswith("reconnaissance-patterns.md#")]
-            tool = [l for l in found if l.id.startswith("tool-usage-patterns.md#")]
+            recon = [l for l in found if "reconnaissance-patterns.md#" in l.id]
+            tool = [l for l in found if "tool-usage-patterns.md#" in l.id]
 
             self.assertEqual(
                 {l.id for l in recon},
-                {"reconnaissance-patterns.md#R-1", "reconnaissance-patterns.md#R-2"},
+                {
+                    _qualified_id(root, "reconnaissance-patterns.md#R-1"),
+                    _qualified_id(root, "reconnaissance-patterns.md#R-2"),
+                },
             )
-            self.assertEqual({l.id for l in tool}, {"tool-usage-patterns.md#T-1"})
+            self.assertEqual(
+                {l.id for l in tool}, {_qualified_id(root, "tool-usage-patterns.md#T-1")},
+            )
 
 
 class R82NegativeSubstringFixture(unittest.TestCase):
@@ -732,9 +860,9 @@ class R82NegativeSubstringFixture(unittest.TestCase):
             c1 = _commit_all(root, "c1")
             ids = {
                 l.id for l in lessons.lessons_at(root, c1)
-                if l.id.startswith("reconnaissance-patterns.md#")
+                if "reconnaissance-patterns.md#" in l.id
             }
-            self.assertEqual(ids, {"reconnaissance-patterns.md#R-202"})
+            self.assertEqual(ids, {_qualified_id(root, "reconnaissance-patterns.md#R-202")})
 
 
 class FirstStatusLineWins(unittest.TestCase):
@@ -751,9 +879,9 @@ class FirstStatusLineWins(unittest.TestCase):
             c1 = _commit_all(root, "c1")
             ids = {
                 l.id for l in lessons.lessons_at(root, c1)
-                if l.id.startswith("reconnaissance-patterns.md#")
+                if "reconnaissance-patterns.md#" in l.id
             }
-            self.assertIn("reconnaissance-patterns.md#R-301", ids)
+            self.assertIn(_qualified_id(root, "reconnaissance-patterns.md#R-301"), ids)
 
     def test_first_status_open_excludes_even_when_second_says_promoted(self):
         recon_text = (
@@ -768,9 +896,9 @@ class FirstStatusLineWins(unittest.TestCase):
             c1 = _commit_all(root, "c1")
             ids = {
                 l.id for l in lessons.lessons_at(root, c1)
-                if l.id.startswith("reconnaissance-patterns.md#")
+                if "reconnaissance-patterns.md#" in l.id
             }
-            self.assertNotIn("reconnaissance-patterns.md#R-302", ids)
+            self.assertNotIn(_qualified_id(root, "reconnaissance-patterns.md#R-302"), ids)
 
 
 # --- R83: tracked .codescout/memories/**/*.md ---------------------------------------------------
@@ -790,11 +918,11 @@ class R83MemoryFiles(unittest.TestCase):
             ))
             c1 = _commit_all(root, "c1")
 
-            found = [l for l in lessons.lessons_at(root, c1) if l.id.startswith("memory:")]
+            found = [l for l in lessons.lessons_at(root, c1) if "memory:" in l.id]
             ids = {l.id for l in found}
-            self.assertIn("memory:two-section#first-section", ids)
-            self.assertIn("memory:two-section#second-section", ids)
-            self.assertIn("memory:sub/dir-note#only-section", ids)
+            self.assertIn(_qualified_id(root, "memory:two-section#first-section"), ids)
+            self.assertIn(_qualified_id(root, "memory:two-section#second-section"), ids)
+            self.assertIn(_qualified_id(root, "memory:sub/dir-note#only-section"), ids)
 
     def test_a_memory_file_with_no_heading_is_one_lesson(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -802,7 +930,10 @@ class R83MemoryFiles(unittest.TestCase):
             _init_repo(root)
             _write(root, ".codescout/memories/plain.md", "Languages: markdown\nRoot: .\n")
             c1 = _commit_all(root, "c1")
-            found = [l for l in lessons.lessons_at(root, c1) if l.id == "memory:plain"]
+            found = [
+                l for l in lessons.lessons_at(root, c1)
+                if l.id == _qualified_id(root, "memory:plain")
+            ]
             self.assertEqual(len(found), 1)
 
     def test_an_untracked_memory_file_is_absent(self):
@@ -816,8 +947,8 @@ class R83MemoryFiles(unittest.TestCase):
 
             found = lessons.lessons_at(root, c1)
             ids = {l.id for l in found}
-            self.assertIn("memory:tracked#kept", ids)
-            self.assertNotIn("memory:untracked#ghost", ids)
+            self.assertIn(_qualified_id(root, "memory:tracked#kept"), ids)
+            self.assertNotIn(_qualified_id(root, "memory:untracked#ghost"), ids)
 
     def test_an_anchors_toml_file_is_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -844,9 +975,9 @@ class MemorySectionWithSubHeadingDoesNotSplit(unittest.TestCase):
                 "Inner prose that must stay part of Outer Section.\n"
             ))
             c1 = _commit_all(root, "c1")
-            found = [l for l in lessons.lessons_at(root, c1) if l.id.startswith("memory:nested")]
+            found = [l for l in lessons.lessons_at(root, c1) if "memory:nested" in l.id]
             ids = {l.id for l in found}
-            self.assertEqual(ids, {"memory:nested#outer-section"})
+            self.assertEqual(ids, {_qualified_id(root, "memory:nested#outer-section")})
             self.assertIn("Inner Sub-Note", found[0].text)
 
 
@@ -877,15 +1008,15 @@ class CommitPurityAcrossSources(unittest.TestCase):
             at_c1 = lessons.lessons_at(root, c1)
             at_c2 = lessons.lessons_at(root, c2)
 
-            recon_ids_c1 = {l.id for l in at_c1 if l.id.startswith("reconnaissance-patterns.md#")}
-            recon_ids_c2 = {l.id for l in at_c2 if l.id.startswith("reconnaissance-patterns.md#")}
-            memory_ids_c1 = {l.id for l in at_c1 if l.id.startswith("memory:")}
-            memory_ids_c2 = {l.id for l in at_c2 if l.id.startswith("memory:")}
+            recon_ids_c1 = {l.id for l in at_c1 if "reconnaissance-patterns.md#" in l.id}
+            recon_ids_c2 = {l.id for l in at_c2 if "reconnaissance-patterns.md#" in l.id}
+            memory_ids_c1 = {l.id for l in at_c1 if "memory:" in l.id}
+            memory_ids_c2 = {l.id for l in at_c2 if "memory:" in l.id}
 
-            self.assertNotIn("reconnaissance-patterns.md#R-402", recon_ids_c1)
-            self.assertIn("reconnaissance-patterns.md#R-402", recon_ids_c2)
-            self.assertNotIn("memory:added-in-c2#new", memory_ids_c1)
-            self.assertIn("memory:added-in-c2#new", memory_ids_c2)
+            self.assertNotIn(_qualified_id(root, "reconnaissance-patterns.md#R-402"), recon_ids_c1)
+            self.assertIn(_qualified_id(root, "reconnaissance-patterns.md#R-402"), recon_ids_c2)
+            self.assertNotIn(_qualified_id(root, "memory:added-in-c2#new"), memory_ids_c1)
+            self.assertIn(_qualified_id(root, "memory:added-in-c2#new"), memory_ids_c2)
 
     def test_a_memory_dirty_in_the_working_tree_only_is_not_visible(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -897,7 +1028,10 @@ class CommitPurityAcrossSources(unittest.TestCase):
             _write(root, ".codescout/memories/stable.md",
                    "## Committed\n\nDIRTY content never committed.\n")
 
-            found = [l for l in lessons.lessons_at(root, c1) if l.id == "memory:stable#committed"]
+            found = [
+                l for l in lessons.lessons_at(root, c1)
+                if l.id == _qualified_id(root, "memory:stable#committed")
+            ]
             self.assertEqual(len(found), 1)
             self.assertIn("Original content", found[0].text)
             self.assertNotIn("DIRTY", found[0].text)
@@ -915,8 +1049,296 @@ class CommitPurityAcrossSources(unittest.TestCase):
             _commit_all(root, "c2 -- doomed.md deleted")
 
             at_c1 = lessons.lessons_at(root, c1)
-            memory_ids_c1 = {l.id for l in at_c1 if l.id.startswith("memory:")}
-            self.assertIn("memory:doomed#kept", memory_ids_c1)
+            memory_ids_c1 = {l.id for l in at_c1 if "memory:" in l.id}
+            self.assertIn(_qualified_id(root, "memory:doomed#kept"), memory_ids_c1)
+
+
+class R97RetiredRuleImperativeIsNotInTheReferenceSet(unittest.TestCase):
+    def test_a_retired_rules_imperative_is_excluded_while_an_active_ones_is_included(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _init_repo(root)
+            _write(root, "docs/trackers/operator-rules.md", (
+                "## Index\n\n"
+                "| ID | Status |\n"
+                "|---|---|\n"
+                "| OP-1 | active |\n"
+                "| OP-2 | retired |\n\n"
+                "## OP-1 — Active synthetic rule\n\n"
+                "**Imperative:** Always run the active-rule check before merging.\n\n"
+                "## OP-2 — Retired synthetic rule\n\n"
+                "**Imperative:** Do the retired thing, never counted.\n"
+            ))
+            c1 = _commit_all(root, "c1")
+            bodies = lessons._op_imperative_bodies(root, c1)
+            self.assertIn("Always run the active-rule check before merging.", bodies)
+            self.assertNotIn("Do the retired thing, never counted.", bodies)
+
+
+class OpTableStatusParsingIsFenceAware(unittest.TestCase):
+    def test_a_fenced_example_index_row_reading_active_does_not_resurrect_a_retired_rule(self):
+        text = (
+            "## Index\n\n"
+            "| ID | Status |\n"
+            "|---|---|\n"
+            "| OP-5 | retired |\n\n"
+            "## OP-5 — Retired rule\n\n"
+            "**Imperative:** Do the retired thing.\n\n"
+            "To restore it, the row would read:\n\n"
+            "```markdown\n"
+            "| OP-5 | active |\n"
+            "```\n"
+        )
+        found = lessons._operator_rules_lessons(text, "x:operator-rules.md")
+        ids = {l.id for l in found}
+        self.assertNotIn("operator-rules.md#OP-5", ids)
+
+
+class RunawayFenceOpenerIsRefused(unittest.TestCase):
+    def test_a_backtick_opener_whose_info_string_contains_a_backtick_does_not_swallow_the_rest_of_the_file(self):
+        claude_text = (
+            "## Alpha Heading\n\n"
+            "- **Alpha bullet lead words here and more.** Body.\n\n"
+            "```x``` is inline code at line start.\n\n"
+            "## Bravo Heading\n\n"
+            "- **Bravo bullet lead words here and more.** Body.\n"
+        )
+        found = lessons._claude_md_lessons(claude_text, "CLAUDE.md", "x")
+        ids = {l.id for l in found}
+        # A discriminator that survives only if BOTH headings were parsed as their OWN
+        # sections -- if the runaway fence swallowed "## Bravo Heading" as opaque fence
+        # content, no id naming that heading's own slug would exist at all, even though
+        # the raw words "Bravo bullet" would still appear (as a substring) inside Alpha's
+        # merged prose lesson. A substring check on `.text` cannot tell those apart; an
+        # exact heading-qualified id can.
+        self.assertIn(
+            "CLAUDE.md#alpha-heading/alpha-bullet-lead-words-here-and-more", ids,
+        )
+        self.assertIn(
+            "CLAUDE.md#bravo-heading/bravo-bullet-lead-words-here-and-more", ids,
+        )
+
+
+class FieldLineParsingIsFenceAware(unittest.TestCase):
+    def test_a_fenced_status_line_is_not_read_as_the_first_status_line(self):
+        body = (
+            "Some prose before.\n\n"
+            "```\n"
+            "**Status:** promoted\n"
+            "```\n\n"
+            "**Status:** open — the real status.\n"
+        )
+        self.assertEqual(lessons._first_field_line(body, lessons._STATUS_LINE_RE), "open")
+
+
+class BulletStartParsingIsFenceAware(unittest.TestCase):
+    def test_a_fenced_bullet_start_line_is_not_treated_as_a_bullet(self):
+        body = (
+            "Prose before the fence.\n\n"
+            "```\n"
+            "- **Fenced example bullet, never a real lesson.** Body.\n"
+            "```\n\n"
+            "More trailing prose.\n"
+        )
+        bold_bullets, prose_lines = lessons._partition_bullets_and_prose(body)
+        self.assertEqual(bold_bullets, [])
+        self.assertIn(
+            "- **Fenced example bullet, never a real lesson.** Body.", prose_lines,
+        )
+
+
+class PreambleParsingIsFenceAware(unittest.TestCase):
+    def test_a_fenced_heading_line_before_the_first_real_heading_is_not_the_first_heading(self):
+        text = (
+            "Preamble prose line one.\n\n"
+            "```\n"
+            "## Fenced example heading, not real\n"
+            "```\n\n"
+            "Preamble prose line two.\n\n"
+            "## Real First Heading\n\n"
+            "Body.\n"
+        )
+        preamble = lessons._leading_preamble(text, 2, 2)
+        self.assertIn("Preamble prose line two.", preamble)
+        self.assertNotIn("Real First Heading", preamble)
+
+
+class FenceClosingRequiresSameCharAndAtLeastSameLength(unittest.TestCase):
+    def test_fence_does_not_close_on_a_different_fence_character(self):
+        lines = ["```", "~~~", "still inside the original fence", "```"]
+        self.assertEqual(lessons._fence_flags(lines), [True, True, True, True])
+
+    def test_fence_does_not_close_on_a_shorter_run_length(self):
+        lines = ["````", "```", "still inside the original fence", "````"]
+        self.assertEqual(lessons._fence_flags(lines), [True, True, True, True])
+
+
+class FenceOpenerRecognizedAtAnyIndentation(unittest.TestCase):
+    def test_an_indented_fence_opener_is_still_recognized(self):
+        lines = ["  ```", "  fenced content here", "  ```"]
+        self.assertEqual(lessons._fence_flags(lines), [True, True, True])
+
+
+class R84ReferenceSetIsReadAtTheShaNeverTheWorkingTreeOrHead(unittest.TestCase):
+    def test_reference_set_reflects_the_queried_sha_not_a_later_working_tree_edit_or_head(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _init_repo(root)
+            _write(root, "docs/trackers/operator-rules.md",
+                   _op_rules_with_imperative("Imperative A, true at c1."))
+            c1 = _commit_all(root, "c1")
+            _write(root, "docs/trackers/operator-rules.md",
+                   _op_rules_with_imperative("Imperative B, only true after c1."))
+            _commit_all(root, "c2")
+
+            bodies = lessons._op_imperative_bodies(root, c1)
+            self.assertIn("Imperative A, true at c1.", bodies)
+            self.assertNotIn("Imperative B, only true after c1.", bodies)
+
+
+class HeadingSlugDisambiguationAvoidsATripleCollision(unittest.TestCase):
+    def test_claude_md_three_way_heading_collision_gets_three_unique_ids(self):
+        text = (
+            "## Notes\n\n"
+            "First notes section prose.\n\n"
+            "## Notes\n\n"
+            "Second notes section prose.\n\n"
+            "## Notes 2\n\n"
+            "Third notes section prose.\n"
+        )
+        found = lessons._claude_md_lessons(text, "CLAUDE.md", "x")
+        ids = [l.id for l in found]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(
+            set(ids), {"CLAUDE.md#notes", "CLAUDE.md#notes-2", "CLAUDE.md#notes-2-2"},
+        )
+
+    def test_three_identical_headings_get_three_distinct_ids(self):
+        # Unlike the fixture above (whose third heading's OWN natural slug happens to
+        # equal the second heading's disambiguated id), this fixture forces the
+        # disambiguator to increment past "-2" for the SAME natural slug three times --
+        # the direct test of "re-derives against the full used-ids set, keeps
+        # incrementing until free" rather than "stop at the first free-looking candidate".
+        text = (
+            "## Notes\n\nFirst notes section prose.\n\n"
+            "## Notes\n\nSecond notes section prose.\n\n"
+            "## Notes\n\nThird notes section prose.\n"
+        )
+        found = lessons._claude_md_lessons(text, "CLAUDE.md", "x")
+        ids = [l.id for l in found]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(
+            set(ids), {"CLAUDE.md#notes", "CLAUDE.md#notes-2", "CLAUDE.md#notes-3"},
+        )
+
+    def test_memory_file_three_way_heading_collision_gets_three_unique_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _init_repo(root)
+            _write(root, ".codescout/memories/topic.md", (
+                "## Notes\n\nFirst notes section prose.\n\n"
+                "## Notes\n\nSecond notes section prose.\n\n"
+                "## Notes 2\n\nThird notes section prose.\n"
+            ))
+            c1 = _commit_all(root, "c1")
+            found = lessons._memory_lessons(root, c1, "reponame")
+            ids = [l.id for l in found]
+            self.assertEqual(len(ids), len(set(ids)))
+            self.assertEqual(
+                set(ids),
+                {
+                    "memory:topic#notes",
+                    "memory:topic#notes-2",
+                    "memory:topic#notes-2-2",
+                },
+            )
+
+    def test_lessons_at_head_has_zero_duplicate_ids(self):
+        root = REPO_ROOT
+        head = _git(root, "rev-parse", "HEAD").strip()
+        found = lessons.lessons_at(root, head)
+        ids = [l.id for l in found]
+        dupes = {i for i in ids if ids.count(i) > 1}
+        self.assertEqual(dupes, set())
+
+
+class LeadSlugDerivesFromTheBoldSpanNotFullText(unittest.TestCase):
+    def test_a_short_bold_lead_does_not_pull_in_words_from_after_the_close(self):
+        bullet_text = "- **Short lead.** Body text with several more words after the close."
+        source = lessons._bullet_lead_source(bullet_text)
+        self.assertEqual(source, "Short lead.")
+        self.assertEqual(lessons._lead_slug(source), "short-lead")
+
+    def test_a_wrapped_short_bold_lead_does_not_pull_in_words_from_after_the_close(self):
+        bullet_text = "- **Wrapped\nshort lead.** Body text with several more words after the close."
+        source = lessons._bullet_lead_source(bullet_text)
+        self.assertEqual(source, "Wrapped\nshort lead.")
+        self.assertEqual(lessons._lead_slug(source), "wrapped-short-lead")
+
+
+class SourceIsRepoQualifiedAtEverySite(unittest.TestCase):
+    def test_source_is_repo_qualified_at_every_lessons_at_site(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _init_repo(root)
+            _write(root, "CLAUDE.md", (
+                "## Alpha Section\n\n"
+                "- **Alpha bullet lead words here and more text.** Body one.\n"
+            ))
+            _write(root, "docs/trackers/reconnaissance-patterns.md", (
+                "## R-1 — case promoted\n\n"
+                "**Status:** promoted — landed in SKILL.md.\n"
+            ))
+            _write(root, "docs/trackers/tool-usage-patterns.md", (
+                "## Some Observations\n\n"
+                "### T-1 — case promoted\n\n"
+                "**Status:** promoted — folded into a skill.\n"
+            ))
+            _write(root, "docs/trackers/operator-rules.md",
+                   _op_rules_with_imperative("Always run the source-qualification check."))
+            _write(root, ".codescout/memories/topic.md",
+                   "## A Memory Section\n\nSome memory body text.\n")
+            c1 = _commit_all(root, "c1")
+
+            found = lessons.lessons_at(root, c1)
+            repo_name = pathlib.Path(root).resolve().name
+            by_site = {
+                "CLAUDE.md": [l for l in found if "CLAUDE.md#" in l.id],
+                "recon": [l for l in found if "reconnaissance-patterns.md#" in l.id],
+                "tool-usage": [l for l in found if "tool-usage-patterns.md#" in l.id],
+                "operator-rules": [l for l in found if "operator-rules.md#" in l.id],
+                "memory": [l for l in found if ":memory:" in l.id],
+            }
+            for site, site_lessons in by_site.items():
+                self.assertTrue(site_lessons, f"no lessons found for site {site}")
+                for l in site_lessons:
+                    self.assertTrue(
+                        l.source.startswith(f"{repo_name}:"),
+                        f"{site} lesson source not repo-qualified: {l.source!r}",
+                    )
+
+
+class WorktreeSafeRepoNaming(unittest.TestCase):
+    def test_lessons_at_from_a_worktree_matches_the_main_checkout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / "main-repo-name"
+            _init_repo(root)
+            _write(root, "CLAUDE.md", (
+                "## Alpha Section\n\n"
+                "- **Alpha bullet lead words here and more text.** Body one.\n"
+            ))
+            c1 = _commit_all(root, "c1")
+
+            worktree = pathlib.Path(tmp) / "a-differently-named-worktree-dir"
+            _git(root, "worktree", "add", "-q", str(worktree), c1)
+
+            main_found = lessons.lessons_at(root, c1)
+            wt_found = lessons.lessons_at(worktree, c1)
+
+            self.assertEqual(
+                {(l.id, l.source) for l in main_found},
+                {(l.id, l.source) for l in wt_found},
+            )
 
 
 if __name__ == "__main__":

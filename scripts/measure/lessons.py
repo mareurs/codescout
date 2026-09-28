@@ -71,19 +71,19 @@ def _git_ls_tree(repo, sha, path):
 
 # --- fence-awareness (R85) ----------------------------------------------------------------------
 
-_FENCE_OPEN_RE = re.compile(r"^(\s*)(`{3,}|~{3,})")
+_FENCE_OPEN_RE = re.compile(r"^(\s*)(`{3,}|~{3,})(.*)$")
 _FENCE_CLOSE_RE = re.compile(r"^(\s*)(`{3,}|~{3,})\s*$")
 
 
 def _fence_flags(lines):
-    """Return one bool per line: True iff that line sits inside a fenced code block (including
-    the fence's own opening/closing marker lines), and must therefore be treated as opaque
-    content -- never re-interpreted as a heading, a bullet start, or a Status line.
+    """Per-line: True iff the line is inside (or is the opener/closer of) a ``` or ~~~ fence.
 
-    A fence opened by N characters of one kind (backtick or tilde) is closed only by a later
-    line consisting of that SAME character, run length >= N -- a bare fence-length check, not a
-    toggle, so a nested 3-backtick example inside an enclosing 4-backtick fence does not
-    prematurely close the outer one. A fence that never closes runs to end-of-text.
+    A fence closes only on a line with the SAME fence character and AT LEAST the same run
+    length (R85) -- a shorter or different-character fence line is opaque fence content, not a
+    closer. CommonMark also refuses a backtick fence whose info string itself contains a
+    backtick (a "runaway fence" would otherwise never close and silently swallow the rest of
+    the file, item 9/fix round 2) -- tilde fences have no such restriction, since a tilde info
+    string may contain backticks freely.
     """
     flags = []
     in_fence = False
@@ -97,7 +97,7 @@ def _fence_flags(lines):
                 in_fence = False
             continue
         m = _FENCE_OPEN_RE.match(line)
-        if m:
+        if m and not (m.group(2)[0] == "`" and "`" in m.group(3)):
             flags.append(True)
             in_fence = True
             fence_char = m.group(2)[0]
@@ -127,6 +127,26 @@ def _slugify(text):
     text = text.strip().lower().replace("`", "")
     slug = _SLUG_STRIP_RE.sub("-", text).strip("-")
     return slug or "section"
+
+
+def _dedupe_slug(slug, used_ids):
+    """Return a slug guaranteed unique against `used_ids` (mutated in place to add whichever
+    slug is returned): `slug` itself if unused, else `slug-2`, `slug-3`, ... until one is free.
+
+    Re-derives against the FULL used-ids set on every call -- not a per-natural-slug counter --
+    so a disambiguated id minted for an earlier collision (e.g. `notes-2`) cannot itself collide
+    with a THIRD heading whose OWN natural slug is `notes-2` (R87 fix round 2; the prior
+    per-slug-counter form minted exactly that duplicate for `## Notes`, `## Notes`, `## Notes 2`).
+    """
+    if slug not in used_ids:
+        used_ids.add(slug)
+        return slug
+    n = 2
+    while f"{slug}-{n}" in used_ids:
+        n += 1
+    candidate = f"{slug}-{n}"
+    used_ids.add(candidate)
+    return candidate
 
 
 def _split_sections(text, min_level, max_level):
@@ -380,30 +400,37 @@ def _claude_md_lessons(text, id_prefix, source_label):
 
     R80: a bullet's id is `<id_prefix>#<heading-slug>/<lead-slug>`, lead-slug from the bullet's
     bold lead (its first 8 words); `-<n>` on a lead-slug collision WITHIN THE SAME SECTION only,
-    counted in document order. R87: `-<n>` also disambiguates a HEADING-slug collision, counted
-    across the whole document (two sections sharing a heading produce `#slug` and `#slug-2`) --
-    a real section titled "Preamble" collides with the synthetic preamble slug the same way.
+    counted in document order. R87: a HEADING-slug collision is disambiguated across the WHOLE
+    document via `_dedupe_slug`, which checks the full set of ids already minted -- not merely a
+    per-natural-slug counter -- so a disambiguated slug from an earlier collision cannot itself
+    collide with a third heading's own natural slug (fix round 2; the prior per-slug counter
+    minted a duplicate id for `## Notes`, `## Notes`, `## Notes 2`).
+
+    The synthetic preamble pseudo-section's id is the UNCONDITIONAL literal slug `-preamble`,
+    never plain `preamble`: `_slugify` strips a leading `-` from any real heading's slug, so no
+    real `## Preamble` heading can ever produce `-preamble`, and the synthetic id is therefore
+    stable across every commit -- never displaced by, and never displacing, a real section of
+    that name (fix round 2, item 8; previously the two shared the same slug and a real
+    "## Preamble" section added later could take over `#preamble` out from under the synthetic
+    one, breaking R80's cross-commit identity stability).
+
     The section-prose lesson's id is the bare (possibly disambiguated) heading-slug, no
     `/lead-slug` suffix, so it can never collide with a bullet lesson's id in the same section.
     """
     lessons = []
-    heading_seen = {}
+    used_ids = set()
 
     preamble = _leading_preamble(text, 2, 3)
     pre_bullets, pre_prose = _partition_bullets_and_prose(preamble)
     if pre_bullets or "\n".join(pre_prose).strip():
-        heading_seen["preamble"] = heading_seen.get("preamble", 0) + 1
-        hn = heading_seen["preamble"]
-        preamble_id_slug = "preamble" if hn == 1 else f"preamble-{hn}"
+        preamble_id_slug = _dedupe_slug("-preamble", used_ids)
         _emit_partitioned_lessons(
             lessons, id_prefix, source_label, preamble_id_slug, None, pre_bullets, pre_prose,
         )
 
     for heading_text, body in _split_sections(text, 2, 3):
         heading_slug = _slugify(heading_text)
-        heading_seen[heading_slug] = heading_seen.get(heading_slug, 0) + 1
-        hn = heading_seen[heading_slug]
-        heading_id_slug = heading_slug if hn == 1 else f"{heading_slug}-{hn}"
+        heading_id_slug = _dedupe_slug(heading_slug, used_ids)
 
         bold_bullets, prose_lines = _partition_bullets_and_prose(body)
         _emit_partitioned_lessons(
@@ -420,8 +447,18 @@ _IMPERATIVE_LINE_RE = re.compile(r"^\*\*Imperative:\*\*\s*(.+)$")
 
 
 def _parse_op_table_statuses(text):
+    """The Index-table Status cell for each `OP-N` row, keyed by id, lowercased -- fence-aware
+    (R85 fix round 2): an index-table-shaped row that appears inside a fenced example block
+    (a documentation illustration of the table syntax, not a live row) is opaque content and
+    must not update `statuses`, since `_operator_rules_lessons`'s existence gate reads this map
+    directly.
+    """
     statuses = {}
-    for line in text.splitlines():
+    lines = text.splitlines()
+    fenced = _fence_flags(lines)
+    for i, line in enumerate(lines):
+        if fenced[i]:
+            continue
         m = _OP_TABLE_ROW_RE.match(line)
         if not m:
             continue
@@ -455,14 +492,24 @@ def _operator_rules_lessons(text, source_label):
 
 
 def _op_imperative_bodies(repo, sha):
-    """R84: the R79 equality-fallback reference set is the `**Imperative:**` line of each
+    """R84: the R79 equality-fallback reference set is the `**Imperative:**` line of each ACTIVE
     `## OP-N` section of docs/trackers/operator-rules.md AT `sha` -- never the working tree,
-    never a default. The generator (undated_lessons's real caller) emits only that one line per
-    rule, so comparing whole section bodies (the pre-fix behaviour) could never match it.
+    never a default. "Active" here means the same thing R81's own existence gate means:
+    `_parse_op_table_statuses(text)[op_id] == "active"` (R97, fix round 2). A retired rule's
+    Imperative is therefore not a reference-set member, so a hand-written paragraph equal to a
+    RETIRED rule's Imperative is counted once as undated (R81 already excludes it as dated), never
+    zero times -- the pre-fix behaviour put every `## OP-N` section's Imperative into the set
+    regardless of status, which could make such a paragraph match on the dated side too and be
+    silently dropped from both.
 
-    Raises FileNotFoundError if the file does not exist at `sha`: there is no silent
-    empty-reference-set fallback, because an empty reference set makes the whole R79 detector
-    inert without anyone being told.
+    The generator (undated_lessons's real caller) emits only that one line per rule, so comparing
+    whole section bodies (the pre-fix behaviour) could never match it.
+
+    Raises FileNotFoundError if the file does not exist at `sha`. Raises ValueError if the file
+    exists but the ACTIVE-only reference set comes out empty: there is no silent
+    empty-reference-set fallback either way, because an empty reference set makes the whole R79
+    detector inert without anyone being told (fix round 2 extends this from the file-absent case
+    to the zero-active-imperatives case).
     """
     text = _git_show(repo, sha, "docs/trackers/operator-rules.md")
     if text is None:
@@ -471,12 +518,20 @@ def _op_imperative_bodies(repo, sha):
             "it to derive the R79 equality-fallback reference set; there is no default and no "
             "working-tree read."
         )
-    entries, _order = _parse_id_entries(text, _OP_ID_RE, 2)
+    statuses = _parse_op_table_statuses(text)
+    entries, order = _parse_id_entries(text, _OP_ID_RE, 2)
     bodies = []
-    for body in entries.values():
-        imperative = _first_field_line(body, _IMPERATIVE_LINE_RE)
+    for op_id in order:
+        if statuses.get(op_id) != "active":
+            continue
+        imperative = _first_field_line(entries[op_id], _IMPERATIVE_LINE_RE)
         if imperative:
             bodies.append(imperative)
+    if not bodies:
+        raise ValueError(
+            f"docs/trackers/operator-rules.md at {sha!r} in {repo!r} exists but yields zero "
+            "ACTIVE **Imperative:** references -- R84's reference set must not be silently empty."
+        )
     return bodies
 
 
@@ -531,8 +586,10 @@ def _memory_lessons(repo, sha, repo_name):
     (`git ls-tree`, never the working tree) `.codescout/memories/**/*.md` file is one lesson, id
     `memory:<rel-path-without-.md>#<heading-slug>`. A file with no `##` section is one lesson, id
     `memory:<rel-path-without-.md>` (whole file as its own text). Non-`.md` files (e.g.
-    `*.anchors.toml`) are skipped. R87: `-<n>` disambiguates repeated `##` headings within one
-    file (counter reset per file); `source` is repo-qualified (`source`, never `id`).
+    `*.anchors.toml`) are skipped. R87: `_dedupe_slug` disambiguates repeated `##` headings
+    within one file (fresh `used_ids` per file, checking the full set rather than a per-slug
+    counter, so a disambiguated id cannot itself collide with a third heading's own natural
+    slug -- fix round 2); `source` is repo-qualified (`source`, never `id`).
     """
     lessons = []
     for path in sorted(_git_ls_tree(repo, sha, ".codescout/memories")):
@@ -552,12 +609,10 @@ def _memory_lessons(repo, sha, repo_name):
                 dated=True,
             ))
             continue
-        heading_seen = {}
+        used_ids = set()
         for heading_text, body in sections:
             slug = _slugify(heading_text)
-            heading_seen[slug] = heading_seen.get(slug, 0) + 1
-            n = heading_seen[slug]
-            slug_id = slug if n == 1 else f"{slug}-{n}"
+            slug_id = _dedupe_slug(slug, used_ids)
             lessons.append(Lesson(
                 id=f"memory:{rel}#{slug_id}",
                 source=source_label,
@@ -570,15 +625,46 @@ def _memory_lessons(repo, sha, repo_name):
 # --- public: lessons_at -------------------------------------------------------------------------
 
 
+def _repo_name(repo):
+    """The repo name used to qualify `lessons_at`'s ids and sources (R96(b), fix round 2):
+    the basename of the directory CONTAINING the git common dir
+    (`git rev-parse --path-format=absolute --git-common-dir`), never the repo path argument's
+    own basename. Worktree-safe -- a `git worktree add` checkout's own directory can have any
+    basename (e.g. `mutation-slot-0`) while its common dir still lives inside the main
+    checkout's `.git`, so this resolves to the MAIN repo's name in both places, keeping
+    `lessons_at(main, sha)` and `lessons_at(worktree, sha)` identical. For an ordinary
+    (non-worktree) repo the common dir's parent IS the repo root, so this agrees with
+    `repo.resolve().name` there -- the two computations diverge only under a worktree.
+    Falls back to the repo path's own basename if git cannot answer at all (not a git
+    repository).
+    """
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        return pathlib.Path(out).resolve().parent.name
+    except (subprocess.CalledProcessError, OSError):
+        return pathlib.Path(repo).resolve().name
+
+
+
 def lessons_at(repo, sha):
     """All lessons that existed at `sha` -- a pure function of the commit (every read goes
     through `git show`/`git ls-tree`, never the working tree).
 
-    R87: `source` is repo-qualified (`"<repo-name>:<path-in-repo>"`, repo name = the repo dir's
-    basename) -- `id` stays the bare, unqualified form it always was.
+    R87/R96(a): `source` AND `id` are both repo-qualified (`"<repo-name>:<...>"`, repo name via
+    `_repo_name`, worktree-safe -- R96(b)). Applied as a single post-processing step over every
+    source's already-built ids, so no internal helper's own id-construction logic changes; only
+    `lessons_at`'s own return value gains the prefix (fix round 2 -- R87's header already said
+    ids are repo-qualified, its sub-bullets omitted it by drafting error, and round 1's docstring
+    here said the opposite: "id stays the bare, unqualified form it always was").
     """
     repo = pathlib.Path(repo)
-    repo_name = repo.resolve().name
+    repo_name = _repo_name(repo)
     lessons = []
 
     claude_md = _git_show(repo, sha, "CLAUDE.md")
@@ -604,7 +690,7 @@ def lessons_at(repo, sha):
 
     lessons.extend(_memory_lessons(repo, sha, repo_name))
 
-    return lessons
+    return [dataclasses.replace(l, id=f"{repo_name}:{l.id}") for l in lessons]
 
 
 # --- public: undated_lessons ---------------------------------------------------------------------
