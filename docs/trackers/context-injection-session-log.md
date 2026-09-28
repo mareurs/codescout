@@ -12,7 +12,7 @@ topic: context-injection
 entry_prefix:
   - F
   - W
-entry_high_water_F: 17
+entry_high_water_F: 18
 entry_high_water_W: 6
 ---
 
@@ -51,6 +51,7 @@ author to make.
 | F-15 | 2026-09-26 | med | architectural | mitigated | The engine key-disjointness gate computes over build-time corpora, so a session-authored corpus would be invisible to it |
 | F-16 | 2026-09-26 | med | plan-prose | mitigated | The spec's per-block delivery shape is not attributable at the coordinator — keys are per engine, not per block |
 | F-17 | 2026-09-26 | high | architectural | fixed-verified | The live check found `tool_use_id` NULL on every row: rmcp puts `_meta` in RequestContext.meta, and the test built params in-process |
+| F-18 | 2026-09-28 | med | context-rendering | mitigated | A harness-rendered CLAUDE.md strips HTML comments, so the controller read "no markers" and designed a ruling around it |
 
 ## Wins Index
 
@@ -1601,6 +1602,20 @@ True of the `guide_ledger.rs` / `server.rs` / `guide_rearm.rs` shape at `HEAD` o
 **Lesson:** "Through the production funnel" means through the TRANSPORT, not the first function the harness can call. When a value arrives from the wire, the test's input must be bytes through the real deserializer. A struct built in-process, even by `serde_json::from_value`, is the exact shape the failure hides in. A plan step that runs the real binary against the real client is the instrument here, not a formality after the tests.
 
 **Fix:** bug `922981c9afdd2a42` (archived), 6f6349ca (patch-id `6bff20b066abbae151bbfd9762d1a4dad6b2b65b`): fold `req_ctx.meta` into `req.meta` in `call_tool`, with an end-to-end duplex-transport test whose deletion mutant is killed on the assertion. **Verified live 2026-09-27:** session `0cbae2f0`, the first to reconnect to the rebuilt binary, recorded 85 non-NULL `tool_use_id`s (04:58:01–05:55:38 UTC), each occurring exactly once across its 7 transcript files. Status `fixed-verified`.
+
+## F-18 — A harness-rendered CLAUDE.md strips HTML comments, so the controller read "no markers" and designed a ruling around it
+
+**Valid:** dated 2026-09-28
+
+**Observed:** While preparing Task 7 of the system1 measurement plan, the controller stated that `~/.claude-sdd/CLAUDE.md` carries the operator-rules text WITHOUT its `<!-- BEGIN operator-rules … -->` / `<!-- END operator-rules -->` markers, while `~/.claude/CLAUDE.md` has them. The claim went into the Task 7 dispatch context and into ruling R79's design, which added a text-equality fallback for the markerless case. The source of the claim was the copy of that file shown to the model as session instructions.
+
+**Expected:** The claim reflects the file's bytes.
+
+**Gap:** All three profiles' global `CLAUDE.md` are byte-identical (sha256 prefix `462af94b…`, per the Task 7 review), and all three carry both markers (`grep -c` gives 1 and 1 on each, mtime 2026-09-13). The instruction rendering the harness injects appears to strip HTML comments, so a model reading its own instructions sees the rules' text but not the markers around them. The implementer measured the files and caught this. Its report said so, and the controller verified it with `grep -c` on the paths.
+
+**Cost:** One ruling (R79's markerless branch) was designed for a case that does not exist on this machine. It is kept for robustness, but real data never exercises it. A related mistake in the same hour: the controller's hand-rolled awk summary placed a `###` sub-section under the wrong `##` entry, and a reviewer's independent fence-aware parser corrected it. Neither error shipped, because both were caught by a party that read the bytes.
+
+**Lesson:** The copy of an instruction file shown in context is a RENDERING, not the file. Comments, markers, and anything else the harness strips are invisible there. Before a claim about an instruction file's structure becomes a ruling, a test fixture or a doc, check it against the bytes (`grep -c` on the path, or `sha256sum` across copies). This is the context-injection instance of reconnaissance's "read the actual shape, not docs".
 
 ## Template for new entries
 

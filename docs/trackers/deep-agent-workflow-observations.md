@@ -106,7 +106,7 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DCS-9 | 2026-09-25 | coverage | session-receipt | e4fbc7ef/whole-session |
 | DCS-10 | 2026-09-26 | coverage | session-receipt | 571eb3d6/post-compaction-2026-09-24-to-26 |
 | DWF-11 | 2026-09-26 | workflow | routine-first (retrospective) | 3c5b02df/system1-lineage-read |
-| DCS-11 | 2026-09-26 | coverage | session-receipt | 3c5b02df/whole-session-to-05:40Z |
+| DCS-11 | 2026-09-26 | coverage | session-receipt | 3c5b02df/whole-session-to-2026-09-28T06:57Z |
 | DWF-12 | 2026-09-26 | workflow | enrichment (retrospective) | 571eb3d6/amd-second-card |
 | DCS-12 | 2026-09-26 | coverage | session-receipt | 571eb3d6→0cbae2f0/post-compaction-2026-09-26 |
 | DWF-13 | 2026-09-27 | workflow | enrichment | b4de6398:taxonomy-recipes-test |
@@ -621,31 +621,40 @@ No failed attempts beyond one refused pipe, which recovered on the next call.
 
 ## DCS-11 — Session 3c5b02df — System 1 lineage, three-role assessment, recon, base-rate measurement design
 
-**Valid:** dated 2026-09-26
+**Valid:** dated 2026-09-28
 
 **Identity:**
-- **Session / principal / collector:** session `3c5b02df-b6ce-45f5-9d03-1194e38465c0`, profile `~/.claude-kat`, model Opus 5.5; the collector is the same session.
+- **Session / principal / collector:** session `3c5b02df-b6ce-45f5-9d03-1194e38465c0`, model Opus 5.5. The collector is the same session.
+- **Profiles:** it began in `~/.claude-kat` and was resumed under `~/.claude-sdd` on 2026-09-26, so its transcript exists in both profiles, which is spec Amendment 3(b)'s case.
 - **Workspace:** codescout checkout, branch `experiments`.
 
-**Observed interval (UTC):**
-- The first and last recorded codescout calls are 2026-09-26 04:53:24 and 05:40:31: 120 calls, no subagent `agent_id`.
-- Native `Read`, `Skill` and `AskUserQuestion` calls are not in that count.
-- The session continued past the last recorded call. This receipt is written mid-session at the operator's request to commit, so a resumed or later part of the session updates it rather than counting another.
+**Observed interval (UTC), measured 2026-09-28 06:57 from `usage.db`:**
+- The first and last recorded codescout calls are 2026-09-26 04:53:24 and 2026-09-28 06:57:29.
+- 4,194 calls under this `cc_session_id`: 557 by the coordinator (no `agent_id`) and the rest across 29 distinct subagent `agent_id`s.
+- Subagent transcripts: 28 under the `.claude-kat` copy and 64 under the `.claude-sdd` copy.
+- Commits carrying this session's `Session-Id` trailer: 41.
+- 0 of these rows carry a `tool_use_id`, because this session never reconnected after the Part A fix (spec Amendment 4).
 
-**Coverage:** `partial`. The interval above is covered; nothing after this write is.
+**Coverage:** `partial`. This receipt is updated at a compaction checkpoint, and the session continues. A resumed part updates this entry rather than counting another.
 
 **Routine samples:**
-- **DWF:** `DWF-11`, retrospective (a `missed-capture` of the pre-action snapshot, recorded after the outcome).
-- **DCX:** `missed-capture`. One eligible context event was observed and not entered as a DCX: the operator-rule `OP-4` delivery on an `edit_file` call at 05:22:48 UTC, which arrived while the agent was already doing what it asked. It is used instead as a named positive control in `docs/superpowers/specs/2026-09-26-system1-base-rate-measurement-design.md` § *Testing the pipeline*.
+- **DWF:** `DWF-11`, retrospective (a `missed-capture` of the pre-action snapshot).
+- **DCX:** `missed-capture`. One eligible context event, the `OP-4` delivery at 2026-09-26 05:22:48 UTC, is used instead as a named positive control in the measurement spec.
 
-**Enrichment:** none entered as DWF. The two material corrections of this session's own claims are recorded canonically as `context-injection-session-log:F-14` and `context-injection-session-log:F-15` and are not duplicated here.
+**Enrichment:** none entered as DWF. This session's material errors and catches are canonical elsewhere and are not duplicated:
+- `context-injection-session-log:F-14` and `F-15`: architecture claims corrected by reconnaissance;
+- `context-injection-session-log:F-17`: the Part A live check found `tool_use_id` NULL on every row;
+- `context-injection-session-log:F-18`: a harness-rendered CLAUDE.md is not the file;
+- bugs `922981c9afdd2a42`, `99aec62455e993b8` and `acf3e131521d24b5`;
+- the controller's own ruling errors, which are ledgered in the plan's SDD workspace: R53's pairing key, and the misplaced R-104 sub-section.
 
 **Native / delegated / unobserved gaps:**
 - Native tool calls are absent from `usage.db`.
-- There was no delegation.
-- One harness settings change was made outside the repo: `cleanupPeriodDays: 3650` in all three profiles, on the operator's instruction.
+- Delegation was heavy: subagent-driven development of the system1 base-rate measurement plan, Tasks 3–13, with an implementer and an Opus reviewer per round. Subagent calls are in `usage.db` under their `agent_id`, and their reasoning is only in their subagent transcripts.
+- One subagent was stopped by the coordinator (`TaskStop`) after its context ran out, so that its armed monitor could not wake it into a concurrent commit.
+- Harness change outside the repo: `cleanupPeriodDays: 3650` in all three profiles (2026-09-26, on the operator's instruction).
 
-**Collection overhead:** about 10 minutes for DWF-11 plus this receipt, estimated, not measured.
+**Collection overhead:** about 15 minutes for DWF-11 plus this receipt and its update, estimated, not measured.
 
 **Unresolved pending entries:** none.
 

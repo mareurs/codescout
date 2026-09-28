@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 187
+entry_high_water_R: 189
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -289,6 +289,8 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-189 | 2026-09-28 | miss (1 instance, caught by the next review) | **A rule about a POPULATION is a hypothesis about every member: enumerate the classes before writing the key.** R53 generalized a hook-twin key (toolUseID) from 1,838 PreToolUse/PostToolUse pairs to every hook event. SubagentStart twins differ in toolUseID, and SessionStart's is a constant, so the session-less key collapsed 333 distinct deliveries across 14 sessions. R56 (session, file, event, text, 5 s) was measured per event first. Recon applies to the controller's own rulings, not only to code. | system1 measurement SDD ledger R53 → R56; spec Amendment 5(e) |
+| R-188 | 2026-09-28 | hit (1 instance) | **Scout the GRAIN of an upstream exclusion against the consumer's input.** Before Task 6 (events DB), a probe found 6 of 9 cross-profile sids with subagent files present in only one copy; R22's whole-session exclusion would have silently dropped them. R40 unioned subagent files over every copy of a kept sid; the live control recovered 929 entries from 614 files. A missing file produces no row to be wrong about, so nothing downstream could see it. | system1 measurement SDD ledger R40; `docs/superpowers/specs/2026-09-26-system1-base-rate-measurement-design.md` Amendment 5(c) |
 | R-187 | 2026-09-23 | hit → rule | **The judge was already built and calibrated in the sibling repo `CLAUDE.md` names — and the gap the lookup closed was a MISSING ARM, not a duplicated instrument.** One turn from dispatching a hand-rolled fork to score 285 blind tasks. `prompt-engineering` holds `PanelJudge` (cross-family; disagreement *withholds* the grade rather than voting), a `max_spread` calibrated at n=64 whose own refresh rule says thresholds do not transfer corpora, `skill-eval-playbook:L-13` (the precision law this corpus was built to embody, three months earlier), and § *The shape* rule 4 — *"a positive control is not optional when arms tie"* — which the pre-registration lacked, on exactly the tie `A-10` predicts. Law G. The instruction (*"Don't hand-roll scoring"*) was visible, current and correctly worded throughout, so this is applicability-recognition, not decay — the same partition the eval it serves exists to measure | `docs/evals/rule-injection-timing-preregistration.md` (arm 3 + judge registered); `prompt-engineering:src/prompt_tdd/judge.py` `PanelJudge`, `cross-family-panel-calibration`, `skill-eval-playbook:L-13`, `prompt-tdd-operating-guide` § *The shape that avoids most of this*; kin R-55/R-60/R-87 |
 | R-186 | 2026-09-06 | miss ×1 → rule (found by the peer whose file I duplicated) | **Capture-on-notice has no corpus-check step, and a bug file is the one artifact whose duplicate is invisible to its author** — the search that would find it is the thing you are about to write. Filed a complete bug file for a stale error message; `codescout-98` had filed the same defect hours earlier, already on `origin/experiments` at `29c5b461`. The two slugs shared **not one word** (`the-invalid-action-message-omits-edit-…` vs `body-edits-invalid-action-error-omits-…`), so a slug grep would also have missed — the query that works is **semantic over the defect**, or a grep for the *symptom string* (`invalid action`). **The cost is not the duplicate:** the existing file had already falsified this one's prescribed fix (adding `edit` to `edit_markdown.rs:281` would make that message false for `plan_section_edit`'s other callers; the real repair validates one layer up at `apply_body_edits`). So the miss produced **a plausible one-line diff that would have shipped a second defect**, behind a confident bug file. Same shape as *run the reproduction before reading the fix plan*, one level out: read the corpus before writing the plan, because the corpus may hold the refutation. Does **not** weaken capture-on-notice — one `doc(find, kind="bug", semantic=…)` is not "later". | `R-186` |
 | R-183 | 2026-09-06 | miss ×1 → rule | **The cost of re-deriving a wired check is the REMEDY, not the number — and the check's cause line is authored, not measured.** Hand-rolled a Python scan of `docs/issues/**` for frontmatter ids not matching `sha256(abs_path)[:16]`, when `librarian(action="doctor")` already ships the check. It returned **8**; `doctor` returns **8**. So the standard warning — *"re-derives a worse version and reports its own shortfall as a clean backlog"* — **did not apply**: accuracy was fine, which is what makes this worth an entry. What was lost is that a hand-rolled scan **can only return the finding, never the fix**: `doctor` also ships `fix="repair_frontmatter_id"`, which repaired all 8 with 0 failures. Reaching it was **accidental** — a grep of `docs/issues/` surfaced archived bug files that named the repair; nothing deliberate pointed at it, so this is a mechanism gap, not a discipline gap. **Then the inverse:** having reached the instrument, its `detail` asserted *"a move re-keys the row"* — **false for 8 of 8**, all worktree-minted, identified positively by `sha256("<repo>/.worktrees/tool-collapse/<rel_path>")[:16]` reproducing the stale id with `git log --follow --diff-filter=R` empty. So `doctor` was right on the finding, uniquely able on the remedy, and **wrong on the cause**, where the ad-hoc reasoning was right. **Generative:** a wired check's **finding** is recomputed against live state every run; its **explanation** is a string a human wrote once, ages like a comment, and arrives in the same JSON inheriting the measurement's authority. Sharper because the 2026-08-18 fix had *already* split this field once, partitioning by id **shape** as a proxy for *was this row moved* — well-formed does not imply moved. **Runnable:** (1) before deriving a population by hand, grep `docs/PROBES.md` and `librarian`'s `fix=` enum for the noun — not for a better number, to learn whether the repair exists; (2) read a wired tool's counts as measurement and its `detail`/`hint`/`reason` prose as an assertion of the same rank as a code comment, asking what the check can actually observe. | `docs/issues/archive/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`; fixes `593614aa` (8 ids + 17 dead citations), `c7a54d12` (the cause-line bug); `IC-22` sixth member |
@@ -8695,6 +8697,46 @@ The plan was to dispatch a clean fork as judge over 285 blind classification tas
 **Status:** open — 1 datapoint
 
 **Kin:** R-55, R-60, R-87
+
+## R-188 — Scout the grain of an upstream exclusion against the consumer's input
+
+**Valid:** dated 2026-09-28
+
+**Status:** open
+
+**Verdict:** hit (1 instance).
+
+**Observed:** Before dispatching Task 6 of the system1 base-rate measurement plan (the events DB), the controller scouted the seam between Task 5's `attribute_entries`, whose output Task 6 consumes, and the real corpus. Reading its body showed that it attributes TOP-LEVEL transcripts only. A two-minute probe across the three profiles' codescout dirs then measured:
+- 9 sids have copies in more than one profile;
+- in 6 of those, subagent files exist in only ONE copy (2cb44cd3: 26 only in `.claude`; b0b9bc40: 28 only in `.claude-sdd`);
+- ebf651ec has unique files on BOTH sides.
+
+Task 5's R22 excludes the duplicate copy as a whole session, so every subagent transcript that lived only under an excluded copy would have vanished from the events DB, with no error, no count and no test. Ruling R40 (a union of subagent files over every copy of a kept sid, with per-uuid dedupe) went into the dispatch. The live control recovered 929 subagent entries from 614 unioned files.
+
+**Counterfactual:** Without the probe, Task 6 would have followed the plan's text, which says nothing about subagent files under duplicate copies, and silently dropped about 1k delegated-work entries. Those entries are A1.5's baseline population (the background-worker outcome). Nothing downstream could have noticed: a missing file produces no row to be wrong about.
+
+**Pattern:** When a stage consumes another stage's dedupe or exclusion output, scout the GRAIN of the exclusion against the grain of the consumer's input. A session-level exclusion applied to data that lives at a finer grain (per-subagent files under each copy) drops the finer grain wholesale. Ask: "what lives UNDER the thing being excluded, and does every copy hold the same children?"
+
+## R-189 — A rule about a population is a hypothesis about every member — enumerate the classes before writing the key
+
+**Valid:** dated 2026-09-28
+
+**Status:** open
+
+**Verdict:** miss (1 instance), caught by the next review.
+
+**Observed:** A reviewer of the system1 measurement's Task 6 reported 1,838 pairs where Claude Code records one hook injection twice, as `hook_success` plus `hook_additional_context`, sharing toolUseID, ts, hook and sha256. The controller turned that into ruling R53: "one delivery per (toolUseID, hook event, sha256)", applied to EVERY hook event, without enumerating the events first.
+
+The next re-review measured per event and found:
+- **SubagentStart** twins carry DIFFERENT toolUseIDs (735/735).
+- **SessionStart** `hook_additional_context` rows all carry the literal toolUseID `"SessionStart"`.
+- Because R53's key had no session, 333 distinct deliveries from 14 sessions collapsed into single rows. Deliveries were deleted.
+
+The 1,838 pairs had all been PreToolUse/PostToolUse twins, the one event class where the premise holds. The superseding ruling R56 keys twins by (session, file, event, text or merged-element text, |Δts| ≤ 5 s). It was measured to hold: twins ≤1.713 s apart, the nearest non-twin ≥12.1 s away. Its per-event table matched the reviewer's row for row.
+
+**Counterfactual:** Recon at the ruling, not the code: one `group by hook event` over the snapshot before writing R53 would have shown the toolUseID premise failing for two of the five events. It cost one extra fix round, and it nearly shipped a cross-session collapse of the delivery source that feeds metric 7.
+
+**Pattern:** A rule about a POPULATION is a hypothesis about every member. Before writing a key, a filter or a dedupe rule that will run over a heterogeneous population (event types, sources, profiles), enumerate the population's classes and check the rule's premise per class. A sample that satisfies the premise is evidence only about the classes it contains. This is the ruling-level twin of the CLAUDE.md law "an assertion computed over a population cannot verify a claim about a member". The controller was writing rules for implementers, and the reconnaissance skill's "read the actual shape" had not been applied to its own rulings.
 
 ## Template for new entries
 
