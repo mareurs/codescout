@@ -95,13 +95,11 @@ def session_id_of(repo_path, sha):
     the body. A prose line that merely STARTS "Session-Id:" above the real trailer block is
     not a trailer, and a first-match search would read it.
 
-    Equals commits.session_id on an ordinary commit, but not on every commit:
-      - on a merge, join._run_git_log reads the trailer block as the file list, so
-        commits.session_id is NULL while the trailer exists. That is bug 91bafcc7d4137bf9,
-        filed in 4bd5006d and not fixed (Task 6 is closed). The miner skips merges before it
-        ever reads a Session-Id, so the difference never reaches a candidate.
-      - on a body with a prose line starting "Session-Id:" above the trailer, join's
-        first-match regex reads the prose value, until Task 14 aligns join to R110.
+    Equals commits.session_id on every commit: join._run_git_log reads the same trailer through
+    the same `%(trailers:key=Session-Id,valueonly)` format and takes the same first non-empty
+    line (Task 14, R110), merges and prose "Session-Id:" paragraphs included -- the merge
+    trailer-as-file-list bug is fixed and archived as 6708cab25f53b797. The miner skips merges
+    before it ever reads a Session-Id, so a merge never reaches a candidate either way.
     """
     raw = _git(repo_path, "log", "-1", "--format=%(trailers:key=Session-Id,valueonly)", sha)
     for line in raw.splitlines():
