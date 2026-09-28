@@ -1,4 +1,4 @@
-"""Stage 1c tests: the observability map (Task 13, fix round 2).
+"""Stage 1c tests: the observability map (Task 13, fix round 3).
 
 Mirrors tests/test_measure_join.py's shape: unittest classes, modules loaded by path through
 importlib (never a real package import), fixture helpers copied from that file rather than
@@ -262,6 +262,12 @@ def _freeze_fixture(tmp, profiles, usage_rows=(), corpus_id="fx-corpus"):
         str(pathlib.Path(tmp) / "out"),
     )
     return pathlib.Path(tmp) / "out" / corpus_id, manifest
+
+
+def _plus_one_second(created):
+    """The test's own R75 end: a second-precision "...Z" created_utc plus one second."""
+    dt = datetime.strptime(created, "%Y-%m-%dT%H:%M:%SZ") + timedelta(seconds=1)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class ObservabilityMapShape(unittest.TestCase):
@@ -945,7 +951,10 @@ class UsageRowsUnmappedRendersRulingSentence(unittest.TestCase):
 class SkippedTimestampDoesNotCrash(unittest.TestCase):
     """R71: NULL and unparseable ts rows are skipped AND counted, per table and per cause, in
     coverage() and in render_map -- and neither a None day key nor an unparseable FIRST entry
-    (which becomes Session.first_ts) crashes anything."""
+    (which becomes Session.first_ts) crashes anything. LOAD-BEARING: the two causes have
+    DIFFERENT counts in every table and in the earliest-entry scan, so a swap of the cause labels
+    anywhere (the round-2 reviewer's X1-X4) changes a number; equal counts made every swap
+    invisible."""
 
     def test_null_or_unparseable_ts_is_skipped_and_counted(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -958,12 +967,18 @@ class SkippedTimestampDoesNotCrash(unittest.TestCase):
                 _entry("u-null", None, "sid1", content="hi again"),
                 _agent_tool_use_entry("t-null", None, "sid1"),
                 _agent_tool_use_entry("t-bad", "garbage-ts", "sid1"),
+                _agent_tool_use_entry("t-bad2", "garbage-2", "sid1"),
                 _agent_tool_use_entry("t-ok", "2026-09-20T10:00:01Z", "sid1"),
                 _entry("u-ok", "2026-09-20T10:00:00Z", "sid1", content="a valid one"),
+                # Session-state records: no uuid (so no turn) and no ts field at all.
+                {"type": "last-prompt", "sessionId": "sid1", "lastPrompt": "x"},
+                {"type": "last-prompt", "sessionId": "sid1", "lastPrompt": "y"},
+                {"type": "mode", "sessionId": "sid1", "mode": "normal"},
             ])
             marker = json.dumps([{"type": "text", "text": "<!-- operator-rule OP-1 -->\nbody"}])
             _write_usage_db(corpus_dir, [
                 {"cc_session_id": "sid1", "called_at": None, "output_json": marker},
+                {"cc_session_id": "sid1", "called_at": "", "output_json": marker},
                 {"cc_session_id": "sid1", "called_at": "bogus", "output_json": marker},
                 {"cc_session_id": "sid1", "called_at": "2026-09-20T10:00:02Z", "output_json": marker},
             ])
@@ -972,21 +987,27 @@ class SkippedTimestampDoesNotCrash(unittest.TestCase):
             cov = observability.coverage(events_db, corpus_dir)
 
             self.assertEqual(cov["skipped_ts"], {
-                "turns": {"null": 2, "unparseable": 2},        # u-null + t-null; u-bad + t-bad
-                "tool_events": {"null": 1, "unparseable": 1},  # t-null; t-bad
-                "deliveries": {"null": 1, "unparseable": 1},   # called_at None; "bogus"
+                "turns": {"null": 2, "unparseable": 3},        # u-null, t-null; u-bad, t-bad, t-bad2
+                "tool_events": {"null": 1, "unparseable": 2},  # t-null; t-bad, t-bad2
+                "deliveries": {"null": 2, "unparseable": 1},   # called_at None and ""; "bogus"
             })
             # Skipped rows stay in the whole-DB tables; only the parseable one has a day.
-            self.assertEqual(cov["tool_events_by_method"]["not_codescout"], 3)
+            self.assertEqual(cov["tool_events_by_method"]["not_codescout"], 4)
             self.assertEqual(
                 cov["tool_events_by_day"],
                 {"2026-09-20": {"exact": 0, "heuristic": 0, "none": 0, "not_codescout": 1}},
             )
+            # The scan: 10 top-level entries; 5 carry no ts (u-null, t-null and the 3 records),
+            # 3 an unparseable one (u-bad, t-bad, t-bad2).
             self.assertEqual(cov["earliest_kept_top_level"], {
-                "ts": "2026-09-20T10:00:00Z", "entries_without_ts": 2,
-                "entries_unparseable_ts": 2,
+                "ts": "2026-09-20T10:00:00Z",
+                "entries_total": 10,
+                "entries_without_ts": 5,
+                "entries_without_ts_by_type": {"last-prompt": 2, "mode": 1, "user": 1,
+                                               "assistant": 1},
+                "entries_unparseable_ts": 3,
             })
-            # Only parseable rows are windowed: 1 of 3 deliveries, 1 of 3 tool_events.
+            # Only parseable rows are windowed: 1 of 4 deliveries, 1 of 4 tool_events.
             self.assertEqual(cov["fields"]["deliveries_total"]["retained"], 1)
             self.assertEqual(cov["fields"]["tool_events_total"]["retained"], 1)
 
@@ -994,25 +1015,32 @@ class SkippedTimestampDoesNotCrash(unittest.TestCase):
             windows = _prose(_sections(rendered)["## Windows"])
             self.assertIn(
                 "Rows skipped from every window, day and span for a NULL or empty ts -- "
-                "turns: 2, tool_events: 1, deliveries: 1.",
+                "turns: 2, tool_events: 1, deliveries: 2.",
                 windows,
             )
             self.assertIn(
                 "Rows skipped from every window, day and span for an unparseable ts -- "
-                "turns: 2, tool_events: 1, deliveries: 1.",
+                "turns: 3, tool_events: 2, deliveries: 1.",
                 windows,
             )
             by_day = _sections(rendered)["### A1.6 -- joins by method (by day)"]
             self.assertIn(
-                "Window: retained, by UTC day of the tool_use ts; the 2 tool_events rows with a "
+                "Window: retained, by UTC day of the tool_use ts; the 3 tool_events rows with a "
                 "NULL or unparseable ts appear in the overall table only.",
                 _prose(by_day),
             )
             self.assertEqual(_table_rows(by_day)[1:], [["2026-09-20", "0", "0", "0", "1"]])
+            provenance = _prose(_sections(rendered)["## Provenance"])
             self.assertIn(
-                "- earliest kept top-level entry ts: 2026-09-20T10:00:00Z (top-level entries "
-                "skipped by this scan: 2 without a ts, 2 with an unparseable ts)",
-                _prose(_sections(rendered)["## Provenance"]),
+                "- earliest kept top-level entry ts: 2026-09-20T10:00:00Z (the minimum over the "
+                "kept top-level entries that carry a parseable ts)",
+                provenance,
+            )
+            self.assertIn(
+                "- 5 of 10 kept top-level entries carry no ts field (absent, null or empty) and 3 "
+                "carry an unparseable ts; the no-ts entries by entry type: last-prompt 2, "
+                "assistant 1, mode 1, user 1",
+                provenance,
             )
 
 
@@ -1427,7 +1455,7 @@ class AppendixRenderedIntegrity(unittest.TestCase):
                 "- retained: 2026-09-19T12:00:00Z to 2026-09-23T00:00:00Z",
                 "- decision: 2026-09-21T00:00:00Z to 2026-09-22T00:00:00Z",
                 "Data span observed across turns, tool_events and deliveries: "
-                "2026-09-19T12:00:00+00:00 to 2026-09-21T13:00:30+00:00.",
+                "2026-09-19T12:00:00.000Z to 2026-09-21T13:00:30.000Z.",
                 "Rows skipped from every window, day and span for a NULL or empty ts -- "
                 "turns: 0, tool_events: 0, deliveries: 0.",
                 "Rows skipped from every window, day and span for an unparseable ts -- "
@@ -1655,7 +1683,8 @@ class StrictReadsRaise(unittest.TestCase):
     def test_every_events_meta_counter_read_is_strict(self):
         for key in ("sessions_kept", "sessions_excluded", "tool_events_total",
                     "tool_events_heuristic", "heuristic_via_called_at", "hook_success_only",
-                    "hook_success_twins_dropped", "deliveries_unmapped_session"):
+                    "hook_success_twins_dropped", "deliveries_unmapped_session",
+                    "tool_events_exact", "tool_events_none", "tool_events_not_codescout"):
             with self.subTest(key=key), tempfile.TemporaryDirectory() as tmp:
                 corpus_dir, events_db = self._simple(tmp)
                 conn = sqlite3.connect(str(events_db))
@@ -1771,8 +1800,10 @@ class ProvenanceHeader(unittest.TestCase):
                 "- rendering code: git HEAD " + "c0de" * 10 + " at render time; scripts/measure "
                 "has uncommitted changes",
                 "- repos at freeze (manifest repos): none",
-                "- earliest kept top-level entry ts: 2026-09-20T09:00:00Z (top-level entries "
-                "skipped by this scan: 0 without a ts, 0 with an unparseable ts)",
+                "- earliest kept top-level entry ts: 2026-09-20T09:00:00Z (the minimum over the "
+                "kept top-level entries that carry a parseable ts)",
+                "- 0 of 3 kept top-level entries carry no ts field (absent, null or empty) and 0 "
+                "carry an unparseable ts; the no-ts entries by entry type: none",
                 "- usage DBs: 1 file(s) in the manifest's files, holding 2 usage rows "
                 "(manifest counts)",
                 "Transcript sources, from the manifest's files:",
@@ -1783,7 +1814,8 @@ class ProvenanceHeader(unittest.TestCase):
                 ["01-.claude-sdd", "p", "2", "0"],
             ])
             windows = _prose(_sections(rendered)["## Windows"])
-            self.assertIn(f"- retained: 2026-09-20T09:00:00Z to {created}", windows)
+            end = _plus_one_second(created)
+            self.assertIn(f"- retained: 2026-09-20T09:00:00Z to {end}", windows)
 
             clean = observability.render_map(cov, final, {"head": "c0de" * 10, "dirty": False})
             self.assertIn(
@@ -1793,6 +1825,8 @@ class ProvenanceHeader(unittest.TestCase):
             )
 
     def test_render_map_refuses_a_manifest_the_coverage_was_not_computed_from(self):
+        # Each half of the refusal separately (the round-2 reviewer's X6 dropped the corpus_id
+        # half and survived a bounds-only case): every other manifest field is the real one.
         with tempfile.TemporaryDirectory() as tmp:
             corpus_dir = _make_corpus(pathlib.Path(tmp))
             proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
@@ -1800,13 +1834,21 @@ class ProvenanceHeader(unittest.TestCase):
             events_db = pathlib.Path(tmp) / "events.db"
             join.build_events(corpus_dir, events_db)
             cov = observability.coverage(events_db, corpus_dir)
-            other = _load_manifest(corpus_dir)
-            other["bounds"] = {
+            manifest = _load_manifest(corpus_dir)
+            observability.render_map(cov, manifest, _CODE_VERSION)  # control: the real pair renders
+
+            other_bounds = dict(manifest)
+            other_bounds["bounds"] = {
                 "retained": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2098-01-01T00:00:00Z"},
                 "decision": {"start_utc": "2000-01-01T00:00:00Z", "end_utc": "2098-01-01T00:00:00Z"},
             }
-            with self.assertRaises(ValueError):
-                observability.render_map(cov, other, _CODE_VERSION)
+            other_corpus = dict(manifest)
+            other_corpus["corpus_id"] = "some-other-corpus"
+            for name, other in (("bounds", other_bounds), ("corpus_id", other_corpus)):
+                with self.subTest(differs=name):
+                    with self.assertRaises(ValueError) as ctx:
+                        observability.render_map(cov, other, _CODE_VERSION)
+                    self.assertIn("render_map: coverage was computed for corpus", str(ctx.exception))
 
 
 class RenderingCodeVersionDefault(unittest.TestCase):
@@ -1891,13 +1933,15 @@ class FinalizeBounds(unittest.TestCase):
                 ],
             }})
             created = manifest["created_utc"]
-            created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            # R75: end = floor(created_utc) + 1 s; decision = the 7 days before that end.
+            end = _plus_one_second(created)
+            end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
             expected = {
-                "retained": {"start_utc": "2026-09-20T10:00:00Z", "end_utc": created},
+                "retained": {"start_utc": "2026-09-20T10:00:00Z", "end_utc": end},
                 "decision": {
-                    "start_utc": (created_dt - timedelta(days=7)).astimezone(timezone.utc)
+                    "start_utc": (end_dt - timedelta(days=7)).astimezone(timezone.utc)
                     .strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "end_utc": created,
+                    "end_utc": end,
                 },
             }
             self.assertEqual(
@@ -1931,6 +1975,136 @@ class FinalizeBounds(unittest.TestCase):
             }})
             with self.assertRaises(ValueError):
                 observability.finalize_bounds(corpus_dir)
+
+    def test_a_row_in_the_freezes_final_second_is_inside_the_window(self):
+        # R75: archive._format_iso floors created_utc to the second, so a row written during
+        # the freeze's final second carries a ts >= created_utc. end = floor + 1 s keeps it in.
+        # Deterministic stand-in for the reviewer's probe_floor.py (which raced the real clock):
+        # created_utc is set, and the late row sits 750 ms after it, inside the same second.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))  # created_utc 2026-09-26T00:00:00Z
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            _write_lines(proj / "s1.jsonl", [
+                _entry("e-0", "2026-09-25T23:59:00Z", "s1", content="earlier"),
+                _entry("e-late", "2026-09-26T00:00:00.750Z", "s1", content="same second"),
+            ])
+            bounds = observability.finalize_bounds(corpus_dir)
+            self.assertEqual(bounds, {
+                "retained": {"start_utc": "2026-09-25T23:59:00Z", "end_utc": "2026-09-26T00:00:01Z"},
+                "decision": {"start_utc": "2026-09-19T00:00:01Z", "end_utc": "2026-09-26T00:00:01Z"},
+            })
+            events_db = pathlib.Path(tmp) / "events.db"
+            join.build_events(corpus_dir, events_db)
+            cov = observability.coverage(events_db, corpus_dir)  # R61's end raise stays silent
+            self.assertEqual(cov["fields"]["prompt_interrupt_turns"]["retained"], 2)
+
+    def test_the_end_floors_a_fractional_created_utc(self):
+        # R75's floor: archive never writes a fraction, but a manifest that carries one must not
+        # push the end past floor + 1 s.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = _make_corpus(pathlib.Path(tmp))
+            manifest = _load_manifest(corpus_dir)
+            manifest["created_utc"] = "2026-09-26T00:00:00.400Z"
+            (corpus_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True))
+            proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+            _write_lines(proj / "s1.jsonl", [_entry("e-0", "2026-09-25T23:59:00Z", "s1")])
+            bounds = observability.finalize_bounds(corpus_dir)
+            self.assertEqual(bounds["retained"]["end_utc"], "2026-09-26T00:00:01Z")
+            self.assertEqual(bounds["decision"]["start_utc"], "2026-09-19T00:00:01Z")
+
+    def test_an_earliest_entry_not_before_the_end_raises(self):
+        # The empty-window guard (the round-2 reviewer's X5): the earliest kept entry AT the end
+        # (half-open, so outside) and AFTER it must both refuse, and nothing may be written.
+        for ts in ("2026-09-26T00:00:01Z", "2026-09-27T00:00:00Z"):
+            with self.subTest(ts=ts), tempfile.TemporaryDirectory() as tmp:
+                corpus_dir = _make_corpus(pathlib.Path(tmp))  # created_utc 2026-09-26T00:00:00Z
+                before = (corpus_dir / "manifest.json").read_text()
+                proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+                _write_lines(proj / "s1.jsonl", [_entry("e-0", ts, "s1")])
+                with self.assertRaises(ValueError) as ctx:
+                    observability.finalize_bounds(corpus_dir)
+                self.assertIn("is not before the window end", str(ctx.exception))
+                self.assertEqual((corpus_dir / "manifest.json").read_text(), before)
+
+
+class RowsBeforeRetainedStartRaise(unittest.TestCase):
+    """R76 / Amendment 6(a): coverage() raises when an events-DB row predates retained.start --
+the half of "data falls outside the window" that R61's top-level scan cannot see. The
+reviewer's probe_before_start.py shape: a KEPT session whose subagent turn and usage-row
+delivery predate every top-level entry, with retained.start = the earliest top-level entry."""
+
+    def _corpus(self, tmp, subagent_ts, called_at):
+        bounds = {
+            "retained": {"start_utc": "2026-09-20T10:00:00Z", "end_utc": "2026-09-23T00:00:00Z"},
+            "decision": {"start_utc": "2026-09-21T00:00:00Z", "end_utc": "2026-09-22T00:00:00Z"},
+        }
+        corpus_dir = _make_corpus(pathlib.Path(tmp), bounds=bounds)
+        proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+        _write_lines(proj / "k1.jsonl", [
+            _entry("k1-p1", "2026-09-20T10:00:00Z", "k1", content="hello"),
+            _assistant_text_entry("k1-a1", "2026-09-20T10:00:01Z", "k1"),
+        ])
+        _write_lines(_subagent_dir(corpus_dir, "00-.claude-sdd", "p", "k1") / "agent-1.jsonl", [
+            _entry("k1-s1", subagent_ts, "k1", content="brief"),
+        ])
+        _write_usage_db(corpus_dir, [
+            {"cc_session_id": "k1", "called_at": called_at, "output_json": _OP_RULE_OUTPUT},
+        ])
+        events_db = pathlib.Path(tmp) / "events.db"
+        join.build_events(corpus_dir, events_db)
+        return corpus_dir, events_db
+
+    def test_a_subagent_turn_or_a_delivery_before_the_start_raises(self):
+        for name, sub_ts, called_at in (
+            ("subagent turn", "2026-09-20T09:00:00Z", "2026-09-20 10:30:00"),
+            ("usage delivery", "2026-09-20T10:30:00Z", "2026-09-20 09:30:00"),
+        ):
+            with self.subTest(early=name), tempfile.TemporaryDirectory() as tmp:
+                corpus_dir, events_db = self._corpus(tmp, sub_ts, called_at)
+                # The top-level half is silent: retained.start IS the earliest top-level entry.
+                self.assertEqual(
+                    observability.earliest_kept_top_level_ts(corpus_dir), "2026-09-20T10:00:00Z"
+                )
+                with self.assertRaises(ValueError) as ctx:
+                    observability.coverage(events_db, corpus_dir)
+                self.assertIn("R76: an events-DB row's ts", str(ctx.exception))
+
+    def test_rows_at_the_start_are_inside(self):
+        # Half-open control: a subagent turn and a delivery EXACTLY at retained.start pass.
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir, events_db = self._corpus(tmp, "2026-09-20T10:00:00Z", "2026-09-20 10:00:00")
+            cov = observability.coverage(events_db, corpus_dir)
+            self.assertEqual(cov["data_min_ts"], "2026-09-20T10:00:00.000Z")
+            self.assertEqual(cov["fields"]["subagent_turns"]["retained"], 1)
+            self.assertEqual(cov["fields"]["deliveries_total"]["retained"], 1)
+
+
+class JoinMethodCountsMatchMeta(unittest.TestCase):
+    """R77: the joins-by-method table's row counts must equal events_meta's
+tool_events_exact / _heuristic / _none / _not_codescout; a mismatch raises. Each counter is
+corrupted in turn, so a check covering only some methods is caught."""
+
+    def test_each_corrupted_join_method_counter_raises(self):
+        for method in ("exact", "heuristic", "none", "not_codescout"):
+            with self.subTest(method=method), tempfile.TemporaryDirectory() as tmp:
+                corpus_dir = _make_corpus(pathlib.Path(tmp))
+                proj = _session_dir(corpus_dir, "00-.claude-sdd", "p")
+                _write_lines(proj / "sid1.jsonl", [
+                    _agent_tool_use_entry("t1", "2026-09-20T10:00:00Z", "sid1"),
+                ])
+                events_db = pathlib.Path(tmp) / "events.db"
+                join.build_events(corpus_dir, events_db)
+                observability.coverage(events_db, corpus_dir)  # control: consistent meta passes
+                conn = sqlite3.connect(str(events_db))
+                conn.execute(
+                    "UPDATE events_meta SET value = value + 1 WHERE key = ?",
+                    (f"tool_events_{method}",),
+                )
+                conn.commit()
+                conn.close()
+                with self.assertRaises(ValueError) as ctx:
+                    observability.coverage(events_db, corpus_dir)
+                self.assertIn(f"events_meta.tool_events_{method}", str(ctx.exception))
 
 
 if __name__ == "__main__":

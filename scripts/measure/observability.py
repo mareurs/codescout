@@ -20,12 +20,16 @@ Fix round 2 (rulings R68-R71):
   join method, delivery source) is a subscript, never `.get(..., default)`. A missing key RAISES;
   only a PRESENT 0 renders 0. A closed-set value the build emits but this module does not declare
   also raises, so a schema change cannot silently drop rows from a table. (A raw transcript
-  entry's optional fields -- uuid, timestamp -- are source data, not keys this module owns, and
-  are the only `.get` reads left.)
+  entry's optional fields -- uuid, timestamp, type -- are source data, not keys this module
+  owns, and are the only `.get` reads left.)
 - R71, windows: every membership test is the one half-open predicate `_in_window`, [start, end).
   NULL and unparseable ts rows are skipped and counted, per table and per cause, and rendered.
 - R69, deliveries count DELIVERED ITEMS, not table rows (`_is_delivered_item`).
 - R68, the header is rendered from data plus one fixed rule sentence (PROVISIONAL_SENTENCE).
+
+Fix round 3 (rulings R75-R77): finalize_bounds ends both windows at floor(created_utc) + 1 s
+(R75); coverage() also raises on an events-DB row before retained.start (R76) and on a
+joins-by-method row count that disagrees with events_meta (R77).
 
 Run: ~/work/claude/prompt-engineering/.venv/bin/python -m pytest tests/test_measure_observability.py -v
 """
@@ -252,6 +256,11 @@ def _iso_z(dt):
     return dt.strftime("%Y-%m-%dT%H:%M:%S") + frac + "Z"
 
 
+def _iso_ms_z(dt):
+    """The events DB's canonical ts form (join._fmt_ts): "YYYY-MM-DDTHH:MM:SS.mmmZ"."""
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
+
+
 def _windows_from_bounds(bounds):
     """{"retained": (start, end), "decision": (start, end)} from manifest.bounds, strictly: a
     missing key raises KeyError, and an unset (None/empty) bound raises ValueError."""
@@ -271,23 +280,27 @@ def _windows_from_bounds(bounds):
 def _earliest_kept_top_level(sessions_list, excl):
     """R71: the earliest ts over every entry of every KEPT session's top-level transcript (the
     sessions transcripts.exclusions() does not exclude). Returns {"ts": the raw ts string of
-    that entry, "entries_without_ts": n, "entries_unparseable_ts": m}; entries without a ts or
-    with an unparseable one are skipped and counted, never fed to min(). "ts" is None when no
-    kept top-level entry has a parseable ts. The single implementation behind both
+    that entry, "entries_total": every kept top-level entry scanned, "entries_without_ts": those
+    whose ts field is absent, null or empty, "entries_without_ts_by_type": {entry type: count}
+    over those, "entries_unparseable_ts": those whose ts join.utc cannot read}. Entries without a
+    parseable ts are skipped and counted, never fed to min(). "ts" is None when no kept
+    top-level entry has a parseable ts. The single implementation behind both
     earliest_kept_top_level_ts() and coverage()."""
     best_dt = None
     best_raw = None
-    without_ts = 0
+    total = 0
+    without_ts_by_type = collections.Counter()
     unparseable = 0
     for s in sessions_list:
         if transcripts.copy_id(s) in excl:
             continue
         entries, _skipped = transcripts.read_jsonl(s.path)
         for e in entries:
+            total += 1
             raw = e.get("timestamp")
             dt, why = _parse_ts(raw)
             if why == "null":
-                without_ts += 1
+                without_ts_by_type[str(e.get("type"))] += 1
                 continue
             if why == "unparseable":
                 unparseable += 1
@@ -296,7 +309,9 @@ def _earliest_kept_top_level(sessions_list, excl):
                 best_dt, best_raw = dt, raw
     return {
         "ts": best_raw,
-        "entries_without_ts": without_ts,
+        "entries_total": total,
+        "entries_without_ts": sum(without_ts_by_type.values()),
+        "entries_without_ts_by_type": dict(without_ts_by_type),
         "entries_unparseable_ts": unparseable,
     }
 
@@ -317,26 +332,35 @@ def earliest_kept_top_level_ts(corpus_dir):
 
 
 def finalize_bounds(corpus_dir):
-    """R71: set manifest.bounds from data and rewrite corpus_dir/manifest.json. retained =
-    [earliest_kept_top_level_ts, manifest.created_utc) and decision = [created_utc - 7 days,
-    created_utc). archive.freeze writes created_utc AFTER copying every file, so no copied ts can
-    fall at or after it. Task 12 calls this right after archive.freeze. Returns the bounds."""
+    """R71/R75: set manifest.bounds from data and rewrite corpus_dir/manifest.json. With
+    end = floor(manifest.created_utc) + 1 s: retained = [earliest_kept_top_level_ts, end) and
+    decision = [end - 7 days, end). Task 12 calls this right after archive.freeze. Returns the
+    bounds.
+
+    The guarantee, and why the + 1 s: archive.freeze takes created_utc AFTER copying every file,
+    but archive._format_iso floors it to the second. A row written during the freeze's final
+    second is copied yet can carry a ts >= created_utc (reproduced 5/5 by the round-2 reviewer's
+    probe_floor.py). Every copied ts is earlier than the instant created_utc was read, which is
+    earlier than floor(created_utc) + 1 s -- provided the writers' clock is the freezing host's.
+    RAISES ValueError if the earliest kept entry is not before that end (an empty window)."""
     corpus_dir = pathlib.Path(corpus_dir)
     manifest_path = corpus_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
     created = manifest["created_utc"]
-    end_dt = join.utc(created)
+    end_dt = join.utc(created).replace(microsecond=0) + timedelta(seconds=1)
+    end = _iso_z(end_dt)
     start = earliest_kept_top_level_ts(corpus_dir)
     if not join.utc(start) < end_dt:
         raise ValueError(
             f"finalize_bounds: the earliest kept top-level entry ({start}) is not before the "
-            f"freeze instant ({created}), so the retained window would be empty."
+            f"window end ({end}, the freeze instant {created} floored + 1 s), so the retained "
+            "window would be empty."
         )
     bounds = {
-        "retained": {"start_utc": start, "end_utc": created},
+        "retained": {"start_utc": start, "end_utc": end},
         "decision": {
             "start_utc": _iso_z(end_dt - timedelta(days=DECISION_WINDOW_DAYS)),
-            "end_utc": created,
+            "end_utc": end,
         },
     }
     manifest["bounds"] = bounds
@@ -678,7 +702,10 @@ def coverage(events_db, corpus_dir):
       (R64; the reviewer's swap fixture trips it). The excluded cids and the kept cids partition
       the sessions, so the subset check also rules out an excluded cid in turns.sid;
     - manifest.bounds is unset, or retained.start_utc is later than the earliest kept top-level
-      entry, or any observed ts is at or after retained.end_utc (R61, half-open per R71);
+      entry, or any observed ts is at or after retained.end_utc (R61, half-open per R71), or any
+      events-DB row's ts is before retained.start_utc (R76);
+    - a tool_events join_method row count disagrees with events_meta's tool_events_<method>
+      counter (R77);
     - a turn kind, join method or delivery source is outside its declared set (R70).
 
     RAISES KeyError if a _BASE_TABLE cell names a field with no window-count dispatcher branch
@@ -744,6 +771,24 @@ def coverage(events_db, corpus_dir):
                 f"manifest.bounds.retained.end_utc ({retained_end.isoformat()}) -- the "
                 "half-open retained window must cover every observed ts."
             )
+        # R76 / Amendment 6(a): the other half of "coverage raises when data falls outside the
+        # window" -- an events-DB row (a subagent turn, a usage-row delivery) can predate every
+        # top-level entry, which the R61 start check above cannot see.
+        if win["data_min"] is not None and win["data_min"] < retained_start:
+            raise ValueError(
+                f"R76: an events-DB row's ts ({win['data_min'].isoformat()}) is before "
+                f"manifest.bounds.retained.start_utc ({retained_start.isoformat()}) -- the "
+                "retained window must cover every observed ts."
+            )
+        # R77: the joins-by-method table's row counts must equal build_events' own counters.
+        for method in JOIN_METHODS:
+            persisted = int(meta[f"tool_events_{method}"])
+            if win["tool_events_by_method"][method] != persisted:
+                raise ValueError(
+                    f"R77: tool_events has {win['tool_events_by_method'][method]} rows with "
+                    f"join_method {method!r}, but events_meta.tool_events_{method} records "
+                    f"{persisted} -- the table and the build's counters disagree."
+                )
 
         tool_events_total_count = int(meta["tool_events_total"])
         heuristic_total = int(meta["tool_events_heuristic"])
@@ -826,8 +871,8 @@ def coverage(events_db, corpus_dir):
             "manifest_bounds": bounds,
             "meta": dict(meta),
             "earliest_kept_top_level": earliest,
-            "data_min_ts": win["data_min"].isoformat() if win["data_min"] else None,
-            "data_max_ts": win["data_max"].isoformat() if win["data_max"] else None,
+            "data_min_ts": _iso_ms_z(win["data_min"]) if win["data_min"] else None,
+            "data_max_ts": _iso_ms_z(win["data_max"]) if win["data_max"] else None,
             "skipped_ts": win["skipped_ts"],
             "tool_events_by_method": win["tool_events_by_method"],
             "tool_events_by_day": win["tool_events_by_day"],
@@ -1007,9 +1052,18 @@ def render_map(coverage, manifest, code_version=None):
     lines.append(f"- repos at freeze (manifest repos): {repo_bits}")
     earliest_ts = earliest["ts"] if earliest["ts"] is not None else "none, no kept entry has one"
     lines.append(
-        f"- earliest kept top-level entry ts: {earliest_ts} (top-level entries skipped by "
-        f"this scan: {earliest['entries_without_ts']} without a ts, "
-        f"{earliest['entries_unparseable_ts']} with an unparseable ts)"
+        f"- earliest kept top-level entry ts: {earliest_ts} (the minimum over the kept top-level "
+        "entries that carry a parseable ts)"
+    )
+    by_type = earliest["entries_without_ts_by_type"]
+    histogram = ", ".join(
+        f"{t} {by_type[t]}" for t in sorted(by_type, key=lambda t: (-by_type[t], t))
+    ) or "none"
+    lines.append(
+        f"- {earliest['entries_without_ts']} of {earliest['entries_total']} kept top-level "
+        "entries carry no ts field (absent, null or empty) and "
+        f"{earliest['entries_unparseable_ts']} carry an unparseable ts; the no-ts entries by "
+        f"entry type: {histogram}"
     )
     lines.append(
         f"- usage DBs: {sources['usage_db_files']} file(s) in the manifest's files, holding "
