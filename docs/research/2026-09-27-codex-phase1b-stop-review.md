@@ -82,7 +82,7 @@ Accepted counterexample rows cover `closed_population` (44), `d_adjacency` (1), 
 
 ## Code defect fixed: wrappers erase failure status
 
-Bug: `docs/issues/2026-09-27-codex-phase1b-shell-failures-return-success.md` (`0614080cf4efbb1f`).
+Bug: `docs/issues/archive/2026-09-27-codex-phase1b-shell-failures-return-success.md` (`e76b043bbdd97622`).
 
 - `stage2/lanes.sh`: a failed training child was followed by successful echoes; background lane status was discarded by bare `wait`; the script returned zero. The fix accumulates failures inside each lane, returns the lane result, waits for both explicit PIDs, and returns the aggregate status.
 - `stage2/step4.sh`: failed scoring/calibration children set `fail=1` but the final echo returned zero. A failing common-menu child did not set `fail` at all. Both results now reach the process exit status.

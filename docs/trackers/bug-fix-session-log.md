@@ -17078,7 +17078,7 @@ At that point `df` showed 64G free, and no process was still building into a leg
 
 **Valid:** dated 2026-09-27
 
-**Rests on:** `docs/issues/2026-09-27-codex-phase1b-shell-failures-return-success.md`; `docs/evals/data/2026-09-24-rule-tell/phase1b/codex-stop-review/shell-verification.json`; `run-status-checks.json` in the same directory.
+**Rests on:** `docs/issues/archive/2026-09-27-codex-phase1b-shell-failures-return-success.md`; `docs/evals/data/2026-09-24-rule-tell/phase1b/codex-stop-review/shell-verification.json`; `run-status-checks.json` in the same directory.
 
 **Handoff:** `docs/research/2026-09-27-codex-phase1b-stop-review.md` records the code fixes, new ranking/calibration measurements, and a bounded next-step recommendation.
 

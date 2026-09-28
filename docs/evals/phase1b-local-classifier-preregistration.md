@@ -600,7 +600,7 @@ Predictions 1–5 are the text committed in `2e4743e0`, before Step 4's smoke ru
 
 ### After the campaign: a Codex review, 2026-09-27
 
-**The runners' exit status.** A Codex review (`docs/research/2026-09-27-codex-phase1b-stop-review.md`) found that `stage2/lanes.sh`, `step4.sh` and `step5.sh` exit 0 even when a child fails. Each ends on an `echo`, and `lanes.sh`'s bare `wait` discards both lanes' statuses. The bug is `0614080cf4efbb1f` (`bug-fix-session-log:F-177`).
+**The runners' exit status.** A Codex review (`docs/research/2026-09-27-codex-phase1b-stop-review.md`) found that `stage2/lanes.sh`, `step4.sh` and `step5.sh` exit 0 even when a child fails. Each ends on an `echo`, and `lanes.sh`'s bare `wait` discards both lanes' statuses. The bug is `e76b043bbdd97622` (archived 2026-09-28; `bug-fix-session-log:F-177`).
 - **The committed copies were edited after the run** so that they exit non-zero after a failed child.
 - **The as-run bytes are preserved:** `lanes.sh` and `step4.sh` in `08a5544e`, and `step5.sh` in `5a477c51`. They are also in `~/work/claude/rule-tell-runs/phase1b-s2/`.
 - **No result changes.** Every child of the recorded run exited 0: 6 of 6 in `lanes.log`, 19 of 19 in `step4.log` and 10 of 10 in `step5.log`.

@@ -1,7 +1,7 @@
 ---
-id: '0614080cf4efbb1f'
+id: e76b043bbdd97622
 kind: bug
-status: fixed
+status: archived
 title: 'Codex: Phase1b shell runners return success after child failure'
 owners:
 - codex
@@ -12,7 +12,6 @@ tags:
 closed: 2026-09-27
 opened: 2026-09-27
 severity: medium
-unverified: Working-tree fix verified with focused shell regression tests and applied mutations; integration and a fresh whole-repository gate are not claimed.
 ---
 
 ## Summary
@@ -36,6 +35,8 @@ Fixed in the working tree: preserve per-lane failures through explicit PID waits
 Evidence and reproduction: `docs/evals/data/2026-09-24-rule-tell/phase1b/codex-stop-review/shell-verification.json` and `verify_shell_fixes.py`. Review: `docs/research/2026-09-27-codex-phase1b-stop-review.md`.
 
 No models, training jobs, held-out evaluations, or full Rust gate rerun. **Committed in `c991f226`, patch-id `f0bd8c00dafbb5ece2e7e98a445af9f9d7f9559a`**, after the integrating session re-observed a red (removing `step5.sh`'s final `exit "$fail"` fails 2 of the 8 tests). The historical outputs are unchanged; the as-run script bytes are in `08a5544e` and `5a477c51`. Archive after the applicable repository gate.
+
+**Verified 2026-09-28, then archived** by the integrating session (`82cff72e`). `./scripts/gate.sh` ran in a leased slot and returned `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`. That covers the repository and never runs this fix's own test, which is Python. So the regression suite was run separately at HEAD (`fd6291a2`): `python3 -m unittest discover -s tests -p test_phase1b_stage2_shell.py` reported `Ran 8 tests ... OK`.
 
 ## References
 
