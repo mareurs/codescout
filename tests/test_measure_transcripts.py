@@ -1175,8 +1175,10 @@ class OperatorRejections(unittest.TestCase):
 
     def test_a_marker_bearing_tool_result_whose_is_error_is_not_true_yields_none(self):
         # R127: is_error must be True. LOAD-BEARING: a real-shaped marker-bearing tool_result, so
-        # the type guard and the marker check both admit it -- only is_error can refuse it.
-        for label, flag in (("is_error False", {"is_error": False}), ("is_error absent", {})):
+        # the type guard and the marker check both admit it -- only is_error can refuse it. The
+        # truthy string is unreal and pins "== True", not mere truthiness.
+        for label, flag in (("is_error False", {"is_error": False}), ("is_error absent", {}),
+                            ("is_error the truthy string 'true'", {"is_error": "true"})):
             with self.subTest(label):
                 block = {"type": "tool_result", "tool_use_id": "t1", "content": self._REJECTED}
                 block.update(flag)
