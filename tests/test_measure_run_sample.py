@@ -209,6 +209,12 @@ class Frame(Base):
                             "packet.py": hashlib.sha256((MEASURE / "packet.py").read_bytes()).hexdigest()}})
         self.assertEqual(json.loads(out), COUNTS)  # what is printed is the counts, and only them
 
+    def test_the_kind_and_stratum_vocabularies_match_what_frame_produces(self):
+        units = sampler.frame(self.corpus, excluded_sids=set())
+        self.assertEqual({u.kind for u in units}, set(run.KINDS))
+        self.assertEqual(run.STRATA, sampler.STRATA)
+        self.assertEqual({u.stratum for u in units}, set(run.STRATA))
+
     def test_frame_refuses_an_existing_out_file_and_an_empty_corpus(self):
         p = self.root / "frame.json"
         p.write_text("first evidence")
@@ -720,7 +726,7 @@ class SetGuards(Base):
         rc, out, err = cli("estimate", "--set", set_dir, "--frame", self.frame_file(), "--seed", 1,
                            "--out", self.root / "r.json")
         self.assertEqual(rc, 1)
-        self.assertIn(f"duplicate label for case_id '{recs[-1]['case_id']}'", err)
+        self.assertEqual(err, f"error: duplicate label for case_id '{recs[-1]['case_id']}'; nothing written\n")
         self.assertFalse((self.root / "r.json").exists())
 
     def test_export_writes_nothing_when_only_one_target_exists(self):
@@ -832,6 +838,77 @@ class SetGuards(Base):
         self.assertNotIn(sid_for(3), out + err)
         self.assertFalse((set_dir / "packets").exists())
         self.assertIsNone(json.loads(read(set_dir / "draw.json"))["cases"][0]["sha256"])
+
+    def test_a_duplicated_case_entry_in_draw_json_is_refused_at_load(self):
+        set_dir = self.rendered()
+        write_labels(set_dir, sub_hits=4, rou_hits=1)
+        draw = json.loads(read(set_dir / "draw.json"))
+        draw["cases"].append(dict(draw["cases"][0]))  # the same case listed twice; key.json still agrees as a set
+        (set_dir / "draw.json").write_text(json.dumps(draw))
+        repo = self.root / "fakerepo"
+        repo.mkdir()
+        attempts = {"render": ("render", "--corpus", self.corpus, "--set", set_dir),
+                    "estimate": ("estimate", "--set", set_dir, "--frame", self.frame_file(), "--seed", 1,
+                                 "--out", self.root / "r.json"),
+                    "export": ("export", "--set", set_dir, "--out-dir", repo / "data")}
+        with mock.patch.object(run.archive, "REPO_ROOT", repo):
+            for name, argv in attempts.items():
+                rc, out, err = cli(*argv)
+                self.assertEqual(rc, 1, name)
+                self.assertEqual(err, f"error: {set_dir}: draw.json lists a case more than once\n", name)
+        self.assertFalse((self.root / "r.json").exists())
+
+    def test_a_failing_corpus_read_never_quotes_the_exception_text(self):
+        set_dir = self.draw("main", 11, 6, 4)
+        secret = sid_for(4)
+        boom = ValueError(f"cannot read work/{secret}")
+        attempts = {"render": ("render", "--corpus", self.corpus, "--set", set_dir),
+                    "draw": ("draw", "--corpus", self.corpus, "--set", self.root / "d2", "--seed", 1,
+                             "--substantive", 1, "--routine", 1),
+                    "frame": ("frame", "--corpus", self.corpus, "--out", self.root / "f2.json")}
+        for name, argv in attempts.items():
+            with self.subTest(name):
+                with mock.patch.object(run.sampler, "frame", side_effect=boom):
+                    rc, out, err = cli(*argv)
+                self.assertEqual((rc, out), (1, ""))
+                self.assertEqual(err, "error: the corpus could not be read (ValueError); nothing written\n")
+                self.assertNotIn(secret, out + err)
+        self.assertFalse((self.root / "d2").exists() or (self.root / "f2.json").exists())
+        self.assertFalse((set_dir / "packets").exists())
+
+    def test_estimate_refuses_an_orphan_or_duplicate_relabel(self):
+        set_dir = self.rendered()
+        recs = write_labels(set_dir, sub_hits=4, rou_hits=1, drop_sub=1)  # the last substantive case is unlabelled
+        unlabelled = next(c for c in json.loads(read(set_dir / "draw.json"))["order"]
+                          if c not in {r["case_id"] for r in recs} and
+                          json.loads(read(set_dir / "key.json"))[c]["stratum"] == "substantive")
+        sha = {c["case_id"]: c["sha256"] for c in json.loads(read(set_dir / "draw.json"))["cases"]}
+        frame = self.frame_file()
+        for name, relabels, message in (
+                ("orphan", [dict(recs[0], case_id=unlabelled, packet_sha256=sha[unlabelled])],
+                 f"orphan relabel for case_id '{unlabelled}'"),
+                ("duplicate", [recs[0], recs[0]], f"duplicate relabel for case_id '{recs[0]['case_id']}'")):
+            with self.subTest(name):
+                (set_dir / "relabels.jsonl").write_text("".join(json.dumps(r) + "\n" for r in relabels))
+                rc, out, err = cli("estimate", "--set", set_dir, "--frame", frame, "--seed", 1,
+                                   "--out", self.root / f"r-{name}.json")
+                self.assertEqual(rc, 1)
+                self.assertIn(f"error: {message}", err)
+                self.assertFalse((self.root / f"r-{name}.json").exists())
+
+    def test_estimate_refuses_an_unknown_stratum_in_key_json(self):
+        # reaches the estimator's own ValueError (the handler around it is otherwise unreachable)
+        set_dir = self.rendered()
+        write_labels(set_dir, sub_hits=4, rou_hits=1)
+        key = json.loads(read(set_dir / "key.json"))
+        cid = next(iter(key))
+        key[cid]["stratum"] = "other"
+        (set_dir / "key.json").write_text(json.dumps(key))
+        rc, out, err = cli("estimate", "--set", set_dir, "--frame", self.frame_file(), "--seed", 1,
+                           "--out", self.root / "r.json")
+        self.assertEqual(rc, 1)
+        self.assertIn(f"case '{cid}' has unknown stratum", err)
+        self.assertFalse((self.root / "r.json").exists())
 
 
 
@@ -1081,6 +1158,90 @@ class Export(Base):
         self.assertEqual(rc, 1)
         self.assertEqual(err, "error: main-labels.jsonl: record 0 is not an object; nothing exported\n")
         self.assertFalse(self.out_dir.exists())
+
+    def test_export_validates_the_draw_manifest_values(self):
+        key_path, draw_path, labels_path = (self.set_dir / n for n in ("key.json", "draw.json", "labels.jsonl"))
+        saved = {p: read(p) for p in (key_path, draw_path, labels_path)}
+        cid, good_sha = EXPORT_CASES[0][0], EXPORT_CASES[0][1]
+        secret = json.loads(saved[key_path])[cid]["case_key"]  # holds a session id
+        # positive control first: the untouched set exports, and seed / sha / stratum / kind ARE in the manifest
+        rc, out, err = self.export(self.fake_repo / "control")
+        self.assertEqual((rc, err), (0, ""))
+        manifest = json.loads(read(self.fake_repo / "control" / "main-draw.json"))
+        self.assertEqual(manifest["seed"], 11)
+        self.assertEqual(manifest["cases"][0], {"case_id": cid, "sha256": good_sha, "stratum": "substantive",
+                                                "kind": "top"})
+        bad_sha = {"case_key": secret, "uppercase": good_sha.upper(), "63 chars": good_sha[:63],
+                   "65 chars": good_sha + "0", "not hex": "g" * 64, "an int": 7, "a 64-digit int": int("1" * 64), "a list": [good_sha]}
+        cases = [("seed", "draw.json: field seed is invalid; nothing exported", "draw.json",
+                  lambda d, k, v: d.update(seed=v), [secret, True, 11.0, None, [11]])]
+        cases += [("sha256", f"draw.json: case {cid}: field sha256 is invalid; nothing exported", "draw.json",
+                   lambda d, k, v: d["cases"][0].update(sha256=v), list(bad_sha.values()))]
+        cases += [("stratum", f"draw.json: case {cid}: field stratum is invalid; nothing exported", "key.json",
+                   lambda d, k, v: k[cid].update(stratum=v), [secret, "other", "", None])]
+        cases += [("kind", f"draw.json: case {cid}: field kind is invalid; nothing exported", "key.json",
+                   lambda d, k, v: k[cid].update(kind=v), [secret, "other", "", None])]
+        cases += [("set_id", "draw.json's set_id is not a plain file name", "draw.json",
+                   lambda d, k, v: d.update(set_id=v), [secret, "../escape", ".hidden", "", ["main"], None])]
+        for field, message, _, mutate, values in cases:
+            for value in values:
+                with self.subTest(field=field, value=type(value).__name__ + str(value)[:12]):
+                    draw, key = json.loads(saved[draw_path]), json.loads(saved[key_path])
+                    mutate(draw, key, value)
+                    draw_path.write_text(json.dumps(draw))
+                    key_path.write_text(json.dumps(key))
+                    # a label edited to carry the SAME bad hash, so only the manifest check can refuse it
+                    recs = [json.loads(l) for l in saved[labels_path].splitlines()]
+                    recs = [dict(r, packet_sha256=value) if field == "sha256" and r["case_id"] == cid else r
+                            for r in recs]
+                    labels_path.write_text("".join(json.dumps(r) + "\n" for r in recs))
+                    rc, out, err = self.export()
+                    self.assertEqual((rc, err), (1, f"error: {message}\n"))
+                    self.assertNotIn(secret, out + err)
+                    self.assertFalse(self.out_dir.exists())
+        for p, text in saved.items():
+            p.write_text(text)
+        self.assertEqual(self.export()[0], 0)  # restored: exports again
+
+    def test_export_seconds_are_bounded_on_both_sides(self):
+        first, rest = self.recs[0], "".join(read(self.set_dir / "labels.jsonl").splitlines(keepends=True)[1:])
+        for value, accepted in ((86400 * 7 - 1, True), (86400 * 7 - 0.5, True), (0, True),
+                                (86400 * 7, False), (86400 * 7 + 0.5, False), (10 ** 400, False),
+                                (int(sid_for(1).replace("-", ""), 16), False)):  # a UUID encoded as an int
+            with self.subTest(value=str(value)[:12]):
+                out_dir = self.fake_repo / f"s{len(str(value))}-{str(value)[:6]}"
+                (self.set_dir / "labels.jsonl").write_text(json.dumps(dict(first, seconds=value)) + "\n" + rest)
+                rc, out, err = self.export(out_dir)
+                if accepted:
+                    self.assertEqual((rc, err), (0, ""))
+                    self.assertEqual(json.loads(read(out_dir / "main-labels.jsonl").splitlines()[0])["seconds"], value)
+                else:
+                    self.assertEqual((rc, err), (1, f"error: main-labels.jsonl: case {first['case_id']}: field "
+                                                    f"seconds is invalid; nothing exported\n"))
+                    self.assertFalse(out_dir.exists())
+
+    def test_export_refuses_duplicate_and_orphan_records(self):
+        labels_path, relabels_path = self.set_dir / "labels.jsonl", self.set_dir / "relabels.jsonl"
+        lines = read(labels_path).splitlines(keepends=True)
+        cid0, cid_late = self.recs[0]["case_id"], self.recs[6]["case_id"]
+        # positive control: a relabel of a labelled case exports
+        relabels_path.write_text(lines[0])
+        rc, out, err = self.export(self.fake_repo / "ok")
+        self.assertEqual((rc, out, err), (0, "exported 10 cases, 10 labels, 1 relabels\n", ""))
+        attempts = {
+            "duplicate label": ("".join(lines) + lines[0], "", f"duplicate label for case_id '{cid0}'"),
+            "orphan relabel": ("".join(lines[:4]), lines[6], f"orphan relabel for case_id '{cid_late}'"),
+            "duplicate relabel": ("".join(lines), lines[0] + lines[0], f"duplicate relabel for case_id '{cid0}'"),
+        }
+        for name, (labels_text, relabels_text, message) in attempts.items():
+            with self.subTest(name):
+                labels_path.write_text(labels_text)
+                relabels_path.write_text(relabels_text)
+                rc, out, err = self.export()
+                self.assertEqual(rc, 1)
+                self.assertIn(f"error: {message}", err)
+                self.assertIn("nothing written", err)
+                self.assertFalse(self.out_dir.exists())
 
 
     def test_export_relabels_are_whitelisted_too(self):

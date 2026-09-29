@@ -38,7 +38,6 @@ import argparse
 import contextlib
 import hashlib
 import json
-import math
 import os
 import pathlib
 import random
@@ -56,7 +55,12 @@ import packet  # noqa: E402
 import sampler  # noqa: E402
 
 BOOTSTRAP_SAMPLES = 10000
-STRATA = ("substantive", "routine")
+STRATA = sampler.STRATA
+# sampler.frame emits exactly these two unit kinds as string literals (no constant exists there); a test
+# pins this tuple to what frame() really produces so it cannot drift.
+KINDS = ("top", "handback")
+MAX_SECONDS = 86400 * 7  # a labelling time of a week or more is not a labelling time
+_HEX64 = re.compile(r"[0-9a-f]{64}")
 LABEL_EXPORT_FIELDS = ("case_id", "packet_sha256", "labels", "delivery", "recall", "seconds")
 _SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _CASE_ID = re.compile(r"[0-9a-f]{10}")
@@ -194,15 +198,48 @@ def _load_set(set_dir):
         if not _CASE_ID.fullmatch(c["case_id"]) or c["case_id"] not in key:
             raise Refused(f"{set_dir}: draw.json names a case_id key.json does not hold")
     drawn_ids = {c["case_id"] for c in draw["cases"]}
+    if len(draw["cases"]) != len(drawn_ids):
+        raise Refused(f"{set_dir}: draw.json lists a case more than once")
     if set(key) != drawn_ids:
         raise Refused(f"{set_dir}: key.json holds {len(set(key) - drawn_ids)} case(s) draw.json does not; "
                       f"the two must name the same cases")
     return set_dir, draw, key
 
 
+def _frame_units(corpus):
+    """sampler.frame, with any failure reduced to its TYPE: the exception text may quote a session id."""
+    try:
+        return sampler.frame(corpus)
+    except Exception as e:
+        raise Refused(f"the corpus could not be read ({type(e).__name__}); nothing written") from None
+
+
+def _check_population(labels, relabels):
+    """The population rules estimate and export share: a case is labelled once, relabelled at most once,
+    and only a labelled case is relabelled. Messages name the case_id, which is opaque."""
+    seen = set()
+    for r in labels:
+        if r["case_id"] in seen:
+            raise Refused(f"duplicate label for case_id '{r['case_id']}'; nothing written")
+        seen.add(r["case_id"])
+    again = set()
+    for r in relabels:
+        if r["case_id"] not in seen:
+            raise Refused(f"orphan relabel for case_id '{r['case_id']}' that was never labelled; nothing written")
+        if r["case_id"] in again:
+            raise Refused(f"duplicate relabel for case_id '{r['case_id']}'; nothing written")
+        again.add(r["case_id"])
+
+
+def _valid_seconds(v):
+    """A real, non-bool number in [0, MAX_SECONDS). NaN, inf and 10**400 all fail the comparison itself."""
+    return not isinstance(v, bool) and isinstance(v, (int, float)) and 0 <= v < MAX_SECONDS
+
+
+
 def _cmd_frame(args):
     corpus = pathlib.Path(args.corpus)
-    units = sampler.frame(corpus)
+    units = _frame_units(corpus)
     if not units:
         raise Refused(f"{corpus} has no units; refusing to freeze an empty frame")
     counts = sampler.frame_counts(units)
@@ -233,7 +270,7 @@ def _cmd_draw(args):
     if not _SAFE_NAME.fullmatch(set_dir.name):
         raise Refused(f"set name {set_dir.name!r} is not a plain file name (letters, digits, . _ -)")
     exclude = _excluded_case_keys(args.exclude_set) if args.exclude_set else set()
-    units = sampler.frame(args.corpus)
+    units = _frame_units(args.corpus)
     absent = exclude - {u.case_key for u in units}
     if absent:
         raise Refused(f"--exclude-set holds {len(absent)} case_key(s) that are not in this frame; the pilot must "
@@ -270,7 +307,7 @@ def _cmd_render(args):
     set_dir, draw, key = _load_set(args.set)
     if any(c["sha256"] for c in draw["cases"]):
         raise Refused(f"{set_dir} is already rendered; labels bind to its packet hashes, so it is not re-rendered")
-    by_key = {u.case_key: u for u in sampler.frame(args.corpus)}
+    by_key = {u.case_key: u for u in _frame_units(args.corpus)}
     built = []
     for c in draw["cases"]:
         cid = c["case_id"]
@@ -338,6 +375,7 @@ def _cmd_estimate(args):
     if labelled["substantive"] > drawn["substantive"]:  # the invariant the `==` below relies on, stated
         raise Refused(f"{labelled['substantive']} substantive label records for {drawn['substantive']} substantive "
                       f"cases drawn (a case labelled twice?); refusing to estimate")
+    _check_population(labels, relabels)
     try:
         est = estimator.estimate(labels, key, frame["counts"], args.seed, relabels or None, b=BOOTSTRAP_SAMPLES)
     except ValueError as e:  # a duplicate label or relabel: refuse, do not crash
@@ -373,6 +411,8 @@ def _check_record(fname, i, r, sha):
     if not isinstance(r, dict):
         raise Refused(f"{fname}: record {i} is not an object; nothing exported")
     cid = r.get("case_id")
+    # Deliberate redundancy on the only seam into committed data: the 10-hex shape below is implied by
+    # `cid in sha` (_load_set shape-checks every draw.json id), so it is mutation-inert by construction.
     if not (isinstance(cid, str) and _CASE_ID.fullmatch(cid) and cid in sha):
         raise Refused(f"{fname}: record {i}: field case_id is not a case of this draw; nothing exported")
 
@@ -384,6 +424,8 @@ def _check_record(fname, i, r, sha):
     if r.get("delivery") not in label.DELIVERIES:
         bad("delivery")
     labels = r.get("labels")
+    # Deliberate redundancy on the same seam: label.validate below also rejects any label outside
+    # LABEL_KEYS, so the subset test is mutation-inert by construction (the isinstance(list) part is not).
     if not isinstance(labels, list) or any(l not in estimator.LABEL_KEYS for l in labels):
         bad("labels")
     try:
@@ -392,8 +434,7 @@ def _check_record(fname, i, r, sha):
         bad("labels")
     if r.get("recall") not in ("y", "n"):
         bad("recall")
-    secs = r.get("seconds")
-    if isinstance(secs, bool) or not isinstance(secs, (int, float)) or not math.isfinite(secs) or secs < 0:
+    if not _valid_seconds(r.get("seconds")):
         bad("seconds")
     return {k: r[k] for k in LABEL_EXPORT_FIELDS}
 
@@ -414,16 +455,25 @@ def _cmd_export(args):
                       f"must be inside it") from None
     set_dir, draw, key = _load_set(args.set)
     set_id = draw["set_id"]
-    if not _SAFE_NAME.fullmatch(set_id):
+    if not (isinstance(set_id, str) and _SAFE_NAME.fullmatch(set_id)):
         raise Refused("draw.json's set_id is not a plain file name")
     sha = {c["case_id"]: c["sha256"] for c in draw["cases"]}
     if not all(sha.values()):
         raise Refused(f"{set_dir} is not rendered (draw.json holds no packet hashes); run render first")
+    # The draw manifest's own values, validated like the records: they are copied into committed data.
+    if isinstance(draw["seed"], bool) or not isinstance(draw["seed"], int):
+        raise Refused("draw.json: field seed is invalid; nothing exported")
+    for cid, digest in sha.items():
+        for field, ok in (("sha256", isinstance(digest, str) and _HEX64.fullmatch(digest)),
+                          ("stratum", key[cid]["stratum"] in STRATA), ("kind", key[cid]["kind"] in KINDS)):
+            if not ok:
+                raise Refused(f"draw.json: case {cid}: field {field} is invalid; nothing exported")
     exported = {}
     for name in ("labels", "relabels"):
         fname = f"{set_id}-{name}.jsonl"
         recs = label._read_jsonl(set_dir / f"{name}.jsonl")
         exported[fname] = [_check_record(fname, i, r, sha) for i, r in enumerate(recs)]
+    _check_population(exported[f"{set_id}-labels.jsonl"], exported[f"{set_id}-relabels.jsonl"])
     draw_name = f"{set_id}-draw.json"
     plan = {draw_name: json.dumps(
         {"set_id": set_id, "seed": draw["seed"],
