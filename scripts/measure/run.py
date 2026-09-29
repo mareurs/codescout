@@ -14,6 +14,7 @@ Task 9 adds the `gate` subcommand; later tasks add theirs.
 Run from the repo root with ~/work/claude/prompt-engineering/.venv/bin/python.
 """
 import argparse
+import contextlib
 import json
 import pathlib
 import sys
@@ -47,19 +48,34 @@ def _parser():
 
 
 def _gate(args, complete):
-    res = judge.run_gate(
-        complete=complete, dry=args.dry, repo=args.repo, rtd_doc=args.rtd_doc,
-        controls_doc=args.controls_doc, global_claude_md=args.global_claude_md,
-        votes=args.votes, log_dir=args.log_dir,
-        population=None if args.any_population else judge.GATE_POPULATION)
-    text = judge.format_gate(res)
-    if args.out:
-        pathlib.Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-        pathlib.Path(args.out).write_text(text)
-    else:
-        sys.stdout.write(text)
-    if args.json_out:
-        pathlib.Path(args.json_out).write_text(json.dumps(res, indent=1, default=str))
+    # Reserve both destinations before any model call. Keep reservations on failure:
+    # an interrupted attempt must not silently reuse or overwrite its evidence.
+    paths = {key: pathlib.Path(value).resolve()
+             for key, value in (("text", args.out), ("json", args.json_out)) if value}
+    if len(set(paths.values())) != len(paths):
+        raise ValueError("--out and --json-out must be different paths")
+    for path in paths.values():
+        if path.exists():
+            raise FileExistsError(f"gate output already exists: {path}")
+    with contextlib.ExitStack() as stack:
+        outputs = {}
+        for key, path in paths.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            outputs[key] = stack.enter_context(path.open("x"))
+            outputs[key].write('{"state": "reserved; gate has not completed"}\n')
+            outputs[key].flush()
+        res = judge.run_gate(
+            complete=complete, dry=args.dry, repo=args.repo, rtd_doc=args.rtd_doc,
+            controls_doc=args.controls_doc, global_claude_md=args.global_claude_md,
+            votes=args.votes, log_dir=args.log_dir,
+            population=None if args.any_population else judge.GATE_POPULATION)
+        text = judge.format_gate(res)
+        for key, output in outputs.items():
+            output.seek(0)
+            output.truncate()
+            output.write(text if key == "text" else json.dumps(res, indent=1, default=str))
+        if not args.out:
+            sys.stdout.write(text)
     if args.dry:
         return 0
     return 0 if res["passed"] else 1

@@ -1467,6 +1467,7 @@ class GateItemTests(unittest.TestCase):
             for finding in ({"own_correction_in_evidence_or_index": ["RTD-1/correction"]},
                             {"gate_id_tokens_by_item": {"CTL1-1/audit": 1}},
                             {"gate_id_tokens_in_template": 1}):
+                kwargs["log_dir"] = pathlib.Path(tmp) / ("logs-" + next(iter(finding)))
                 with self.subTest(finding=sorted(finding)), \
                         mock.patch.object(judge, "_leak_scan", return_value=dict(clean, **finding)), \
                         mock.patch.object(judge, "_codex_version", return_value="codex-cli test"):
@@ -1491,6 +1492,7 @@ class GateItemTests(unittest.TestCase):
                             judge.run_gate(dry=False, complete=None, **dict(kwargs, **bad))
             for version, refused_by in (("codex-cli 0.155.0", "R138"),
                                         (judge.CODEX_CLI_VERSION or "?", "gate population")):
+                kwargs["log_dir"] = pathlib.Path(tmp) / ("logs-" + version)
                 ch = mock.Mock(version=version)
                 ch.describe.return_value = "described"
                 with self.subTest(version=version), \
@@ -1506,6 +1508,7 @@ class GateItemTests(unittest.TestCase):
                                 "is_mistake": True, "lessons": "uncovered", "lesson_outcomes": {},
                                 "detectability": "obtainable", "evidence_present_before": "no",
                                 "evidence_used": "unknown", "quote": "a claim quoted here"})
+            kwargs["log_dir"] = pathlib.Path(tmp) / "logs-fixture"
             fake = _FakeComplete([reply] * 5)
             with mock.patch.object(judge, "_codex_version", return_value="codex-cli test"):
                 res = judge.run_gate(dry=False, complete=fake, **dict(kwargs, votes=1,

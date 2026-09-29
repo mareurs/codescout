@@ -1655,6 +1655,24 @@ def _refuse_log_dir_inside(log_dir, *roots):
                              "outside it")
 
 
+def _reserve_gate_logs(log_dir):
+    """Reserve a fresh evidence directory before channel setup or votes.
+
+    The marker survives failures, including those before the first vote log. A new
+    attempt needs a new directory; existing evidence is never silently replaced.
+    """
+    path = pathlib.Path(log_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    if any(path.iterdir()):
+        raise ValueError(f"judge gate log directory already contains evidence or a reservation: {path}")
+    try:
+        with (path / ".judge-gate-reserved.json").open("x") as out:
+            json.dump({"state": "reserved", "pid": os.getpid()}, out)
+            out.write("\n")
+    except FileExistsError as exc:
+        raise ValueError(f"judge gate log directory already reserved: {path}") from exc
+
+
 def run_gate(complete=None, dry=False, repo=REPO_ROOT, rtd_doc=None, controls_doc=None,
              global_claude_md=GLOBAL_CLAUDE_MD, votes=3, log_dir=None,
              population=GATE_POPULATION):
@@ -1681,6 +1699,8 @@ def run_gate(complete=None, dry=False, repo=REPO_ROOT, rtd_doc=None, controls_do
     if own_channel and population != GATE_POPULATION:
         raise ValueError("R138: a live gate checks the spec's population; --any-population is "
                          "for dry runs and fixtures only")
+    if not dry and log_dir is not None:
+        _reserve_gate_logs(log_dir)
     try:
         ch = None
         if own_channel:
@@ -1843,6 +1863,12 @@ def format_gate(res):
                                         and r["majority"].get("is_mistake") is True)
         out.append(f"- control fires by prompt section (descriptive): "
                    f"{json.dumps(dict(by_prompt), sort_keys=True)}")
+        out.append("- control_fires meaning: " + s["checks"]["control_fires"]["reported_as"])
+        control_values = collections.Counter(r["majority"].get("is_mistake")
+                                             for r in res["results"] if r["kind"] == "control")
+        out.append("- controls (is_mistake majority, descriptive): "
+                   f"true={control_values[True]}, false={control_values[False]}, "
+                   f"null={control_values[None]}; null is not a clean verdict")
         out.append(_quote_failure_line(res["results"]))
         out.append(_retry_line(res["results"]))
         out += ["", "| id | expected | detectability | is_mistake | lessons | split fields | flags |",
