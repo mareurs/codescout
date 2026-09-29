@@ -889,6 +889,145 @@ class UnitTrim(PacketCase):
         self.assertEqual(p.text.count(TRIM_MARKER), 1)
 
 
+class Surrogates(PacketCase):
+    """A lone surrogate (Claude Code writes the JSON escape `\\ud83d` alone when a truncated output splits
+    an emoji) used to reach `text.encode("utf-8")` and raise UnicodeEncodeError, aborting a whole render.
+    Every piece that can reach the packet is cleaned in `_blind` (results, args, operator/dispatch text,
+    unit text, context text) or in `_call` (tool names); a lone surrogate becomes U+FFFD, a valid pair stays."""
+
+    LONE = "\ud83d"  # the high half of an emoji, alone: what a truncated output leaves behind
+    FFFD = "�"
+
+    def assertClean(self, p):
+        self.assertIn(self.FFFD, p.text)
+        # positive control on the scan itself: an unclean string WOULD be caught by this predicate
+        self.assertTrue(any("\ud800" <= c <= "\udfff" for c in "x" + self.LONE))
+        self.assertFalse(any("\ud800" <= c <= "\udfff" for c in p.text))
+        p.text.encode("utf-8")  # raises UnicodeEncodeError on a surrogate
+        self.assertEqual(p.sha256, hashlib.sha256(p.text.encode("utf-8")).hexdigest())
+        self.assertEqual(p.chars, len(p.text))
+        self.assertLessEqual(p.chars, 20000)
+
+    def test_a_lone_surrogate_in_a_kept_result_builds_with_exact_text_and_sha(self):
+        s = Seq()
+        s.user("go")
+        (t,) = s.asst("m1", "Run.", tools=[("run_command", {"command": "ls"})])
+        s.result(t, "before " + self.LONE + " after")
+        s.asst("m2", "Done.")
+        p = self.build(s, "m2")
+        self.assertEqual(
+            p.text,
+            "## Operator's last message\n\ngo\n\n"
+            f"## Context\n\n### {MINUS}1\nRun.\n"
+            'CALL run_command({"command": "ls"})\n'
+            "RESULT before � after\n\n"
+            "## The message\n\nDone.\n")
+        self.assertEqual(p.sha256, "c926c130333123f890040829e21e2a28e47cf0d87db5b87135e80eefb1d9a292")
+        self.assertClean(p)
+
+    def test_a_lone_surrogate_in_args_the_operator_message_and_the_unit_text_each_builds(self):
+        def with_args():
+            s = Seq()
+            s.user("go")
+            s.asst("m1", "Run.", tools=[("run_command", {"command": "echo " + self.LONE})])
+            s.asst("m2", "Done.")
+            return s
+
+        def with_operator():
+            s = Seq()
+            s.user("fix " + self.LONE + " it")
+            s.asst("m2", "Done.")
+            return s
+
+        def with_unit_text():
+            s = Seq()
+            s.user("go")
+            s.asst("m2", "Done " + self.LONE + ".")
+            return s
+
+        def with_unit_args():
+            s = Seq()
+            s.user("go")
+            s.asst("m2", "Done.", tools=[("edit_file", {"path": "a" + self.LONE})])
+            return s
+
+        for name, make, needle in [
+            ("args", with_args, 'echo �"'),
+            ("operator", with_operator, "fix � it"),
+            ("unit_text", with_unit_text, "Done �."),
+            ("unit_args", with_unit_args, 'a�"'),
+        ]:
+            with self.subTest(piece=name):
+                p = self.build(make(), "m2")
+                self.assertIn(needle, p.text)
+                self.assertClean(p)
+
+    def test_a_lone_surrogate_in_a_context_message_text_builds(self):
+        s = Seq()
+        s.user("go")
+        s.asst("m1", "Ran " + self.LONE + ".")
+        s.asst("m2", "Done.")
+        p = self.build(s, "m2")
+        self.assertIn("### " + MINUS + "1\nRan �.", p.text)
+        self.assertClean(p)
+
+
+    def test_a_lone_surrogate_in_a_tool_name_builds(self):
+        s = Seq()
+        s.user("go")
+        (t,) = s.asst("m1", "Run.", tools=[("run" + self.LONE + "_cmd", {"command": "ls"})])
+        s.result(t, "ok")
+        s.asst("m2", "Done.", tools=[("edit" + self.LONE, {"path": "a"})])
+        p = self.build(s, "m2")
+        self.assertIn('CALL run�_cmd({"command": "ls"})', p.text)
+        self.assertIn('- edit�({"path": "a"})', p.text)
+        self.assertClean(p)
+
+    def test_a_lone_surrogate_in_an_over_long_unit_still_fits_the_budget(self):
+        # 25,000 chars of unit text with the surrogate inside the KEPT tail: offsets are unchanged
+        # (one char for one char), so the trim is exactly the same as without the surrogate.
+        s = Seq()
+        s.user("go")
+        s.asst("m1", "u" * 20000 + self.LONE + "u" * 4999)
+        p = self.build(s, "m1")
+        self.assertEqual(len(p.text), 20000)
+        self.assertClean(p)
+
+    def test_a_lone_low_surrogate_and_an_inverted_pair_are_both_cleaned(self):
+        # the low half alone (a cut that kept only the tail of the emoji), and low-then-high (not a pair)
+        for name, raw in [("low", "a\ude00b"), ("inverted", "a\ude00\ud83db")]:
+            with self.subTest(case=name):
+                s = Seq()
+                s.user("go")
+                (t,) = s.asst("m1", "Run.", tools=[("run_command", {"command": "ls"})])
+                s.result(t, raw)
+                s.asst("m2", "Done.")
+                p = self.build(s, "m2")
+                self.assertIn("RESULT a" + self.FFFD * (raw.count("\ude00") + raw.count("\ud83d")) + "b", p.text)
+                self.assertClean(p)
+
+
+    def test_a_valid_surrogate_pair_is_preserved_unchanged(self):
+        emoji = "\U0001f600"  # one non-BMP char; on the wire it is the pair 😀
+        s = Seq()
+        s.user("fix " + emoji)
+        (t,) = s.asst("m1", "Run " + emoji, tools=[("run_command", {"command": "echo " + emoji})])
+        s.result(t, "ok " + emoji)
+        s.asst("m2", "Done " + emoji + ".", tools=[("edit_file", {"path": "a" + emoji})])
+        p = self.build(s, "m2")
+        self.assertNotIn(self.FFFD, p.text)
+        self.assertEqual(p.text.count(emoji), 6)
+        self.assertEqual(
+            p.text,
+            f"## Operator's last message\n\nfix {emoji}\n\n"
+            f"## Context\n\n### {MINUS}1\nRun {emoji}\n"
+            f'CALL run_command({{"command": "echo {emoji}"}})\n'
+            f"RESULT ok {emoji}\n\n"
+            f"## The message\n\nDone {emoji}.\n\nABOUT TO RUN:\n"
+            f'- edit_file({{"path": "a{emoji}"}})\n')
+        self.assertEqual(p.sha256, hashlib.sha256(p.text.encode("utf-8")).hexdigest())
+
+
 
 
 

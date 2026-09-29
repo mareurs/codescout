@@ -3,8 +3,11 @@
 Model-free. A packet shows the operator's last message (or, for a hand-back, the dispatch prompt),
 the last CONTEXT_MESSAGES assistant messages before the decision point WITH their tool output, and
 the message itself with the tool calls it is about to run. Nothing at or after the decision point
-except the message's own entries, and no identifier or timestamp, ever appears in it. The packet is
-at most PACKET_CHARS characters in total, always.
+except the message's own entries. What is blinded (replaced by a placeholder) is limited to: session ids,
+message ids and uuid-shaped strings, ISO and space-separated calendar timestamps, and API ids of the form
+msg_01... / toolu_01...; dates inside file names are kept as evidence. A lone surrogate (a truncated
+emoji) becomes U+FFFD so the text can be hashed as UTF-8. The packet is at most PACKET_CHARS characters
+in total, always.
 
 A token-shaped string refuses the build (TokenFound). The check is made on the SOURCE of every piece
 before any cut (a token half-cut by a tail/head/trim would otherwise render its secret body while the
@@ -41,6 +44,7 @@ _UUID_RE = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-
 _TIMESTAMP_RE = re.compile(
     r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:\s?(?:Z|[+-]\d{2}:?\d{2}))?")
 _API_ID_RE = re.compile(r"\b(?:msg|toolu)_01[A-Za-z0-9]{20,}")
+_SURROGATE_RE = re.compile("[\ud800-\udfff]")
 
 
 class TokenFound(Exception):
@@ -85,8 +89,19 @@ def exit_code(result_text):
     return int(m.group(1)) if m else None
 
 
+def _clean(s):
+    """Replace each LONE surrogate with U+FFFD. Claude Code writes the JSON escape `\\ud83d` alone when a
+    truncated output splits an emoji; json.loads keeps it as a lone surrogate, which `str.encode("utf-8")`
+    refuses (the packet's sha256 step). A valid pair was already joined into one non-BMP char by json.loads
+    and is untouched, as is every string without a surrogate. One char for one char, so offsets are unchanged.
+    Applied at the earliest point every piece passes: `_blind` (results, args, operator/dispatch text, unit
+    and context text, all before any overlap check or cut) and `_call` (tool names)."""
+    return _SURROGATE_RE.sub("�", s)
+
+
 def _blind(s):
-    """Replace uuid-, timestamp- and API-id-shaped strings quoted inside transcript content."""
+    """Replace lone surrogates, then uuid-, timestamp- and API-id-shaped strings quoted inside transcript content."""
+    s = _clean(s)
     s = _UUID_RE.sub("<uuid>", s)
     s = _TIMESTAMP_RE.sub("<timestamp>", s)
     return _API_ID_RE.sub("<id>", s)
@@ -112,7 +127,7 @@ def _head(source, n):
 def _call(name, inp):
     """('name(args)', leaked) with the JSON arguments cut to ARGS_CHARS."""
     args, leaked = _head(_blind(json.dumps(inp, ensure_ascii=False, sort_keys=False)), ARGS_CHARS)
-    return f"{name}({args})", leaked
+    return f"{_clean(name)}({args})", leaked
 
 
 def _is_shell(name):
