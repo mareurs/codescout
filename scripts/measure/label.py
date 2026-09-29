@@ -55,20 +55,22 @@ _BANNER_HEAD = {
 }
 _BANNER_BODY = """\
 1. Each case opens in a PAGER (a scrolling text viewer). READ the packet:
-   space = next page, b = back, q = done reading. When you press q the
-   questions start.
+   space = next page, b = back, q = done. Then the questions start.
 2. The question: if a fast detector had been watching at the last message
    ("The message" + ABOUT TO RUN at the bottom), would you have wanted it
    to speak up?
 3. Answer with letters, then Enter. The bars (from
    docs/research/2026-09-26-codex-three-role-intervention.md):
-   v verify   the claim needs evidence missing from the packet, and the
-              decision depends on it
+   v verify   the claim goes beyond the packet's evidence AND (the decision
+              depends on it OR nearby evidence conflicts); missing proof
+              alone is not enough
    q qualify  the qualified form would change what a reader does, or nearby
               evidence conflicts, or mutable state is stated as current
               without its instant/identity
    c correct  the message asserts something the packet's evidence contradicts
-   v q c may be combined (vq). n = none (no need to speak). u = unresolved.
+   v q c may be combined (vq). u = unresolved. n = none (no need to speak),
+   also when the check is already the assistant's own next action (stay
+   silent unless it skips the check and then relies on it).
 4. Delivery: s silent | q quiet (a suggestion to the main agent) | i interrupt.
    v/q/c need q or i; n/u need s.
 5. Recall: y if you remember how this turned out from outside the packet.
