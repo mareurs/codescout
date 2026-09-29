@@ -12,11 +12,13 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import pathlib
 import random
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -394,10 +396,10 @@ class RelabelIdsTests(Base):
 
     def test_relabel_ids_only_picks_cases_at_least_three_days_old(self):
         ages = [
-            timedelta(days=3),                       # exactly 3 days: eligible
-            timedelta(days=2, hours=23, minutes=59), # just under: not eligible
-            timedelta(days=10),                      # eligible
-            timedelta(hours=1),                      # not eligible
+            timedelta(days=3),                                  # exactly 3 days: eligible
+            timedelta(days=2, hours=23, minutes=59, seconds=59),  # ONE SECOND short: not eligible
+            timedelta(days=10),                                 # eligible
+            timedelta(hours=1),                                 # not eligible
         ]
         d, ids = self._set_with_ages(ages)
         got = label.relabel_ids(d, 1, now=NOW)
@@ -438,12 +440,257 @@ class CliTests(Base):
                        clock=Clock(1.0, 2.0))
         self.assertEqual(rc, 0)
         self.assertEqual(len(shown), 1)
+        self.assertIn(PACKET_SENTINEL, shown[0])  # positive control: the packet WAS shown, to show()
         self.assertEqual(len(read_jsonl(d / "labels.jsonl")), 1)
         self.assertNotIn(PACKET_SENTINEL, out)  # packet text goes only through show()
 
     def test_cli_rejects_an_unknown_subcommand(self):
         with self.assertRaises(SystemExit):
             _cli(["frobnicate", "/nonexistent"])
+
+
+class _Tty(io.StringIO):
+    def isatty(self):
+        return True
+
+
+class TtyGuardTests(Base):
+    def _refused(self, stdin):
+        d = make_set(self.root, ["a"])
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), mock.patch.object(sys, "stdin", stdin):
+            rc, out = _cli(["next", str(d)])
+        return d, rc, out, err.getvalue()
+
+    def test_next_without_a_terminal_refuses_and_prints_no_packet(self):
+        d, rc, out, err = self._refused(io.StringIO(""))
+        self.assertEqual(rc, 1)
+        self.assertIn("interactive terminal", err)  # positive control: the refusal speaks
+        self.assertNotIn(PACKET_SENTINEL, out + err)
+        self.assertFalse((d / "labels.jsonl").exists())
+
+    def test_next_needs_both_stdin_and_stdout_to_be_terminals(self):
+        # stdin IS a tty, stdout (captured by _cli) is not: still refused, nothing printed
+        d, rc, out, err = self._refused(_Tty(""))
+        self.assertEqual(rc, 1)
+        self.assertNotIn(PACKET_SENTINEL, out + err)
+
+    def test_the_same_set_labels_normally_with_injected_io(self):
+        d = make_set(self.root, ["a"])
+        shown = []
+        rc, out = _cli(["next", str(d)], ask=scripted(["n", "s", "n", ""]), show=shown.append,
+                       clock=Clock(1.0, 2.0))
+        self.assertEqual(rc, 0)
+        self.assertIn(PACKET_SENTINEL, shown[0])
+
+
+class PagerTests(unittest.TestCase):
+    def test_empty_or_missing_pager_falls_back_to_print(self):
+        for value in ("", "/nonexistent/pager-binary"):
+            buf = io.StringIO()
+            with mock.patch.dict(os.environ, {"PAGER": value}), contextlib.redirect_stdout(buf):
+                label._pager_show("PAGER-FALLBACK-TEXT")
+            self.assertIn("PAGER-FALLBACK-TEXT", buf.getvalue(), msg=repr(value))
+
+
+class QuitLetterTests(Base):
+    def test_x_quits_at_the_delivery_prompt(self):
+        with self.assertRaises(label.Quit):
+            label.label_one("c", "h", "P", scripted(["v", "x"]), lambda t: None, Clock(0.0, 1.0))
+
+    def test_x_quits_at_the_recall_prompt(self):
+        with self.assertRaises(label.Quit):
+            label.label_one("c", "h", "P", scripted(["v", "q", "x"]), lambda t: None, Clock(0.0, 1.0))
+
+    def test_x_at_delivery_or_recall_writes_nothing(self):
+        for answers in (["v", "x"], ["v", "q", "x"]):
+            d = make_set(self.root, ["a"], name="s" + str(len(answers)))
+            out = label.run_next(d, False, scripted(answers), lambda t: None, Clock(0.0, 1.0))
+            self.assertEqual(out["labelled"], 0)
+            self.assertFalse((d / "labels.jsonl").exists())
+
+    def test_a_note_of_x_is_a_note_not_a_quit(self):
+        r = label.label_one("c", "h", "P", scripted(["n", "s", "n", "x"]), lambda t: None, Clock(0.0, 1.0))
+        self.assertEqual(r["note"], "x")
+
+
+class ParseVariantTests(unittest.TestCase):
+    def test_label_parsing_variants(self):
+        p = label._parse_labels
+        self.assertEqual(p("V"), ["verify"])                       # uppercase
+        self.assertEqual(p("N"), ["none"])
+        self.assertEqual(p("U"), ["unresolved"])
+        self.assertEqual(p("v, q"), ["verify", "qualify"])         # spaces and commas
+        self.assertEqual(p(" c  v "), ["verify", "correct"])
+        self.assertEqual(p("vv"), ["verify"])                      # duplicates dedup
+        self.assertIsNone(p("vn"))                                 # mixed forms rejected
+        self.assertIsNone(p("nq"))
+        self.assertIsNone(p("nu"))
+        self.assertIsNone(p("nn"))                                 # pinned: rejected, not deduped
+        self.assertIsNone(p(""))
+        self.assertIsNone(p("  , "))
+
+    def test_delivery_and_recall_are_case_insensitive(self):
+        r = label.label_one("c", "h", "P", scripted(["V", "I", "Y", ""]), lambda t: None, Clock(0.0, 1.0))
+        self.assertEqual((r["labels"], r["delivery"], r["recall"]), (["verify"], "interrupt", "y"))
+
+
+class FsyncTests(Base):
+    def test_each_record_is_fsynced_before_the_next_packet_is_shown(self):
+        d = make_set(self.root, ["a", "b"])
+        events = []
+        real = os.fsync
+
+        def fake_fsync(fd):
+            events.append("fsync")
+            return real(fd)
+
+        with mock.patch.object(label.os, "fsync", fake_fsync):
+            label.run_next(d, False, scripted(["n", "s", "n", ""] * 2), lambda t: events.append("show"),
+                           Clock(*[float(i) for i in range(10)]))
+        self.assertEqual(events, ["show", "fsync", "show", "fsync"])
+
+
+class ReadOnceTests(Base):
+    def test_the_packet_is_read_once_and_the_same_bytes_are_hashed_and_shown(self):
+        d = make_set(self.root, ["a"])
+        calls = []
+        orig_b, orig_t = pathlib.Path.read_bytes, pathlib.Path.read_text
+
+        def rb(self, *a, **k):
+            calls.append(self.name)
+            return orig_b(self, *a, **k)
+
+        def rt(self, *a, **k):
+            calls.append(self.name)
+            return orig_t(self, *a, **k)
+
+        with mock.patch.object(pathlib.Path, "read_bytes", rb), mock.patch.object(pathlib.Path, "read_text", rt):
+            label.run_next(d, False, scripted(["n", "s", "n", ""]), lambda t: None, Clock(0.0, 1.0))
+        self.assertEqual(calls.count("a.md"), 1)
+        self.assertIn("draw.json", calls)  # positive control: the counter sees reads
+
+
+class DrawValidationTests(Base):
+    def test_order_naming_an_unknown_case_is_a_clear_error(self):
+        d = make_set(self.root, ["a"])
+        draw = json.loads((d / "draw.json").read_text())
+        draw["order"] = ["a", "ghost-id"]
+        (d / "draw.json").write_text(json.dumps(draw))
+        for fn in (lambda: label.run_next(d, False, scripted([]), lambda t: None, Clock()),
+                   lambda: label.summary(d), lambda: label.verify(d)):
+            with self.assertRaises(ValueError) as cm:
+                fn()
+            self.assertIn("ghost-id", str(cm.exception))
+
+
+class TornLineTests(Base):
+    def _base(self):
+        d = make_set(self.root, ["a", "b"])
+        good = json.dumps(record("a", sha_of(d, "a"), ["none"], "silent"))
+        return d, good
+
+    def test_torn_final_unterminated_line_is_skipped_with_a_warning_and_repaired_on_append(self):
+        d, good = self._base()
+        (d / "labels.jsonl").write_text(good + "\n" + '{"case_id": "b", "packet_sh', encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(label.summary(d)["labelled"], 1)
+        self.assertIn("torn", err.getvalue())  # positive control: a warning is emitted
+        shown = []
+        with contextlib.redirect_stderr(io.StringIO()):
+            out = label.run_next(d, False, scripted(["n", "s", "n", ""]), shown.append, Clock(1.0, 2.0))
+        self.assertEqual(out["labelled"], 1)   # b was re-shown
+        self.assertEqual(len(shown), 1)
+        self.assertEqual([r["case_id"] for r in read_jsonl(d / "labels.jsonl")], ["a", "b"])  # file parses
+
+    def test_unterminated_but_valid_final_line_is_kept(self):
+        d, good = self._base()
+        (d / "labels.jsonl").write_text(good, encoding="utf-8")  # valid JSON, no newline
+        shown = []
+        label.run_next(d, False, scripted(["n", "s", "n", ""]), shown.append, Clock(1.0, 2.0))
+        self.assertEqual(len(shown), 1)  # only b shown; a counted
+        self.assertEqual([r["case_id"] for r in read_jsonl(d / "labels.jsonl")], ["a", "b"])
+
+    def test_corrupt_non_final_line_raises(self):
+        d, good = self._base()
+        (d / "labels.jsonl").write_text('{"bad\n' + good + "\n", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            label.summary(d)
+
+    def test_corrupt_final_line_that_is_newline_terminated_raises(self):
+        d, good = self._base()
+        (d / "labels.jsonl").write_text(good + "\n" + '{"bad\n', encoding="utf-8")
+        with self.assertRaises(ValueError):
+            label.summary(d)
+
+
+class RelabelPickTests(Base):
+    IDS = [f"c{i:02d}" for i in range(15)]
+    FIRST_TEN = IDS[:10]
+
+    def _set(self, old, young=(), name="set"):
+        """`old` ids labelled 5 days before NOW, `young` ids 1 day before NOW."""
+        d = make_set(self.root, self.IDS, name=name)
+        recs = [record(c, sha_of(d, c), ["none"], "silent", when=NOW - timedelta(days=5)) for c in old]
+        recs += [record(c, sha_of(d, c), ["none"], "silent", when=NOW - timedelta(days=1)) for c in young]
+        write_jsonl(d / "labels.jsonl", recs)
+        return d
+
+    def _ans(self, n):
+        return ["n", "s", "n", ""] * n
+
+    def test_the_pick_is_persisted_and_reused_across_resumes(self):
+        d = self._set(self.FIRST_TEN, young=self.IDS[10:])
+        clock = Clock(*[float(i) for i in range(100)])
+        out = label.run_next(d, True, scripted(self._ans(3) + ["x"]), lambda t: None, clock, now=NOW)
+        self.assertEqual(out["labelled"], 3)
+        pick = json.loads((d / "relabel_pick.json").read_text())
+        self.assertEqual(pick["ids"], self.FIRST_TEN)  # hard-coded: exactly 10 eligible at session 1
+        self.assertEqual((pick["seed"], pick["n"], pick["min_days"], pick["now"]), (7, 10, 3, "2026-09-29T12:00:00Z"))
+        # time passes: the five young cases become eligible, so a fresh draw would differ
+        later = NOW + timedelta(days=5)
+        self.assertNotEqual(label.relabel_ids(d, 7, now=later), self.FIRST_TEN)  # control: re-sampling WOULD differ
+        out = label.run_next(d, True, scripted(self._ans(7)), lambda t: None,
+                             Clock(*[float(i) for i in range(100)]), now=later)
+        self.assertEqual(out["labelled"], 7)
+        ids = [r["case_id"] for r in read_jsonl(d / "relabels.jsonl")]
+        self.assertEqual(ids, self.FIRST_TEN)
+
+    def test_an_existing_pick_file_is_used_without_consulting_relabel_ids(self):
+        d = self._set(self.IDS[:5])  # only 5 eligible: relabel_ids would refuse
+        (d / "relabel_pick.json").write_text(json.dumps(
+            {"ids": ["c01", "c03"], "seed": 7, "n": 10, "min_days": 3, "now": "2026-09-01T00:00:00Z"}))
+        shown = []
+        out = label.run_next(d, True, scripted(self._ans(2)), shown.append, Clock(*[float(i) for i in range(10)]), now=NOW)
+        self.assertEqual(out["labelled"], 2)
+        self.assertEqual([r["case_id"] for r in read_jsonl(d / "relabels.jsonl")], ["c01", "c03"])
+
+    def test_fewer_than_n_eligible_refuses_and_writes_nothing(self):
+        d = self._set(self.IDS[:9], young=["c09"])  # 9 eligible, the 10th becomes eligible 2026-10-01T12:00:00Z
+        with self.assertRaises(label.RelabelRefused) as cm:
+            label.run_next(d, True, scripted([]), lambda t: None, Clock(), now=NOW)
+        msg = str(cm.exception)
+        self.assertIn("9", msg)
+        self.assertIn("2026-10-01T12:00:00Z", msg)
+        self.assertFalse((d / "relabel_pick.json").exists())
+        self.assertFalse((d / "relabels.jsonl").exists())
+
+    def test_exactly_n_eligible_proceeds(self):
+        d = self._set(self.FIRST_TEN, young=self.IDS[10:], name="ten")
+        out = label.run_next(d, True, scripted(self._ans(1) + ["x"]), lambda t: None,
+                             Clock(*[float(i) for i in range(10)]), now=NOW)
+        self.assertEqual(out["labelled"], 1)
+        self.assertTrue((d / "relabel_pick.json").exists())
+
+    def test_cli_refusal_is_a_message_not_a_traceback(self):
+        d = self._set(self.IDS[:9], young=["c09"], name="cli")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc, out = _cli(["next", str(d), "--relabel"], ask=scripted([]), show=lambda t: None, clock=Clock(), now=NOW)
+        self.assertEqual(rc, 1)
+        self.assertIn("9", err.getvalue() + out)
+        self.assertIn("eligible", err.getvalue() + out)
 
 
 if __name__ == "__main__":
