@@ -62,7 +62,11 @@ KINDS = ("top", "handback")
 MAX_SECONDS = 86400 * 7  # a labelling time of a week or more is not a labelling time
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 LABEL_EXPORT_FIELDS = ("case_id", "packet_sha256", "labels", "delivery", "recall", "seconds")
-_SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# A set directory looks like 2026-09-29-labelled-main; that name becomes the committed file names, so it
+# may not be a bare session id, nor contain a UUID-shaped run (which the pattern alone would let through).
+_SET_NAME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z][a-z0-9-]{0,40}")
+_UUID_RUN = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+SEED_LIMIT = 2 ** 32
 _CASE_ID = re.compile(r"[0-9a-f]{10}")
 
 
@@ -203,6 +207,13 @@ def _load_set(set_dir):
     if set(key) != drawn_ids:
         raise Refused(f"{set_dir}: key.json holds {len(set(key) - drawn_ids)} case(s) draw.json does not; "
                       f"the two must name the same cases")
+    # key.json values feed estimate's messages and export's committed manifest: check them here, once, for
+    # render, estimate and export alike, by field name and case_id only. A stratum is not a kind and a kind
+    # is not a stratum, so each is checked against its own vocabulary.
+    for cid, entry in key.items():
+        for field, vocabulary in (("stratum", STRATA), ("kind", KINDS)):
+            if entry[field] not in vocabulary:
+                raise Refused(f"{set_dir}: key.json: case {cid}: field {field} is invalid")
     return set_dir, draw, key
 
 
@@ -214,21 +225,31 @@ def _frame_units(corpus):
         raise Refused(f"the corpus could not be read ({type(e).__name__}); nothing written") from None
 
 
-def _check_population(labels, relabels):
+def _check_population(labels, relabels, tail):
     """The population rules estimate and export share: a case is labelled once, relabelled at most once,
-    and only a labelled case is relabelled. Messages name the case_id, which is opaque."""
+    and only a labelled case is relabelled. Messages name the case_id, which is opaque; `tail` says what
+    did not happen ("nothing exported" / "refusing to estimate")."""
     seen = set()
     for r in labels:
         if r["case_id"] in seen:
-            raise Refused(f"duplicate label for case_id '{r['case_id']}'; nothing written")
+            raise Refused(f"duplicate label for case_id '{r['case_id']}'; {tail}")
         seen.add(r["case_id"])
     again = set()
     for r in relabels:
         if r["case_id"] not in seen:
-            raise Refused(f"orphan relabel for case_id '{r['case_id']}' that was never labelled; nothing written")
+            raise Refused(f"orphan relabel for case_id '{r['case_id']}' that was never labelled; {tail}")
         if r["case_id"] in again:
-            raise Refused(f"duplicate relabel for case_id '{r['case_id']}'; nothing written")
+            raise Refused(f"duplicate relabel for case_id '{r['case_id']}'; {tail}")
         again.add(r["case_id"])
+
+
+def _valid_seed(v):
+    """A registered seed: an int (not a bool) in [0, 2**32). Anything wider could carry a session id."""
+    return isinstance(v, int) and not isinstance(v, bool) and 0 <= v < SEED_LIMIT
+
+
+def _valid_set_name(name):
+    return bool(_SET_NAME.fullmatch(name)) and not _UUID_RUN.search(name)
 
 
 def _valid_seconds(v):
@@ -265,10 +286,13 @@ def _excluded_case_keys(exclude_set):
 
 
 def _cmd_draw(args):
+    if not _valid_seed(args.seed):
+        raise Refused("--seed must be an integer from 0 to 2**32 - 1")
     set_dir = pathlib.Path(args.set)
     _private_dir(set_dir)
-    if not _SAFE_NAME.fullmatch(set_dir.name):
-        raise Refused(f"set name {set_dir.name!r} is not a plain file name (letters, digits, . _ -)")
+    if not _valid_set_name(set_dir.name):
+        raise Refused("set name is not allowed: it must look like 2026-09-29-labelled-main (a date, then a "
+                      "lowercase name) and hold no session-id-shaped run")
     exclude = _excluded_case_keys(args.exclude_set) if args.exclude_set else set()
     units = _frame_units(args.corpus)
     absent = exclude - {u.case_key for u in units}
@@ -356,6 +380,8 @@ def _annotate(figs, corpus_id, note):
 
 
 def _cmd_estimate(args):
+    if not _valid_seed(args.seed):
+        raise Refused("--seed must be an integer from 0 to 2**32 - 1")
     set_dir, draw, key = _load_set(args.set)
     frame = _read_json(args.frame)
     sha = {c["case_id"]: c["sha256"] for c in draw["cases"]}
@@ -375,11 +401,13 @@ def _cmd_estimate(args):
     if labelled["substantive"] > drawn["substantive"]:  # the invariant the `==` below relies on, stated
         raise Refused(f"{labelled['substantive']} substantive label records for {drawn['substantive']} substantive "
                       f"cases drawn (a case labelled twice?); refusing to estimate")
-    _check_population(labels, relabels)
+    _check_population(labels, relabels, "refusing to estimate")
     try:
         est = estimator.estimate(labels, key, frame["counts"], args.seed, relabels or None, b=BOOTSTRAP_SAMPLES)
-    except ValueError as e:  # a duplicate label or relabel: refuse, do not crash
-        raise Refused(str(e)) from None
+    except ValueError as e:
+        # Unreachable by construction (labels, key.json strata/kinds and case ids are all validated above), so
+        # a fixed message naming only the type: no estimator message may ever carry a value out.
+        raise Refused(f"the estimator refused the labels ({type(e).__name__}); refusing to estimate") from None
     complete = labelled["substantive"] == drawn["substantive"]
     for branch, note in (("all_cases", ""), ("without_recall_flagged", ", recall-flagged cases excluded")):
         _annotate(est[branch], frame["corpus_id"], note)
@@ -452,28 +480,32 @@ def _cmd_export(args):
         out_dir.relative_to(archive.REPO_ROOT.resolve())
     except ValueError:
         raise Refused(f"refusing {out_dir}: it is outside the repository; an export is committed data and "
-                      f"must be inside it") from None
-    set_dir, draw, key = _load_set(args.set)
+                      f"must be inside it; nothing exported") from None
+    try:
+        set_dir, draw, key = _load_set(args.set)
+    except Refused as e:
+        raise Refused(f"{e}; nothing exported") from None
     set_id = draw["set_id"]
-    if not (isinstance(set_id, str) and _SAFE_NAME.fullmatch(set_id)):
-        raise Refused("draw.json's set_id is not a plain file name")
+    if not (set_id == set_dir.name and _valid_set_name(set_id)):  # equality also implies set_id is a str
+        raise Refused("draw.json's set_id must equal the set directory's name, which must look like "
+                      "2026-09-29-labelled-main and hold no session-id-shaped run; nothing exported")
     sha = {c["case_id"]: c["sha256"] for c in draw["cases"]}
     if not all(sha.values()):
-        raise Refused(f"{set_dir} is not rendered (draw.json holds no packet hashes); run render first")
-    # The draw manifest's own values, validated like the records: they are copied into committed data.
-    if isinstance(draw["seed"], bool) or not isinstance(draw["seed"], int):
+        raise Refused(f"{set_dir} is not rendered (draw.json holds no packet hashes); run render first; "
+                      f"nothing exported")
+    # The draw manifest's own values are copied into committed data, so they are validated like the records.
+    # (stratum and kind come from key.json and were validated by _load_set, the one place that does it.)
+    if not _valid_seed(draw["seed"]):
         raise Refused("draw.json: field seed is invalid; nothing exported")
     for cid, digest in sha.items():
-        for field, ok in (("sha256", isinstance(digest, str) and _HEX64.fullmatch(digest)),
-                          ("stratum", key[cid]["stratum"] in STRATA), ("kind", key[cid]["kind"] in KINDS)):
-            if not ok:
-                raise Refused(f"draw.json: case {cid}: field {field} is invalid; nothing exported")
+        if not (isinstance(digest, str) and _HEX64.fullmatch(digest)):
+            raise Refused(f"draw.json: case {cid}: field sha256 is invalid; nothing exported")
     exported = {}
     for name in ("labels", "relabels"):
         fname = f"{set_id}-{name}.jsonl"
         recs = label._read_jsonl(set_dir / f"{name}.jsonl")
         exported[fname] = [_check_record(fname, i, r, sha) for i, r in enumerate(recs)]
-    _check_population(exported[f"{set_id}-labels.jsonl"], exported[f"{set_id}-relabels.jsonl"])
+    _check_population(exported[f"{set_id}-labels.jsonl"], exported[f"{set_id}-relabels.jsonl"], "nothing exported")
     draw_name = f"{set_id}-draw.json"
     plan = {draw_name: json.dumps(
         {"set_id": set_id, "seed": draw["seed"],
@@ -489,11 +521,12 @@ def _cmd_export(args):
         if fname == draw_name:
             if path.read_bytes() != text.encode("utf-8"):
                 raise Refused(f"{path} differs from the new draw manifest; the draw manifest is immutable once "
-                              f"committed")
+                              f"committed; nothing exported")
         else:
             old = _existing_records(path)
             if old is None or [json.loads(l) for l in text.splitlines()][:len(old)] != old:
-                raise Refused(f"{path} is not a prefix of the new export; an exported label file only grows")
+                raise Refused(f"{path} is not a prefix of the new export; an exported label file only grows; "
+                              f"nothing exported")
     out_dir.mkdir(parents=True, exist_ok=True)
     for fname, text in plan.items():
         _write_atomic(out_dir / fname, text.encode("utf-8"), 0o644)

@@ -19,6 +19,7 @@ import stat
 import sys
 import tempfile
 import unittest
+import uuid
 from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -41,6 +42,11 @@ label = _load("label")
 import measure_corpus_fixture as fx  # noqa: E402
 
 CORPUS_ID = "corpus-2026-09-29"
+SETP = "2026-09-29-labelled-"  # the shape of a real set directory name
+MAIN = SETP + "main"
+SETID_MESSAGE = ("draw.json's set_id must equal the set directory's name, which must look like "
+                "2026-09-29-labelled-main and hold no session-id-shaped run; nothing exported")
+MAIN_DRAW, MAIN_LABELS, MAIN_RELABELS = MAIN + "-draw.json", MAIN + "-labels.jsonl", MAIN + "-relabels.jsonl"
 # ghp_ + exactly 36 alphanumerics: the shape packet._TOKEN_RE refuses.
 TOKEN = "ghp_" + "A1" * 18
 NOTE = "NOTE-SENTINEL-do-not-export"
@@ -178,7 +184,7 @@ class Base(unittest.TestCase):
         self.corpus = fx.build_corpus(self.root / CORPUS_ID, make_sessions())
 
     def draw(self, name, seed, sub, rou, *extra):
-        set_dir = self.root / name
+        set_dir = self.root / (SETP + name)
         rc, out, err = cli("draw", "--corpus", self.corpus, "--set", set_dir, "--seed", seed,
                            "--substantive", sub, "--routine", rou, *extra)
         self.assertEqual((rc, err), (0, ""), out)
@@ -249,7 +255,7 @@ class Draw(Base):
         self.assertEqual(sum(v["stratum"] == "routine" for v in key.values()), 4)
         # draw.json: set_id, seed, cases without hashes yet, order = a seed+1 shuffle
         self.assertEqual(set(draw), {"set_id", "seed", "cases", "order"})
-        self.assertEqual(draw["set_id"], "main")
+        self.assertEqual(draw["set_id"], MAIN)
         self.assertEqual(draw["seed"], 11)
         self.assertEqual(draw["cases"], [{"case_id": cid, "sha256": None} for cid in key])
         expected = list(key)
@@ -258,7 +264,7 @@ class Draw(Base):
         self.assertNotEqual(draw["order"], list(key))  # non-vacuous: the shuffle moved something
 
     def test_draw_prints_counts_only(self):
-        set_dir = self.root / "main"
+        set_dir = self.root / (SETP + "main")
         rc, out, err = cli("draw", "--corpus", self.corpus, "--set", set_dir, "--seed", 11,
                            "--substantive", 6, "--routine", 4)
         self.assertEqual((rc, out, err), (0, "drawn substantive=6 routine=4 excluded=0\n", ""))
@@ -269,7 +275,7 @@ class Draw(Base):
         self.assertEqual(draw["order"], PILOT_ORDER)
 
     def test_draw_refuses_existing_or_in_repo_dir(self):
-        existing = self.root / "taken"
+        existing = self.root / (SETP + "taken")
         existing.mkdir()
         (existing / "marker.txt").write_text("mine")  # no key.json here: only the mkdir refusal can stop this
         rc, out, err = cli("draw", "--corpus", self.corpus, "--set", existing, "--seed", 1,
@@ -294,7 +300,7 @@ class Draw(Base):
                          "--substantive", 1, "--routine", 1)
         self.assertEqual(rc, 1)
         self.assertIn("set name", err)
-        big = self.root / "toobig"
+        big = self.root / (SETP + "toobig")
         rc, _, err = cli("draw", "--corpus", self.corpus, "--set", big, "--seed", 1,
                          "--substantive", 16, "--routine", 1)  # 15 substantive exist
         self.assertEqual(rc, 1)
@@ -307,7 +313,7 @@ class Draw(Base):
         # positive control: the SAME seed and sizes without --exclude-set redraw the pilot's units
         same = self.draw("same", 5, 3, 2)
         self.assertEqual({v["case_key"] for v in json.loads(read(same / "key.json")).values()}, pilot_keys)
-        main = self.root / "main"
+        main = self.root / (SETP + "main")
         rc, out, err = cli("draw", "--corpus", self.corpus, "--set", main, "--seed", 5, "--substantive", 3,
                            "--routine", 2, "--exclude-set", pilot)
         self.assertEqual((rc, err), (0, ""))
@@ -316,14 +322,14 @@ class Draw(Base):
         self.assertEqual(len(main_keys), 5)
         self.assertEqual(main_keys & pilot_keys, set())
         # boundary on the pool itself: 15 - 3 = 12 substantive remain, 12 is drawable and 13 is not
-        rc, _, err = cli("draw", "--corpus", self.corpus, "--set", self.root / "all12", "--seed", 5,
+        rc, _, err = cli("draw", "--corpus", self.corpus, "--set", self.root / (SETP + "all12"), "--seed", 5,
                          "--substantive", 12, "--routine", 0, "--exclude-set", pilot)
         self.assertEqual((rc, err), (0, ""))
-        rc, _, err = cli("draw", "--corpus", self.corpus, "--set", self.root / "all13", "--seed", 5,
+        rc, _, err = cli("draw", "--corpus", self.corpus, "--set", self.root / (SETP + "all13"), "--seed", 5,
                          "--substantive", 13, "--routine", 0, "--exclude-set", pilot)
         self.assertEqual(rc, 1)
         self.assertIn("12 candidates", err)
-        rc, _, err = cli("draw", "--corpus", self.corpus, "--set", self.root / "nokey", "--seed", 5,
+        rc, _, err = cli("draw", "--corpus", self.corpus, "--set", self.root / (SETP + "nokey"), "--seed", 5,
                          "--substantive", 1, "--routine", 0, "--exclude-set", self.root / "no-such-set")
         self.assertEqual(rc, 1)
         self.assertIn("exclude", err)
@@ -331,26 +337,26 @@ class Draw(Base):
     def test_draw_refuses_an_exclude_set_from_another_frame(self):
         # a pilot drawn from a DIFFERENT frame (other session id -> other case_keys): disjointness would be fiction
         foreign_corpus = fx.build_corpus(self.root / "foreign", [dict(session(0), sid=sid_for(50))])
-        foreign = self.root / "foreign-set"
+        foreign = self.root / (SETP + "foreign-set")
         rc, _, err = cli("draw", "--corpus", foreign_corpus, "--set", foreign, "--seed", 5, "--substantive", 2,
                          "--routine", 1)
         self.assertEqual((rc, err), (0, ""))
-        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", self.root / "m1", "--seed", 5,
+        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", self.root / (SETP + "m1"), "--seed", 5,
                            "--substantive", 2, "--routine", 1, "--exclude-set", foreign)
         self.assertEqual(rc, 1)
         self.assertEqual(err, "error: --exclude-set holds 3 case_key(s) that are not in this frame; the pilot must "
                               "come from the same frame, or disjointness is not guaranteed\n")
-        self.assertFalse((self.root / "m1").exists())
+        self.assertFalse((self.root / (SETP + "m1")).exists())
         # ONE foreign key among real ones is enough to refuse
         pilot = self.draw("pilot", 5, 3, 2)
         key = json.loads(read(pilot / "key.json"))
         key["ffffffffff"] = {"case_key": "work/nope|transcripts/x.jsonl|mX"}
         (pilot / "key.json").write_text(json.dumps(key))
-        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", self.root / "m2", "--seed", 6,
+        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", self.root / (SETP + "m2"), "--seed", 6,
                            "--substantive", 2, "--routine", 1, "--exclude-set", pilot)
         self.assertEqual(rc, 1)
         self.assertIn("holds 1 case_key(s) that are not in this frame", err)
-        self.assertFalse((self.root / "m2").exists())
+        self.assertFalse((self.root / (SETP + "m2")).exists())
 
     def test_draw_refuses_a_malformed_exclude_set(self):
         cases = {"bad-json": "{not json", "missing-field": json.dumps({"aaaaaaaaaa": {"stratum": "routine"}}),
@@ -360,12 +366,12 @@ class Draw(Base):
                 bad = self.root / f"bad-{name}"
                 bad.mkdir()
                 (bad / "key.json").write_text(text)
-                rc, out, err = cli("draw", "--corpus", self.corpus, "--set", self.root / f"m-{name}", "--seed", 5,
+                rc, out, err = cli("draw", "--corpus", self.corpus, "--set", self.root / f"{SETP}m-{name}", "--seed", 5,
                                    "--substantive", 1, "--routine", 0, "--exclude-set", bad)
                 self.assertEqual(rc, 1)
                 self.assertEqual(err, f"error: --exclude-set {bad}: key.json is malformed "
                                       f"(not a case_id -> case_key map)\n")
-                self.assertFalse((self.root / f"m-{name}").exists())
+                self.assertFalse((self.root / f"{SETP}m-{name}").exists())
 
 
 # Pinned after observation (see the report): the pilot draw (seed 3, 2 substantive + 1 routine) shuffled by
@@ -408,7 +414,7 @@ class Render(Base):
 
     def test_render_aborts_on_token(self):
         corpus = fx.build_corpus(self.root / "token-corpus", make_sessions(token_session=2))
-        set_dir = self.root / "tok"
+        set_dir = self.root / (SETP + "tok")
         rc, _, err = cli("draw", "--corpus", corpus, "--set", set_dir, "--seed", TOKEN_SEED,
                          "--substantive", 15, "--routine", 2)  # all 15 substantive: the token unit is in
         self.assertEqual((rc, err), (0, ""))
@@ -526,10 +532,10 @@ class Estimate(Base):
         with mock.patch.object(run.archive, "REPO_ROOT", self.root / "fakerepo"):
             rc, out, err = cli("export", "--set", set_dir, "--out-dir", exp)
         self.assertEqual((rc, out, err), (0, "exported 10 cases, 10 labels, 0 relabels\n", ""))
-        self.assertEqual(json.loads(read(exp / "main-draw.json")), {
-            "set_id": "main", "seed": 11,
+        self.assertEqual(json.loads(read(exp / MAIN_DRAW)), {
+            "set_id": MAIN, "seed": 11,
             "cases": [{"case_id": c, "sha256": s, "stratum": st, "kind": k} for c, s, st, k in EXPORT_CASES]})
-        self.assertEqual([json.loads(l) for l in read(exp / "main-labels.jsonl").splitlines()],
+        self.assertEqual([json.loads(l) for l in read(exp / MAIN_LABELS).splitlines()],
                          [dict(zip(LABEL_FIELDS, row)) for row in EXPORT_LABELS])
 
     def test_estimate_attaches_corpus_id_and_population_to_every_figure_block(self):
@@ -707,7 +713,7 @@ class SetGuards(Base):
         with mock.patch.object(run.archive, "REPO_ROOT", repo):
             rc, out, err = cli("export", "--set", set_dir, "--out-dir", repo / "data")
         self.assertEqual(rc, 1)
-        self.assertIn("not a plain file name", err)
+        self.assertIn("must equal the set directory's name", err)
         self.assertEqual(list(repo.iterdir()), [])
 
     def test_render_refuses_a_case_whose_unit_is_not_in_the_corpus(self):
@@ -726,7 +732,7 @@ class SetGuards(Base):
         rc, out, err = cli("estimate", "--set", set_dir, "--frame", self.frame_file(), "--seed", 1,
                            "--out", self.root / "r.json")
         self.assertEqual(rc, 1)
-        self.assertEqual(err, f"error: duplicate label for case_id '{recs[-1]['case_id']}'; nothing written\n")
+        self.assertEqual(err, f"error: duplicate label for case_id '{recs[-1]['case_id']}'; refusing to estimate\n")
         self.assertFalse((self.root / "r.json").exists())
 
     def test_export_writes_nothing_when_only_one_target_exists(self):
@@ -735,13 +741,13 @@ class SetGuards(Base):
         repo = self.root / "fakerepo"
         out_dir = repo / "data"
         out_dir.mkdir(parents=True)
-        (out_dir / "main-labels.jsonl").write_text("earlier evidence")  # the SECOND file of the pair exists
+        (out_dir / MAIN_LABELS).write_text("earlier evidence")  # the SECOND file of the pair exists
         with mock.patch.object(run.archive, "REPO_ROOT", repo):
             rc, out, err = cli("export", "--set", set_dir, "--out-dir", out_dir)
         self.assertEqual(rc, 1)
         self.assertIn("is not a prefix of the new export; an exported label file only grows", err)
-        self.assertEqual(sorted(p.name for p in out_dir.iterdir()), ["main-labels.jsonl"])  # no half-written pair
-        self.assertEqual(read(out_dir / "main-labels.jsonl"), "earlier evidence")
+        self.assertEqual(sorted(p.name for p in out_dir.iterdir()), [MAIN_LABELS])  # no half-written pair
+        self.assertEqual(read(out_dir / MAIN_LABELS), "earlier evidence")
 
     def test_a_key_json_entry_draw_json_does_not_hold_is_refused_at_load(self):
         set_dir = self.rendered()
@@ -855,7 +861,8 @@ class SetGuards(Base):
             for name, argv in attempts.items():
                 rc, out, err = cli(*argv)
                 self.assertEqual(rc, 1, name)
-                self.assertEqual(err, f"error: {set_dir}: draw.json lists a case more than once\n", name)
+                tail = "; nothing exported" if name == "export" else ""
+                self.assertEqual(err, f"error: {set_dir}: draw.json lists a case more than once{tail}\n", name)
         self.assertFalse((self.root / "r.json").exists())
 
     def test_a_failing_corpus_read_never_quotes_the_exception_text(self):
@@ -863,7 +870,7 @@ class SetGuards(Base):
         secret = sid_for(4)
         boom = ValueError(f"cannot read work/{secret}")
         attempts = {"render": ("render", "--corpus", self.corpus, "--set", set_dir),
-                    "draw": ("draw", "--corpus", self.corpus, "--set", self.root / "d2", "--seed", 1,
+                    "draw": ("draw", "--corpus", self.corpus, "--set", self.root / (SETP + "d2"), "--seed", 1,
                              "--substantive", 1, "--routine", 1),
                     "frame": ("frame", "--corpus", self.corpus, "--out", self.root / "f2.json")}
         for name, argv in attempts.items():
@@ -873,7 +880,7 @@ class SetGuards(Base):
                 self.assertEqual((rc, out), (1, ""))
                 self.assertEqual(err, "error: the corpus could not be read (ValueError); nothing written\n")
                 self.assertNotIn(secret, out + err)
-        self.assertFalse((self.root / "d2").exists() or (self.root / "f2.json").exists())
+        self.assertFalse((self.root / (SETP + "d2")).exists() or (self.root / "f2.json").exists())
         self.assertFalse((set_dir / "packets").exists())
 
     def test_estimate_refuses_an_orphan_or_duplicate_relabel(self):
@@ -896,19 +903,131 @@ class SetGuards(Base):
                 self.assertIn(f"error: {message}", err)
                 self.assertFalse((self.root / f"r-{name}.json").exists())
 
-    def test_estimate_refuses_an_unknown_stratum_in_key_json(self):
-        # reaches the estimator's own ValueError (the handler around it is otherwise unreachable)
+    def test_key_json_values_are_validated_at_load_by_render_estimate_and_export(self):
         set_dir = self.rendered()
         write_labels(set_dir, sub_hits=4, rou_hits=1)
-        key = json.loads(read(set_dir / "key.json"))
-        cid = next(iter(key))
-        key[cid]["stratum"] = "other"
-        (set_dir / "key.json").write_text(json.dumps(key))
-        rc, out, err = cli("estimate", "--set", set_dir, "--frame", self.frame_file(), "--seed", 1,
-                           "--out", self.root / "r.json")
-        self.assertEqual(rc, 1)
-        self.assertIn(f"case '{cid}' has unknown stratum", err)
+        frame = self.frame_file()
+        repo = self.root / "fakerepo"
+        repo.mkdir()
+        saved = read(set_dir / "key.json")
+        key0 = json.loads(saved)
+        cid = next(iter(key0))
+        secret = key0[cid]["case_key"]  # a session id inside
+        self.assertIn(secret, saved)  # positive control: the sentinel IS in the private file
+        for field, values in (("stratum", [secret, "other", None, "top", "handback"]),
+                              ("kind", [secret, "other", None, "substantive", "routine"])):
+            for value in values:
+                with self.subTest(field=field, value=str(value)[:12]):
+                    key = json.loads(saved)
+                    key[cid][field] = value
+                    (set_dir / "key.json").write_text(json.dumps(key))
+                    message = f"{set_dir}: key.json: case {cid}: field {field} is invalid"
+                    attempts = {"render": (("render", "--corpus", self.corpus, "--set", set_dir), ""),
+                                "estimate": (("estimate", "--set", set_dir, "--frame", frame, "--seed", 1,
+                                              "--out", self.root / "r.json"), ""),
+                                "export": (("export", "--set", set_dir, "--out-dir", repo / "data"),
+                                           "; nothing exported")}
+                    with mock.patch.object(run.archive, "REPO_ROOT", repo):
+                        for name, (argv, tail) in attempts.items():
+                            rc, out, err = cli(*argv)
+                            self.assertEqual((rc, out, err), (1, "", f"error: {message}{tail}\n"), name)
+        (set_dir / "key.json").write_text(saved)
+        rc, out, err = cli("estimate", "--set", set_dir, "--frame", frame, "--seed", 1, "--out", self.root / "r.json")
+        self.assertEqual((rc, err), (0, ""))  # restored: the same set estimates
+        self.assertFalse((repo / "data").exists())
+
+    def test_an_estimator_error_never_carries_a_value_out(self):
+        set_dir = self.rendered()
+        write_labels(set_dir, sub_hits=4, rou_hits=1)
+        secret = "work/" + sid_for(2)
+        with mock.patch.object(run.estimator, "estimate", side_effect=ValueError(f"case {secret} is odd")):
+            rc, out, err = cli("estimate", "--set", set_dir, "--frame", self.frame_file(), "--seed", 1,
+                               "--out", self.root / "r.json")
+        self.assertEqual((rc, out), (1, ""))
+        self.assertEqual(err, "error: the estimator refused the labels (ValueError); refusing to estimate\n")
         self.assertFalse((self.root / "r.json").exists())
+
+    def test_the_seed_is_bounded_on_both_sides_at_draw_estimate_and_export(self):
+        uuid_int = uuid.UUID(sid_for(3)).int
+        for i, (seed, accepted) in enumerate(((0, True), (2 ** 32 - 1, True), (2 ** 32, False), (-1, False),
+                                              (10 ** 400, False), (uuid_int, False))):
+            with self.subTest(draw=str(seed)[:12]):
+                target = self.root / f"{SETP}seed{i}"
+                rc, out, err = cli("draw", "--corpus", self.corpus, "--set", target, "--seed", seed,
+                                   "--substantive", 1, "--routine", 0)
+                if accepted:
+                    self.assertEqual((rc, err), (0, ""))
+                    self.assertEqual(json.loads(read(target / "draw.json"))["seed"], seed)
+                else:
+                    self.assertEqual((rc, out, err), (1, "", "error: --seed must be an integer from 0 to 2**32 - 1\n"))
+                    self.assertFalse(target.exists())
+        set_dir = self.rendered()
+        write_labels(set_dir, sub_hits=4, rou_hits=1)
+        frame = self.frame_file()
+        for j, (seed, accepted) in enumerate(((0, True), (2 ** 32 - 1, True), (2 ** 32, False), (-1, False), (uuid_int, False))):
+            with self.subTest(estimate=str(seed)[:12]):
+                out_file = self.root / f"e{j}.json"
+                rc, out, err = cli("estimate", "--set", set_dir, "--frame", frame, "--seed", seed, "--out", out_file)
+                self.assertEqual(rc, 0 if accepted else 1)
+                self.assertEqual(out_file.exists(), accepted)
+                if not accepted:
+                    self.assertEqual(err, "error: --seed must be an integer from 0 to 2**32 - 1\n")
+        repo = self.root / "fakerepo"
+        repo.mkdir()
+        draw = json.loads(read(set_dir / "draw.json"))
+        for seed in (0, 2 ** 32 - 1):
+            with self.subTest(export=seed):
+                draw["seed"] = seed
+                (set_dir / "draw.json").write_text(json.dumps(draw))
+                with mock.patch.object(run.archive, "REPO_ROOT", repo):
+                    rc, out, err = cli("export", "--set", set_dir, "--out-dir", repo / f"x{seed}")
+                self.assertEqual((rc, err), (0, ""))
+                self.assertEqual(json.loads(read(repo / f"x{seed}" / f"{MAIN}-draw.json"))["seed"], seed)
+
+    def test_set_names_at_draw_and_at_export(self):
+        long_ok = "2026-09-29-" + "a" * 41  # 41 name characters: the limit
+        accepted = ["2026-09-29-labelled-pilot", "2026-09-29-labelled-main", long_ok]
+        refused = {"bare uuid": sid_for(3), "date-prefixed name embedding a uuid": "2026-09-29-x-" + sid_for(3),
+                   "no date": "main", "short date": "2026-9-29-x", "uppercase": "2026-09-29-Labelled",
+                   "name too long": "2026-09-29-" + "a" * 42, "name starts with a digit": "2026-09-29-9x",
+                   "nothing after the date": "2026-09-29-", "underscore": "2026-09-29-a_b"}
+        for name in accepted:
+            with self.subTest(accepted=name[:30]):
+                rc, out, err = cli("draw", "--corpus", self.corpus, "--set", self.root / name, "--seed", 1,
+                                   "--substantive", 1, "--routine", 0)
+                self.assertEqual((rc, err), (0, ""))
+        for why, name in refused.items():
+            with self.subTest(refused=why):
+                rc, out, err = cli("draw", "--corpus", self.corpus, "--set", self.root / name, "--seed", 1,
+                                   "--substantive", 1, "--routine", 0)
+                self.assertEqual((rc, out), (1, ""))
+                self.assertEqual(err, "error: set name is not allowed: it must look like 2026-09-29-labelled-main "
+                                      "(a date, then a lowercase name) and hold no session-id-shaped run\n")
+                self.assertFalse((self.root / name).exists())
+                self.assertNotIn(sid_for(3), err)
+        set_dir = self.rendered("exp")
+        write_labels(set_dir, sub_hits=4, rou_hits=1)
+        repo = self.root / "fakerepo"
+        repo.mkdir()
+        bad = self.root / ("2026-09-29-x-" + sid_for(3))
+        set_dir.rename(bad)
+        draw = json.loads(read(bad / "draw.json"))
+        draw["set_id"] = bad.name
+        (bad / "draw.json").write_text(json.dumps(draw))
+        with mock.patch.object(run.archive, "REPO_ROOT", repo):
+            rc, out, err = cli("export", "--set", bad, "--out-dir", repo / "data")
+        self.assertEqual((rc, out, err), (1, "", f"error: {SETID_MESSAGE}\n"))
+        self.assertEqual(list(repo.iterdir()), [])
+        # positive control: the same set under a good name exports, names carried into the file names
+        good = bad.rename(self.root / (SETP + "renamed"))
+        draw["set_id"] = good.name
+        (good / "draw.json").write_text(json.dumps(draw))
+        with mock.patch.object(run.archive, "REPO_ROOT", repo):
+            rc, out, err = cli("export", "--set", good, "--out-dir", repo / "data")
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(sorted(p.name for p in (repo / "data").iterdir()),
+                         [f"{good.name}-draw.json", f"{good.name}-labels.jsonl"])
+
 
 
 
@@ -931,7 +1050,7 @@ class Export(Base):
         self.assertEqual((rc, err), (0, ""))
         self.assertEqual(out, "exported 10 cases, 10 labels, 0 relabels\n")
         files = sorted(p.name for p in self.out_dir.iterdir())
-        self.assertEqual(files, ["main-draw.json", "main-labels.jsonl"])  # no key.json, pick, packets, notes
+        self.assertEqual(files, [MAIN_DRAW, MAIN_LABELS])  # no key.json, pick, packets, notes
         key = json.loads(read(self.set_dir / "key.json"))
         private = "".join(read(self.set_dir / f) for f in ("key.json", "labels.jsonl", "relabel_pick.json", "draw.json"))
         packets = "".join(read(p) for p in (self.set_dir / "packets").iterdir())
@@ -957,16 +1076,16 @@ class Export(Base):
 
     def test_export_contents(self):
         self.export()
-        draw = json.loads(read(self.out_dir / "main-draw.json"))
+        draw = json.loads(read(self.out_dir / MAIN_DRAW))
         key = json.loads(read(self.set_dir / "key.json"))
         src = json.loads(read(self.set_dir / "draw.json"))
         self.assertEqual(set(draw), {"set_id", "seed", "cases"})
-        self.assertEqual((draw["set_id"], draw["seed"]), ("main", 11))
+        self.assertEqual((draw["set_id"], draw["seed"]), (MAIN, 11))
         self.assertEqual(draw["cases"], [{"case_id": c["case_id"], "sha256": c["sha256"],
                                           "stratum": key[c["case_id"]]["stratum"], "kind": key[c["case_id"]]["kind"]}
                                          for c in src["cases"]])
         self.assertTrue(all(len(c["sha256"]) == 64 for c in draw["cases"]))
-        rows = [json.loads(l) for l in read(self.out_dir / "main-labels.jsonl").splitlines()]
+        rows = [json.loads(l) for l in read(self.out_dir / MAIN_LABELS).splitlines()]
         self.assertEqual(len(rows), 10)
         for row, rec in zip(rows, self.recs):
             self.assertEqual(row, {k: rec[k] for k in ("case_id", "packet_sha256", "labels", "delivery",
@@ -993,7 +1112,7 @@ class Export(Base):
         rc, out, err = self.export()
         self.assertEqual((rc, out, err), (0, "exported 10 cases, 10 labels, 0 relabels\n", ""))
         self.assertEqual({p.name: p.read_bytes() for p in self.out_dir.iterdir()}, before)
-        self.assertEqual(sorted(before), ["main-draw.json", "main-labels.jsonl"])  # no temp file left behind
+        self.assertEqual(sorted(before), [MAIN_DRAW, MAIN_LABELS])  # no temp file left behind
 
     def test_first_export_without_labels_writes_the_draw_and_an_empty_labels_file(self):
         for how in ("absent", "empty"):
@@ -1007,26 +1126,26 @@ class Export(Base):
                     labels.write_text("")
                 rc, out, err = self.export(out_dir)
                 self.assertEqual((rc, out, err), (0, "exported 10 cases, 0 labels, 0 relabels\n", ""))
-                self.assertEqual(sorted(p.name for p in out_dir.iterdir()), ["main-draw.json", "main-labels.jsonl"])
-                self.assertEqual(read(out_dir / "main-labels.jsonl"), "")
-                self.assertEqual(len(json.loads(read(out_dir / "main-draw.json"))["cases"]), 10)
+                self.assertEqual(sorted(p.name for p in out_dir.iterdir()), [MAIN_DRAW, MAIN_LABELS])
+                self.assertEqual(read(out_dir / MAIN_LABELS), "")
+                self.assertEqual(len(json.loads(read(out_dir / MAIN_DRAW))["cases"]), 10)
                 labels.write_text(saved)
 
     def test_second_export_after_labelling_grows_the_first(self):
         lines = read(self.set_dir / "labels.jsonl").splitlines(keepends=True)
         (self.set_dir / "labels.jsonl").write_text("".join(lines[:4]))
         self.assertEqual(self.export()[0], 0)
-        first = [json.loads(l) for l in read(self.out_dir / "main-labels.jsonl").splitlines()]
-        draw_bytes = (self.out_dir / "main-draw.json").read_bytes()
+        first = [json.loads(l) for l in read(self.out_dir / MAIN_LABELS).splitlines()]
+        draw_bytes = (self.out_dir / MAIN_DRAW).read_bytes()
         (self.set_dir / "labels.jsonl").write_text("".join(lines))
         rc, out, err = self.export()
         self.assertEqual((rc, out, err), (0, "exported 10 cases, 10 labels, 0 relabels\n", ""))
-        second = [json.loads(l) for l in read(self.out_dir / "main-labels.jsonl").splitlines()]
+        second = [json.loads(l) for l in read(self.out_dir / MAIN_LABELS).splitlines()]
         self.assertEqual((len(first), len(second)), (4, 10))
         self.assertEqual(second[:4], first)  # the old records are a prefix
         self.assertEqual([r["case_id"] for r in second], [row[0] for row in EXPORT_LABELS])
-        self.assertEqual((self.out_dir / "main-draw.json").read_bytes(), draw_bytes)
-        self.assertEqual(sorted(p.name for p in self.out_dir.iterdir()), ["main-draw.json", "main-labels.jsonl"])
+        self.assertEqual((self.out_dir / MAIN_DRAW).read_bytes(), draw_bytes)
+        self.assertEqual(sorted(p.name for p in self.out_dir.iterdir()), [MAIN_DRAW, MAIN_LABELS])
 
     def test_re_export_with_a_changed_draw_is_refused(self):
         self.assertEqual(self.export()[0], 0)
@@ -1036,8 +1155,8 @@ class Export(Base):
         (self.set_dir / "draw.json").write_text(json.dumps(draw))
         rc, out, err = self.export()
         self.assertEqual(rc, 1)
-        self.assertEqual(err, f"error: {self.out_dir.resolve() / 'main-draw.json'} differs from the new draw manifest; "
-                              f"the draw manifest is immutable once committed\n")
+        self.assertEqual(err, f"error: {self.out_dir.resolve() / MAIN_DRAW} differs from the new draw manifest; "
+                              f"the draw manifest is immutable once committed; nothing exported\n")
         self.assertEqual({p.name: p.read_bytes() for p in self.out_dir.iterdir()}, before)
 
     def test_re_export_that_drops_or_alters_an_exported_label_is_refused(self):
@@ -1053,8 +1172,8 @@ class Export(Base):
                 (self.set_dir / "labels.jsonl").write_text(text)
                 rc, out, err = self.export()
                 self.assertEqual(rc, 1)
-                self.assertEqual(err, f"error: {self.out_dir.resolve() / 'main-labels.jsonl'} is not a prefix of the "
-                                      f"new export; an exported label file only grows\n")
+                self.assertEqual(err, f"error: {self.out_dir.resolve() / MAIN_LABELS} is not a prefix of the "
+                                      f"new export; an exported label file only grows; nothing exported\n")
                 self.assertEqual({p.name: p.read_bytes() for p in self.out_dir.iterdir()}, before)
 
     def test_re_export_that_drops_exported_relabels_is_refused_and_growth_is_allowed(self):
@@ -1063,12 +1182,12 @@ class Export(Base):
         self.assertEqual(self.export()[1], "exported 10 cases, 10 labels, 2 relabels\n")
         (self.set_dir / "relabels.jsonl").write_text("".join(lines[:3]))  # grows: fine
         self.assertEqual(self.export()[1], "exported 10 cases, 10 labels, 3 relabels\n")
-        self.assertEqual(len(read(self.out_dir / "main-relabels.jsonl").splitlines()), 3)
+        self.assertEqual(len(read(self.out_dir / MAIN_RELABELS).splitlines()), 3)
         (self.set_dir / "relabels.jsonl").unlink()  # the exported file exists, the source has none
         rc, out, err = self.export()
         self.assertEqual(rc, 1)
-        self.assertIn("main-relabels.jsonl is not a prefix of the new export; an exported label file only grows", err)
-        self.assertEqual(len(read(self.out_dir / "main-relabels.jsonl").splitlines()), 3)
+        self.assertIn(f"{MAIN_RELABELS} is not a prefix of the new export; an exported label file only grows", err)
+        self.assertEqual(len(read(self.out_dir / MAIN_RELABELS).splitlines()), 3)
 
     def test_export_refuses_an_unrendered_draw(self):
         unrendered = self.draw("fresh", 12, 2, 1)
@@ -1076,7 +1195,7 @@ class Export(Base):
             rc, out, err = cli("export", "--set", unrendered, "--out-dir", self.out_dir)
         self.assertEqual(rc, 1)
         self.assertEqual(err, f"error: {unrendered} is not rendered (draw.json holds no packet hashes); "
-                              f"run render first\n")
+                              f"run render first; nothing exported\n")
         self.assertFalse(self.out_dir.exists())
 
     def test_export_validates_the_values_it_commits(self):
@@ -1113,7 +1232,7 @@ class Export(Base):
                 (self.set_dir / "labels.jsonl").write_text(json.dumps(rec) + "\n" + rest)
                 rc, out, err = self.export()
                 self.assertEqual(rc, 1)
-                self.assertIn(f"main-labels.jsonl: {message} is", err)
+                self.assertIn(f"{MAIN_LABELS}: {message} is", err)
                 self.assertIn("; nothing exported", err)
                 self.assertNotIn(secret, out + err)
                 self.assertNotIn(sid_for(0), out + err)
@@ -1123,14 +1242,14 @@ class Export(Base):
         (self.set_dir / "relabels.jsonl").write_text(json.dumps(dict(first, labels=[secret])) + "\n")
         rc, out, err = self.export()
         self.assertEqual(rc, 1)
-        self.assertIn(f"main-relabels.jsonl: case {cid}: field labels is invalid", err)
+        self.assertIn(f"{MAIN_RELABELS}: case {cid}: field labels is invalid", err)
         self.assertNotIn(secret, out + err)
         self.assertFalse(self.out_dir.exists())
         # positive control: without the bad record the same files export, whitelisted fields present
         (self.set_dir / "relabels.jsonl").unlink()
         (self.set_dir / "labels.jsonl").write_text(json.dumps(dict(first, seconds=0)) + "\n" + rest)  # 0 is a valid duration
         self.assertEqual(self.export()[0], 0)
-        rows = [json.loads(l) for l in read(self.out_dir / "main-labels.jsonl").splitlines()]
+        rows = [json.loads(l) for l in read(self.out_dir / MAIN_LABELS).splitlines()]
         self.assertEqual(rows[0], dict(zip(LABEL_FIELDS, EXPORT_LABELS[0][:5] + (0,))))
         self.assertEqual(rows[1:], [dict(zip(LABEL_FIELDS, row)) for row in EXPORT_LABELS[1:]])
 
@@ -1143,7 +1262,7 @@ class Export(Base):
         real_replace = os.replace
 
         def failing(src, dst, *a, **k):
-            if pathlib.Path(dst).name == "main-labels.jsonl":
+            if pathlib.Path(dst).name == MAIN_LABELS:
                 raise OSError("simulated crash during the labels swap")
             return real_replace(src, dst, *a, **k)
 
@@ -1156,7 +1275,7 @@ class Export(Base):
         (self.set_dir / "labels.jsonl").write_text("[1, 2]\n")
         rc, out, err = self.export()
         self.assertEqual(rc, 1)
-        self.assertEqual(err, "error: main-labels.jsonl: record 0 is not an object; nothing exported\n")
+        self.assertEqual(err, f"error: {MAIN_LABELS}: record 0 is not an object; nothing exported\n")
         self.assertFalse(self.out_dir.exists())
 
     def test_export_validates_the_draw_manifest_values(self):
@@ -1167,22 +1286,27 @@ class Export(Base):
         # positive control first: the untouched set exports, and seed / sha / stratum / kind ARE in the manifest
         rc, out, err = self.export(self.fake_repo / "control")
         self.assertEqual((rc, err), (0, ""))
-        manifest = json.loads(read(self.fake_repo / "control" / "main-draw.json"))
+        manifest = json.loads(read(self.fake_repo / "control" / MAIN_DRAW))
         self.assertEqual(manifest["seed"], 11)
         self.assertEqual(manifest["cases"][0], {"case_id": cid, "sha256": good_sha, "stratum": "substantive",
                                                 "kind": "top"})
         bad_sha = {"case_key": secret, "uppercase": good_sha.upper(), "63 chars": good_sha[:63],
                    "65 chars": good_sha + "0", "not hex": "g" * 64, "an int": 7, "a 64-digit int": int("1" * 64), "a list": [good_sha]}
         cases = [("seed", "draw.json: field seed is invalid; nothing exported", "draw.json",
-                  lambda d, k, v: d.update(seed=v), [secret, True, 11.0, None, [11]])]
+                  lambda d, k, v: d.update(seed=v), [secret, True, 11.0, None, [11], 2 ** 32, -1, 10 ** 400,
+                                                     uuid.UUID(sid_for(3)).int])]
         cases += [("sha256", f"draw.json: case {cid}: field sha256 is invalid; nothing exported", "draw.json",
                    lambda d, k, v: d["cases"][0].update(sha256=v), list(bad_sha.values()))]
-        cases += [("stratum", f"draw.json: case {cid}: field stratum is invalid; nothing exported", "key.json",
-                   lambda d, k, v: k[cid].update(stratum=v), [secret, "other", "", None])]
-        cases += [("kind", f"draw.json: case {cid}: field kind is invalid; nothing exported", "key.json",
-                   lambda d, k, v: k[cid].update(kind=v), [secret, "other", "", None])]
-        cases += [("set_id", "draw.json's set_id is not a plain file name", "draw.json",
-                   lambda d, k, v: d.update(set_id=v), [secret, "../escape", ".hidden", "", ["main"], None])]
+        cases += [("stratum", f"{self.set_dir}: key.json: case {cid}: field stratum is invalid; nothing exported",
+                   "key.json",
+                   lambda d, k, v: k[cid].update(stratum=v), [secret, "other", "", None, "top", "handback"])]
+        cases += [("kind", f"{self.set_dir}: key.json: case {cid}: field kind is invalid; nothing exported",
+                   "key.json",
+                   lambda d, k, v: k[cid].update(kind=v), [secret, "other", "", None, "substantive", "routine"])]
+        cases += [("set_id", SETID_MESSAGE, "draw.json",
+                   lambda d, k, v: d.update(set_id=v), [secret, "../escape", ".hidden", "", ["main"], None, sid_for(3),
+                                                    "2026-09-29-x-" + sid_for(3), "main", SETP + "other",
+                                                    MAIN.upper()])]
         for field, message, _, mutate, values in cases:
             for value in values:
                 with self.subTest(field=field, value=type(value).__name__ + str(value)[:12]):
@@ -1214,9 +1338,9 @@ class Export(Base):
                 rc, out, err = self.export(out_dir)
                 if accepted:
                     self.assertEqual((rc, err), (0, ""))
-                    self.assertEqual(json.loads(read(out_dir / "main-labels.jsonl").splitlines()[0])["seconds"], value)
+                    self.assertEqual(json.loads(read(out_dir / MAIN_LABELS).splitlines()[0])["seconds"], value)
                 else:
-                    self.assertEqual((rc, err), (1, f"error: main-labels.jsonl: case {first['case_id']}: field "
+                    self.assertEqual((rc, err), (1, f"error: {MAIN_LABELS}: case {first['case_id']}: field "
                                                     f"seconds is invalid; nothing exported\n"))
                     self.assertFalse(out_dir.exists())
 
@@ -1240,7 +1364,7 @@ class Export(Base):
                 rc, out, err = self.export()
                 self.assertEqual(rc, 1)
                 self.assertIn(f"error: {message}", err)
-                self.assertIn("nothing written", err)
+                self.assertIn("nothing exported", err)
                 self.assertFalse(self.out_dir.exists())
 
 
@@ -1251,8 +1375,8 @@ class Export(Base):
         rc, out, err = self.export()
         self.assertEqual((rc, err), (0, ""))
         self.assertEqual(out, "exported 10 cases, 10 labels, 3 relabels\n")
-        self.assertTrue((self.out_dir / "main-relabels.jsonl").is_file())
-        text = read(self.out_dir / "main-relabels.jsonl")
+        self.assertTrue((self.out_dir / MAIN_RELABELS).is_file())
+        text = read(self.out_dir / MAIN_RELABELS)
         rows = [json.loads(l) for l in text.splitlines()]
         self.assertEqual(len(rows), 3)
         for row, rec in zip(rows, self.recs):
