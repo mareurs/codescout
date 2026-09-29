@@ -281,7 +281,10 @@ class EstimateTests(unittest.TestCase):
         d = s["decision"]
         self.assertAlmostEqual(d["wilson"][0], 0.193260, delta=1e-5)  # independent quadratic-formula literal
         self.assertAlmostEqual(d["wilson"][1], 0.680489, delta=1e-5)
-        self.assertIn(d["outcome"], ("go", "no-go", "inconclusive"))
+        # wilson lower 0.193 >= T=0.10 is `go`; the seed-5 b=300 session bootstrap over the 3 sessions is (0.25, 0.5),
+        # also `go`; 1 unresolved of 12 is under a quarter. Observed values, so the outcome is the specific `go`.
+        self.assertEqual((d["wilson_outcome"], d["boot_outcome"]), ("go", "go"))
+        self.assertEqual((d["guards"], d["outcome"]), ([], "go"))
 
     def test_substantive_without_recall_flagged_cases(self):
         s = self.out["without_recall_flagged"]["substantive"]
@@ -395,6 +398,201 @@ class EstimateTests(unittest.TestCase):
         out = est.estimate(only_sub, self.key, self.frame, seed=1, b=50)
         self.assertIsNone(out["all_cases"]["overall"])
         self.assertIsNone(out["all_cases"]["routine"])
+
+
+def _substantive(k, n, unresolved=0, recall_from=None):
+    """n substantive labelled cases in n distinct sessions: k hits (quiet) first, `unresolved` unresolved LAST,
+    the rest none.
+    Cases with index >= recall_from (if given) carry recall 'y'. Distinct sessions mean the session bootstrap
+    is a plain bootstrap over cases, the shape a real 60-case sample has when no session repeats."""
+    labels, key = [], {}
+    for i in range(n):
+        cid = f"c{i:03d}"
+        if i < k:
+            l = rec(cid, ["verify"], "quiet")
+        elif i >= n - unresolved:
+            l = rec(cid, ["unresolved"], "silent")
+        else:
+            l = rec(cid, ["none"], "silent")
+        if recall_from is not None and i >= recall_from:
+            l["recall"] = "y"
+        labels.append(l)
+        key[cid] = {"stratum": "substantive", "kind": "top", "copy_id": f"s{i:03d}"}
+    return labels, key
+
+
+class UnresolvedGuardThroughEstimateTests(unittest.TestCase):
+    """The guard is wired into the production decision: exercised through estimate(), not decide() alone.
+    20 hits of 60 => wilson lower ~0.23 and a session bootstrap lower ~0.22: both `go`, so the unresolved
+    share is the ONLY thing that can refuse."""
+
+    def _decision(self, unresolved):
+        labels, key = _substantive(20, 60, unresolved)
+        out = est.estimate(labels, key, {}, seed=3, b=1000)
+        return out["all_cases"]["substantive"]["decision"], out["all_cases"]["substantive"]
+
+    def test_exactly_a_quarter_unresolved_does_not_trip(self):
+        d, s = self._decision(15)  # 15 / 60 = 25% exactly
+        self.assertEqual(s["unresolved"], 15)
+        self.assertEqual((d["wilson_outcome"], d["boot_outcome"]), ("go", "go"))
+        self.assertEqual(d["guards"], [])
+        self.assertEqual(d["outcome"], "go")
+
+    def test_one_over_a_quarter_trips_only_the_unresolved_guard(self):
+        d, s = self._decision(16)  # 16 / 60 > 25%
+        self.assertEqual(s["unresolved"], 16)
+        self.assertEqual((d["wilson_outcome"], d["boot_outcome"]), ("go", "go"))  # intervals agree: no other guard
+        self.assertEqual(d["guards"], ["unresolved_share"])
+        self.assertEqual(d["outcome"], "inconclusive")
+
+    def test_guard_is_evaluated_per_recall_branch(self):
+        # 16 unresolved sit in the recall-flagged tail: the all-cases branch trips, the without-recall one does not.
+        labels, key = _substantive(20, 60, 16, recall_from=44)  # indices 44..59 are the unresolved tail
+        for l in labels[:44]:
+            self.assertEqual(l["recall"], "n")
+        out = est.estimate(labels, key, {}, seed=3, b=1000)
+        self.assertEqual(out["all_cases"]["substantive"]["decision"]["guards"], ["unresolved_share"])
+        w = out["without_recall_flagged"]["substantive"]
+        self.assertEqual((w["n"], w["unresolved"]), (44, 0))
+        self.assertEqual(w["decision"]["guards"], [])
+        self.assertEqual(w["decision"]["outcome"], "go")
+
+
+class RealisticBootstrapEndToEndTests(unittest.TestCase):
+    """Decision boundaries through estimate() with a REAL session bootstrap (60 distinct sessions, b = 10000),
+    not the hand-picked agreeing tuples that test_outcome_at_the_registered_boundaries uses.
+    Seeds checked, k = 11 (the registered go boundary), 100 seeds 0..99, guard-free otherwise:
+      go in 35 of 100 (first: 1, 2, 9, 10, 11, 15, 16, 21); inconclusive + interval_disagreement in 65.
+    k = 1 no-go, k = 10 inconclusive, k = 12 go in 100 / 100. Reproduce: session_bootstrap on 60 one-unit
+    sessions, hits {s00..s10} = 1."""
+
+    def _run(self, k, seed):
+        labels, key = _substantive(k, 60)
+        out = est.estimate(labels, key, {}, seed=seed, b=10000)
+        return out["all_cases"]["substantive"]["decision"]
+
+    def test_k11_outcome_is_seed_dependent_at_the_registered_boundary(self):
+        # OPEN DESIGN ISSUE, not a property to rely on: at k = 11 of 60 the bootstrap's 2.5% quantile lands on
+        # the discrete atoms 5/60 and 6/60 (P(X <= 5 | Binomial(60, 11/60)) = 0.0256), so the bootstrap lower
+        # bound straddles 10% and the outcome depends on the seed even with no session clustering: `go` in
+        # 35 of 100 seeds, `interval_disagreement` in the other 65. k >= 12 is `go` at every seed tried.
+        # The operator was asked to rule on this before registration. These two pins fix the two behaviours.
+        d = self._run(11, seed=1)
+        self.assertEqual((d["wilson_outcome"], d["boot_outcome"]), ("go", "go"))
+        self.assertEqual((d["guards"], d["outcome"]), ([], "go"))
+        d = self._run(11, seed=0)
+        self.assertEqual((d["wilson_outcome"], d["boot_outcome"]), ("go", "inconclusive"))
+        self.assertEqual((d["guards"], d["outcome"]), (["interval_disagreement"], "inconclusive"))
+
+    def test_k12_is_go(self):
+        d = self._run(12, seed=0)
+        self.assertEqual((d["guards"], d["outcome"]), ([], "go"))
+
+    def test_k10_is_inconclusive(self):
+        d = self._run(10, seed=0)
+        self.assertEqual((d["guards"], d["outcome"]), ([], "inconclusive"))
+
+    def test_k1_is_no_go(self):
+        d = self._run(1, seed=0)
+        self.assertEqual((d["guards"], d["outcome"]), ([], "no-go"))
+
+
+class EstimateWiringTests(unittest.TestCase):
+    """estimate() hands the RIGHT sessions, seed and b to the bootstrap, on both recall branches."""
+
+    def setUp(self):
+        # 8 sessions; session i has i + 1 units, unit j is a hit when (i + j) % 3 == 0; units j == 0 of even
+        # sessions are recall-flagged. Uneven session sizes keep the pooled-rate atoms fine-grained.
+        self.labels, self.key = [], {}
+        self.all_hits, self.kept_hits = {}, {}
+        for i in range(8):
+            for j in range(i + 1):
+                cid = f"w{i}_{j}"
+                hit = (i + j) % 3 == 0
+                flagged = j == 0 and i % 2 == 0
+                l = rec(cid, ["verify"], "quiet") if hit else rec(cid, ["none"], "silent")
+                l["recall"] = "y" if flagged else "n"
+                self.labels.append(l)
+                self.key[cid] = {"stratum": "substantive", "kind": "top" if j % 2 else "handback",
+                                 "copy_id": f"sess{i}"}
+                self.all_hits.setdefault(f"sess{i}", []).append(int(hit))
+                if not flagged:
+                    self.kept_hits.setdefault(f"sess{i}", []).append(int(hit))
+        self.frame = {"substantive": {"top": 200}}
+        # Routine cases in their own sessions, one of them unresolved: they must not leak into the substantive
+        # decision (its sessions, k, n or unresolved count). Sizes 1..4, hits where (i + j) % 2 == 0.
+        self.rou_hits = {}
+        for i in range(4):
+            for j in range(i + 1):
+                cid = f"x{i}_{j}"
+                hit = (i + j) % 2 == 0
+                if i == 3 and j == 3:
+                    l = rec(cid, ["unresolved"], "silent")
+                    hit = False
+                else:
+                    l = rec(cid, ["verify"], "quiet") if hit else rec(cid, ["none"], "silent")
+                self.labels.append(l)
+                self.key[cid] = {"stratum": "routine", "kind": "top", "copy_id": f"rsess{i}"}
+                self.rou_hits.setdefault(f"rsess{i}", []).append(int(hit))
+
+    def test_decision_bootstrap_uses_copy_id_sessions_seed_and_b_on_both_branches(self):
+        out = est.estimate(self.labels, self.key, self.frame, seed=9, b=40)
+        self.assertEqual(out["all_cases"]["substantive"]["decision"]["boot"],
+                         est.session_bootstrap(self.all_hits, 9, 40))
+        self.assertEqual(out["without_recall_flagged"]["substantive"]["decision"]["boot"],
+                         est.session_bootstrap(self.kept_hits, 9, 40))
+
+    def test_the_two_expected_bootstraps_are_not_accidentally_equal(self):
+        # Positive control for the test above: a mutant that swapped the branches or dropped the recall
+        # filter would be invisible if these coincided.
+        self.assertNotEqual(est.session_bootstrap(self.all_hits, 9, 40), est.session_bootstrap(self.kept_hits, 9, 40))
+        self.assertNotEqual(est.session_bootstrap(self.all_hits, 9, 40), est.session_bootstrap(self.all_hits, 0, 40))
+        self.assertNotEqual(est.session_bootstrap(self.all_hits, 9, 40),
+                            est.session_bootstrap(self.all_hits, 9, 10000))
+
+    def test_overall_bootstrap_uses_the_same_sessions_seed_and_b(self):
+        # One stratum in the frame => the weighted bootstrap reduces to that stratum's session bootstrap.
+        out = est.estimate(self.labels, self.key, self.frame, seed=9, b=40)
+        lo, hi = est.session_bootstrap(self.all_hits, 9, 40)
+        got = out["all_cases"]["overall"]["boot"]
+        self.assertAlmostEqual(got[0], lo, places=12)
+        self.assertAlmostEqual(got[1], hi, places=12)
+        lo, hi = est.session_bootstrap(self.kept_hits, 9, 40)
+        got = out["without_recall_flagged"]["overall"]["boot"]
+        self.assertAlmostEqual(got[0], lo, places=12)
+        self.assertAlmostEqual(got[1], hi, places=12)
+
+    def test_decision_counts_come_from_the_right_stratum_and_branch(self):
+        out = est.estimate(self.labels, self.key, self.frame, seed=9, b=40)
+        s = out["all_cases"]["substantive"]
+        self.assertEqual((s["n"], s["k"]), (36, sum(map(sum, self.all_hits.values()))))
+        w = out["without_recall_flagged"]["substantive"]
+        self.assertEqual((w["n"], w["k"]), (32, sum(map(sum, self.kept_hits.values()))))
+        self.assertEqual(w["decision"]["wilson"], est.wilson(w["k"], w["n"]))  # wired k, n (wilson tested on literals)
+        self.assertEqual(s["decision"]["wilson"], est.wilson(s["k"], s["n"]))
+
+    def test_routine_cases_do_not_leak_into_the_substantive_decision(self):
+        out = est.estimate(self.labels, self.key, self.frame, seed=9, b=40)
+        s = out["all_cases"]["substantive"]
+        self.assertEqual(s["unresolved"], 0)  # the one unresolved case is routine
+        self.assertEqual(out["all_cases"]["routine"]["n"], 10)
+        self.assertEqual(out["all_cases"]["routine"]["k"], sum(map(sum, self.rou_hits.values())))
+        self.assertEqual(s["decision"]["boot"], est.session_bootstrap(self.all_hits, 9, 40))  # substantive sessions only
+
+    def test_two_stratum_overall_bootstrap_draws_strata_in_order_from_one_seeded_stream(self):
+        # With b = 40 the first stratum's stream position decides the second's draws, so a wrong b, seed,
+        # stratum order or grouping at the overall site shifts the result. Expected value built from the
+        # same primitives by hand: substantive first, then routine, weights 100 / 300 by frame size.
+        import random
+        frame = {"substantive": {"top": 100}, "routine": {"top": 300}}
+        out = est.estimate(self.labels, self.key, frame, seed=9, b=40)
+        rng = random.Random(9)
+        sub = est._resample_rates([(sum(h), len(h)) for _, h in sorted(self.all_hits.items())], rng, 40)
+        rou = est._resample_rates([(sum(h), len(h)) for _, h in sorted(self.rou_hits.items())], rng, 40)
+        want = est._bounds([(100 * a + 300 * b) / 400 for a, b in zip(sub, rou)])
+        got = out["all_cases"]["overall"]["boot"]
+        self.assertAlmostEqual(got[0], want[0], places=12)
+        self.assertAlmostEqual(got[1], want[1], places=12)
 
 
 if __name__ == "__main__":
