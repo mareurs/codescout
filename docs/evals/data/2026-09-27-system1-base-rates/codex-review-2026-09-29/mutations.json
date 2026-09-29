@@ -1,0 +1,85 @@
+{
+  "model_calls": 0,
+  "applied": 6,
+  "survived": 0,
+  "mutations": [
+    {
+      "symbol": "_reserve_gate_logs",
+      "mutation": [
+        "open(\"x\")",
+        "open(\"w\")"
+      ],
+      "test": "test_two_contenders_observing_empty_directory_only_enter_once",
+      "tests_run": 1,
+      "failures": 1,
+      "errors": 0,
+      "survived": false,
+      "output": "F\n======================================================================\nFAIL: test_two_contenders_observing_empty_directory_only_enter_once (review_reservation.ReservationTests.test_two_contenders_observing_empty_directory_only_enter_once)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_measure_judge_reservation.py\", line 101, in test_two_contenders_observing_empty_directory_only_enter_once\n    self.assertEqual(sorted(outcomes), [\"entered\", \"refused\"])\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Lists differ: ['entered', 'entered'] != ['entered', 'refused']\n\nFirst differing element 1:\n'entered'\n'refused'\n\n- ['entered', 'entered']\n?               ^^^^\n\n+ ['entered', 'refused']\n?              + ^^^\n\n\n----------------------------------------------------------------------\nRan 1 test in 0.004s\n\nFAILED (failures=1)\n"
+    },
+    {
+      "symbol": "run_gate",
+      "mutation": [
+        "_reserve_gate_logs(log_dir)",
+        "pass"
+      ],
+      "test": "test_successful_run_cannot_reenter_or_overwrite_its_logs",
+      "tests_run": 1,
+      "failures": 1,
+      "errors": 0,
+      "survived": false,
+      "output": "F\n======================================================================\nFAIL: test_successful_run_cannot_reenter_or_overwrite_its_logs (review_reservation.ReservationTests.test_successful_run_cannot_reenter_or_overwrite_its_logs)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_measure_judge_reservation.py\", line 33, in test_successful_run_cannot_reenter_or_overwrite_its_logs\n    with self.assertRaisesRegex(ValueError, \"already|existing|reserved\"):\n         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: ValueError not raised\n\n----------------------------------------------------------------------\nRan 1 test in 0.001s\n\nFAILED (failures=1)\n"
+    },
+    {
+      "symbol": "_reserve_gate_logs",
+      "mutation": [
+        "if any(path.iterdir()):",
+        "if False:"
+      ],
+      "test": "test_legacy_evidence_refused_before_channel_construction",
+      "tests_run": 1,
+      "failures": 1,
+      "errors": 0,
+      "survived": false,
+      "output": "F\n======================================================================\nFAIL: test_legacy_evidence_refused_before_channel_construction (review_reservation.ReservationTests.test_legacy_evidence_refused_before_channel_construction)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_measure_judge_reservation.py\", line 45, in test_legacy_evidence_refused_before_channel_construction\n    with self.assertRaisesRegex(ValueError, \"already|existing|reserved\"):\n         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: ValueError not raised\n\n----------------------------------------------------------------------\nRan 1 test in 0.001s\n\nFAILED (failures=1)\n"
+    },
+    {
+      "symbol": "run_gate",
+      "mutation": [
+        "if not dry and log_dir is not None:\n        _reserve_gate_logs(log_dir)",
+        "if log_dir is not None:\n        _reserve_gate_logs(log_dir)"
+      ],
+      "test": "test_dry_run_does_not_reserve_or_touch_live_evidence",
+      "tests_run": 1,
+      "failures": 1,
+      "errors": 0,
+      "survived": false,
+      "output": "F\n======================================================================\nFAIL: test_dry_run_does_not_reserve_or_touch_live_evidence (review_reservation.ReservationTests.test_dry_run_does_not_reserve_or_touch_live_evidence)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_measure_judge_reservation.py\", line 75, in test_dry_run_does_not_reserve_or_touch_live_evidence\n    self.assertFalse(logs.exists())\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^\nAssertionError: True is not false\n\n----------------------------------------------------------------------\nRan 1 test in 0.001s\n\nFAILED (failures=1)\n"
+    },
+    {
+      "symbol": "format_gate",
+      "mutation": [
+        "s[\"checks\"][\"control_fires\"][\"reported_as\"]",
+        "\"\""
+      ],
+      "test": "test_control_caveat_and_nulls_survive_the_text_report",
+      "tests_run": 1,
+      "failures": 1,
+      "errors": 0,
+      "survived": false,
+      "output": "F\n======================================================================\nFAIL: test_control_caveat_and_nulls_survive_the_text_report (review_reservation.ReportTests.test_control_caveat_and_nulls_survive_the_text_report)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_measure_judge_reservation.py\", line 117, in test_control_caveat_and_nulls_survive_the_text_report\n    self.assertIn(\"a firing rate, not a false-positive rate\", rendered)\n    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'a firing rate, not a false-positive rate' not found in '# Task 9 gate -- LIVE\\n\\ncodex_version: codex-cli 0.154.0\\nmodel: gpt-6-astra\\neffort: medium\\nmodel_source: docs/evals/data/2026-09-24-rule-tell/stage2/generate_synthetic.py\\nchannel: bwrap --die-with-parent --ro-bind / / --dev /dev --proc /proc --tmpfs <home> --tmpfs /tmp --tmpfs /run/user/<uid> --bind <CODEX_HOME> <CODEX_HOME> --bind <auth.json target> <auth.json target> --bind <workdir> <workdir> -- codex exec --skip-git-repo-check --sandbox read-only -c approval_policy=never --ephemeral --json --strict-config -o <workdir>/last.txt -C <workdir> - (prompt on stdin); env: CODEX_HOME=<CODEX_HOME>, without OPENAI_API_KEY/CODEX_API_KEY/OPENAI_BASE_URL; config.toml: model, model_reasoning_effort, forced_login_method = \"chatgpt\" [features] in_app_updates = false\\nprompt: scripts/measure/judge_prompt.md sha256 3137920a8d4645540b9cff7bced95671a9c6fbb282581cddc5eb5391d4de8c54\\nrtd_doc: eval/rtd.md sha256 ca5af90a3920e74e6bfed9ec120b85bcb6708cdeb61bd55365730dd6f05cadf3\\ncontrols_doc: eval/controls.md sha256 fda3201f932264501d660339736298384284606c7357b724e2872adc541c74d4\\nrepo_head: 704b7fbcdde159b6a6d90ead85560f5eebb59a0d\\nvotes_per_item: 3\\nretry_policy: R137: a call_failed/unparseable/tool_call attempt is re-issued, up to 3 attempts per vote; every attempt is recorded\\ntoken_estimate: ceil(chars / 4) -- an estimate, not a tokenizer count\\n\\n| id | mode | kind | lessons | context chars | prompt chars | est tokens |\\n|---|---|---|---|---|---|---|\\n| RTD-1/correction | correction | rtd | 5 | 162 | 7278 | 1820 |\\n| RTD-1/audit | audit | rtd | 5 | 162 | 6841 | 1711 |\\n| RTD-2/correction | correction | rtd | 5 | 162 | 7273 | 1819 |\\n| CTL1-1/audit | audit | control | 3 | 188 | 6646 | 1662 |\\n| CTLX-1/audit | audit | control | 7 | 248 | 7193 | 1799 |\\n\\nitems: 5 {\"audit_rtd\": 1, \"controls\": 2, \"correction\": 2, \"peer_yes\": 1}\\ntotal prompt chars: 35231\\ntotal est tokens (one vote): 8811\\ntotal est tokens (x3 votes): 26433\\nlargest item: RTD-1/correction (7278 chars, 1820 est tokens)\\n\\nlesson inventory per (freeze sha, decision ts, undated reference sha):\\n| freeze sha | decision ts | undated ref | dated kept | after decision | undatable | global undated |\\n|---|---|---|---|---|---|---|\\n| fb1c3b03ff8b | 2026-01-02T10:00:00Z | fb1c3b03ff8b | 2 | 2 | 1 | 2 |\\n| 3504d7fb0f60 | 2026-01-01T10:00:00Z | 704b7fbcdde1 | 0 | 2 | 1 | 2 |\\n| 3ff2ef341441 | 2026-01-03T10:00:00Z | 704b7fbcdde1 | 4 | 0 | 1 | 2 |\\n\\nleak scan:\\n- own correction in pre-evidence or lesson index: 0 []\\n- gate-id tokens in the template: 0\\n- items whose rendered prompt carries gate-id tokens: 0 {}\\n\\ncontext disclosure: gate document items include text after the decision point from the same pre-correction blob; session items never do\\norigin disclosure: 1 control (CTL1-1) originates before docs/trackers/operator-rules.md existed (first added fb1c3b03); at those commits the OP-N rules are in neither lesson set\\n- check: OP-N lesson ids listed by those 1: 0; by the other 1 controls: 1\\n\\ncomplete() calls: 15\\n\\nPASSED: False\\n- detectability: 0/2 (need >= 16) -> FAIL\\n- peer_yes_flags: 0/1 (need >= 3) -> FAIL\\n- yes_flags: 0/1 (need >= 6) -> FAIL\\n- control_fires: 0/2 (need <= 5) -> ok\\n- lesson assignment (reported, not a pass condition): 0/2 scoreable\\n- control fires by prompt section (descriptive): {\"RTD-1\": 1}\\n- control_fires meaning: \\n- controls (is_mistake majority, descriptive): true=1, false=0, null=1; null is not a clean verdict\\n- quote_not_verbatim (descriptive): 0 of 0 majority flags and 0 of 1 control fires carry at least one such vote\\n- retries (R137, descriptive): 0 of 15 votes took more than 1 attempt; failed attempts by kind {}; 0 votes failed on every attempt\\n\\n| id | expected | detectability | is_mistake | lessons | split fields | flags |\\n|---|---|---|---|---|---|---|\\n| RTD-1/correction | in-trace | None | None | \"abstain\" |  |  |\\n| RTD-1/audit | in-trace | None | None | \"abstain\" |  | abstain:is_mistake |\\n| RTD-2/correction | obtainable | None | None | \"abstain\" |  |  |\\n| CTL1-1/audit | control | None | True | \"abstain\" |  | abstain:is_mistake |\\n| CTLX-1/audit | control | None | None | \"abstain\" |  | abstain:is_mistake |\\n'\n\n----------------------------------------------------------------------\nRan 1 test in 0.195s\n\nFAILED (failures=1)\n"
+    },
+    {
+      "symbol": "_gate",
+      "mutation": [
+        "path.open(\"x\")",
+        "path.open(\"w\")"
+      ],
+      "test": "test_racing_writer_cannot_be_overwritten_after_preflight",
+      "tests_run": 1,
+      "failures": 1,
+      "errors": 0,
+      "survived": false,
+      "output": "F\n======================================================================\nFAIL: test_racing_writer_cannot_be_overwritten_after_preflight (review_outputs.OutputTests.test_racing_writer_cannot_be_overwritten_after_preflight)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/marius/work/claude/codescout/tests/test_measure_run_outputs.py\", line 78, in test_racing_writer_cannot_be_overwritten_after_preflight\n    with self.assertRaises((ValueError, FileExistsError)):\n         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: (<class 'ValueError'>, <class 'FileExistsError'>) not raised\n\n----------------------------------------------------------------------\nRan 1 test in 0.002s\n\nFAILED (failures=1)\n"
+    }
+  ]
+}

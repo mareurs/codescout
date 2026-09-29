@@ -53,3 +53,14 @@ So 3 of the 4 `text_detectable: no` cases were not labelled `external` by majori
 - **Controls:** the 17 control fires are the largest miss. By prompt section they are RTD-10: 6, RTD-3: 4, RTD-9: 3, RTD-8: 2 and contradiction: 2. None of the 17 fires, and none of the 5 majority flags, carries a `quote_not_verbatim` vote.
 - **The `yes` cases that went unflagged:** RTD-17 and RTD-18 came out `is_mistake` False, and RTD-20 got no majority.
 - **Lesson assignment,** reported and not a pass condition: 3 of 12 scoreable.
+
+## Codex review erratum — 2026-09-29
+
+The original gate output and registered decision above remain unchanged: INCONCLUSIVE. The following corrects the controller's interpretation, not the scoring rule.
+
+- All **four**, not three, `text_detectable: no` cases miss `external`: RTD-6/14 return `obtainable`; RTD-13/21 return null.
+- Null here does not mean no majority. RTD-13 has three `is_correction: false` votes; RTD-17 and RTD-21 have two. Their null detectability follows the prompt's conditional contract. RTD-20's audit has two null `is_mistake` votes and one false: majority abstention.
+- Controls split into **17 true, 13 false, 22 null** on majority `is_mistake`. The 17/52 is a **firing rate, not an established false-positive rate**: the control corpus was not independently adjudicated as error-free. Null is not a clean verdict.
+- RTD-17's source labels an unstamped, then-true statement as detectable in form and explicitly describes decay rather than error. Reusing that label as gold for mistake detection requires justification; registration alone does not supply it. This observation does not license post-hoc relabelling.
+
+Saved-response recount and code fixes: [Codex review](../../../research/2026-09-29-codex-system1-judge-review.md). No new model calls were made.

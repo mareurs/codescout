@@ -1,0 +1,721 @@
+{
+  "model_calls": 0,
+  "saved_json_sha256": "2dda3e36cae01a47ed37e43cf5addec43d175e8e3a520a4540cd16638763fb92",
+  "rows_by_kind": {
+    "rtd": 29,
+    "control": 52
+  },
+  "vote_logs": 243,
+  "saved_answers_match_logs": true,
+  "majorities_checked": [
+    "is_mistake",
+    "is_correction",
+    "detectability"
+  ],
+  "attempt_counts": {
+    "1": 243
+  },
+  "event_sequences": {
+    "thread.started > turn.started > item.completed:agent_message > turn.completed": 243
+  },
+  "usage": {
+    "input_tokens": 7652195,
+    "cached_input_tokens": 2799360,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 66385,
+    "reasoning_output_tokens": 37820
+  },
+  "controls_is_mistake": {
+    "False": 13,
+    "None": 22,
+    "True": 17
+  },
+  "corrections": [
+    {
+      "id": "RTD-1/correction",
+      "expected": {
+        "text_detectable": "partial",
+        "detectability": "obtainable",
+        "caught_by": "peer",
+        "peer_yes": false,
+        "lesson": {
+          "surface": "docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md",
+          "section": "Decision",
+          "prefix": null
+        }
+      },
+      "detectability": "obtainable",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-2/correction",
+      "expected": {
+        "text_detectable": "partial",
+        "detectability": "obtainable",
+        "caught_by": "peer",
+        "peer_yes": false,
+        "lesson": {
+          "surface": "CLAUDE.md",
+          "section": "Reaching a Peer Session",
+          "prefix": "CLAUDE.md#reaching-a-peer-session"
+        }
+      },
+      "detectability": "in-trace",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-3/correction",
+      "expected": {
+        "text_detectable": "yes",
+        "detectability": "in-trace",
+        "caught_by": "peer",
+        "peer_yes": true,
+        "lesson": {
+          "surface": "CLAUDE.md",
+          "section": "Testing Discipline",
+          "prefix": "CLAUDE.md#testing-discipline"
+        }
+      },
+      "detectability": "in-trace",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-4/correction",
+      "expected": {
+        "text_detectable": "partial",
+        "detectability": "obtainable",
+        "caught_by": "measurement",
+        "peer_yes": false,
+        "lesson": {
+          "surface": "CLAUDE.md",
+          "section": "Testing Discipline",
+          "prefix": "CLAUDE.md#testing-discipline"
+        }
+      },
+      "detectability": "obtainable",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-5/correction",
+      "expected": {
+        "text_detectable": "partial",
+        "detectability": "obtainable",
+        "caught_by": "measurement",
+        "peer_yes": false,
+        "lesson": {
+          "surface": "src/prompts/guides/project-activation-bootstrap.md",
+          "section": "Phase 2",
+          "prefix": null
+        }
+      },
+      "detectability": "obtainable",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-6/correction",
+      "expected": {
+        "text_detectable": "no",
+        "detectability": "external",
+        "caught_by": "measurement",
+        "peer_yes": false,
+        "lesson": {
+          "surface": "docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md",
+          "section": "Decision",
+          "prefix": null
+        }
+      },
+      "detectability": "obtainable",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-7/correction",
+      "expected": {
+        "text_detectable": "partial",
+        "detectability": "obtainable",
+        "caught_by": "peer",
+        "peer_yes": false,
+        "lesson": {
+          "surface": "src/prompts/guides/project-activation-bootstrap.md",
+          "section": "Phase 2",
+          "prefix": null
+        }
+      },
+      "detectability": "obtainable",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-8/correction",
+      "expected": {
+        "text_detectable": "yes",
+        "detectability": "in-trace",
+        "caught_by": "peer",
+        "peer_yes": true,
+        "lesson": "uncovered"
+      },
+      "detectability": "in-trace",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-9/correction",
+      "expected": {
+        "text_detectable": "yes",
+        "detectability": "in-trace",
+        "caught_by": "peer",
+        "peer_yes": true,
+        "lesson": "uncovered"
+      },
+      "detectability": "in-trace",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-10/correction",
+      "expected": {
+        "text_detectable": "yes",
+        "detectability": "in-trace",
+        "caught_by": "peer",
+        "peer_yes": true,
+        "lesson": {
+          "surface": "CLAUDE.md",
+          "section": "Parsers Over a Namespace",
+          "prefix": "CLAUDE.md#parsers-over-a-namespace"
+        }
+      },
+      "detectability": "in-trace",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-11/correction",
+      "expected": {
+        "text_detectable": "partial",
+        "detectability": "obtainable",
+        "caught_by": "peer",
+        "peer_yes": false,
+        "lesson": {
+          "surface": "docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md",
+          "section": "Decision",
+          "prefix": null
+        }
+      },
+      "detectability": "obtainable",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-12/correction",
+      "expected": {
+        "text_detectable": "partial",
+        "detectability": "obtainable",
+        "caught_by": "measurement",
+        "peer_yes": false,
+        "lesson": {
+          "surface": "docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md",
+          "section": "Decision",
+          "prefix": null
+        }
+      },
+      "detectability": "obtainable",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-13/correction",
+      "expected": {
+        "text_detectable": "no",
+        "detectability": "external",
+        "caught_by": "measurement",
+        "peer_yes": false,
+        "lesson": {
+          "surface": null,
+          "section": "Phase 2",
+          "prefix": null
+        }
+      },
+      "detectability": null,
+      "is_correction_votes": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "id": "RTD-14/correction",
+      "expected": {
+        "text_detectable": "no",
+        "detectability": "external",
+        "caught_by": "measurement",
+        "peer_yes": false,
+        "lesson": {
+          "surface": "docs/trackers/issue-clusters.md",
+          "section": null,
+          "prefix": null
+        }
+      },
+      "detectability": "obtainable",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-15/correction",
+      "expected": {
+        "text_detectable": "yes",
+        "detectability": "in-trace",
+        "caught_by": "self-reread",
+        "peer_yes": false,
+        "lesson": "uncovered"
+      },
+      "detectability": "in-trace",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-16/correction",
+      "expected": {
+        "text_detectable": "partial",
+        "detectability": "obtainable",
+        "caught_by": "measurement",
+        "peer_yes": false,
+        "lesson": {
+          "surface": "CLAUDE.md",
+          "section": "Testing Discipline",
+          "prefix": "CLAUDE.md#testing-discipline"
+        }
+      },
+      "detectability": "obtainable",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-17/correction",
+      "expected": {
+        "text_detectable": "yes",
+        "detectability": "in-trace",
+        "caught_by": "measurement",
+        "peer_yes": false,
+        "lesson": {
+          "surface": "CLAUDE.md",
+          "section": "Reaching a Peer Session",
+          "prefix": "CLAUDE.md#reaching-a-peer-session"
+        }
+      },
+      "detectability": null,
+      "is_correction_votes": [
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "id": "RTD-18/correction",
+      "expected": {
+        "text_detectable": "yes",
+        "detectability": "in-trace",
+        "caught_by": "self-reread",
+        "peer_yes": false,
+        "lesson": {
+          "surface": "CLAUDE.md",
+          "section": "Testing Discipline",
+          "prefix": "CLAUDE.md#testing-discipline"
+        }
+      },
+      "detectability": "in-trace",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-19/correction",
+      "expected": {
+        "text_detectable": "partial",
+        "detectability": "obtainable",
+        "caught_by": "measurement",
+        "peer_yes": false,
+        "lesson": {
+          "surface": "CLAUDE.md",
+          "section": "Testing Discipline",
+          "prefix": "CLAUDE.md#testing-discipline"
+        }
+      },
+      "detectability": "obtainable",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-20/correction",
+      "expected": {
+        "text_detectable": "yes",
+        "detectability": "in-trace",
+        "caught_by": "measurement",
+        "peer_yes": false,
+        "lesson": {
+          "surface": null,
+          "section": "Phase 2",
+          "prefix": null
+        }
+      },
+      "detectability": "obtainable",
+      "is_correction_votes": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "RTD-21/correction",
+      "expected": {
+        "text_detectable": "no",
+        "detectability": "external",
+        "caught_by": "measurement",
+        "peer_yes": false,
+        "lesson": {
+          "surface": "CLAUDE.md",
+          "section": "Testing Discipline",
+          "prefix": "CLAUDE.md#testing-discipline"
+        }
+      },
+      "detectability": null,
+      "is_correction_votes": [
+        false,
+        true,
+        false
+      ]
+    }
+  ],
+  "log_sha256": {
+    "CTL10-10_audit.vote1.try1.log": "29efb728ad9fe8648dd0ab608d456dd2ed8c51fedcbc9469c2ec1fe250875ab1",
+    "CTL10-10_audit.vote2.try1.log": "d6ab60afee8a2569587c6d43bda5aeacbe181184012bda5875fe25dff808e7ce",
+    "CTL10-10_audit.vote3.try1.log": "59db5d603e89b57c810f7e8f6bf25e7a76c3c787a77907f46e4bd222c25a8837",
+    "CTL10-11_audit.vote1.try1.log": "b47a052719b64197a9751071640462fe23ab02504ff708470dd571268c884d51",
+    "CTL10-11_audit.vote2.try1.log": "e4955dde420a283b29f8c134bb506b973b06f3c47b9b183aced7889ab701d520",
+    "CTL10-11_audit.vote3.try1.log": "3dd89865104b5f4bd00639bd0ca1d9be8d85693438355dbd6f61b549a9461e5f",
+    "CTL10-12_audit.vote1.try1.log": "576dd566a5e62e41dadcb5b22af3c12829fd33f891cb8bf900f56b24ddcb5611",
+    "CTL10-12_audit.vote2.try1.log": "54ccb3870847c84b6e71f9c631b186688d669c260dd6e4231b86d1d40c6e2500",
+    "CTL10-12_audit.vote3.try1.log": "02d095005e392de2c69aaf6a9d4462a5ce59a73a70248b3f0e5f45e03d863a1a",
+    "CTL10-13_audit.vote1.try1.log": "f44cc5955b8be383f0de060fe0860a3c327c0d700dc4f366aafc1d2ceb4218d5",
+    "CTL10-13_audit.vote2.try1.log": "75e5778650846a861cc1a62a558bac81a364d961cf568e2a3cf4316a34c2f13c",
+    "CTL10-13_audit.vote3.try1.log": "b9957db506ea753868e6df2dcb63e82a7cae9bfe3b1b1d0e18288b5992456379",
+    "CTL10-1_audit.vote1.try1.log": "5176061db7948446ac7e756444817f0612e1229dbe99cc7ef59c439822957e1b",
+    "CTL10-1_audit.vote2.try1.log": "4f85493c8ef3be5246017dfe93461fb422cbcece59769c10eebe1f75f34e2cad",
+    "CTL10-1_audit.vote3.try1.log": "2c68f35e0b0219d197b73659acc0f5009c72526f4ea74521d7e2869a470288bd",
+    "CTL10-2_audit.vote1.try1.log": "0b9fa4d0c3a0bfbc7edd595cca5b6bab67f5b82941373b1a85e930ce3d2a81c9",
+    "CTL10-2_audit.vote2.try1.log": "07fb3e3ffc0b7bab24acc8efe2c4349b8f0c76f7c18ce3b01b06555f95913ffb",
+    "CTL10-2_audit.vote3.try1.log": "0738b0fce7fc93b24a36a3a44481e92dac51689459316e37e990e3b410263608",
+    "CTL10-3_audit.vote1.try1.log": "5543fdcafb3882393bb00ac0fbfa66a03cd3d70d7b0906b596b83a9cdd837da9",
+    "CTL10-3_audit.vote2.try1.log": "1e27d768d27ee9054d3226776619b9fef91c9781ab9c28dbffd3fdc3071c1696",
+    "CTL10-3_audit.vote3.try1.log": "744ea34d06088b71b771d000a3d0c1c0c20e99cd9bae9b9a9f1f4e734410a9b7",
+    "CTL10-4_audit.vote1.try1.log": "9985d8695aea893d1cbf1086032b62cd83842d04ecd1340409e2a342ab62adc8",
+    "CTL10-4_audit.vote2.try1.log": "89fd25018853793d0020ac772ced0cc3f41d13f94bd1cfdd60e7d3a554650980",
+    "CTL10-4_audit.vote3.try1.log": "dc7ab48eded9a210d3c9dacb53cc711cc73fd8330d8496af124b50857daf29bc",
+    "CTL10-5_audit.vote1.try1.log": "7948653fd02325177da26609a066abc6f1e52072842aad1b4d7a5b69957233a6",
+    "CTL10-5_audit.vote2.try1.log": "6d2dbbf25cb1fac5217062223ed3f45044ac8e3efeead62aab42b44f2a4a3188",
+    "CTL10-5_audit.vote3.try1.log": "8831151a7a3b441f1f33770f368f9c70cbb8d14d2e6d15f42dd6042cb4be2d4e",
+    "CTL10-6_audit.vote1.try1.log": "486cd30cb4626c39e09cc86aff80c40fe0616f4fc25548cf9b80dc842e2c4b0d",
+    "CTL10-6_audit.vote2.try1.log": "d6551c10f10b837bd80f2f0f82f3f826a90cc19c06229e357c18be122be3f7bd",
+    "CTL10-6_audit.vote3.try1.log": "1e0ffecd918d043ada5f3b0bbe9d38acf43e834f6f50f9da5535180f3709a50f",
+    "CTL10-7_audit.vote1.try1.log": "9c8ee7e63a619e790baabe36db8ece0b933347c43aab34e1ca2eb9dd06cd467e",
+    "CTL10-7_audit.vote2.try1.log": "1246762761d6fe45f390e11837003d2a55aeedf573c00fb6d95ad0896e19d8ea",
+    "CTL10-7_audit.vote3.try1.log": "cb80a9914d1eab20d39f3bd621e375a4ec4d274bae406dbea5c3df00df886f32",
+    "CTL10-9_audit.vote1.try1.log": "57ece967a07b5383666f8106aa5852069ba2d2b88377115ac72cdd296822584a",
+    "CTL10-9_audit.vote2.try1.log": "b4f748a9e25431b0808f86a606bfb20476c10559b04b2a10b34c477cc778f43b",
+    "CTL10-9_audit.vote3.try1.log": "4c5e5c9d101dfee0f0d1fcb76b0f266e5265c078adcba521aabd6a09847b0440",
+    "CTL3-10_audit.vote1.try1.log": "189507cc779efe26d7be00e4d1659f46385377da0b07931077b806e5c3d8bdfe",
+    "CTL3-10_audit.vote2.try1.log": "213a78ebfe13cf9e70429cfb082a13813578ddbc7c20d8d03f1b8495db8eda5c",
+    "CTL3-10_audit.vote3.try1.log": "e1be48afd121584718e038d2a7ec65a74e8502c783e5f6e01b7cf2078e610f2b",
+    "CTL3-11_audit.vote1.try1.log": "625daa84a3e9e0c1b3b79f47009b9ba2f61b00eed1d82657802ffdb2824a0b8d",
+    "CTL3-11_audit.vote2.try1.log": "5ca387ab1ef7b72ff3d7f07bd137fd52539268dc6c9b67cee890fab7e3fb6a71",
+    "CTL3-11_audit.vote3.try1.log": "df8cec094244304069a893575664aee298a01369b1074e79b88147e77ddf8a99",
+    "CTL3-1_audit.vote1.try1.log": "e38b5616317720fd20e54fcf9ef803825742a50e5a82abb3b49526b15bef0498",
+    "CTL3-1_audit.vote2.try1.log": "5b3e2fbae7f1ebeb550b1f9cc857ae9d87121519f79342dcc14e641b4cd38072",
+    "CTL3-1_audit.vote3.try1.log": "716f762b90e989e1dd8a439dfbb8da3e2e5656d09e7336ac49d4ab6c0f7fb81f",
+    "CTL3-2_audit.vote1.try1.log": "c847b366412a8269b639f25a92c9d2ba5666107b46ed49288505f59beb724457",
+    "CTL3-2_audit.vote2.try1.log": "119c6bf5f923b56bdf3273bed9ec8a4dc2c2d5a2435b72a1936754321bdf717f",
+    "CTL3-2_audit.vote3.try1.log": "a50b835f5ff218dddc2a2b81f17439d7d43a0d9ac613b45edde9be2d6a32d34a",
+    "CTL3-3_audit.vote1.try1.log": "7c36657153d425438571b33d386e48aa04df1f228dc096e0a532eccf74aa0107",
+    "CTL3-3_audit.vote2.try1.log": "2e3d34c0b19c04f866459e59b2fc5c7406f5467ec8497399802679eae9f0df6c",
+    "CTL3-3_audit.vote3.try1.log": "634905fc0a4827c64edfc2d43945c656969f73c020b7d7da44fa46b8df039412",
+    "CTL3-4_audit.vote1.try1.log": "69976bcb4e54083bc42ee460d7680c9bb719eddaa9bfd206ca51e566b17eed91",
+    "CTL3-4_audit.vote2.try1.log": "9707dbf0ccad754275612cadbc3dcf0bcdd9df0e3a44c199c859dfcf1cb8b2cc",
+    "CTL3-4_audit.vote3.try1.log": "8ec830398953f83ff5a7f35e7a16b43de87c02a115c6ff3763cfd2867b8c8983",
+    "CTL3-5_audit.vote1.try1.log": "ea86398a04560d71c41349d0bdb8c4c65bc40c9baa56c56fe43273b0807c4417",
+    "CTL3-5_audit.vote2.try1.log": "958cb4f8ff3885cf97babd3c5389069fcdfb6dbeca55ca07928a303b79ef87b1",
+    "CTL3-5_audit.vote3.try1.log": "e3ca9db496cc4db9278259f5c1fd0cfce89c506746908aba3d56ac32ab67c38d",
+    "CTL3-7_audit.vote1.try1.log": "33fc7a0371f7a5a166fd7976ec38db18c2385d279d7d870bf4bacb87056efabe",
+    "CTL3-7_audit.vote2.try1.log": "9f2e19d61aaf14fb3836ee90eb511393a62c5ce86dfa92fc10bde2d8abd7ca94",
+    "CTL3-7_audit.vote3.try1.log": "e3d1d865e3e6ed3046a9d3c11d805f7193256194243ca7e22f0a7b7ee90ac5e4",
+    "CTL3-8_audit.vote1.try1.log": "ef5440bf6b0455990a2d40a13337dfb9755012a636ac8a5623eb933dd65c58e9",
+    "CTL3-8_audit.vote2.try1.log": "2c8b302397047014df950cc4ce7614e30414c3cc1839027dfc9b6cd0edbf8a0e",
+    "CTL3-8_audit.vote3.try1.log": "74ae802b1eb39c6dea2970acdbc2a57540b059feb67328fbda383a3acff535ce",
+    "CTL3-9_audit.vote1.try1.log": "fc644f77fc56173cd0ce980bc13db5690ea805761716e043110c9d48a96a8888",
+    "CTL3-9_audit.vote2.try1.log": "509ec5e903312a62f5cc0da7c20773782ea820e7035cdc631f27fe0423c4a627",
+    "CTL3-9_audit.vote3.try1.log": "370e7bc63ac3a9336f24ee1f106746f152598af52574b9fcf35d83e1f101e6bd",
+    "CTL8-10_audit.vote1.try1.log": "459302dfbdbf433333724b8b68dd47d1fe291c0594191768d11f1a096cd61d19",
+    "CTL8-10_audit.vote2.try1.log": "d6e8041d9af9c45a68b05f6c802f4e8e3b3613a1128d3570ac355b1c31f0c0f2",
+    "CTL8-10_audit.vote3.try1.log": "20313b7c1cd531b9e774d337cbfe5201e8c2c9ecf910a36e4366e2dbaf1696c0",
+    "CTL8-11_audit.vote1.try1.log": "d0b84b5ae4fdc68fafabd12a1dc2ebda06056485f0344e704321d6253abba56b",
+    "CTL8-11_audit.vote2.try1.log": "80ee90e7db558cf30a059915ae9546ed03291c378574b2b28e21fb86b4b29ea2",
+    "CTL8-11_audit.vote3.try1.log": "38fe89896615a3b0c3facbac802edafddba2e097e92ffa6f7c3cf12fc3292229",
+    "CTL8-1_audit.vote1.try1.log": "a8c26ad6420a0b50e41cc82da0c6a2c50f950355fedbce20ecf60f3f7cbc0f73",
+    "CTL8-1_audit.vote2.try1.log": "e3cfb47f5c8bcea583318fcc352d700709edfca95b4b88104899f2bf1a1681c8",
+    "CTL8-1_audit.vote3.try1.log": "c8fa0f9ff5dac553070378573a751d56aca0f92ee3a48ef711f6dec27c3fb77a",
+    "CTL8-2_audit.vote1.try1.log": "247c4680ac9fa7a256085260e5f31dc77cb6f9571b25f2628d179b4da1df84b5",
+    "CTL8-2_audit.vote2.try1.log": "fc8b0e69f30f6ff638a53350ee57a19d20789bbf7debf1c70302ca311314b178",
+    "CTL8-2_audit.vote3.try1.log": "7e7dd0a5e5e00e4eab34ea80a2172eff288cb4b7e9c313f328b158df2ce53347",
+    "CTL8-3_audit.vote1.try1.log": "737f769f62bc610f962ef40a50d31a0f375d81ad4acbab8020a88beef719fa99",
+    "CTL8-3_audit.vote2.try1.log": "9e16724092378a3576472d940fbd9e8e61c5dd27c053288b81330dd4ca45fd9d",
+    "CTL8-3_audit.vote3.try1.log": "d5bc51eb1975a9440d3c6b59a3ddd798bf6345200088ed06eccef87cb16bca2c",
+    "CTL8-4_audit.vote1.try1.log": "e5558cbe2196a8fbe88c6b53c641f6ed66d0df24d81021f8afcb7514ffe26a99",
+    "CTL8-4_audit.vote2.try1.log": "2f16a08bdfc8bed6385e9c1f27d83bcf01773c2e3aae29c7a59889967cc80fde",
+    "CTL8-4_audit.vote3.try1.log": "63ceaee989725642b8fb0c28d537987bb8529ea6f8326022cc8533b41ed97585",
+    "CTL8-5_audit.vote1.try1.log": "26d6eaf4da157ca7d67ece590c2047350074740a83e9a5c3c1054e13d1590866",
+    "CTL8-5_audit.vote2.try1.log": "5197fc53e15a4211ede71d487427886df978129004b61db1eb9f3c7a29301308",
+    "CTL8-5_audit.vote3.try1.log": "5f4f08ec88f1c49d85714038ecfc55f071cd97474ee668b6333829381dbc0879",
+    "CTL8-7_audit.vote1.try1.log": "4aa0959de583a21d7cf45008669ab93e798a349b43a4fd123b3f357b90d78019",
+    "CTL8-7_audit.vote2.try1.log": "a964bd43ed3d90252fc901354963ea630e67ddd3d727f8a135d69eef92cb9c55",
+    "CTL8-7_audit.vote3.try1.log": "4232c26231f776187ff7bda8210858d1e681a844daf157294227f021999bc55f",
+    "CTL8-8_audit.vote1.try1.log": "aaa50338a3907d7691c69287b3ad6dacd991d9728064dde28cdad80de92ef5c3",
+    "CTL8-8_audit.vote2.try1.log": "16cefacf6bfec8fc830e032bcf2a562ce031ec3497e6808c605a078ee72a4bd0",
+    "CTL8-8_audit.vote3.try1.log": "c4fc9041db91876c6d45600b13b7df23bcc19b489137c6699d4c86a6e3b1a539",
+    "CTL8-9_audit.vote1.try1.log": "de189e810ade84d2cd2f917ff59be5f249339e33b553d02659ec4856faec2ec5",
+    "CTL8-9_audit.vote2.try1.log": "e223a5ebad3d80acf4099cafc57390e70a1e3f0571f96f5a9f240c7b3578036c",
+    "CTL8-9_audit.vote3.try1.log": "d4ca8e00338191d2923060d273f8c9bb97dd4972e54a6bbf90813d4567c10fc2",
+    "CTL9-10_audit.vote1.try1.log": "060c55bed75b277a8e3f4d6d2253ceaeb84a937d69fd7d72ae36024830d5b7cc",
+    "CTL9-10_audit.vote2.try1.log": "8c8fb11092e7eb3b998dac4c2f1091ff42503155cc5073132059ddef6c7e0f59",
+    "CTL9-10_audit.vote3.try1.log": "b455ee70810bb17598fc59adeafb3b4d414aff77e7ee5eb02a3c006ce49f70b8",
+    "CTL9-11_audit.vote1.try1.log": "551d9a133dff3afee0de627bc88f7766d9063b5c97d34e998b87e4f30f3ddda2",
+    "CTL9-11_audit.vote2.try1.log": "2bd42f312fb1d7e6caf0a127715ce0dee90451a1fc01ef0aea79439e73cfb1cc",
+    "CTL9-11_audit.vote3.try1.log": "4b6daf28070bf2f38e557d386c583c88ed0f403d38bad0d0386e5a7c0aff52be",
+    "CTL9-1_audit.vote1.try1.log": "9fb2a1bb9930e6de836af5dd15a8aa4065f2707b2a2edaa34f6a83c5ab0bfd84",
+    "CTL9-1_audit.vote2.try1.log": "cc70b4afc6dead6a611bab1f2533498a0f641f23840a097caf1569960b22f819",
+    "CTL9-1_audit.vote3.try1.log": "cfa0ec24a4932911abf7a63d1640a87c60720ba43e72918fd4732755061b00c8",
+    "CTL9-2_audit.vote1.try1.log": "43572b5c07ed7ecdb49c2a48acc1ea7d7598a67ebffa81a45274eb3ea74220dd",
+    "CTL9-2_audit.vote2.try1.log": "75411c1d5146974178f5a9798f0bed7f32f5581a3a5d1437c6866e0ab07cd780",
+    "CTL9-2_audit.vote3.try1.log": "54a59389eb3f7e4bc3e84dfa84414bc21c1bb1e47989009344eb15e218982b01",
+    "CTL9-3_audit.vote1.try1.log": "12f4ce8156f1f52c2309b90110d49f3efc1fafcc84f1e6c47f94312656a06bf0",
+    "CTL9-3_audit.vote2.try1.log": "1ad1fd244284735019dd0e0be5251a437ceb1a0ac272c2a262976d6a5f8ae325",
+    "CTL9-3_audit.vote3.try1.log": "be3872fd45713f1dcf32e9bb6ad92d0236e3b7509c5e3c74d5254097487052c3",
+    "CTL9-5_audit.vote1.try1.log": "8f8c5b52877a4288e4b83e2a317e6d8be2a340212a8d621c7509f4ccbc1522d8",
+    "CTL9-5_audit.vote2.try1.log": "115f9a8aa0cc29d826f7557b6a72fca42f39cbb5399e310f6b31efa757005b32",
+    "CTL9-5_audit.vote3.try1.log": "91e8174d5dead650154bffbebc50b25b45c16758f4fd576a27c71a2d2a943bb0",
+    "CTL9-6_audit.vote1.try1.log": "134b9560004ccc2757c735dda2d205c3ffb1d17a1f62b87bd4b431927cc264a3",
+    "CTL9-6_audit.vote2.try1.log": "1ca93db6f5459efcc96ef50d3508ab8d3a4f0598aa396875bb862a9dc7611f42",
+    "CTL9-6_audit.vote3.try1.log": "051c4f18370c5c2ac4aaca0a72ba39a3dd626a399794ea5c37d0fc5accf3212b",
+    "CTL9-7_audit.vote1.try1.log": "705d2df1f6025a5e1a65eae211582c24597b55b896da0bd66f426e3c7e79ed40",
+    "CTL9-7_audit.vote2.try1.log": "f0588bd4651538577b466ee809f53489a09e83d0fa9402b43c3e3e7788c0feca",
+    "CTL9-7_audit.vote3.try1.log": "05cff81091b56fd44765f880b51edba3e5238c0cc8f9f5d40cee2b7ec0ef5d48",
+    "CTL9-8_audit.vote1.try1.log": "b6f1108a001de7872012dc29c8d92e8883988024bb8599a30f657eb4566da269",
+    "CTL9-8_audit.vote2.try1.log": "54025383055b9851c6d0dafffe5040ad9d50b1a2c68e9d094a6f0e9a20c28159",
+    "CTL9-8_audit.vote3.try1.log": "036a784f52fafe5fdd0548ef7cabf6824a05817c35b75e7c7f711c7e986904ea",
+    "CTL9-9_audit.vote1.try1.log": "e6f8ea944fe8fb8b77f88d4b9cf63b88cde1254a1a8fd8060927b1e0fe27fa8e",
+    "CTL9-9_audit.vote2.try1.log": "4839b0dac34f40e973f825140afd20278f948425319cd441a319234a69cebf83",
+    "CTL9-9_audit.vote3.try1.log": "058801685eb587764e3b686ee890eb7f70e803993cbcf01fd3339efc7c62fbe5",
+    "CTLX-10_audit.vote1.try1.log": "c0ab9ceb365dd96aac8cc44f5c7750c71c5af4284a64f064713dc1ca806f215a",
+    "CTLX-10_audit.vote2.try1.log": "0931b2ac48fe9f824ecfbdf5a28ab5580b0c3072126ae5eb984615110aef9ed4",
+    "CTLX-10_audit.vote3.try1.log": "82920c8e4140ca94f11529a9c960a127fca5b69603260e059d7dc635a3c71c72",
+    "CTLX-11_audit.vote1.try1.log": "a99da7196add32a8b7e9f157de272524e653094d0e014ef2ddfd41439569e8d9",
+    "CTLX-11_audit.vote2.try1.log": "db598fca3ea4cf135b7d0c6e1047a2850cefd95ce0864d0f84ad7cd52f7e6f52",
+    "CTLX-11_audit.vote3.try1.log": "c2f5f80059b839f0cb75d42095db6f40184d5227d289f674943321e1096c62b0",
+    "CTLX-1_audit.vote1.try1.log": "b6394e1102e439a54f2f9f45255c24a34e4b2b03e870505bb3361efbc2af528c",
+    "CTLX-1_audit.vote2.try1.log": "05cba6f0a16392cc96a4e0f08f0e70c5d9d10c13b227ffe79ec13c1fa9922248",
+    "CTLX-1_audit.vote3.try1.log": "a1198a0e89ccc8f5dc516b546aee6a2c9113d5291dcfacca7218eb1da6fee56e",
+    "CTLX-2_audit.vote1.try1.log": "ba1026dd316082e6ab592b2f6aaf75e688338f2590e9069bf6c3c65df96dee1c",
+    "CTLX-2_audit.vote2.try1.log": "ed19517bc10086ac4500866950c936439cd00873cd5faa3314f7c23f422bf13c",
+    "CTLX-2_audit.vote3.try1.log": "54ad9858d086fa8eb2f2b8392d2e5460b2dd180c1949d56365598b7b29964b8a",
+    "CTLX-3_audit.vote1.try1.log": "800df40b4a5002bcd280f7bf80c34b2a884a9ce533e62e599b41225a11f6996b",
+    "CTLX-3_audit.vote2.try1.log": "af6703ab0193140bd21942e4f93261a457d2ec40d5f4b826a785f888b11106cd",
+    "CTLX-3_audit.vote3.try1.log": "dd4587ba05c0b25651a75e8ea9ace90f08b4c5a8624246155b632fda08914ac3",
+    "CTLX-4_audit.vote1.try1.log": "ff0e7692d2db59568d5d0f76a1fafa7b743a52b6f7f6aed12faf51dba34a8f4f",
+    "CTLX-4_audit.vote2.try1.log": "bacaa107bd80d78e3ed8831770e94453b29aa26d781f5998d4dc6a85cfe9abc4",
+    "CTLX-4_audit.vote3.try1.log": "bb5203e53b9280a6acd91e781b884e6f4919c257ff4444b9ae7e17e38b4f36fb",
+    "CTLX-6_audit.vote1.try1.log": "d93759fa5c3dba410f773e1b12b09fe60867ec5e2162c1b244cf3b754b673d37",
+    "CTLX-6_audit.vote2.try1.log": "631de3319010e9f1cbaaa1a0ea4ee6c00f6f8a9984b316d6e6a03ca8b4657a2f",
+    "CTLX-6_audit.vote3.try1.log": "ccf3f6e57efa6b0c2dcb452cc0b68c239f5e6a2c9f10617a7e2bccde2a06510f",
+    "CTLX-7_audit.vote1.try1.log": "c0436b69dc7570de95a24a3a0f65520e922031ef1d5a3df9a1a999d88754cbed",
+    "CTLX-7_audit.vote2.try1.log": "38bc04fa6adff4e7e925065b25778990081c82f4e3aec3f28465bd22aedde433",
+    "CTLX-7_audit.vote3.try1.log": "79a6bfc0f23839f10345234b4c76603c42a26c852bccebd0b6e97ebce5d17c87",
+    "CTLX-8_audit.vote1.try1.log": "6741b165a6fefa318fad192a4baba614b12ee43dc9648252ffdb953412e4af3a",
+    "CTLX-8_audit.vote2.try1.log": "7aa374c4d1bbf48463c3058c8e5fc2ea7bd9f698f69bafea75b8f45639924862",
+    "CTLX-8_audit.vote3.try1.log": "db4edb51433264388069dd2a2b08c3b6adfc03ba577d5adb5f0d14e46aab025a",
+    "CTLX-9_audit.vote1.try1.log": "ca708e6069aacf8e6921e63e4d8c23922eee973c272ad1f95de6a8a65c2ba401",
+    "CTLX-9_audit.vote2.try1.log": "1918a52e0aba96f20bbaae5bfa364b24126ee72756374201d92292f92e46a257",
+    "CTLX-9_audit.vote3.try1.log": "2d86f999bf303d081c4617873386a70e2a390b200693373f56fe7316a1f66482",
+    "RTD-10_audit.vote1.try1.log": "7834361962b9851722cf9c5bfbd2337d6aa874dfbbaed22cc56e949a4a4cbe55",
+    "RTD-10_audit.vote2.try1.log": "076c6456f658005aee317812ea38f0aa70579bbef8f0b29faba99657a326a550",
+    "RTD-10_audit.vote3.try1.log": "01d7a535adc84b47fbd9d875bb67b81d81dcfc155405f1f2e0875324cdde8108",
+    "RTD-10_correction.vote1.try1.log": "86b27dffd3511a35a077cab9d769b7facea57acea38798f6b09ff455aad9d7fe",
+    "RTD-10_correction.vote2.try1.log": "e5e67c481fc4ed9fb17cb97918e9187cd0b037e55db1346edcf9a8691f65b33d",
+    "RTD-10_correction.vote3.try1.log": "495048e22e872c99aab5696e2dd69d67fb7b29bf4cd6a4ec1c626682e22729d5",
+    "RTD-11_correction.vote1.try1.log": "93e65b54d29f1162424c1da399fd804b3c868c9712db0795641e1df25c30be0b",
+    "RTD-11_correction.vote2.try1.log": "5b225efe79a90709ffa04272a8380a9ab4631c2a09af9c1c143922f432524461",
+    "RTD-11_correction.vote3.try1.log": "d4dde0b8eb75240015c685611be3fe8e5a54c926f54e279efbb90188501537b0",
+    "RTD-12_correction.vote1.try1.log": "926ec277c9d97ca67066387cb0a01e0c4d843d226deefb242ebbf4a5aeee7791",
+    "RTD-12_correction.vote2.try1.log": "96b6aadb8fbad0cd34375dbbc543376ea982766406054be21fd195bdf4eee29e",
+    "RTD-12_correction.vote3.try1.log": "a8d949f85a2c33198d984860c82791dc5a528c6fe604935e621e8b3e415f30b8",
+    "RTD-13_correction.vote1.try1.log": "11e63cc0f43b6b2d5b29b2bcf4722bbcb864d362fc0da8affa9a91a7c34c3ae6",
+    "RTD-13_correction.vote2.try1.log": "1131f7a63051ff7dedf425b1cc543d7e1a2a1ffebcb82053d2ae574b724b9d1b",
+    "RTD-13_correction.vote3.try1.log": "5d438687477eeaf52b59ad77f4d681d866c1cbffcb1f2d65b848d7d53c5c2902",
+    "RTD-14_correction.vote1.try1.log": "d126230c33744157928e92fcd9ecc426a75145bdcb0fd548130988aed1b5be3e",
+    "RTD-14_correction.vote2.try1.log": "ea644316ea67b57be00607ca38ddb402042c47b8aff05a880471f6f81fd13a4f",
+    "RTD-14_correction.vote3.try1.log": "d82346e65437b9eb2de4f6891414fc4586bb8488a9fab3c22cce945c464afb3b",
+    "RTD-15_audit.vote1.try1.log": "5540c2fca9b6b3d9db50bdaf8f8ad9c09141c650ca43da3ac4e21ced42d7783a",
+    "RTD-15_audit.vote2.try1.log": "5f46136539df992aab23628d0a5df63196313eded91bf7dcb3dad5621bbdcc01",
+    "RTD-15_audit.vote3.try1.log": "a4a66357031758b7edec273d8929cccbcbe0868b0aaaf20101567b02bcfa344e",
+    "RTD-15_correction.vote1.try1.log": "73418c8f81d0e2cf6965cb985379533e9f4b1afbd7f3bbf0230044f065b2cbcf",
+    "RTD-15_correction.vote2.try1.log": "b25e7066c5aa08062af4c1e2c59b1c1018d07fde4d895c34d6dd2fcfc09f8a50",
+    "RTD-15_correction.vote3.try1.log": "34a3897a26612d9bc76360cca2f78a447101c50faca5b5ea287f5837f29c692d",
+    "RTD-16_correction.vote1.try1.log": "be8a2839d742ee05282672b307987e150c767931524fc992c9e9ff3269034785",
+    "RTD-16_correction.vote2.try1.log": "6ae0bd19e045638ea45b2f63d731fe1458dc32bb1f851350669ce1a41d4b95cb",
+    "RTD-16_correction.vote3.try1.log": "063f4e0f9ecba962c6554091acf62a95f93ca4de14f4035a0bfc6ef740773964",
+    "RTD-17_audit.vote1.try1.log": "4ce74a774502ae650ca0681e835ffdd7f95c39056dba8f9f63cb3c6e6de3d2b5",
+    "RTD-17_audit.vote2.try1.log": "ca50a1de99c3bb8b886faf511905061b85bc5bb10e024a06f0452387e17bf91c",
+    "RTD-17_audit.vote3.try1.log": "8441105451fbb23c056f69579b0d60f460a34409403e45db0c5a43676497f2e1",
+    "RTD-17_correction.vote1.try1.log": "fb8a230ef0e11db4c9e2fa490c02c090d6012a66ff8e9fdea0199667cc27b37e",
+    "RTD-17_correction.vote2.try1.log": "ec804476583a941eb40d1af4a5b3a8997bb9c8a612ffc0e4a1e6d96ded68a1f8",
+    "RTD-17_correction.vote3.try1.log": "fc835fded223866bbd56d27081d112f5d7e71be92f2f3db4949aaedc3b3aed2d",
+    "RTD-18_audit.vote1.try1.log": "649a1d26908321892cdc22e7c823f113d18018b339c996bf6575b9bfd3831e10",
+    "RTD-18_audit.vote2.try1.log": "edd2b54cf33bd757666f33da4f1fc7ee01ed5308c124d12cc99a76eaca52f9fc",
+    "RTD-18_audit.vote3.try1.log": "bb8793d08a4b4203138b4211d7fc31430bfc1098a7c1d4eee59974276866e400",
+    "RTD-18_correction.vote1.try1.log": "6b71fa5153e8b46a87b8e462e59e5889be66a12a7618f74417bdda5d68f4d07c",
+    "RTD-18_correction.vote2.try1.log": "d6ac21a6f3061fa66f0a7cf35eacd51a9aea905cdc2fef39225337b7107374e7",
+    "RTD-18_correction.vote3.try1.log": "14aca3e3b5e7ec01547b92d70398b45b0e6ee3593f37aac70f67b71230991137",
+    "RTD-19_correction.vote1.try1.log": "48da68655a2a1e976e643583bb2205bbc0bd517cedd45b7c61ba85981df823e6",
+    "RTD-19_correction.vote2.try1.log": "1a0b09a2330acb3b36822caee5044dd53877d3e2974a782f386f3af06967e74c",
+    "RTD-19_correction.vote3.try1.log": "4d9c042fcdbc712d4f415b7fa54b8acb50d8cf41be12e64fa78d436a1250aa92",
+    "RTD-1_correction.vote1.try1.log": "9053fcce26de7d6281be232c672233a65d9b3df6823df6e67b2c7396361348a0",
+    "RTD-1_correction.vote2.try1.log": "fbbf1927405203e0845a7522a094802041c060c6feeb509ec9447f67ff927643",
+    "RTD-1_correction.vote3.try1.log": "087b522bf6a8be98e36dd4432eb0e554315d4c8864492848f1ff7787dcb2f80e",
+    "RTD-20_audit.vote1.try1.log": "08b30cc5ef0ef4e117cf074507be8f3b8a7481c4b6ae84472c194e80a214f74b",
+    "RTD-20_audit.vote2.try1.log": "af5e7679b14c529ab409e8dc69ddbebe1c8c5c3c07290ee7ae685101d1d6280a",
+    "RTD-20_audit.vote3.try1.log": "ad2b1ba20d80f329cc7fffa168151482671c93e6d6da44fa266e79e3d6ce4729",
+    "RTD-20_correction.vote1.try1.log": "f0d524a88c084ab4543f6654cb29854c06a427b2d9dbc24f4581d343412bd12c",
+    "RTD-20_correction.vote2.try1.log": "108338f029a9c452bdcd306fc84bbd6b17946d3d1bb5baa1dfa564b2ed404296",
+    "RTD-20_correction.vote3.try1.log": "2f430fed63c95bc88a64e055c2d098b586f1cc2eedf161b988aa1339da01428f",
+    "RTD-21_correction.vote1.try1.log": "a509ae4f9d0a228a7d1eecef779acc09a4537324ce422c2fe95887757d0ffc89",
+    "RTD-21_correction.vote2.try1.log": "2c5936dbc819420b0ad90b4405638face2ebad5daf167d87d88fabcaeeca96dc",
+    "RTD-21_correction.vote3.try1.log": "df07de963dce99f08c323bca1fb14bd6c93204ba3aec47d36e19bd044bfb05df",
+    "RTD-2_correction.vote1.try1.log": "e3f21e0e05c51e614bee24347832c243e32adf3cc1e4ddd2c357d719657aad35",
+    "RTD-2_correction.vote2.try1.log": "1d8387bb21e332037ea6ba19a2c8bd4d4c15a3098c8fddc8ffa6173b87a57bd9",
+    "RTD-2_correction.vote3.try1.log": "95acebc887b0af39dabc0d5af62c58da3c4ab7d3914ccfd9be9664a5b3df304b",
+    "RTD-3_audit.vote1.try1.log": "a594ccf0867d2a45a27c9cfa4e5de19102ae6e2b5183ad079d29c8d4d5262b6e",
+    "RTD-3_audit.vote2.try1.log": "df22300419dfd099ea4339334a9bbdacaffd815f129fef7db1c3c6b7d5febf24",
+    "RTD-3_audit.vote3.try1.log": "c6b89c3681974d9f9a4f61c56f15f0aacf410984092e034cb7a3c648c14137bb",
+    "RTD-3_correction.vote1.try1.log": "6353a54fdf0a29248facba3ec3a7076ced24792f02d95edf661d0b65c826fb30",
+    "RTD-3_correction.vote2.try1.log": "955d91c4706a9affc5daa044a2cde590cea69b952c78c21429236a4963ff96fc",
+    "RTD-3_correction.vote3.try1.log": "4deabeb1aa48c190535b450eb7fabeb4984b62ffee49a14333ec9ddb1397e065",
+    "RTD-4_correction.vote1.try1.log": "89e38df88d2fed5c4333700ce7ad1d243d9fb034b759ffcf409dbcc9bf4545f2",
+    "RTD-4_correction.vote2.try1.log": "82257d0f693d2d64e64db25149e8423f214aa780604b48d3ab77b23865821715",
+    "RTD-4_correction.vote3.try1.log": "57d472a769633a855bcca836cf2b1c21d702d89949a4d85e1205540ab803b4b1",
+    "RTD-5_correction.vote1.try1.log": "cf57e5185806fd88f9635d0ebe86483e4d2099484d116dc7f39f42c0cbf3a4ca",
+    "RTD-5_correction.vote2.try1.log": "6420c7bcb7ec9ee6482cc991cc45f9d5c38b420933998f4750be5bddf7ac216b",
+    "RTD-5_correction.vote3.try1.log": "ea2b66152df70dd6c9483e8e819205d22701cb02e9cbf3f704c10d758533ec09",
+    "RTD-6_correction.vote1.try1.log": "1315c9c6e7d39d2c8081dc624ab4f4229a6319c19a39cf04296832235bfabc1f",
+    "RTD-6_correction.vote2.try1.log": "b43cfc8e31bcf896600915dcc04a88e6a2177ef2941ba79205ec832ae750fe70",
+    "RTD-6_correction.vote3.try1.log": "67b33cfc87ed8b393f5ee88de51309d99dff6bebd99cb6837a371731fe370b9b",
+    "RTD-7_correction.vote1.try1.log": "d7b2a4e5484ef6d6489819afa5fae7895f0e2ad604840793de82cc4307856f19",
+    "RTD-7_correction.vote2.try1.log": "59c3e3992d0b805c11aa21901386dc42a62c29f0494e070f6f4f9dd6cf9fe37e",
+    "RTD-7_correction.vote3.try1.log": "b5c59ffaceebac0391507923ded8452f6968b5e700e24f7f1729c415c9150145",
+    "RTD-8_audit.vote1.try1.log": "ddcbe437744f2f53b9025dcbfdcdd1a96251062ec56a9d54ceae895f0634574f",
+    "RTD-8_audit.vote2.try1.log": "cbaa271d50ca4dd112980542b89ca78da9e8e02761eb9fc7e94c4a362851c472",
+    "RTD-8_audit.vote3.try1.log": "c475f734468b4d66dadfa4fe8e34d556d2c26327c8e1794bb25615fccc9df3c8",
+    "RTD-8_correction.vote1.try1.log": "0735217d48e9aa862d48bd86e1fc4f071b6686330fd97fc045b55aee80260091",
+    "RTD-8_correction.vote2.try1.log": "4c77ce5ffc4da4c152a7d1bd30d769c9b2722497413ab7db501dad3e8c8f1c82",
+    "RTD-8_correction.vote3.try1.log": "2ee54712e2bfd10d03f0226a669cc158a432618bcaf2f8476e49ce461db34723",
+    "RTD-9_audit.vote1.try1.log": "7e2ffd89e712d6ff0d4ea48a346a6c83865adcb6331668ab1a6a7171fef5090b",
+    "RTD-9_audit.vote2.try1.log": "98e5326e8dc06a844e916c68b67a4ca55c45246406ed2d7f74c3f04f58ca30b3",
+    "RTD-9_audit.vote3.try1.log": "d1fe5a2350f857f052b8ac474aaee210f50547ba6e6e85a43e9b3cfde1d57bfa",
+    "RTD-9_correction.vote1.try1.log": "7889b99911a65ead99cbaeda1f58a9d9fb9f8d73caa6d307be7001d594a2272b",
+    "RTD-9_correction.vote2.try1.log": "b9f73e404e1893ab10c250925aa5b6eaeff51864cfd4b70a2defefd80868a8d7",
+    "RTD-9_correction.vote3.try1.log": "a60931c026fc4c7b7de249d485bb98340414ec7be922a3c554849959855cc133"
+  },
+  "registered_score": {
+    "detectability": {
+      "count": 14,
+      "of": 21,
+      "rule": ">= 16",
+      "ok": false
+    },
+    "peer_yes_flags": {
+      "count": 4,
+      "of": 4,
+      "rule": ">= 3",
+      "ok": true
+    },
+    "yes_flags": {
+      "count": 5,
+      "of": 8,
+      "rule": ">= 6",
+      "ok": false
+    },
+    "control_fires": {
+      "count": 17,
+      "of": 52,
+      "rule": "<= 5",
+      "ok": false,
+      "reported_as": "a firing rate, not a false-positive rate"
+    }
+  },
+  "independently_recounted_scores": {
+    "detectability": 14,
+    "peer_yes_flags": 4,
+    "yes_flags": 5,
+    "control_fires": 17
+  }
+}
