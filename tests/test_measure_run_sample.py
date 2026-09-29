@@ -47,6 +47,36 @@ NOTE = "NOTE-SENTINEL-do-not-export"
 LABELLED_AT = "2031-01-02T03:04:05Z"  # a time of day no source timestamp has
 OUTLIER_SECONDS = 7777.777  # the max of the seconds list: never a median, so it must never be printed
 COUNTS = {"substantive": {"top": 12, "handback": 3}, "routine": {"top": 18}}
+# The exported record of the seed-11 main draw (6 substantive + 4 routine), pinned as literals: case id,
+# packet sha256 (deterministic for the fixture), stratum, kind, in draw.json's `cases` order.
+EXPORT_CASES = [
+    ("9cc8493506", "5e60b00766f032e061fc5dc049ad4603a43da19f8822d210ba2ba6b4d7943a0f", "substantive", "top"),
+    ("d6a1394c31", "c560d140225cb1e1ff3eee825a74b76170ec59ec14e6027a2d8234fc4271d1da", "substantive", "top"),
+    ("77ba2592f7", "95290a93da6dbb2df60d304f1ed96a34590510c21a3fdd31e258a308a046e73b", "substantive", "handback"),
+    ("1a64a9afdb", "5753597682f3477ae706c96fb8833b97567830a6480f8417d92c080fd06b13bc", "substantive", "top"),
+    ("b837168a2c", "a9cfffbd82fa2fd88466938b271c4cd5ec9a7e9b3a9ea24d2826d54fe8b92aac", "substantive", "top"),
+    ("0761ce7ec5", "43e3cf4b7402df86ab248ba74df75dd033610b5ebf20b73eb46104695571e2e8", "substantive", "top"),
+    ("d6ec25c96f", "cf449453976052933cea49034560e13e2514a97a8e4d7435a72545c451934f6e", "routine", "top"),
+    ("30fc2c09dd", "ac07955b317ac1f061caf74da091cfec4094ba144819a75a93e2de0c6b54118b", "routine", "top"),
+    ("3c9284abec", "7786e4d6400ece5ae77a970ebeba3e230b6a3d3ff3d26c51e6050b999f3e57c5", "routine", "top"),
+    ("812c9a7436", "642d50b4c8f65ebe86a1f78bb2c61f07fd8bcc0c40188e76853c079c6b71f6b4", "routine", "top"),
+]
+# write_labels(sub_hits=4, rou_hits=1) on that draw, in the order it writes them:
+# (case id, sha256, labels, delivery, recall, seconds)
+V, Q, N, S = ["verify"], "quiet", ["none"], "silent"
+EXPORT_LABELS = [
+    ("77ba2592f7", "95290a93da6dbb2df60d304f1ed96a34590510c21a3fdd31e258a308a046e73b", V, Q, "y", 900.123),
+    ("9cc8493506", "5e60b00766f032e061fc5dc049ad4603a43da19f8822d210ba2ba6b4d7943a0f", V, Q, "n", 901.123),
+    ("1a64a9afdb", "5753597682f3477ae706c96fb8833b97567830a6480f8417d92c080fd06b13bc", V, Q, "n", 902.123),
+    ("d6a1394c31", "c560d140225cb1e1ff3eee825a74b76170ec59ec14e6027a2d8234fc4271d1da", V, Q, "n", 903.123),
+    ("0761ce7ec5", "43e3cf4b7402df86ab248ba74df75dd033610b5ebf20b73eb46104695571e2e8", N, S, "n", 904.123),
+    ("b837168a2c", "a9cfffbd82fa2fd88466938b271c4cd5ec9a7e9b3a9ea24d2826d54fe8b92aac", N, S, "n", 905.123),
+    ("3c9284abec", "7786e4d6400ece5ae77a970ebeba3e230b6a3d3ff3d26c51e6050b999f3e57c5", V, Q, "n", 906.123),
+    ("812c9a7436", "642d50b4c8f65ebe86a1f78bb2c61f07fd8bcc0c40188e76853c079c6b71f6b4", N, S, "n", 907.123),
+    ("d6ec25c96f", "cf449453976052933cea49034560e13e2514a97a8e4d7435a72545c451934f6e", N, S, "n", 908.123),
+    ("30fc2c09dd", "ac07955b317ac1f061caf74da091cfec4094ba144819a75a93e2de0c6b54118b", N, S, "n", 7777.777),
+]
+LABEL_FIELDS = ("case_id", "packet_sha256", "labels", "delivery", "recall", "seconds")
 
 
 def sid_for(i):
@@ -241,12 +271,15 @@ class Draw(Base):
         self.assertEqual(rc, 1)
         self.assertIn("already exists", err)
         self.assertEqual(sorted(p.name for p in existing.iterdir()), ["marker.txt"])
-        inrepo = REPO_ROOT / "scripts" / "measure" / "never-created-label-set"  # absent: only the repo refusal can stop this
-        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", inrepo, "--seed", 1,
-                           "--substantive", 2, "--routine", 1)
+        fake_repo = self.root / "fakerepo"  # a stand-in repo: a guard mutated away cannot litter the shared checkout
+        inrepo = fake_repo / "sets" / "never-created"  # absent: only the repo refusal can stop this
+        with mock.patch.object(run.archive, "REPO_ROOT", fake_repo):
+            rc, out, err = cli("draw", "--corpus", self.corpus, "--set", inrepo, "--seed", 1,
+                               "--substantive", 2, "--routine", 1)
         self.assertEqual(rc, 1)
         self.assertIn("inside the repository", err)
         self.assertFalse(inrepo.exists())
+        self.assertFalse(fake_repo.exists())
         # positive control: a fresh directory outside the repo is accepted with the same arguments
         self.draw("fresh", 1, 2, 1)
 
@@ -288,6 +321,45 @@ class Draw(Base):
                          "--substantive", 1, "--routine", 0, "--exclude-set", self.root / "no-such-set")
         self.assertEqual(rc, 1)
         self.assertIn("exclude", err)
+
+    def test_draw_refuses_an_exclude_set_from_another_frame(self):
+        # a pilot drawn from a DIFFERENT frame (other session id -> other case_keys): disjointness would be fiction
+        foreign_corpus = fx.build_corpus(self.root / "foreign", [dict(session(0), sid=sid_for(50))])
+        foreign = self.root / "foreign-set"
+        rc, _, err = cli("draw", "--corpus", foreign_corpus, "--set", foreign, "--seed", 5, "--substantive", 2,
+                         "--routine", 1)
+        self.assertEqual((rc, err), (0, ""))
+        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", self.root / "m1", "--seed", 5,
+                           "--substantive", 2, "--routine", 1, "--exclude-set", foreign)
+        self.assertEqual(rc, 1)
+        self.assertEqual(err, "error: --exclude-set holds 3 case_key(s) that are not in this frame; the pilot must "
+                              "come from the same frame, or disjointness is not guaranteed\n")
+        self.assertFalse((self.root / "m1").exists())
+        # ONE foreign key among real ones is enough to refuse
+        pilot = self.draw("pilot", 5, 3, 2)
+        key = json.loads(read(pilot / "key.json"))
+        key["ffffffffff"] = {"case_key": "work/nope|transcripts/x.jsonl|mX"}
+        (pilot / "key.json").write_text(json.dumps(key))
+        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", self.root / "m2", "--seed", 6,
+                           "--substantive", 2, "--routine", 1, "--exclude-set", pilot)
+        self.assertEqual(rc, 1)
+        self.assertIn("holds 1 case_key(s) that are not in this frame", err)
+        self.assertFalse((self.root / "m2").exists())
+
+    def test_draw_refuses_a_malformed_exclude_set(self):
+        cases = {"bad-json": "{not json", "missing-field": json.dumps({"aaaaaaaaaa": {"stratum": "routine"}}),
+                 "not-a-map": json.dumps(["x"]), "entry-not-object": json.dumps({"aaaaaaaaaa": 3})}
+        for name, text in cases.items():
+            with self.subTest(name):
+                bad = self.root / f"bad-{name}"
+                bad.mkdir()
+                (bad / "key.json").write_text(text)
+                rc, out, err = cli("draw", "--corpus", self.corpus, "--set", self.root / f"m-{name}", "--seed", 5,
+                                   "--substantive", 1, "--routine", 0, "--exclude-set", bad)
+                self.assertEqual(rc, 1)
+                self.assertEqual(err, f"error: --exclude-set {bad}: key.json is malformed "
+                                      f"(not a case_id -> case_key map)\n")
+                self.assertFalse((self.root / f"m-{name}").exists())
 
 
 # Pinned after observation (see the report): the pilot draw (seed 3, 2 substantive + 1 routine) shuffled by
@@ -418,7 +490,10 @@ class Estimate(Base):
         self.assertAlmostEqual(sub["rate"], 4 / 6)
         self.assertAlmostEqual(sub["decision"]["wilson"][0], 0.300, places=3)  # Wilson(4, 6), by hand: 0.6016 - 0.3016
         self.assertAlmostEqual(sub["decision"]["wilson"][1], 0.903, places=3)
-        self.assertIn(sub["decision"]["outcome"], ("go", "no-go", "inconclusive"))
+        self.assertEqual(sub["decision"]["outcome"], "inconclusive")  # pinned: Wilson says go, the bootstrap disagrees
+        self.assertEqual(sub["decision"]["guards"], ["interval_disagreement"])
+        self.assertEqual((sub["decision"]["wilson_outcome"], sub["decision"]["boot_outcome"]), ("go", "inconclusive"))
+        self.assertEqual(sub["by_kind"], {"handback": {"n": 1, "k": 1}, "top": {"n": 5, "k": 3}})
         self.assertEqual(sub["by_label"], {"verify": 4, "qualify": 0, "correct": 0, "none": 2, "unresolved": 0})
         self.assertEqual(sub["by_delivery"], {"silent": 2, "quiet": 4, "interrupt": 0})
         self.assertEqual(sub["by_recall"], {"y": {"n": 1, "k": 1}, "n": {"n": 5, "k": 3}})
@@ -427,11 +502,29 @@ class Estimate(Base):
         self.assertIsNotNone(allc["overall"])
         self.assertEqual(allc["overall"]["weights"], {"substantive": 15, "routine": 18})
         self.assertAlmostEqual(allc["overall"]["rate"], (4 / 6 * 15 + 1 / 4 * 18) / 33)
-        self.assertAlmostEqual(allc["median_seconds"], 904.623)
+        self.assertAlmostEqual(allc["median_seconds"]["value"], 904.623)
+        self.assertEqual(allc["median_seconds"]["population"],
+                         "median labelling time in seconds over all labelled cases of both strata, n=10")
+        self.assertEqual(allc["median_seconds"]["corpus_id"], CORPUS_ID)
         wo = res["results"]["without_recall_flagged"]
         self.assertEqual((wo["substantive"]["n"], wo["substantive"]["k"]), (5, 3))
-        self.assertAlmostEqual(wo["median_seconds"], 905.123)
+        self.assertAlmostEqual(wo["median_seconds"]["value"], 905.123)
+        self.assertEqual(wo["median_seconds"]["population"],
+                         "median labelling time in seconds over all labelled cases of both strata, "
+                         "recall-flagged cases excluded, n=9")
+        self.assertEqual(wo["median_seconds"]["corpus_id"], CORPUS_ID)
         self.assertIsNone(res["results"]["self_agreement"])
+        # and the export of the same set: pinned literals, not recomputed
+        exp = self.root / "fakerepo" / "data"
+        (self.root / "fakerepo").mkdir()
+        with mock.patch.object(run.archive, "REPO_ROOT", self.root / "fakerepo"):
+            rc, out, err = cli("export", "--set", set_dir, "--out-dir", exp)
+        self.assertEqual((rc, out, err), (0, "exported 10 cases, 10 labels, 0 relabels\n", ""))
+        self.assertEqual(json.loads(read(exp / "main-draw.json")), {
+            "set_id": "main", "seed": 11,
+            "cases": [{"case_id": c, "sha256": s, "stratum": st, "kind": k} for c, s, st, k in EXPORT_CASES]})
+        self.assertEqual([json.loads(l) for l in read(exp / "main-labels.jsonl").splitlines()],
+                         [dict(zip(LABEL_FIELDS, row)) for row in EXPORT_LABELS])
 
     def test_estimate_attaches_corpus_id_and_population_to_every_figure_block(self):
         set_dir = self.rendered()
@@ -623,11 +716,11 @@ class SetGuards(Base):
         set_dir = self.rendered()
         recs = write_labels(set_dir, sub_hits=4, rou_hits=1)
         with open(set_dir / "labels.jsonl", "a") as f:
-            f.write(json.dumps(recs[0]) + "\n")  # the same case labelled twice
+            f.write(json.dumps(recs[-1]) + "\n")  # a ROUTINE case labelled twice: the estimator's own refusal
         rc, out, err = cli("estimate", "--set", set_dir, "--frame", self.frame_file(), "--seed", 1,
                            "--out", self.root / "r.json")
         self.assertEqual(rc, 1)
-        self.assertIn(f"duplicate label for case_id '{recs[0]['case_id']}'", err)
+        self.assertIn(f"duplicate label for case_id '{recs[-1]['case_id']}'", err)
         self.assertFalse((self.root / "r.json").exists())
 
     def test_export_writes_nothing_when_only_one_target_exists(self):
@@ -640,9 +733,105 @@ class SetGuards(Base):
         with mock.patch.object(run.archive, "REPO_ROOT", repo):
             rc, out, err = cli("export", "--set", set_dir, "--out-dir", out_dir)
         self.assertEqual(rc, 1)
-        self.assertIn("exists; an export is not overwritten", err)
+        self.assertIn("is not a prefix of the new export; an exported label file only grows", err)
         self.assertEqual(sorted(p.name for p in out_dir.iterdir()), ["main-labels.jsonl"])  # no half-written pair
         self.assertEqual(read(out_dir / "main-labels.jsonl"), "earlier evidence")
+
+    def test_a_key_json_entry_draw_json_does_not_hold_is_refused_at_load(self):
+        set_dir = self.rendered()
+        write_labels(set_dir, sub_hits=4, rou_hits=1)
+        key = json.loads(read(set_dir / "key.json"))
+        key["abcdef0123"] = dict(next(iter(key.values())))  # the set is bigger than the draw says
+        (set_dir / "key.json").write_text(json.dumps(key))
+        repo = self.root / "fakerepo"
+        repo.mkdir()
+        attempts = {"render": ("render", "--corpus", self.corpus, "--set", set_dir),
+                    "estimate": ("estimate", "--set", set_dir, "--frame", self.frame_file(), "--seed", 1,
+                                 "--out", self.root / "r.json"),
+                    "export": ("export", "--set", set_dir, "--out-dir", repo / "data")}
+        with mock.patch.object(run.archive, "REPO_ROOT", repo):
+            for name, argv in attempts.items():
+                rc, out, err = cli(*argv)
+                self.assertEqual(rc, 1, name)
+                self.assertIn("key.json holds 1 case(s) draw.json does not; the two must name the same cases", err, name)
+        self.assertFalse((self.root / "r.json").exists())
+        self.assertEqual(list(repo.iterdir()), [])
+
+    def test_estimate_refuses_a_label_for_a_case_draw_json_does_not_hold(self):
+        # p2: a null-hash label for a case_id in neither draw.json nor key.json -> was a KeyError crash
+        set_dir = self.rendered()
+        recs = write_labels(set_dir, sub_hits=4, rou_hits=1)
+        frame = self.frame_file()
+        for extra_sha in (None, "a" * 64):  # a real-looking hash does not help a stray case either
+            with open(set_dir / "labels.jsonl", "a") as f:
+                f.write(json.dumps(dict(recs[0], case_id="0123456789", packet_sha256=extra_sha)) + "\n")
+            rc, out, err = cli("estimate", "--set", set_dir, "--frame", frame, "--seed", 1,
+                               "--out", self.root / "r.json")
+            self.assertEqual(rc, 1, extra_sha)
+            self.assertEqual(err, "error: 1 label record(s) name a case_id that draw.json does not hold; "
+                                  "refusing to estimate\n")
+            self.assertFalse((self.root / "r.json").exists())
+            (set_dir / "labels.jsonl").write_text("".join(json.dumps(r) + "\n" for r in recs))
+        for stray_id in ("0123456789", ["0123456789"]):  # unknown, and unhashable
+            with self.subTest(str(stray_id)):
+                (set_dir / "labels.jsonl").write_text("".join(json.dumps(r) + "\n" for r in recs)
+                                                      + json.dumps(dict(recs[0], case_id=stray_id)) + "\n")
+                rc, out, err = cli("estimate", "--set", set_dir, "--frame", frame, "--seed", 1,
+                                   "--out", self.root / "r-stray.json")
+                self.assertEqual(rc, 1)
+                self.assertIn("1 label record(s) name a case_id that draw.json does not hold", err)
+        self.assertFalse((self.root / "r-stray.json").exists())
+        (set_dir / "labels.jsonl").write_text("".join(json.dumps(r) + "\n" for r in recs))
+        # the same stray record as a RELABEL is refused too
+        (set_dir / "relabels.jsonl").write_text(json.dumps(dict(recs[0], case_id="0123456789")) + "\n")
+        rc, out, err = cli("estimate", "--set", set_dir, "--frame", frame, "--seed", 1,
+                           "--out", self.root / "r.json")
+        self.assertEqual(rc, 1)
+        self.assertIn("1 label record(s) name a case_id that draw.json does not hold", err)
+
+    def test_estimate_refuses_a_null_or_missing_packet_hash(self):
+        # p1: a null-hash label used to defeat the binding and then the PARTIAL gate
+        set_dir = self.rendered()
+        recs = write_labels(set_dir, sub_hits=4, rou_hits=1, drop_sub=1)  # 5 of 6 substantive labelled
+        frame = self.frame_file()
+        for name, mutate in (("null", lambda r: dict(r, packet_sha256=None)),
+                             ("missing", lambda r: {k: v for k, v in r.items() if k != "packet_sha256"}),
+                             ("wrong", lambda r: dict(r, packet_sha256="0" * 64))):
+            with self.subTest(name):
+                bad = [mutate(recs[0])] + recs[1:]
+                (set_dir / "labels.jsonl").write_text("".join(json.dumps(r) + "\n" for r in bad))
+                rc, out, err = cli("estimate", "--set", set_dir, "--frame", frame, "--seed", 1,
+                                   "--out", self.root / f"r-{name}.json")
+                self.assertEqual(rc, 1)
+                self.assertEqual(err, "error: 1 label record(s) do not match draw.json's packet hashes; "
+                                      "refusing to estimate\n")
+                self.assertFalse((self.root / f"r-{name}.json").exists())
+
+    def test_estimate_states_the_invariant_that_labels_cannot_outnumber_the_draw(self):
+        set_dir = self.rendered()
+        recs = write_labels(set_dir, sub_hits=4, rou_hits=1)
+        with open(set_dir / "labels.jsonl", "a") as f:
+            f.write(json.dumps(recs[0]) + "\n")  # a SUBSTANTIVE case labelled twice: 7 records for 6 cases
+        rc, out, err = cli("estimate", "--set", set_dir, "--frame", self.frame_file(), "--seed", 1,
+                           "--out", self.root / "r.json")
+        self.assertEqual(rc, 1)
+        self.assertEqual(err, "error: 7 substantive label records for 6 substantive cases drawn "
+                              "(a case labelled twice?); refusing to estimate\n")
+        self.assertFalse((self.root / "r.json").exists())
+
+    def test_render_hides_an_unexpected_build_error_text(self):
+        set_dir = self.draw("main", 11, 6, 4)
+        secret = "work/" + sid_for(3)  # what packet.py's ValueError embeds: the unit's case_key
+
+        with mock.patch.object(run.packet, "build_packet", side_effect=ValueError(f"unit {secret}|x is not a message")):
+            rc, out, err = cli("render", "--corpus", self.corpus, "--set", set_dir)
+        self.assertEqual(rc, 1)
+        first = json.loads(read(set_dir / "draw.json"))["cases"][0]["case_id"]
+        self.assertEqual(err, f"error: case {first}: the packet could not be built (ValueError); render aborted, "
+                              f"nothing written\n")
+        self.assertNotIn(sid_for(3), out + err)
+        self.assertFalse((set_dir / "packets").exists())
+        self.assertIsNone(json.loads(read(set_dir / "draw.json"))["cases"][0]["sha256"])
 
 
 
@@ -678,10 +867,16 @@ class Export(Base):
             self.assertIn(s, private, s)  # positive control: every sentinel IS in the private files
             self.assertNotIn(s, published, s)
         # packet text and the source's session ids / timestamps never reach the export either
-        for s in ("Reading the module.", "Fixed and verified.", "T10:") + tuple(
-                v["copy_id"].split("/", 1)[1] for v in key.values()):
+        bare_sids = tuple(v["copy_id"].split("/", 1)[1] for v in key.values())
+        source = "".join(p.read_text() for p in self.corpus.rglob("*.jsonl"))
+        for s in ("Reading the module.", "Fixed and verified.", "T10:") + bare_sids:
+            # positive control for each: it IS in the packets / the source transcripts / the private key
+            self.assertTrue(s in packets or s in source or s in private, s)
             self.assertNotIn(s, published, s)
         self.assertIn("Reading the module.", packets)
+        self.assertIn("Fixed and verified.", packets)
+        self.assertIn("T10:", source)
+        self.assertTrue(all(s in private for s in bare_sids))
 
     def test_export_contents(self):
         self.export()
@@ -715,13 +910,178 @@ class Export(Base):
         # positive control: inside the (fake) repo the same set exports
         self.assertEqual(self.export()[0], 0)
 
-    def test_export_refuses_to_overwrite(self):
+    def test_export_is_rerunnable_and_idempotent(self):
         self.assertEqual(self.export()[0], 0)
         before = {p.name: p.read_bytes() for p in self.out_dir.iterdir()}
         rc, out, err = self.export()
-        self.assertEqual(rc, 1)
-        self.assertIn("exists", err)
+        self.assertEqual((rc, out, err), (0, "exported 10 cases, 10 labels, 0 relabels\n", ""))
         self.assertEqual({p.name: p.read_bytes() for p in self.out_dir.iterdir()}, before)
+        self.assertEqual(sorted(before), ["main-draw.json", "main-labels.jsonl"])  # no temp file left behind
+
+    def test_first_export_without_labels_writes_the_draw_and_an_empty_labels_file(self):
+        for how in ("absent", "empty"):
+            with self.subTest(how):
+                out_dir = self.fake_repo / how
+                labels = self.set_dir / "labels.jsonl"
+                saved = read(labels)
+                if how == "absent":
+                    labels.unlink()
+                else:
+                    labels.write_text("")
+                rc, out, err = self.export(out_dir)
+                self.assertEqual((rc, out, err), (0, "exported 10 cases, 0 labels, 0 relabels\n", ""))
+                self.assertEqual(sorted(p.name for p in out_dir.iterdir()), ["main-draw.json", "main-labels.jsonl"])
+                self.assertEqual(read(out_dir / "main-labels.jsonl"), "")
+                self.assertEqual(len(json.loads(read(out_dir / "main-draw.json"))["cases"]), 10)
+                labels.write_text(saved)
+
+    def test_second_export_after_labelling_grows_the_first(self):
+        lines = read(self.set_dir / "labels.jsonl").splitlines(keepends=True)
+        (self.set_dir / "labels.jsonl").write_text("".join(lines[:4]))
+        self.assertEqual(self.export()[0], 0)
+        first = [json.loads(l) for l in read(self.out_dir / "main-labels.jsonl").splitlines()]
+        draw_bytes = (self.out_dir / "main-draw.json").read_bytes()
+        (self.set_dir / "labels.jsonl").write_text("".join(lines))
+        rc, out, err = self.export()
+        self.assertEqual((rc, out, err), (0, "exported 10 cases, 10 labels, 0 relabels\n", ""))
+        second = [json.loads(l) for l in read(self.out_dir / "main-labels.jsonl").splitlines()]
+        self.assertEqual((len(first), len(second)), (4, 10))
+        self.assertEqual(second[:4], first)  # the old records are a prefix
+        self.assertEqual([r["case_id"] for r in second], [row[0] for row in EXPORT_LABELS])
+        self.assertEqual((self.out_dir / "main-draw.json").read_bytes(), draw_bytes)
+        self.assertEqual(sorted(p.name for p in self.out_dir.iterdir()), ["main-draw.json", "main-labels.jsonl"])
+
+    def test_re_export_with_a_changed_draw_is_refused(self):
+        self.assertEqual(self.export()[0], 0)
+        before = {p.name: p.read_bytes() for p in self.out_dir.iterdir()}
+        draw = json.loads(read(self.set_dir / "draw.json"))
+        draw["seed"] = 12  # any change to what the manifest would say
+        (self.set_dir / "draw.json").write_text(json.dumps(draw))
+        rc, out, err = self.export()
+        self.assertEqual(rc, 1)
+        self.assertEqual(err, f"error: {self.out_dir.resolve() / 'main-draw.json'} differs from the new draw manifest; "
+                              f"the draw manifest is immutable once committed\n")
+        self.assertEqual({p.name: p.read_bytes() for p in self.out_dir.iterdir()}, before)
+
+    def test_re_export_that_drops_or_alters_an_exported_label_is_refused(self):
+        self.assertEqual(self.export()[0], 0)
+        before = {p.name: p.read_bytes() for p in self.out_dir.iterdir()}
+        lines = read(self.set_dir / "labels.jsonl").splitlines(keepends=True)
+        altered = json.loads(lines[2])
+        altered["seconds"] = 1.5
+        variants = {"dropped": "".join(lines[:9]), "altered": "".join(lines[:2]) + json.dumps(altered) + "\n"
+                    + "".join(lines[3:]), "reordered": "".join([lines[1], lines[0]] + lines[2:])}
+        for name, text in variants.items():
+            with self.subTest(name):
+                (self.set_dir / "labels.jsonl").write_text(text)
+                rc, out, err = self.export()
+                self.assertEqual(rc, 1)
+                self.assertEqual(err, f"error: {self.out_dir.resolve() / 'main-labels.jsonl'} is not a prefix of the "
+                                      f"new export; an exported label file only grows\n")
+                self.assertEqual({p.name: p.read_bytes() for p in self.out_dir.iterdir()}, before)
+
+    def test_re_export_that_drops_exported_relabels_is_refused_and_growth_is_allowed(self):
+        lines = read(self.set_dir / "labels.jsonl").splitlines(keepends=True)
+        (self.set_dir / "relabels.jsonl").write_text("".join(lines[:2]))
+        self.assertEqual(self.export()[1], "exported 10 cases, 10 labels, 2 relabels\n")
+        (self.set_dir / "relabels.jsonl").write_text("".join(lines[:3]))  # grows: fine
+        self.assertEqual(self.export()[1], "exported 10 cases, 10 labels, 3 relabels\n")
+        self.assertEqual(len(read(self.out_dir / "main-relabels.jsonl").splitlines()), 3)
+        (self.set_dir / "relabels.jsonl").unlink()  # the exported file exists, the source has none
+        rc, out, err = self.export()
+        self.assertEqual(rc, 1)
+        self.assertIn("main-relabels.jsonl is not a prefix of the new export; an exported label file only grows", err)
+        self.assertEqual(len(read(self.out_dir / "main-relabels.jsonl").splitlines()), 3)
+
+    def test_export_refuses_an_unrendered_draw(self):
+        unrendered = self.draw("fresh", 12, 2, 1)
+        with mock.patch.object(run.archive, "REPO_ROOT", self.fake_repo):
+            rc, out, err = cli("export", "--set", unrendered, "--out-dir", self.out_dir)
+        self.assertEqual(rc, 1)
+        self.assertEqual(err, f"error: {unrendered} is not rendered (draw.json holds no packet hashes); "
+                              f"run render first\n")
+        self.assertFalse(self.out_dir.exists())
+
+    def test_export_validates_the_values_it_commits(self):
+        key = json.loads(read(self.set_dir / "key.json"))
+        secret = next(iter(key.values()))["case_key"]  # contains a session id: must never be committed
+        first = self.recs[0]
+        cid = first["case_id"]
+        bad = {  # name -> (record, expected message)
+            "case_key in labels": (dict(first, labels=[secret]), f"case {cid}: field labels"),
+            "case_key as case_id": (dict(first, case_id=secret), "record 0: field case_id"),
+            "unknown case_id": (dict(first, case_id="0123456789"), "record 0: field case_id"),
+            "case_id a list": (dict(first, case_id=[secret]), "record 0: field case_id"),
+            "labels a dict": (dict(first, labels={"verify": secret}), f"case {cid}: field labels"),
+            "wrong sha": (dict(first, packet_sha256="0" * 64), f"case {cid}: field packet_sha256"),
+            "null sha": (dict(first, packet_sha256=None), f"case {cid}: field packet_sha256"),
+            "unknown delivery": (dict(first, delivery=secret), f"case {cid}: field delivery"),
+            "bad recall": (dict(first, recall=secret), f"case {cid}: field recall"),
+            "bool recall": (dict(first, recall=True), f"case {cid}: field recall"),
+            "nan seconds": (dict(first, seconds=float("nan")), f"case {cid}: field seconds"),
+            "inf seconds": (dict(first, seconds=float("inf")), f"case {cid}: field seconds"),
+            "negative seconds": (dict(first, seconds=-1), f"case {cid}: field seconds"),
+            "string seconds": (dict(first, seconds=secret), f"case {cid}: field seconds"),
+            "bool seconds": (dict(first, seconds=True), f"case {cid}: field seconds"),
+            "labels not a list": (dict(first, labels="verify"), f"case {cid}: field labels"),
+            "labels empty": (dict(first, labels=[]), f"case {cid}: field labels"),
+            "none with verify": (dict(first, labels=["none", "verify"]), f"case {cid}: field labels"),
+            "verify with silent": (dict(first, delivery="silent"), f"case {cid}: field labels"),
+            "missing seconds": ({k: v for k, v in first.items() if k != "seconds"}, f"case {cid}: field seconds"),
+        }
+        original = read(self.set_dir / "labels.jsonl")
+        rest = "".join(original.splitlines(keepends=True)[1:])
+        for name, (rec, message) in bad.items():
+            with self.subTest(name):
+                (self.set_dir / "labels.jsonl").write_text(json.dumps(rec) + "\n" + rest)
+                rc, out, err = self.export()
+                self.assertEqual(rc, 1)
+                self.assertIn(f"main-labels.jsonl: {message} is", err)
+                self.assertIn("; nothing exported", err)
+                self.assertNotIn(secret, out + err)
+                self.assertNotIn(sid_for(0), out + err)
+                self.assertFalse(self.out_dir.exists())  # nothing written
+        # the same rules apply to relabels
+        (self.set_dir / "labels.jsonl").write_text(original)
+        (self.set_dir / "relabels.jsonl").write_text(json.dumps(dict(first, labels=[secret])) + "\n")
+        rc, out, err = self.export()
+        self.assertEqual(rc, 1)
+        self.assertIn(f"main-relabels.jsonl: case {cid}: field labels is invalid", err)
+        self.assertNotIn(secret, out + err)
+        self.assertFalse(self.out_dir.exists())
+        # positive control: without the bad record the same files export, whitelisted fields present
+        (self.set_dir / "relabels.jsonl").unlink()
+        (self.set_dir / "labels.jsonl").write_text(json.dumps(dict(first, seconds=0)) + "\n" + rest)  # 0 is a valid duration
+        self.assertEqual(self.export()[0], 0)
+        rows = [json.loads(l) for l in read(self.out_dir / "main-labels.jsonl").splitlines()]
+        self.assertEqual(rows[0], dict(zip(LABEL_FIELDS, EXPORT_LABELS[0][:5] + (0,))))
+        self.assertEqual(rows[1:], [dict(zip(LABEL_FIELDS, row)) for row in EXPORT_LABELS[1:]])
+
+    def test_export_writes_are_atomic(self):
+        lines = read(self.set_dir / "labels.jsonl").splitlines(keepends=True)
+        (self.set_dir / "labels.jsonl").write_text("".join(lines[:4]))
+        self.assertEqual(self.export()[0], 0)
+        before = {p.name: p.read_bytes() for p in self.out_dir.iterdir()}
+        (self.set_dir / "labels.jsonl").write_text("".join(lines))
+        real_replace = os.replace
+
+        def failing(src, dst, *a, **k):
+            if pathlib.Path(dst).name == "main-labels.jsonl":
+                raise OSError("simulated crash during the labels swap")
+            return real_replace(src, dst, *a, **k)
+
+        with mock.patch.object(os, "replace", side_effect=failing):
+            with self.assertRaises(OSError):
+                self.export()
+        self.assertEqual({p.name: p.read_bytes() for p in self.out_dir.iterdir()}, before)  # whole, no .tmp
+
+    def test_export_refuses_a_record_that_is_not_an_object(self):
+        (self.set_dir / "labels.jsonl").write_text("[1, 2]\n")
+        rc, out, err = self.export()
+        self.assertEqual(rc, 1)
+        self.assertEqual(err, "error: main-labels.jsonl: record 0 is not an object; nothing exported\n")
+        self.assertFalse(self.out_dir.exists())
+
 
     def test_export_relabels_are_whitelisted_too(self):
         with open(self.set_dir / "relabels.jsonl", "w") as f:

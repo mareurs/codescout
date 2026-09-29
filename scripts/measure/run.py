@@ -28,7 +28,9 @@ docs/superpowers/plans/2026-09-29-system1-labelled-sample.md) are below it.
     run.py export --set DIR --out-dir D
                                        the committable record: case ids, packet hashes, strata,
                                        kinds and labels WITHOUT notes; D must be INSIDE the repo
-                                       (the opposite of the private writers above)
+                                       (the opposite of the private writers above). Re-runnable: the
+                                       draw manifest must stay byte-identical, an exported label file
+                                       may only grow; every committed value is validated
 
 Run from the repo root with ~/work/claude/prompt-engineering/.venv/bin/python.
 """
@@ -36,6 +38,7 @@ import argparse
 import contextlib
 import hashlib
 import json
+import math
 import os
 import pathlib
 import random
@@ -190,6 +193,10 @@ def _load_set(set_dir):
     for c in draw["cases"]:
         if not _CASE_ID.fullmatch(c["case_id"]) or c["case_id"] not in key:
             raise Refused(f"{set_dir}: draw.json names a case_id key.json does not hold")
+    drawn_ids = {c["case_id"] for c in draw["cases"]}
+    if set(key) != drawn_ids:
+        raise Refused(f"{set_dir}: key.json holds {len(set(key) - drawn_ids)} case(s) draw.json does not; "
+                      f"the two must name the same cases")
     return set_dir, draw, key
 
 
@@ -213,7 +220,11 @@ def _excluded_case_keys(exclude_set):
     path = pathlib.Path(exclude_set) / "key.json"
     if not path.is_file():
         raise Refused(f"--exclude-set {exclude_set} holds no key.json; nothing to exclude")
-    return {v["case_key"] for v in _read_json(path).values()}
+    try:
+        return {v["case_key"] for v in _read_json(path).values()}
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise Refused(f"--exclude-set {exclude_set}: key.json is malformed (not a case_id -> case_key map)") \
+            from None
 
 
 def _cmd_draw(args):
@@ -223,6 +234,11 @@ def _cmd_draw(args):
         raise Refused(f"set name {set_dir.name!r} is not a plain file name (letters, digits, . _ -)")
     exclude = _excluded_case_keys(args.exclude_set) if args.exclude_set else set()
     units = sampler.frame(args.corpus)
+    absent = exclude - {u.case_key for u in units}
+    if absent:
+        raise Refused(f"--exclude-set holds {len(absent)} case_key(s) that are not in this frame; the pilot must "
+                      f"come from the same frame, or disjointness is not guaranteed")
+    removed = sum(1 for u in units if u.case_key in exclude)
     try:
         drawn = sampler.draw(units, {"substantive": args.substantive, "routine": args.routine}, args.seed,
                              frozenset(exclude))
@@ -246,7 +262,7 @@ def _cmd_draw(args):
             "order": order}
     _write_new(set_dir / "draw.json", json.dumps(draw, indent=1) + "\n")
     n_sub = sum(v["stratum"] == "substantive" for v in key.values())
-    print(f"drawn substantive={n_sub} routine={len(key) - n_sub} excluded={len(exclude)}")
+    print(f"drawn substantive={n_sub} routine={len(key) - n_sub} excluded={removed}")
     return 0
 
 
@@ -268,6 +284,9 @@ def _cmd_render(args):
         except packet.TokenFound:
             raise Refused(f"case {cid}: a token-shaped string is in its packet; render aborted, nothing written") \
                 from None
+        except Exception as e:  # e.g. packet.py's ValueError embeds the unit's case_key (a session id)
+            raise Refused(f"case {cid}: the packet could not be built ({type(e).__name__}); render aborted, "
+                          f"nothing written") from None
     packets = set_dir / "packets"
     packets.mkdir(mode=0o700, exist_ok=True)
     for p in built:
@@ -293,6 +312,10 @@ def _annotate(figs, corpus_id, note):
         blk["corpus_id"] = corpus_id
         blk["population"] = (f"overall, frame-weighted over {'+'.join(active)} strata{note}, "
                              f"n={sum(figs[s]['n'] for s in active)}")
+    figs["median_seconds"] = {
+        "value": figs["median_seconds"], "corpus_id": corpus_id,
+        "population": (f"median labelling time in seconds over all labelled cases of both strata{note}, "
+                       f"n={sum(figs[s]['n'] for s in STRATA if figs[s])}")}
 
 
 def _cmd_estimate(args):
@@ -303,11 +326,18 @@ def _cmd_estimate(args):
         raise Refused(f"{set_dir} is not rendered (draw.json holds no packet hashes); run render first")
     labels = label._read_jsonl(set_dir / "labels.jsonl")
     relabels = label._read_jsonl(set_dir / "relabels.jsonl")
-    bad = sum(1 for r in labels + relabels if sha.get(r["case_id"]) != r["packet_sha256"])
+    rows = labels + relabels
+    stray = sum(1 for r in rows if not (isinstance(r.get("case_id"), str) and r["case_id"] in sha))
+    if stray:
+        raise Refused(f"{stray} label record(s) name a case_id that draw.json does not hold; refusing to estimate")
+    bad = sum(1 for r in rows if r.get("packet_sha256") != sha[r["case_id"]])  # sha is non-null: render was checked
     if bad:
         raise Refused(f"{bad} label record(s) do not match draw.json's packet hashes; refusing to estimate")
     drawn = {s: sum(1 for c in draw["cases"] if key[c["case_id"]]["stratum"] == s) for s in STRATA}
     labelled = {s: sum(1 for r in labels if key[r["case_id"]]["stratum"] == s) for s in STRATA}
+    if labelled["substantive"] > drawn["substantive"]:  # the invariant the `==` below relies on, stated
+        raise Refused(f"{labelled['substantive']} substantive label records for {drawn['substantive']} substantive "
+                      f"cases drawn (a case labelled twice?); refusing to estimate")
     try:
         est = estimator.estimate(labels, key, frame["counts"], args.seed, relabels or None, b=BOOTSTRAP_SAMPLES)
     except ValueError as e:  # a duplicate label or relabel: refuse, do not crash
@@ -336,6 +366,45 @@ def _cmd_estimate(args):
     return 0
 
 
+def _check_record(fname, i, r, sha):
+    """One label/relabel record as it may be committed: the whitelisted fields, each validated by VALUE.
+    Refusals name the file, the case_id (already proven to be a case of this draw) and the FIELD, never a
+    value: a bad value is exactly what may be a session id."""
+    if not isinstance(r, dict):
+        raise Refused(f"{fname}: record {i} is not an object; nothing exported")
+    cid = r.get("case_id")
+    if not (isinstance(cid, str) and _CASE_ID.fullmatch(cid) and cid in sha):
+        raise Refused(f"{fname}: record {i}: field case_id is not a case of this draw; nothing exported")
+
+    def bad(field):
+        raise Refused(f"{fname}: case {cid}: field {field} is invalid; nothing exported")
+
+    if r.get("packet_sha256") != sha[cid]:
+        bad("packet_sha256")
+    if r.get("delivery") not in label.DELIVERIES:
+        bad("delivery")
+    labels = r.get("labels")
+    if not isinstance(labels, list) or any(l not in estimator.LABEL_KEYS for l in labels):
+        bad("labels")
+    try:
+        label.validate(labels, r["delivery"])
+    except ValueError:
+        bad("labels")
+    if r.get("recall") not in ("y", "n"):
+        bad("recall")
+    secs = r.get("seconds")
+    if isinstance(secs, bool) or not isinstance(secs, (int, float)) or not math.isfinite(secs) or secs < 0:
+        bad("seconds")
+    return {k: r[k] for k in LABEL_EXPORT_FIELDS}
+
+
+def _existing_records(path):
+    try:
+        return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    except ValueError:
+        return None
+
+
 def _cmd_export(args):
     out_dir = pathlib.Path(args.out_dir).resolve()
     try:
@@ -347,23 +416,39 @@ def _cmd_export(args):
     set_id = draw["set_id"]
     if not _SAFE_NAME.fullmatch(set_id):
         raise Refused("draw.json's set_id is not a plain file name")
-    labels = label._read_jsonl(set_dir / "labels.jsonl")
-    relabels = label._read_jsonl(set_dir / "relabels.jsonl")
-    files = {f"{set_id}-draw.json": json.dumps(
+    sha = {c["case_id"]: c["sha256"] for c in draw["cases"]}
+    if not all(sha.values()):
+        raise Refused(f"{set_dir} is not rendered (draw.json holds no packet hashes); run render first")
+    exported = {}
+    for name in ("labels", "relabels"):
+        fname = f"{set_id}-{name}.jsonl"
+        recs = label._read_jsonl(set_dir / f"{name}.jsonl")
+        exported[fname] = [_check_record(fname, i, r, sha) for i, r in enumerate(recs)]
+    draw_name = f"{set_id}-draw.json"
+    plan = {draw_name: json.dumps(
         {"set_id": set_id, "seed": draw["seed"],
          "cases": [{"case_id": c["case_id"], "sha256": c["sha256"], "stratum": key[c["case_id"]]["stratum"],
                     "kind": key[c["case_id"]]["kind"]} for c in draw["cases"]]}, indent=1) + "\n"}
-    for name, recs in (("labels", labels), ("relabels", relabels)):
-        if recs or name == "labels":
-            files[f"{set_id}-{name}.jsonl"] = "".join(
-                json.dumps({k: r[k] for k in LABEL_EXPORT_FIELDS}) + "\n" for r in recs)
-    for name in files:
-        if (out_dir / name).exists():
-            raise Refused(f"{out_dir / name} exists; an export is not overwritten")
+    for fname, recs in exported.items():
+        if recs or fname.endswith("-labels.jsonl") or (out_dir / fname).exists():
+            plan[fname] = "".join(json.dumps(r) + "\n" for r in recs)
+    for fname, text in plan.items():
+        path = out_dir / fname
+        if not path.exists():
+            continue
+        if fname == draw_name:
+            if path.read_bytes() != text.encode("utf-8"):
+                raise Refused(f"{path} differs from the new draw manifest; the draw manifest is immutable once "
+                              f"committed")
+        else:
+            old = _existing_records(path)
+            if old is None or [json.loads(l) for l in text.splitlines()][:len(old)] != old:
+                raise Refused(f"{path} is not a prefix of the new export; an exported label file only grows")
     out_dir.mkdir(parents=True, exist_ok=True)
-    for name, text in files.items():
-        _write_new(out_dir / name, text, 0o644)
-    print(f"exported {len(draw['cases'])} cases, {len(labels)} labels, {len(relabels)} relabels")
+    for fname, text in plan.items():
+        _write_atomic(out_dir / fname, text.encode("utf-8"), 0o644)
+    n_l, n_r = (len(exported[f"{set_id}-{n}.jsonl"]) for n in ("labels", "relabels"))
+    print(f"exported {len(draw['cases'])} cases, {n_l} labels, {n_r} relabels")
     return 0
 
 
