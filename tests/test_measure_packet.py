@@ -144,6 +144,25 @@ class DecisionPoint(PacketCase):
         self.assertNotIn("LATE-B", p.text)
 
 
+    def test_a_tool_result_with_an_unhashable_id_is_skipped_on_both_paths(self):
+        # build() also builds through a cache and requires identical bytes; the cached index covers the WHOLE
+        # transcript, so a malformed block AFTER the unit used to raise there while the plain path never saw it
+        for where in ("after", "before"):
+            with self.subTest(where=where):
+                s = Seq()
+                s.user("go")
+                (t0,) = s.asst("m0", "Ran.", tools=[("run_command", {"command": "a"})])
+                if where == "before":
+                    s.result(["not", "hashable"], "MALFORMED-EARLY")
+                s.result(t0, "GOOD-RESULT")
+                s.asst("m1", "The decision.")
+                if where == "after":
+                    s.result({"also": "unhashable"}, "MALFORMED-LATE")
+                p = self.build(s, "m1")
+                self.assertIn("RESULT GOOD-RESULT", p.text)
+                self.assertNotIn("MALFORMED", p.text)
+
+
     def test_a_context_message_piece_after_the_decision_is_not_shown(self):
         s = Seq()
         s.user("go")
@@ -560,6 +579,16 @@ class Blinding(PacketCase):
     def test_words_shaped_like_api_ids_are_left_intact(self):
         text = "let msg_count = 3;\nfn toolu_helper() {}\nmsg_01short and toolu_01short"  # no 20 chars after `_01`
         self.assertEqual(self._result_body(text), text)
+    def test_a_bare_calendar_date_is_kept_and_only_a_date_with_a_time_is_blinded(self):
+        s = Seq()
+        s.user("see notes-2026-09-20.md dated 2026-09-20 and stamped 2026-09-20 10:11:12")
+        s.asst("m1", "Done.")
+        p = self.build(s, "m1")
+        op = self.section(p.text, "Operator's last message")
+        self.assertEqual(op.strip(), "see notes-2026-09-20.md dated 2026-09-20 and stamped <timestamp>")
+        self.assertIn("BARE calendar date is kept everywhere", packet.__doc__)  # the docstring says what the code does
+
+
     def test_api_id_needs_exactly_twenty_characters_after_the_01_prefix(self):
         nineteen, twenty = "01" + "a" * 19, "01" + "a" * 20
         self.assertEqual(self._result_body(f"x msg_{nineteen} y toolu_{nineteen}"), f"x msg_{nineteen} y toolu_{nineteen}")

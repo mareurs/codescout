@@ -3,9 +3,10 @@
 Model-free. A packet shows the operator's last message (or, for a hand-back, the dispatch prompt),
 the last CONTEXT_MESSAGES assistant messages before the decision point WITH their tool output, and
 the message itself with the tool calls it is about to run. Nothing at or after the decision point
-except the message's own entries. What is blinded (replaced by a placeholder) is limited to: session ids,
-message ids and uuid-shaped strings, ISO and space-separated calendar timestamps, and API ids of the form
-msg_01... / toolu_01...; dates inside file names are kept as evidence. A lone surrogate (a truncated
+except the message's own entries. What is blinded (replaced by a placeholder) is limited to: uuid-shaped
+strings (session and message ids), calendar timestamps, and API ids of the form msg_01... / toolu_01.... A
+BARE calendar date is kept everywhere (prose, file names): only a date WITH a time of day, ISO `T` or
+space separated, is blinded, because _TIMESTAMP_RE requires the time. A lone surrogate (a truncated
 emoji) becomes U+FFFD so the text can be hashed as UTF-8. The packet is at most PACKET_CHARS characters
 in total, always.
 
@@ -161,16 +162,26 @@ def _tool_calls(entries):
     return out
 
 
+def _hashable(x):
+    try:
+        hash(x)
+    except TypeError:
+        return False
+    return True
+
+
 def _results(entries):
-    """{tool_use_id: (text, is_error)} over the given entries (first block for an id wins)."""
+    """{tool_use_id: (text, is_error)} over the given entries (first block for an id wins). A block whose id is
+    unhashable (a malformed transcript) is skipped, exactly as _results_index skips it."""
     out = {}
     for e in entries:
         if e.get("type") != "user":
             continue
         for b in sampler._content(e):
-            if b.get("type") == "tool_result" and b.get("tool_use_id") not in out:
+            tid = b.get("tool_use_id")
+            if b.get("type") == "tool_result" and _hashable(tid) and tid not in out:
                 text = transcripts._tool_result_text(b)
-                out[b.get("tool_use_id")] = (text or "", b.get("is_error") is True)
+                out[tid] = (text or "", b.get("is_error") is True)
     return out
 
 
@@ -247,9 +258,10 @@ def _results_index(entries):
         if e.get("type") != "user":
             continue
         for b in sampler._content(e):
-            if b.get("type") == "tool_result" and b.get("tool_use_id") not in out:
+            tid = b.get("tool_use_id")
+            if b.get("type") == "tool_result" and _hashable(tid) and tid not in out:
                 text = transcripts._tool_result_text(b)
-                out[b.get("tool_use_id")] = (i, (text or "", b.get("is_error") is True))
+                out[tid] = (i, (text or "", b.get("is_error") is True))
     return out
 
 

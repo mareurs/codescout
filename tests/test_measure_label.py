@@ -876,6 +876,20 @@ class PagerBehaviourTests(unittest.TestCase):
             label._pager_show("PAGER-RAN-TEXT")
         self.assertEqual(buf2.getvalue(), "PAGER-RAN-TEXT\n")
 
+    def test_the_pager_child_gets_the_default_sigint_disposition_not_the_parents_ignore(self):
+        import shlex
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = pathlib.Path(tmp) / "disposition.txt"
+            code = f"import signal; open({str(probe)!r}, 'w').write(repr(signal.getsignal(signal.SIGINT)))"
+            with mock.patch.dict(os.environ, {"PAGER": shlex.join([sys.executable, "-c", code])}):
+                label._pager_show("T")
+            # a child started with SIGINT ignored reports Handlers.SIG_IGN; with the default restored, Python
+            # installs its own handler and reports default_int_handler
+            self.assertIn("default_int_handler", probe.read_text())
+            self.assertNotIn("SIG_IGN", probe.read_text())
+
+
     def test_a_pager_that_fails_to_start_prints_once_and_restores_sigint(self):
         marker = lambda *a: None  # noqa: E731
         prev = signal.signal(signal.SIGINT, marker)

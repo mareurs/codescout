@@ -7,6 +7,7 @@ The corpus has 6 sessions -> 33 units: 18 routine, 12 substantive top-level, 3 s
 hand-backs (sessions 0-2 have one subagent file each). Fixture details that carry a guard are
 annotated on their own line with what breaks if they go.
 """
+import atexit
 import contextlib
 import hashlib
 import importlib.util
@@ -15,6 +16,7 @@ import json
 import os
 import pathlib
 import random
+import shutil
 import stat
 import sys
 import tempfile
@@ -133,10 +135,30 @@ def make_sessions(token_session=None):
     return [session(i, token=(i == token_session)) for i in range(6)]
 
 
-def cli(*argv):
+_AUTO_FRAMES = {}
+_AUTO_DIR = tempfile.mkdtemp(prefix="measure-auto-frames-")
+atexit.register(shutil.rmtree, _AUTO_DIR, ignore_errors=True)
+
+
+def _auto_frame(corpus):
+    """A frame file for `corpus`, made once per corpus path. `draw` requires --frame; the many tests that are
+    about something else get the frame `run.py frame` would have produced (byte-identical to Base.frame_file's)."""
+    if corpus not in _AUTO_FRAMES:
+        path = pathlib.Path(_AUTO_DIR) / f"frame-{len(_AUTO_FRAMES)}.json"
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            run.main(["frame", "--corpus", corpus, "--out", str(path)])
+        _AUTO_FRAMES[corpus] = path
+    return _AUTO_FRAMES[corpus]
+
+
+def cli(*argv, auto_frame=True):
+    argv = [str(a) for a in argv]
+    if (auto_frame and argv[:1] == ["draw"] and "--frame" not in argv and "--exclude-units" not in argv
+            and "--corpus" in argv):
+        argv += ["--frame", str(_auto_frame(argv[argv.index("--corpus") + 1]))]
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        rc = run.main([str(a) for a in argv])
+        rc = run.main(argv)
     return rc, out.getvalue(), err.getvalue()
 
 
@@ -254,7 +276,7 @@ class Draw(Base):
         self.assertEqual(sum(v["stratum"] == "substantive" for v in key.values()), 6)
         self.assertEqual(sum(v["stratum"] == "routine" for v in key.values()), 4)
         # draw.json: set_id, seed, cases without hashes yet, order = a seed+1 shuffle
-        self.assertEqual(set(draw), {"set_id", "seed", "cases", "order"})
+        self.assertEqual(set(draw), {"set_id", "seed", "frame_sha256", "cases", "order"})
         self.assertEqual(draw["set_id"], MAIN)
         self.assertEqual(draw["seed"], 11)
         self.assertEqual(draw["cases"], [{"case_id": cid, "sha256": None} for cid in key])
@@ -1660,10 +1682,12 @@ class ExcludeUnits(TokenBase):
         rc, out, err = cli(*base, "--set", target, "--frame", plain, "--exclude-units", excluded)
         self.assertEqual((rc, out), (1, ""))
         self.assertIn("records no exclusion", err)
-        # the draw brings an exclusion without a frame to check it against
-        rc, out, err = cli(*base, "--set", target, "--exclude-units", excluded)
-        self.assertEqual((rc, out), (1, ""))
-        self.assertIn("--frame", err)
+        # the draw brings an exclusion without a frame to check it against: --frame is argparse-required
+        err_buf = io.StringIO()
+        with contextlib.redirect_stderr(err_buf), self.assertRaises(SystemExit) as cm:
+            run.main([str(a) for a in (*base, "--set", target, "--exclude-units", excluded)])
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("--frame", err_buf.getvalue())
         # the frame records an exclusion, but the draw does not apply it
         rc, out, err = cli(*base, "--set", target, "--frame", recorded)
         self.assertEqual((rc, out), (1, ""))
@@ -1741,12 +1765,21 @@ class EstimateBinding(Base):
         set_dir, frame = self.labelled()
         good = json.loads(read(frame))
         self.assertEqual(sorted(good["code_sha256"]), ["estimate.py", "packet.py", "run.py", "sampler.py"])
+
+        def drawn_against(path):
+            """Make the set look as if it had been drawn against this (tampered) frame file: the frame binding
+            is by bytes, so a frame frozen by other code is only reachable through a set bound to it."""
+            draw = json.loads(read(set_dir / "draw.json"))
+            draw["frame_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+            (set_dir / "draw.json").write_text(json.dumps(draw))
+
         for i, name in enumerate(("sampler.py", "packet.py", "estimate.py", "run.py")):
             with self.subTest(tampered=name):
                 bad = json.loads(json.dumps(good))
                 bad["code_sha256"][name] = "0" * 64
                 path = self.root / f"tampered{i}.json"
                 path.write_text(json.dumps(bad))
+                drawn_against(path)
                 rc, so, se, out = self.run_estimate(set_dir, path, 11, f"t{i}.json")
                 self.assertEqual((rc, so), (1, ""))
                 self.assertEqual(se, f"error: the code changed since the frame was frozen ({name}); "
@@ -1762,11 +1795,13 @@ class EstimateBinding(Base):
                     bad["code_sha256"] = code
                 path = self.root / f"missing{len(why)}.json"
                 path.write_text(json.dumps(bad))
+                drawn_against(path)
                 rc, so, se, out = self.run_estimate(set_dir, path, 11, f"m{len(why)}.json")
                 self.assertEqual((rc, so), (1, ""))
-                self.assertIn("frame", se)
+                self.assertIn("the code changed since the frame was frozen", se)
                 self.assertFalse(out.exists())
         # positive control: the untouched frame file estimates
+        drawn_against(frame)
         rc, so, se, out = self.run_estimate(set_dir, frame, 11, "ok.json")
         self.assertEqual((rc, se), (0, ""))
 
@@ -1993,6 +2028,165 @@ class PacketCache(Base):
         with patch, mock.patch.object(run, "_frame_units", lambda c: pre):
             cli("preflight", "--corpus", corpus)
         self.assertEqual(len(calls), 9)
+
+
+class FrameBinding(TokenBase):
+    """draw records the sha256 of the frame file's BYTES; estimate/export hold the set to it."""
+
+    def excluded_and_frames(self):
+        corpus = self.token_corpus()
+        excluded = self.root / "excluded.json"
+        self.assertEqual(cli("preflight", "--corpus", corpus, "--excluded-out", excluded)[0], 0)
+        with_excl, plain = self.root / "frame-excl.json", self.root / "frame-plain.json"
+        self.assertEqual(cli("frame", "--corpus", corpus, "--out", with_excl, "--exclude-units", excluded)[0], 0)
+        self.assertEqual(cli("frame", "--corpus", corpus, "--out", plain)[0], 0)
+        return corpus, excluded, with_excl, plain
+
+    def drawn_and_labelled(self, corpus, excluded, frame):
+        set_dir = self.root / (SETP + "main")
+        rc, out, err = cli("draw", "--corpus", corpus, "--set", set_dir, "--seed", 7, "--substantive", 4,
+                           "--routine", 2, "--frame", frame, "--exclude-units", excluded)
+        self.assertEqual((rc, err), (0, ""), out)
+        self.assertEqual(cli("render", "--corpus", corpus, "--set", set_dir)[0], 0)
+        write_labels(set_dir, sub_hits=2, rou_hits=1)
+        return set_dir
+
+    def estimate(self, set_dir, frame, name="r.json", seed=7):
+        out = self.root / name
+        rc, so, se = cli("estimate", "--set", set_dir, "--frame", frame, "--seed", seed, "--out", out)
+        return rc, so, se, out
+
+    def test_draw_without_frame_is_refused_by_argparse_and_creates_nothing(self):
+        target = self.root / (SETP + "main")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()), \
+                self.assertRaises(SystemExit) as cm:
+            run.main(["draw", "--corpus", str(self.corpus), "--set", str(target), "--seed", "1",
+                      "--substantive", "2", "--routine", "1"])
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("--frame", err.getvalue())
+        self.assertFalse(target.exists())
+
+    def test_draw_refuses_a_missing_or_malformed_frame_file_by_field_and_creates_nothing(self):
+        base = ("draw", "--corpus", self.corpus, "--seed", 1, "--substantive", 2, "--routine", 1)
+        good = json.loads(read(self.frame_file()))
+        cases = {
+            "missing": (None, "error: --frame no-such-frame.json: cannot be read (No such file or directory)\n"),
+            "not json": (b"not json", "error: --frame: the file is not a frame file (a JSON object)\n"),
+            "not an object": (b"[1]", "error: --frame: the file is not a frame file (a JSON object)\n"),
+            "no counts": (json.dumps({"corpus_id": "c"}).encode(), "error: --frame: field counts is invalid\n"),
+            "no corpus id": (json.dumps(dict(good, corpus_id=5)).encode(), "error: --frame: field corpus_id is invalid\n"),
+        }
+        for why, (data, message) in cases.items():
+            with self.subTest(why=why):
+                path = self.root / ("no-such-frame.json" if data is None else f"bad-{why.replace(' ', '-')}.json")
+                if data is not None:
+                    path.write_bytes(data)
+                target = self.root / (SETP + "t" + str(len(why)))
+                rc, out, err = cli(*base, "--set", target, "--frame", path)
+                self.assertEqual((rc, out, err), (1, "", message))
+                self.assertFalse(target.exists())
+
+    def test_draw_records_the_frame_bytes_hash_and_estimate_accepts_a_byte_identical_copy_elsewhere(self):
+        corpus, excluded, frame, plain = self.excluded_and_frames()
+        set_dir = self.drawn_and_labelled(corpus, excluded, frame)
+        recorded = json.loads(read(set_dir / "draw.json"))["frame_sha256"]
+        self.assertEqual(recorded, hashlib.sha256(frame.read_bytes()).hexdigest())  # (a literal would embed the code hashes)
+        self.assertRegex(recorded, r"[0-9a-f]{64}")
+        rc, so, se, out = self.estimate(set_dir, frame)
+        self.assertEqual((rc, se), (0, ""))
+        other = self.root / "elsewhere" / "renamed-frame.json"  # the binding is to bytes, not to the path
+        other.parent.mkdir()
+        other.write_bytes(frame.read_bytes())
+        rc, so, se, out = self.estimate(set_dir, other, "r2.json")
+        self.assertEqual((rc, se), (0, ""))
+
+    def test_a_frame_refrozen_without_the_exclusion_is_refused_although_the_code_hashes_match(self):
+        corpus, excluded, frame, plain = self.excluded_and_frames()
+        set_dir = self.drawn_and_labelled(corpus, excluded, frame)
+        a, b = json.loads(read(frame)), json.loads(read(plain))
+        self.assertEqual(a["code_sha256"], b["code_sha256"])  # control: only the exclusion differs...
+        self.assertNotEqual(a["counts"], b["counts"])  # ...and with it the counts (the weights)
+        ha, hb = hashlib.sha256(frame.read_bytes()).hexdigest(), hashlib.sha256(plain.read_bytes()).hexdigest()
+        rc, so, se, out = self.estimate(set_dir, plain)
+        self.assertEqual((rc, so), (1, ""))
+        self.assertEqual(se, f"error: --frame is not the frame this set was drawn against "
+                             f"(sha256 {hb[:12]}, drawn against {ha[:12]})\n")
+        self.assertFalse(out.exists())
+
+    def test_export_refuses_a_tampered_missing_or_uppercase_frame_hash(self):
+        corpus, excluded, frame, plain = self.excluded_and_frames()
+        set_dir = self.drawn_and_labelled(corpus, excluded, frame)
+        repo = self.root / "fakerepo"
+        repo.mkdir()
+        draw = json.loads(read(set_dir / "draw.json"))
+        good = draw["frame_sha256"]
+        bad_values = {"short": ("abc", f"{set_dir}: draw.json: field frame_sha256 is invalid; nothing exported\n"),
+                      "uppercase": (good.upper(), f"{set_dir}: draw.json: field frame_sha256 is invalid; nothing exported\n"),
+                      "not a string": (5, f"{set_dir}: draw.json: field frame_sha256 is invalid; nothing exported\n")}
+        for why, (value, message) in bad_values.items():
+            with self.subTest(why=why):
+                (set_dir / "draw.json").write_text(json.dumps(dict(draw, frame_sha256=value)))
+                with mock.patch.object(run.archive, "REPO_ROOT", repo):
+                    rc, out, err = cli("export", "--set", set_dir, "--out-dir", repo / "data")
+                self.assertEqual((rc, out, err), (1, "", f"error: {message}"))
+                self.assertFalse((repo / "data").exists())
+        predates = {k: v for k, v in draw.items() if k != "frame_sha256"}
+        (set_dir / "draw.json").write_text(json.dumps(predates))
+        with mock.patch.object(run.archive, "REPO_ROOT", repo):
+            rc, out, err = cli("export", "--set", set_dir, "--out-dir", repo / "data")
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("predates the frame binding; nothing exported", err)
+        rc, so, se, _ = self.estimate(set_dir, frame, "predates.json")
+        self.assertEqual((rc, so), (1, ""))
+        self.assertIn("predates the frame binding", se)
+        # positive control + the choice: the value is validated but NOT exported (the manifest keeps its whitelist)
+        (set_dir / "draw.json").write_text(json.dumps(draw))
+        with mock.patch.object(run.archive, "REPO_ROOT", repo):
+            rc, out, err = cli("export", "--set", set_dir, "--out-dir", repo / "data")
+        self.assertEqual((rc, err), (0, ""))
+        manifest = json.loads(read(repo / "data" / f"{MAIN}-draw.json"))
+        self.assertEqual(sorted(manifest), ["cases", "seed", "set_id"])
+
+    def test_estimate_refuses_a_missing_or_malformed_frame_by_field_not_by_traceback(self):
+        corpus, excluded, frame, plain = self.excluded_and_frames()
+        set_dir = self.drawn_and_labelled(corpus, excluded, frame)
+        rc, so, se, out = self.estimate(set_dir, self.root / "gone.json")
+        self.assertEqual((rc, so, se), (1, "", "error: --frame gone.json: cannot be read (No such file or directory)\n"))
+        good = json.loads(read(frame))
+        draw = json.loads(read(set_dir / "draw.json"))
+        cases = {"not json": b"{oops", "no counts": json.dumps(dict(good, counts=[1])).encode(),
+                 "no corpus id": json.dumps({k: v for k, v in good.items() if k != "corpus_id"}).encode()}
+        want = {"not json": "error: --frame: the file is not a frame file (a JSON object)\n",
+                "no counts": "error: --frame: field counts is invalid\n",
+                "no corpus id": "error: --frame: field corpus_id is invalid\n"}
+        for why, data in cases.items():
+            with self.subTest(why=why):
+                path = self.root / f"m-{why.replace(' ', '-')}.json"
+                path.write_bytes(data)  # bound to the set by hash, so only the content is at fault
+                (set_dir / "draw.json").write_text(json.dumps(dict(draw, frame_sha256=hashlib.sha256(data).hexdigest())))
+                rc, so, se, out = self.estimate(set_dir, path, f"m{len(why)}.json")
+                self.assertEqual((rc, so, se), (1, "", want[why]))
+                self.assertFalse(out.exists())
+
+    def test_the_excluded_units_file_is_written_atomically_and_never_over_an_existing_one(self):
+        corpus = self.token_corpus()
+        target = self.root / "excluded.json"
+        with mock.patch.object(run.os, "link", side_effect=RuntimeError("crash between temp write and rename")):
+            with self.assertRaises(RuntimeError):
+                cli("preflight", "--corpus", corpus, "--excluded-out", target)
+        self.assertFalse(target.exists())  # no partial target...
+        self.assertEqual(list(self.root.glob("*excluded*")), [])  # ...and no temp file left behind
+        rc, out, err = cli("preflight", "--corpus", corpus, "--excluded-out", target)  # positive control
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(mode(target), 0o600)
+        self.assertEqual(len(json.loads(read(target))), 1)
+        # the link step itself refuses an existing target (a race the early exists() check cannot see)
+        before = read(target)
+        with self.assertRaises(FileExistsError):
+            run._write_exclusive(target, "overwritten")
+        self.assertEqual(read(target), before)
+        self.assertEqual(sorted(p.name for p in self.root.glob("*excluded*")), ["excluded.json"])
 
 
 if __name__ == "__main__":

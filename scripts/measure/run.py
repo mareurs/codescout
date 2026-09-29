@@ -24,12 +24,14 @@ docs/superpowers/plans/2026-09-29-system1-labelled-sample.md) are below it.
                                        BEFORE counting and records {count, sha256} of the file. Editing
                                        run.py (or any hashed file) after `frame` invalidates the frame file
     run.py draw --corpus C --set DIR --seed S --substantive N --routine M [--exclude-set DIR2]
-                [--frame FRAME.json --exclude-units FILE]
+                --frame FRAME.json [--exclude-units FILE]
                                        stratified draw into a NEW private (mode 700) set directory
                                        OUTSIDE the repo: key.json (private, holds session ids) and
-                                       draw.json; prints counts only (incl. distinct sessions per stratum).
-                                       --exclude-units is refused unless FILE's sha256 is the one FRAME.json
-                                       registered; pilot and main draws use the same file
+                                       draw.json (records the sha256 of FRAME.json's bytes; estimate
+                                       refuses any other frame); prints counts only (incl. distinct
+                                       sessions per stratum). --frame is required. --exclude-units is
+                                       refused unless FILE's sha256 is the one FRAME.json registered;
+                                       pilot and main draws use the same file
     run.py render --corpus C --set DIR builds every blinded packet into DIR/packets and fills
                                        draw.json's sha256s; a token-shaped string aborts it with
                                        nothing written; prints counts only
@@ -125,8 +127,9 @@ def _parser():
     dr.add_argument("--substantive", type=int, required=True)
     dr.add_argument("--routine", type=int, required=True)
     dr.add_argument("--exclude-set", help="another set directory whose units are removed from the pool")
-    dr.add_argument("--frame", help="the frame file; required with --exclude-units, and refused when it "
-                                    "records an exclusion the draw does not apply")
+    dr.add_argument("--frame", required=True,
+                    help="the frame file this draw belongs to (REQUIRED): its sha256 is recorded in draw.json and "
+                         "estimate refuses any other frame; it also registers --exclude-units by hash")
     dr.add_argument("--exclude-units", help="the same file frame was given; refused unless its sha256 is the "
                                             "one the frame file registered")
     rd = sub.add_parser("render", help="build every blinded packet of a set")
@@ -214,6 +217,21 @@ def _write_atomic(path, data, mode=0o600):
         raise
 
 
+def _write_exclusive(path, data, mode=0o600):
+    """Create `path` atomically and never over an existing file (FileExistsError): write a temp file in the same
+    directory (O_EXCL, `mode`), hard-link it to the target (fails if the target exists), then remove the temp.
+    A crash at any point leaves no partial target, only possibly a dot-named temp file."""
+    path = pathlib.Path(path)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.unlink(missing_ok=True)
+    _write_new(tmp, data, mode)
+    try:
+        os.link(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+
 def _private_dir(path):
     """A set directory is private data: refuse one inside the repo."""
     try:
@@ -246,6 +264,13 @@ def _load_set(set_dir):
         for field, vocabulary in (("stratum", STRATA), ("kind", KINDS)):
             if entry[field] not in vocabulary:
                 raise Refused(f"{set_dir}: key.json: case {cid}: field {field} is invalid")
+    # The frame the set was drawn against is bound by its bytes' sha256 (estimate compares it). A draw.json
+    # without the field predates the binding; a malformed one is refused by field name, never echoed.
+    if "frame_sha256" not in draw:
+        raise Refused(f"{set_dir}: draw.json has no frame_sha256: the set predates the frame binding")
+    fsha = draw["frame_sha256"]
+    if not (isinstance(fsha, str) and _HEX64.fullmatch(fsha)):
+        raise Refused(f"{set_dir}: draw.json: field frame_sha256 is invalid")
     return set_dir, draw, key
 
 
@@ -391,7 +416,7 @@ def _cmd_preflight(args):
                       "by_kind": tally(u.kind for _, u in refused)}, sort_keys=True))
     if out is not None:
         out.parent.mkdir(parents=True, exist_ok=True)
-        _write_new(out, json.dumps(sorted(u.case_key for _, u in refused)) + "\n", 0o600)
+        _write_exclusive(out, json.dumps(sorted(u.case_key for _, u in refused)) + "\n", 0o600)
     return 0
 
 
@@ -406,19 +431,34 @@ def _excluded_case_keys(exclude_set):
             from None
 
 
-def _registered_exclusion(args):
+def _frame_bytes(path):
+    """The frame file's bytes: ONE read, so the sha256 taken of them is of the bytes that get parsed."""
+    try:
+        return pathlib.Path(path).read_bytes()
+    except OSError as e:
+        raise Refused(f"--frame {pathlib.Path(path).name}: cannot be read ({e.strerror})") from None
+
+
+def _parse_frame(data):
+    """The frame record from its bytes. Refusals name only the field, never a value of the file."""
+    try:
+        frame = json.loads(data.decode("utf-8"))
+    except ValueError:
+        frame = None
+    if not isinstance(frame, dict):
+        raise Refused("--frame: the file is not a frame file (a JSON object)")
+    if not isinstance(frame.get("counts"), dict):
+        raise Refused("--frame: field counts is invalid")
+    if not isinstance(frame.get("corpus_id"), str):
+        raise Refused("--frame: field corpus_id is invalid")
+    return frame
+
+
+def _registered_exclusion(args, frame):
     """The exclusion `draw` applies (a set of case_keys, empty when none), after checking it against the frame
     file: the treatment of the units preflight found is registered by the sha256 the frame recorded."""
-    recorded = None
-    if args.frame:
-        try:
-            frame = _read_json(args.frame)
-        except (OSError, ValueError):
-            raise Refused(f"--frame {pathlib.Path(args.frame).name} cannot be read as a frame file") from None
-        recorded = frame.get("excluded_units") if isinstance(frame, dict) else None
+    recorded = frame.get("excluded_units")
     if args.exclude_units:
-        if not args.frame:
-            raise Refused("--exclude-units needs --frame: the frame file registers the exclusion by its sha256")
         if not isinstance(recorded, dict):
             raise Refused("the frame file records no exclusion; --exclude-units is refused")
         keys, digest = _load_exclusion(args.exclude_units)
@@ -438,7 +478,9 @@ def _cmd_draw(args):
     if not _valid_set_name(set_dir.name):
         raise Refused("set name is not allowed: it must look like 2026-09-29-labelled-main (a date, then a "
                       "lowercase name) and hold no session-id-shaped run")
-    unfit = _registered_exclusion(args)
+    frame_data = _frame_bytes(args.frame)
+    frame = _parse_frame(frame_data)
+    unfit = _registered_exclusion(args, frame)
     exclude = _excluded_case_keys(args.exclude_set) if args.exclude_set else set()
     units = _frame_units(args.corpus)
     if unfit:
@@ -467,8 +509,8 @@ def _cmd_draw(args):
     except FileExistsError:
         raise Refused(f"set directory already exists: {set_dir}") from None
     _write_new(set_dir / "key.json", json.dumps(key, indent=1) + "\n")
-    draw = {"set_id": set_dir.name, "seed": args.seed, "cases": [{"case_id": cid, "sha256": None} for cid in key],
-            "order": order}
+    draw = {"set_id": set_dir.name, "seed": args.seed, "frame_sha256": hashlib.sha256(frame_data).hexdigest(),
+            "cases": [{"case_id": cid, "sha256": None} for cid in key], "order": order}
     _write_new(set_dir / "draw.json", json.dumps(draw, indent=1) + "\n")
     n_sub = sum(v["stratum"] == "substantive" for v in key.values())
     # aggregates only: how many distinct sessions the drawn units of each stratum come from
@@ -545,7 +587,12 @@ def _cmd_estimate(args):
     if not _valid_seed(args.seed):
         raise Refused("--seed must be an integer from 0 to 2**32 - 1")
     set_dir, draw, key = _load_set(args.set)
-    frame = _read_json(args.frame)
+    frame_data = _frame_bytes(args.frame)
+    frame_sha = hashlib.sha256(frame_data).hexdigest()
+    if frame_sha != draw["frame_sha256"]:  # the binding is to the frame's BYTES, not its path
+        raise Refused(f"--frame is not the frame this set was drawn against (sha256 {frame_sha[:12]}, drawn "
+                      f"against {draw['frame_sha256'][:12]})")
+    frame = _parse_frame(frame_data)
     sha = {c["case_id"]: c["sha256"] for c in draw["cases"]}
     if not all(sha.values()):
         raise Refused(f"{set_dir} is not rendered (draw.json holds no packet hashes); run render first")

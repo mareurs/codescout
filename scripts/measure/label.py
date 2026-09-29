@@ -378,6 +378,11 @@ def verify(set_dir):
 
 # ---------------------------------------------------------------- CLI
 
+def _child_sigint_default():
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+
+
 def _pager_show(text):
     """Page `text`. `less -R -X` by default: -X keeps the packet on the screen (no alternate-screen
     clear) while the questions are asked. SIGINT is ignored in this process while the pager runs, so a
@@ -401,7 +406,10 @@ def _pager_show(text):
         swapped, previous = False, None
     try:
         try:
-            subprocess.run(argv, input=text, text=True)  # no check=: a non-zero exit is not a failure to show
+            # the child would inherit SIGINT=ignore (an ignored disposition survives exec): restore the default
+            # in the child only, so Ctrl-C reaches `less`. preexec_fn is POSIX-only; elsewhere it is skipped.
+            kw = {"preexec_fn": _child_sigint_default} if os.name == "posix" else {}
+            subprocess.run(argv, input=text, text=True, **kw)  # no check=: a non-zero exit is not a failure to show
         except OSError:
             print(text)
     finally:
