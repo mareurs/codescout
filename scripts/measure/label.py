@@ -49,6 +49,93 @@ _LABEL_LETTERS = {"v": "verify", "q": "qualify", "c": "correct"}
 _DELIVERY_LETTERS = {"s": "silent", "q": "quiet", "i": "interrupt"}
 
 
+_BANNER_HEAD = {
+    False: "HOW THIS WORKS (read once; this text never contains any packet)",
+    True: "RE-LABEL PASS: label each case fresh from the packet alone, as if new.",
+}
+_BANNER_BODY = """\
+1. Each case opens in a PAGER (a scrolling text viewer). READ the packet:
+   space = next page, b = back, q = done reading. When you press q the
+   questions start.
+2. The question: if a fast detector had been watching at the last message
+   ("The message" + ABOUT TO RUN at the bottom), would you have wanted it
+   to speak up?
+3. Answer with letters, then Enter. The bars (from
+   docs/research/2026-09-26-codex-three-role-intervention.md):
+   v verify   the claim needs evidence missing from the packet, and the
+              decision depends on it
+   q qualify  the qualified form would change what a reader does, or nearby
+              evidence conflicts, or mutable state is stated as current
+              without its instant/identity
+   c correct  the message asserts something the packet's evidence contradicts
+   v q c may be combined (vq). n = none (no need to speak). u = unresolved.
+4. Delivery: s silent | q quiet (a suggestion to the main agent) | i interrupt.
+   v/q/c need q or i; n/u need s.
+5. Recall: y if you remember how this turned out from outside the packet.
+6. Note is optional, Enter skips. Then Enter keeps your answer, r redoes it.
+7. p re-shows the packet; x quits, and you can resume later. Every answer is
+   saved as soon as you keep it."""
+
+LEGEND_LABELS = ("Labels: v=verify q=qualify c=correct (any combination) | n=none | "
+                 "u=unresolved | p=re-show | x=quit")
+LEGEND_DELIVERY = ("Delivery: s=silent | q=quiet (a suggestion to the main agent) | i=interrupt | "
+                   "p=re-show | x=quit\n  (v/q/c need q or i; n/u need s)")
+LEGEND_RECALL = ("Recall: y=you remember how this turned out from outside the packet | n=you do not | "
+                 "p=re-show | x=quit")
+LEGEND_NOTE = "Note (optional): anything worth remembering about this case. Enter skips. Here x is just text."
+LEGEND_KEEP = "Enter=keep and save this answer | r=redo this case | x=quit (this case is not saved)"
+
+NEXT_HELP = ("Run this yourself in a terminal. It shows one packet at a time in a pager; "
+             "read it, press q, then answer the questions.")
+
+PAGER_HINT = "READ, then press q when done (space=next page, b=back)"
+PAGER_LINE = "Opening the packet in a pager. " + PAGER_HINT
+_EDITORS = ("vim", "vi", "nvim", "view", "nano", "emacs", "micro", "ed")
+
+
+def banner(relabel=False):
+    """The start-of-run help text: static, plain ASCII, never any packet, note, label or id."""
+    return _BANNER_HEAD[bool(relabel)] + "\n" + _BANNER_BODY
+
+
+def _less_escape(s):
+    """less treats \\ % ? : . specially inside a prompt string; escape each with a backslash."""
+    return "".join("\\" + ch if ch in "\\%?:." else ch for ch in s)
+
+
+def pager_argv(pager_env):
+    """(argv, notice). The default (no $PAGER) is `less -R -X` with a self-explaining prompt; an
+    EDITOR named in $PAGER is ignored (the notice says so); any other $PAGER is used as given.
+    An empty or unparseable $PAGER yields ([], None): the caller prints instead."""
+    default = ["less", "-R", "-X", "-P", _less_escape(PAGER_HINT)]
+    if pager_env is None:
+        return default, None
+    try:
+        parts = shlex.split(pager_env)
+    except ValueError:
+        return [], None
+    if not parts:
+        return [], None
+    if os.path.basename(parts[0]) in _EDITORS:
+        return default, (f"PAGER={pager_env} is an editor; using less. "
+                         "To use another viewer set PAGER to a pager.")
+    return parts, None
+
+
+def _explain_labels(raw):
+    t = raw.strip()
+    letters = "".join(ch for ch in t.lower() if ch not in " ,")
+    if letters and all(ch in "vqcnu" for ch in letters):
+        return (f"'{t}' is not allowed: n and u must be given once and alone "
+                "(v q c may be combined, e.g. vq)")
+    return f"'{t}' is not one of v q c n u p x"
+
+
+def _explain_letters(allowed):
+    return lambda raw: f"'{raw.strip()}' is not one of {allowed}"
+
+
+
 class Quit(Exception):
     """The operator asked to stop; the case in progress is not recorded."""
 
@@ -83,10 +170,16 @@ def _iso(t):
     return datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _ask_until(ask, prompt, parse, reshow=None):
+def _ask_until(ask, prompt, parse, reshow=None, guide=None, legend=None, explain=None):
     """Ask until parse() accepts. 'x' quits here; 'p' re-shows the packet (when `reshow` is given) and
     asks again. The free-text note prompt does NOT use this helper, so a note may legitimately be "x"
-    or "p"."""
+    or "p". `guide` (static help lines only) receives the legend before the first ask, and after an
+    invalid answer the plain-words `explain(raw)` message followed by the legend once more."""
+    def legend_line():
+        if guide is not None and legend is not None:
+            guide(legend)
+
+    legend_line()
     while True:
         raw = ask(prompt)
         low = raw.strip().lower()
@@ -94,17 +187,21 @@ def _ask_until(ask, prompt, parse, reshow=None):
             raise Quit()
         if low == "p" and reshow is not None:
             reshow()
+            legend_line()
             continue
         val = parse(raw)
         if val is not None:
             return val
+        if guide is not None and explain is not None:
+            guide(explain(raw))
+        legend_line()
 
 
-LABELS_PROMPT = "labels [v=verify q=qualify c=correct (any combination) | n=none | u=unresolved | p=re-show | x=quit]: "
-DELIVERY_PROMPT = "delivery [s=silent q=quiet i=interrupt | p=re-show | x=quit]: "
-RECALL_PROMPT = "recall y/n: do you remember how this turned out (from outside the packet)? [p=re-show | x=quit]: "
-NOTE_PROMPT = "note (optional, free text; an x here is a note, not a quit): "
-KEEP_PROMPT = "keep = enter, redo = r, x=quit: "
+LABELS_PROMPT = "labels (p=re-show, x=quit)> "
+DELIVERY_PROMPT = "delivery (p=re-show, x=quit)> "
+RECALL_PROMPT = "recall y/n (p=re-show, x=quit)> "
+NOTE_PROMPT = "note (optional; an x here is a note, not a quit)> "
+KEEP_PROMPT = "keep = enter, redo = r, x=quit> "
 RULE_LINE = ("that pairing is not allowed: verify/qualify/correct need quiet or interrupt; "
              "none/unresolved need silent")
 
@@ -118,15 +215,16 @@ def _echo(labels, delivery, recall, note):
             f"recall = {said}; note = {shown_note}")
 
 
-def label_one(case_id, sha256, packet_text, ask, show, clock, confirm=False, say=None):
-    """Show one packet, collect the answers, return the record. Invalid input is asked again;
-    a forbidden label/delivery pair says which rule it broke and restarts the three questions. 'x'
-    raises Quit at the labels, delivery and recall prompts (and the keep prompt) only; at the free-text
-    note prompt "x" is stored as the note. 'p' at the labels, delivery or recall prompt re-shows the
-    packet. With confirm=True the parsed answers are echoed in words through `say` and the operator
-    answers `keep = enter, redo = r`: redo shows the packet again and asks from the labels prompt;
-    nothing is returned (so nothing is written) before keep. `seconds` covers the whole case, redos
-    included."""
+def label_one(case_id, sha256, packet_text, ask, show, clock, confirm=False, say=None, guide=None):
+    """Show one packet, collect the answers, return the record. Invalid input is asked again with a
+    plain-words message; a forbidden label/delivery pair says which rule it broke and restarts the
+    three questions. 'x' raises Quit at the labels, delivery and recall prompts (and the keep prompt)
+    only; at the free-text note prompt "x" is stored as the note. 'p' at the labels, delivery or
+    recall prompt re-shows the packet. With confirm=True the parsed answers are echoed in words
+    through `say` and the operator answers `keep = enter, redo = r`: redo shows the packet again and
+    asks from the labels prompt; nothing is returned (so nothing is written) before keep. `seconds`
+    covers the whole case, redos included. `guide` receives the static legend printed above each
+    prompt and the invalid-input messages (never packet text, notes or ids)."""
     say = say or (lambda m: None)
     t0 = clock()
     show(packet_text)
@@ -136,8 +234,9 @@ def label_one(case_id, sha256, packet_text, ask, show, clock, confirm=False, say
 
     while True:
         while True:
-            labels = _ask_until(ask, LABELS_PROMPT, _parse_labels, reshow)
-            delivery = _ask_until(ask, DELIVERY_PROMPT, lambda s: _DELIVERY_LETTERS.get(s.strip().lower()), reshow)
+            labels = _ask_until(ask, LABELS_PROMPT, _parse_labels, reshow, guide, LEGEND_LABELS, _explain_labels)
+            delivery = _ask_until(ask, DELIVERY_PROMPT, lambda s: _DELIVERY_LETTERS.get(s.strip().lower()), reshow,
+                                  guide, LEGEND_DELIVERY, _explain_letters("s q i p x"))
             try:
                 validate(labels, delivery)
             except ValueError:
@@ -145,12 +244,16 @@ def label_one(case_id, sha256, packet_text, ask, show, clock, confirm=False, say
                 continue
             break
         recall = _ask_until(ask, RECALL_PROMPT,
-                            lambda s: s.strip().lower() if s.strip().lower() in ("y", "n") else None, reshow)
+                            lambda s: s.strip().lower() if s.strip().lower() in ("y", "n") else None, reshow,
+                            guide, LEGEND_RECALL, _explain_letters("y n p x"))
+        if guide is not None:
+            guide(LEGEND_NOTE)
         note = ask(NOTE_PROMPT)
         if not confirm:
             break
         say(_echo(labels, delivery, recall, note))
-        answer = _ask_until(ask, KEEP_PROMPT, lambda s: s.strip().lower() if s.strip().lower() in ("", "r") else None)
+        answer = _ask_until(ask, KEEP_PROMPT, lambda s: s.strip().lower() if s.strip().lower() in ("", "r") else None,
+                            None, guide, LEGEND_KEEP, _explain_letters("Enter r x"))
         if answer == "":
             break
         show(packet_text)  # redo: the packet is shown again and the questions start over
@@ -292,15 +395,16 @@ def _append(path, rec):
         os.fsync(f.fileno())
 
 
-def run_next(set_dir, relabel, ask, show, clock, now=None, warn=None, confirm=False, say=None):
+def run_next(set_dir, relabel, ask, show, clock, now=None, warn=None, confirm=False, say=None, guide=None):
     """Label the not-yet-labelled cases in draw order. Each record is appended and fsynced before
     the next packet is shown. A packet whose bytes no longer match draw.json is refused, not shown;
     the bytes hashed are the bytes displayed (one read). With relabel=True the pick comes from
     relabel_pick.json (drawn and persisted on the first run; RelabelRefused if under RELABEL_N
     cases are eligible). `confirm` adds the echo-and-keep step (see label_one); `say` receives the
     progress lines ("case i of N (remaining R)" before each packet, and a final "labelled N this
-    session, M total, R remaining", counts only). Returns {"labelled": n, "refused": [case_id, ...],
-    "total": m, "remaining": r}."""
+    session, M total, R remaining", counts only). `guide` receives the static start-of-run banner
+    (once, and only when there is a case to label), the legends and the invalid-input messages.
+    Returns {"labelled": n, "refused": [case_id, ...], "total": m, "remaining": r}."""
     set_dir = pathlib.Path(set_dir)
     archive._refuse_if_inside_repo(set_dir)
     say = say or (lambda m: None)
@@ -312,6 +416,8 @@ def run_next(set_dir, relabel, ask, show, clock, now=None, warn=None, confirm=Fa
     if relabel:
         wanted = _relabel_wanted(set_dir, draw, now)
     todo = [cid for cid in draw["order"] if cid not in done and (wanted is None or cid in wanted)]
+    if todo and guide is not None:
+        guide(banner(relabel))
     labelled, refused = 0, []
     for i, cid in enumerate(todo, start=1):
         packet = set_dir / "packets" / f"{cid}.md"
@@ -323,7 +429,7 @@ def run_next(set_dir, relabel, ask, show, clock, now=None, warn=None, confirm=Fa
         text = data.decode("utf-8")
         say(f"case {i} of {len(todo)} (remaining {len(todo) - labelled})")
         try:
-            rec = label_one(cid, sha_by_id[cid], text, ask, show, clock, confirm=confirm, say=say)
+            rec = label_one(cid, sha_by_id[cid], text, ask, show, clock, confirm=confirm, say=say, guide=guide)
         except (Quit, EOFError, KeyboardInterrupt):
             break
         _append(target, rec)
@@ -384,21 +490,23 @@ def _child_sigint_default():
 
 
 
-def _pager_show(text):
-    """Page `text`. `less -R -X` by default: -X keeps the packet on the screen (no alternate-screen
-    clear) while the questions are asked. SIGINT is ignored in this process while the pager runs, so a
+def _pager_show(text, say=None):
+    """Page `text`. Default `less -R -X -P <hint>` (see pager_argv): -X keeps the packet on the screen
+    (no alternate-screen clear) while the questions are asked, and -P makes the pager's own prompt line
+    say "READ, then press q when done". When `say` is given, one plain line with the same hint is sent
+    to it first (so it stays visible if the pager is bypassed), preceded by a one-line notice when an
+    EDITOR named in $PAGER was ignored. SIGINT is ignored in this process while the pager runs, so a
     Ctrl-C meant for `less` cannot kill us first and leave the terminal in the pager's mode; the
     previous handler is restored in a finally. A pager that could not START (empty $PAGER, a missing
     binary, unbalanced quotes) falls back to print; one that ran and exited non-zero does NOT print the
     packet again (the operator has seen it, and answering `p` shows it again)."""
-    pager = os.environ.get("PAGER", "less -R -X")
-    try:
-        argv = shlex.split(pager)
-    except ValueError:
-        print(text)
-        return
+    say = say or (lambda m: None)
+    argv, notice = pager_argv(os.environ.get("PAGER"))
+    if notice:
+        say(notice)
+    say(PAGER_LINE)
     if not argv:
-        print(text)  # an empty $PAGER splits to []
+        print(text)  # an empty or unparseable $PAGER
         return
     swapped = True
     try:
@@ -421,7 +529,7 @@ def _pager_show(text):
 def main(argv=None, ask=None, show=None, clock=None, now=None, confirm=True):
     ap = argparse.ArgumentParser(prog="label.py")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    n = sub.add_parser("next")
+    n = sub.add_parser("next", description=NEXT_HELP, formatter_class=argparse.RawDescriptionHelpFormatter)
     n.add_argument("set_dir")
     n.add_argument("--relabel", action="store_true")
     for name in ("summary", "verify"):
@@ -440,8 +548,9 @@ def main(argv=None, ask=None, show=None, clock=None, now=None, confirm=True):
               "(stdin and stdout must both be a TTY); nothing was shown.", file=sys.stderr)
         return 1
     try:
-        out = run_next(args.set_dir, args.relabel, ask or input, show or _pager_show,
-                       clock or time.time, now=now, confirm=confirm, say=print)
+        out = run_next(args.set_dir, args.relabel, ask or input,
+                       show or (lambda t: _pager_show(t, say=print)),
+                       clock or time.time, now=now, confirm=confirm, say=print, guide=print)
     except RelabelRefused as e:
         print(str(e), file=sys.stderr)
         return 1

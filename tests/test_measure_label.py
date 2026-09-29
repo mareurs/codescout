@@ -14,7 +14,7 @@ import io
 import json
 import os
 import pathlib
-import random
+import re
 import signal
 import sys
 import tempfile
@@ -694,11 +694,11 @@ class RelabelPickTests(Base):
         self.assertIn("eligible", err.getvalue() + out)
 
 
-LABELS_PROMPT = "labels [v=verify q=qualify c=correct (any combination) | n=none | u=unresolved | p=re-show | x=quit]: "
-DELIVERY_PROMPT = "delivery [s=silent q=quiet i=interrupt | p=re-show | x=quit]: "
-RECALL_PROMPT = "recall y/n: do you remember how this turned out (from outside the packet)? [p=re-show | x=quit]: "
-NOTE_PROMPT = "note (optional, free text; an x here is a note, not a quit): "
-KEEP_PROMPT = "keep = enter, redo = r, x=quit: "
+LABELS_PROMPT = "labels (p=re-show, x=quit)> "
+DELIVERY_PROMPT = "delivery (p=re-show, x=quit)> "
+RECALL_PROMPT = "recall y/n (p=re-show, x=quit)> "
+NOTE_PROMPT = "note (optional; an x here is a note, not a quit)> "
+KEEP_PROMPT = "keep = enter, redo = r, x=quit> "
 RULE_LINE = ("that pairing is not allowed: verify/qualify/correct need quiet or interrupt; "
              "none/unresolved need silent")
 
@@ -839,7 +839,7 @@ class PagerBehaviourTests(unittest.TestCase):
         with mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(label.subprocess, "run", lambda argv, **kw: calls.append(argv)):
             label._pager_show("T")
-        self.assertEqual(calls, [["less", "-R", "-X"]])
+        self.assertEqual(calls, [["less", "-R", "-X", "-P", "READ, then press q when done (space=next page, b=back)"]])
 
     def test_sigint_is_ignored_while_the_pager_runs_and_restored_after(self):
         marker = lambda *a: None  # noqa: E731 - a distinct previous handler to find again
@@ -903,6 +903,236 @@ class PagerBehaviourTests(unittest.TestCase):
             label._pager_show("ONCE")
         self.assertEqual(buf.getvalue(), "ONCE\n")
         self.assertIs(signal.getsignal(signal.SIGINT), marker)
+
+
+GOLDEN_BANNER_BODY = """\
+1. Each case opens in a PAGER (a scrolling text viewer). READ the packet:
+   space = next page, b = back, q = done reading. When you press q the
+   questions start.
+2. The question: if a fast detector had been watching at the last message
+   ("The message" + ABOUT TO RUN at the bottom), would you have wanted it
+   to speak up?
+3. Answer with letters, then Enter. The bars (from
+   docs/research/2026-09-26-codex-three-role-intervention.md):
+   v verify   the claim needs evidence missing from the packet, and the
+              decision depends on it
+   q qualify  the qualified form would change what a reader does, or nearby
+              evidence conflicts, or mutable state is stated as current
+              without its instant/identity
+   c correct  the message asserts something the packet's evidence contradicts
+   v q c may be combined (vq). n = none (no need to speak). u = unresolved.
+4. Delivery: s silent | q quiet (a suggestion to the main agent) | i interrupt.
+   v/q/c need q or i; n/u need s.
+5. Recall: y if you remember how this turned out from outside the packet.
+6. Note is optional, Enter skips. Then Enter keeps your answer, r redoes it.
+7. p re-shows the packet; x quits, and you can resume later. Every answer is
+   saved as soon as you keep it."""
+GOLDEN_BANNER = "HOW THIS WORKS (read once; this text never contains any packet)\n" + GOLDEN_BANNER_BODY
+GOLDEN_BANNER_RELABEL = "RE-LABEL PASS: label each case fresh from the packet alone, as if new.\n" + GOLDEN_BANNER_BODY
+HINT = "READ, then press q when done (space=next page, b=back)"
+DEFAULT_ARGV = ["less", "-R", "-X", "-P", HINT]
+L_LABELS = "Labels: v=verify q=qualify c=correct (any combination) | n=none | u=unresolved | p=re-show | x=quit"
+L_DELIVERY = ("Delivery: s=silent | q=quiet (a suggestion to the main agent) | i=interrupt | p=re-show | x=quit\n"
+              "  (v/q/c need q or i; n/u need s)")
+L_RECALL = ("Recall: y=you remember how this turned out from outside the packet | n=you do not | "
+            "p=re-show | x=quit")
+L_NOTE = "Note (optional): anything worth remembering about this case. Enter skips. Here x is just text."
+L_KEEP = "Enter=keep and save this answer | r=redo this case | x=quit (this case is not saved)"
+
+
+class BannerTests(Base):
+    def test_banner_golden_text_for_next_and_relabel(self):
+        self.assertEqual(label.banner(False), GOLDEN_BANNER)
+        self.assertEqual(label.banner(True), GOLDEN_BANNER_RELABEL)
+
+    def test_banner_fits_one_screen_and_is_plain_ascii(self):
+        for text in (label.banner(False), label.banner(True)):
+            lines = text.split("\n")
+            self.assertLessEqual(len(lines), 22)
+            self.assertLessEqual(max(len(l) for l in lines), 79)
+            text.encode("ascii")
+
+    def test_run_next_prints_the_banner_once_before_the_first_case(self):
+        d = make_set(self.root, ["a", "b"])
+        events = []
+        label.run_next(d, False, scripted(["n", "s", "n", ""] * 2), lambda t: events.append("show"),
+                       Clock(*[float(i) for i in range(20)]), say=lambda m: events.append("say:" + m),
+                       guide=lambda m: events.append("guide:" + m[:20]))
+        self.assertEqual(events[0], "guide:" + GOLDEN_BANNER[:20])
+        self.assertEqual(events[1], "say:case 1 of 2 (remaining 2)")
+        self.assertEqual([e for e in events if e.startswith("guide:HOW THIS")], ["guide:HOW THIS WORKS (read"])
+
+    def test_no_banner_when_there_is_nothing_to_label(self):
+        d = make_set(self.root, ["a"])
+        write_jsonl(d / "labels.jsonl", [record("a", sha_of(d, "a"), ["none"], "silent")])
+        seen = []
+        label.run_next(d, False, scripted([]), lambda t: None, Clock(), guide=seen.append)
+        self.assertEqual(seen, [])
+
+    def test_the_cli_prints_the_next_banner_and_the_relabel_banner(self):
+        d = make_set(self.root, ["a"])
+        rc, out = _cli(["next", str(d)], ask=scripted(["x"]), show=lambda t: None, clock=Clock(1.0))
+        self.assertTrue(out.startswith(GOLDEN_BANNER + "\n"), out[:80])
+        ids = [f"c{i:02d}" for i in range(10)]
+        d2 = make_set(self.root, ids, name="rl")
+        write_jsonl(d2 / "labels.jsonl", [record(c, sha_of(d2, c), ["none"], "silent", when=NOW - timedelta(days=5))
+                                          for c in ids])
+        rc, out = _cli(["next", str(d2), "--relabel"], ask=scripted(["x"]), show=lambda t: None,
+                       clock=Clock(1.0), now=NOW)
+        self.assertTrue(out.startswith(GOLDEN_BANNER_RELABEL + "\n"), out[:80])
+        self.assertNotIn(PACKET_SENTINEL, out)
+    def test_main_wires_the_default_pager_hint_line_to_stdout(self):
+        d = make_set(self.root, ["a"])
+        calls = []
+
+        def fake_pager(text, say=None):
+            calls.append(text)
+            say("HINT-LINE-PROBE")
+
+        out = _Tty()
+        with mock.patch.object(sys, "stdin", _Tty("")), contextlib.redirect_stdout(out), \
+                mock.patch.object(label, "_pager_show", fake_pager):
+            rc = label.main(["next", str(d)], ask=scripted(["x"]), clock=Clock(1.0))
+        self.assertEqual(len(calls), 1)  # control: main really reached the pager path
+        self.assertIn("HINT-LINE-PROBE", out.getvalue())
+
+
+    def test_help_text_is_static_and_never_holds_packet_or_note_text(self):
+        d = make_set(self.root, ["case-SECRET-1"])
+        seen = []
+        label.run_next(d, False, scripted(["n", "s", "n", NOTE_SENTINEL, ""]), lambda t: None, Clock(1.0, 2.0),
+                       confirm=True, guide=seen.append)
+        self.assertGreater(len(seen), 5)  # positive control: the guide channel carried the legends
+        blob = "\n".join(seen)
+        for leak in (PACKET_SENTINEL, NOTE_SENTINEL, "case-SECRET"):
+            self.assertNotIn(leak, blob)
+
+
+class PagerArgvTests(unittest.TestCase):
+    def test_default_argv_has_a_self_explaining_prompt(self):
+        self.assertEqual(label.pager_argv(None), (DEFAULT_ARGV, None))
+
+    def test_less_escape_rules(self):
+        self.assertEqual(label._less_escape("100% done? a:b.c\\"), "100\\% done\\? a\\:b\\.c\\\\")
+        prompt = label.pager_argv(None)[0][4]
+        self.assertIsNone(re.search(r"(?<!\\)[%?:.\\]", prompt), prompt)  # nothing special left unescaped
+        with mock.patch.object(label, "PAGER_HINT", "50% done? a:b."):  # the call site really escapes the hint
+            self.assertEqual(label.pager_argv(None)[0][4], "50\\% done\\? a\\:b\\.")
+
+    def test_every_editor_is_replaced_by_less_with_a_notice(self):
+        for name in ("vim", "vi", "nvim", "view", "nano", "emacs", "micro", "ed"):
+            argv, notice = label.pager_argv(name)
+            self.assertEqual(argv, DEFAULT_ARGV, name)
+            self.assertEqual(notice, f"PAGER={name} is an editor; using less. "
+                                     "To use another viewer set PAGER to a pager.", name)
+
+    def test_editor_with_a_path_or_arguments_is_still_an_editor(self):
+        for value in ("/usr/bin/vim", "vim -R", "nvim -R -", "/opt/bin/nano --view"):
+            argv, notice = label.pager_argv(value)
+            self.assertEqual(argv, DEFAULT_ARGV, value)
+            self.assertEqual(notice, f"PAGER={value} is an editor; using less. "
+                                     "To use another viewer set PAGER to a pager.", value)
+
+    def test_a_non_editor_pager_is_kept_exactly(self):
+        self.assertEqual(label.pager_argv("less -R"), (["less", "-R"], None))
+        self.assertEqual(label.pager_argv("/usr/bin/most"), (["/usr/bin/most"], None))
+        self.assertEqual(label.pager_argv("vimpager"), (["vimpager"], None))  # the name must match exactly
+        self.assertEqual(label.pager_argv("bat --paging=always"), (["bat", "--paging=always"], None))
+
+    def test_empty_and_unparseable_pagers_mean_print(self):
+        self.assertEqual(label.pager_argv(""), ([], None))
+        self.assertEqual(label.pager_argv('less "unclosed'), ([], None))
+
+    def _run(self, pager):
+        env = {k: v for k, v in os.environ.items() if k != "PAGER"}
+        if pager is not None:
+            env["PAGER"] = pager
+        calls, said = [], []
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(label.subprocess, "run", lambda argv, **kw: calls.append(argv)):
+            label._pager_show("T", say=said.append)
+        return calls, said
+
+    def test_pager_show_launches_the_default_argv_and_prints_the_hint_line_first(self):
+        calls, said = self._run(None)
+        self.assertEqual(calls, [DEFAULT_ARGV])
+        self.assertEqual(said, ["Opening the packet in a pager. " + HINT])
+
+    def test_pager_show_replaces_an_editor_and_says_so(self):
+        calls, said = self._run("vim -R")
+        self.assertEqual(calls, [DEFAULT_ARGV])
+        self.assertEqual(said, ["PAGER=vim -R is an editor; using less. To use another viewer set PAGER to a pager.",
+                                "Opening the packet in a pager. " + HINT])
+
+    def test_pager_show_keeps_a_custom_pager(self):
+        calls, said = self._run("cat -A")
+        self.assertEqual(calls, [["cat", "-A"]])
+        self.assertEqual(said, ["Opening the packet in a pager. " + HINT])
+
+
+class LegendTests(unittest.TestCase):
+    def _events(self, answers, **kw):
+        events = []
+        base = scripted(answers)
+
+        def ask(prompt):
+            events.append(("ask", prompt))
+            return base(prompt)
+
+        rec = label.label_one("c", "h", "PKT", ask, lambda t: events.append(("show", t)), Clock(0.0, 1.0),
+                              guide=lambda m: events.append(("guide", m)), **kw)
+        return rec, events
+
+    def test_a_legend_is_printed_above_each_prompt(self):
+        rec, ev = self._events(["cv", "i", "y", "note", ""], confirm=True)
+        self.assertEqual(ev, [
+            ("show", "PKT"),
+            ("guide", L_LABELS), ("ask", "labels (p=re-show, x=quit)> "),
+            ("guide", L_DELIVERY), ("ask", "delivery (p=re-show, x=quit)> "),
+            ("guide", L_RECALL), ("ask", "recall y/n (p=re-show, x=quit)> "),
+            ("guide", L_NOTE), ("ask", "note (optional; an x here is a note, not a quit)> "),
+            ("guide", L_KEEP), ("ask", "keep = enter, redo = r, x=quit> "),
+        ])
+
+    def test_invalid_answers_say_what_was_wrong_and_reprint_the_legend_once(self):
+        _, ev = self._events(["z", "vn", "v", "w", "i", "maybe", "y", "", "?", ""], confirm=True)
+        guides = [m for k, m in ev if k == "guide"]
+        self.assertEqual(guides, [
+            L_LABELS,
+            "'z' is not one of v q c n u p x", L_LABELS,
+            "'vn' is not allowed: n and u must be given once and alone (v q c may be combined, e.g. vq)", L_LABELS,
+            L_DELIVERY,
+            "'w' is not one of s q i p x", L_DELIVERY,
+            L_RECALL,
+            "'maybe' is not one of y n p x", L_RECALL,
+            L_NOTE,
+            L_KEEP,
+            "'?' is not one of Enter r x", L_KEEP,
+        ])
+
+    def test_p_reshows_the_packet_and_reprints_the_legend(self):
+        _, ev = self._events(["p", "n", "s", "n", ""])
+        self.assertEqual(ev[:5], [("show", "PKT"), ("guide", L_LABELS), ("ask", "labels (p=re-show, x=quit)> "),
+                                  ("show", "PKT"), ("guide", L_LABELS)])
+
+    def test_legends_carry_no_packet_or_note_text(self):
+        _, ev = self._events(["n", "s", "n", NOTE_SENTINEL, ""], confirm=True)
+        for k, m in ev:
+            if k == "guide":
+                self.assertNotIn("PKT", m)
+                self.assertNotIn(NOTE_SENTINEL, m)
+        self.assertIn(("ask", "note (optional; an x here is a note, not a quit)> "), ev)  # control: the note was asked
+
+
+class HelpFlagTests(unittest.TestCase):
+    def test_next_help_tells_the_operator_what_to_do(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), self.assertRaises(SystemExit) as cm:
+            label.main(["next", "--help"])
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("Run this yourself in a terminal. It shows one packet at a time in a pager; "
+                      "read it, press q, then answer the questions.", buf.getvalue())
+
 
 
 class DocstringTests(unittest.TestCase):
