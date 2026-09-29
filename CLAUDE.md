@@ -111,8 +111,8 @@ Why each part, one line each. Every measurement, date and superseded form →
   broken, and two sessions cited it as a pass in one evening. Read **your own test names** out of
   the default lane (`grep -E '^test librarian::<module>::tests::'`), never either lane's total.
 - **AND THE DEFAULT LANE IS VACUOUS FOR `server-stack` — the same law again, polarity
-  reversed, which is why internalising the one above does not protect you.** `default =
-  ["remote-embed", "http", "librarian"]` names no `server-stack`, so the four commands never
+  reversed, which is why internalising the one above does not protect you.** `default` in
+  `Cargo.toml` names no `server-stack`, so the four commands never
   compile `dep:qdrant-client`, `QdrantArtifactStore` or the hybrid sparse+reranker query path —
   while `.cargo/config.toml`'s `cargo rb` ships exactly that feature set. **Green here is
   silence about code the running binary uses.** Do **not** answer this by adding a fifth
