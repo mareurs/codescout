@@ -64,3 +64,11 @@ The original gate output and registered decision above remain unchanged: INCONCL
 - RTD-17's source labels an unstamped, then-true statement as detectable in form and explicitly describes decay rather than error. Reusing that label as gold for mistake detection requires justification; registration alone does not supply it. This observation does not license post-hoc relabelling.
 
 Saved-response recount and code fixes: [Codex review](../../../research/2026-09-29-codex-system1-judge-review.md). No new model calls were made.
+
+## Controller erratum — RTD-13 and RTD-21 gold labels, 2026-09-29
+
+**RTD-13 and RTD-21 have the same gold-label flaw as RTD-17, and the flaw is the controller's.** The gate scored every RTD correction pair as a correction to detect. In these two, the extracted negative does not reverse the extracted positive. RTD-13's negative calls `link_scan` the sole mechanism, which confirms what the positive describes; RTD-21's negative adds prose-side exceptions that do not make the positive's params counts false. Codex's derived labels mark both context-unresolved for this reason (`docs/research/2026-09-29-codex-system1-derived-adjudications.md`). These two and RTD-17 are exactly the cases where the judge's majority said "not a correction", so the judge may have been right on all three. The positive span was chosen as the sentence *near* a correction instead of the sentence the correction *reverses*; RTD-17's own entry warned about that shape.
+
+**Not rescored.** Removing items after seeing results is not a licensed rescoring, and the gate stays as `gate.txt` records it. As a robustness check only: without the three, detectability would be 14/18 against a bar of 16/21, which could pass proportionally. But `yes_flags` would be 5/7 (only RTD-17 is in that check) against 6/8, and `control_fires` fails regardless. **The INCONCLUSIVE stop does not depend on these disputes.**
+
+**One control shown to be incorrect.** Performing the check the derived labels suggest for CTL3-7 showed its premise was stale at the controls' tree: `CLAUDE.md` listed three default features, while `Cargo.toml` has four. Fixed in `c67f4552` (bug `96745f0ce9636580`). A never-corrected control is not a verified-correct one, which is the reason `control_fires` is reported as a firing rate.
