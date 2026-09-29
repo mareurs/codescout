@@ -141,14 +141,20 @@ atexit.register(shutil.rmtree, _AUTO_DIR, ignore_errors=True)
 
 
 def _auto_frame(corpus):
-    """A frame file for `corpus`, made once per corpus path. `draw` requires --frame; the many tests that are
-    about something else get the frame `run.py frame` would have produced (byte-identical to Base.frame_file's)."""
-    if corpus not in _AUTO_FRAMES:
+    """A frame file for `corpus`. `draw` requires --frame and checks it against the corpus; the many tests that are
+    about something else get the frame `run.py frame` would have produced (byte-identical to Base.frame_file's).
+    Keyed by the corpus path AND its files' names, sizes and mtimes, so a corpus rebuilt or changed at the same
+    path never gets a stale frame."""
+    root = pathlib.Path(corpus)
+    stamp = tuple((str(p.relative_to(root)), p.stat().st_size, p.stat().st_mtime_ns)
+                  for p in sorted(root.rglob("*")) if p.is_file()) if root.is_dir() else ()
+    key = (str(corpus), stamp)
+    if key not in _AUTO_FRAMES:
         path = pathlib.Path(_AUTO_DIR) / f"frame-{len(_AUTO_FRAMES)}.json"
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             run.main(["frame", "--corpus", corpus, "--out", str(path)])
-        _AUTO_FRAMES[corpus] = path
-    return _AUTO_FRAMES[corpus]
+        _AUTO_FRAMES[key] = path
+    return _AUTO_FRAMES[key]
 
 
 def cli(*argv, auto_frame=True):
@@ -2168,6 +2174,101 @@ class FrameBinding(TokenBase):
                 rc, so, se, out = self.estimate(set_dir, path, f"m{len(why)}.json")
                 self.assertEqual((rc, so, se), (1, "", want[why]))
                 self.assertFalse(out.exists())
+
+    def test_a_frame_hash_that_is_not_a_64_char_lowercase_hex_string_is_refused_by_render_estimate_and_export(self):
+        corpus, excluded, frame, plain = self.excluded_and_frames()
+        set_dir = self.drawn_and_labelled(corpus, excluded, frame)
+        repo = self.root / "fakerepo"
+        repo.mkdir()
+        draw = json.loads(read(set_dir / "draw.json"))
+        good = draw["frame_sha256"]
+        bad_values = {
+            "64 decimal digits as a JSON integer": int("1" * 64),  # str() of it would match the hex pattern
+            "a list of 64 characters": ["a"] * 64,
+            "true": True,
+            "63 hex characters": good[:63],
+            "65 hex characters": good + "a",
+        }
+        field = f"{set_dir}: draw.json: field frame_sha256 is invalid"
+        for why, value in bad_values.items():
+            with self.subTest(why=why):
+                (set_dir / "draw.json").write_text(json.dumps(dict(draw, frame_sha256=value)))
+                self.assertEqual(cli("render", "--corpus", corpus, "--set", set_dir), (1, "", f"error: {field}\n"))
+                rc, so, se, out = self.estimate(set_dir, frame, "bad.json")
+                self.assertEqual((rc, so, se), (1, "", f"error: {field}\n"))
+                self.assertFalse(out.exists())
+                with mock.patch.object(run.archive, "REPO_ROOT", repo):
+                    rc, so, se = cli("export", "--set", set_dir, "--out-dir", repo / "data")
+                self.assertEqual((rc, so, se), (1, "", f"error: {field}; nothing exported\n"))
+                self.assertFalse((repo / "data").exists())
+        (set_dir / "draw.json").write_text(json.dumps(draw))  # positive control: the real value estimates
+        self.assertEqual(self.estimate(set_dir, frame, "ok.json")[0], 0)
+
+    def test_a_failed_write_removes_the_private_temp_file(self):
+        corpus = self.token_corpus()
+        target = self.root / "excluded.json"
+        with mock.patch.object(run.os, "fsync", side_effect=OSError(28, "No space left on device")):
+            with self.assertRaises(OSError):
+                cli("preflight", "--corpus", corpus, "--excluded-out", target)
+        self.assertFalse(target.exists())
+        self.assertEqual(sorted(p.name for p in self.root.iterdir() if p.name.startswith(".")), [])
+        # positive control: the temp file WAS created by that run (it existed while fsync failed)
+        seen = []
+
+        def failing_fsync(fd):
+            seen.append(sorted(p.name for p in self.root.iterdir() if p.name.startswith(".excluded")))
+            raise OSError(5, "Input/output error")
+
+        with mock.patch.object(run.os, "fsync", failing_fsync):
+            with self.assertRaises(OSError):
+                cli("preflight", "--corpus", corpus, "--excluded-out", target)
+        self.assertEqual(len(seen[0]), 1)
+        self.assertEqual(list(self.root.glob(".excluded*")), [])
+
+    def test_draw_refuses_a_frame_that_does_not_describe_this_corpus_and_creates_nothing(self):
+        small = fx.build_corpus(self.root / "small-corpus", [session(0)])
+        small_frame = self.root / "small-frame.json"
+        self.assertEqual(cli("frame", "--corpus", small, "--out", small_frame)[0], 0)
+        target = self.root / (SETP + "main")
+        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", target, "--seed", 1, "--substantive", 2,
+                           "--routine", 1, "--frame", small_frame)
+        self.assertEqual((rc, out), (1, ""))
+        self.assertEqual(err, "error: the frame file's counts (6 units) do not match this corpus (33 units after "
+                              "the frame's exclusion); freeze the frame from this corpus\n")
+        self.assertFalse(target.exists())
+        # positive control: the frame of THIS corpus passes with the same arguments
+        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", target, "--seed", 1, "--substantive", 2,
+                           "--routine", 1, "--frame", self.frame_file())
+        self.assertEqual((rc, err), (0, ""))
+
+    def test_draw_refuses_doctored_counts_although_the_registered_exclusion_hash_matches(self):
+        corpus, excluded, frame, plain = self.excluded_and_frames()
+        doctored = json.loads(read(frame))
+        self.assertIn("excluded_units", doctored)  # the exclusion is registered and its hash is the true one
+        doctored["counts"]["substantive"]["top"] += 1  # only the counts lie
+        path = self.root / "doctored.json"
+        path.write_text(json.dumps(doctored))
+        target = self.root / (SETP + "main")
+        rc, out, err = cli("draw", "--corpus", corpus, "--set", target, "--seed", 1, "--substantive", 2,
+                           "--routine", 1, "--frame", path, "--exclude-units", excluded)
+        self.assertEqual((rc, out), (1, ""))
+        self.assertEqual(err, "error: the frame file's counts (33 units) do not match this corpus (32 units after "
+                              "the frame's exclusion); freeze the frame from this corpus\n")
+        self.assertFalse(target.exists())
+        # the frame frozen WITHOUT the exclusion, with the exclusion applied by the draw: counts differ too
+        # (33 vs 32) but the earlier 'records no exclusion' guard owns that input, so it is not this guard's case
+        # positive control: the true frame with the same exclusion passes
+        rc, out, err = cli("draw", "--corpus", corpus, "--set", target, "--seed", 1, "--substantive", 2,
+                           "--routine", 1, "--frame", frame, "--exclude-units", excluded)
+        self.assertEqual((rc, err), (0, ""))
+
+    def test_auto_frames_are_not_shared_between_corpora_at_one_path(self):
+        first = fx.build_corpus(self.root / "same-path", [session(0)])
+        f1 = _auto_frame(str(first))
+        shutil.rmtree(first)
+        second = fx.build_corpus(self.root / "same-path", make_sessions())
+        self.assertNotEqual(_auto_frame(str(second)), f1)
+
 
     def test_the_excluded_units_file_is_written_atomically_and_never_over_an_existing_one(self):
         corpus = self.token_corpus()

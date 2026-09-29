@@ -10,7 +10,8 @@ are the boundary an agent can reach, so they return counts and (for verify) the 
 whose hashes DISAGREE -- never a label, a note, packet text, or an id paired with a label.
 
 Label-set layout (created by run.py, outside the repo):
-    draw.json      {"set_id", "seed", "cases": [{"case_id", "sha256"}], "order": [case_id, ...]}
+    draw.json      {"set_id", "seed", "frame_sha256", "cases": [{"case_id", "sha256"}], "order": [case_id, ...]}
+                   (frame_sha256: sha256 of the frame file's bytes, recorded by run.py draw)
     packets/<case_id>.md
     labels.jsonl   append-only for complete records; a torn final fragment is cut on the next append
     relabels.jsonl same schema, the re-label pass

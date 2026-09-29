@@ -5,8 +5,9 @@ the last CONTEXT_MESSAGES assistant messages before the decision point WITH thei
 the message itself with the tool calls it is about to run. Nothing at or after the decision point
 except the message's own entries. What is blinded (replaced by a placeholder) is limited to: uuid-shaped
 strings (session and message ids), calendar timestamps, and API ids of the form msg_01... / toolu_01.... A
-BARE calendar date is kept everywhere (prose, file names): only a date WITH a time of day, ISO `T` or
-space separated, is blinded, because _TIMESTAMP_RE requires the time. A lone surrogate (a truncated
+BARE calendar date is kept everywhere (prose, file names): only a date WITH hours, minutes and seconds, ISO `T`
+or space separated, is blinded, because _TIMESTAMP_RE requires HH:MM:SS (`2026-09-20 10:11` is kept). A lone
+surrogate (a truncated
 emoji) becomes U+FFFD so the text can be hashed as UTF-8. The packet is at most PACKET_CHARS characters
 in total, always.
 

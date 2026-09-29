@@ -220,12 +220,14 @@ def _write_atomic(path, data, mode=0o600):
 def _write_exclusive(path, data, mode=0o600):
     """Create `path` atomically and never over an existing file (FileExistsError): write a temp file in the same
     directory (O_EXCL, `mode`), hard-link it to the target (fails if the target exists), then remove the temp.
-    A crash at any point leaves no partial target, only possibly a dot-named temp file."""
+    The temp file holds private data, so EVERYTHING after its creation, the write and fsync included, is inside
+    the try: a failed write (disk full, EIO, an interrupt) removes it too. A crash at any point leaves no partial
+    target, only possibly a dot-named temp file after a hard kill."""
     path = pathlib.Path(path)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     tmp.unlink(missing_ok=True)
-    _write_new(tmp, data, mode)
     try:
+        _write_new(tmp, data, mode)
         os.link(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
@@ -454,6 +456,13 @@ def _parse_frame(data):
     return frame
 
 
+def _total_units(counts):
+    """The number of units a frame's counts add up to; tolerant of a doctored shape (only ints are summed)."""
+    return sum(n for blk in counts.values() if isinstance(blk, dict) for n in blk.values()
+               if isinstance(n, int) and not isinstance(n, bool))
+
+
+
 def _registered_exclusion(args, frame):
     """The exclusion `draw` applies (a set of case_keys, empty when none), after checking it against the frame
     file: the treatment of the units preflight found is registered by the sha256 the frame recorded."""
@@ -485,6 +494,11 @@ def _cmd_draw(args):
     units = _frame_units(args.corpus)
     if unfit:
         units = _apply_exclusion(units, unfit)
+    # The main draw is one-shot: refuse a frame that does not describe THIS corpus (after its own exclusion)
+    # before anything is drawn or created. Aggregates only in the message.
+    if sampler.frame_counts(units) != frame["counts"]:
+        raise Refused(f"the frame file's counts ({_total_units(frame['counts'])} units) do not match this corpus "
+                      f"({len(units)} units after the frame's exclusion); freeze the frame from this corpus")
     absent = exclude - {u.case_key for u in units}
     if absent:
         raise Refused(f"--exclude-set holds {len(absent)} case_key(s) that are not in this frame; the pilot must "

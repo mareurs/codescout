@@ -581,11 +581,12 @@ class Blinding(PacketCase):
         self.assertEqual(self._result_body(text), text)
     def test_a_bare_calendar_date_is_kept_and_only_a_date_with_a_time_is_blinded(self):
         s = Seq()
-        s.user("see notes-2026-09-20.md dated 2026-09-20 and stamped 2026-09-20 10:11:12")
+        s.user("see notes-2026-09-20.md dated 2026-09-20 and stamped 2026-09-20 10:11:12 but 2026-09-20 10:11 stays")
         s.asst("m1", "Done.")
         p = self.build(s, "m1")
         op = self.section(p.text, "Operator's last message")
-        self.assertEqual(op.strip(), "see notes-2026-09-20.md dated 2026-09-20 and stamped <timestamp>")
+        self.assertEqual(op.strip(), "see notes-2026-09-20.md dated 2026-09-20 and stamped <timestamp> "
+                                     "but 2026-09-20 10:11 stays")  # HH:MM without seconds is not a timestamp here
         self.assertIn("BARE calendar date is kept everywhere", packet.__doc__)  # the docstring says what the code does
 
 
