@@ -400,6 +400,10 @@ All code goes in scripts/measure. Every module is importable by path and exposes
 
 ### Task 10: Audit sampler and pilot (V3)
 
+> **Superseded 2026-09-29.** This plan stopped at Task 9 (INCONCLUSIVE). Task 10 is replaced by
+> `docs/superpowers/specs/2026-09-29-system1-labelled-sample-design.md`: a stratified uniform draw
+> labelled by the operator, instead of a judge-qualified audit. Do not resume Task 10 from this text.
+
 **Files:** create `scripts/measure/sampler.py`; test in `tests/test_measure_sampler.py`.
 
 **Interfaces — produces:**
