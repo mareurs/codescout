@@ -8,6 +8,22 @@ Companion to `gate.txt`, which is the gate's full output, committed unedited. Ev
 - The prompt was `scripts/measure/judge_prompt.md`, sha256 `3137920a8d4645540b9cff7bced95671a9c6fbb282581cddc5eb5391d4de8c54`, the value Amendment 8 (a) registered.
 - 81 items × 3 votes gave 243 calls (`complete() calls: 243`), and the run exited 1 because `passed` is False.
 
+## Frozen corpora — 2026-09-29
+
+Task 12 Step 1 ran on 2026-09-29 at the operator's request, after the stop, as preservation only: Steps 2–5 did not run. Corpora live privately under `~/work/claude/measurement-corpora/<corpus-id>/` (mode 700). Only their manifests are committed, under `corpora/`. Each was checked by `archive.verify()` right after freezing, and `observability.finalize_bounds` set the bounds.
+
+| corpus id | top-level / subagent transcripts | usage rows | retained window (UTC) | sessions kept / excluded |
+|---|---|---|---|---|
+| `2026-09-29-codescout` | 162 / 823 | 77,189 | 2026-08-03T20:49:16.290Z → 2026-09-29T09:42:08Z | 122 / 40 (25 `sdk-cli`, 10 `duplicate-prefix-of`, 5 `excluded-by-spec`) |
+| `2026-09-29-mrv-poc` | 40 / 309 | 19,383 | 2026-08-26T06:17:40.545Z → 2026-09-29T09:43:03Z | 32 / 8 (8 `duplicate-prefix-of`) |
+| `2026-09-29-judge-gate-1` | 243 vote logs + `gate.json` + run files (254 files) | — | — | — |
+
+- **codescout's sources:** the three spec profiles, two `--worktrees-` project dirs whose worktrees are gone from disk, and four scratchpad dirs. All 18 scratchpad transcripts are `sdk-cli` and are excluded under that higher-priority reason, so none is kept.
+- **The contrast project is MRV-poc.** It keeps 32 sessions, above the 15 at which backend-kotlin would replace it.
+- **The exclusions are provisional.** They are recomputed here with `join.SPEC_EXCLUDED_SIDS`. The manifest's `exclusions` field stays empty until `join.build_events` records it (Task 12 Step 2).
+- **The gate evidence was cross-checked against an independent record.** Its `gate.json` and all 243 vote logs match the hashes Codex recorded in `codex-review-2026-09-29/saved-diagnostics.json`.
+- **Three frozen files contain GitHub-token-shaped strings.** That count is from a pattern match over the corpus directory on 2026-09-29, and it does not show whether they hold one token or several. So the corpus directory must never be published, and the token rotation already owed still stands.
+
 ## Channel checks (Amendment 8 (b), R133/R137)
 
 - **All 243 vote logs have one event sequence:** thread started, turn started, one agent message, turn completed. There were 0 tool or exec events.

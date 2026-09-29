@@ -1,0 +1,1430 @@
+{
+  "bounds": {
+    "decision": {
+      "end_utc": "2026-09-29T09:43:03Z",
+      "start_utc": "2026-09-22T09:43:03Z"
+    },
+    "retained": {
+      "end_utc": "2026-09-29T09:43:03Z",
+      "start_utc": "2026-08-26T06:17:40.545Z"
+    }
+  },
+  "corpus_id": "2026-09-29-mrv-poc",
+  "counts": {
+    "subagent_transcripts": 309,
+    "transcripts": 40,
+    "usage_rows": 19383
+  },
+  "created_utc": "2026-09-29T09:43:02Z",
+  "exclusions": [],
+  "files": {
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad.jsonl": {
+      "bytes": 14336410,
+      "sha256": "bd83c460303297c299715e83dd1a3d430722ade901e2b71b08a14d21707e04d3"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a0876ca9453137978.jsonl": {
+      "bytes": 1611815,
+      "sha256": "59d7cf8fae22c51af19d58db5ba99a887456a37f43c672c8b9a961438ede5898"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a11f50e1a45518261.jsonl": {
+      "bytes": 1756478,
+      "sha256": "e4d27a12fccbf1bef9477edb709a5d63c28293fce28282bbe1b2683ecd945236"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a15c086c3e2a26c49.jsonl": {
+      "bytes": 1698016,
+      "sha256": "b03c8ea54992eef6e4fb0d01216b130ff9ca29df210b4a01e27e0f12139503ad"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a1e836c5679c8c89e.jsonl": {
+      "bytes": 1334975,
+      "sha256": "05218cb0c3a555905c39a7406750db234024c6ab11a713c0a78a7a7522e3b0f0"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a27fe72a2acd06201.jsonl": {
+      "bytes": 1145544,
+      "sha256": "47ef55b19065b9bbd76b015d063bc10f4332e2e881497f8e0d3e8cb53f69621d"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a30c231e0f8641da0.jsonl": {
+      "bytes": 10806831,
+      "sha256": "9178ca864fcfd7380ef3d674df004819a8af0e12550f3b76ed389e65c8b78a76"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a4019bfec495c4efd.jsonl": {
+      "bytes": 2776436,
+      "sha256": "c822d26ee045d53c5c27cc8a7291f28061aaea1117cbd66625b117c1c0d04bcd"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a42d0699d3e705faa.jsonl": {
+      "bytes": 959479,
+      "sha256": "a9701f394b32f0c5c9c1f90a93d5d7c28966a2d6672808f546c5ac79ba7e0955"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a4e3fb6f85cb34041.jsonl": {
+      "bytes": 1057180,
+      "sha256": "9471e90f588c52892f9712d9397d57fdc76c57d1c06f0aed15988b4d3d5c605e"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a5307cea6ee981923.jsonl": {
+      "bytes": 1682438,
+      "sha256": "07821df7c4baaeb652434bf4b5c2fa44588490b064b96c9fe6f71c2ae7424d59"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a57a988cb8670bc00.jsonl": {
+      "bytes": 850292,
+      "sha256": "728f4d3c30266b91fcb2e0ef6450a4adf3afc2e0077fa64b32d277104b01686c"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a601078310722e319.jsonl": {
+      "bytes": 1051251,
+      "sha256": "240915a76e4d0f33dc75ea5d331ecb014ea211c8b10956b33754bf1588f9c2c3"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a609716972811ce24.jsonl": {
+      "bytes": 930361,
+      "sha256": "18a0448b075dcd39d2ad866c98c065d50c3a7e08acf8300247cbce90c3cbaeb9"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a63c70366ef0cf156.jsonl": {
+      "bytes": 1049669,
+      "sha256": "faba1ad5064b49ee94437b359310599a50779059fbd55fb0ba8c0f1173a5c888"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a74f6270125d6bcb5.jsonl": {
+      "bytes": 1114653,
+      "sha256": "c97afa0c3571c737514461ffcb94a5fb6a7e8668f8d7a3580e53e52e278d6807"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a7990974f4a5aa8ce.jsonl": {
+      "bytes": 774240,
+      "sha256": "c34ac426d0056b7551b5314c149961602a28c6165a83d5d0c37e6c09b8ab7194"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a7c8038b309ef6b9d.jsonl": {
+      "bytes": 3403833,
+      "sha256": "a9f620dc256f5450c24dab76e312d12da818aac04c19957f41cd77d7fca8c1a2"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a97683c385d358857.jsonl": {
+      "bytes": 662256,
+      "sha256": "ea864fdcd87a89789e7a9ede23e7ce8fcc16c97db7cf77a76c70a69d3ce0f082"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-ab84f95fc51b31d2c.jsonl": {
+      "bytes": 3091335,
+      "sha256": "901f7f0780e7353dabc798e1d155d3d37bfe452235cba846239988aa24c255fb"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-abd3876e10ab66ddf.jsonl": {
+      "bytes": 879340,
+      "sha256": "18466740926bf42567c9d8820797e3ced765aaf8fd1830c831e7df8d39522e6c"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-ad4c1475357478ce9.jsonl": {
+      "bytes": 1014385,
+      "sha256": "77577231625fd899c7d18957f9520f11805374dbc46d3bf104b7b04e26b2eff6"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/2c79f948-e73a-4f29-9a37-1639727a3a16.jsonl": {
+      "bytes": 786454,
+      "sha256": "e953d60344a55efa09bdf67132341da8f80ab8acecd4b951db0798380b4dc4a0"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80.jsonl": {
+      "bytes": 5677130,
+      "sha256": "176fc627e9ede1a5ed0cdffe08397cbfc34d1a3134b6bb9ed90fefd461bd220e"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a04798683d088f9f3.jsonl": {
+      "bytes": 517707,
+      "sha256": "a467466b3e4512f450be5692c8383bc154dd707be757ee0ff281c43f05cdc31d"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a1195d53348079943.jsonl": {
+      "bytes": 2510380,
+      "sha256": "59178f31e111ffd68f920c3a8edeb65916b25a081833bf1476d49701ff87f297"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a19fad2842507f29c.jsonl": {
+      "bytes": 505402,
+      "sha256": "5efb57d1dcc09de74a2bc907e441391a36eb3ac62354cc175017a669b66ff431"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a2310bd3df6f9967d.jsonl": {
+      "bytes": 1457310,
+      "sha256": "4e7d3182e395f314a6d285ad8f099058c98e8c7e7d9277a2882c60ec631ff58f"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a23f917c4c2b9e09d.jsonl": {
+      "bytes": 416234,
+      "sha256": "857a981f4f2378d2f5c9327103132f1c1032f8412390d7c8487a7050b6860c3f"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a2aa50d43d26a1dc6.jsonl": {
+      "bytes": 533764,
+      "sha256": "658c8d63df3ffacb886b2dbbd326d2ff2648ebac79f0df6980495e20477b5a52"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a2be1dd3ca71467f7.jsonl": {
+      "bytes": 1250607,
+      "sha256": "d39a7d834fc8ca37da9149d8aeb1521479f5913a05b517e73ed13b6c9b22bb41"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a442f327ef64b544a.jsonl": {
+      "bytes": 723962,
+      "sha256": "e9572c1c2a83cf251293f5bf50bf36eadc476c2ce858df03a94401b3925e5229"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a6c58d76990e99090.jsonl": {
+      "bytes": 477419,
+      "sha256": "0b2f501c9c980f96de689d84e1f9429b4a405e3eb29abf58925912729475ccc9"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a9295ca7b3a6967b3.jsonl": {
+      "bytes": 622152,
+      "sha256": "53099126ce40864c81483801aa41c76db3490e16dc3fd8a24b2cb4f698068e80"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a96b2fbf54815d515.jsonl": {
+      "bytes": 373735,
+      "sha256": "16661e21e0129fc6f7ed327bb89489ff3d1aad0a292ebf0bc3130cbe7699d227"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-ab5ddb5b1395a1eb5.jsonl": {
+      "bytes": 1141874,
+      "sha256": "f76b4834fc78b466ad6ee14a80a8af16e80101b36dc1c32130b750e52a4f5115"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-abccbb2e906849f58.jsonl": {
+      "bytes": 112264,
+      "sha256": "36e897d270b207aeb37b9d11c7716f47c1e5b353cc90b1975d4287235c51a93d"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-ac3c1b59ff1a614c6.jsonl": {
+      "bytes": 631921,
+      "sha256": "665dc60669525b3e027a9b86f07771a481ab4e5affe5c75da9382ed75601e34d"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-ac6b30a53a3caebfe.jsonl": {
+      "bytes": 348220,
+      "sha256": "a4265d04fe15159d2db03107a135afdb24c3f5ac69f3f5f09750edd9a353e6e7"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-ace7c055101ed0e5a.jsonl": {
+      "bytes": 703630,
+      "sha256": "63bfd3390263b3e7044e8d3c977dcdaf08eb8f16f30b8e60aa3aac68ed2cc2ea"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-adaa9a00fd43ce8bb.jsonl": {
+      "bytes": 2313164,
+      "sha256": "71ebd4ded945062e727feda0d0a9246899b812fdad1ad8c0953d069be75f72a4"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-ae40d3ccefde3fcfb.jsonl": {
+      "bytes": 711505,
+      "sha256": "2279e690d421b201da7dee8ff11a1ad54f5666f7ca8578419677bf7b5a0ec249"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-ae59f6e9140944a44.jsonl": {
+      "bytes": 1116694,
+      "sha256": "39556cb27db9d4a2169a76907e5ae97d5c84b150387887a313aeffc6b7fbde76"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-ae62ff0cb72d13fe0.jsonl": {
+      "bytes": 156400,
+      "sha256": "4a40623227ff662ac181f7c1d8d7fd0e380679e319c330895fc950ce154299a7"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-af24e320fad1c91c3.jsonl": {
+      "bytes": 1413552,
+      "sha256": "55ab4754804d1b291776c282c0fa88165b3cd77a400c62d80af74991b142b61a"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-af805ef4ad04a9602.jsonl": {
+      "bytes": 359003,
+      "sha256": "beb4339183b83b30c4374bdff78d0d0d9c348be119b2d894c4cd7770608a9b20"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/3d806b09-79ae-482b-b362-ab526e9c189a.jsonl": {
+      "bytes": 9257579,
+      "sha256": "5b329fe82d785eaed75f7875d0db8e0bb62bc08a4784709a4d0bbaf94472c973"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/4caee917-0448-434b-8fc6-11319cea79ab.jsonl": {
+      "bytes": 123688,
+      "sha256": "fa50be2e4b493fff8e68a2decdb3051e63f9111c18c5509a9f68b12108a56d04"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/5b41fcbe-0a2e-40dd-a427-1082b2876e00.jsonl": {
+      "bytes": 1610509,
+      "sha256": "ee37720801f982c8f7e8d51a294120332db90bc8a2b3e120286ca31d5ebd10ae"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/5cbcbfb4-4e45-4bbd-9a8c-d1ef7ccf3e96.jsonl": {
+      "bytes": 197651,
+      "sha256": "6bf53be4a7765b66de555b321e6688e25ce965dd179f98e21dd61097b0f41aac"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/76039e73-b3fd-46b6-b234-2ac4e16cb3fc.jsonl": {
+      "bytes": 17144367,
+      "sha256": "bcaf1add0fe08151ea5a9cec690273bcff6497233332bd0f3a19294ead68dd34"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/76039e73-b3fd-46b6-b234-2ac4e16cb3fc/subagents/agent-a4affa9a28b2111fe.jsonl": {
+      "bytes": 765483,
+      "sha256": "d2240a8eb72ab20d00880aaeb3eb97331344550523648340b78b17ca30565663"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/7c0c487f-5942-40ed-81e1-23c9d07797f4.jsonl": {
+      "bytes": 90646,
+      "sha256": "ef3a4e73b8d80f3ca9c4b29147eb00b813a0ab004260f73bbb3173909d152575"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b.jsonl": {
+      "bytes": 22719257,
+      "sha256": "4c8516ee4bca9433766fd37551b097d0f6f142097d936dfd93d9d7df93236dd9"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a06f4fab8278f71d9.jsonl": {
+      "bytes": 2535763,
+      "sha256": "67ce2f50df2539ba360a033d3d54aa0214afbea9558513d02ca2605c7e09ba0c"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a0c74278a553cfaef.jsonl": {
+      "bytes": 922052,
+      "sha256": "c0e4ba7e3ad76d5e43f8b1018cefd517dc18273b24e9ff16d06afaa5d13423e6"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a0e07f35e3419e84b.jsonl": {
+      "bytes": 1009717,
+      "sha256": "a2c0b9ba36405120c6b2d19adcdb93f4de4de17d3594fe9d98e925b0dea372a2"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a13b60b6412e1032c.jsonl": {
+      "bytes": 881757,
+      "sha256": "71d517f1055a67fbd5e67b6f0207faeaf4b2a249ccdf771dd6f30d26611c8cd7"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a154d7b2c1c3ea1a5.jsonl": {
+      "bytes": 894437,
+      "sha256": "b5835c1d79db88495ff193e483e297dd7e6d7e60f647ea8e00125c19dd67d711"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a1b8d917f31a1adc5.jsonl": {
+      "bytes": 922597,
+      "sha256": "41dd9a3e1915499c3d4e91cf9d4ce3290e03a90bbaf97cc1a9a72536d7c491ca"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a201a1ee25aa36a01.jsonl": {
+      "bytes": 1271784,
+      "sha256": "5ea9a0cb262b721f793ad431277d20dd24df81fbd4eb411f7d82abad80106a27"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a2209c29c46038456.jsonl": {
+      "bytes": 18241571,
+      "sha256": "a48467e6286335318241ab4e07f5246c6a71e680228d45b9b56eaae4eca66759"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a2211053b3c2ac39f.jsonl": {
+      "bytes": 1553377,
+      "sha256": "289e1eefa13fa324e2395124451e046f8ea1f0b466c882ec46cf373c6eee0125"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a22b4701cfabe7acb.jsonl": {
+      "bytes": 1285259,
+      "sha256": "3a2172d661a3055a8855f856081ee0d4611386a88efe8459b8819cd7a7b01f47"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a272a1204fd6dc7b7.jsonl": {
+      "bytes": 999835,
+      "sha256": "bae99ad4a279152d1a13facc1e90799a42f81b08fc3f7473f0e22b7552e52cd3"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a2c65ed061869a1b3.jsonl": {
+      "bytes": 1800323,
+      "sha256": "72861c792657417d40dbcbc6d38f763c48172619f0718efe5108eb09328b1797"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a31015d7073c46c69.jsonl": {
+      "bytes": 971457,
+      "sha256": "afba5d606a9c7bfa3b2c6bfff0bee9fca0a5278ef412119f10d9b65ae071affd"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a31f18370fe8b2077.jsonl": {
+      "bytes": 1656992,
+      "sha256": "c0c2d9f51ef9936dbbb7214b9e407afde0036391caf010c30fd5fbe1063c87f0"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a32dcba5b37ef503b.jsonl": {
+      "bytes": 1164085,
+      "sha256": "e01652494eff477bf69162f4661608cc5fcf2a642aa13ecb99ad18e2b74b8ea0"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a3f60d09788b5cd0f.jsonl": {
+      "bytes": 1430403,
+      "sha256": "a0f3255d35f5f21a430243faff8cb0ce8d54b86bd5c0c9f6336ea37643276ff8"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a40b4db95355a922f.jsonl": {
+      "bytes": 906195,
+      "sha256": "a81e053881def185b5e0856cde8aefacf9ad99ced92144c871fd8da7d0eddbd8"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a431f566823fe3b09.jsonl": {
+      "bytes": 1076617,
+      "sha256": "badb2e3d59c9831ebf54ad94dab3259f17255eae4bfe5e2e726c80a20cc27172"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a4adf633918f2af72.jsonl": {
+      "bytes": 751993,
+      "sha256": "73b7f6d2c20d6370b71bbdd915a1ba1d1d69697fb9e1a6d1e7b07e1ba224562a"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a4f49a6845175f56f.jsonl": {
+      "bytes": 969359,
+      "sha256": "4e6463ce7abf99cef5899d1db09e7cbca35ff5db706cd8d50f5a97d32f8ce5ca"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a4f515af0c5244570.jsonl": {
+      "bytes": 1059528,
+      "sha256": "936b4f5f6a3babc30804a1564612fbd33bdd9855fe523d98331cc43374303e78"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a52931d10037e1d86.jsonl": {
+      "bytes": 2298718,
+      "sha256": "5abf3f045d113ac8ff328a2b67abc397395c6a0613c3f3eb523f91e8a555f7b0"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a568d9dcccf836e53.jsonl": {
+      "bytes": 1704165,
+      "sha256": "f89252436cd8937f2d9309a6aa3e069bc6a87fd0303e55284d3c1b2a71d43573"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a59cdef3db57b29f8.jsonl": {
+      "bytes": 24661383,
+      "sha256": "6badf29b2add2773c2dd38f86eea542af076ecdd309781e9d2d3f99148a9873e"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a5c38b0b3731fa6bd.jsonl": {
+      "bytes": 965052,
+      "sha256": "97c7c3832c95a11709e2173d73189b6dcd39c4e0bc9df1ad05d43e15cd44895d"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a5cba4b840e0908fe.jsonl": {
+      "bytes": 2077354,
+      "sha256": "f034513f86b8f24a52b894c38d4286ea09c12ad46080e003bf154fab08adfb87"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a5e86f266f45116fb.jsonl": {
+      "bytes": 1303967,
+      "sha256": "88d3b30a8c892d3536e8fd542a29431bc7b3a2ddb168b411c1d77b04c8c31dc6"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a63202ff8c5817a91.jsonl": {
+      "bytes": 8833141,
+      "sha256": "e6b542f8a1ac94d3e546b1c62a2ced573958ce1bd0961cc55f5f462759fff80a"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a75be486d0f9886b0.jsonl": {
+      "bytes": 975591,
+      "sha256": "e1fad2c8a8e6b04a8cc81f535fe4c7b181df2f4c6d5a2714ab027b04200e2a33"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a7735fec1ede415a8.jsonl": {
+      "bytes": 1090025,
+      "sha256": "4493ec835ffba6854f4d836d4ebaeb548e6992dff28408822905f3de91e20fee"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a7c0418c037e22f79.jsonl": {
+      "bytes": 1790868,
+      "sha256": "5f8756b088d93577f317d9d264d657f1f21c769a294907194aa21bfff60a37c8"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a81b961265f3b1cc9.jsonl": {
+      "bytes": 857525,
+      "sha256": "a79c1cb3be4a637d4c4a3812485c2d6a8f14652bd605f5dcd8e52b783e9f7894"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a82b6fa39ecadddd2.jsonl": {
+      "bytes": 996212,
+      "sha256": "c8205819aca0248874046b842fc6ab7a6ebba714ccb8f31d00c60dfcf81f3245"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a83789c7819b88fb7.jsonl": {
+      "bytes": 1241334,
+      "sha256": "89282f7ac8f8811d8f545dc60a6bc289b7a21b7cd4001ca30372caf1e45b39e9"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a8419980998635c20.jsonl": {
+      "bytes": 2417092,
+      "sha256": "bd2cc49728bae5f5952dbf4ced512e75bfdbe691a30941cdaca0ca94a6dcc992"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a8639fc843cc8268b.jsonl": {
+      "bytes": 3520527,
+      "sha256": "44b900f5f0e69fe22d6fc25c633644808da6eb733a643f6239fa681934463099"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a8da18dd0661e4c42.jsonl": {
+      "bytes": 2369069,
+      "sha256": "408942e424be06ec9b4025046aaee065614f761be4efc1f47d92133e8314d2c6"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a8e804ba168b0116d.jsonl": {
+      "bytes": 789454,
+      "sha256": "0edfb419e6f4b0e1441a7dff853551d869100534fabe1e18f720e085ae9d6177"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a9302b2e700f5bc8d.jsonl": {
+      "bytes": 847308,
+      "sha256": "158515b1415550a6b44168b94935fdaf8e9b5c930b92ea23d0d17304bd2ae431"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a97627b376da81495.jsonl": {
+      "bytes": 1562075,
+      "sha256": "adbe1be97cb34fc6d4de0ec7b794d369830d494889f9cdd4759d6c94b1ebac35"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a97a6788aa39e45d7.jsonl": {
+      "bytes": 4207754,
+      "sha256": "b409240e9d781f921ef32732f3f642b47a8ee7d0c18fc184b74ded6f565909ca"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a98e8efbe33bf4ffc.jsonl": {
+      "bytes": 997828,
+      "sha256": "5f8ee44305422ce239de19653799d1d266dad9fe0fb4253265210298f64415c2"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-aa2cd3b41927501ed.jsonl": {
+      "bytes": 9476170,
+      "sha256": "7155fbeeed14c2fa1434b69a2c694fd28d21f043a6057edd49b7a53a4acc29e1"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-aadc9b6a3326c0b9f.jsonl": {
+      "bytes": 1334013,
+      "sha256": "cc96eeb3b3464a9dee497c9d4d44c7383c1305a9e491fb0834d3d1c8ab75cd17"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ab3a480476445558e.jsonl": {
+      "bytes": 28114583,
+      "sha256": "3693fa423c14628eddb958f53e4c877e95c505e2e4754e908c0de5b7d0de5e2c"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ab4678a92f6bf63e8.jsonl": {
+      "bytes": 1008643,
+      "sha256": "4cb555aaae608c1f962e98282a2ee7efd90b247f0b4904e95c5a65ba8979c743"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ab734e5754322d805.jsonl": {
+      "bytes": 992273,
+      "sha256": "01b8fa75659442d00d4fcf412fd6bbd493a2a0aa51ef3ed3e0778d584a679885"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ab973e87131a3f31a.jsonl": {
+      "bytes": 886966,
+      "sha256": "1deabaa12e7b7e9c0258f037de36a5d87749a0df8cfa87c0bb939698efa60375"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ac09d80504c914c2b.jsonl": {
+      "bytes": 720541,
+      "sha256": "a557f9fc4493c7b2056141668ec50b414d26e45e1157406f80be0a054d15032e"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ac3bf6e71a5cea0dc.jsonl": {
+      "bytes": 951772,
+      "sha256": "05bbc5e662bb900600bcc6d57f3e803f7fd35b178d2163bc583db20859a33a70"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-acbe520c5b39b3886.jsonl": {
+      "bytes": 954449,
+      "sha256": "c2e488900ea794ed31c789a888fd4a71a91104f977741bdfecc63741ef24f86a"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ad4e99c8f0c964a63.jsonl": {
+      "bytes": 1629963,
+      "sha256": "bc4bc67115f13ae97186c96351a46a546d17ad148b5ee5475d699ba7c3ee44b2"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ad68d265ca5ca9dc9.jsonl": {
+      "bytes": 1219481,
+      "sha256": "66a1373c3f37fd1d0b17b453b0e52cfffdb760cbaf580d5caaa9b25363e7ab85"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ae1e81f6e7e98df21.jsonl": {
+      "bytes": 3105805,
+      "sha256": "b01a3dd51c5554b0db3ce6b01a926fc0ffdd39d0c22a7c188eb8045d46fa1ccb"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ae35ec72abaea9c6e.jsonl": {
+      "bytes": 1299775,
+      "sha256": "31704e95bf4234ef7515c2d7a125a70f12856325858865a938f316685df15d20"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ae38885c7bfb42682.jsonl": {
+      "bytes": 974270,
+      "sha256": "200a80f2d4c8f37b3afbc05334dfa287b7a335101e1eaba5a44067c0a1a5220a"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ae5127d4e07698d64.jsonl": {
+      "bytes": 802399,
+      "sha256": "c6d563a43380ee7ee4476c2cc1f19e7da686164f8b838f3b239cbfd7edaeb38e"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-aeab46c58dcb5a148.jsonl": {
+      "bytes": 7901300,
+      "sha256": "b89f087501a9dcb44bcb1e61dacc7a2d1cbe26c7850444d7d2681ffcdc7052c3"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-aebf910ee8e224b04.jsonl": {
+      "bytes": 794219,
+      "sha256": "48b162b29baccfa785ee57ee5334d86c2acf690285bd666d8092620351f63de3"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-af4f30191201e0de4.jsonl": {
+      "bytes": 1783314,
+      "sha256": "14348e1bb9e1090a48f415c19bcf782a6f8bcf8e3fa85f1386b3248836b9d1ab"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-af85f0b1f7903e60d.jsonl": {
+      "bytes": 1272794,
+      "sha256": "2bcfe6a31df81503c970d276770a5da57b612483adbc3e5e6c860cfb01ddca7f"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-afacf6e963d9cfb3e.jsonl": {
+      "bytes": 1576087,
+      "sha256": "ca7a8b3ab7504e1c2d987ab87de460988cccdfd247b388ea5221f5c7a625da6f"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e.jsonl": {
+      "bytes": 14143033,
+      "sha256": "bb2822a1c89389a09741b2771420a73f7e4b579694f965ba94d24fc6aaff3e4e"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a07020875e7487477.jsonl": {
+      "bytes": 381747,
+      "sha256": "4caacf42d9da9ab8a058e0fd449ae8b5c87a0c6d375adb30532bc9afab6032fd"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a07f1f4c2ad6e45ec.jsonl": {
+      "bytes": 2773727,
+      "sha256": "fd3e26c4629565ffbff55073485e73c8c78af2ad4da103a633a7c2699266ee88"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a0b8d9ba3834198f5.jsonl": {
+      "bytes": 381607,
+      "sha256": "4abb54c4738e78a444feb811e36dfdb00ebde826bc7a21801852381961db4046"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a1797a4038c673dee.jsonl": {
+      "bytes": 399321,
+      "sha256": "92b66636e4abdf835e3baf331f45e5b5a5d938e20d72900c156393e34714f530"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a1b60214278768314.jsonl": {
+      "bytes": 905154,
+      "sha256": "f0a927f7edb3600b6bc6636d46e9d1e4afe647c4892efc8d323e48403c5729db"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a22a6ac83929609af.jsonl": {
+      "bytes": 480438,
+      "sha256": "406eb27d02e985b25236938f9d27579c003d45cb27ccbaab91e9bd01c1c5081a"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a2542817023e41836.jsonl": {
+      "bytes": 1299265,
+      "sha256": "8a040fe0c58cd5f4c0514442e39d9fe4505845202c32b726ec756b85b071138c"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a27673fa005c63335.jsonl": {
+      "bytes": 2564795,
+      "sha256": "1635477f6e089595b00ed834a8014709834af92e430a83555acc6c211240d686"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a33842428b643d47b.jsonl": {
+      "bytes": 828054,
+      "sha256": "9556104f35d5a627993dfa50b2c0b3a91742abd653653624aaecf948b9318705"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a3a33fa78fd48ea2c.jsonl": {
+      "bytes": 1179749,
+      "sha256": "49aa3c09329868f890cc62c34dc68b5eda80b118a56f5810dfa3fb686cbed55a"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a4e113d9466d58925.jsonl": {
+      "bytes": 1049397,
+      "sha256": "5467c36fe59fc5b7e9531245c0ebda5d7987a6944ad616302394b8b7a3fdbc7f"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a54aad113f77512f6.jsonl": {
+      "bytes": 1227460,
+      "sha256": "a00258e356a1e8c6d85397cc6ad7b4cab5c0d008bdc43e9b7c0a91b628d96eef"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a5a0c94ec558de06d.jsonl": {
+      "bytes": 8490421,
+      "sha256": "670f201467e1b9392dbd87187a54eeb011e49f6f855b95dfb6b1b2ba872e39bd"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a60976ee73dfe1e74.jsonl": {
+      "bytes": 1046144,
+      "sha256": "23a1a2bf514576ba740a5a07ed148121a9fe7007c7274f8edcbeb77732d70816"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a694d30748957384c.jsonl": {
+      "bytes": 290662,
+      "sha256": "5cc0f8722c0591684fd0d43f4512adf92e01d3309d2778be119fc90697a23c17"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a72a262fd46d8c621.jsonl": {
+      "bytes": 1127880,
+      "sha256": "e65b40a7ad43a98c47247f4875918ea6215c33d3f9537bab15e03f7dc732916e"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a7c76b5a34e412326.jsonl": {
+      "bytes": 227724,
+      "sha256": "90cc14d32373bd14341b2bff9a7ef0a59e12dc7bf5c910b8d902caa73e42a088"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a7ca66d5b178b0c89.jsonl": {
+      "bytes": 753502,
+      "sha256": "21424ee048a303435d2dc642a285fb28b107eb5868d720fe1dfdc42b07095905"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a81647ca3d245f4e1.jsonl": {
+      "bytes": 539334,
+      "sha256": "1b2355fe34ae7ac3c704b0ff7a3bfb91b7148d77d8094ea4444a859f2eeb02bf"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a83a06740b2bf3947.jsonl": {
+      "bytes": 1083982,
+      "sha256": "01585b73b4d97a9cce797e4451bfe76bfa9ffea37ef13d6efdeee1bb6460f7b8"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a8cd9cf6cb7c5be50.jsonl": {
+      "bytes": 566200,
+      "sha256": "670a386e1bc9ec9e8b26b4dc157e1ae4c586735c9231298e3a48d21664573d97"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a92af51074f26b3f6.jsonl": {
+      "bytes": 778190,
+      "sha256": "28b7f3b8d48c7febb92c20f93c7c0d0b5966e63c200b543abd96377c3dcc4437"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a961658dd757793e8.jsonl": {
+      "bytes": 672159,
+      "sha256": "9fbc1778ac9357430c7bb915c21cdc4a29dcce72cf6a40726376a08272d8d5d1"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a9fb778a3ce413e94.jsonl": {
+      "bytes": 585739,
+      "sha256": "4b185a66acd076ec9cbcd1caaec5310a6cd118d5476e3b7fe10f691756296ca0"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-aa9c4031d7d45395b.jsonl": {
+      "bytes": 11984124,
+      "sha256": "0ad288f0ce8f46b95066ecb667516c991162921701ab5093c63e022b4cb67587"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-aac495744a62e36e6.jsonl": {
+      "bytes": 3049765,
+      "sha256": "8a73e3ba4208ff89291663b0cee7a43e1cbb20cd3ac1f48bf2fa12b559ff043e"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-aada6eca731e7a0c5.jsonl": {
+      "bytes": 280381,
+      "sha256": "2cb65c286318a433a406f16da2439b86790f2780ea091f1a849bdb19b5823d42"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-ab372f04ed32b0026.jsonl": {
+      "bytes": 444834,
+      "sha256": "2e7ee4c5598972c7d00db25185e21f19aeedf32aa97d75627387da401fdcb778"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-ab9e2005c3dde13af.jsonl": {
+      "bytes": 414240,
+      "sha256": "baa9954f714ec089de3c6e265b02588d2f9b361fcad6c93aa18b2108fe630713"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-abbba437d59b9e8f3.jsonl": {
+      "bytes": 1244919,
+      "sha256": "731d66474cc8c715d83426d0b53fb416013ae4ba7712a1f945d5c536ac038f03"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-abe378752689bb742.jsonl": {
+      "bytes": 609582,
+      "sha256": "adf88643aaeb71ce89a837c2a1695403ef2b7f887dc977a0ab1f71c1d66785ae"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-ad6acb3efacf0df24.jsonl": {
+      "bytes": 440203,
+      "sha256": "4d7032cf68f329a3aa7485d72442892f6a96fb29cf7ec608d80dd874ae7a8f2f"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-af0597461cea504b2.jsonl": {
+      "bytes": 490850,
+      "sha256": "922697abc21523eace005e6215739fe6425e31d7ef69b2c7fbf93353742423ee"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-af8926dc5bfc9eb31.jsonl": {
+      "bytes": 839449,
+      "sha256": "40d7b3c4913436e2ce8f6b88dcc3478e88e06029f3b2f9d29c758c9be6623bdb"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-aff47669d1882f44b.jsonl": {
+      "bytes": 300545,
+      "sha256": "bfc0a7a3c3faa8712e4cb001393a5a4dec1c70ba2b966f5c1be941e9922a17e9"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/9fd6128c-f1ab-446e-8afd-cabc6fdf2f3e.jsonl": {
+      "bytes": 9441052,
+      "sha256": "ef3dee8a14f3d4bfabcf9868b8d12c050d89b4fdd5dbe6887e2cbd9235d6e85d"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/a34e50d3-a41d-4aba-b111-eb1e94189bf7.jsonl": {
+      "bytes": 7202817,
+      "sha256": "7e62a57cff9e1ebcec6341418186730ca899915960157519f11d64cb837bb15a"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/abac0e0a-0847-4c05-b2b5-71334bff4107.jsonl": {
+      "bytes": 6453642,
+      "sha256": "c92d1ac6a096f44afce5574d0a8021bbae733cbd7c7997337ce2583404460b4b"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/abac0e0a-0847-4c05-b2b5-71334bff4107/subagents/agent-a095b264e318bb19a.jsonl": {
+      "bytes": 579457,
+      "sha256": "40394eac00a8e6c762f82cb3f6e474bc26a2adf9e4d135bb6b506c025375781e"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/abac0e0a-0847-4c05-b2b5-71334bff4107/subagents/agent-a330bc596b1f4e2cd.jsonl": {
+      "bytes": 486715,
+      "sha256": "8b88eca12d92529f3be4b7ccc99be6a6c30a9c7d06a45048ea09e530b0a03d98"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/abac0e0a-0847-4c05-b2b5-71334bff4107/subagents/agent-ad2c0ec6452bf1f66.jsonl": {
+      "bytes": 598254,
+      "sha256": "f4f8620fe436ff8973d3b590dceae281aaa40eb0dd38e3c6e4aa7ffbcaf21f71"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/bcf42c59-1ac8-488b-87ef-a4b2087ef67c.jsonl": {
+      "bytes": 56132,
+      "sha256": "e732077b40d5b7d33b480f594ff8f23752edfbb117ecf494b506a0742aa2c51a"
+    },
+    "transcripts/00-.claude/-home-marius-work-stefanini-southpole-MRV-poc/fde2617a-04e6-4405-9712-eba206e88290.jsonl": {
+      "bytes": 750675,
+      "sha256": "c3206372c55779e3afccb0a983ce3fdaa8c4c6d8d0dc3488472d10b5101e6def"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad.jsonl": {
+      "bytes": 36130559,
+      "sha256": "8dd81a9d5d7940d6b9a2b405053e9cfeb3e853acdb2705d0871d263fbfc44964"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a0876ca9453137978.jsonl": {
+      "bytes": 1611815,
+      "sha256": "59d7cf8fae22c51af19d58db5ba99a887456a37f43c672c8b9a961438ede5898"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a11f50e1a45518261.jsonl": {
+      "bytes": 1756478,
+      "sha256": "e4d27a12fccbf1bef9477edb709a5d63c28293fce28282bbe1b2683ecd945236"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a15c086c3e2a26c49.jsonl": {
+      "bytes": 1698016,
+      "sha256": "b03c8ea54992eef6e4fb0d01216b130ff9ca29df210b4a01e27e0f12139503ad"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a1e836c5679c8c89e.jsonl": {
+      "bytes": 1334975,
+      "sha256": "05218cb0c3a555905c39a7406750db234024c6ab11a713c0a78a7a7522e3b0f0"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a27fe72a2acd06201.jsonl": {
+      "bytes": 1145544,
+      "sha256": "47ef55b19065b9bbd76b015d063bc10f4332e2e881497f8e0d3e8cb53f69621d"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a30c231e0f8641da0.jsonl": {
+      "bytes": 10806831,
+      "sha256": "9178ca864fcfd7380ef3d674df004819a8af0e12550f3b76ed389e65c8b78a76"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a4019bfec495c4efd.jsonl": {
+      "bytes": 2776436,
+      "sha256": "c822d26ee045d53c5c27cc8a7291f28061aaea1117cbd66625b117c1c0d04bcd"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a42d0699d3e705faa.jsonl": {
+      "bytes": 959479,
+      "sha256": "a9701f394b32f0c5c9c1f90a93d5d7c28966a2d6672808f546c5ac79ba7e0955"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a4e3fb6f85cb34041.jsonl": {
+      "bytes": 1057180,
+      "sha256": "9471e90f588c52892f9712d9397d57fdc76c57d1c06f0aed15988b4d3d5c605e"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a5307cea6ee981923.jsonl": {
+      "bytes": 1682438,
+      "sha256": "07821df7c4baaeb652434bf4b5c2fa44588490b064b96c9fe6f71c2ae7424d59"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a57a988cb8670bc00.jsonl": {
+      "bytes": 850292,
+      "sha256": "728f4d3c30266b91fcb2e0ef6450a4adf3afc2e0077fa64b32d277104b01686c"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a5d4a98ea638338ed.jsonl": {
+      "bytes": 2276419,
+      "sha256": "98d09332475839d30c72b0f900d00f91349138788677e459898dfd05b2ab473d"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a601078310722e319.jsonl": {
+      "bytes": 1051251,
+      "sha256": "240915a76e4d0f33dc75ea5d331ecb014ea211c8b10956b33754bf1588f9c2c3"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a609716972811ce24.jsonl": {
+      "bytes": 930361,
+      "sha256": "18a0448b075dcd39d2ad866c98c065d50c3a7e08acf8300247cbce90c3cbaeb9"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a63c70366ef0cf156.jsonl": {
+      "bytes": 1049669,
+      "sha256": "faba1ad5064b49ee94437b359310599a50779059fbd55fb0ba8c0f1173a5c888"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a74f6270125d6bcb5.jsonl": {
+      "bytes": 1114653,
+      "sha256": "c97afa0c3571c737514461ffcb94a5fb6a7e8668f8d7a3580e53e52e278d6807"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a7990974f4a5aa8ce.jsonl": {
+      "bytes": 774240,
+      "sha256": "c34ac426d0056b7551b5314c149961602a28c6165a83d5d0c37e6c09b8ab7194"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a7c8038b309ef6b9d.jsonl": {
+      "bytes": 3403833,
+      "sha256": "a9f620dc256f5450c24dab76e312d12da818aac04c19957f41cd77d7fca8c1a2"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a8658c3e66d3fdb61.jsonl": {
+      "bytes": 4568108,
+      "sha256": "0d97e92434f3ffc7b20d2effb1141c9b8bb6c06f2953f2d33abb4e6447ffd42e"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a97683c385d358857.jsonl": {
+      "bytes": 662256,
+      "sha256": "ea864fdcd87a89789e7a9ede23e7ce8fcc16c97db7cf77a76c70a69d3ce0f082"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-ab84f95fc51b31d2c.jsonl": {
+      "bytes": 3091335,
+      "sha256": "901f7f0780e7353dabc798e1d155d3d37bfe452235cba846239988aa24c255fb"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-abd3876e10ab66ddf.jsonl": {
+      "bytes": 879340,
+      "sha256": "18466740926bf42567c9d8820797e3ced765aaf8fd1830c831e7df8d39522e6c"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-ad4c1475357478ce9.jsonl": {
+      "bytes": 1014385,
+      "sha256": "77577231625fd899c7d18957f9520f11805374dbc46d3bf104b7b04e26b2eff6"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/3ac803dc-6edf-4592-b709-9d4d90881e90.jsonl": {
+      "bytes": 723353,
+      "sha256": "5764b50f44231138ffe7ab57a4eab69cf3e2a1b5dded9866425bdb50dcb33c5f"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/3d1b1cc6-6b5d-4a17-98b2-39a6d7f16e5b.jsonl": {
+      "bytes": 2979964,
+      "sha256": "479e5b6352a2a98fdd9f26ecb3e56e4e82856c2c925512db3cb724b946166221"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/4a86414f-a731-44ea-8474-3c884693f47d.jsonl": {
+      "bytes": 5732020,
+      "sha256": "20776b6e81d2e94a9609ac7a359718e66fe92b3bb7105b5aa6b42219b860d88b"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/60086e9a-19e8-4ba2-ae19-913ae793bdfe.jsonl": {
+      "bytes": 1209847,
+      "sha256": "1495529b25f6d17324af10caeb71bd46cb0cc865f1a02a9139558c7f7c9b2243"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/64e1fc10-72de-4150-b48a-a11669a08ece.jsonl": {
+      "bytes": 11082523,
+      "sha256": "25ae3aae1e108692f6060d5cbea76d5dbe21c3971678e4982d972217ce3231f0"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e.jsonl": {
+      "bytes": 11492340,
+      "sha256": "94e47cad682655a9dec59d34caecc1bda40a7195b8095382956dc6a111beee04"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a07020875e7487477.jsonl": {
+      "bytes": 381747,
+      "sha256": "4caacf42d9da9ab8a058e0fd449ae8b5c87a0c6d375adb30532bc9afab6032fd"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a07f1f4c2ad6e45ec.jsonl": {
+      "bytes": 2773727,
+      "sha256": "fd3e26c4629565ffbff55073485e73c8c78af2ad4da103a633a7c2699266ee88"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a0b8d9ba3834198f5.jsonl": {
+      "bytes": 381607,
+      "sha256": "4abb54c4738e78a444feb811e36dfdb00ebde826bc7a21801852381961db4046"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a1797a4038c673dee.jsonl": {
+      "bytes": 399321,
+      "sha256": "92b66636e4abdf835e3baf331f45e5b5a5d938e20d72900c156393e34714f530"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a22a6ac83929609af.jsonl": {
+      "bytes": 480438,
+      "sha256": "406eb27d02e985b25236938f9d27579c003d45cb27ccbaab91e9bd01c1c5081a"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a27673fa005c63335.jsonl": {
+      "bytes": 2564795,
+      "sha256": "1635477f6e089595b00ed834a8014709834af92e430a83555acc6c211240d686"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a33842428b643d47b.jsonl": {
+      "bytes": 828054,
+      "sha256": "9556104f35d5a627993dfa50b2c0b3a91742abd653653624aaecf948b9318705"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a3a33fa78fd48ea2c.jsonl": {
+      "bytes": 1179749,
+      "sha256": "49aa3c09329868f890cc62c34dc68b5eda80b118a56f5810dfa3fb686cbed55a"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a4e113d9466d58925.jsonl": {
+      "bytes": 1049397,
+      "sha256": "5467c36fe59fc5b7e9531245c0ebda5d7987a6944ad616302394b8b7a3fdbc7f"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a54aad113f77512f6.jsonl": {
+      "bytes": 1227460,
+      "sha256": "a00258e356a1e8c6d85397cc6ad7b4cab5c0d008bdc43e9b7c0a91b628d96eef"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a5a0c94ec558de06d.jsonl": {
+      "bytes": 8490421,
+      "sha256": "670f201467e1b9392dbd87187a54eeb011e49f6f855b95dfb6b1b2ba872e39bd"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a60976ee73dfe1e74.jsonl": {
+      "bytes": 1046144,
+      "sha256": "23a1a2bf514576ba740a5a07ed148121a9fe7007c7274f8edcbeb77732d70816"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a694d30748957384c.jsonl": {
+      "bytes": 290662,
+      "sha256": "5cc0f8722c0591684fd0d43f4512adf92e01d3309d2778be119fc90697a23c17"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a72a262fd46d8c621.jsonl": {
+      "bytes": 1127880,
+      "sha256": "e65b40a7ad43a98c47247f4875918ea6215c33d3f9537bab15e03f7dc732916e"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a7c76b5a34e412326.jsonl": {
+      "bytes": 227724,
+      "sha256": "90cc14d32373bd14341b2bff9a7ef0a59e12dc7bf5c910b8d902caa73e42a088"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a7ca66d5b178b0c89.jsonl": {
+      "bytes": 753502,
+      "sha256": "21424ee048a303435d2dc642a285fb28b107eb5868d720fe1dfdc42b07095905"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a81647ca3d245f4e1.jsonl": {
+      "bytes": 539334,
+      "sha256": "1b2355fe34ae7ac3c704b0ff7a3bfb91b7148d77d8094ea4444a859f2eeb02bf"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a83a06740b2bf3947.jsonl": {
+      "bytes": 1083982,
+      "sha256": "01585b73b4d97a9cce797e4451bfe76bfa9ffea37ef13d6efdeee1bb6460f7b8"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a8cd9cf6cb7c5be50.jsonl": {
+      "bytes": 566200,
+      "sha256": "670a386e1bc9ec9e8b26b4dc157e1ae4c586735c9231298e3a48d21664573d97"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a92af51074f26b3f6.jsonl": {
+      "bytes": 778190,
+      "sha256": "28b7f3b8d48c7febb92c20f93c7c0d0b5966e63c200b543abd96377c3dcc4437"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a961658dd757793e8.jsonl": {
+      "bytes": 672159,
+      "sha256": "9fbc1778ac9357430c7bb915c21cdc4a29dcce72cf6a40726376a08272d8d5d1"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a9fb778a3ce413e94.jsonl": {
+      "bytes": 585739,
+      "sha256": "4b185a66acd076ec9cbcd1caaec5310a6cd118d5476e3b7fe10f691756296ca0"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-aa9c4031d7d45395b.jsonl": {
+      "bytes": 11984124,
+      "sha256": "0ad288f0ce8f46b95066ecb667516c991162921701ab5093c63e022b4cb67587"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-aac495744a62e36e6.jsonl": {
+      "bytes": 3049765,
+      "sha256": "8a73e3ba4208ff89291663b0cee7a43e1cbb20cd3ac1f48bf2fa12b559ff043e"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-aada6eca731e7a0c5.jsonl": {
+      "bytes": 280381,
+      "sha256": "2cb65c286318a433a406f16da2439b86790f2780ea091f1a849bdb19b5823d42"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-ab372f04ed32b0026.jsonl": {
+      "bytes": 444834,
+      "sha256": "2e7ee4c5598972c7d00db25185e21f19aeedf32aa97d75627387da401fdcb778"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-ab9e2005c3dde13af.jsonl": {
+      "bytes": 414240,
+      "sha256": "baa9954f714ec089de3c6e265b02588d2f9b361fcad6c93aa18b2108fe630713"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-abbba437d59b9e8f3.jsonl": {
+      "bytes": 1244919,
+      "sha256": "731d66474cc8c715d83426d0b53fb416013ae4ba7712a1f945d5c536ac038f03"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-abe378752689bb742.jsonl": {
+      "bytes": 609582,
+      "sha256": "adf88643aaeb71ce89a837c2a1695403ef2b7f887dc977a0ab1f71c1d66785ae"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-ad6acb3efacf0df24.jsonl": {
+      "bytes": 440203,
+      "sha256": "4d7032cf68f329a3aa7485d72442892f6a96fb29cf7ec608d80dd874ae7a8f2f"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-af0597461cea504b2.jsonl": {
+      "bytes": 490850,
+      "sha256": "922697abc21523eace005e6215739fe6425e31d7ef69b2c7fbf93353742423ee"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-af8926dc5bfc9eb31.jsonl": {
+      "bytes": 839449,
+      "sha256": "40d7b3c4913436e2ce8f6b88dcc3478e88e06029f3b2f9d29c758c9be6623bdb"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-aff47669d1882f44b.jsonl": {
+      "bytes": 300545,
+      "sha256": "bfc0a7a3c3faa8712e4cb001393a5a4dec1c70ba2b966f5c1be941e9922a17e9"
+    },
+    "transcripts/01-.claude-sdd/-home-marius-work-stefanini-southpole-MRV-poc/cad6c76f-fbc7-4c0e-a8ce-52626b2c525d.jsonl": {
+      "bytes": 152865,
+      "sha256": "821e5965b6c61668c8ffb6503d4b11a7e50a2abd64906d7ff6904400eada6440"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/1237a47b-fac6-4edc-a443-b0003ee690d4.jsonl": {
+      "bytes": 3103113,
+      "sha256": "161524a4f0623129b760a66e492e90670e998f21d61d05944bb9c2f2d4bb27f5"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/199e2259-29d4-4b96-9b76-e13b80e22bec.jsonl": {
+      "bytes": 2279580,
+      "sha256": "2889b14f57bb5b83e0c401bea15f1de2578f54cf9a0b347c324e0bfc86c99c4f"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad.jsonl": {
+      "bytes": 9161391,
+      "sha256": "e2a8f63d939cba19b4ef3d0d5f86992da35a421d26364b9175ec0b600428f796"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a0876ca9453137978.jsonl": {
+      "bytes": 1611815,
+      "sha256": "59d7cf8fae22c51af19d58db5ba99a887456a37f43c672c8b9a961438ede5898"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a11f50e1a45518261.jsonl": {
+      "bytes": 1756478,
+      "sha256": "e4d27a12fccbf1bef9477edb709a5d63c28293fce28282bbe1b2683ecd945236"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a15c086c3e2a26c49.jsonl": {
+      "bytes": 1698016,
+      "sha256": "b03c8ea54992eef6e4fb0d01216b130ff9ca29df210b4a01e27e0f12139503ad"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a1e836c5679c8c89e.jsonl": {
+      "bytes": 1334975,
+      "sha256": "05218cb0c3a555905c39a7406750db234024c6ab11a713c0a78a7a7522e3b0f0"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a27fe72a2acd06201.jsonl": {
+      "bytes": 1145544,
+      "sha256": "47ef55b19065b9bbd76b015d063bc10f4332e2e881497f8e0d3e8cb53f69621d"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a30c231e0f8641da0.jsonl": {
+      "bytes": 10806831,
+      "sha256": "9178ca864fcfd7380ef3d674df004819a8af0e12550f3b76ed389e65c8b78a76"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a4019bfec495c4efd.jsonl": {
+      "bytes": 2776436,
+      "sha256": "c822d26ee045d53c5c27cc8a7291f28061aaea1117cbd66625b117c1c0d04bcd"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a42d0699d3e705faa.jsonl": {
+      "bytes": 959479,
+      "sha256": "a9701f394b32f0c5c9c1f90a93d5d7c28966a2d6672808f546c5ac79ba7e0955"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a4e3fb6f85cb34041.jsonl": {
+      "bytes": 1057180,
+      "sha256": "9471e90f588c52892f9712d9397d57fdc76c57d1c06f0aed15988b4d3d5c605e"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a5307cea6ee981923.jsonl": {
+      "bytes": 1682438,
+      "sha256": "07821df7c4baaeb652434bf4b5c2fa44588490b064b96c9fe6f71c2ae7424d59"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a57a988cb8670bc00.jsonl": {
+      "bytes": 850292,
+      "sha256": "728f4d3c30266b91fcb2e0ef6450a4adf3afc2e0077fa64b32d277104b01686c"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a601078310722e319.jsonl": {
+      "bytes": 1051251,
+      "sha256": "240915a76e4d0f33dc75ea5d331ecb014ea211c8b10956b33754bf1588f9c2c3"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a609716972811ce24.jsonl": {
+      "bytes": 930361,
+      "sha256": "18a0448b075dcd39d2ad866c98c065d50c3a7e08acf8300247cbce90c3cbaeb9"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a63c70366ef0cf156.jsonl": {
+      "bytes": 1049669,
+      "sha256": "faba1ad5064b49ee94437b359310599a50779059fbd55fb0ba8c0f1173a5c888"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a74f6270125d6bcb5.jsonl": {
+      "bytes": 1114653,
+      "sha256": "c97afa0c3571c737514461ffcb94a5fb6a7e8668f8d7a3580e53e52e278d6807"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a7990974f4a5aa8ce.jsonl": {
+      "bytes": 774240,
+      "sha256": "c34ac426d0056b7551b5314c149961602a28c6165a83d5d0c37e6c09b8ab7194"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a7c8038b309ef6b9d.jsonl": {
+      "bytes": 3403833,
+      "sha256": "a9f620dc256f5450c24dab76e312d12da818aac04c19957f41cd77d7fca8c1a2"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-a97683c385d358857.jsonl": {
+      "bytes": 662256,
+      "sha256": "ea864fdcd87a89789e7a9ede23e7ce8fcc16c97db7cf77a76c70a69d3ce0f082"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-ab84f95fc51b31d2c.jsonl": {
+      "bytes": 3091335,
+      "sha256": "901f7f0780e7353dabc798e1d155d3d37bfe452235cba846239988aa24c255fb"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-abd3876e10ab66ddf.jsonl": {
+      "bytes": 879340,
+      "sha256": "18466740926bf42567c9d8820797e3ced765aaf8fd1830c831e7df8d39522e6c"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/26c737e4-6c77-4291-b534-b0090d06bdad/subagents/agent-ad4c1475357478ce9.jsonl": {
+      "bytes": 1014385,
+      "sha256": "77577231625fd899c7d18957f9520f11805374dbc46d3bf104b7b04e26b2eff6"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/36b9f6ae-6841-48fa-bc84-abeecfc25671.jsonl": {
+      "bytes": 98060,
+      "sha256": "bd00bc94c856bc56bce4a233017b39105abbc4c7c80f94c203df65b793bf7a82"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80.jsonl": {
+      "bytes": 8419899,
+      "sha256": "8178662e9e8433bc0eb742003581c7a45c43b440dc5d082fd37ed09953d88bf1"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a04798683d088f9f3.jsonl": {
+      "bytes": 517707,
+      "sha256": "a467466b3e4512f450be5692c8383bc154dd707be757ee0ff281c43f05cdc31d"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a1195d53348079943.jsonl": {
+      "bytes": 2510380,
+      "sha256": "59178f31e111ffd68f920c3a8edeb65916b25a081833bf1476d49701ff87f297"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a19fad2842507f29c.jsonl": {
+      "bytes": 505402,
+      "sha256": "5efb57d1dcc09de74a2bc907e441391a36eb3ac62354cc175017a669b66ff431"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a2310bd3df6f9967d.jsonl": {
+      "bytes": 1457310,
+      "sha256": "4e7d3182e395f314a6d285ad8f099058c98e8c7e7d9277a2882c60ec631ff58f"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a23f917c4c2b9e09d.jsonl": {
+      "bytes": 416234,
+      "sha256": "857a981f4f2378d2f5c9327103132f1c1032f8412390d7c8487a7050b6860c3f"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a2aa50d43d26a1dc6.jsonl": {
+      "bytes": 533764,
+      "sha256": "658c8d63df3ffacb886b2dbbd326d2ff2648ebac79f0df6980495e20477b5a52"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a2be1dd3ca71467f7.jsonl": {
+      "bytes": 1250607,
+      "sha256": "d39a7d834fc8ca37da9149d8aeb1521479f5913a05b517e73ed13b6c9b22bb41"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a442f327ef64b544a.jsonl": {
+      "bytes": 723962,
+      "sha256": "e9572c1c2a83cf251293f5bf50bf36eadc476c2ce858df03a94401b3925e5229"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a6c58d76990e99090.jsonl": {
+      "bytes": 477419,
+      "sha256": "0b2f501c9c980f96de689d84e1f9429b4a405e3eb29abf58925912729475ccc9"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a9295ca7b3a6967b3.jsonl": {
+      "bytes": 622152,
+      "sha256": "53099126ce40864c81483801aa41c76db3490e16dc3fd8a24b2cb4f698068e80"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-a96b2fbf54815d515.jsonl": {
+      "bytes": 373735,
+      "sha256": "16661e21e0129fc6f7ed327bb89489ff3d1aad0a292ebf0bc3130cbe7699d227"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-ab5ddb5b1395a1eb5.jsonl": {
+      "bytes": 1141874,
+      "sha256": "f76b4834fc78b466ad6ee14a80a8af16e80101b36dc1c32130b750e52a4f5115"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-abccbb2e906849f58.jsonl": {
+      "bytes": 112264,
+      "sha256": "36e897d270b207aeb37b9d11c7716f47c1e5b353cc90b1975d4287235c51a93d"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-ac3c1b59ff1a614c6.jsonl": {
+      "bytes": 631921,
+      "sha256": "665dc60669525b3e027a9b86f07771a481ab4e5affe5c75da9382ed75601e34d"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-ac6b30a53a3caebfe.jsonl": {
+      "bytes": 348220,
+      "sha256": "a4265d04fe15159d2db03107a135afdb24c3f5ac69f3f5f09750edd9a353e6e7"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-ace7c055101ed0e5a.jsonl": {
+      "bytes": 703630,
+      "sha256": "63bfd3390263b3e7044e8d3c977dcdaf08eb8f16f30b8e60aa3aac68ed2cc2ea"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-adaa9a00fd43ce8bb.jsonl": {
+      "bytes": 2313164,
+      "sha256": "71ebd4ded945062e727feda0d0a9246899b812fdad1ad8c0953d069be75f72a4"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-ae40d3ccefde3fcfb.jsonl": {
+      "bytes": 711505,
+      "sha256": "2279e690d421b201da7dee8ff11a1ad54f5666f7ca8578419677bf7b5a0ec249"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-ae59f6e9140944a44.jsonl": {
+      "bytes": 1116694,
+      "sha256": "39556cb27db9d4a2169a76907e5ae97d5c84b150387887a313aeffc6b7fbde76"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-ae62ff0cb72d13fe0.jsonl": {
+      "bytes": 156400,
+      "sha256": "4a40623227ff662ac181f7c1d8d7fd0e380679e319c330895fc950ce154299a7"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-af24e320fad1c91c3.jsonl": {
+      "bytes": 1413552,
+      "sha256": "55ab4754804d1b291776c282c0fa88165b3cd77a400c62d80af74991b142b61a"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d3a607d-2be7-40ff-8c5a-0c30a34aea80/subagents/agent-af805ef4ad04a9602.jsonl": {
+      "bytes": 359003,
+      "sha256": "beb4339183b83b30c4374bdff78d0d0d9c348be119b2d894c4cd7770608a9b20"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/3d806b09-79ae-482b-b362-ab526e9c189a.jsonl": {
+      "bytes": 1903297,
+      "sha256": "f274f9caf28537af3242a1b28c6c244b56d6ef06b6048b59d8c8013f400e4059"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/6eddae66-e9a9-4a12-ad71-ab5b63ceaf98.jsonl": {
+      "bytes": 867047,
+      "sha256": "8c08bbf44e5c93418de4fbd294f3ebe62e2c51e1f482a5fad563799f9762c528"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b.jsonl": {
+      "bytes": 20136320,
+      "sha256": "03becdb70856fbba0228d96aeaace077fb2351c9ad448b3f4b21f8a3d30ea81d"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a06f4fab8278f71d9.jsonl": {
+      "bytes": 2535763,
+      "sha256": "67ce2f50df2539ba360a033d3d54aa0214afbea9558513d02ca2605c7e09ba0c"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a0c74278a553cfaef.jsonl": {
+      "bytes": 922052,
+      "sha256": "c0e4ba7e3ad76d5e43f8b1018cefd517dc18273b24e9ff16d06afaa5d13423e6"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a13b60b6412e1032c.jsonl": {
+      "bytes": 881757,
+      "sha256": "71d517f1055a67fbd5e67b6f0207faeaf4b2a249ccdf771dd6f30d26611c8cd7"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a154d7b2c1c3ea1a5.jsonl": {
+      "bytes": 894437,
+      "sha256": "b5835c1d79db88495ff193e483e297dd7e6d7e60f647ea8e00125c19dd67d711"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a1b8d917f31a1adc5.jsonl": {
+      "bytes": 922597,
+      "sha256": "41dd9a3e1915499c3d4e91cf9d4ce3290e03a90bbaf97cc1a9a72536d7c491ca"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a2209c29c46038456.jsonl": {
+      "bytes": 18241571,
+      "sha256": "a48467e6286335318241ab4e07f5246c6a71e680228d45b9b56eaae4eca66759"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a2211053b3c2ac39f.jsonl": {
+      "bytes": 1553377,
+      "sha256": "289e1eefa13fa324e2395124451e046f8ea1f0b466c882ec46cf373c6eee0125"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a22b4701cfabe7acb.jsonl": {
+      "bytes": 1285259,
+      "sha256": "3a2172d661a3055a8855f856081ee0d4611386a88efe8459b8819cd7a7b01f47"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a272a1204fd6dc7b7.jsonl": {
+      "bytes": 999835,
+      "sha256": "bae99ad4a279152d1a13facc1e90799a42f81b08fc3f7473f0e22b7552e52cd3"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a2c65ed061869a1b3.jsonl": {
+      "bytes": 1800323,
+      "sha256": "72861c792657417d40dbcbc6d38f763c48172619f0718efe5108eb09328b1797"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a31015d7073c46c69.jsonl": {
+      "bytes": 971457,
+      "sha256": "afba5d606a9c7bfa3b2c6bfff0bee9fca0a5278ef412119f10d9b65ae071affd"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a31f18370fe8b2077.jsonl": {
+      "bytes": 1656992,
+      "sha256": "c0c2d9f51ef9936dbbb7214b9e407afde0036391caf010c30fd5fbe1063c87f0"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a40b4db95355a922f.jsonl": {
+      "bytes": 906195,
+      "sha256": "a81e053881def185b5e0856cde8aefacf9ad99ced92144c871fd8da7d0eddbd8"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a431f566823fe3b09.jsonl": {
+      "bytes": 1076617,
+      "sha256": "badb2e3d59c9831ebf54ad94dab3259f17255eae4bfe5e2e726c80a20cc27172"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a4f49a6845175f56f.jsonl": {
+      "bytes": 969359,
+      "sha256": "4e6463ce7abf99cef5899d1db09e7cbca35ff5db706cd8d50f5a97d32f8ce5ca"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a52931d10037e1d86.jsonl": {
+      "bytes": 2298718,
+      "sha256": "5abf3f045d113ac8ff328a2b67abc397395c6a0613c3f3eb523f91e8a555f7b0"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a568d9dcccf836e53.jsonl": {
+      "bytes": 1704165,
+      "sha256": "f89252436cd8937f2d9309a6aa3e069bc6a87fd0303e55284d3c1b2a71d43573"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a59cdef3db57b29f8.jsonl": {
+      "bytes": 24661383,
+      "sha256": "6badf29b2add2773c2dd38f86eea542af076ecdd309781e9d2d3f99148a9873e"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a5c38b0b3731fa6bd.jsonl": {
+      "bytes": 965052,
+      "sha256": "97c7c3832c95a11709e2173d73189b6dcd39c4e0bc9df1ad05d43e15cd44895d"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a5cba4b840e0908fe.jsonl": {
+      "bytes": 2077354,
+      "sha256": "f034513f86b8f24a52b894c38d4286ea09c12ad46080e003bf154fab08adfb87"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a5e86f266f45116fb.jsonl": {
+      "bytes": 1303967,
+      "sha256": "88d3b30a8c892d3536e8fd542a29431bc7b3a2ddb168b411c1d77b04c8c31dc6"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a63202ff8c5817a91.jsonl": {
+      "bytes": 8833141,
+      "sha256": "e6b542f8a1ac94d3e546b1c62a2ced573958ce1bd0961cc55f5f462759fff80a"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a75be486d0f9886b0.jsonl": {
+      "bytes": 975591,
+      "sha256": "e1fad2c8a8e6b04a8cc81f535fe4c7b181df2f4c6d5a2714ab027b04200e2a33"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a7735fec1ede415a8.jsonl": {
+      "bytes": 1090025,
+      "sha256": "4493ec835ffba6854f4d836d4ebaeb548e6992dff28408822905f3de91e20fee"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a7c0418c037e22f79.jsonl": {
+      "bytes": 1790868,
+      "sha256": "5f8756b088d93577f317d9d264d657f1f21c769a294907194aa21bfff60a37c8"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a81b961265f3b1cc9.jsonl": {
+      "bytes": 857525,
+      "sha256": "a79c1cb3be4a637d4c4a3812485c2d6a8f14652bd605f5dcd8e52b783e9f7894"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a82b6fa39ecadddd2.jsonl": {
+      "bytes": 996212,
+      "sha256": "c8205819aca0248874046b842fc6ab7a6ebba714ccb8f31d00c60dfcf81f3245"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a83789c7819b88fb7.jsonl": {
+      "bytes": 1241334,
+      "sha256": "89282f7ac8f8811d8f545dc60a6bc289b7a21b7cd4001ca30372caf1e45b39e9"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a8419980998635c20.jsonl": {
+      "bytes": 2417092,
+      "sha256": "bd2cc49728bae5f5952dbf4ced512e75bfdbe691a30941cdaca0ca94a6dcc992"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a8639fc843cc8268b.jsonl": {
+      "bytes": 3520527,
+      "sha256": "44b900f5f0e69fe22d6fc25c633644808da6eb733a643f6239fa681934463099"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a8e804ba168b0116d.jsonl": {
+      "bytes": 789454,
+      "sha256": "0edfb419e6f4b0e1441a7dff853551d869100534fabe1e18f720e085ae9d6177"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a9302b2e700f5bc8d.jsonl": {
+      "bytes": 847308,
+      "sha256": "158515b1415550a6b44168b94935fdaf8e9b5c930b92ea23d0d17304bd2ae431"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a97a6788aa39e45d7.jsonl": {
+      "bytes": 4207754,
+      "sha256": "b409240e9d781f921ef32732f3f642b47a8ee7d0c18fc184b74ded6f565909ca"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-a98e8efbe33bf4ffc.jsonl": {
+      "bytes": 997828,
+      "sha256": "5f8ee44305422ce239de19653799d1d266dad9fe0fb4253265210298f64415c2"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-aa2cd3b41927501ed.jsonl": {
+      "bytes": 9476170,
+      "sha256": "7155fbeeed14c2fa1434b69a2c694fd28d21f043a6057edd49b7a53a4acc29e1"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-aadc9b6a3326c0b9f.jsonl": {
+      "bytes": 1334013,
+      "sha256": "cc96eeb3b3464a9dee497c9d4d44c7383c1305a9e491fb0834d3d1c8ab75cd17"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ab3a480476445558e.jsonl": {
+      "bytes": 28114583,
+      "sha256": "3693fa423c14628eddb958f53e4c877e95c505e2e4754e908c0de5b7d0de5e2c"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ab4678a92f6bf63e8.jsonl": {
+      "bytes": 1008643,
+      "sha256": "4cb555aaae608c1f962e98282a2ee7efd90b247f0b4904e95c5a65ba8979c743"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ab734e5754322d805.jsonl": {
+      "bytes": 992273,
+      "sha256": "01b8fa75659442d00d4fcf412fd6bbd493a2a0aa51ef3ed3e0778d584a679885"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ac09d80504c914c2b.jsonl": {
+      "bytes": 720541,
+      "sha256": "a557f9fc4493c7b2056141668ec50b414d26e45e1157406f80be0a054d15032e"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ac3bf6e71a5cea0dc.jsonl": {
+      "bytes": 951772,
+      "sha256": "05bbc5e662bb900600bcc6d57f3e803f7fd35b178d2163bc583db20859a33a70"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-acbe520c5b39b3886.jsonl": {
+      "bytes": 954449,
+      "sha256": "c2e488900ea794ed31c789a888fd4a71a91104f977741bdfecc63741ef24f86a"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ad68d265ca5ca9dc9.jsonl": {
+      "bytes": 1219481,
+      "sha256": "66a1373c3f37fd1d0b17b453b0e52cfffdb760cbaf580d5caaa9b25363e7ab85"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-ae38885c7bfb42682.jsonl": {
+      "bytes": 974270,
+      "sha256": "200a80f2d4c8f37b3afbc05334dfa287b7a335101e1eaba5a44067c0a1a5220a"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-aeab46c58dcb5a148.jsonl": {
+      "bytes": 7901300,
+      "sha256": "b89f087501a9dcb44bcb1e61dacc7a2d1cbe26c7850444d7d2681ffcdc7052c3"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-aebf910ee8e224b04.jsonl": {
+      "bytes": 794219,
+      "sha256": "48b162b29baccfa785ee57ee5334d86c2acf690285bd666d8092620351f63de3"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-af4f30191201e0de4.jsonl": {
+      "bytes": 1783314,
+      "sha256": "14348e1bb9e1090a48f415c19bcf782a6f8bcf8e3fa85f1386b3248836b9d1ab"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-af85f0b1f7903e60d.jsonl": {
+      "bytes": 1272794,
+      "sha256": "2bcfe6a31df81503c970d276770a5da57b612483adbc3e5e6c860cfb01ddca7f"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/82063589-65a8-4b59-b0a5-f1c1bfd1232b/subagents/agent-afacf6e963d9cfb3e.jsonl": {
+      "bytes": 1576087,
+      "sha256": "ca7a8b3ab7504e1c2d987ab87de460988cccdfd247b388ea5221f5c7a625da6f"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e.jsonl": {
+      "bytes": 9170419,
+      "sha256": "c23f0f52ca505eaa126094ddfb050e91bff3e33264c98ce36ff3a58d3b1a35a7"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a0b8d9ba3834198f5.jsonl": {
+      "bytes": 381607,
+      "sha256": "4abb54c4738e78a444feb811e36dfdb00ebde826bc7a21801852381961db4046"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a1797a4038c673dee.jsonl": {
+      "bytes": 399321,
+      "sha256": "92b66636e4abdf835e3baf331f45e5b5a5d938e20d72900c156393e34714f530"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a22a6ac83929609af.jsonl": {
+      "bytes": 480438,
+      "sha256": "406eb27d02e985b25236938f9d27579c003d45cb27ccbaab91e9bd01c1c5081a"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a27673fa005c63335.jsonl": {
+      "bytes": 2564795,
+      "sha256": "1635477f6e089595b00ed834a8014709834af92e430a83555acc6c211240d686"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a54aad113f77512f6.jsonl": {
+      "bytes": 1227460,
+      "sha256": "a00258e356a1e8c6d85397cc6ad7b4cab5c0d008bdc43e9b7c0a91b628d96eef"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a60976ee73dfe1e74.jsonl": {
+      "bytes": 1046144,
+      "sha256": "23a1a2bf514576ba740a5a07ed148121a9fe7007c7274f8edcbeb77732d70816"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a694d30748957384c.jsonl": {
+      "bytes": 290662,
+      "sha256": "5cc0f8722c0591684fd0d43f4512adf92e01d3309d2778be119fc90697a23c17"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a7c76b5a34e412326.jsonl": {
+      "bytes": 227724,
+      "sha256": "90cc14d32373bd14341b2bff9a7ef0a59e12dc7bf5c910b8d902caa73e42a088"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a8cd9cf6cb7c5be50.jsonl": {
+      "bytes": 566200,
+      "sha256": "670a386e1bc9ec9e8b26b4dc157e1ae4c586735c9231298e3a48d21664573d97"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a92af51074f26b3f6.jsonl": {
+      "bytes": 778190,
+      "sha256": "28b7f3b8d48c7febb92c20f93c7c0d0b5966e63c200b543abd96377c3dcc4437"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-a9fb778a3ce413e94.jsonl": {
+      "bytes": 585739,
+      "sha256": "4b185a66acd076ec9cbcd1caaec5310a6cd118d5476e3b7fe10f691756296ca0"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-aada6eca731e7a0c5.jsonl": {
+      "bytes": 280381,
+      "sha256": "2cb65c286318a433a406f16da2439b86790f2780ea091f1a849bdb19b5823d42"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-ab372f04ed32b0026.jsonl": {
+      "bytes": 444834,
+      "sha256": "2e7ee4c5598972c7d00db25185e21f19aeedf32aa97d75627387da401fdcb778"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-ab9e2005c3dde13af.jsonl": {
+      "bytes": 414240,
+      "sha256": "baa9954f714ec089de3c6e265b02588d2f9b361fcad6c93aa18b2108fe630713"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-abe378752689bb742.jsonl": {
+      "bytes": 609582,
+      "sha256": "adf88643aaeb71ce89a837c2a1695403ef2b7f887dc977a0ab1f71c1d66785ae"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-af0597461cea504b2.jsonl": {
+      "bytes": 490850,
+      "sha256": "922697abc21523eace005e6215739fe6425e31d7ef69b2c7fbf93353742423ee"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/8f9907a3-fde3-415d-8eec-2f7cebd6978e/subagents/agent-aff47669d1882f44b.jsonl": {
+      "bytes": 300545,
+      "sha256": "bfc0a7a3c3faa8712e4cb001393a5a4dec1c70ba2b966f5c1be941e9922a17e9"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/a34e50d3-a41d-4aba-b111-eb1e94189bf7.jsonl": {
+      "bytes": 7276617,
+      "sha256": "73b83c41a51950e07b41049b9bd6b455c8f13f72a9d9f387960e11745a741e02"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/a4f26704-9b65-47bb-8202-483e7b8f2dc4.jsonl": {
+      "bytes": 169201,
+      "sha256": "d5bcfe09d84a313703295d7a97c14cf9fce652062f8509999ea5e2b3360582df"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/c15ab1fa-a877-4afc-837d-a2ce47876bf0.jsonl": {
+      "bytes": 2335635,
+      "sha256": "b54573fbe23280bdb351769a7fba2968574240213d1f90b82690605c8d2278c6"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/ca19e0d0-e7f9-4517-b9e1-554384b3c748.jsonl": {
+      "bytes": 3357909,
+      "sha256": "eed630329efe77273cc89c46f643d6be73cab95c31a6c66e1e1bb169bd86c1d0"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/f6b53299-1c63-441a-83fb-cd2f13f5bf16.jsonl": {
+      "bytes": 6006859,
+      "sha256": "4d495a86f28d937fd1d8abd095747f805dc352689a3d55f3be2e8687324bbc57"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/fb45ffc2-6540-4a1b-a775-de53bd6b612f.jsonl": {
+      "bytes": 2202699,
+      "sha256": "bb87cd6983a543e6973d9d2e78ea7fb019a56e75106e503bf199f9a5e2663927"
+    },
+    "transcripts/02-.claude-kat/-home-marius-work-stefanini-southpole-MRV-poc/fc84cf29-fd9b-42a4-be45-dfb5700f8991.jsonl": {
+      "bytes": 53298,
+      "sha256": "6c06a89c886400253fc686cbb366d9f7e1ff8b4eb80d3cd336b270bf3dd49063"
+    },
+    "usage_dbs/00-usage.db": {
+      "bytes": 93745152,
+      "sha256": "4d5c3d1040c2f35b39aeec8c5957adf2864e5fdd15ee882ddcb89190269e3d5e"
+    }
+  },
+  "repos": {
+    "MRV-poc": "5dbae818f7537dc75ed4641494994b3a9016e4a1"
+  },
+  "versions": {
+    "claude_code": "2.1.284 (Claude Code)",
+    "codescout_sha": "5ae94267a31b71219fba7e4e76210ac7ee30afe9",
+    "codex": "codex-cli 0.154.0"
+  }
+}

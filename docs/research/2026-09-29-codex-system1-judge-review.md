@@ -49,7 +49,7 @@ Integrate `scripts/measure/judge.py`, `scripts/measure/run.py`, `tests/test_meas
 
 Keep the frozen prompt, labels, thresholds and historical gate output unchanged. The next useful step is human adjudication of the target: rule-form warning, factual mistake, and correction relationship must not share a gold label without an explicit mapping. A future judge attempt requires freshly registered held-out cases. The expensive real-corpus measurement stays stopped.
 
-The raw JSON and logs remain in the original session's temporary `scratchpad/t9b`. Hashes are not a backup. Preserve the originals in an appropriate private durable archive before scratch cleanup; this review did not move them or publish raw transcripts.
+The raw JSON and logs are preserved privately, outside the repo, as corpus `2026-09-29-judge-gate-1` under `~/work/claude/measurement-corpora/` (frozen 2026-09-29). Its committed manifest is `docs/evals/data/2026-09-27-system1-base-rates/corpora/2026-09-29-judge-gate-1.manifest.json`, and all 243 vote-log hashes and the `gate.json` hash recorded in this review match the frozen copy. It is one copy on one disk, so an off-machine backup is still owed. This review did not publish raw transcripts.
 
 ## Subsequent operator clarification — 2026-09-29
 
