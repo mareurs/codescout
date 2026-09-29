@@ -15,6 +15,7 @@ import json
 import os
 import pathlib
 import random
+import signal
 import sys
 import tempfile
 import unittest
@@ -437,7 +438,7 @@ class CliTests(Base):
         d = make_set(self.root, ["a"])
         shown = []
         rc, out = _cli(["next", str(d)], ask=scripted(["n", "s", "n", ""]), show=shown.append,
-                       clock=Clock(1.0, 2.0))
+                       clock=Clock(1.0, 2.0), confirm=False)
         self.assertEqual(rc, 0)
         self.assertEqual(len(shown), 1)
         self.assertIn(PACKET_SENTINEL, shown[0])  # positive control: the packet WAS shown, to show()
@@ -479,7 +480,7 @@ class TtyGuardTests(Base):
         d = make_set(self.root, ["a"])
         shown = []
         rc, out = _cli(["next", str(d)], ask=scripted(["n", "s", "n", ""]), show=shown.append,
-                       clock=Clock(1.0, 2.0))
+                       clock=Clock(1.0, 2.0), confirm=False)
         self.assertEqual(rc, 0)
         self.assertIn(PACKET_SENTINEL, shown[0])
 
@@ -691,6 +692,209 @@ class RelabelPickTests(Base):
         self.assertEqual(rc, 1)
         self.assertIn("9", err.getvalue() + out)
         self.assertIn("eligible", err.getvalue() + out)
+
+
+LABELS_PROMPT = "labels [v=verify q=qualify c=correct (any combination) | n=none | u=unresolved | p=re-show | x=quit]: "
+DELIVERY_PROMPT = "delivery [s=silent q=quiet i=interrupt | p=re-show | x=quit]: "
+RECALL_PROMPT = "recall y/n: do you remember how this turned out (from outside the packet)? [p=re-show | x=quit]: "
+NOTE_PROMPT = "note (optional, free text; an x here is a note, not a quit): "
+KEEP_PROMPT = "keep = enter, redo = r, x=quit: "
+RULE_LINE = ("that pairing is not allowed: verify/qualify/correct need quiet or interrupt; "
+             "none/unresolved need silent")
+
+
+class OperatorPromptTests(unittest.TestCase):
+    def test_prompts_and_the_echo_are_pinned_word_for_word(self):
+        said = []
+        ask = scripted(["cv", "i", "y", "my note", ""])
+        rec = label.label_one("c", "h", "PKT", ask, lambda t: None, Clock(0.0, 1.0), confirm=True, say=said.append)
+        self.assertEqual(ask.prompts, [LABELS_PROMPT, DELIVERY_PROMPT, RECALL_PROMPT, NOTE_PROMPT, KEEP_PROMPT])
+        for p in (LABELS_PROMPT, DELIVERY_PROMPT, RECALL_PROMPT, KEEP_PROMPT):
+            self.assertIn("x=quit", p)  # every prompt where x quits says so
+        self.assertEqual(said, ["you answered: labels = verify, correct; delivery = interrupt; "
+                                "recall = yes (I remember how this turned out); note = 'my note'"])
+        self.assertEqual((rec["labels"], rec["delivery"], rec["recall"], rec["note"]),
+                         (["verify", "correct"], "interrupt", "y", "my note"))
+
+    def test_the_echo_for_none_recall_no_and_an_empty_note(self):
+        said = []
+        label.label_one("c", "h", "P", scripted(["n", "s", "n", "", ""]), lambda t: None, Clock(0.0, 1.0),
+                        confirm=True, say=said.append)
+        self.assertEqual(said, ["you answered: labels = none; delivery = silent; "
+                                "recall = no (I do not remember how this turned out); note = (none)"])
+
+    def test_without_confirm_there_is_no_keep_prompt_and_nothing_is_said(self):
+        said = []
+        ask = scripted(["n", "s", "n", ""])
+        label.label_one("c", "h", "P", ask, lambda t: None, Clock(0.0, 1.0), say=said.append)
+        self.assertEqual(len(ask.prompts), 4)  # the pre-confirm behaviour is unchanged
+        self.assertEqual(said, [])
+
+    def test_redo_reshows_the_packet_and_reasks_from_the_labels_prompt(self):
+        shown = []
+        ask = scripted(["v", "q", "n", "first", "r", "c", "i", "y", "second", ""])
+        rec = label.label_one("c", "h", "PKT", ask, shown.append, Clock(0.0, 5.0), confirm=True, say=lambda m: None)
+        self.assertEqual(shown, ["PKT", "PKT"])
+        self.assertEqual(ask.prompts[5], LABELS_PROMPT)  # the redo starts at the labels prompt
+        self.assertEqual((rec["labels"], rec["delivery"], rec["recall"], rec["note"]),
+                         (["correct"], "interrupt", "y", "second"))
+        self.assertEqual(rec["seconds"], 5.0)  # the whole case, first attempt included
+
+    def test_an_unrecognised_keep_answer_is_asked_again(self):
+        ask = scripted(["n", "s", "n", "", "maybe", "r ", "n", "s", "n", "", "KEEP?", ""])
+        rec = label.label_one("c", "h", "P", ask, lambda t: None, Clock(0.0, 1.0), confirm=True, say=lambda m: None)
+        self.assertEqual(ask.prompts.count(KEEP_PROMPT), 4)
+        self.assertEqual(rec["labels"], ["none"])
+
+    def test_x_at_the_keep_prompt_quits(self):
+        with self.assertRaises(label.Quit):
+            label.label_one("c", "h", "P", scripted(["n", "s", "n", "", "x"]), lambda t: None, Clock(0.0, 1.0),
+                            confirm=True, say=lambda m: None)
+
+    def test_the_violated_pairing_rule_is_printed_once_per_refusal(self):
+        said = []
+        # 'v'+'s' is forbidden; then 'n'+'q' is forbidden; then 'q'+'q' is valid
+        ask = scripted(["v", "s", "n", "q", "q", "q", "n", ""])
+        label.label_one("c", "h", "P", ask, lambda t: None, Clock(0.0, 1.0), say=said.append)
+        self.assertEqual(said, [RULE_LINE, RULE_LINE])
+        said2 = []  # negative control: a valid pairing prints no rule
+        label.label_one("c", "h", "P", scripted(["v", "q", "n", ""]), lambda t: None, Clock(0.0, 1.0), say=said2.append)
+        self.assertEqual(said2, [])
+
+    def test_p_reshows_the_packet_at_the_labels_delivery_and_recall_prompts_only(self):
+        shown = []
+        ask = scripted(["p", "n", "P", "s", "p", "n", "p"])  # a "p" at the note prompt is a note
+        rec = label.label_one("c", "h", "PKT", ask, shown.append, Clock(0.0, 1.0))
+        self.assertEqual(shown, ["PKT", "PKT", "PKT", "PKT"])  # first show + p at labels, delivery, recall
+        self.assertEqual((rec["labels"], rec["delivery"], rec["recall"], rec["note"]), (["none"], "silent", "n", "p"))
+        self.assertEqual(ask.prompts[:3], [LABELS_PROMPT, LABELS_PROMPT, DELIVERY_PROMPT])
+
+
+class ProgressTests(Base):
+    def test_progress_lines_come_before_each_packet_and_the_final_line_counts(self):
+        d = make_set(self.root, ["a", "b", "c"])
+        write_jsonl(d / "labels.jsonl", [record("a", sha_of(d, "a"), ["none"], "silent")])
+        events = []
+        out = label.run_next(d, False, scripted(["n", "s", "n", ""] * 2), lambda t: events.append("show"),
+                             Clock(*[float(i) for i in range(20)]), say=lambda m: events.append(m))
+        self.assertEqual(events, ["case 1 of 2 (remaining 2)", "show", "case 2 of 2 (remaining 1)", "show",
+                                  "labelled 2 this session, 3 total, 0 remaining"])
+        self.assertEqual((out["labelled"], out["total"], out["remaining"]), (2, 3, 0))
+
+    def test_the_final_line_after_a_quit_counts_what_is_left(self):
+        d = make_set(self.root, ["a", "b", "c"])
+        said = []
+        out = label.run_next(d, False, scripted(["n", "s", "n", "", "x"]), lambda t: None,
+                             Clock(*[float(i) for i in range(20)]), say=said.append)
+        self.assertEqual(said[-1], "labelled 1 this session, 1 total, 2 remaining")
+        self.assertEqual((out["labelled"], out["total"], out["remaining"]), (1, 1, 2))
+
+    def test_relabel_progress_counts_the_pick_only(self):
+        ids = [f"c{i:02d}" for i in range(15)]
+        d = make_set(self.root, ids, name="rp")
+        write_jsonl(d / "labels.jsonl", [record(c, sha_of(d, c), ["none"], "silent", when=NOW - timedelta(days=5))
+                                         for c in ids[:10]] +
+                    [record(c, sha_of(d, c), ["none"], "silent", when=NOW - timedelta(days=1)) for c in ids[10:]])
+        said = []
+        label.run_next(d, True, scripted(["n", "s", "n", "", "x"]), lambda t: None,
+                       Clock(*[float(i) for i in range(20)]), now=NOW, say=said.append)
+        self.assertEqual(said[0], "case 1 of 10 (remaining 10)")
+        self.assertEqual(said[-1], "labelled 1 this session, 1 total, 9 remaining")
+
+    def test_nothing_is_written_until_keep_and_x_at_keep_writes_nothing(self):
+        d = make_set(self.root, ["a"])
+        seen = []
+        answers = iter(["n", "s", "n", "", ""])
+
+        def ask(prompt):
+            if prompt == KEEP_PROMPT:
+                seen.append((d / "labels.jsonl").exists())
+            return next(answers)
+
+        label.run_next(d, False, ask, lambda t: None, Clock(1.0, 2.0), confirm=True, say=lambda m: None)
+        self.assertEqual(seen, [False])  # not on disk when keep was asked...
+        self.assertEqual(len(read_jsonl(d / "labels.jsonl")), 1)  # ...and on disk after it
+        d2 = make_set(self.root, ["a"], name="s2")
+        out = label.run_next(d2, False, scripted(["n", "s", "n", "", "x"]), lambda t: None, Clock(1.0, 2.0),
+                             confirm=True, say=lambda m: None)
+        self.assertEqual(out["labelled"], 0)
+        self.assertFalse((d2 / "labels.jsonl").exists())
+
+    def test_the_cli_confirms_and_prints_progress(self):
+        d = make_set(self.root, ["a"])
+        rc, out = _cli(["next", str(d)], ask=scripted(["n", "s", "n", "", ""]), show=lambda t: None,
+                       clock=Clock(1.0, 2.0))
+        self.assertEqual(rc, 0)
+        self.assertIn("case 1 of 1 (remaining 1)\n", out)
+        self.assertIn("you answered: labels = none;", out)
+        self.assertIn("labelled 1 this session, 1 total, 0 remaining\n", out)
+        self.assertEqual(len(read_jsonl(d / "labels.jsonl")), 1)
+        self.assertNotIn(PACKET_SENTINEL, out)  # packet text goes only through show()
+
+
+class PagerBehaviourTests(unittest.TestCase):
+    def test_the_default_pager_does_not_use_the_alternate_screen(self):
+        env = {k: v for k, v in os.environ.items() if k != "PAGER"}
+        calls = []
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(label.subprocess, "run", lambda argv, **kw: calls.append(argv)):
+            label._pager_show("T")
+        self.assertEqual(calls, [["less", "-R", "-X"]])
+
+    def test_sigint_is_ignored_while_the_pager_runs_and_restored_after(self):
+        marker = lambda *a: None  # noqa: E731 - a distinct previous handler to find again
+        prev = signal.signal(signal.SIGINT, marker)
+        self.addCleanup(signal.signal, signal.SIGINT, prev)
+        during = []
+        with mock.patch.object(label.subprocess, "run",
+                               lambda argv, **kw: during.append(signal.getsignal(signal.SIGINT))):
+            label._pager_show("T")
+        self.assertEqual(during, [signal.SIG_IGN])
+        self.assertIs(signal.getsignal(signal.SIGINT), marker)
+
+    def test_sigint_handler_is_restored_even_when_the_pager_raises(self):
+        marker = lambda *a: None  # noqa: E731
+        prev = signal.signal(signal.SIGINT, marker)
+        self.addCleanup(signal.signal, signal.SIGINT, prev)
+
+        def boom(argv, **kw):
+            raise RuntimeError("pager blew up")
+
+        with mock.patch.object(label.subprocess, "run", boom):
+            with self.assertRaises(RuntimeError):
+                label._pager_show("T")
+        self.assertIs(signal.getsignal(signal.SIGINT), marker)
+
+    def test_a_pager_that_ran_and_exited_non_zero_does_not_print_the_packet_again(self):
+        buf = io.StringIO()
+        with mock.patch.dict(os.environ, {"PAGER": "false"}), contextlib.redirect_stdout(buf):
+            label._pager_show("PAGER-RAN-TEXT")  # the real `false`: starts, exits 1, never reads stdin
+        self.assertEqual(buf.getvalue(), "")
+        # positive control: a pager that could not start DOES fall back to print
+        buf2 = io.StringIO()
+        with mock.patch.dict(os.environ, {"PAGER": "/nonexistent/pager-binary"}), contextlib.redirect_stdout(buf2):
+            label._pager_show("PAGER-RAN-TEXT")
+        self.assertEqual(buf2.getvalue(), "PAGER-RAN-TEXT\n")
+
+    def test_a_pager_that_fails_to_start_prints_once_and_restores_sigint(self):
+        marker = lambda *a: None  # noqa: E731
+        prev = signal.signal(signal.SIGINT, marker)
+        self.addCleanup(signal.signal, signal.SIGINT, prev)
+        buf = io.StringIO()
+
+        def cannot_start(argv, **kw):
+            raise FileNotFoundError("no such pager")
+
+        with mock.patch.object(label.subprocess, "run", cannot_start), contextlib.redirect_stdout(buf):
+            label._pager_show("ONCE")
+        self.assertEqual(buf.getvalue(), "ONCE\n")
+        self.assertIs(signal.getsignal(signal.SIGINT), marker)
+
+
+class DocstringTests(unittest.TestCase):
+    def test_append_only_is_stated_for_complete_records(self):
+        self.assertIn("append-only for complete records; a torn final fragment is cut on the next append",
+                      label.__doc__)
 
 
 if __name__ == "__main__":

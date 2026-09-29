@@ -12,7 +12,7 @@ whose hashes DISAGREE -- never a label, a note, packet text, or an id paired wit
 Label-set layout (created by run.py, outside the repo):
     draw.json      {"set_id", "seed", "cases": [{"case_id", "sha256"}], "order": [case_id, ...]}
     packets/<case_id>.md
-    labels.jsonl   append-only, written here
+    labels.jsonl   append-only for complete records; a torn final fragment is cut on the next append
     relabels.jsonl same schema, the re-label pass
 """
 import argparse
@@ -23,6 +23,7 @@ import os
 import pathlib
 import random
 import shlex
+import signal
 import statistics
 import subprocess
 import sys
@@ -81,38 +82,77 @@ def _iso(t):
     return datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _ask_until(ask, prompt, parse):
-    """Ask until parse() accepts. 'x' quits here; the free-text note prompt does NOT use this
-    helper, so a note may legitimately be "x"."""
+def _ask_until(ask, prompt, parse, reshow=None):
+    """Ask until parse() accepts. 'x' quits here; 'p' re-shows the packet (when `reshow` is given) and
+    asks again. The free-text note prompt does NOT use this helper, so a note may legitimately be "x"
+    or "p"."""
     while True:
         raw = ask(prompt)
-        if raw.strip().lower() == "x":
+        low = raw.strip().lower()
+        if low == "x":
             raise Quit()
+        if low == "p" and reshow is not None:
+            reshow()
+            continue
         val = parse(raw)
         if val is not None:
             return val
 
 
-def label_one(case_id, sha256, packet_text, ask, show, clock):
+LABELS_PROMPT = "labels [v=verify q=qualify c=correct (any combination) | n=none | u=unresolved | p=re-show | x=quit]: "
+DELIVERY_PROMPT = "delivery [s=silent q=quiet i=interrupt | p=re-show | x=quit]: "
+RECALL_PROMPT = "recall y/n: do you remember how this turned out (from outside the packet)? [p=re-show | x=quit]: "
+NOTE_PROMPT = "note (optional, free text; an x here is a note, not a quit): "
+KEEP_PROMPT = "keep = enter, redo = r, x=quit: "
+RULE_LINE = ("that pairing is not allowed: verify/qualify/correct need quiet or interrupt; "
+             "none/unresolved need silent")
+
+
+def _echo(labels, delivery, recall, note):
+    """The parsed answers in words, for the operator to check before anything is written."""
+    said = ("yes (I remember how this turned out)" if recall == "y"
+            else "no (I do not remember how this turned out)")
+    shown_note = repr(note) if note else "(none)"
+    return (f"you answered: labels = {', '.join(labels)}; delivery = {delivery}; "
+            f"recall = {said}; note = {shown_note}")
+
+
+def label_one(case_id, sha256, packet_text, ask, show, clock, confirm=False, say=None):
     """Show one packet, collect the answers, return the record. Invalid input is asked again;
-    a forbidden label/delivery pair restarts the three questions. 'x' raises Quit at the labels,
-    delivery and recall prompts only; at the free-text note prompt "x" is stored as the note."""
+    a forbidden label/delivery pair says which rule it broke and restarts the three questions. 'x'
+    raises Quit at the labels, delivery and recall prompts (and the keep prompt) only; at the free-text
+    note prompt "x" is stored as the note. 'p' at the labels, delivery or recall prompt re-shows the
+    packet. With confirm=True the parsed answers are echoed in words through `say` and the operator
+    answers `keep = enter, redo = r`: redo shows the packet again and asks from the labels prompt;
+    nothing is returned (so nothing is written) before keep. `seconds` covers the whole case, redos
+    included."""
+    say = say or (lambda m: None)
     t0 = clock()
     show(packet_text)
+
+    def reshow():
+        show(packet_text)
+
     while True:
-        labels = _ask_until(
-            ask, "labels [v=verify q=qualify c=correct, any combination | n=none | u=unresolved | x=quit]: ",
-            _parse_labels)
-        delivery = _ask_until(
-            ask, "delivery [s=silent q=quiet i=interrupt]: ",
-            lambda s: _DELIVERY_LETTERS.get(s.strip().lower()))
-        try:
-            validate(labels, delivery)
-        except ValueError:
-            continue
-        break
-    recall = _ask_until(ask, "recall [y/n]: ", lambda s: s.strip().lower() if s.strip().lower() in ("y", "n") else None)
-    note = ask("note (optional): ")
+        while True:
+            labels = _ask_until(ask, LABELS_PROMPT, _parse_labels, reshow)
+            delivery = _ask_until(ask, DELIVERY_PROMPT, lambda s: _DELIVERY_LETTERS.get(s.strip().lower()), reshow)
+            try:
+                validate(labels, delivery)
+            except ValueError:
+                say(RULE_LINE)
+                continue
+            break
+        recall = _ask_until(ask, RECALL_PROMPT,
+                            lambda s: s.strip().lower() if s.strip().lower() in ("y", "n") else None, reshow)
+        note = ask(NOTE_PROMPT)
+        if not confirm:
+            break
+        say(_echo(labels, delivery, recall, note))
+        answer = _ask_until(ask, KEEP_PROMPT, lambda s: s.strip().lower() if s.strip().lower() in ("", "r") else None)
+        if answer == "":
+            break
+        show(packet_text)  # redo: the packet is shown again and the questions start over
     t1 = clock()
     return {
         "case_id": case_id, "packet_sha256": sha256, "labels": labels, "delivery": delivery,
@@ -251,14 +291,18 @@ def _append(path, rec):
         os.fsync(f.fileno())
 
 
-def run_next(set_dir, relabel, ask, show, clock, now=None, warn=None):
+def run_next(set_dir, relabel, ask, show, clock, now=None, warn=None, confirm=False, say=None):
     """Label the not-yet-labelled cases in draw order. Each record is appended and fsynced before
     the next packet is shown. A packet whose bytes no longer match draw.json is refused, not shown;
     the bytes hashed are the bytes displayed (one read). With relabel=True the pick comes from
     relabel_pick.json (drawn and persisted on the first run; RelabelRefused if under RELABEL_N
-    cases are eligible). Returns {"labelled": n, "refused": [case_id, ...]}."""
+    cases are eligible). `confirm` adds the echo-and-keep step (see label_one); `say` receives the
+    progress lines ("case i of N (remaining R)" before each packet, and a final "labelled N this
+    session, M total, R remaining", counts only). Returns {"labelled": n, "refused": [case_id, ...],
+    "total": m, "remaining": r}."""
     set_dir = pathlib.Path(set_dir)
     archive._refuse_if_inside_repo(set_dir)
+    say = say or (lambda m: None)
     draw = _draw(set_dir)
     sha_by_id = {c["case_id"]: c["sha256"] for c in draw["cases"]}
     target = set_dir / ("relabels.jsonl" if relabel else "labels.jsonl")
@@ -266,10 +310,9 @@ def run_next(set_dir, relabel, ask, show, clock, now=None, warn=None):
     wanted = None
     if relabel:
         wanted = _relabel_wanted(set_dir, draw, now)
+    todo = [cid for cid in draw["order"] if cid not in done and (wanted is None or cid in wanted)]
     labelled, refused = 0, []
-    for cid in draw["order"]:
-        if cid in done or (wanted is not None and cid not in wanted):
-            continue
+    for i, cid in enumerate(todo, start=1):
         packet = set_dir / "packets" / f"{cid}.md"
         data = packet.read_bytes() if packet.exists() else None
         if data is None or hashlib.sha256(data).hexdigest() != sha_by_id[cid]:
@@ -277,13 +320,16 @@ def run_next(set_dir, relabel, ask, show, clock, now=None, warn=None):
             (warn or (lambda m: print(m, file=sys.stderr)))(f"refused {cid}: packet does not match draw.json")
             continue
         text = data.decode("utf-8")
+        say(f"case {i} of {len(todo)} (remaining {len(todo) - labelled})")
         try:
-            rec = label_one(cid, sha_by_id[cid], text, ask, show, clock)
+            rec = label_one(cid, sha_by_id[cid], text, ask, show, clock, confirm=confirm, say=say)
         except (Quit, EOFError, KeyboardInterrupt):
             break
         _append(target, rec)
         labelled += 1
-    return {"labelled": labelled, "refused": refused}
+    total, remaining = len(done) + labelled, len(todo) - labelled
+    say(f"labelled {labelled} this session, {total} total, {remaining} remaining")
+    return {"labelled": labelled, "refused": refused, "total": total, "remaining": remaining}
 
 
 # ---------------------------------------------------------------- agent-safe reports
@@ -333,14 +379,37 @@ def verify(set_dir):
 # ---------------------------------------------------------------- CLI
 
 def _pager_show(text):
-    pager = os.environ.get("PAGER", "less -R")
+    """Page `text`. `less -R -X` by default: -X keeps the packet on the screen (no alternate-screen
+    clear) while the questions are asked. SIGINT is ignored in this process while the pager runs, so a
+    Ctrl-C meant for `less` cannot kill us first and leave the terminal in the pager's mode; the
+    previous handler is restored in a finally. A pager that could not START (empty $PAGER, a missing
+    binary, unbalanced quotes) falls back to print; one that ran and exited non-zero does NOT print the
+    packet again (the operator has seen it, and answering `p` shows it again)."""
+    pager = os.environ.get("PAGER", "less -R -X")
     try:
-        subprocess.run(shlex.split(pager), input=text, text=True, check=True)
-    except (OSError, IndexError, subprocess.SubprocessError, ValueError):
-        print(text)  # IndexError: an empty $PAGER splits to [] and subprocess.run([]) raises it
+        argv = shlex.split(pager)
+    except ValueError:
+        print(text)
+        return
+    if not argv:
+        print(text)  # an empty $PAGER splits to []
+        return
+    swapped = True
+    try:
+        previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except ValueError:  # not the main thread: no handler to swap
+        swapped, previous = False, None
+    try:
+        try:
+            subprocess.run(argv, input=text, text=True)  # no check=: a non-zero exit is not a failure to show
+        except OSError:
+            print(text)
+    finally:
+        if swapped:
+            signal.signal(signal.SIGINT, previous)
 
 
-def main(argv=None, ask=None, show=None, clock=None, now=None):
+def main(argv=None, ask=None, show=None, clock=None, now=None, confirm=True):
     ap = argparse.ArgumentParser(prog="label.py")
     sub = ap.add_subparsers(dest="cmd", required=True)
     n = sub.add_parser("next")
@@ -363,11 +432,12 @@ def main(argv=None, ask=None, show=None, clock=None, now=None):
         return 1
     try:
         out = run_next(args.set_dir, args.relabel, ask or input, show or _pager_show,
-                       clock or time.time, now=now)
+                       clock or time.time, now=now, confirm=confirm, say=print)
     except RelabelRefused as e:
         print(str(e), file=sys.stderr)
         return 1
-    print(f"labelled {out['labelled']}, refused {len(out['refused'])}")
+    if out["refused"]:
+        print(f"refused {len(out['refused'])} packet(s) that do not match draw.json")
     return 1 if out["refused"] else 0
 
 
