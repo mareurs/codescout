@@ -3,8 +3,14 @@
 Model-free. A packet shows the operator's last message (or, for a hand-back, the dispatch prompt),
 the last CONTEXT_MESSAGES assistant messages before the decision point WITH their tool output, and
 the message itself with the tool calls it is about to run. Nothing at or after the decision point
-except the message's own entries, and no identifier or timestamp, ever appears in it. A token-shaped
-string in the packet refuses the build (TokenFound) rather than being shown.
+except the message's own entries, and no identifier or timestamp, ever appears in it. The packet is
+at most PACKET_CHARS characters in total, always.
+
+A token-shaped string refuses the build (TokenFound). The check is made on the SOURCE of every piece
+before any cut (a token half-cut by a tail/head/trim would otherwise render its secret body while the
+final text no longer matches the pattern): it refuses when a match OVERLAPS the range that is kept,
+and does not refuse for a match wholly inside dropped material (a dropped head, or a context message
+removed by the cap), which shows the operator nothing.
 """
 import hashlib
 import json
@@ -30,11 +36,13 @@ NO_RESULT = "(no result before this point)"
 MINUS = "−"
 
 _TOKEN_RE = re.compile(r"gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,}")
-_EXIT_JSON_RE = re.compile(r'"exit_code"\s*:\s*(-?\d+)')
-_EXIT_LINE_RE = re.compile(r"^Exit code (-?\d+)$", re.MULTILINE)
+# run_command's compact summary (src/tools/run_command/output.rs format_run_command): "✗ exit 101 · ..."
+_EXIT_SUMMARY_RE = re.compile(r"[✓✗] exit (-?\d+)\b")
+_EXIT_LINE_RE = re.compile(r"Exit code (-?\d+)")
 _UUID_RE = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
-_TIMESTAMP_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?")
-_API_ID_RE = re.compile(r"\b(?:msg|toolu)_[A-Za-z0-9]+")
+_TIMESTAMP_RE = re.compile(
+    r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:\s?(?:Z|[+-]\d{2}:?\d{2}))?")
+_API_ID_RE = re.compile(r"\b(?:msg|toolu)_01[A-Za-z0-9]{20,}")
 
 
 class TokenFound(Exception):
@@ -60,9 +68,20 @@ def token_hits(text):
 
 
 def exit_code(result_text):
-    """The exit code a tool result reports anywhere in its text: the JSON `"exit_code": N` form, else
-    a line `Exit code N`; None otherwise."""
-    m = _EXIT_JSON_RE.search(result_text) or _EXIT_LINE_RE.search(result_text)
+    """The exit code a SHELL tool result reports, else None. Order: a top-level JSON object whose
+    `exit_code` is an int; else the FIRST line `Exit code N` (the harness's own line); else the first
+    line of run_command's compact summary `✓/✗ exit N ...`. Never searched for inside the body: a
+    result that merely quotes such text (a file being read) is not reporting its own exit."""
+    try:
+        obj = json.loads(result_text)
+    except (ValueError, RecursionError):
+        obj = None
+    if isinstance(obj, dict):
+        v = obj.get("exit_code")
+        if isinstance(v, int) and not isinstance(v, bool):
+            return v
+    first = result_text.split("\n", 1)[0].rstrip("\r")
+    m = _EXIT_LINE_RE.fullmatch(first) or _EXIT_SUMMARY_RE.match(first)
     return int(m.group(1)) if m else None
 
 
@@ -73,23 +92,47 @@ def _blind(s):
     return _API_ID_RE.sub("<id>", s)
 
 
+def _overlaps(source, start, end):
+    """True when a token-shaped match in `source` overlaps [start, end) (wholly or partly inside it)."""
+    return any(m.start() < end and m.end() > start for m in _TOKEN_RE.finditer(source))
+
+
+def _tail(source, n):
+    """(last n chars of source, whether a token overlaps them)."""
+    start = max(0, len(source) - n)
+    return source[start:], _overlaps(source, start, len(source))
+
+
+def _head(source, n):
+    """(first n chars of source, whether a token overlaps them)."""
+    end = min(len(source), n)
+    return source[:end], _overlaps(source, 0, end)
+
+
 def _call(name, inp):
-    args = _blind(json.dumps(inp, ensure_ascii=False, sort_keys=False))[:ARGS_CHARS]
-    return f"{name}({args})"
+    """('name(args)', leaked) with the JSON arguments cut to ARGS_CHARS."""
+    args, leaked = _head(_blind(json.dumps(inp, ensure_ascii=False, sort_keys=False)), ARGS_CHARS)
+    return f"{name}({args})", leaked
 
 
-def _result_line(result):
+def _is_shell(name):
+    return name.rsplit("__", 1)[-1] in sampler.SHELL_TOOLS
+
+
+def _result_line(result, shell):
+    """('RESULT ...', leaked). The [exit N] prefix is for shell tools only."""
     if result is None:
-        return f"RESULT {NO_RESULT}"
+        return f"RESULT {NO_RESULT}", False
     text, is_error = result
     text = _blind(text)
     prefix = ""
-    code = exit_code(text)  # the WHOLE text: the code is often outside the kept tail
+    code = exit_code(text) if shell else None  # from the WHOLE text: the code is often outside the kept tail
     if code is not None:
         prefix += f"[exit {code}] "
     if is_error:
         prefix += "[is_error] "
-    return f"RESULT {prefix}{text[-RESULT_TAIL_CHARS:]}"
+    tail, leaked = _tail(text, RESULT_TAIL_CHARS)
+    return f"RESULT {prefix}{tail}", leaked
 
 
 def _tool_calls(entries):
@@ -117,26 +160,62 @@ def _results(entries):
 
 
 def _context_block(label, ents, results):
+    """(block text, leaked) for one context message."""
     lines = [f"### {label}"]
+    leaked = False
     text = _blind(sampler._text(ents))
     if text:
         lines.append(text)
     for tid, name, inp in _tool_calls(ents):
-        lines.append(f"CALL {_call(name, inp)}")
-        lines.append(_result_line(results.get(tid)))
-    return "\n".join(lines)
+        call, l1 = _call(name, inp)
+        res, l2 = _result_line(results.get(tid), _is_shell(name))
+        lines.append(f"CALL {call}")
+        lines.append(res)
+        leaked = leaked or l1 or l2
+    return "\n".join(lines), leaked
 
 
-def _unit_body(ents):
-    text = _blind(sampler._text(ents))
-    calls = _tool_calls(ents)
-    parts = [text] if text else []
-    if calls:
-        parts.append("ABOUT TO RUN:\n" + "\n".join(f"- {_call(n, i)}" for _, n, i in calls))
-    body = "\n\n".join(parts) or "(no text)"
-    if len(body) > PACKET_CHARS:
-        body = TRIM_MARKER + "\n" + body[-PACKET_CHARS:]
-    return body
+def _calls_block(lines):
+    return "ABOUT TO RUN:\n" + "\n".join(lines)
+
+
+def _join_body(text, lines):
+    parts = ([text] if text else []) + ([_calls_block(lines)] if lines else [])
+    return "\n\n".join(parts) or "(no text)"
+
+
+def _fit(text, calls, budget):
+    """(body, leaked) for the unit: its text plus the ABOUT TO RUN block, at most `budget` chars, the
+    trim markers counted. Order of sacrifice: the head of the text, then the tail of the call list."""
+    lines = [c for c, _ in calls]
+    body = _join_body(text, lines)
+    if len(body) <= budget:
+        return body, any(l for _, l in calls)
+    block = _calls_block(lines) if lines else ""
+    sep = 2 if block else 0
+    avail = budget - len(block) - sep
+    if avail > len(TRIM_MARKER):  # the calls fit whole beside a trimmed text
+        kept, leaked = _tail(text, avail - len(TRIM_MARKER) - 1)
+        head = TRIM_MARKER + "\n" + kept
+        return head + ("\n\n" + block if block else ""), leaked or any(l for _, l in calls)
+    # the calls alone are too big: keep the text (trimmed to half the budget if it needs it) and as
+    # many leading calls as fit, then say how many were left out
+    half = budget // 2
+    leaked = False
+    if len(text) <= half:
+        head = text
+    else:
+        kept, leaked = _tail(text, half - len(TRIM_MARKER) - 1)
+        head = TRIM_MARKER + "\n" + kept
+    room = budget - len(head) - (2 if head else 0)
+    for n in range(len(lines) - 1, -1, -1):
+        left = len(lines) - n
+        marker = f"[… {left} more tool call{'s' if left != 1 else ''} not shown]"
+        block = "ABOUT TO RUN:\n" + "\n".join(lines[:n] + [marker])
+        if len(block) <= room:
+            leaked = leaked or any(l for _, l in calls[:n])
+            return (head + "\n\n" if head else "") + block, leaked
+    raise ValueError("packet budget too small for even the call-list marker")
 
 
 def _render(op_title, op_text, blocks, body):
@@ -165,26 +244,42 @@ def build_packet(corpus_dir, unit, case_id):
 
     if handback:
         op_title = "Dispatch prompt"
-        first = next((transcripts._message_text(e) for e in entries
+        first = next((transcripts._message_text(e) for e in before
                       if e.get("type") == "user" and transcripts._message_text(e) is not None), None)
-        op_text = _blind(first)[:OPERATOR_CHARS] if first else NONE_BEFORE
     else:
         op_title = "Operator's last message"
         ops = transcripts.operator_messages(before)
-        last = transcripts._message_text(ops[-1]) if ops else None
-        op_text = _blind(last)[:OPERATOR_CHARS] if last else NONE_BEFORE
+        first = transcripts._message_text(ops[-1]) if ops else None
+    if first:
+        op_text, op_leak = _head(_blind(first), OPERATOR_CHARS)
+    else:
+        op_text, op_leak = NONE_BEFORE, False
 
-    body = _unit_body(unit_ents)
+    unit_text = _blind(sampler._text(unit_ents))
+    calls = []
+    for _, name, inp in _tool_calls(unit_ents):
+        call, leaked = _call(name, inp)
+        calls.append((f"- {call}", leaked))
+    full_body = _join_body(unit_text, [c for c, _ in calls])
+
     kept = list(prior_ents)
     while True:
-        blocks = [_context_block(f"{MINUS}{len(kept) - i}", ents, results) for i, ents in enumerate(kept)]
-        text = _render(op_title, op_text, blocks, body)
+        built = [_context_block(f"{MINUS}{len(kept) - i}", ents, results) for i, ents in enumerate(kept)]
+        blocks = [b for b, _ in built]
+        text = _render(op_title, op_text, blocks, full_body)
         if len(text) <= PACKET_CHARS or not kept:
             break
-        kept.pop(0)  # oldest first; the unit's own body is never dropped
+        kept.pop(0)  # oldest first; the unit itself is never dropped
+    leak = op_leak or any(l for _, l in built)
+    # what is left of the budget once the operator section and the kept context are in; the unit
+    # is whole when it fits, else trimmed to fit (its trim markers counted)
+    budget = PACKET_CHARS - len(_render(op_title, op_text, blocks, ""))
+    body, body_leak = _fit(unit_text, calls, budget)
+    leak = leak or body_leak
+    text = _render(op_title, op_text, blocks, body)
 
     hits = token_hits(text)
-    if hits:
-        raise TokenFound(f"case {case_id}: {hits} token-shaped string(s) in the packet; refusing to build it")
+    if leak or hits:
+        raise TokenFound(f"case {case_id}: token-shaped string(s) in the packet; refusing to build it")
     return Packet(case_id=case_id, text=text, sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
                   n_context=len(kept), chars=len(text), token_hits=hits)
