@@ -278,6 +278,45 @@ not restore" instruction.
 
 Append below. Newest run first.
 
+### system1-base-rate-measurement — 2026-09-26 to 2026-09-29 (STOPPED at Task 9)
+
+Plan: `docs/superpowers/plans/2026-09-26-system1-base-rate-measurement.md` ·
+Spec: `docs/superpowers/specs/2026-09-26-system1-base-rate-measurement-design.md` (Amendments 1–8) ·
+executed with `superpowers:subagent-driven-development`, Opus reviews · stopped by its own rule when the judge
+gate returned `passed=False` (`8d9b2045`, INCONCLUSIVE); Tasks 10–12 and the final review did not run.
+**150 rulings (R1–R150).** The ledger holding all of them in full is preserved privately as corpus
+`2026-09-29-sdd-workspace` under `~/work/claude/measurement-corpora/`. Many are also recorded in
+spec Amendments 2–8. The rows below are the ones a human might have decided differently, plus every
+ruling whose verdict is now known. **5 of these 17 rows were overturned.** Rulings no row evaluates are not re-examined here.
+
+| ruling | class | cost if wrong | verdict |
+|---|---|---|---|
+| R7 / R120 — the gate's correction-mode gold is each RTD case's positive and negative spans, and every pair is scored as a correction to detect | measurement | the detectability and yes-flag checks | **WRONG** — in 3 of 21 pairs (RTD-13, -17, -21) the negative does not reverse the positive, and they are exactly the judge's 3 "not a correction" majorities. The stop did not depend on them (`gate-notes.md`) |
+| R119 — audit mode asks `is_mistake`, and a control "fires" when it is True | measurement | `control_fires` measures a target nobody chose | **WRONG** — the operator's target, approved 2026-09-29, is a useful intervention (verify / qualify / correct / none / unresolved), where a qualification is not an error |
+| R23 — forks (different sessionIds sharing the first 5 uuids) are excluded | measurement | fork sessions dropped from the census | **WRONG** — superseded by R28 in the same run: forks are kept |
+| R131 — `operator_interrupts` applies all of R104's structural filters | measurement | real interrupts dropped | **WRONG** — superseded by R132 (non-human-origin exclusion only) |
+| R72 — freeze the real corpora as soon as Tasks 7–11 permit, because `usage.db` prunes rows older than 30 days | measurement | usage rows lost to pruning | **WRONG in effect** — the freeze was scheduled inside Task 12, so the Task 9 stop left nothing frozen. It happened only when the operator asked, 2026-09-29 |
+| R44 → R106 — spec exclusions start as a hard-coded frozenset and become manifest-recorded | measurement | an exclusion silently not propagated to forks | held, amended |
+| R61 / R71 / R75 / R111 — the retained window is derived from data, ending at floor(`created_utc`) + 1 s, with window invariants asserted | measurement | a window that admits rows written during the freeze | held — the 2026-09-29 snapshots passed `finalize_bounds` and its invariants |
+| R78 — the freeze procedure: kept sessions idle (operator-coordinated), gap check, `parse_errors_skipped == 0` | measurement | wrong joins published without a crash | held as a rule; **the controller broke it on 2026-09-29** (see lessons) |
+| R10 — work in place on the shared checkout, no worktree | process | a peer commit captures uncommitted work | held — every commit pathspec-scoped, and the peers' staged paths were never captured |
+| R109 — the judge must name the most specific applicable lesson; a catch-all rule is credited only when none applies | measurement | transfer credited to the wrong lesson | open — lesson assignment agreed on 3 of 12 scoreable items, reported only |
+| R133 — the Codex judge runs in a jailed channel (bwrap, stdin prompt, no tools, auth untouched) | safety | the judge reads the answer key or the repo | held — 243 of 243 turns single-message, 0 tool events, `auth.json` mtime unchanged |
+| R137 — a failed, unparseable or tool-calling vote is re-issued up to 2 more times, pre-registered | measurement | selective re-runs | held — 0 retries were needed |
+| R146 — scan every committed gate output for private global-CLAUDE.md text, with a positive control | safety | private rules published in a public repo | held — used on every committed file since, including 2026-09-29 |
+| R147 — "obtainable" versus "external" splits on the signal axis | measurement | inconsistent detectability labels | held — decided by the operator when asked |
+| R148 — RTD-2 pre-registered as a structural disagreement | measurement | a predictable miss read as a judge failure | held — RTD-2 came back `in-trace` as predicted |
+| R149 — the codescout snapshot includes 2 worktree slugs and 4 scratchpad slugs | scope | 2 extra kept sessions | open |
+| R150 — corpus manifests are committed under the measurement's existing data dir | process | one more dir to look in | held |
+
+**The lessons this run earned.**
+
+- **A gold label is a claim about each pair, so screen every pair for the relation you score.** R7 checked provenance (the spans really are verbatim from the named SHAs). It never checked that each negative *reverses* its positive. RTD-17's own entry warned that it is a precision probe, true when published. The three pairs that fail are exactly the judge's three dissents.
+- **Write the target down before the prompt, and get it from the operator.** `is_mistake` was the controller's choice. Every lesson from the gate needed an operator decision, not a code fix: the policy, the bars, and approved examples A–F.
+- **A preservation step chained to plan progress dies with the plan.** R72 said "as soon as possible" and then scheduled the freeze inside Task 12, so the Task 9 stop froze nothing. Preservation belongs before the first step that can stop the run.
+- **Reading a plan step is not reading the procedure it defers to.** On 2026-09-29 the controller ran Task 12 Step 1 from the plan text alone. It missed R78, which lives in spec Amendment 6(d) and in the controller's own ledger, and so froze while one kept session was live 318 s before the snapshot. The snapshots were relabelled preservation-only; an analysis run needs a coordinated re-freeze.
+- **Report a number in the system's own words, and count the list.** The score object said `reported_as: "a firing rate, not a false-positive rate"`, and the controller wrote "33% false-fire rate". It typed "3 of 4 `no` cases" beside a table listing 4, and "374 passed" over 6 of 7 suites. An outside reviewer (Codex) caught all three, because it did not share the controller's assumption that the controls were clean.
+
 ### taxonomy-append-recipes-test — 2026-09-27
 
 Plan: `docs/superpowers/plans/2026-09-27-taxonomy-append-recipes-test.md` ·

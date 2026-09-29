@@ -10,7 +10,7 @@ Companion to `gate.txt`, which is the gate's full output, committed unedited. Ev
 
 ## Frozen corpora — 2026-09-29
 
-Task 12 Step 1 ran on 2026-09-29 at the operator's request, after the stop, as preservation only: Steps 2–5 did not run. Corpora live privately under `~/work/claude/measurement-corpora/<corpus-id>/` (mode 700). Only their manifests are committed, under `corpora/`. Each was checked by `archive.verify()` right after freezing, and `observability.finalize_bounds` set the bounds.
+Frozen on 2026-09-29 at the operator's request, after the stop, as **preservation snapshots, not Task 12's analysis corpora**. Steps 2–5 did not run. **These snapshots do not satisfy the R78 freeze procedure (spec Amendment 6(d)), so an analysis run needs a re-freeze under a new corpus id.** They were taken while sessions were live, not in a window the operator coordinated. One kept codescout session wrote its last entry 318 s before the freeze end, shorter than a long in-flight call; MRV-poc's closest is 1,987 s. Amendment 6(d) item 3 does hold: a JSON parse of every frozen transcript line found 0 unparseable lines in either corpus. The backup instant was not recorded separately from `created_utc`. Corpora live privately under `~/work/claude/measurement-corpora/<corpus-id>/` (mode 700). Only their manifests are committed, under `corpora/`. Each was checked by `archive.verify()` right after freezing, and `observability.finalize_bounds` set the bounds.
 
 | corpus id | top-level / subagent transcripts | usage rows | retained window (UTC) | sessions kept / excluded |
 |---|---|---|---|---|
