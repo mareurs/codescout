@@ -12,19 +12,34 @@ docs/superpowers/plans/2026-09-29-system1-labelled-sample.md) are below it.
                                        --any-population, with a --log-dir inside the repository,
                                        or on any codex other than codex-cli 0.154.0 (R133, R138)
 
-    run.py frame --corpus C --out FRAME.json
-                                       counts + two code hashes, no text; may be written anywhere
+    run.py preflight --corpus C [--excluded-out PATH]
+                                       builds a packet for EVERY frame unit and prints COUNTS only (units,
+                                       built, refused, refusals by exception type / stratum / kind); with
+                                       --excluded-out, writes the refusing units' case_keys (a JSON list,
+                                       mode 0600, new file, outside the repo). Run it BEFORE `frame`: the
+                                       main draw is one-shot, so a refusal found at render is unrecoverable
+    run.py frame --corpus C --out FRAME.json [--exclude-units FILE]
+                                       counts + four code hashes (sampler, packet, estimate, run), no text;
+                                       may be written anywhere. --exclude-units removes those case_keys
+                                       BEFORE counting and records {count, sha256} of the file. Editing
+                                       run.py (or any hashed file) after `frame` invalidates the frame file
     run.py draw --corpus C --set DIR --seed S --substantive N --routine M [--exclude-set DIR2]
+                [--frame FRAME.json --exclude-units FILE]
                                        stratified draw into a NEW private (mode 700) set directory
                                        OUTSIDE the repo: key.json (private, holds session ids) and
-                                       draw.json; prints counts only
+                                       draw.json; prints counts only (incl. distinct sessions per stratum).
+                                       --exclude-units is refused unless FILE's sha256 is the one FRAME.json
+                                       registered; pilot and main draws use the same file
     run.py render --corpus C --set DIR builds every blinded packet into DIR/packets and fills
                                        draw.json's sha256s; a token-shaped string aborts it with
                                        nothing written; prints counts only
     run.py estimate --set DIR --frame FRAME.json --seed S --out RESULT.json
-                                       aggregates only (no case id, note or per-case label);
-                                       PARTIAL, with no decision, until every drawn substantive
-                                       case is labelled
+                                       aggregates only (no case id, note or per-case label); S must be
+                                       the seed the set was drawn with and the frame's four code hashes
+                                       must match the files on disk; each stratum block carries
+                                       n_sessions (distinct sessions among its labelled units). PARTIAL,
+                                       with no decision, until every drawn substantive case is labelled.
+                                       Refuses to overwrite --out: a re-run needs a new path
     run.py export --set DIR --out-dir D
                                        the committable record: case ids, packet hashes, strata,
                                        kinds and labels WITHOUT notes; D must be INSIDE the repo
@@ -68,6 +83,11 @@ _SET_NAME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z][a-z0-9-]{0,40}")
 _UUID_RUN = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 SEED_LIMIT = 2 ** 32
 _CASE_ID = re.compile(r"[0-9a-f]{10}")
+# The code whose behaviour the registered decision depends on: what a draw and a packet are (sampler, packet),
+# how the bootstrap and the rule run (estimate), and the constants and wiring around them (run:
+# BOOTSTRAP_SAMPLES, the strata blocks). `frame` records their sha256; `estimate` refuses if any differs. run.py
+# is hashed from the file on disk, so EDITING run.py AFTER `frame` invalidates the frame file -- which is the point.
+CODE_FILES = ("sampler.py", "packet.py", "estimate.py", "run.py")
 
 
 def _parser():
@@ -92,6 +112,12 @@ def _parser():
     fr = sub.add_parser("frame", help="freeze the frame counts (no text)")
     fr.add_argument("--corpus", required=True)
     fr.add_argument("--out", required=True)
+    fr.add_argument("--exclude-units", help="JSON list of case_keys (preflight --excluded-out) removed from the "
+                                            "frame BEFORE counting; its count and sha256 are recorded")
+    pf = sub.add_parser("preflight", help="build a packet for every frame unit; print refusal counts only")
+    pf.add_argument("--corpus", required=True)
+    pf.add_argument("--excluded-out", help="write the refusing units' case_keys here (new file, mode 0600, "
+                                           "outside the repo)")
     dr = sub.add_parser("draw", help="draw a stratified sample into a new private set directory")
     dr.add_argument("--corpus", required=True)
     dr.add_argument("--set", required=True, help="new directory, outside the repo")
@@ -99,14 +125,20 @@ def _parser():
     dr.add_argument("--substantive", type=int, required=True)
     dr.add_argument("--routine", type=int, required=True)
     dr.add_argument("--exclude-set", help="another set directory whose units are removed from the pool")
+    dr.add_argument("--frame", help="the frame file; required with --exclude-units, and refused when it "
+                                    "records an exclusion the draw does not apply")
+    dr.add_argument("--exclude-units", help="the same file frame was given; refused unless its sha256 is the "
+                                            "one the frame file registered")
     rd = sub.add_parser("render", help="build every blinded packet of a set")
     rd.add_argument("--corpus", required=True)
     rd.add_argument("--set", required=True)
     es = sub.add_parser("estimate", help="aggregates only; PARTIAL until every substantive case is labelled")
     es.add_argument("--set", required=True)
     es.add_argument("--frame", required=True)
-    es.add_argument("--seed", type=int, required=True)
-    es.add_argument("--out", required=True)
+    es.add_argument("--seed", type=int, required=True, help="must equal the seed the set was drawn with")
+    es.add_argument("--out", required=True,
+                    help="a NEW file: estimate refuses to overwrite an existing --out, so re-running "
+                         "after a relabel needs a new path")
     ex = sub.add_parser("export", help="the committable record of a set (no key, no notes, no packets)")
     ex.add_argument("--set", required=True)
     ex.add_argument("--out-dir", required=True, help="must be INSIDE the repo")
@@ -258,19 +290,103 @@ def _valid_seconds(v):
 
 
 
+def _code_hashes():
+    return {name: hashlib.sha256((_HERE / name).read_bytes()).hexdigest() for name in CODE_FILES}
+
+
+def _private_file(path):
+    """A file listing private case keys: refuse one inside the repo."""
+    try:
+        archive._refuse_if_inside_repo(pathlib.Path(path))
+    except ValueError:
+        raise Refused(f"refusing {path}: it is inside the repository; a file of case keys is private data and "
+                      f"lives outside it") from None
+
+
+def _load_exclusion(path):
+    """(set of case_keys, sha256 of the file's bytes) for a --exclude-units file. ONE read, so the hash is of
+    the bytes that were parsed. Refusals name the flag, never a value of the file."""
+    try:
+        data = pathlib.Path(path).read_bytes()
+    except OSError as e:
+        raise Refused(f"--exclude-units {pathlib.Path(path).name}: cannot be read ({e.strerror})") from None
+    try:
+        keys = json.loads(data.decode("utf-8"))
+    except ValueError:
+        keys = None
+    if not (isinstance(keys, list) and all(isinstance(k, str) for k in keys)):
+        raise Refused("--exclude-units: the file must be a JSON list of case_key strings")
+    if len(set(keys)) != len(keys):
+        raise Refused("--exclude-units: the file lists a case_key more than once")
+    return set(keys), hashlib.sha256(data).hexdigest()
+
+
+def _apply_exclusion(units, keys):
+    absent = keys - {u.case_key for u in units}
+    if absent:
+        raise Refused(f"--exclude-units holds {len(absent)} case_key(s) that are not in this frame; the file "
+                      f"belongs to another corpus")
+    return [u for u in units if u.case_key not in keys]
+
+
 def _cmd_frame(args):
     corpus = pathlib.Path(args.corpus)
     units = _frame_units(corpus)
+    excluded = None
+    if args.exclude_units:
+        keys, digest = _load_exclusion(args.exclude_units)
+        units = _apply_exclusion(units, keys)
+        excluded = {"count": len(keys), "sha256": digest}
     if not units:
         raise Refused(f"{corpus} has no units; refusing to freeze an empty frame")
     counts = sampler.frame_counts(units)
     rec = {"corpus_id": corpus.resolve().name, "counts": counts, "n_units": len(units),
-           "code_sha256": {name: hashlib.sha256((_HERE / name).read_bytes()).hexdigest()
-                           for name in ("sampler.py", "packet.py")}}
+           "code_sha256": _code_hashes()}
+    if excluded is not None:
+        rec["excluded_units"] = excluded
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     _write_new(out, json.dumps(rec, indent=1) + "\n", 0o644)
     print(json.dumps(counts, sort_keys=True))
+    return 0
+
+
+def _cmd_preflight(args):
+    """Build a packet for EVERY frame unit and report only counts. The one-shot main draw has no redraw,
+    so a unit whose packet cannot be built must be found (and registered as excluded) before the draw.
+    COST: build_packet re-reads and re-parses its unit's transcript on every call, so a unit costs one parse of
+    its transcript plus a scan of the entries before it; a transcript with u units and e entries costs ~u*e.
+    Units are built grouped by transcript so the re-reads hit the OS page cache."""
+    corpus = pathlib.Path(args.corpus)
+    out = None
+    if args.excluded_out:
+        out = pathlib.Path(args.excluded_out)
+        _private_file(out)
+        if out.exists():
+            raise Refused(f"--excluded-out {out} already exists; nothing written")
+    units = _frame_units(corpus)
+    if not units:
+        raise Refused(f"{corpus} has no units; nothing to check")
+    refused = []  # (exception type name, unit): the exception itself is dropped, its text may quote a session id
+    for unit in sorted(units, key=lambda u: (u.transcript, u.first_entry_index)):
+        try:
+            packet.build_packet(corpus, unit, "preflight")
+        except Exception as e:  # every kind: a refusal of any type is a unit the render would abort on
+            refused.append((type(e).__name__, unit))
+
+    def tally(values):
+        counts = {}
+        for v in values:
+            counts[v] = counts.get(v, 0) + 1
+        return counts
+
+    print(json.dumps({"units": len(units), "built": len(units) - len(refused), "refused": len(refused),
+                      "by_type": tally(t for t, _ in refused),
+                      "by_stratum": tally(u.stratum for _, u in refused),
+                      "by_kind": tally(u.kind for _, u in refused)}, sort_keys=True))
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        _write_new(out, json.dumps(sorted(u.case_key for _, u in refused)) + "\n", 0o600)
     return 0
 
 
@@ -285,6 +401,30 @@ def _excluded_case_keys(exclude_set):
             from None
 
 
+def _registered_exclusion(args):
+    """The exclusion `draw` applies (a set of case_keys, empty when none), after checking it against the frame
+    file: the treatment of the units preflight found is registered by the sha256 the frame recorded."""
+    recorded = None
+    if args.frame:
+        try:
+            frame = _read_json(args.frame)
+        except (OSError, ValueError):
+            raise Refused(f"--frame {pathlib.Path(args.frame).name} cannot be read as a frame file") from None
+        recorded = frame.get("excluded_units") if isinstance(frame, dict) else None
+    if args.exclude_units:
+        if not args.frame:
+            raise Refused("--exclude-units needs --frame: the frame file registers the exclusion by its sha256")
+        if not isinstance(recorded, dict):
+            raise Refused("the frame file records no exclusion; --exclude-units is refused")
+        keys, digest = _load_exclusion(args.exclude_units)
+        if digest != recorded.get("sha256"):
+            raise Refused("--exclude-units does not match the frame's registered exclusion (sha256 differs)")
+        return keys
+    if recorded is not None:
+        raise Refused("the frame file records an exclusion; pass --exclude-units with the registered file")
+    return set()
+
+
 def _cmd_draw(args):
     if not _valid_seed(args.seed):
         raise Refused("--seed must be an integer from 0 to 2**32 - 1")
@@ -293,8 +433,11 @@ def _cmd_draw(args):
     if not _valid_set_name(set_dir.name):
         raise Refused("set name is not allowed: it must look like 2026-09-29-labelled-main (a date, then a "
                       "lowercase name) and hold no session-id-shaped run")
+    unfit = _registered_exclusion(args)
     exclude = _excluded_case_keys(args.exclude_set) if args.exclude_set else set()
     units = _frame_units(args.corpus)
+    if unfit:
+        units = _apply_exclusion(units, unfit)
     absent = exclude - {u.case_key for u in units}
     if absent:
         raise Refused(f"--exclude-set holds {len(absent)} case_key(s) that are not in this frame; the pilot must "
@@ -323,7 +466,10 @@ def _cmd_draw(args):
             "order": order}
     _write_new(set_dir / "draw.json", json.dumps(draw, indent=1) + "\n")
     n_sub = sum(v["stratum"] == "substantive" for v in key.values())
-    print(f"drawn substantive={n_sub} routine={len(key) - n_sub} excluded={removed}")
+    # aggregates only: how many distinct sessions the drawn units of each stratum come from
+    sessions = {s: len({v["copy_id"] for v in key.values() if v["stratum"] == s}) for s in STRATA}
+    print(f"drawn substantive={n_sub} routine={len(key) - n_sub} excluded={removed} "
+          f"sessions_substantive={sessions['substantive']} sessions_routine={sessions['routine']}")
     return 0
 
 
@@ -379,6 +525,17 @@ def _annotate(figs, corpus_id, note):
                        f"n={sum(figs[s]['n'] for s in STRATA if figs[s])}")}
 
 
+def _check_code_hashes(frame):
+    """The frame file must have been frozen by the code that is about to run: all of CODE_FILES, by sha256."""
+    recorded = frame.get("code_sha256") if isinstance(frame, dict) else None
+    if not isinstance(recorded, dict):
+        recorded = {}
+    changed = [name for name, digest in _code_hashes().items() if recorded.get(name) != digest]
+    if changed:
+        raise Refused(f"the code changed since the frame was frozen ({', '.join(changed)}); re-run frame, or "
+                      f"estimate with the code that was registered")
+
+
 def _cmd_estimate(args):
     if not _valid_seed(args.seed):
         raise Refused("--seed must be an integer from 0 to 2**32 - 1")
@@ -402,6 +559,14 @@ def _cmd_estimate(args):
         raise Refused(f"{labelled['substantive']} substantive label records for {drawn['substantive']} substantive "
                       f"cases drawn (a case labelled twice?); refusing to estimate")
     _check_population(labels, relabels, "refusing to estimate")
+    # The bootstrap streams from --seed, so a seed other than the registered one is a different draw of the
+    # bootstrap and could move a boundary case: bind it to the seed the set was drawn with (public, an aggregate).
+    if not _valid_seed(draw["seed"]):
+        raise Refused("draw.json: field seed is invalid; refusing to estimate")
+    if args.seed != draw["seed"]:
+        raise Refused(f"--seed {args.seed} is not the seed this set was drawn with ({draw['seed']}); "
+                      f"estimate must use the registered seed")
+    _check_code_hashes(frame)
     try:
         est = estimator.estimate(labels, key, frame["counts"], args.seed, relabels or None, b=BOOTSTRAP_SAMPLES)
     except ValueError as e:
@@ -409,8 +574,16 @@ def _cmd_estimate(args):
         # a fixed message naming only the type: no estimator message may ever carry a value out.
         raise Refused(f"the estimator refused the labels ({type(e).__name__}); refusing to estimate") from None
     complete = labelled["substantive"] == drawn["substantive"]
-    for branch, note in (("all_cases", ""), ("without_recall_flagged", ", recall-flagged cases excluded")):
+    # `kept` mirrors estimate.estimate()'s recall filter (recall != "y"): the second branch's labelled units.
+    kept = [r for r in labels if r["recall"] != "y"]
+    for branch, note, recs in (("all_cases", "", labels),
+                               ("without_recall_flagged", ", recall-flagged cases excluded", kept)):
         _annotate(est[branch], frame["corpus_id"], note)
+        for stratum in STRATA:
+            blk = est[branch][stratum]
+            if blk:  # an aggregate: how many distinct sessions the labelled units of this stratum come from
+                blk["n_sessions"] = len({key[r["case_id"]]["copy_id"] for r in recs
+                                         if key[r["case_id"]]["stratum"] == stratum})
         sub = est[branch]["substantive"]
         if sub and not complete:
             del sub["decision"]
@@ -535,8 +708,8 @@ def _cmd_export(args):
     return 0
 
 
-_SAMPLE_COMMANDS = {"frame": _cmd_frame, "draw": _cmd_draw, "render": _cmd_render, "estimate": _cmd_estimate,
-                    "export": _cmd_export}
+_SAMPLE_COMMANDS = {"frame": _cmd_frame, "preflight": _cmd_preflight, "draw": _cmd_draw, "render": _cmd_render,
+                    "estimate": _cmd_estimate, "export": _cmd_export}
 
 
 

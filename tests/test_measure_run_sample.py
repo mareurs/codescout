@@ -211,8 +211,8 @@ class Frame(Base):
         rec = json.loads(read(out_path))
         self.assertEqual(rec, {
             "corpus_id": CORPUS_ID, "counts": COUNTS, "n_units": 33,
-            "code_sha256": {"sampler.py": hashlib.sha256((MEASURE / "sampler.py").read_bytes()).hexdigest(),
-                            "packet.py": hashlib.sha256((MEASURE / "packet.py").read_bytes()).hexdigest()}})
+            "code_sha256": {name: hashlib.sha256((MEASURE / name).read_bytes()).hexdigest()
+                            for name in ("sampler.py", "packet.py", "estimate.py", "run.py")}})
         self.assertEqual(json.loads(out), COUNTS)  # what is printed is the counts, and only them
 
     def test_the_kind_and_stratum_vocabularies_match_what_frame_produces(self):
@@ -267,7 +267,7 @@ class Draw(Base):
         set_dir = self.root / (SETP + "main")
         rc, out, err = cli("draw", "--corpus", self.corpus, "--set", set_dir, "--seed", 11,
                            "--substantive", 6, "--routine", 4)
-        self.assertEqual((rc, out, err), (0, "drawn substantive=6 routine=4 excluded=0\n", ""))
+        self.assertEqual((rc, out, err), (0, "drawn substantive=6 routine=4 excluded=0 sessions_substantive=3 sessions_routine=4\n", ""))
 
     def test_pilot_order_is_pinned(self):
         set_dir = self.draw("pilot", 3, 2, 1)
@@ -317,7 +317,7 @@ class Draw(Base):
         rc, out, err = cli("draw", "--corpus", self.corpus, "--set", main, "--seed", 5, "--substantive", 3,
                            "--routine", 2, "--exclude-set", pilot)
         self.assertEqual((rc, err), (0, ""))
-        self.assertEqual(out, "drawn substantive=3 routine=2 excluded=5\n")
+        self.assertEqual(out, "drawn substantive=3 routine=2 excluded=5 sessions_substantive=3 sessions_routine=2\n")
         main_keys = {v["case_key"] for v in json.loads(read(main / "key.json")).values()}
         self.assertEqual(len(main_keys), 5)
         self.assertEqual(main_keys & pilot_keys, set())
@@ -482,7 +482,8 @@ class Estimate(Base):
         frame = self.root / "frame.json"
         if not frame.exists():
             self.frame_file()
-        rc, so, se = cli("estimate", "--set", set_dir, "--frame", frame, "--seed", 99, "--out", out)
+        seed = json.loads(read(pathlib.Path(set_dir) / "draw.json"))["seed"]  # estimate is bound to the drawn seed
+        rc, so, se = cli("estimate", "--set", set_dir, "--frame", frame, "--seed", seed, "--out", out)
         return rc, so, se, out
 
     def test_frame_draw_render_estimate_export_end_to_end(self):
@@ -923,7 +924,7 @@ class SetGuards(Base):
                     (set_dir / "key.json").write_text(json.dumps(key))
                     message = f"{set_dir}: key.json: case {cid}: field {field} is invalid"
                     attempts = {"render": (("render", "--corpus", self.corpus, "--set", set_dir), ""),
-                                "estimate": (("estimate", "--set", set_dir, "--frame", frame, "--seed", 1,
+                                "estimate": (("estimate", "--set", set_dir, "--frame", frame, "--seed", 11,
                                               "--out", self.root / "r.json"), ""),
                                 "export": (("export", "--set", set_dir, "--out-dir", repo / "data"),
                                            "; nothing exported")}
@@ -932,7 +933,7 @@ class SetGuards(Base):
                             rc, out, err = cli(*argv)
                             self.assertEqual((rc, out, err), (1, "", f"error: {message}{tail}\n"), name)
         (set_dir / "key.json").write_text(saved)
-        rc, out, err = cli("estimate", "--set", set_dir, "--frame", frame, "--seed", 1, "--out", self.root / "r.json")
+        rc, out, err = cli("estimate", "--set", set_dir, "--frame", frame, "--seed", 11, "--out", self.root / "r.json")
         self.assertEqual((rc, err), (0, ""))  # restored: the same set estimates
         self.assertFalse((repo / "data").exists())
 
@@ -941,7 +942,7 @@ class SetGuards(Base):
         write_labels(set_dir, sub_hits=4, rou_hits=1)
         secret = "work/" + sid_for(2)
         with mock.patch.object(run.estimator, "estimate", side_effect=ValueError(f"case {secret} is odd")):
-            rc, out, err = cli("estimate", "--set", set_dir, "--frame", self.frame_file(), "--seed", 1,
+            rc, out, err = cli("estimate", "--set", set_dir, "--frame", self.frame_file(), "--seed", 11,
                                "--out", self.root / "r.json")
         self.assertEqual((rc, out), (1, ""))
         self.assertEqual(err, "error: the estimator refused the labels (ValueError); refusing to estimate\n")
@@ -964,8 +965,11 @@ class SetGuards(Base):
         set_dir = self.rendered()
         write_labels(set_dir, sub_hits=4, rou_hits=1)
         frame = self.frame_file()
+        drawn = json.loads(read(set_dir / "draw.json"))
         for j, (seed, accepted) in enumerate(((0, True), (2 ** 32 - 1, True), (2 ** 32, False), (-1, False), (uuid_int, False))):
             with self.subTest(estimate=str(seed)[:12]):
+                if accepted:  # estimate is bound to the drawn seed, so draw.json carries the seed under test
+                    (set_dir / "draw.json").write_text(json.dumps(dict(drawn, seed=seed)))
                 out_file = self.root / f"e{j}.json"
                 rc, out, err = cli("estimate", "--set", set_dir, "--frame", frame, "--seed", seed, "--out", out_file)
                 self.assertEqual(rc, 0 if accepted else 1)
@@ -1383,6 +1387,519 @@ class Export(Base):
             self.assertEqual(row, {k: rec[k] for k in ("case_id", "packet_sha256", "labels", "delivery",
                                                        "recall", "seconds")})
         self.assertNotIn(NOTE, text)
+
+
+def corpus_text(root):
+    """Every byte of every file under a corpus, for the positive controls of the absence assertions."""
+    return "".join(p.read_text(encoding="utf-8") + str(p) for p in sorted(pathlib.Path(root).rglob("*")) if p.is_file())
+
+
+class TokenBase(Base):
+    """A corpus in which exactly one unit (session 2's last message, m2c) holds a token-shaped string."""
+
+    def token_corpus(self):
+        return fx.build_corpus(self.root / "token-corpus", make_sessions(token_session=2))
+
+    def token_unit(self, corpus):
+        (unit,) = [u for u in sampler.frame(corpus, excluded_sids=set()) if u.message_id == "m2c"]
+        return unit
+
+
+
+class Preflight(TokenBase):
+    """`preflight` finds every packet refusal BEFORE registration: after it nothing may be redrawn."""
+
+
+
+    def test_counts_one_token_refusal_prints_nothing_but_counts_and_writes_the_excluded_file_0600(self):
+        corpus = self.token_corpus()
+        unit = self.token_unit(corpus)
+        out_file = self.root / "private" / "excluded.json"
+        rc, out, err = cli("preflight", "--corpus", corpus, "--excluded-out", out_file)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(json.loads(out), {
+            "units": 33, "built": 32, "refused": 1, "by_type": {"TokenFound": 1},
+            "by_stratum": {"substantive": 1}, "by_kind": {"top": 1}})
+        # the file: exactly that unit's case_key, private
+        self.assertEqual(json.loads(read(out_file)), [unit.case_key])
+        self.assertEqual(mode(out_file), 0o600)
+        # absence, with positive controls: every sentinel IS in the corpus (or the private file)
+        text = corpus_text(corpus)
+        for sentinel in (TOKEN, sid_for(2), "m2c", "Fixed and verified."):
+            self.assertIn(sentinel, text, sentinel)
+            self.assertNotIn(sentinel, out + err, sentinel)
+        self.assertIn(unit.case_key, read(out_file))
+        self.assertNotIn(unit.case_key, out + err)
+        self.assertNotIn(unit.transcript, out + err)
+
+    def test_a_clean_corpus_reports_no_refusal_and_writes_an_empty_list_on_request(self):
+        out_file = self.root / "excluded.json"
+        rc, out, err = cli("preflight", "--corpus", self.corpus, "--excluded-out", out_file)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(json.loads(out), {"units": 33, "built": 33, "refused": 0, "by_type": {},
+                                           "by_stratum": {}, "by_kind": {}})
+        self.assertEqual(json.loads(read(out_file)), [])
+        rc, out, err = cli("preflight", "--corpus", self.corpus)  # no --excluded-out: counts only, no file
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(json.loads(out)["refused"], 0)
+
+    def test_every_exception_type_is_caught_per_unit_and_only_its_type_is_printed(self):
+        real = packet.build_packet
+        secret = "SECRET-MESSAGE-" + sid_for(4)
+
+        def flaky(corpus, unit, case_id):
+            if unit.message_id in ("m4e", "m4c"):
+                raise ValueError(secret)
+            if unit.message_id == "m5e":
+                raise KeyError(secret)
+            return real(corpus, unit, case_id)
+
+        out_file = self.root / "excluded.json"
+        with mock.patch.object(run.packet, "build_packet", flaky):
+            rc, out, err = cli("preflight", "--corpus", self.corpus, "--excluded-out", out_file)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(json.loads(out), {
+            "units": 33, "built": 30, "refused": 3, "by_type": {"KeyError": 1, "ValueError": 2},
+            "by_stratum": {"substantive": 3}, "by_kind": {"top": 3}})
+        self.assertNotIn(secret, out + err)
+        self.assertNotIn(sid_for(4), out + err)
+        # the file is sorted, whatever order the units were built in (m4e is built BEFORE m4c: it comes first in
+        # its transcript), so the same corpus always registers the same bytes
+        suffixes = [k.rsplit("|", 1)[1] for k in json.loads(read(out_file))]
+        self.assertEqual(suffixes, ["m4c", "m4e", "m5e"])
+
+    def test_units_are_built_grouped_by_transcript(self):
+        real = packet.build_packet
+        seen = []
+
+        def spy(corpus, unit, case_id):
+            seen.append(unit.transcript)
+            return real(corpus, unit, case_id)
+
+        with mock.patch.object(run.packet, "build_packet", spy):
+            rc, out, err = cli("preflight", "--corpus", self.corpus)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(seen), 33)  # positive control: every unit was built
+        runs = [t for i, t in enumerate(seen) if i == 0 or t != seen[i - 1]]  # consecutive duplicates collapsed
+        self.assertEqual(len(runs), len(set(runs)))  # so a transcript that reappears would show up twice
+        self.assertEqual(len(set(seen)), 9)  # 6 sessions + 3 subagent files: the grouping had something to group
+
+    def test_the_grouping_is_done_by_preflight_not_inherited_from_the_frame_order(self):
+        # sampler.frame happens to yield a transcript's units together; feed preflight an INTERLEAVED frame
+        # (by entry index first) so only its own sort can regroup them.
+        units = sampler.frame(self.corpus, excluded_sids=set())
+        interleaved = sorted(units, key=lambda u: (u.first_entry_index, u.transcript))
+        firsts = [u.transcript for u in interleaved]
+        self.assertGreater(sum(1 for i in range(1, len(firsts)) if firsts[i] != firsts[i - 1]), 9)  # control: it IS interleaved
+        real = packet.build_packet
+        seen = []
+
+        def spy(corpus, unit, case_id):
+            seen.append(unit.transcript)
+            return real(corpus, unit, case_id)
+
+        with mock.patch.object(run, "_frame_units", lambda corpus: interleaved), \
+                mock.patch.object(run.packet, "build_packet", spy):
+            rc, out, err = cli("preflight", "--corpus", self.corpus)
+        self.assertEqual(rc, 0)
+        runs = [t for i, t in enumerate(seen) if i == 0 or t != seen[i - 1]]
+        self.assertEqual(len(runs), len(set(runs)))
+        self.assertEqual(len(seen), 33)
+
+
+    def test_the_excluded_out_path_is_private_and_new(self):
+        corpus = self.token_corpus()
+        fake_repo = self.root / "fakerepo"
+        inrepo = fake_repo / "excluded.json"
+        with mock.patch.object(run.archive, "REPO_ROOT", fake_repo):
+            rc, out, err = cli("preflight", "--corpus", corpus, "--excluded-out", inrepo)
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("inside the repository", err)
+        self.assertFalse(inrepo.exists())
+        self.assertFalse(fake_repo.exists())
+        existing = self.root / "already.json"
+        existing.write_text("first evidence")
+        rc, out, err = cli("preflight", "--corpus", corpus, "--excluded-out", existing)
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("exists", err)
+        self.assertEqual(existing.read_text(), "first evidence")
+        # positive control: a fresh path outside the repo is accepted with the same corpus
+        rc, out, err = cli("preflight", "--corpus", corpus, "--excluded-out", self.root / "fresh.json")
+        self.assertEqual((rc, err), (0, ""))
+
+    def test_an_unreadable_corpus_is_refused_by_type(self):
+        empty = self.root / "empty-corpus"
+        empty.mkdir()
+        for corpus in (self.root / "no-such-corpus", empty):
+            with self.subTest(corpus=corpus.name):
+                rc, out, err = cli("preflight", "--corpus", corpus)
+                self.assertEqual((rc, out), (1, ""))
+                self.assertTrue("no units" in err or "could not be read" in err, err)
+
+
+class ExcludeUnits(TokenBase):
+    """`frame`/`draw` --exclude-units: the registered treatment of the units preflight found."""
+
+    def excluded_file(self, corpus):
+        path = self.root / "excluded.json"
+        rc, out, err = cli("preflight", "--corpus", corpus, "--excluded-out", path)
+        self.assertEqual((rc, err), (0, ""))
+        return path
+
+    def frame_with(self, corpus, excluded, name="frame.json"):
+        path = self.root / name
+        rc, out, err = cli("frame", "--corpus", corpus, "--out", path, "--exclude-units", excluded)
+        self.assertEqual((rc, err), (0, ""), out)
+        return path
+
+    def test_frame_removes_the_units_before_counting_and_records_count_and_hash_only(self):
+        corpus = self.token_corpus()
+        unit = self.token_unit(corpus)
+        excluded = self.excluded_file(corpus)
+        frame = self.frame_with(corpus, excluded)
+        rec = json.loads(read(frame))
+        self.assertEqual(rec["counts"], {"substantive": {"top": 11, "handback": 3}, "routine": {"top": 18}})
+        self.assertEqual(rec["n_units"], 32)
+        self.assertEqual(rec["excluded_units"],
+                         {"count": 1, "sha256": hashlib.sha256(excluded.read_bytes()).hexdigest()})
+        for secret in (unit.case_key, sid_for(2), unit.transcript):
+            self.assertIn(secret, read(excluded) + corpus_text(corpus), secret)  # positive control
+            self.assertNotIn(secret, read(frame), secret)
+        # the same corpus framed without the file counts the unit and records no exclusion
+        plain = self.root / "plain.json"
+        self.assertEqual(cli("frame", "--corpus", corpus, "--out", plain)[0], 0)
+        self.assertEqual(json.loads(read(plain))["counts"]["substantive"]["top"], 12)
+        self.assertNotIn("excluded_units", json.loads(read(plain)))
+
+    def test_frame_refuses_a_malformed_stale_or_duplicated_file(self):
+        corpus = self.token_corpus()
+        unit = self.token_unit(corpus)
+        shape = "--exclude-units: the file must be a JSON list of case_key strings"
+        cases = {  # each case is refused by ITS OWN guard: the message names which
+            "not json": ("this is not json", shape),
+            "not a list": (json.dumps({"a": 1}), shape),
+            "not strings": (json.dumps([1, 2]), shape),
+            "nested": (json.dumps([["x"]]), shape),
+            "duplicate": (json.dumps([unit.case_key, unit.case_key]),
+                          "--exclude-units: the file lists a case_key more than once"),
+            "key not in the frame": (json.dumps(["nobody|nowhere|m0"]),
+                                     "--exclude-units holds 1 case_key(s) that are not in this frame; the file "
+                                     "belongs to another corpus"),
+        }
+        for why, (text, message) in cases.items():
+            with self.subTest(why=why):
+                path = self.root / f"bad-{why.replace(' ', '-')}.json"
+                path.write_text(text)
+                out = self.root / f"f-{why.replace(' ', '-')}.json"
+                rc, so, err = cli("frame", "--corpus", corpus, "--out", out, "--exclude-units", path)
+                self.assertEqual((rc, so), (1, ""))
+                self.assertEqual(err, f"error: {message}\n")
+                self.assertFalse(out.exists())
+                self.assertNotIn("nobody", err)  # a value of the file is never echoed
+        rc, so, err = cli("frame", "--corpus", corpus, "--out", self.root / "f-missing.json",
+                          "--exclude-units", self.root / "no-such-file.json")
+        self.assertEqual((rc, so), (1, ""))
+        self.assertIn("cannot be read", err)
+
+    def test_draw_never_returns_an_excluded_unit_and_the_pool_shrinks_by_exactly_it(self):
+        corpus = self.token_corpus()
+        unit = self.token_unit(corpus)
+        excluded = self.excluded_file(corpus)
+        frame = self.frame_with(corpus, excluded)
+        main = self.root / (SETP + "main")
+        rc, out, err = cli("draw", "--corpus", corpus, "--set", main, "--seed", 7, "--substantive", 14,
+                           "--routine", 2, "--frame", frame, "--exclude-units", excluded)
+        self.assertEqual((rc, err), (0, ""), out)
+        keys = {v["case_key"] for v in json.loads(read(main / "key.json")).values()}
+        self.assertEqual(len(keys), 16)
+        self.assertNotIn(unit.case_key, keys)
+        # boundary on the pool: 15 - 1 = 14 substantive are drawable, 15 are not
+        rc, out, err = cli("draw", "--corpus", corpus, "--set", self.root / (SETP + "all15"), "--seed", 7,
+                           "--substantive", 15, "--routine", 0, "--frame", frame, "--exclude-units", excluded)
+        self.assertEqual(rc, 1)
+        self.assertIn("14 candidates", err)
+        # positive control: without the exclusion the same draw of all 15 substantive DOES hold the unit
+        rc, out, err = cli("draw", "--corpus", corpus, "--set", self.root / (SETP + "nofile"), "--seed", 7,
+                           "--substantive", 15, "--routine", 0)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn(unit.case_key, {v["case_key"] for v in json.loads(read(self.root / (SETP + "nofile") / "key.json")).values()})
+
+    def test_draw_refuses_a_file_whose_hash_is_not_the_one_the_frame_registered(self):
+        corpus = self.token_corpus()
+        excluded = self.excluded_file(corpus)
+        frame = self.frame_with(corpus, excluded)
+        other = self.root / "other.json"
+        other.write_text("[]\n")  # a valid list, but not the registered bytes
+        target = self.root / (SETP + "main")
+        rc, out, err = cli("draw", "--corpus", corpus, "--set", target, "--seed", 7, "--substantive", 2,
+                           "--routine", 1, "--frame", frame, "--exclude-units", other)
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("does not match the frame's registered exclusion", err)
+        self.assertFalse(target.exists())
+        # one byte of difference is enough: the registered file, appended to
+        same_but = self.root / "same-but.json"
+        same_but.write_bytes(excluded.read_bytes() + b" ")
+        rc, out, err = cli("draw", "--corpus", corpus, "--set", target, "--seed", 7, "--substantive", 2,
+                           "--routine", 1, "--frame", frame, "--exclude-units", same_but)
+        self.assertEqual(rc, 1)
+        self.assertFalse(target.exists())
+        # positive control: the registered bytes are accepted
+        rc, out, err = cli("draw", "--corpus", corpus, "--set", target, "--seed", 7, "--substantive", 2,
+                           "--routine", 1, "--frame", frame, "--exclude-units", excluded)
+        self.assertEqual((rc, err), (0, ""))
+
+    def test_the_exclusion_flags_are_refused_when_the_frame_and_the_draw_disagree(self):
+        corpus = self.token_corpus()
+        excluded = self.excluded_file(corpus)
+        recorded = self.frame_with(corpus, excluded)
+        plain = self.root / "plain.json"
+        self.assertEqual(cli("frame", "--corpus", corpus, "--out", plain)[0], 0)
+        base = ("draw", "--corpus", corpus, "--seed", 7, "--substantive", 2, "--routine", 1)
+        target = self.root / (SETP + "main")
+        # the frame records no exclusion, but the draw brings one
+        rc, out, err = cli(*base, "--set", target, "--frame", plain, "--exclude-units", excluded)
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("records no exclusion", err)
+        # the draw brings an exclusion without a frame to check it against
+        rc, out, err = cli(*base, "--set", target, "--exclude-units", excluded)
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("--frame", err)
+        # the frame records an exclusion, but the draw does not apply it
+        rc, out, err = cli(*base, "--set", target, "--frame", recorded)
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("pass --exclude-units", err)
+        self.assertFalse(target.exists())
+
+    def test_pilot_and_main_share_the_exclusion_and_the_recovery_path_renders(self):
+        corpus = self.token_corpus()
+        # without the exclusion the token unit is in a full draw and render aborts (the problem)
+        bad = self.root / (SETP + "bad")
+        self.assertEqual(cli("draw", "--corpus", corpus, "--set", bad, "--seed", 7, "--substantive", 15,
+                             "--routine", 0)[0], 0)
+        rc, out, err = cli("render", "--corpus", corpus, "--set", bad)
+        self.assertEqual(rc, 1)
+        self.assertIn("token-shaped", err)
+        # with it: pilot, then main excluding the pilot, both under the same registered file
+        excluded = self.excluded_file(corpus)
+        frame = self.frame_with(corpus, excluded)
+        common = ("--corpus", corpus, "--seed", 7, "--frame", frame, "--exclude-units", excluded)
+        pilot, main = self.root / (SETP + "pilot"), self.root / (SETP + "main")
+        rc, out, err = cli("draw", *common, "--set", pilot, "--substantive", 4, "--routine", 1)
+        self.assertEqual((rc, err), (0, ""))
+        rc, out, err = cli("draw", *common, "--set", main, "--substantive", 10, "--routine", 3,
+                           "--exclude-set", pilot)
+        self.assertEqual((rc, err), (0, ""), out)
+        keys = lambda d: {v["case_key"] for v in json.loads(read(d / "key.json")).values()}  # noqa: E731
+        self.assertEqual(keys(pilot) & keys(main), set())
+        self.assertNotIn(self.token_unit(corpus).case_key, keys(pilot) | keys(main))
+        for d, n in ((pilot, 5), (main, 13)):
+            rc, out, err = cli("render", "--corpus", corpus, "--set", d)
+            self.assertEqual((rc, err), (0, ""))
+            self.assertEqual(out, f"rendered {n} packets\n")
+
+
+class EstimateBinding(Base):
+    """`estimate` is bound to the registered seed and to the code the frame hashed."""
+
+    def labelled(self):
+        set_dir = self.rendered()
+        write_labels(set_dir, sub_hits=4, rou_hits=1)
+        return set_dir, self.frame_file()
+
+    def run_estimate(self, set_dir, frame, seed, name="result.json"):
+        out = self.root / name
+        rc, so, se = cli("estimate", "--set", set_dir, "--frame", frame, "--seed", seed, "--out", out)
+        return rc, so, se, out
+
+    def test_the_seed_must_equal_the_drawn_seed_on_both_sides(self):
+        set_dir, frame = self.labelled()  # drawn with seed 11
+        for i, seed in enumerate((10, 12, 0, 99)):
+            with self.subTest(seed=seed):
+                rc, so, se, out = self.run_estimate(set_dir, frame, seed, f"bad{i}.json")
+                self.assertEqual((rc, so), (1, ""))
+                self.assertEqual(se, f"error: --seed {seed} is not the seed this set was drawn with (11); "
+                                     f"estimate must use the registered seed\n")
+                self.assertFalse(out.exists())
+        rc, so, se, out = self.run_estimate(set_dir, frame, 11)
+        self.assertEqual((rc, se), (0, ""))
+        self.assertEqual(json.loads(read(out))["seed"], 11)
+
+    def test_an_invalid_seed_in_draw_json_is_refused_without_echoing_it(self):
+        set_dir, frame = self.labelled()
+        draw = json.loads(read(set_dir / "draw.json"))
+        leak = "work/" + sid_for(2)  # session-id-shaped: what a tampered draw.json could carry into a message
+        (set_dir / "draw.json").write_text(json.dumps(dict(draw, seed=leak)))
+        rc, so, se, out = self.run_estimate(set_dir, frame, 11)
+        self.assertEqual((rc, so), (1, ""))
+        self.assertEqual(se, "error: draw.json: field seed is invalid; refusing to estimate\n")
+        self.assertNotIn(sid_for(2), se)
+        self.assertFalse(out.exists())
+        self.assertIn(leak, read(set_dir / "draw.json"))  # positive control: the value IS on disk
+
+
+    def test_every_one_of_the_four_code_hashes_is_checked(self):
+        set_dir, frame = self.labelled()
+        good = json.loads(read(frame))
+        self.assertEqual(sorted(good["code_sha256"]), ["estimate.py", "packet.py", "run.py", "sampler.py"])
+        for i, name in enumerate(("sampler.py", "packet.py", "estimate.py", "run.py")):
+            with self.subTest(tampered=name):
+                bad = json.loads(json.dumps(good))
+                bad["code_sha256"][name] = "0" * 64
+                path = self.root / f"tampered{i}.json"
+                path.write_text(json.dumps(bad))
+                rc, so, se, out = self.run_estimate(set_dir, path, 11, f"t{i}.json")
+                self.assertEqual((rc, so), (1, ""))
+                self.assertEqual(se, f"error: the code changed since the frame was frozen ({name}); "
+                                     f"re-run frame, or estimate with the code that was registered\n")
+                self.assertFalse(out.exists())
+        for why, code in (("missing key", {k: v for k, v in good["code_sha256"].items() if k != "run.py"}),
+                          ("no hashes", None)):
+            with self.subTest(why=why):
+                bad = dict(good)
+                if code is None:
+                    del bad["code_sha256"]
+                else:
+                    bad["code_sha256"] = code
+                path = self.root / f"missing{len(why)}.json"
+                path.write_text(json.dumps(bad))
+                rc, so, se, out = self.run_estimate(set_dir, path, 11, f"m{len(why)}.json")
+                self.assertEqual((rc, so), (1, ""))
+                self.assertIn("frame", se)
+                self.assertFalse(out.exists())
+        # positive control: the untouched frame file estimates
+        rc, so, se, out = self.run_estimate(set_dir, frame, 11, "ok.json")
+        self.assertEqual((rc, se), (0, ""))
+
+    def test_n_sessions_counts_distinct_sessions_per_stratum_and_carries_no_id(self):
+        set_dir, frame = self.labelled()
+        rc, so, se, out = self.run_estimate(set_dir, frame, 11)
+        self.assertEqual((rc, se), (0, ""))
+        res = json.loads(read(out))
+        self.assertEqual(json.loads(so), res)  # stdout and RESULT.json carry the same figures
+        allc = res["results"]["all_cases"]
+        # 6 substantive units in 3 sessions (2, 4, 5); 4 routine units in 4 sessions (1, 2, 3, 5)
+        self.assertEqual((allc["substantive"]["n"], allc["substantive"]["n_sessions"]), (6, 3))
+        self.assertEqual((allc["routine"]["n"], allc["routine"]["n_sessions"]), (4, 4))
+        self.assertNotIn("n_sessions", allc["overall"])
+        wo = res["results"]["without_recall_flagged"]
+        self.assertEqual((wo["substantive"]["n"], wo["substantive"]["n_sessions"]), (5, 3))  # h2b flagged; m2e keeps session 2
+        # no session id, copy_id or case_key anywhere in what is published
+        key = json.loads(read(set_dir / "key.json"))
+        for secret in ([v["copy_id"] for v in key.values()] + [v["copy_id"].split("/", 1)[1] for v in key.values()]
+                       + [v["case_key"] for v in key.values()]):
+            self.assertIn(secret, read(set_dir / "key.json"), secret)  # positive control
+            self.assertNotIn(secret, so + read(out), secret)
+
+    def test_n_sessions_follows_the_labelled_units_not_the_drawn_ones(self):
+        set_dir = self.rendered()
+        recs = write_labels(set_dir, sub_hits=4, rou_hits=1, keep_routine=2)
+        # flag BOTH session-2 substantive units (h2b, m2e) as recalled: that session drops from the second branch
+        key = json.loads(read(set_dir / "key.json"))
+        for r in recs:
+            if key[r["case_id"]]["case_key"].split("|")[-1] in ("h2b", "m2e"):
+                r["recall"] = "y"
+        (set_dir / "labels.jsonl").write_text("".join(json.dumps(r) + "\n" for r in recs))
+        rc, so, se, out = self.run_estimate(set_dir, self.frame_file(), 11)
+        self.assertEqual((rc, se), (0, ""))
+        res = json.loads(read(out))["results"]
+        self.assertEqual(res["all_cases"]["substantive"]["n_sessions"], 3)
+        self.assertEqual(res["without_recall_flagged"]["substantive"]["n"], 4)
+        self.assertEqual(res["without_recall_flagged"]["substantive"]["n_sessions"], 2)
+        # only the first 2 routine cases in draw order are labelled: sessions 5 and 3
+        self.assertEqual((res["all_cases"]["routine"]["n"], res["all_cases"]["routine"]["n_sessions"]), (2, 2))
+
+    def test_estimate_help_says_an_existing_out_is_never_overwritten(self):
+        help_text = " ".join(run._parser()._subparsers._group_actions[0].choices["estimate"].format_help().split())
+        self.assertIn("refuses to overwrite", help_text)
+        self.assertIn("relabel", help_text)
+
+
+class DrawSessions(Base):
+    def test_draw_prints_the_distinct_session_count_of_each_stratum(self):
+        set_dir = self.root / (SETP + "main")
+        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", set_dir, "--seed", 11,
+                           "--substantive", 6, "--routine", 4)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(out, "drawn substantive=6 routine=4 excluded=0 sessions_substantive=3 sessions_routine=4\n")
+        # an all-strata draw: every unit in, so every session counts once however many of its units are drawn
+        one = self.root / (SETP + "two")
+        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", one, "--seed", 11,
+                           "--substantive", 15, "--routine", 18)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(out, "drawn substantive=15 routine=18 excluded=0 sessions_substantive=6 sessions_routine=6\n")
+
+
+class EndToEndThroughTheOperatorTool(Base):
+    """A rendered set labelled THROUGH label.run_next (the operator loop), not hand-written records: a
+    change to label.py's record schema must turn this red even when every hand-made fixture stays green."""
+
+    def test_label_run_next_output_feeds_verify_summary_estimate_and_export(self):
+        set_dir = self.rendered()
+        draw, key = json.loads(read(set_dir / "draw.json")), json.loads(read(set_dir / "key.json"))
+        order = draw["order"]
+        subs = [c for c in order if key[c]["stratum"] == "substantive"]
+        rous = [c for c in order if key[c]["stratum"] == "routine"]
+        plan = {}  # case_id -> (labels letter, delivery letter, recall, note)
+        for pos, cid in enumerate(subs):
+            plan[cid] = ("v", "q", "y" if pos == 0 else "n", f"note {cid}") if pos < 4 else ("n", "s", "n", "")
+        for pos, cid in enumerate(rous):
+            plan[cid] = ("v", "q", "n", "") if pos < 1 else ("n", "s", "n", "")
+        shown = []
+
+        def show(text):
+            i = len(shown)
+            shown.append(text)
+            cid = order[i]  # the i-th packet shown belongs to the i-th case of draw.json's order
+            self.assertEqual(text, read(set_dir / "packets" / f"{cid}.md"))
+            self.assertEqual(hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                             {c["case_id"]: c["sha256"] for c in draw["cases"]}[cid])
+
+        def ask(prompt):
+            lab, deliv, recall, note = plan[order[len(shown) - 1]]
+            return {label.LABELS_PROMPT: lab, label.DELIVERY_PROMPT: deliv, label.RECALL_PROMPT: recall,
+                    label.NOTE_PROMPT: note, label.KEEP_PROMPT: ""}[prompt]
+
+        ticks = []
+        for i in range(10):  # case i takes 30 + i seconds
+            ticks += [100.0 * i, 100.0 * i + 30 + i]
+        out = label.run_next(set_dir, False, ask, show, iter(ticks).__next__, confirm=True, say=lambda m: None)
+        self.assertEqual(out, {"labelled": 10, "refused": [], "total": 10, "remaining": 0})
+        self.assertEqual(len(shown), 10)
+        # verify and summary read what the tool wrote
+        self.assertEqual(label.verify(set_dir), {"ok": 10, "mismatch": []})
+        self.assertEqual(label.summary(set_dir), {
+            "cases": 10, "labelled": 10,
+            "labels": {"verify": 5, "qualify": 0, "correct": 0, "none": 5, "unresolved": 0},
+            "delivery": {"silent": 5, "quiet": 5, "interrupt": 0}, "unresolved": 0, "recall": 1,
+            "median_seconds": 34.5})
+        # estimate and export accept those records
+        rc, so, se = cli("estimate", "--set", set_dir, "--frame", self.frame_file(), "--seed", 11,
+                         "--out", self.root / "result.json")
+        self.assertEqual((rc, se), (0, ""))
+        res = json.loads(so)
+        self.assertEqual(res["status"], "COMPLETE")
+        self.assertEqual(res["labelled"], {"substantive": 6, "routine": 4})
+        sub = res["results"]["all_cases"]["substantive"]
+        self.assertEqual((sub["n"], sub["k"], sub["n_sessions"]), (6, 4, 3))
+        self.assertEqual(res["results"]["all_cases"]["median_seconds"]["value"], 34.5)
+        exp = self.root / "fakerepo" / "data"
+        (self.root / "fakerepo").mkdir()
+        with mock.patch.object(run.archive, "REPO_ROOT", self.root / "fakerepo"):
+            rc, so, se = cli("export", "--set", set_dir, "--out-dir", exp)
+        self.assertEqual((rc, so, se), (0, "exported 10 cases, 10 labels, 0 relabels\n", ""))
+        rows = [json.loads(l) for l in read(exp / MAIN_LABELS).splitlines()]
+        # in draw order: 4 routine/sub interleaved as drawn; hits are the first 4 substantive and the first routine
+        self.assertEqual(rows, [dict(zip(LABEL_FIELDS, row)) for row in [
+            ("3c9284abec", "7786e4d6400ece5ae77a970ebeba3e230b6a3d3ff3d26c51e6050b999f3e57c5", V, Q, "n", 30.0),
+            ("812c9a7436", "642d50b4c8f65ebe86a1f78bb2c61f07fd8bcc0c40188e76853c079c6b71f6b4", N, S, "n", 31.0),
+            ("d6ec25c96f", "cf449453976052933cea49034560e13e2514a97a8e4d7435a72545c451934f6e", N, S, "n", 32.0),
+            ("77ba2592f7", "95290a93da6dbb2df60d304f1ed96a34590510c21a3fdd31e258a308a046e73b", V, Q, "y", 33.0),
+            ("9cc8493506", "5e60b00766f032e061fc5dc049ad4603a43da19f8822d210ba2ba6b4d7943a0f", V, Q, "n", 34.0),
+            ("1a64a9afdb", "5753597682f3477ae706c96fb8833b97567830a6480f8417d92c080fd06b13bc", V, Q, "n", 35.0),
+            ("d6a1394c31", "c560d140225cb1e1ff3eee825a74b76170ec59ec14e6027a2d8234fc4271d1da", V, Q, "n", 36.0),
+            ("0761ce7ec5", "43e3cf4b7402df86ab248ba74df75dd033610b5ebf20b73eb46104695571e2e8", N, S, "n", 37.0),
+            ("b837168a2c", "a9cfffbd82fa2fd88466938b271c4cd5ec9a7e9b3a9ea24d2826d54fe8b92aac", N, S, "n", 38.0),
+            ("30fc2c09dd", "ac07955b317ac1f061caf74da091cfec4094ba144819a75a93e2de0c6b54118b", N, S, "n", 39.0)]])
 
 
 if __name__ == "__main__":
