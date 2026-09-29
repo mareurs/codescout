@@ -1,0 +1,254 @@
+# Task 9 gate -- LIVE
+
+codex_version: codex-cli 0.154.0
+model: gpt-6-astra
+effort: medium
+model_source: docs/evals/data/2026-09-24-rule-tell/stage2/generate_synthetic.py
+channel: bwrap --die-with-parent --ro-bind / / --dev /dev --proc /proc --tmpfs <home> --tmpfs /tmp --tmpfs /run/user/<uid> --bind <CODEX_HOME> <CODEX_HOME> --bind <auth.json target> <auth.json target> --bind <workdir> <workdir> -- codex exec --skip-git-repo-check --sandbox read-only -c approval_policy=never --ephemeral --json --strict-config -o <workdir>/last.txt -C <workdir> - (prompt on stdin); env: CODEX_HOME=<CODEX_HOME>, without OPENAI_API_KEY/CODEX_API_KEY/OPENAI_BASE_URL; config.toml: model, model_reasoning_effort, forced_login_method = "chatgpt" [features] in_app_updates = false
+prompt: scripts/measure/judge_prompt.md sha256 3137920a8d4645540b9cff7bced95671a9c6fbb282581cddc5eb5391d4de8c54
+rtd_doc: docs/evals/rule-tell-detection.md sha256 1c7de54f147bf90c79c577c5d00b261957a0ddefb9dc5defe8b18f733cbc3bac
+controls_doc: docs/evals/rule-tell-controls.md sha256 ff569215c943647093d3f283cad716227601f0293c6803012d43a2936d389b6f
+repo_head: 0f3bc7c1fab184503a2464da192ccfb062f1f196
+votes_per_item: 3
+retry_policy: R137: a call_failed/unparseable/tool_call attempt is re-issued, up to 3 attempts per vote; every attempt is recorded
+token_estimate: ceil(chars / 4) -- an estimate, not a tokenizer count
+
+| id | mode | kind | lessons | context chars | prompt chars | est tokens |
+|---|---|---|---|---|---|---|
+| RTD-1/correction | correction | rtd | 231 | 2432 | 72140 | 18035 |
+| RTD-2/correction | correction | rtd | 231 | 2906 | 73069 | 18268 |
+| RTD-3/correction | correction | rtd | 231 | 2636 | 72827 | 18207 |
+| RTD-3/audit | audit | rtd | 231 | 2636 | 72061 | 18016 |
+| RTD-4/correction | correction | rtd | 231 | 2453 | 72317 | 18080 |
+| RTD-5/correction | correction | rtd | 231 | 2071 | 71877 | 17970 |
+| RTD-6/correction | correction | rtd | 231 | 2740 | 72943 | 18236 |
+| RTD-7/correction | correction | rtd | 231 | 3184 | 73415 | 18354 |
+| RTD-8/correction | correction | rtd | 231 | 3083 | 73116 | 18279 |
+| RTD-8/audit | audit | rtd | 231 | 3083 | 72475 | 18119 |
+| RTD-9/correction | correction | rtd | 231 | 2561 | 72720 | 18180 |
+| RTD-9/audit | audit | rtd | 231 | 2561 | 71916 | 17979 |
+| RTD-10/correction | correction | rtd | 231 | 1841 | 71873 | 17969 |
+| RTD-10/audit | audit | rtd | 231 | 1841 | 71054 | 17764 |
+| RTD-11/correction | correction | rtd | 231 | 2590 | 72646 | 18162 |
+| RTD-12/correction | correction | rtd | 231 | 2953 | 73117 | 18280 |
+| RTD-13/correction | correction | rtd | 231 | 2066 | 72148 | 18037 |
+| RTD-14/correction | correction | rtd | 231 | 2787 | 72636 | 18159 |
+| RTD-15/correction | correction | rtd | 231 | 2994 | 72969 | 18243 |
+| RTD-15/audit | audit | rtd | 231 | 2994 | 72160 | 18040 |
+| RTD-16/correction | correction | rtd | 231 | 2809 | 72799 | 18200 |
+| RTD-17/correction | correction | rtd | 231 | 2072 | 72193 | 18049 |
+| RTD-17/audit | audit | rtd | 231 | 2072 | 71396 | 17849 |
+| RTD-18/correction | correction | rtd | 231 | 2502 | 72632 | 18158 |
+| RTD-18/audit | audit | rtd | 231 | 2502 | 71795 | 17949 |
+| RTD-19/correction | correction | rtd | 231 | 2777 | 73110 | 18278 |
+| RTD-20/correction | correction | rtd | 231 | 3120 | 73153 | 18289 |
+| RTD-20/audit | audit | rtd | 231 | 3120 | 72466 | 18117 |
+| RTD-21/correction | correction | rtd | 231 | 2671 | 72844 | 18211 |
+| CTL3-1/audit | audit | control | 221 | 3572 | 70856 | 17714 |
+| CTL3-2/audit | audit | control | 206 | 3200 | 66047 | 16512 |
+| CTL3-3/audit | audit | control | 223 | 3069 | 70287 | 17572 |
+| CTL3-4/audit | audit | control | 219 | 3278 | 69627 | 17407 |
+| CTL3-5/audit | audit | control | 227 | 3254 | 71603 | 17901 |
+| CTL3-7/audit | audit | control | 222 | 3222 | 70351 | 17588 |
+| CTL3-8/audit | audit | control | 228 | 3159 | 71630 | 17908 |
+| CTL3-9/audit | audit | control | 206 | 3362 | 66396 | 16599 |
+| CTL3-10/audit | audit | control | 223 | 3167 | 70543 | 17636 |
+| CTL3-11/audit | audit | control | 206 | 3341 | 66272 | 16568 |
+| CTL8-1/audit | audit | control | 227 | 2535 | 70843 | 17711 |
+| CTL8-2/audit | audit | control | 227 | 3217 | 71478 | 17870 |
+| CTL8-3/audit | audit | control | 206 | 3185 | 66019 | 16505 |
+| CTL8-4/audit | audit | control | 228 | 3226 | 71835 | 17959 |
+| CTL8-5/audit | audit | control | 189 | 2668 | 60763 | 15191 |
+| CTL8-7/audit | audit | control | 224 | 2904 | 70238 | 17560 |
+| CTL8-8/audit | audit | control | 206 | 3242 | 66150 | 16538 |
+| CTL8-9/audit | audit | control | 228 | 3117 | 71598 | 17900 |
+| CTL8-10/audit | audit | control | 206 | 3151 | 66056 | 16514 |
+| CTL8-11/audit | audit | control | 229 | 3280 | 72130 | 18033 |
+| CTL9-1/audit | audit | control | 228 | 3134 | 71667 | 17917 |
+| CTL9-2/audit | audit | control | 223 | 3082 | 70424 | 17606 |
+| CTL9-3/audit | audit | control | 223 | 3343 | 70867 | 17717 |
+| CTL9-5/audit | audit | control | 126 | 2577 | 42377 | 10595 |
+| CTL9-6/audit | audit | control | 127 | 3163 | 43238 | 10810 |
+| CTL9-7/audit | audit | control | 222 | 2694 | 69775 | 17444 |
+| CTL9-8/audit | audit | control | 199 | 2254 | 63174 | 15794 |
+| CTL9-9/audit | audit | control | 199 | 2591 | 63506 | 15877 |
+| CTL9-10/audit | audit | control | 127 | 2057 | 42076 | 10519 |
+| CTL9-11/audit | audit | control | 189 | 3012 | 60858 | 15215 |
+| CTL10-1/audit | audit | control | 228 | 3347 | 72001 | 18001 |
+| CTL10-2/audit | audit | control | 222 | 3163 | 70263 | 17566 |
+| CTL10-3/audit | audit | control | 228 | 3031 | 71461 | 17866 |
+| CTL10-4/audit | audit | control | 199 | 3179 | 64142 | 16036 |
+| CTL10-5/audit | audit | control | 228 | 3324 | 71998 | 18000 |
+| CTL10-6/audit | audit | control | 206 | 3284 | 66305 | 16577 |
+| CTL10-7/audit | audit | control | 222 | 2796 | 69846 | 17462 |
+| CTL10-9/audit | audit | control | 228 | 3056 | 71443 | 17861 |
+| CTL10-10/audit | audit | control | 227 | 3173 | 71428 | 17857 |
+| CTL10-11/audit | audit | control | 227 | 3255 | 71607 | 17902 |
+| CTL10-12/audit | audit | control | 121 | 3126 | 39894 | 9974 |
+| CTL10-13/audit | audit | control | 228 | 3230 | 71776 | 17944 |
+| CTLX-1/audit | audit | control | 228 | 4356 | 72991 | 18248 |
+| CTLX-2/audit | audit | control | 227 | 3372 | 71787 | 17947 |
+| CTLX-3/audit | audit | control | 228 | 5407 | 73974 | 18494 |
+| CTLX-4/audit | audit | control | 126 | 4788 | 44550 | 11138 |
+| CTLX-6/audit | audit | control | 224 | 3860 | 71464 | 17866 |
+| CTLX-7/audit | audit | control | 192 | 3310 | 62265 | 15567 |
+| CTLX-8/audit | audit | control | 228 | 4247 | 72847 | 18212 |
+| CTLX-9/audit | audit | control | 126 | 3709 | 43460 | 10865 |
+| CTLX-10/audit | audit | control | 206 | 6343 | 69415 | 17354 |
+| CTLX-11/audit | audit | control | 227 | 5116 | 73554 | 18389 |
+
+items: 81 {"audit_rtd": 8, "controls": 52, "correction": 21, "peer_yes": 4}
+total prompt chars: 5549022
+total est tokens (one vote): 1387283
+total est tokens (x3 votes): 4161849
+largest item: CTLX-3/audit (73974 chars, 18494 est tokens)
+
+lesson inventory per (freeze sha, decision ts, undated reference sha):
+| freeze sha | decision ts | undated ref | dated kept | after decision | undatable | global undated |
+|---|---|---|---|---|---|---|
+| a17c5e667350 | 2026-09-21T10:50:52+03:00 | a17c5e667350 | 225 | 0 | 0 | 6 |
+| 738c3c88290e | 2026-09-21T11:57:46+03:00 | 738c3c88290e | 225 | 0 | 0 | 6 |
+| 46c3aa577704 | 2026-09-21T12:06:39+03:00 | 46c3aa577704 | 225 | 0 | 0 | 6 |
+| 46f2c4ccecb8 | 2026-09-21T12:22:50+03:00 | 46f2c4ccecb8 | 225 | 0 | 0 | 6 |
+| 87c06e1ea86e | 2026-09-21T12:25:39+03:00 | 87c06e1ea86e | 225 | 0 | 0 | 6 |
+| 60b627a23477 | 2026-09-21T18:09:52+03:00 | 60b627a23477 | 225 | 0 | 0 | 6 |
+| 96e4498d5146 | 2026-09-21T18:32:20+03:00 | 96e4498d5146 | 225 | 0 | 0 | 6 |
+| ddfce06545de | 2026-09-21T17:48:26+03:00 | ddfce06545de | 225 | 0 | 0 | 6 |
+| 27e0247d8995 | 2026-09-21T18:42:33+03:00 | 27e0247d8995 | 225 | 0 | 0 | 6 |
+| 0f11fc40ee6b | 2026-09-21T18:48:38+03:00 | 0f11fc40ee6b | 225 | 0 | 0 | 6 |
+| b9bf860975f0 | 2026-09-21T18:58:32+03:00 | b9bf860975f0 | 225 | 0 | 0 | 6 |
+| 5098641994fe | 2026-09-21T19:50:11+03:00 | 5098641994fe | 225 | 0 | 0 | 6 |
+| def547592783 | 2026-09-04T02:35:29+03:00 | 27eded91c0cf | 215 | 1 | 0 | 6 |
+| 0828ddaaf42e | 2026-09-01T21:10:15+03:00 | 27eded91c0cf | 200 | 12 | 0 | 6 |
+| b5322af77233 | 2026-09-06T22:38:45+03:00 | 27eded91c0cf | 217 | 0 | 0 | 6 |
+| 0d2ab2b1af22 | 2026-09-02T12:19:30+03:00 | 27eded91c0cf | 213 | 1 | 0 | 6 |
+| 58b6bafc3282 | 2026-09-14T22:09:06+03:00 | 27eded91c0cf | 221 | 1 | 0 | 6 |
+| 29f1940c746a | 2026-09-06T21:48:03+03:00 | 27eded91c0cf | 216 | 1 | 0 | 6 |
+| ce00f79624b3 | 2026-09-16T13:08:53+03:00 | 27eded91c0cf | 222 | 0 | 0 | 6 |
+| ccfd59209392 | 2026-09-14T20:39:05+03:00 | 27eded91c0cf | 221 | 0 | 0 | 6 |
+| f9d770760cba | 2026-09-16T21:42:40+03:00 | 27eded91c0cf | 222 | 0 | 0 | 6 |
+| ee41c635528a | 2026-08-27T16:13:09+03:00 | 27eded91c0cf | 183 | 0 | 0 | 6 |
+| 012549eb6004 | 2026-09-08T17:02:30+03:00 | 27eded91c0cf | 218 | 0 | 0 | 6 |
+| 87e434dd488c | 2026-09-17T10:08:56+03:00 | 27eded91c0cf | 223 | 1 | 0 | 6 |
+| dbe302af7231 | 2026-09-16T23:19:45+03:00 | 27eded91c0cf | 222 | 1 | 0 | 6 |
+| f15aa586e7c9 | 2026-09-07T08:34:33+03:00 | 27eded91c0cf | 217 | 0 | 0 | 6 |
+| 05490dd52312 | 2026-08-19T10:58:22+03:00 | 27eded91c0cf | 120 | 1 | 0 | 6 |
+| 1d5c99a40d70 | 2026-07-19T13:42:36+03:00 | 27eded91c0cf | 121 | 0 | 0 | 6 |
+| 6ac368a53bbd | 2026-09-04T08:49:33+03:00 | 27eded91c0cf | 216 | 0 | 0 | 6 |
+| 8b4890e23363 | 2026-08-30T20:02:56+03:00 | 27eded91c0cf | 193 | 0 | 0 | 6 |
+| 9bfc7e4b910a | 2026-08-30T15:21:55+03:00 | 27eded91c0cf | 193 | 0 | 0 | 6 |
+| 14d0a21190cd | 2026-07-29T20:59:45+03:00 | 27eded91c0cf | 121 | 0 | 0 | 6 |
+| fbaf2b99a89f | 2026-09-16T09:36:10+03:00 | 27eded91c0cf | 222 | 0 | 0 | 6 |
+| 4f79909d6d7d | 2026-08-31T00:04:12+03:00 | 27eded91c0cf | 193 | 1 | 0 | 6 |
+| e05254623447 | 2026-08-31T23:53:14+03:00 | 27eded91c0cf | 200 | 1 | 0 | 6 |
+| 3ff4adf2732d | 2026-09-06T14:45:38+03:00 | 27eded91c0cf | 216 | 0 | 0 | 6 |
+| 844d952beafb | 2026-09-14T07:09:21+03:00 | 27eded91c0cf | 221 | 0 | 0 | 6 |
+| f482938c0528 | 2026-06-14T21:31:05+03:00 | 27eded91c0cf | 115 | 0 | 0 | 6 |
+| 388275485095 | 2026-09-15T00:01:28+03:00 | 27eded91c0cf | 222 | 0 | 0 | 6 |
+| 8a7b66c17e65 | 2026-08-27T22:21:05+03:00 | 27eded91c0cf | 186 | 0 | 0 | 6 |
+| 82df49cabe01 | 2026-09-14T12:30:55+03:00 | 27eded91c0cf | 221 | 0 | 0 | 6 |
+
+leak scan:
+- own correction in pre-evidence or lesson index: 0 []
+- gate-id tokens in the template: 0
+- items whose rendered prompt carries gate-id tokens: 0 {}
+
+context disclosure: gate document items include text after the decision point from the same pre-correction blob; session items never do
+origin disclosure: 8 controls (CTL8-5, CTL9-5, CTL9-6, CTL9-10, CTL9-11, CTL10-12, CTLX-4, CTLX-9) originate before docs/trackers/operator-rules.md existed (first added 21e60b81); at those commits the OP-N rules are in neither lesson set
+- check: OP-N lesson ids listed by those 8: 0; by the other 44 controls: 193
+
+complete() calls: 243
+
+PASSED: False
+- detectability: 14/21 (need >= 16) -> FAIL
+- peer_yes_flags: 4/4 (need >= 3) -> ok
+- yes_flags: 5/8 (need >= 6) -> FAIL
+- control_fires: 17/52 (need <= 5) -> FAIL
+- lesson assignment (reported, not a pass condition): 3/12 scoreable
+- control fires by prompt section (descriptive): {"RTD-10": 6, "RTD-3": 4, "RTD-8": 2, "RTD-9": 3, "contradiction": 2}
+- quote_not_verbatim (descriptive): 0 of 5 majority flags and 0 of 17 control fires carry at least one such vote
+- retries (R137, descriptive): 0 of 243 votes took more than 1 attempt; failed attempts by kind {}; 0 votes failed on every attempt
+
+| id | expected | detectability | is_mistake | lessons | split fields | flags |
+|---|---|---|---|---|---|---|
+| RTD-1/correction | obtainable | obtainable | None | ["codescout:reconnaissance-patterns.md#R-89"] | detectability |  |
+| RTD-2/correction | obtainable | in-trace | None | ["codescout:operator-rules.md#OP-1"] |  |  |
+| RTD-3/correction | in-trace | in-trace | None | ["codescout:operator-rules.md#OP-1"] | lessons |  |
+| RTD-3/audit | in-trace | in-trace | True | ["codescout:memory:eval-design#when-you-have-an-axis-but-no-mechanism-capture-the-mechanism-first"] |  |  |
+| RTD-4/correction | obtainable | obtainable | None | ["codescout:CLAUDE.md#testing-discipline-what-a-green-suite-is-evidence-for/a-count-of-a-defect-population-must-arrive"] |  |  |
+| RTD-5/correction | obtainable | obtainable | None | ["codescout:operator-rules.md#OP-1"] |  |  |
+| RTD-6/correction | external | obtainable | None | ["codescout:reconnaissance-patterns.md#R-95"] |  |  |
+| RTD-7/correction | obtainable | obtainable | None | ["codescout:operator-rules.md#OP-1"] | detectability,lessons |  |
+| RTD-8/correction | in-trace | in-trace | None | ["codescout:operator-rules.md#OP-1"] |  |  |
+| RTD-8/audit | in-trace | in-trace | True | ["codescout:operator-rules.md#OP-1"] | lesson_outcomes,lessons |  |
+| RTD-9/correction | in-trace | in-trace | None | ["codescout:CLAUDE.md#reaching-a-peer-session-address-by-scope-not-by-the-list-you-were-handed/report-the-scope-you-searched-name-the-unit"] |  |  |
+| RTD-9/audit | in-trace | in-trace | True | ["codescout:CLAUDE.md#reaching-a-peer-session-address-by-scope-not-by-the-list-you-were-handed/report-the-scope-you-searched-name-the-unit", "codescout:memory:eval-design#a-number-can-be-real-and-still-describe-the-wrong-subject"] | lessons |  |
+| RTD-10/correction | in-trace | in-trace | None | ["codescout:operator-rules.md#OP-1"] | lessons |  |
+| RTD-10/audit | in-trace | in-trace | True | ["codescout:operator-rules.md#OP-1"] | evidence_present_before |  |
+| RTD-11/correction | obtainable | obtainable | None | ["codescout:operator-rules.md#OP-1"] |  |  |
+| RTD-12/correction | obtainable | obtainable | None | ["codescout:operator-rules.md#OP-1"] |  |  |
+| RTD-13/correction | external | None | None | [] |  |  |
+| RTD-14/correction | external | obtainable | None | ["codescout:operator-rules.md#OP-1"] |  |  |
+| RTD-15/correction | in-trace | in-trace | None | ["codescout:operator-rules.md#OP-1"] |  |  |
+| RTD-15/audit | in-trace | in-trace | True | ["codescout:operator-rules.md#OP-1"] | lesson_outcomes,lessons |  |
+| RTD-16/correction | obtainable | obtainable | None | ["codescout:memory:eval-design#a-number-can-be-real-and-still-describe-the-wrong-subject"] |  |  |
+| RTD-17/correction | in-trace | None | None | [] | detectability,is_correction,lessons |  |
+| RTD-17/audit | in-trace | None | False | [] | lesson_outcomes |  |
+| RTD-18/correction | in-trace | in-trace | None | ["codescout:CLAUDE.md#testing-discipline-what-a-green-suite-is-evidence-for/an-assertion-computed-over-a-population-cannot-verify"] |  |  |
+| RTD-18/audit | in-trace | None | False | [] | detectability,evidence_present_before,evidence_used,is_mistake,lesson_outcomes,lessons |  |
+| RTD-19/correction | obtainable | obtainable | None | ["codescout:CLAUDE.md#testing-discipline-what-a-green-suite-is-evidence-for/a-count-of-a-defect-population-must-arrive"] |  |  |
+| RTD-20/correction | in-trace | obtainable | None | ["codescout:operator-rules.md#OP-1"] | lessons |  |
+| RTD-20/audit | in-trace | None | None | "abstain" | evidence_present_before,evidence_used,is_mistake,lesson_outcomes,lessons | abstain:is_mistake |
+| RTD-21/correction | external | None | None | [] | detectability,is_correction,lessons |  |
+| CTL3-1/audit | control | None | False | [] | lesson_outcomes |  |
+| CTL3-2/audit | control | None | None | "abstain" |  | abstain:is_mistake |
+| CTL3-3/audit | control | None | None | "abstain" | detectability,evidence_used,is_mistake,lesson_outcomes,lessons | abstain:is_mistake |
+| CTL3-4/audit | control | None | None | "abstain" |  | abstain:is_mistake |
+| CTL3-5/audit | control | None | False | [] | lesson_outcomes |  |
+| CTL3-7/audit | control | in-trace | True | ["codescout:operator-rules.md#OP-1"] |  |  |
+| CTL3-8/audit | control | None | None | "abstain" |  | abstain:is_mistake |
+| CTL3-9/audit | control | in-trace | True | "abstain" | detectability,evidence_used,is_mistake,lesson_outcomes,lessons |  |
+| CTL3-10/audit | control | in-trace | True | ["codescout:operator-rules.md#OP-1"] |  |  |
+| CTL3-11/audit | control | in-trace | True | ["codescout:CLAUDE.md#testing-discipline-what-a-green-suite-is-evidence-for"] | lesson_outcomes,lessons |  |
+| CTL8-1/audit | control | None | False | [] | detectability,evidence_used,is_mistake,lesson_outcomes,lessons |  |
+| CTL8-2/audit | control | None | False | [] | lesson_outcomes |  |
+| CTL8-3/audit | control | None | None | "abstain" |  | abstain:is_mistake |
+| CTL8-4/audit | control | None | None | "abstain" | evidence_present_before,is_mistake,lesson_outcomes,lessons | abstain:is_mistake |
+| CTL8-5/audit | control | in-trace | True | ["codescout:reconnaissance-patterns.md#R-104"] |  |  |
+| CTL8-7/audit | control | None | None | "abstain" |  | abstain:is_mistake |
+| CTL8-8/audit | control | None | None | "abstain" | evidence_present_before | abstain:is_mistake |
+| CTL8-9/audit | control | None | False | [] |  |  |
+| CTL8-10/audit | control | in-trace | True | ["codescout:operator-rules.md#OP-1"] |  |  |
+| CTL8-11/audit | control | None | None | "abstain" |  | abstain:is_mistake |
+| CTL9-1/audit | control | None | False | [] | lesson_outcomes |  |
+| CTL9-2/audit | control | in-trace | True | ["codescout:operator-rules.md#OP-1"] |  |  |
+| CTL9-3/audit | control | in-trace | True | ["codescout:operator-rules.md#OP-1"] |  |  |
+| CTL9-5/audit | control | None | None | "abstain" |  | abstain:is_mistake |
+| CTL9-6/audit | control | None | None | "abstain" |  | abstain:is_mistake |
+| CTL9-7/audit | control | in-trace | True | "abstain" | lesson_outcomes,lessons |  |
+| CTL9-8/audit | control | None | None | "abstain" | evidence_present_before | abstain:is_mistake |
+| CTL9-9/audit | control | None | None | "abstain" |  | abstain:is_mistake |
+| CTL9-10/audit | control | None | False | [] |  |  |
+| CTL9-11/audit | control | None | None | "abstain" | evidence_present_before,evidence_used,is_mistake,lessons | abstain:is_mistake |
+| CTL10-1/audit | control | None | None | "abstain" | evidence_present_before | abstain:is_mistake |
+| CTL10-2/audit | control | None | None | "abstain" | evidence_present_before | abstain:is_mistake |
+| CTL10-3/audit | control | in-trace | True | ["codescout:operator-rules.md#OP-1"] |  |  |
+| CTL10-4/audit | control | in-trace | True | ["codescout:operator-rules.md#OP-1"] | evidence_present_before,lesson_outcomes,lessons |  |
+| CTL10-5/audit | control | None | False | [] |  |  |
+| CTL10-6/audit | control | in-trace | True | ["codescout:memory:eval-design#a-green-suite-is-not-evidence-about-the-thing-it-guards"] | lesson_outcomes,lessons |  |
+| CTL10-7/audit | control | None | False | [] |  |  |
+| CTL10-9/audit | control | obtainable | True | ["codescout:reconnaissance-patterns.md#R-95"] | lesson_outcomes,lessons |  |
+| CTL10-10/audit | control | None | None | "abstain" |  | abstain:is_mistake |
+| CTL10-11/audit | control | in-trace | True | ["codescout:CLAUDE.md#parsers-over-a-namespace-owe-an-escape-and-a-disambiguator"] |  |  |
+| CTL10-12/audit | control | None | None | "abstain" | evidence_present_before | abstain:is_mistake |
+| CTL10-13/audit | control | in-trace | True | ["codescout:operator-rules.md#OP-1"] |  |  |
+| CTLX-1/audit | control | None | False | [] |  |  |
+| CTLX-2/audit | control | None | False | [] | detectability,is_mistake,lesson_outcomes,lessons |  |
+| CTLX-3/audit | control | in-trace | True | ["codescout:CLAUDE.md#development-commands/scripts-gate-sh-runs-those-four-in-a"] | lesson_outcomes |  |
+| CTLX-4/audit | control | None | None | "abstain" | evidence_present_before,lesson_outcomes | abstain:is_mistake |
+| CTLX-6/audit | control | None | None | "abstain" | evidence_present_before,is_mistake,lessons | abstain:is_mistake |
+| CTLX-7/audit | control | None | None | "abstain" | evidence_present_before | abstain:is_mistake |
+| CTLX-8/audit | control | obtainable | True | ["codescout:reconnaissance-patterns.md#R-95"] | lesson_outcomes,lessons |  |
+| CTLX-9/audit | control | None | False | [] | lesson_outcomes |  |
+| CTLX-10/audit | control | None | None | "abstain" |  | abstain:is_mistake |
+| CTLX-11/audit | control | None | False | [] | lesson_outcomes |  |
