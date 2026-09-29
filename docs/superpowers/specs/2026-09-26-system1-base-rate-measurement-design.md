@@ -420,3 +420,64 @@ No probe read a correction, a miss, a judge verdict, or any quantity the go/no-g
   2. **Commit timestamps are author dates.** The window is filtered in Python over the full history from the manifest SHA; `git --since` stops walking at the first older committer date. `Session-Id` is read from git's trailer parser, never from the first matching body line (R110).
   3. The go/no-go denominator is the body's own rule: a top-level transcript with at least one decision point in the window. A miss is placed by its origin timestamp. The observability map's any-turn session count is descriptive and labelled as such (R112).
 - **(d) Disclosure.** Every probe behind this amendment counted shapes: leading tags, origin kinds, `commandMode`, and hash equality. None read a correction, a miss, or a rate.
+
+### Amendment 8 — 2026-09-29, recorded before the gate first runs (Task 9b)
+
+**Source:** Task 9a's implementation (commits 0fc330a0 and d608423b; fix rounds 1–2: 164e9d5d, cb431157, 0ee8cf34, c90e0d9b), its Opus reviews, and the controller's verification. Rulings R116–R126 and R133–R148 are in the SDD ledger. Where this amendment and the body disagree, this amendment wins. **Nothing here changes the go/no-go rule or the gate's thresholds and populations** (16/21; 3/4; 6/8; at most 5/52).
+
+- **(a) The frozen prompt.** The file is `scripts/measure/judge_prompt.md`, sha256 `3137920a8d4645540b9cff7bced95671a9c6fbb282581cddc5eb5391d4de8c54`, as committed in `c90e0d9b`, rendered by `judge.render_prompt`. Any later edit is a new prompt and needs a new registration. Its detectability terms mirror `text_detectable`, as § Definitions requires (R134), written in general terms with no text from `docs/evals/rule-tell-detection.md`:
+  - `in-trace`: the material shown is enough, with nothing looked up, to see that the decision point is wrong, in the way it is wrong;
+  - `obtainable`: the material shows **at least one warning sign** pointing at the problem, and confirming it needs one bounded lookup;
+  - `external`: the material shows no sign of the problem, **even if one lookup elsewhere would have revealed it**. It also covers a problem needing more than one lookup, or facts no bounded lookup supplies.
+
+  **§ Definitions' `obtainable` is read on the signal axis (R147, confirmed by the operator 2026-09-29).** L120 defines `obtainable` by lookup cost ("one bounded lookup would have found it"), declares that detectability mirrors `text_detectable`, and L173 fixes the mapping `no → external`. `text_detectable: no` is exactly the case where there is no signal in the text and the falsifier is elsewhere, and RTD-6's falsifier is one committed file away. So the three sentences agree only if "would have found it" means a lookup the material gave the agent reason to make. This is the reading applied. Consequences:
+  - an addressable miss (§ Definitions; the go/no-go quantity) requires a signal in the trace, which matches what a trace-reading System 1 can fire on;
+  - relative to the lookup-cost reading, it counts fewer addressable misses, so it errs toward NO-GO.
+
+  The prompt's first draft put a `partial`-style warning sign under `in-trace`, and its second allowed `obtainable` with no sign at all. Both were corrected before any gate output existed.
+- **(b) The channel (R122, amended by R133 and R138).**
+  - **Subscription and version:** Codex on the ChatGPT subscription only, with `forced_login_method = "chatgpt"` and `--strict-config`. The model and effort are imported from `docs/evals/data/2026-09-24-rule-tell/stage2/generate_synthetic.py` (`gpt-6-astra`/`medium`). `codex-cli 0.154.0` is pinned, and a live run refuses on any other version.
+  - **Invocation:** the rendered prompt is the entire user message, delivered on stdin with no wrapper instruction.
+  - **Jail:** codex runs inside a `bwrap` jail with tmpfs over the home directory, `/tmp` and `/run/user/<uid>`. Only the fresh `CODEX_HOME`, its auth target and an empty workdir are bound back.
+  - **Precondition:** before the first vote, a local `codex sandbox` check inside the same jail must fail to see the repo the gate runs on (the realpath of its `--repo`), the RTD document, every `~/.claude*` transcript root and the session scratch root, and must see the workdir. Otherwise the run refuses to start.
+  - Why: measured with no model call, `--sandbox read-only` grants read access to `:root`, so the RTD answer key was readable. The same exposure in the rule-tell campaign's committed call sites is bug `4b7cdb0cb35d12a7`.
+  - **Votes:** 3 votes per item, at most 3 concurrent calls, each with its own `--json` log. The logs live outside the repo and are never committed.
+  - **Failed votes:** a vote whose log shows a tool or exec event is a failed `tool_call` vote. An empty or unparseable `--json` stream is a failed `call_failed` vote. **Retry policy, pre-registered (R137):** a `call_failed`, `unparseable` or `tool_call` vote is re-issued up to 2 more times. Every attempt is recorded, and the first attempt that is none of these counts. A vote with 3 failed attempts stays failed and is recorded, never dropped.
+  - A live run also refuses on a non-empty leak scan, on `votes ≠ 3`, and on `--any-population` (R135, R138).
+- **(c) Inputs (R116, R117, R120, R124, R142).**
+  - **Leakage:**
+    - an audit context turn must be strictly earlier than the decision;
+    - correction-mode context must be strictly earlier than the origin;
+    - the correction text is a separate field, never pre-decision evidence for the quote check;
+    - `build_input` raises on any violation.
+  - **Session context:** the preceding top-level turns, up to 12 turns and 20,000 chars, dropping the oldest first. Correction mode offers up to 5 previous `assistant_text` turns as origin candidates.
+  - **Gate items are built from documents:**
+    - the positive and up to 1,500 chars **on each side** of it, from the **pre-correction blob**;
+    - the correction is the case's `negative`;
+    - controls: the passage and its surrounding text in its source.
+  - **Lesson index:** each lesson appears as its id, source, `dated|undated`, anchor line and first sentence, at most 300 chars, never its full text.
+- **(d) Lesson dating (R118, R125, R140, R143).**
+  - **Date:** a lesson's date is the AUTHOR date of the first commit that introduced its anchor line. It is found by `git log --reverse --topo-order --format=%H%x09%aI -G <regex> -- <the lesson's own source>`, with the anchor whitespace-normalized. A repeated heading dates at the commit where the source first held that many copies.
+  - **Freeze points:**
+    - correction items freeze lessons at the positive's own commit when the correction was appended, and at the pre-correction sha when it was in place;
+    - controls freeze their REPO lessons at the passage's latest introducing commit ("as they stood at the origin commit", R140/R144). The operator's global lessons are unversioned, so there is no "as they stood". They are read at one fixed reference sha (the controls' tree 27eded91). Because the global file carries BEGIN/END markers, that set is byte-identical at any sha that has `docs/trackers/operator-rules.md`.
+    - 8 controls originate before `docs/trackers/operator-rules.md` existed (first added 21e60b81). For them the OP-N rules appear in neither set, and the gate report says so.
+  - **Undated lessons:** the operator's global lessons are always listed and marked `undated`. A repo lesson whose date cannot be derived is listed `undated` and counted as `lesson_undatable`, which was 0 at every gate freeze sha in the dry run.
+- **(e) Verdict and scoring (R119, R136, R139, R142).**
+  - **Missing fields:** a missing field parses to None, `unknown` or `{}` and is flagged, never defaulted. A `null` boolean is an abstention. For `origin_uuid`, `null` means "the correction targets the decision point shown", and `"unknown"` is its abstention.
+  - **Quote failure:** an `in-trace` answer whose quote is not verbatim in the pre-decision evidence has its detectability and lessons discarded; the rest of the answer stands.
+  - **Fires:** a control "fires", and a `yes` case is "flagged", when the majority `is_mistake` is True. The gate report counts how many fires and flags carry at least one `quote_not_verbatim` vote.
+  - **Lessons:** `lessons` names the most specific applicable lesson. `lesson_outcomes` covers every lesson the judge finds applicable (A1.4). Lesson-assignment agreement is REPORTED beside the gate result and is not a pass condition (Amendment 7 (b)2).
+- **(f) Disclosures the gate report carries.**
+  - Gate document items see text after the decision point, from the same pre-correction blob; session items never do. So the gate's agreement transfers to session items only for the claim-shaped class, and only for decisions judged without later context.
+  - The gate's cost, from the fix round's dry run: 81 items, 5,549,022 prompt chars (about 1.39M estimated tokens per vote round at chars/4), dominated by the lesson index.
+  - The 8 pre-operator-rules controls (item (d)), with their OP-N count.
+- **(g) Carried to Task 10.** Before any session item is built, a pre-selection rule for turns that share the decision's timestamp or `message_id` is ruled and recorded. R116's guard stays a raise. `_majority` must also separate `origin_uuid` `"unknown"` abstentions from `null` ("the decision point shown") before session items are scored; the gate has no origin candidates, so it is unaffected.
+- **(h) Pre-registered before any gate output (R148).** Nothing here changes the gate's pass conditions, populations, labels or thresholds. The decisive score remains detectability agreement on all 21 correction cases, needing at least 16.
+  - **A structural disagreement, measured.** RTD-2 is labelled `text_detectable: partial` (so `obtainable`). In its pre-correction blob (`9822b98c^`), the two window end timestamps that falsify its containment claim sit 433 and 385 chars BEFORE the positive, inside the gate's 1,500-char window. A judge applying `in-trace` correctly will therefore answer `in-trace`. The cause is the widening that § Definitions names ("widened from the text to the whole trace"): `text_detectable` assessed the turn's own output, while the gate shows the surrounding document. RTD-2 is scored as it stands. The committed gate record carries a controller note, computed from the run's JSON result, that states the agreement count both with and without RTD-2, descriptively.
+  - **Predicted from reading, not measured,** by the review that cleared the prompt:
+    - RTD-13 is the next most likely disagreement, close to a coin flip on `obtainable` against `external`, followed by RTD-1;
+    - RTD-4, RTD-11, RTD-12 and RTD-19 more weakly;
+    - all 4 `text_detectable: no` cases (RTD-6, RTD-13, RTD-14, RTD-21) are most plausibly `external`.
+
+    These are recorded so that no disagreement can be explained after the fact without being checked against a prediction made before it.
