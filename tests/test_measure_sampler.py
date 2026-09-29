@@ -224,12 +224,84 @@ class Frame(unittest.TestCase):
         self.assertIn(f"a/{spec_sid}", {u.copy_id for u in sampler.frame(self.root, excluded_sids=set())})
 
 
+class Constants(unittest.TestCase):
+    def test_constants_equal_the_brief_verbatim(self):
+        # Literals copied from the task brief. Deleting a member or editing a pattern reds here.
+        self.assertEqual(sampler.CLAIM_PATTERNS, {
+            "completion": r"\b(?:done|fixed|passes|passing|verified|confirmed|committed|green|completed?|resolved|implemented|landed|merged|pushed|shipped|works now|now works|all set)\b",
+            "test_result": r"\b\d[\d,]*\s+(?:passed|failed|passing|failing|tests? pass(?:ed)?|tests? fail(?:ed)?|ignored|skipped)\b|\b0\s+(?:failed|failures|errors|warnings)\b|test result:\s*ok|\ball\s+(?:tests?\s+)?(?:pass|green)\b|\b\d+\s*/\s*\d+\s+(?:pass|tests?)\b|\bexit(?:ed)?(?: code)?\s*[=:]?\s*0\b",
+            "count_noun": r"\b\d[\d,]*\s+(?:[A-Za-z][A-Za-z-]*\s+){0,2}?(?:files?|tests?|lines?|messages?|sessions?|entries|rows?|commits?|bugs?|findings?|hits?|matches|occurrences?|functions?|symbols?|tools?|items?|calls?|errors?|instances?|cases?|sites?|callers?|references?|turns?|bytes|chars|characters|tokens|docs?|artifacts?|trackers?|crates?|modules?|failures?|warnings?|assertions?|mutations?|packets?|samples?|strata|percent|%)\b",
+            "absence": r"\b(?:no|none|never|nothing|zero|nowhere|nobody|neither)\b|\bnot found\b|\bno such\b|\bnot (?:present|exist|there|used|reached|called|set)\b|\b(?:doesn't|does not|don't|do not|didn't|did not|isn't|is not|aren't|are not|cannot|can't|won't|will not)\s+(?:exist|appear|contain|occur|match|find|show|carry|reach|fire|hold|have)\b|\bwithout any\b",
+        })
+        self.assertEqual(sampler.EDIT_TOOLS, {"edit_file", "edit_code", "create_file", "Write", "Edit",
+                                              "MultiEdit", "NotebookEdit", "edit_markdown"})
+        self.assertEqual(sampler.DISPATCH_TOOLS, {"Agent", "Task"})
+        self.assertEqual(sampler.SHELL_TOOLS, {"run_command", "Bash"})
+        self.assertEqual(sampler.CONSEQ_CMD,
+                         r"\bgit\s+(commit|push|reset|rebase|checkout|stash|clean)\b|\brm\s+-|\bcargo\s+rb\b|\brb\.sh\b")
+        self.assertEqual(sampler.CATALOG_TOOLS, {"doc", "memory"})
+        self.assertEqual(sampler.CATALOG_WRITE_ACTIONS, {
+            "create", "update", "move", "delete", "graft", "link", "append_entry", "update_entry",
+            "rekey_prefix", "event_create", "augment", "write", "remember", "forget"})
+        self.assertEqual(sampler.REASONS, ("claim_marker", "end_turn", "edit", "git_or_rm_or_release",
+                                           "dispatch", "catalog_write", "handback"))
+
+    def test_each_claim_pattern_has_a_text_only_it_matches(self):
+        # Each text matches exactly ONE of the four patterns (checked here against all four), so
+        # dropping that pattern from the classifier flips it to routine while the others stay
+        # substantive. "12 tests passed" cannot do this: test_result and count_noun both match it.
+        import re
+        cases = {
+            "completion": "Done.",  # only completion: no digits, none of the absence words
+            "test_result": "exit code 0",  # only test_result: no noun follows the digit
+            "count_noun": "3 files",  # only count_noun: "files" is not a test-result word
+            "absence": "nothing changed",  # only absence: "changed" is not a completion word
+        }
+        for name, text in cases.items():
+            with self.subTest(pattern=name):
+                hit = {k for k, p in sampler.CLAIM_PATTERNS.items() if re.search(p, text, re.IGNORECASE)}
+                self.assertEqual(hit, {name})
+                self.assertEqual(sampler.classify(_msg("m", text=text)), ("substantive", ("claim_marker",)))
+
+    def test_claim_matching_is_case_insensitive(self):
+        # "DONE." matches the completion pattern only when re.IGNORECASE is applied.
+        self.assertEqual(sampler.classify(_msg("m", text="DONE.")), ("substantive", ("claim_marker",)))
+
+
+class FixtureShape(unittest.TestCase):
+    def test_sibling_entries_of_one_message_get_distinct_tool_use_ids(self):
+        # Task 2 matches tool_results by tool_use_id; a split message (one mid, one tool per entry)
+        # needs a distinct id per entry. ids are f"{entry uuid}-tu{i}".
+        e1 = fx.assistant("u1", _ts(1), "mX", tool_uses=[("Read", {})])
+        e2 = fx.assistant("u2", _ts(2), "mX", tool_uses=[("Read", {})])
+        ids = [b["id"] for e in (e1, e2) for b in e["message"]["content"] if b["type"] == "tool_use"]
+        self.assertEqual(ids, ["u1-tu0", "u2-tu0"])
+
+    def test_subagent_entries_are_written_sidechain_and_top_level_are_not(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            # sidechain=False is set explicitly on the subagent entry: the writer must OVERWRITE it.
+            sub = [fx.assistant("s1", _ts(1), "sm", text=NEUTRAL, sidechain=False)]
+            fx.build_corpus(root, [_session("s1", "p", [fx.assistant("t1", _ts(1), "tm", text=NEUTRAL)],
+                                            subagents={"w": sub})])
+            top = json.loads(next(root.glob("transcripts/*/proj/s1.jsonl")).read_text().splitlines()[0])
+            sub_e = json.loads(next(root.glob("transcripts/*/proj/s1/subagents/w.jsonl")).read_text().splitlines()[0])
+            self.assertIs(sub_e["isSidechain"], True)
+            self.assertIs(top["isSidechain"], False)
+
+
+
 def _unit(i, stratum):
-    cid = f"p/s{i:03d}"
-    return sampler.Unit(case_key=f"{cid}|t.jsonl|m{i:03d}", copy_id=cid, transcript="t.jsonl",
-                        message_id=f"m{i:03d}", kind="top", stratum=stratum,
+    # Every field a sort key might be mistaken for DISAGREES with case_key order: copy_id repeats in
+    # groups of 5 (ties fall back to input order), message_id counts DOWN, first_entry_index and
+    # decision_ts are scrambled. If they all rose together, sorting by any of them would pass.
+    cid = f"p/s{i // 5:03d}"
+    mid = f"m{99 - i:03d}"
+    return sampler.Unit(case_key=f"{cid}|t.jsonl|{mid}", copy_id=cid, transcript="t.jsonl",
+                        message_id=mid, kind="top", stratum=stratum,
                         reasons=("claim_marker",) if stratum == "substantive" else (),
-                        first_entry_index=i, decision_ts=_ts(i % 60))
+                        first_entry_index=(i * 37) % 101, decision_ts=_ts((i * 7) % 60))
 
 
 class Draw(unittest.TestCase):
@@ -264,6 +336,19 @@ class Draw(unittest.TestCase):
                       key=lambda u: u.case_key)
         expected = rng.sample(subs, 5) + rng.sample(rous, 4)
         self.assertEqual(got, expected)
+
+    def test_golden_draw_for_a_fixed_seed(self):
+        # Hard-coded literal computed once from the shipped algorithm. The re-implementation test
+        # above shares the algorithm's assumptions; this one cannot drift with them. Units are in
+        # generation order, and every non-case_key field disagrees with case_key order (see _unit).
+        got = [u.case_key for u in sampler.draw(self.units, self.sizes, seed=5)]
+        self.assertEqual(got, [
+            "p/s003|t.jsonl|m084", "p/s001|t.jsonl|m093", "p/s004|t.jsonl|m078",
+            "p/s002|t.jsonl|m086", "p/s005|t.jsonl|m070",
+            "p/s009|t.jsonl|m051", "p/s006|t.jsonl|m065", "p/s008|t.jsonl|m059",
+            "p/s007|t.jsonl|m062",
+        ])
+
 
     def test_oversize_request_raises(self):
         with self.assertRaises(ValueError):

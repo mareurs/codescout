@@ -40,6 +40,9 @@ _CONSEQ_RE = re.compile(CONSEQ_CMD)
 
 @dataclass(frozen=True)
 class Unit:
+    """One sampled assistant message. `first_entry_index` indexes the PARSED entries returned by
+    transcripts.read_jsonl(transcript) (malformed and blank lines are skipped, so it is NOT a file
+    line number); a consumer must re-read the file with that same function."""
     case_key: str
     copy_id: str
     transcript: str
