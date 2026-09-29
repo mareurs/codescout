@@ -318,10 +318,11 @@ class ExitPrefix(PacketCase):
         self.assertEqual(self._result_line("run_command", '{"exit_code": 2}', is_error=True),
                          'RESULT [exit 2] [is_error] {"exit_code": 2}')
 
-    def test_the_compact_summary_line_on_the_first_line_is_recognised(self):
-        # format from src/tools/run_command/output.rs format_run_command: "{✓|✗} exit N · ..."
-        self.assertIn("RESULT [exit 101] ", self._result_line("run_command", "✗ exit 101 · 3 passed · 1 FAILED  (query @cmd_ab12)"))
-        self.assertNotIn("[exit", self._result_line("Read", "✗ exit 101 · 3 passed"))
+    def test_the_compact_run_command_summary_is_not_an_exit_code(self):
+        # `cat log` output that begins like format_run_command's summary must not become [exit 3]:
+        # that form never reaches a transcript result as a first line, so recognising it can only mis-tag
+        self.assertNotIn("[exit", self._result_line("Bash", "✗ exit 3 · 2 FAILED  (query @cmd_ab12)"))
+        self.assertNotIn("[exit", self._result_line("run_command", "✓ exit 0 · 5 lines"))
 
 
 class Handback(PacketCase):
@@ -685,12 +686,9 @@ class ExitCode(unittest.TestCase):
         self.assertEqual(packet.exit_code("Exit code 2\r\nmore"), 2)
         self.assertIsNone(packet.exit_code("abc\nExit code 2"))  # a later line is program output
 
-    def test_compact_summary_form_is_the_first_line_only(self):
-        # format_run_command in src/tools/run_command/output.rs
-        self.assertEqual(packet.exit_code("✗ exit 101 · 3 passed · 1 FAILED  (query @cmd_ab12)"), 101)
-        self.assertEqual(packet.exit_code("✓ exit 0  (query @cmd_x)"), 0)
-        self.assertEqual(packet.exit_code("✗ exit 2 · 14 lines"), 2)
-        for text in ("✗ timed out", "… running  (query @cmd_x)", "  ✗ exit 3", "ok\n✗ exit 3"):
+    def test_compact_summary_form_is_not_recognised(self):
+        for text in ("✗ exit 101 · 3 passed · 1 FAILED  (query @cmd_ab12)", "✓ exit 0  (query @cmd_x)",
+                     "✗ exit 2 · 14 lines", "✗ timed out"):
             with self.subTest(text=text):
                 self.assertIsNone(packet.exit_code(text))
 
@@ -845,6 +843,51 @@ class UnitTrim(PacketCase):
         head = body.lstrip("\n").split("\n\nABOUT TO RUN:", 1)[0]
         self.assertEqual(len(head), 9953)  # half of the 19,906 budget, marker (49) and newline (1) included
         self.assertTrue(head.startswith(TRIM_MARKER + "\n") and head.endswith("uE"))
+    def _many_calls_then_sized(self, sized_cmd_len, total=103):
+        # 62 full calls (315-char lines), then ONE call of a chosen size at index 62, then filler calls
+        calls = [("run_command", {"command": f"cmd-{i:03d}-" + "z" * 300}) for i in range(62)]
+        calls.append(("run_command", {"command": "s" * sized_cmd_len}))  # line = 14 + (15 + len) + 1 chars
+        calls += [("run_command", {"command": f"cmd-{i:03d}-" + "z" * 300}) for i in range(63, total)]
+        return calls
+
+    def test_a_tool_only_message_reaches_exactly_20000_and_never_more(self):
+        # text=None: the message is only tool calls, the common shape. Room = the whole body budget
+        # 19,906 (operator "go", no context, no text head, no "\n\n" separator). Block for 63 shown =
+        # 14 + 62*315 + line + 32 (marker "[… 40 more tool calls not shown]") + 63 newlines = 19,639 + line;
+        # a 267-char line fills 19,906 exactly, a 268-char line is one over.
+        for cmd_len, shown, left, exact in ((237, True, 40, True), (238, False, 41, False)):
+            with self.subTest(cmd_len=cmd_len):
+                s = Seq()
+                s.user("go")
+                s.asst("m1", None, tools=self._many_calls_then_sized(cmd_len))
+                p = self.build(s, "m1")
+                self.assertIn("## The message\n\nABOUT TO RUN:\n- run_command(", p.text)  # no stray "\n\n" head
+                self.assertEqual(p.chars, len(p.text))
+                self.assertLessEqual(len(p.text), 20000)
+                if exact:
+                    self.assertEqual(len(p.text), 20000)
+                self.assertEqual('run_command({"command": "' + "s" * cmd_len + '"})' in p.text, shown)
+                self.assertIn(f"[… {left} more tool calls not shown]", p.text)
+
+    def test_a_token_straddling_the_half_trim_boundary_refuses_beside_a_call_list(self):
+        # 15,000-char text beside 100 calls: the text keeps its last half - 49 - 1 = 9,903 chars, i.e.
+        # from offset 5,097. A token at 5,070..5,110 is cut at its start.
+        tok = "ghp_" + "Z" * 36
+        s = Seq()
+        s.user("go")
+        s.asst("m1", "u" * 5070 + tok + "u" * (15000 - 5110), tools=self._many_calls_then_sized(237, total=100))
+        with self.assertRaises(packet.TokenFound):
+            self.build(s, "m1")
+
+    def test_a_token_wholly_before_the_half_trim_boundary_renders_beside_a_call_list(self):
+        tok = "ghp_" + "Z" * 36
+        s = Seq()
+        s.user("go")  # token at 5,057..5,097: ends exactly where the kept range begins
+        s.asst("m1", "u" * 5057 + tok + "u" * (15000 - 5097), tools=self._many_calls_then_sized(237, total=100))
+        p = self.build(s, "m1")
+        self.assertNotIn("ghp_", p.text)
+        self.assertEqual(p.text.count(TRIM_MARKER), 1)
+
 
 
 

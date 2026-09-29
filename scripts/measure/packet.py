@@ -36,8 +36,6 @@ NO_RESULT = "(no result before this point)"
 MINUS = "−"
 
 _TOKEN_RE = re.compile(r"gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,}")
-# run_command's compact summary (src/tools/run_command/output.rs format_run_command): "✗ exit 101 · ..."
-_EXIT_SUMMARY_RE = re.compile(r"[✓✗] exit (-?\d+)\b")
 _EXIT_LINE_RE = re.compile(r"Exit code (-?\d+)")
 _UUID_RE = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
 _TIMESTAMP_RE = re.compile(
@@ -69,9 +67,11 @@ def token_hits(text):
 
 def exit_code(result_text):
     """The exit code a SHELL tool result reports, else None. Order: a top-level JSON object whose
-    `exit_code` is an int; else the FIRST line `Exit code N` (the harness's own line); else the first
-    line of run_command's compact summary `✓/✗ exit N ...`. Never searched for inside the body: a
-    result that merely quotes such text (a file being read) is not reporting its own exit."""
+    `exit_code` is an int; else the FIRST line `Exit code N` (the harness's own line); else None. Never
+    searched for inside the body: a result that merely quotes such text (a file being read, `cat log`)
+    is not reporting its own exit. run_command's compact `✗ exit N · ...` summary is deliberately NOT
+    recognised: it never reaches a transcript result as a first line, and a program's output that
+    happens to begin that way would be tagged with a code the tool never returned."""
     try:
         obj = json.loads(result_text)
     except (ValueError, RecursionError):
@@ -81,7 +81,7 @@ def exit_code(result_text):
         if isinstance(v, int) and not isinstance(v, bool):
             return v
     first = result_text.split("\n", 1)[0].rstrip("\r")
-    m = _EXIT_LINE_RE.fullmatch(first) or _EXIT_SUMMARY_RE.match(first)
+    m = _EXIT_LINE_RE.fullmatch(first)
     return int(m.group(1)) if m else None
 
 
