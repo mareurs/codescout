@@ -354,9 +354,10 @@ def _cmd_frame(args):
 def _cmd_preflight(args):
     """Build a packet for EVERY frame unit and report only counts. The one-shot main draw has no redraw,
     so a unit whose packet cannot be built must be found (and registered as excluded) before the draw.
-    COST: build_packet re-reads and re-parses its unit's transcript on every call, so a unit costs one parse of
-    its transcript plus a scan of the entries before it; a transcript with u units and e entries costs ~u*e.
-    Units are built grouped by transcript so the re-reads hit the OS page cache."""
+    COST: without a cache build_packet re-reads and re-parses its unit's transcript on every call (~u*e for a
+    transcript of e entries and u units). Preflight passes ONE cache dict and clears it when the transcript
+    changes (units are sorted by transcript), so each transcript is parsed once and only one is held in memory;
+    what remains per unit is a prefix scan (operator message, context) but no JSON parsing."""
     corpus = pathlib.Path(args.corpus)
     out = None
     if args.excluded_out:
@@ -368,9 +369,13 @@ def _cmd_preflight(args):
     if not units:
         raise Refused(f"{corpus} has no units; nothing to check")
     refused = []  # (exception type name, unit): the exception itself is dropped, its text may quote a session id
+    cache, current = {}, None  # one transcript's parsed state at a time: memory stays bounded to one file
     for unit in sorted(units, key=lambda u: (u.transcript, u.first_entry_index)):
+        if unit.transcript != current:
+            cache.clear()
+            current = unit.transcript
         try:
-            packet.build_packet(corpus, unit, "preflight")
+            packet.build_packet(corpus, unit, "preflight", cache=cache)
         except Exception as e:  # every kind: a refusal of any type is a unit the render would abort on
             refused.append((type(e).__name__, unit))
 

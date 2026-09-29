@@ -238,22 +238,76 @@ def _render(op_title, op_text, blocks, body):
     return "\n\n".join([f"## {op_title}\n\n{op_text}", f"## Context\n\n{ctx}", f"## The message\n\n{body}"]) + "\n"
 
 
-def build_packet(corpus_dir, unit, case_id):
+def _results_index(entries):
+    """{tool_use_id: (entry_index, (text, is_error))}, the FIRST block for an id winning, over ALL entries.
+    Restricted to entries before an index it equals _results(entries[:index]): the first block overall is
+    the first in any prefix that contains it, and no prefix that does not contain it has one."""
+    out = {}
+    for i, e in enumerate(entries):
+        if e.get("type") != "user":
+            continue
+        for b in sampler._content(e):
+            if b.get("type") == "tool_result" and b.get("tool_use_id") not in out:
+                text = transcripts._tool_result_text(b)
+                out[b.get("tool_use_id")] = (i, (text or "", b.get("is_error") is True))
+    return out
+
+
+class _PrefixResults:
+    """Read-only view of a _results_index limited to entries before `idx`; only .get is used downstream."""
+
+    def __init__(self, index, idx):
+        self._index, self._idx = index, idx
+
+    def get(self, tid, default=None):
+        hit = self._index.get(tid)
+        return hit[1] if hit is not None and hit[0] < self._idx else default
+
+
+def _transcript_state(cache, path, handback):
+    """(entries, pos, msgs, results_index) for one transcript. With cache=None every call parses afresh
+    (today's behaviour). With a caller-owned dict, the parsed state is kept under the RESOLVED path, so a
+    caller iterating units grouped by transcript parses each file once; the caller clears the dict when the
+    transcript changes (memory only: a stale entry is never wrong, since the key is the full path)."""
+    key = str(pathlib.Path(path).resolve())
+    state = cache.get(key) if cache is not None else None
+    if state is None:
+        entries, _ = transcripts.read_jsonl(path)
+        state = {"entries": entries, "pos": {id(e): i for i, e in enumerate(entries)}, "msgs": {},
+                 "results": None}
+        if cache is not None:
+            cache[key] = state
+    skip = not handback
+    if skip not in state["msgs"]:
+        state["msgs"][skip] = sampler._messages(state["entries"], skip_sidechain=skip)
+    if state["results"] is None:
+        state["results"] = _results_index(state["entries"])
+    return state["entries"], state["pos"], state["msgs"][skip], state["results"]
+
+
+def build_packet(corpus_dir, unit, case_id, cache=None):
     """The packet for `unit`. Re-reads the transcript with transcripts.read_jsonl so that
-    unit.first_entry_index indexes the same parsed entries the sampler counted."""
+    unit.first_entry_index indexes the same parsed entries the sampler counted. `cache` is an optional
+    caller-owned dict (see _transcript_state); None keeps the original per-call parse and scan."""
     corpus_dir = pathlib.Path(corpus_dir)
-    entries, _ = transcripts.read_jsonl(corpus_dir / unit.transcript)
     handback = unit.kind == "handback"
     idx = unit.first_entry_index
-    msgs = sampler._messages(entries, skip_sidechain=not handback)
+    if cache is None:
+        entries, _ = transcripts.read_jsonl(corpus_dir / unit.transcript)
+        msgs = sampler._messages(entries, skip_sidechain=not handback)
+        pos = {id(e): i for i, e in enumerate(entries)}
+        results = None
+    else:
+        entries, pos, msgs, index = _transcript_state(cache, corpus_dir / unit.transcript, handback)
+        results = _PrefixResults(index, idx)
     found = [m for m in msgs if m[0] == unit.message_id and m[1] == idx]
     if not found:
         raise ValueError(f"unit {unit.case_key!r} is not a message of {unit.transcript!r} at entry {idx}")
     unit_ents = found[0][2]
 
     before = entries[:idx]  # nothing at or after the decision point is read past here (the unit's own entries excepted)
-    results = _results(before)
-    pos = {id(e): i for i, e in enumerate(entries)}
+    if results is None:
+        results = _results(before)
     prior = [m for m in msgs if m[1] < idx][-CONTEXT_MESSAGES:]
     prior_ents = [[e for e in m[2] if pos[id(e)] < idx] for m in prior]
 

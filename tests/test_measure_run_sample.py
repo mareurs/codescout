@@ -1447,12 +1447,12 @@ class Preflight(TokenBase):
         real = packet.build_packet
         secret = "SECRET-MESSAGE-" + sid_for(4)
 
-        def flaky(corpus, unit, case_id):
+        def flaky(corpus, unit, case_id, cache=None):
             if unit.message_id in ("m4e", "m4c"):
                 raise ValueError(secret)
             if unit.message_id == "m5e":
                 raise KeyError(secret)
-            return real(corpus, unit, case_id)
+            return real(corpus, unit, case_id, cache=cache)
 
         out_file = self.root / "excluded.json"
         with mock.patch.object(run.packet, "build_packet", flaky):
@@ -1472,9 +1472,9 @@ class Preflight(TokenBase):
         real = packet.build_packet
         seen = []
 
-        def spy(corpus, unit, case_id):
+        def spy(corpus, unit, case_id, cache=None):
             seen.append(unit.transcript)
-            return real(corpus, unit, case_id)
+            return real(corpus, unit, case_id, cache=cache)
 
         with mock.patch.object(run.packet, "build_packet", spy):
             rc, out, err = cli("preflight", "--corpus", self.corpus)
@@ -1494,9 +1494,9 @@ class Preflight(TokenBase):
         real = packet.build_packet
         seen = []
 
-        def spy(corpus, unit, case_id):
+        def spy(corpus, unit, case_id, cache=None):
             seen.append(unit.transcript)
-            return real(corpus, unit, case_id)
+            return real(corpus, unit, case_id, cache=cache)
 
         with mock.patch.object(run, "_frame_units", lambda corpus: interleaved), \
                 mock.patch.object(run.packet, "build_packet", spy):
@@ -1900,6 +1900,99 @@ class EndToEndThroughTheOperatorTool(Base):
             ("0761ce7ec5", "43e3cf4b7402df86ab248ba74df75dd033610b5ebf20b73eb46104695571e2e8", N, S, "n", 37.0),
             ("b837168a2c", "a9cfffbd82fa2fd88466938b271c4cd5ec9a7e9b3a9ea24d2826d54fe8b92aac", N, S, "n", 38.0),
             ("30fc2c09dd", "ac07955b317ac1f061caf74da091cfec4094ba144819a75a93e2de0c6b54118b", N, S, "n", 39.0)]])
+
+
+class PacketCache(Base):
+    """build_packet(cache=...) parses each transcript once for a caller iterating units grouped by transcript,
+    and builds byte-identical packets."""
+
+    def units(self, corpus):
+        return sorted(sampler.frame(corpus, excluded_sids=set()), key=lambda u: (u.transcript, u.first_entry_index))
+
+    def spy_reads(self):
+        calls = []
+        real = packet.transcripts.read_jsonl
+
+        def spy(path, *a, **k):
+            calls.append(str(path))
+            return real(path, *a, **k)
+
+        return calls, mock.patch.object(packet.transcripts, "read_jsonl", spy)
+
+    def test_packets_are_byte_identical_with_and_without_the_cache_for_every_unit(self):
+        units = self.units(self.corpus)
+        self.assertEqual(len(units), 33)
+        self.assertIn("handback", {u.kind for u in units})  # control: the skip_sidechain=False state is exercised too
+        cache = {}
+        for u in units:
+            plain = packet.build_packet(self.corpus, u, "c")
+            cached = packet.build_packet(self.corpus, u, "c", cache=cache)
+            self.assertEqual((cached.sha256, cached.text, cached.n_context), (plain.sha256, plain.text, plain.n_context),
+                             u.message_id)
+
+    def test_the_cache_parses_each_transcript_once_and_no_cache_parses_once_per_unit(self):
+        units = self.units(self.corpus)
+        calls, patch = self.spy_reads()
+        with patch:
+            cache = {}
+            for u in units:
+                packet.build_packet(self.corpus, u, "c", cache=cache)
+        self.assertEqual(len(calls), 9)  # 6 sessions + 3 subagent files, 33 units
+        self.assertEqual(len(set(calls)), 9)
+        calls2, patch2 = self.spy_reads()
+        with patch2:
+            for u in units:
+                packet.build_packet(self.corpus, u, "c")
+        self.assertEqual(len(calls2), 33)  # positive control: without the cache, one parse per unit
+
+    def test_the_cache_does_not_leak_between_transcripts_or_corpora(self):
+        # the same relative transcript path in two corpora, different content, ONE shared cache
+        a = fx.build_corpus(self.root / "corpus-a", [session(0)])
+        b = fx.build_corpus(self.root / "corpus-b", [dict(session(1), sid=sid_for(0))])
+        cache = {}
+        seen = {}
+        for name, corpus in (("a", a), ("b", b)):
+            texts = []
+            for u in self.units(corpus):
+                cached = packet.build_packet(corpus, u, "c", cache=cache)
+                self.assertEqual(cached.text, packet.build_packet(corpus, u, "c").text, (name, u.message_id))
+                texts.append(cached.text)
+            seen[name] = texts
+        self.assertIn("please work on task 0", " ".join(seen["a"]))
+        self.assertIn("please work on task 1", " ".join(seen["b"]))
+        self.assertNotIn("please work on task 0", " ".join(seen["b"]))
+        # two transcripts of ONE corpus keep their own state as well (interleaved calls)
+        units = self.units(self.corpus)
+        cache = {}
+        for u in units[::-1] + units:
+            self.assertEqual(packet.build_packet(self.corpus, u, "c", cache=cache).text,
+                             packet.build_packet(self.corpus, u, "c").text)
+
+    def test_preflight_counts_are_identical_with_and_without_the_cache_and_hold_one_transcript(self):
+        corpus = fx.build_corpus(self.root / "token-corpus", make_sessions(token_session=2))
+        real = packet.build_packet
+        sizes = []
+
+        def uncached(c, u, i, cache=None):
+            return real(c, u, i)
+
+        def measuring(c, u, i, cache=None):
+            sizes.append(len(cache))
+            return real(c, u, i, cache=cache)
+
+        with mock.patch.object(run.packet, "build_packet", uncached):
+            without = cli("preflight", "--corpus", corpus)
+        with mock.patch.object(run.packet, "build_packet", measuring):
+            with_cache = cli("preflight", "--corpus", corpus)
+        self.assertEqual(with_cache, without)
+        self.assertEqual(json.loads(with_cache[1])["refused"], 1)  # control: there is something to count
+        self.assertEqual(len(sizes), 33)
+        self.assertEqual(max(sizes), 1)  # never more than one transcript held (memory bound)
+        calls, patch = self.spy_reads()
+        pre = self.units(corpus)  # framed outside the spy: only preflight's own parses are counted
+        with patch, mock.patch.object(run, "_frame_units", lambda c: pre):
+            cli("preflight", "--corpus", corpus)
+        self.assertEqual(len(calls), 9)
 
 
 if __name__ == "__main__":

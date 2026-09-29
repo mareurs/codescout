@@ -87,7 +87,11 @@ class PacketCase(unittest.TestCase):
         fx.build_corpus(root, sessions)
         units = sampler.frame(root, excluded_sids=set())
         (unit,) = [u for u in units if u.message_id == mid and u.kind == kind]
-        return packet.build_packet(root, unit, "case-1")
+        p = packet.build_packet(root, unit, "case-1")
+        # every packet scenario in this file is also built through a cache and must be byte-identical
+        q = packet.build_packet(root, unit, "case-1", cache={})
+        self.assertEqual((q.text, q.sha256, q.n_context), (p.text, p.sha256, p.n_context))
+        return p
 
     def section(self, text, title):
         """The body of `## title` up to the next `## ` heading."""
@@ -122,6 +126,23 @@ class DecisionPoint(PacketCase):
         p = self.build(s, "m1")
         self.assertNotIn(MARKER, p.text)
         self.assertIn("Started a run.", p.text)  # m0 is still context; only its late result is withheld
+
+    def test_the_first_result_for_a_tool_use_id_wins_before_and_after_the_decision(self):
+        # (built through build(), which also builds via a cache and requires identical bytes)
+        s = Seq()
+        s.user("go")
+        (t0, t1) = s.asst("m0", "Two calls.", tools=[("run_command", {"command": "a"}), ("run_command", {"command": "b"})])
+        s.result(t0, "FIRST-A")
+        s.result(t0, "SECOND-A")  # a repeated id before the decision: the first block wins
+        s.result(t1, "FIRST-B")
+        s.asst("m1", "The decision.")
+        s.result(t1, "LATE-B")  # after the decision: never shown, and it must not displace FIRST-B
+        p = self.build(s, "m1")
+        self.assertIn("RESULT FIRST-A", p.text)
+        self.assertIn("RESULT FIRST-B", p.text)
+        self.assertNotIn("SECOND-A", p.text)
+        self.assertNotIn("LATE-B", p.text)
+
 
     def test_a_context_message_piece_after_the_decision_is_not_shown(self):
         s = Seq()
