@@ -398,11 +398,21 @@ REASONS = ("claim_marker", "end_turn", "edit", "git_or_rm_or_release", "dispatch
 
 ### Task 6: Pilot (operator-gated)
 
-- [ ] **Step 1:** `run.py frame --corpus ~/work/claude/measurement-corpora/2026-09-29-codescout --out ~/work/claude/measurement-corpora/2026-09-29-labelled-frame.json`.
-  Record the counts.
+- [ ] **Step 0: Preflight (added after the final review).** After registration nothing may be redrawn
+  and `packet.py` may not change, so a unit whose packet cannot be built must be found first:
+  `run.py preflight --corpus ~/work/claude/measurement-corpora/2026-09-29-codescout --excluded-out ~/work/claude/measurement-corpora/2026-09-29-labelled-excluded-units.json`.
+  It prints counts only (units, built, refused, refused by exception type). Time it once: the cost
+  on the real corpus is unmeasured. If any unit refuses, the operator rules how they are treated;
+  the registerable treatment is "excluded from the frame", done by passing `--exclude-units <that file>`
+  to `frame` and to every `draw`. Nobody reads the excluded file.
+- [ ] **Step 1:** `run.py frame --corpus ~/work/claude/measurement-corpora/2026-09-29-codescout --out ~/work/claude/measurement-corpora/2026-09-29-labelled-frame.json`
+  (add `--exclude-units …` when Step 0 found refusals). Record the counts. `frame` records the sha256
+  of `sampler.py`, `packet.py`, `estimate.py` **and** `run.py`; editing any of the four afterwards
+  invalidates the frame file (`estimate` checks them), so re-run `frame` after the last edit.
 - [ ] **Step 2: Choose the pilot seed** with `python -c "import secrets; print(secrets.randbelow(2**31))"`,
-  then run `run.py draw … --set ~/work/claude/measurement-corpora/2026-09-29-labelled-pilot --seed <pilot seed> --substantive 4 --routine 1`,
-  then `run.py render …`.
+  then run `run.py draw --frame ~/work/claude/measurement-corpora/2026-09-29-labelled-frame.json … --set ~/work/claude/measurement-corpora/2026-09-29-labelled-pilot --seed <pilot seed> --substantive 4 --routine 1`
+  (always pass `--frame`: without it a registered exclusion is silently ignored; a seed is `0 <= seed < 2**32`;
+  set directory names must look like `2026-09-29-labelled-pilot`), then `run.py render …`.
 - [ ] **Step 3: Hand off to the operator.** They run
   `~/work/claude/prompt-engineering/.venv/bin/python scripts/measure/label.py next ~/work/claude/measurement-corpora/2026-09-29-labelled-pilot`
   **in their own terminal.** The controller reads only `label.py summary`. The operator reports any
@@ -414,10 +424,18 @@ REASONS = ("claim_marker", "end_turn", "edit", "git_or_rm_or_release", "dispatch
 
 ### Task 7: Registration, Amendment 1 (before the main draw exists)
 
+- [ ] **Step 0: The operator rules on the k = 11 boundary (open).** Under the current code `go` needs
+  BOTH the Wilson lower bound and the session-bootstrap 2.5th percentile to be at least 0.10. That is
+  12 hits of 60 for an unclustered draw (and only on a floating-point tie) and 13 with mild clustering;
+  11 is essentially never `go`. The spec's "11 or more" is false under the current code. Options are
+  in the ledger; the reviewer recommends registering the rule as it is, described honestly, and
+  publishing the session count and the simulated go-probability per hit count right after the main
+  draw and before any label. Amendment 1 states whichever rule the operator chooses.
 - [ ] **Step 1: Choose the main seed** the same way as the pilot's.
 - [ ] **Step 2: Append "Amendment 1 — registration"** to the spec. It records the main seed; the
-  sha256 of `scripts/measure/sampler.py` and `scripts/measure/packet.py` at HEAD; the frame counts
-  from Task 6 Step 1 (re-run if either file changed since); the sizes 60/20; the pilot's set id as
+  sha256 of `scripts/measure/sampler.py`, `scripts/measure/packet.py`, `scripts/measure/estimate.py` and
+  `scripts/measure/run.py` at HEAD; the frame counts from Task 6 Step 1 (re-run `frame` if any of the
+  four changed since) and, if Task 6 Step 0 excluded units, their count and the sha256 of the exclusion file; the sizes 60/20; the pilot's set id as
   excluded; and the sentence "The decision rule in § *The question and the decision rule* is
   unchanged."
 - [ ] **Step 3: Commit** `docs(spec): labelled sample Amendment 1 -- registration before the main draw`.
@@ -426,8 +444,9 @@ REASONS = ("claim_marker", "end_turn", "edit", "git_or_rm_or_release", "dispatch
 ### Task 8: Main draw and render
 
 - [ ] **Step 1: Draw.** `run.py draw --corpus … --set ~/work/claude/measurement-corpora/2026-09-29-labelled-main --seed <registered seed> --substantive 60 --routine 20 --exclude-set ~/work/claude/measurement-corpora/2026-09-29-labelled-pilot`,
-  then `run.py render …`. Confirm that the sha256 of `sampler.py` and `packet.py` still equal the
-  registered values **before** drawing, and stop for a ruling if either differs.
+  then `run.py render …`. Also pass `--frame …` (and `--exclude-units …` if registered); `draw` prints the session counts (aggregates).
+  Confirm that the sha256 of `sampler.py`, `packet.py`, `estimate.py` **and** `run.py` still equal the
+  registered values **before** drawing, and stop for a ruling if any differs.
 - [ ] **Step 2: Export and commit.** Run `run.py export … --out-dir docs/evals/data/2026-09-27-system1-base-rates/labelled-sample/`,
   so the draw manifest holds ids and hashes and the labels file is still empty. Commit it as
   `data(measure): labelled sample main draw -- 80 case ids and packet hashes`.
@@ -444,5 +463,6 @@ REASONS = ("claim_marker", "end_turn", "edit", "git_or_rm_or_release", "dispatch
   from the spec. **Every number names corpus `2026-09-29-codescout` and its population.** Run the
   R146 private-text scan over every file before committing.
 - [ ] **Step 4: The optional re-label**, when the operator wants it: `label.py next --relabel` at
-  least 3 days later, then re-run `estimate` with the relabels and add the kappa to the readout.
+  least 3 days later, then re-run `estimate` with the relabels **to a new `--out` path** (it refuses to overwrite) and add
+  the kappa to the readout.
 - [ ] **Step 5: Commit** the readout and the exported labels.
