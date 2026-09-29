@@ -1,0 +1,744 @@
+"""Task 5 of the labelled sample: run.py frame / draw / render / estimate / export.
+
+Run: ~/work/claude/prompt-engineering/.venv/bin/python -m pytest tests/test_measure_run_sample.py -v
+
+Every transcript here is SYNTHETIC (tests/measure_corpus_fixture.py); nothing reads a real corpus.
+The corpus has 6 sessions -> 33 units: 18 routine, 12 substantive top-level, 3 substantive
+hand-backs (sessions 0-2 have one subagent file each). Fixture details that carry a guard are
+annotated on their own line with what breaks if they go.
+"""
+import contextlib
+import hashlib
+import importlib.util
+import io
+import json
+import os
+import pathlib
+import random
+import stat
+import sys
+import tempfile
+import unittest
+from unittest import mock
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+MEASURE = REPO_ROOT / "scripts" / "measure"
+sys.path.insert(0, str(MEASURE))
+sys.path.insert(0, str(REPO_ROOT / "tests"))
+
+
+def _load(name):
+    spec = importlib.util.spec_from_file_location(f"measure_{name}", MEASURE / f"{name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+run = _load("run")
+sampler = _load("sampler")
+packet = _load("packet")
+label = _load("label")
+import measure_corpus_fixture as fx  # noqa: E402
+
+CORPUS_ID = "corpus-2026-09-29"
+# ghp_ + exactly 36 alphanumerics: the shape packet._TOKEN_RE refuses.
+TOKEN = "ghp_" + "A1" * 18
+NOTE = "NOTE-SENTINEL-do-not-export"
+LABELLED_AT = "2031-01-02T03:04:05Z"  # a time of day no source timestamp has
+OUTLIER_SECONDS = 7777.777  # the max of the seconds list: never a median, so it must never be printed
+COUNTS = {"substantive": {"top": 12, "handback": 3}, "routine": {"top": 18}}
+
+
+def sid_for(i):
+    return f"5b1f0c2e-{i:04d}-4222-8333-444455556666"  # UUID-shaped: a leaked session id is only scrubbed as one
+
+
+class Seq:
+    def __init__(self, i):
+        self.i, self.n, self.entries = i, 0, []
+
+    def _ids(self):
+        self.n += 1
+        return f"{self.i:04d}aaaa-0000-4000-8000-{self.n:012d}", f"2026-09-20T10:{self.i % 60:02d}:{self.n:02d}Z"
+
+    def user(self, text):
+        u, t = self._ids()
+        self.entries.append(fx.user_prompt(u, t, text))
+
+    def asst(self, mid, text=None, tools=(), stop=None):
+        u, t = self._ids()
+        self.entries.append(fx.assistant(u, t, mid, text=text, tool_uses=tools, stop=stop))
+        return [f"{u}-tu{k}" for k in range(len(tools))]
+
+    def result(self, tid, content):
+        u, t = self._ids()
+        self.entries.append(fx.tool_result(u, t, tid, content))
+
+
+def session(i, token=False):
+    s = Seq(i)
+    s.user(f"please work on task {i}")
+    for j in range(3):  # routine: no claim marker, no tool, no end_turn
+        s.asst(f"m{i}r{j}", "Reading the module.")
+    (tu,) = s.asst(f"m{i}e", "Applying the change.", tools=[("edit_file", {"path": "a.rs"})])  # substantive: edit
+    s.result(tu, "ok")
+    s.asst(f"m{i}c", "Fixed and verified." + (f" {TOKEN}" if token else ""), stop="end_turn")  # substantive: claim
+    subs = {}
+    if i < 3:
+        h = Seq(100 + i)
+        h.user("search the tree")
+        h.asst(f"h{i}a", "Searching.")
+        h.asst(f"h{i}b", "Report: done.", stop="end_turn")  # the LAST text message of the file = the hand-back
+        subs = {f"agent-{i}": h.entries}
+    return {"sid": sid_for(i), "profile": "work", "slug": "proj", "entries": s.entries, "subagents": subs}
+
+
+def make_sessions(token_session=None):
+    return [session(i, token=(i == token_session)) for i in range(6)]
+
+
+def cli(*argv):
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = run.main([str(a) for a in argv])
+    return rc, out.getvalue(), err.getvalue()
+
+
+def read(path):
+    return pathlib.Path(path).read_text(encoding="utf-8")
+
+
+def mode(path):
+    return stat.S_IMODE(os.stat(path).st_mode)
+
+
+def write_labels(set_dir, sub_hits, rou_hits, drop_sub=0, keep_routine=None):
+    """Scripted operator records, straight into labels.jsonl. Substantive cases first, then routine, each
+    in draw order; the first `sub_hits` (`rou_hits`) of a stratum are hits (verify/quiet), the rest
+    none/silent. The first substantive case is recall-flagged. drop_sub leaves that many substantive
+    cases unlabelled; keep_routine limits the routine ones labelled."""
+    set_dir = pathlib.Path(set_dir)
+    draw = json.loads(read(set_dir / "draw.json"))
+    key = json.loads(read(set_dir / "key.json"))
+    sha = {c["case_id"]: c["sha256"] for c in draw["cases"]}
+    subs = [c for c in draw["order"] if key[c]["stratum"] == "substantive"]
+    rous = [c for c in draw["order"] if key[c]["stratum"] == "routine"]
+    chosen = subs[:len(subs) - drop_sub] + (rous if keep_routine is None else rous[:keep_routine])
+    recs = []
+    for n, cid in enumerate(chosen):
+        st = key[cid]["stratum"]
+        pos = (subs if st == "substantive" else rous).index(cid)
+        hit = pos < (sub_hits if st == "substantive" else rou_hits)
+        recs.append({"case_id": cid, "packet_sha256": sha[cid],
+                     "labels": ["verify"] if hit else ["none"], "delivery": "quiet" if hit else "silent",
+                     "note": f"{NOTE} {cid}", "recall": "y" if (st == "substantive" and pos == 0) else "n",
+                     "seconds": 900.123 + n, "labelled_at": LABELLED_AT})
+    recs[-1]["seconds"] = OUTLIER_SECONDS
+    with open(set_dir / "labels.jsonl", "w", encoding="utf-8") as f:
+        for r in recs:
+            f.write(json.dumps(r) + "\n")
+    return recs
+
+
+class Base(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        self.corpus = fx.build_corpus(self.root / CORPUS_ID, make_sessions())
+
+    def draw(self, name, seed, sub, rou, *extra):
+        set_dir = self.root / name
+        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", set_dir, "--seed", seed,
+                           "--substantive", sub, "--routine", rou, *extra)
+        self.assertEqual((rc, err), (0, ""), out)
+        return set_dir
+
+    def rendered(self, name="main", seed=11, sub=6, rou=4):
+        set_dir = self.draw(name, seed, sub, rou)
+        rc, out, err = cli("render", "--corpus", self.corpus, "--set", set_dir)
+        self.assertEqual((rc, err), (0, ""), out)
+        return set_dir
+
+    def frame_file(self):
+        p = self.root / "frame.json"
+        rc, _, err = cli("frame", "--corpus", self.corpus, "--out", p)
+        self.assertEqual((rc, err), (0, ""))
+        return p
+
+
+class Frame(Base):
+    def test_frame_writes_counts_and_code_hashes(self):
+        out_path = self.root / "sub" / "frame.json"
+        rc, out, err = cli("frame", "--corpus", self.corpus, "--out", out_path)
+        self.assertEqual((rc, err), (0, ""))
+        rec = json.loads(read(out_path))
+        self.assertEqual(rec, {
+            "corpus_id": CORPUS_ID, "counts": COUNTS, "n_units": 33,
+            "code_sha256": {"sampler.py": hashlib.sha256((MEASURE / "sampler.py").read_bytes()).hexdigest(),
+                            "packet.py": hashlib.sha256((MEASURE / "packet.py").read_bytes()).hexdigest()}})
+        self.assertEqual(json.loads(out), COUNTS)  # what is printed is the counts, and only them
+
+    def test_frame_refuses_an_existing_out_file_and_an_empty_corpus(self):
+        p = self.root / "frame.json"
+        p.write_text("first evidence")
+        rc, out, err = cli("frame", "--corpus", self.corpus, "--out", p)
+        self.assertEqual(rc, 1)
+        self.assertIn("exists", err)
+        self.assertEqual(p.read_text(), "first evidence")
+        empty = self.root / "empty-corpus"
+        empty.mkdir()
+        rc, out, err = cli("frame", "--corpus", empty, "--out", self.root / "f2.json")
+        self.assertEqual(rc, 1)
+        self.assertIn("no units", err)
+        self.assertFalse((self.root / "f2.json").exists())
+
+
+class Draw(Base):
+    def test_draw_writes_private_key_and_draw_json(self):
+        set_dir = self.draw("main", 11, 6, 4)
+        key = json.loads(read(set_dir / "key.json"))
+        draw = json.loads(read(set_dir / "draw.json"))
+        self.assertEqual(mode(set_dir), 0o700)
+        self.assertEqual(mode(set_dir / "key.json"), 0o600)
+        self.assertEqual(mode(set_dir / "draw.json"), 0o600)
+        # key.json: exactly the drawn units, substantive stratum first (the sampler's order)
+        units = sampler.frame(self.corpus, excluded_sids=set())
+        drawn = sampler.draw(units, {"substantive": 6, "routine": 4}, 11)
+        self.assertEqual(list(key), [packet.case_id_for(u, 11) for u in drawn])
+        for cid, u in zip(key, drawn):
+            self.assertEqual(key[cid], {"case_key": u.case_key, "stratum": u.stratum, "kind": u.kind,
+                                        "copy_id": u.copy_id, "reasons": list(u.reasons)})
+        self.assertEqual(sum(v["stratum"] == "substantive" for v in key.values()), 6)
+        self.assertEqual(sum(v["stratum"] == "routine" for v in key.values()), 4)
+        # draw.json: set_id, seed, cases without hashes yet, order = a seed+1 shuffle
+        self.assertEqual(set(draw), {"set_id", "seed", "cases", "order"})
+        self.assertEqual(draw["set_id"], "main")
+        self.assertEqual(draw["seed"], 11)
+        self.assertEqual(draw["cases"], [{"case_id": cid, "sha256": None} for cid in key])
+        expected = list(key)
+        random.Random(12).shuffle(expected)  # seed + 1, computed here by the stdlib, not by run.py
+        self.assertEqual(draw["order"], expected)
+        self.assertNotEqual(draw["order"], list(key))  # non-vacuous: the shuffle moved something
+
+    def test_draw_prints_counts_only(self):
+        set_dir = self.root / "main"
+        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", set_dir, "--seed", 11,
+                           "--substantive", 6, "--routine", 4)
+        self.assertEqual((rc, out, err), (0, "drawn substantive=6 routine=4 excluded=0\n", ""))
+
+    def test_pilot_order_is_pinned(self):
+        set_dir = self.draw("pilot", 3, 2, 1)
+        draw = json.loads(read(set_dir / "draw.json"))
+        self.assertEqual(draw["order"], PILOT_ORDER)
+
+    def test_draw_refuses_existing_or_in_repo_dir(self):
+        existing = self.root / "taken"
+        existing.mkdir()
+        (existing / "marker.txt").write_text("mine")  # no key.json here: only the mkdir refusal can stop this
+        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", existing, "--seed", 1,
+                           "--substantive", 2, "--routine", 1)
+        self.assertEqual(rc, 1)
+        self.assertIn("already exists", err)
+        self.assertEqual(sorted(p.name for p in existing.iterdir()), ["marker.txt"])
+        inrepo = REPO_ROOT / "scripts" / "measure" / "never-created-label-set"  # absent: only the repo refusal can stop this
+        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", inrepo, "--seed", 1,
+                           "--substantive", 2, "--routine", 1)
+        self.assertEqual(rc, 1)
+        self.assertIn("inside the repository", err)
+        self.assertFalse(inrepo.exists())
+        # positive control: a fresh directory outside the repo is accepted with the same arguments
+        self.draw("fresh", 1, 2, 1)
+
+    def test_draw_refuses_an_unsafe_set_name_and_writes_nothing_on_a_short_pool(self):
+        rc, _, err = cli("draw", "--corpus", self.corpus, "--set", self.root / ".hidden", "--seed", 1,
+                         "--substantive", 1, "--routine", 1)
+        self.assertEqual(rc, 1)
+        self.assertIn("set name", err)
+        big = self.root / "toobig"
+        rc, _, err = cli("draw", "--corpus", self.corpus, "--set", big, "--seed", 1,
+                         "--substantive", 16, "--routine", 1)  # 15 substantive exist
+        self.assertEqual(rc, 1)
+        self.assertIn("15 candidates", err)
+        self.assertFalse(big.exists())
+
+    def test_main_draw_excludes_pilot_units(self):
+        pilot = self.draw("pilot", 5, 3, 2)
+        pilot_keys = {v["case_key"] for v in json.loads(read(pilot / "key.json")).values()}
+        # positive control: the SAME seed and sizes without --exclude-set redraw the pilot's units
+        same = self.draw("same", 5, 3, 2)
+        self.assertEqual({v["case_key"] for v in json.loads(read(same / "key.json")).values()}, pilot_keys)
+        main = self.root / "main"
+        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", main, "--seed", 5, "--substantive", 3,
+                           "--routine", 2, "--exclude-set", pilot)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(out, "drawn substantive=3 routine=2 excluded=5\n")
+        main_keys = {v["case_key"] for v in json.loads(read(main / "key.json")).values()}
+        self.assertEqual(len(main_keys), 5)
+        self.assertEqual(main_keys & pilot_keys, set())
+        # boundary on the pool itself: 15 - 3 = 12 substantive remain, 12 is drawable and 13 is not
+        rc, _, err = cli("draw", "--corpus", self.corpus, "--set", self.root / "all12", "--seed", 5,
+                         "--substantive", 12, "--routine", 0, "--exclude-set", pilot)
+        self.assertEqual((rc, err), (0, ""))
+        rc, _, err = cli("draw", "--corpus", self.corpus, "--set", self.root / "all13", "--seed", 5,
+                         "--substantive", 13, "--routine", 0, "--exclude-set", pilot)
+        self.assertEqual(rc, 1)
+        self.assertIn("12 candidates", err)
+        rc, _, err = cli("draw", "--corpus", self.corpus, "--set", self.root / "nokey", "--seed", 5,
+                         "--substantive", 1, "--routine", 0, "--exclude-set", self.root / "no-such-set")
+        self.assertEqual(rc, 1)
+        self.assertIn("exclude", err)
+
+
+# Pinned after observation (see the report): the pilot draw (seed 3, 2 substantive + 1 routine) shuffled by
+# random.Random(4). A literal, not a recomputation.
+PILOT_ORDER = ["6b4267295b", "8c61c89952", "b9ba446c23"]
+
+
+class Render(Base):
+    def test_render_builds_every_packet_and_fills_hashes(self):
+        set_dir = self.draw("main", 11, 6, 4)
+        before = json.loads(read(set_dir / "draw.json"))
+        rc, out, err = cli("render", "--corpus", self.corpus, "--set", set_dir)
+        self.assertEqual((rc, out, err), (0, "rendered 10 packets\n", ""))  # counts only
+        draw = json.loads(read(set_dir / "draw.json"))
+        self.assertEqual(draw["order"], before["order"])
+        self.assertEqual([c["case_id"] for c in draw["cases"]], [c["case_id"] for c in before["cases"]])
+        self.assertEqual(mode(set_dir / "packets"), 0o700)
+        files = sorted(p.name for p in (set_dir / "packets").iterdir())
+        self.assertEqual(files, sorted(f"{c['case_id']}.md" for c in draw["cases"]))
+        for c in draw["cases"]:
+            p = set_dir / "packets" / f"{c['case_id']}.md"
+            self.assertEqual(hashlib.sha256(p.read_bytes()).hexdigest(), c["sha256"])
+            self.assertEqual(mode(p), 0o600)
+        self.assertEqual(label.verify(set_dir), {"ok": 10, "mismatch": []})
+        # the printed output carries no packet text (positive control: the text IS in the packets)
+        all_text = "".join(read(p) for p in (set_dir / "packets").iterdir())
+        for phrase in ("Reading the module.", "Fixed and verified."):
+            self.assertIn(phrase, all_text)
+            self.assertNotIn(phrase, out + err)
+
+    def test_render_refuses_a_set_that_is_already_rendered(self):
+        set_dir = self.rendered()
+        draw_bytes = (set_dir / "draw.json").read_bytes()
+        packets = {p.name: p.read_bytes() for p in (set_dir / "packets").iterdir()}
+        rc, out, err = cli("render", "--corpus", self.corpus, "--set", set_dir)
+        self.assertEqual(rc, 1)
+        self.assertIn("already rendered", err)
+        self.assertEqual((set_dir / "draw.json").read_bytes(), draw_bytes)
+        self.assertEqual({p.name: p.read_bytes() for p in (set_dir / "packets").iterdir()}, packets)
+
+    def test_render_aborts_on_token(self):
+        corpus = fx.build_corpus(self.root / "token-corpus", make_sessions(token_session=2))
+        set_dir = self.root / "tok"
+        rc, _, err = cli("draw", "--corpus", corpus, "--set", set_dir, "--seed", TOKEN_SEED,
+                         "--substantive", 15, "--routine", 2)  # all 15 substantive: the token unit is in
+        self.assertEqual((rc, err), (0, ""))
+        (unit,) = [u for u in sampler.frame(corpus, excluded_sids=set()) if u.message_id == "m2c"]
+        token_cid = packet.case_id_for(unit, TOKEN_SEED)
+        draw_bytes = (set_dir / "draw.json").read_bytes()
+        draw = json.loads(draw_bytes)
+        # precondition: at least one packet is built BEFORE the token one, so an abort that
+        # wrote as it went would leave files behind
+        self.assertGreater([c["case_id"] for c in draw["cases"]].index(token_cid), 0)
+        rc, out, err = cli("render", "--corpus", corpus, "--set", set_dir)
+        self.assertEqual(rc, 1)
+        self.assertIn(token_cid, err)
+        self.assertNotIn("ghp_", out + err)
+        self.assertNotIn("Fixed and verified", out + err)
+        self.assertEqual((set_dir / "draw.json").read_bytes(), draw_bytes)
+        packets = set_dir / "packets"
+        self.assertEqual(sorted(packets.iterdir()) if packets.exists() else [], [])
+        # positive control: the identical draw over the token-free corpus renders
+        rc, out, err = cli("render", "--corpus", self.corpus, "--set", self.draw_same(TOKEN_SEED, 15, 2))
+        self.assertEqual((rc, err), (0, ""))
+
+    def draw_same(self, seed, sub, rou):
+        return self.draw("clean", seed, sub, rou)
+
+    def test_render_fills_draw_json_atomically(self):
+        set_dir = self.draw("main", 11, 6, 4)
+        draw_bytes = (set_dir / "draw.json").read_bytes()
+        real_replace = os.replace
+
+        def failing(src, dst, *a, **k):
+            if pathlib.Path(dst).name == "draw.json":
+                raise OSError("simulated crash during the draw.json swap")
+            return real_replace(src, dst, *a, **k)
+
+        with mock.patch.object(os, "replace", side_effect=failing):
+            with self.assertRaises(OSError):
+                cli("render", "--corpus", self.corpus, "--set", set_dir)
+        self.assertEqual((set_dir / "draw.json").read_bytes(), draw_bytes)  # neither torn nor half-filled
+        self.assertEqual([p.name for p in set_dir.iterdir() if p.name.endswith(".tmp")], [])
+        # and the set is still renderable afterwards
+        rc, out, err = cli("render", "--corpus", self.corpus, "--set", set_dir)
+        self.assertEqual((rc, err), (0, ""))
+
+    def test_render_refuses_a_unit_that_no_longer_classifies_as_drawn(self):
+        set_dir = self.draw("main", 11, 6, 4)
+        key = json.loads(read(set_dir / "key.json"))
+        cid = next(iter(key))
+        key[cid]["stratum"] = "routine"  # the sampler would now place this unit elsewhere
+        (set_dir / "key.json").write_text(json.dumps(key))
+        rc, out, err = cli("render", "--corpus", self.corpus, "--set", set_dir)
+        self.assertEqual(rc, 1)
+        self.assertIn(cid, err)
+        self.assertIn("no longer classifies", err)
+        self.assertFalse((set_dir / "packets").exists())
+
+
+# Seed for the token-corpus draw: chosen so the token unit is NOT the first case in draw.json (asserted).
+TOKEN_SEED = 1
+
+
+class Estimate(Base):
+    def estimate(self, set_dir, name="result.json"):
+        out = self.root / name
+        frame = self.root / "frame.json"
+        if not frame.exists():
+            self.frame_file()
+        rc, so, se = cli("estimate", "--set", set_dir, "--frame", frame, "--seed", 99, "--out", out)
+        return rc, so, se, out
+
+    def test_frame_draw_render_estimate_export_end_to_end(self):
+        set_dir = self.rendered()
+        write_labels(set_dir, sub_hits=4, rou_hits=1)
+        rc, so, se, out = self.estimate(set_dir)
+        self.assertEqual((rc, se), (0, ""))
+        self.assertEqual(json.loads(so), json.loads(read(out)))  # stdout and RESULT.json agree
+        res = json.loads(read(out))
+        self.assertEqual(res["status"], "COMPLETE")
+        self.assertEqual(res.get("corpus_id"), CORPUS_ID)
+        self.assertEqual(res["drawn"], {"substantive": 6, "routine": 4})
+        self.assertEqual(res["labelled"], {"substantive": 6, "routine": 4})
+        allc = res["results"]["all_cases"]
+        sub = allc["substantive"]
+        self.assertEqual((sub["n"], sub["k"], sub["unresolved"]), (6, 4, 0))
+        self.assertAlmostEqual(sub["rate"], 4 / 6)
+        self.assertAlmostEqual(sub["decision"]["wilson"][0], 0.300, places=3)  # Wilson(4, 6), by hand: 0.6016 - 0.3016
+        self.assertAlmostEqual(sub["decision"]["wilson"][1], 0.903, places=3)
+        self.assertIn(sub["decision"]["outcome"], ("go", "no-go", "inconclusive"))
+        self.assertEqual(sub["by_label"], {"verify": 4, "qualify": 0, "correct": 0, "none": 2, "unresolved": 0})
+        self.assertEqual(sub["by_delivery"], {"silent": 2, "quiet": 4, "interrupt": 0})
+        self.assertEqual(sub["by_recall"], {"y": {"n": 1, "k": 1}, "n": {"n": 5, "k": 3}})
+        self.assertEqual(allc["routine"]["n"], 4)
+        self.assertEqual(allc["routine"]["k"], 1)
+        self.assertIsNotNone(allc["overall"])
+        self.assertEqual(allc["overall"]["weights"], {"substantive": 15, "routine": 18})
+        self.assertAlmostEqual(allc["overall"]["rate"], (4 / 6 * 15 + 1 / 4 * 18) / 33)
+        self.assertAlmostEqual(allc["median_seconds"], 904.623)
+        wo = res["results"]["without_recall_flagged"]
+        self.assertEqual((wo["substantive"]["n"], wo["substantive"]["k"]), (5, 3))
+        self.assertAlmostEqual(wo["median_seconds"], 905.123)
+        self.assertIsNone(res["results"]["self_agreement"])
+
+    def test_estimate_attaches_corpus_id_and_population_to_every_figure_block(self):
+        set_dir = self.rendered()
+        write_labels(set_dir, sub_hits=4, rou_hits=1)
+        with open(set_dir / "relabels.jsonl", "w") as f:
+            for r in [json.loads(l) for l in read(set_dir / "labels.jsonl").splitlines()][:3]:
+                f.write(json.dumps(dict(r, delivery=r["delivery"])) + "\n")
+        rc, so, se, out = self.estimate(set_dir)
+        self.assertEqual((rc, se), (0, ""))
+        res = json.loads(read(out))["results"]
+        want = {("all_cases", "substantive"): "substantive stratum, n=6",
+                ("all_cases", "routine"): "routine stratum, n=4",
+                ("all_cases", "overall"): "overall, frame-weighted over substantive+routine strata, n=10",
+                ("without_recall_flagged", "substantive"): "substantive stratum, recall-flagged cases excluded, n=5",
+                ("without_recall_flagged", "routine"): "routine stratum, recall-flagged cases excluded, n=4",
+                ("without_recall_flagged", "overall"):
+                    "overall, frame-weighted over substantive+routine strata, recall-flagged cases excluded, n=9"}
+        for (branch, block), population in want.items():
+            self.assertEqual(res[branch][block].get("population"), population, (branch, block))
+            self.assertEqual(res[branch][block].get("corpus_id"), CORPUS_ID, (branch, block))
+        sa = res["self_agreement"]
+        self.assertIsNotNone(sa)
+        self.assertEqual(sa.get("population"), "relabelled cases of the main set, n=3")
+        self.assertEqual(sa.get("corpus_id"), CORPUS_ID)
+
+    def test_estimate_output_is_aggregates_only(self):
+        set_dir = self.rendered()
+        recs = write_labels(set_dir, sub_hits=4, rou_hits=1)
+        with open(set_dir / "relabels.jsonl", "w") as f:
+            for r in recs[:3]:
+                f.write(json.dumps(r) + "\n")
+        rc, so, se, out = self.estimate(set_dir)
+        self.assertEqual((rc, se), (0, ""))
+        key = json.loads(read(set_dir / "key.json"))
+        private = read(set_dir / "key.json") + read(set_dir / "labels.jsonl")
+        secrets = (list(key) + [v["case_key"] for v in key.values()] + [v["copy_id"] for v in key.values()]
+                   + [v["copy_id"].split("/", 1)[1] for v in key.values()]  # the bare session ids
+                   + [NOTE, LABELLED_AT, str(OUTLIER_SECONDS), "01-work", "proj"])
+        published = so + read(out)
+        for s in secrets:
+            self.assertIn(s, private, s)  # positive control: every sentinel IS in the private files
+            self.assertNotIn(s, published, s)
+        sa = json.loads(so)["results"]["self_agreement"]
+        self.assertIsNotNone(sa)
+        self.assertEqual(sa["n"], 3)  # the relabel block is in the output
+
+    def test_estimate_withholds_the_decision_unless_every_substantive_case_is_labelled(self):
+        set_dir = self.rendered()
+        write_labels(set_dir, sub_hits=4, rou_hits=1, drop_sub=1)  # 5 of 6 substantive labelled
+        rc, so, se, out = self.estimate(set_dir)
+        self.assertEqual(rc, 0)
+        self.assertIn("PARTIAL", se)
+        res = json.loads(read(out))
+        self.assertEqual(res["status"], "PARTIAL")
+        self.assertEqual((res["drawn"]["substantive"], res["labelled"]["substantive"]), (6, 5))
+        for branch in ("all_cases", "without_recall_flagged"):
+            sub = res["results"][branch]["substantive"]
+            self.assertNotIn("decision", sub)
+            self.assertEqual(sub.get("decision_withheld"), "PARTIAL")
+            self.assertIn("rate", sub)  # the figures themselves are still reported
+        self.assertNotIn('"decision"', so)
+        self.assertNotIn('"go"', so)
+        # the other side of the equality: the full labelling of the same set is COMPLETE with a decision
+        write_labels(set_dir, sub_hits=4, rou_hits=1)
+        rc, so2, se2, out2 = self.estimate(set_dir, "result2.json")
+        self.assertEqual((rc, se2), (0, ""))
+        full = json.loads(read(out2))
+        self.assertEqual(full["status"], "COMPLETE")
+        self.assertIn("decision", full["results"]["all_cases"]["substantive"])
+
+    def test_an_unlabelled_routine_case_does_not_withhold_the_substantive_decision(self):
+        set_dir = self.rendered()
+        write_labels(set_dir, sub_hits=4, rou_hits=1, keep_routine=2)
+        rc, so, se, out = self.estimate(set_dir)
+        self.assertEqual((rc, se), (0, ""))
+        res = json.loads(read(out))
+        self.assertEqual(res["status"], "COMPLETE")
+        self.assertEqual((res["drawn"]["routine"], res["labelled"]["routine"]), (4, 2))
+        self.assertEqual(res["results"]["all_cases"]["routine"]["population"], "routine stratum, n=2")
+
+    def test_estimate_refuses_an_unrendered_set_and_labels_that_do_not_match_draw_json(self):
+        set_dir = self.draw("main", 11, 6, 4)  # drawn, never rendered: draw.json has no hashes
+        (set_dir / "labels.jsonl").write_text("")
+        rc, so, se, out = self.estimate(set_dir)
+        self.assertEqual(rc, 1)
+        self.assertIn("not rendered", se)
+        self.assertFalse(out.exists())
+        rendered = self.rendered("main2", seed=12)
+        recs = write_labels(rendered, sub_hits=4, rou_hits=1)
+        recs[3]["packet_sha256"] = "0" * 64
+        (rendered / "labels.jsonl").write_text("".join(json.dumps(r) + "\n" for r in recs))
+        rc, so, se, out = self.estimate(rendered, "r2.json")
+        self.assertEqual(rc, 1)
+        self.assertIn("1 label record(s) do not match", se)
+        self.assertFalse(out.exists())
+
+    def test_estimate_refuses_to_overwrite_its_result(self):
+        set_dir = self.rendered()
+        write_labels(set_dir, sub_hits=4, rou_hits=1)
+        rc, so, se, out = self.estimate(set_dir)
+        self.assertEqual(rc, 0)
+        before = read(out)
+        rc, so, se, out = self.estimate(set_dir)
+        self.assertEqual(rc, 1)
+        self.assertIn("exists", se)
+        self.assertEqual(read(out), before)
+
+
+class SetGuards(Base):
+    """The checks every command that opens an existing set shares (_load_set)."""
+
+    def test_render_estimate_and_export_refuse_a_set_inside_the_repo(self):
+        set_dir = self.rendered()
+        write_labels(set_dir, sub_hits=4, rou_hits=1)
+        frame = self.frame_file()
+        with mock.patch.object(run.archive, "REPO_ROOT", self.root):  # the set is now "inside the repo"
+            attempts = {
+                "render": ("render", "--corpus", self.corpus, "--set", set_dir),
+                "estimate": ("estimate", "--set", set_dir, "--frame", frame, "--seed", 1,
+                             "--out", self.root / "r.json"),
+                "export": ("export", "--set", set_dir, "--out-dir", self.root / "exp"),  # the out dir IS inside
+            }
+            for name, argv in attempts.items():
+                rc, out, err = cli(*argv)
+                self.assertEqual(rc, 1, name)
+                self.assertIn("inside the repository", err, name)
+        self.assertFalse((self.root / "r.json").exists())
+        self.assertFalse((self.root / "exp").exists())
+
+    def test_a_tampered_draw_json_is_refused_by_render(self):
+        # a path-shaped id that key.json also holds: only the id's SHAPE can refuse it
+        a = self.draw("shape", 11, 2, 1)
+        draw, key = json.loads(read(a / "draw.json")), json.loads(read(a / "key.json"))
+        key["../escape"] = key.pop(draw["cases"][0]["case_id"])
+        draw["cases"][0]["case_id"] = "../escape"
+        (a / "key.json").write_text(json.dumps(key))
+        (a / "draw.json").write_text(json.dumps(draw))
+        # a well-formed id that key.json lacks: only the membership can refuse it
+        b = self.draw("member", 11, 2, 1)
+        draw = json.loads(read(b / "draw.json"))
+        draw["cases"][0]["case_id"] = "0123456789"
+        (b / "draw.json").write_text(json.dumps(draw))
+        for set_dir in (a, b):
+            rc, out, err = cli("render", "--corpus", self.corpus, "--set", set_dir)
+            self.assertEqual(rc, 1, set_dir.name)
+            self.assertIn("draw.json names a case_id", err)
+            self.assertFalse((set_dir / "packets").exists())
+
+    def test_a_set_directory_that_is_not_a_set_is_refused(self):
+        empty = self.root / "empty"
+        empty.mkdir()
+        rc, out, err = cli("render", "--corpus", self.corpus, "--set", empty)
+        self.assertEqual(rc, 1)
+        self.assertIn("is not a label set", err)
+
+    def test_estimate_refuses_a_relabel_that_does_not_match_draw_json(self):
+        set_dir = self.rendered()
+        recs = write_labels(set_dir, sub_hits=4, rou_hits=1)
+        (set_dir / "relabels.jsonl").write_text(json.dumps(dict(recs[0], packet_sha256="f" * 64)) + "\n")
+        rc, out, err = cli("estimate", "--set", set_dir, "--frame", self.frame_file(), "--seed", 1,
+                           "--out", self.root / "r.json")
+        self.assertEqual(rc, 1)
+        self.assertIn("1 label record(s) do not match", err)
+        self.assertFalse((self.root / "r.json").exists())
+
+    def test_export_refuses_an_unsafe_set_id(self):
+        set_dir = self.rendered()
+        write_labels(set_dir, sub_hits=4, rou_hits=1)
+        draw = json.loads(read(set_dir / "draw.json"))
+        draw["set_id"] = "../../escape"
+        (set_dir / "draw.json").write_text(json.dumps(draw))
+        repo = self.root / "fakerepo"
+        repo.mkdir()
+        with mock.patch.object(run.archive, "REPO_ROOT", repo):
+            rc, out, err = cli("export", "--set", set_dir, "--out-dir", repo / "data")
+        self.assertEqual(rc, 1)
+        self.assertIn("not a plain file name", err)
+        self.assertEqual(list(repo.iterdir()), [])
+
+    def test_render_refuses_a_case_whose_unit_is_not_in_the_corpus(self):
+        set_dir = self.draw("main", 11, 6, 4)
+        other = fx.build_corpus(self.root / "other-corpus", [session(0)])  # sessions 1-5 are absent
+        rc, out, err = cli("render", "--corpus", other, "--set", set_dir)
+        self.assertEqual(rc, 1)
+        self.assertIn("its unit is not in the corpus", err)
+        self.assertFalse((set_dir / "packets").exists())
+
+    def test_estimate_refuses_a_duplicate_label_instead_of_crashing(self):
+        set_dir = self.rendered()
+        recs = write_labels(set_dir, sub_hits=4, rou_hits=1)
+        with open(set_dir / "labels.jsonl", "a") as f:
+            f.write(json.dumps(recs[0]) + "\n")  # the same case labelled twice
+        rc, out, err = cli("estimate", "--set", set_dir, "--frame", self.frame_file(), "--seed", 1,
+                           "--out", self.root / "r.json")
+        self.assertEqual(rc, 1)
+        self.assertIn(f"duplicate label for case_id '{recs[0]['case_id']}'", err)
+        self.assertFalse((self.root / "r.json").exists())
+
+    def test_export_writes_nothing_when_only_one_target_exists(self):
+        set_dir = self.rendered()
+        write_labels(set_dir, sub_hits=4, rou_hits=1)
+        repo = self.root / "fakerepo"
+        out_dir = repo / "data"
+        out_dir.mkdir(parents=True)
+        (out_dir / "main-labels.jsonl").write_text("earlier evidence")  # the SECOND file of the pair exists
+        with mock.patch.object(run.archive, "REPO_ROOT", repo):
+            rc, out, err = cli("export", "--set", set_dir, "--out-dir", out_dir)
+        self.assertEqual(rc, 1)
+        self.assertIn("exists; an export is not overwritten", err)
+        self.assertEqual(sorted(p.name for p in out_dir.iterdir()), ["main-labels.jsonl"])  # no half-written pair
+        self.assertEqual(read(out_dir / "main-labels.jsonl"), "earlier evidence")
+
+
+
+class Export(Base):
+    def setUp(self):
+        super().setUp()
+        self.fake_repo = self.root / "fakerepo"
+        self.out_dir = self.fake_repo / "docs" / "evals" / "data" / "labelled-sample"
+        self.set_dir = self.rendered()
+        self.recs = write_labels(self.set_dir, sub_hits=4, rou_hits=1)
+        (self.set_dir / "relabel_pick.json").write_text('{"ids": ["PICK-SENTINEL"]}')
+        self.fake_repo.mkdir()
+
+    def export(self, out_dir=None):
+        with mock.patch.object(run.archive, "REPO_ROOT", self.fake_repo):
+            return cli("export", "--set", self.set_dir, "--out-dir", out_dir or self.out_dir)
+
+    def test_export_omits_notes(self):
+        rc, out, err = self.export()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(out, "exported 10 cases, 10 labels, 0 relabels\n")
+        files = sorted(p.name for p in self.out_dir.iterdir())
+        self.assertEqual(files, ["main-draw.json", "main-labels.jsonl"])  # no key.json, pick, packets, notes
+        key = json.loads(read(self.set_dir / "key.json"))
+        private = "".join(read(self.set_dir / f) for f in ("key.json", "labels.jsonl", "relabel_pick.json", "draw.json"))
+        packets = "".join(read(p) for p in (self.set_dir / "packets").iterdir())
+        secrets = ([v["case_key"] for v in key.values()] + [v["copy_id"] for v in key.values()]
+                   + [v["case_key"].rsplit("|", 1)[1] for v in key.values()]  # the message ids
+                   + [NOTE, LABELLED_AT, "PICK-SENTINEL", "01-work", "proj",
+                      '"note"', '"labelled_at"', '"case_key"', '"copy_id"', '"order"'])
+        published = "".join(read(self.out_dir / f) for f in files)
+        for s in secrets:
+            self.assertIn(s, private, s)  # positive control: every sentinel IS in the private files
+            self.assertNotIn(s, published, s)
+        # packet text and the source's session ids / timestamps never reach the export either
+        for s in ("Reading the module.", "Fixed and verified.", "T10:") + tuple(
+                v["copy_id"].split("/", 1)[1] for v in key.values()):
+            self.assertNotIn(s, published, s)
+        self.assertIn("Reading the module.", packets)
+
+    def test_export_contents(self):
+        self.export()
+        draw = json.loads(read(self.out_dir / "main-draw.json"))
+        key = json.loads(read(self.set_dir / "key.json"))
+        src = json.loads(read(self.set_dir / "draw.json"))
+        self.assertEqual(set(draw), {"set_id", "seed", "cases"})
+        self.assertEqual((draw["set_id"], draw["seed"]), ("main", 11))
+        self.assertEqual(draw["cases"], [{"case_id": c["case_id"], "sha256": c["sha256"],
+                                          "stratum": key[c["case_id"]]["stratum"], "kind": key[c["case_id"]]["kind"]}
+                                         for c in src["cases"]])
+        self.assertTrue(all(len(c["sha256"]) == 64 for c in draw["cases"]))
+        rows = [json.loads(l) for l in read(self.out_dir / "main-labels.jsonl").splitlines()]
+        self.assertEqual(len(rows), 10)
+        for row, rec in zip(rows, self.recs):
+            self.assertEqual(row, {k: rec[k] for k in ("case_id", "packet_sha256", "labels", "delivery",
+                                                       "recall", "seconds")})
+
+    def test_export_refuses_a_directory_outside_the_repo(self):
+        outside = self.root / "elsewhere" / "data"
+        rc, out, err = self.export(outside)
+        self.assertEqual(rc, 1)
+        self.assertIn("outside the repository", err)
+        self.assertFalse(outside.exists())
+        self.assertFalse((self.root / "elsewhere").exists())
+        # the REAL repo root is what guards by default: a tmp dir is outside it
+        rc, out, err = cli("export", "--set", self.set_dir, "--out-dir", self.root / "elsewhere2")
+        self.assertEqual(rc, 1)
+        self.assertIn("outside the repository", err)
+        self.assertFalse((self.root / "elsewhere2").exists())
+        # positive control: inside the (fake) repo the same set exports
+        self.assertEqual(self.export()[0], 0)
+
+    def test_export_refuses_to_overwrite(self):
+        self.assertEqual(self.export()[0], 0)
+        before = {p.name: p.read_bytes() for p in self.out_dir.iterdir()}
+        rc, out, err = self.export()
+        self.assertEqual(rc, 1)
+        self.assertIn("exists", err)
+        self.assertEqual({p.name: p.read_bytes() for p in self.out_dir.iterdir()}, before)
+
+    def test_export_relabels_are_whitelisted_too(self):
+        with open(self.set_dir / "relabels.jsonl", "w") as f:
+            for r in self.recs[:3]:
+                f.write(json.dumps(dict(r, note=f"{NOTE}-relabel")) + "\n")
+        rc, out, err = self.export()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(out, "exported 10 cases, 10 labels, 3 relabels\n")
+        self.assertTrue((self.out_dir / "main-relabels.jsonl").is_file())
+        text = read(self.out_dir / "main-relabels.jsonl")
+        rows = [json.loads(l) for l in text.splitlines()]
+        self.assertEqual(len(rows), 3)
+        for row, rec in zip(rows, self.recs):
+            self.assertEqual(row, {k: rec[k] for k in ("case_id", "packet_sha256", "labels", "delivery",
+                                                       "recall", "seconds")})
+        self.assertNotIn(NOTE, text)
+
+
+if __name__ == "__main__":
+    unittest.main()
