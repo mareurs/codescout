@@ -89,6 +89,17 @@ class Classify(unittest.TestCase):
             dict(tool_uses=[("mcp__codescout__symbols", {"command": "git commit -m x"})]),  # conseq command, non-shell tool
         ]:
             self.assertEqual(sampler.classify(_msg("m", **kw)), ("routine", ()))
+    def test_a_non_string_action_is_not_a_catalog_write_and_does_not_raise(self):
+        # A list/dict `action` is unhashable: `inp.get("action") in CATALOG_WRITE_ACTIONS` (a set)
+        # raised TypeError and _frame_units refused the WHOLE frame. Only a str can be a write.
+        for action in (["update"], {"update": 1}):
+            with self.subTest(action=action):
+                kw = dict(tool_uses=[("mcp__codescout__doc", {"action": action})])
+                self.assertEqual(sampler.classify(_msg("m", **kw)), ("routine", ()))
+        # positive control: the str form of the same input still is a catalog write
+        kw = dict(tool_uses=[("mcp__codescout__doc", {"action": "update"})])
+        self.assertEqual(sampler.classify(_msg("m", **kw)), ("substantive", ("catalog_write",)))
+
 
 
     def test_end_turn_needs_text_and_reads_any_entry_of_the_message(self):

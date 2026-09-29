@@ -97,7 +97,7 @@ def classify(message_entries, handback=False):
             found.add("git_or_rm_or_release")
         if name in DISPATCH_TOOLS:
             found.add("dispatch")
-        if name in CATALOG_TOOLS and inp.get("action") in CATALOG_WRITE_ACTIONS:
+        if name in CATALOG_TOOLS and isinstance(inp.get("action"), str) and inp["action"] in CATALOG_WRITE_ACTIONS:
             found.add("catalog_write")
     if handback:
         found.add("handback")
