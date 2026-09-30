@@ -330,6 +330,89 @@ impl Tool for EditCode {
     }
 }
 
+/// Rollback message for a `replace` whose re-parse lost sibling symbols.
+///
+/// `syntax_regressed` is whether the file parsed before the edit and does not after it.
+/// It is passed in because `corruption_verdict` ranks the name-set checks above it, so
+/// the verdict alone cannot say which of two causes fired. When the file stopped parsing,
+/// the replacement body is the first suspect: the caller wrote it, and a parse failure can
+/// hide every symbol after the break. The range stays named second, because a real
+/// overshoot can also break the parse.
+///
+/// **The flag being false does NOT clear the body.** Measured 2026-09-30: it is false for
+/// the double-indented body that started this (a Python dedent to a level no enclosing
+/// block has), because tree-sitter-python does not flag indentation errors. So the
+/// `false` branch ranks the body first too, and names the range only as the fallback.
+/// See `docs/issues/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md`.
+///
+/// Wording is load-bearing for telemetry: `usage::db::normalize_err_family` files a
+/// message containing `dropped sibling` under `replace_dropped_sibling` and one
+/// containing `left the file syntactically invalid` under `edit_would_break_syntax`.
+pub(crate) fn replace_siblings_dropped_reason(
+    name_path: &str,
+    dropped: &[String],
+    syntax_regressed: bool,
+) -> (String, &'static str) {
+    if syntax_regressed {
+        return (
+            format!(
+                "edit_code replace('{name_path}') left the file syntactically invalid — it \
+                 parsed before this edit and does not parse after it — and these symbols \
+                 were lost along with the parse: {}. Check the replacement body first, since \
+                 a parse failure can hide every symbol after it: its indentation against the \
+                 symbol's column, and unclosed brackets or quotes. If the body is sound, the \
+                 range may have overshot into adjacent code. File restored.",
+                dropped.join(", ")
+            ),
+            "Check the replacement body first: its indentation against the symbol's \
+             column, and balanced brackets and quotes. symbols(name=..., \
+             include_body=true) shows the declaration as it stands, and refreshing the \
+             index will not change this result. Only if the body is sound, refresh with \
+             symbols(path) and narrow the edit via edit_file with unique anchors.",
+        );
+    }
+    (
+        format!(
+            "edit_code replace('{name_path}') would have dropped sibling symbols: {}. \
+             The cause is not determined by the syntax check, so check the replacement body \
+             first: its indentation against the symbol's column (Python's grammar accepts \
+             some mis-indentation without failing to parse, yet the symbols after it are \
+             lost), and unclosed brackets or quotes. If the body is sound, the range may \
+             have overshot into adjacent code (likely a stale LSP range). File restored.",
+            dropped.join(", ")
+        ),
+        "Check the replacement body first: its indentation against the symbol's \
+         column, and balanced brackets and quotes. symbols(name=..., \
+         include_body=true) shows the declaration as it stands. If the body is sound, \
+         refresh with symbols(path) and retry, or narrow the edit via edit_file with \
+         unique anchors.",
+    )
+}
+
+/// Rollback message for a `replace` that left the file unparseable with no symbol lost.
+///
+/// In `replace` the caller supplied the body, so it is the first suspect and the range
+/// the second; the old text asserted only the range. `remove` takes no body, so its own
+/// message keeps the range wording.
+pub(crate) fn replace_syntax_broken_reason(name_path: &str) -> (String, &'static str) {
+    (
+        format!(
+            "edit_code('{name_path}') left the file syntactically invalid — it \
+             parsed before this edit and does not parse after it. No symbol was \
+             lost. Check the replacement body first: its indentation against the \
+             symbol's column, and unclosed brackets or quotes. If the body is sound, \
+             the edit most likely overshot into adjacent code and took a delimiter \
+             with it. File restored."
+        ),
+        "Check the replacement body first: its indentation against the symbol's \
+         column, and balanced brackets and quotes. If it is sound, re-read with \
+         symbols(path) to refresh the ranges, then retry; if the range still looks \
+         wrong, narrow the edit via edit_file with unique anchors. Serialize write \
+         calls — parallel edit_code writes in one block can leave the LSP with a \
+         stale view (BUG-021).",
+    )
+}
+
 impl EditCode {
     /// Did the rename reach only the declaration, while other source files still name the
     /// symbol?
@@ -1153,56 +1236,39 @@ impl EditCode {
         );
 
         // Both corrupting verdicts roll the file back identically; only the message differs.
-        let rollback_reason = match &verdict {
-            CorruptionVerdict::TargetRenamed(new_name) => Some((
-                format!(
+        let rollback_reason =
+            match &verdict {
+                CorruptionVerdict::TargetRenamed(new_name) => Some((
+                    format!(
                     "edit_code replace('{name_path}') was given a complete declaration, but it \
                      declares `{new_name}` instead of `{name_path}`. `replace` cannot rename — \
                      applying this would have removed `{name_path}` and added a different \
                      symbol. File restored."
                 ),
-                "To rename: edit_code(action=\"rename\", symbol=..., new_name=...) — then \
+                    "To rename: edit_code(action=\"rename\", symbol=..., new_name=...) — then \
                  replace the body in a second call if it also changed. To replace only the \
                  body, keep the declared name identical to `symbol`.",
-            )),
-            CorruptionVerdict::TargetDropped => Some((
-                format!(
-                    "edit_code replace('{name_path}') dropped the symbol definition — \
+                )),
+                CorruptionVerdict::TargetDropped => Some((
+                    format!(
+                        "edit_code replace('{name_path}') dropped the symbol definition — \
                      body must be the complete declaration (attributes, doc comments, \
                      signature, and body), not just body statements. File restored."
+                    ),
+                    "Use symbols(symbol=..., include_body=true) to see the expected format.",
+                )),
+                CorruptionVerdict::SiblingsDropped(dropped) => Some(
+                    replace_siblings_dropped_reason(name_path, dropped, syntax_regressed),
                 ),
-                "Use symbols(symbol=..., include_body=true) to see the expected format.",
-            )),
-            CorruptionVerdict::SiblingsDropped(dropped) => Some((
-                format!(
-                    "edit_code replace('{name_path}') would have dropped sibling symbols: {}. \
-                     The edit range overshot into adjacent code (likely a stale LSP range). \
-                     File restored.",
-                    dropped.join(", ")
-                ),
-                "Try symbols(path) to refresh, then retry; or narrow the edit via \
-                 edit_file with unique anchors.",
-            )),
-            // The verdict the name-set checks structurally cannot reach: an edit that
-            // drops a closing delimiter loses no symbol name, so it used to land here as
-            // `Clean` with `status: "ok"` and no rollback, leaving the file invalid.
-            // Reported once, on a removal whose AST-repaired range overshot the start by
-            // two lines and took the previous function's `)` and `}` with it.
-            // See docs/issues/archive/2026-08-07-edit-code-remove-ast-repair-over-deletes.md.
-            CorruptionVerdict::SyntaxBroken => Some((
-                format!(
-                    "edit_code('{name_path}') left the file syntactically invalid — it \
-                     parsed before this edit and does not parse after it. No symbol was \
-                     dropped, so the edit most likely overshot into adjacent code and took \
-                     a delimiter with it. File restored."
-                ),
-                "Re-read with symbols(path) to refresh the ranges, then retry; if the \
-                 range still looks wrong, narrow the edit via edit_file with unique \
-                 anchors. Serialize write calls — parallel edit_code writes in one block \
-                 can leave the LSP with a stale view (BUG-021).",
-            )),
-            CorruptionVerdict::Clean | CorruptionVerdict::Unverified => None,
-        };
+                // The verdict the name-set checks structurally cannot reach: an edit that
+                // drops a closing delimiter loses no symbol name, so it used to land here as
+                // `Clean` with `status: "ok"` and no rollback, leaving the file invalid.
+                // Reported once, on a removal whose AST-repaired range overshot the start by
+                // two lines and took the previous function's `)` and `}` with it.
+                // See docs/issues/archive/2026-08-07-edit-code-remove-ast-repair-over-deletes.md.
+                CorruptionVerdict::SyntaxBroken => Some(replace_syntax_broken_reason(name_path)),
+                CorruptionVerdict::Clean | CorruptionVerdict::Unverified => None,
+            };
 
         if let Some((msg, hint)) = rollback_reason {
             write_lines(&full_path, &lines, content.ends_with('\n'))?;

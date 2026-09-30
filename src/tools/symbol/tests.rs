@@ -10175,3 +10175,117 @@ fn undocumented() {}
     );
     drop(dir);
 }
+
+// ---- replace's rollback wording: which cause the message is entitled to assert ----
+//
+// `corruption_verdict` ranks the name-set checks above `syntax_regressed`, so a body that
+// stops the file parsing (tree-sitter then loses every symbol after the break) arrives as
+// `SiblingsDropped`, and the old wording blamed a stale LSP range for it. These pin what
+// each message SAYS the cause is, and where its remedy sends the caller first. They do
+// not pin sentences: every assertion is about which cause is named, in what order, and
+// which telemetry family the text lands in.
+
+fn dropped_names(names: &[&str]) -> Vec<String> {
+    names.iter().map(|s| s.to_string()).collect()
+}
+
+#[test]
+fn replace_names_the_body_first_when_an_unparseable_edit_also_lost_siblings() {
+    let (msg, hint) = super::edit_code::replace_siblings_dropped_reason(
+        "Foo/a",
+        &dropped_names(&["Foo/b", "Foo/c"]),
+        true,
+    );
+    assert!(
+        !msg.contains("stale LSP range"),
+        "the file stopped parsing, so 'stale LSP range' asserts a cause nothing shows: {msg}"
+    );
+    // The classifier keys on this substring; a rewording that drops it moves every one of
+    // these failures out of the family that measures 'the edit broke the syntax'.
+    assert_eq!(
+        crate::usage::db::normalize_err_family("edit_code", &msg),
+        Some("edit_would_break_syntax"),
+        "must land in the syntax family, not replace_dropped_sibling: {msg}"
+    );
+    assert!(
+        msg.contains("Foo/b") && msg.contains("Foo/c"),
+        "the lost symbols are still named: {msg}"
+    );
+    // Two addressees: the body first, the range as the fallback. Naming only the body would
+    // strand a caller whose body is sound and whose range really did overshoot.
+    let body_at = msg
+        .find("replacement body")
+        .expect("names the replacement body");
+    let range_at = msg
+        .find("overshot")
+        .expect("keeps the range as the fallback");
+    assert!(body_at < range_at, "body must come before range: {msg}");
+    // The remedy: check the body BEFORE refreshing anything.
+    let hint_body = hint.find("replacement body").expect("hint names the body");
+    let hint_refresh = hint.find("refresh").expect("hint keeps the refresh step");
+    assert!(
+        hint_body < hint_refresh,
+        "hint sends the caller to the body first: {hint}"
+    );
+}
+
+#[test]
+fn replace_names_the_body_before_the_range_even_when_the_syntax_check_is_clean() {
+    // Siblings gone with `syntax_regressed` false. The obvious reading is a genuine overshoot,
+    // and this test used to assert exactly that: the old stale-range wording, unchanged. It was
+    // wrong. Measured 2026-09-30, the flag is false for the double-indented Python body that
+    // started this (tree-sitter-python does not flag a dedent to a level no enclosing block
+    // has), so a clean check does not clear the body.
+    let (msg, hint) = super::edit_code::replace_siblings_dropped_reason(
+        "Foo/a",
+        &dropped_names(&["Foo/b"]),
+        false,
+    );
+    assert!(msg.contains("Foo/b"), "{msg}");
+    // Telemetry continuity: this branch keeps the `dropped sibling` phrase, so it stays in
+    // its own family and the syntax family stays specific to a parse that actually broke.
+    assert_eq!(
+        crate::usage::db::normalize_err_family("edit_code", &msg),
+        Some("replace_dropped_sibling"),
+        "{msg}"
+    );
+    // Two addressees again: the body first, the range as the fallback it always was.
+    let body_at = msg
+        .find("replacement body")
+        .expect("names the replacement body");
+    let range_at = msg
+        .find("stale LSP range")
+        .expect("keeps the range as the fallback");
+    assert!(body_at < range_at, "body must come before range: {msg}");
+    let hint_body = hint.find("replacement body").expect("hint names the body");
+    let hint_refresh = hint.find("refresh").expect("hint keeps the refresh step");
+    assert!(
+        hint_body < hint_refresh,
+        "hint sends the caller to the body first: {hint}"
+    );
+}
+
+#[test]
+fn replace_syntax_broken_names_the_body_before_the_range() {
+    let (msg, hint) = super::edit_code::replace_syntax_broken_reason("Foo/a");
+    assert_eq!(
+        crate::usage::db::normalize_err_family("edit_code", &msg),
+        Some("edit_would_break_syntax"),
+        "{msg}"
+    );
+    // In `replace` the caller wrote the body, so it is the first suspect; the range is the
+    // second. The old text asserted only the range.
+    let body_at = msg
+        .find("replacement body")
+        .expect("names the replacement body");
+    let range_at = msg
+        .find("overshot")
+        .expect("keeps the range as the fallback");
+    assert!(body_at < range_at, "body must come before range: {msg}");
+    let hint_body = hint.find("replacement body").expect("hint names the body");
+    let hint_refresh = hint.find("refresh").expect("hint keeps the refresh step");
+    assert!(
+        hint_body < hint_refresh,
+        "hint sends the caller to the body first: {hint}"
+    );
+}
