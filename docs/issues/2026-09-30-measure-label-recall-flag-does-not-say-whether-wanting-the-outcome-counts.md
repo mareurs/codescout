@@ -80,6 +80,8 @@ legend now qualifies at the moment of asking; say so if the echo should carry "f
 
 `label.py` is not one of the four files `run.py frame` hashes, so no re-freeze is owed for this change.
 
+Fixed: `acd78f10`, patch-id `8ba3a82c906e9401eb1ebc67f9200bcca779bc4d` (`git show acd78f10 | git patch-id --stable`). Status stays `open` until the four-command gate has run green on it; the gate as run on 2026-09-30 was not green for reasons outside this change (a peer's unformatted file, two new red `util::text` tests in someone's uncommitted work, and a default lane killed by SIGTERM).
+
 ## Tests added
 
 In `tests/test_measure_label.py`:
