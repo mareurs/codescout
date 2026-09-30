@@ -8929,6 +8929,74 @@ mod tests {
             result_text(&after)
         );
     }
+    /// An approved write root cannot widen a write past a read-only guard, because the gate
+    /// refuses BEFORE any root is consulted. This is the claim that keeps `approve_write`'s
+    /// per-project, session-shared `session_write_roots` list from being a way around a
+    /// read-only activation: a pinned caller may record an approval (a pin is consent for its
+    /// own call), and an unpinned caller writing into that directory afterwards is still
+    /// refused by `check_tool_access`, which never reaches `validate_write_path`.
+    ///
+    /// The approved directory is OUTSIDE the project root on purpose. A directory inside it
+    /// needs no approval, so an in-root write would be refused (or allowed) for reasons that
+    /// have nothing to do with the approved-roots list, and the test could not tell the
+    /// difference.
+    #[tokio::test]
+    async fn an_approved_root_cannot_widen_a_write_past_a_read_only_guard() {
+        let (_home, server) = make_server().await;
+        let browsed = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        std::fs::create_dir_all(browsed.path().join(".codescout")).unwrap();
+        let root = std::fs::canonicalize(browsed.path()).unwrap();
+        let outside_dir = std::fs::canonicalize(outside.path()).unwrap();
+        let pin = root.to_string_lossy().to_string();
+
+        let armed = dispatch_tool(
+            &server,
+            "workspace",
+            serde_json::json!({ "action": "activate", "path": pin, "read_only": true }),
+        )
+        .await;
+        assert_ne!(
+            armed.is_error,
+            Some(true),
+            "precondition: {}",
+            result_text(&armed)
+        );
+
+        let approved = dispatch_tool(
+            &server,
+            "approve_write",
+            serde_json::json!({ "path": outside_dir.to_string_lossy(), "workspace": pin }),
+        )
+        .await;
+        let approved_text = result_text(&approved);
+        assert!(
+            !approved_text.contains("file writes are disabled"),
+            "precondition: the pinned approval must have been RECORDED, or the assertion below \
+             proves nothing about the roots list; got: {approved_text}"
+        );
+
+        let target = outside_dir.join("widened.txt");
+        let write = dispatch_tool(
+            &server,
+            "create_file",
+            serde_json::json!({ "path": target.to_string_lossy(), "content": "x" }),
+        )
+        .await;
+        assert_eq!(
+            write.is_error,
+            Some(true),
+            "the read-only guard must refuse this write even though its directory was approved; \
+             got: {}",
+            result_text(&write)
+        );
+        assert!(
+            result_text(&write).contains("File writes are disabled"),
+            "and it must be the GATE that refused, not a later stage; got: {}",
+            result_text(&write)
+        );
+        assert!(!target.exists(), "nothing may have been written");
+    }
 
     // `artifact` only registers with the librarian feature on.
     #[cfg(feature = "librarian")]
