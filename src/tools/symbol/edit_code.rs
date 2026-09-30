@@ -1503,23 +1503,39 @@ impl EditCode {
             }
             out
         };
+        // One refusal, reachable by two routes: `finalize_edit_content` (tree-sitter says the
+        // insert introduced a parse error) and the indentation check just below.
+        let refuse_insert = || -> anyhow::Error {
+            RecoverableError::with_hint(
+                format!(
+                    "inserting near '{}' would introduce syntax errors — not written",
+                    sym.name
+                ),
+                "Check the inserted code's braces/indentation; verify the target with \
+                 symbols(path) and retry.",
+            )
+            .into()
+        };
         let (final_content, repaired) = match crate::tools::edit_repair::finalize_edit_content(
             &full_path, &content, candidate, code, reassemble,
         ) {
             crate::tools::edit_repair::RepairResult::Repaired(c) => (c, true),
             crate::tools::edit_repair::RepairResult::Clean(c) => (c, false),
-            crate::tools::edit_repair::RepairResult::Introduced(_) => {
-                return Err(RecoverableError::with_hint(
-                    format!(
-                        "inserting near '{}' would introduce syntax errors — not written",
-                        sym.name
-                    ),
-                    "Check the inserted code's braces/indentation; verify the target with \
-                     symbols(path) and retry.",
-                )
-                .into());
-            }
+            crate::tools::edit_repair::RepairResult::Introduced(_) => return Err(refuse_insert()),
         };
+
+        // `finalize_edit_content` asks tree-sitter only, and tree-sitter-python does not flag
+        // a dedent to a column no enclosing block has or a tab/space mix — CPython refuses
+        // both at import. `syntax_regressed` adds that question, gated on the file having been
+        // clean before, so an already-broken file is still editable. Kept out of
+        // `finalize_edit_content` itself because edit_file shares it and runs an
+        // escape-decoding repair on whatever it flags.
+        // docs/issues/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md
+        if crate::ast::detect_language(&full_path).is_some_and(|lang| {
+            crate::symbol::edit::syntax_regressed(&content, &final_content, lang)
+        }) {
+            return Err(refuse_insert());
+        }
 
         crate::util::fs::atomic_write(&full_path, &final_content)?;
         ctx.lsp.notify_file_changed(&full_path).await;
