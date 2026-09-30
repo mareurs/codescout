@@ -1656,6 +1656,10 @@ pub(crate) const SOURCE_ACCESS_COMMANDS: &[&str] =
 /// Backslash escaping outside single quotes is respected (`\"` does not close
 /// a double-quoted string). Unclosed quotes are treated as closed at end-of-string.
 /// Empty segments are silently dropped.
+///
+/// A lone `"&"` (the background operator) may be listed as a separator. It is matched only
+/// where [`is_background_ampersand`] says it is one: `2>&1`, `>&2`, `&>`, `<&3` and `|&` all
+/// contain the character and must stay whole.
 fn split_outside_quotes(s: &str, seps: &[&str]) -> Vec<String> {
     let mut segments: Vec<String> = Vec::new();
     let mut seg_start = 0usize; // byte offset of current segment start
@@ -1690,6 +1694,9 @@ fn split_outside_quotes(s: &str, seps: &[&str]) -> Vec<String> {
             let remaining = &s[byte_pos..];
             for sep in seps {
                 if remaining.starts_with(sep) {
+                    if *sep == "&" && !is_background_ampersand(s, byte_pos) {
+                        continue;
+                    }
                     let seg = s[seg_start..byte_pos].trim();
                     if !seg.is_empty() {
                         segments.push(seg.to_string());
@@ -1714,6 +1721,36 @@ fn split_outside_quotes(s: &str, seps: &[&str]) -> Vec<String> {
     segments
 }
 
+/// Is the `&` at byte offset `at` in `s` the background operator, rather than part of a
+/// redirection or of `&&`?
+///
+/// Judged by its neighbours, which is enough because the caller has already skipped quotes and
+/// escapes: a `&` directly after `>`, `<`, `|` or `&` is the second half of `>&`, `<&`, `|&` or
+/// `&&`, and one directly before `>` or `&` is the first half of `&>` or `&&`.
+/// docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+fn is_background_ampersand(s: &str, at: usize) -> bool {
+    let before = s[..at].chars().next_back();
+    let after = s[at + 1..].chars().next();
+    !matches!(before, Some('>' | '<' | '|' | '&')) && !matches!(after, Some('>' | '&'))
+}
+
+/// The separators that cut one run into the stages [`check_source_file_access`] inspects.
+///
+/// `|` is a pipe. A lone `&` is the background operator: it starts the command on its left in
+/// the background and runs the one on its right, so `echo b & cat src/main.rs` reads source on
+/// its right-hand side. With `&` in neither separator list that was ONE segment whose head was
+/// `echo`, and the gate never saw the `cat`.
+/// docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+///
+/// **A stage separator, deliberately NOT a run separator.** Runs (`&&`, `||`, `;`, newline) are
+/// the unit a `cd` can move, because they execute in sequence in the same shell. A backgrounded
+/// command runs in a subshell, so `cd /tmp & cat src/main.rs` moves nothing, exactly as a `cd`
+/// inside a pipeline stage does. As a run separator the `cd` would count, the relative path
+/// would resolve against /tmp, read as outside the project, and the read would be ALLOWED: a
+/// bypass created by the fix for a bypass. As a stage separator the run has two stages, so
+/// `cd_effect` (which applies only to a single-stage run) is never consulted.
+const SOURCE_GATE_STAGE_SEPARATORS: &[&str] = &["|", "&"];
+
 /// Returns a hint string if `command` is a file-reading tool targeting a source file,
 /// `None` if the command is safe to execute.
 ///
@@ -1731,6 +1768,17 @@ fn split_outside_quotes(s: &str, seps: &[&str]) -> Vec<String> {
 ///
 /// Known limits:
 /// - Variable expansion (`cat $FILE`) is undetectable at parse time — accepted.
+/// - **A reader inside an argument of another command is not seen.** `$(cat f.rs)`,
+///   `` `cat f.rs` ``, `bash -c 'cat f.rs'` and `eval cat f.rs` put the reader INSIDE the
+///   argument list of the head command, and a rule that classifies a segment by its head can
+///   not see into one, however long a wrapper list grows: `bash -c` and `eval` take arbitrary
+///   code, which no parser closes. The gate steers callers to `read_file`/`symbols`; it is not
+///   a security boundary (`acknowledge_risk: true` is the sanctioned escape and this is the
+///   unsanctioned one).
+/// - **Paths on stdin.** `find . -name '*.rs' | xargs cat` names no file at parse time.
+/// - **A wrapper the head rule does not skip** (`sudo`, `xargs`, a shell keyword or group
+///   prefix) reads as its own name. Closing these is `executed_command`'s job once PR #29
+///   lands; see the bug file cited above.
 /// - Heredocs (`cat <<'EOF'`) read stdin, not a file; any source extension appearing
 ///   inside the heredoc body is not a filename argument. The body is removed by
 ///   [`strip_heredoc_bodies`] before the segment split, so it cannot contribute
@@ -1782,7 +1830,7 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     let mut cwd = Cwd::At(project_root.to_path_buf());
     let mut blocked: Option<String> = None;
     'runs: for run in &runs {
-        let stages = split_outside_quotes(run, &["|"]);
+        let stages = split_outside_quotes(run, SOURCE_GATE_STAGE_SEPARATORS);
         // Only a `cd` that is a whole run moves the shell for later runs.
         if stages.len() == 1 {
             if let Some(next) = cd_effect(&stages[0], &cwd) {
@@ -1855,7 +1903,7 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     // the first offender, which the detection loop above deliberately does via `break`.
     let total_clauses: usize = runs
         .iter()
-        .map(|run| split_outside_quotes(run, &["|"]).len())
+        .map(|run| split_outside_quotes(run, SOURCE_GATE_STAGE_SEPARATORS).len())
         .sum();
     let others = total_clauses.saturating_sub(1);
     let clause_note = if others > 0 {
@@ -3787,6 +3835,78 @@ mod tests {
         assert!(
             check_source_file_access_at_root("cat \\\n  src/main.rs").is_some(),
             "a line continuation is one command, and this one reads source"
+        );
+    }
+    // ── Source gate: background `&` ──────────────────────────────────────
+    //
+    // docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+    //
+    // The gate names a segment's PROGRAM by its first token, and no separator list contained a
+    // lone `&`, so `echo b & cat src/main.rs` was one segment headed by `echo`. This section
+    // covers that mechanism only. The WRAPPER half (`env cat`, `FOO=1 cat`, `time cat`,
+    // `sudo cat`, `xargs cat`) is deliberately not fixed here: the gate takes the raw first
+    // token and never consults `producer_index`, so every wrapper that function knows is a
+    // bypass too (measured on the live binary 2026-09-30: `env`, `FOO=1` and `time`), but PR #29
+    // unifies the head rule for this gate and IL-3 in `executed_command`, and a second
+    // implementation here would fork it. The test table for that follow-up is in the bug file.
+    //
+    // The case that must BLOCK has an over-block partner that must NOT, because a gate that
+    // "closes" this by refusing anything containing `&` is a different defect.
+
+    #[test]
+    fn source_file_access_blocks_a_read_after_a_background_ampersand() {
+        assert!(
+            check_source_file_access_at_root("echo b & cat src/main.rs").is_some(),
+            "a lone `&` backgrounds the left side and runs the right; the read after it is a read"
+        );
+    }
+
+    /// A backgrounded `cd` runs in a subshell and moves nothing, exactly as a `cd` in a
+    /// pipeline stage does. Treating `cd /tmp & cat src/main.rs` as "cd, then cat" would
+    /// resolve the relative path against /tmp, find it outside the project, and ALLOW a
+    /// read of project source — a bypass created by the fix for a bypass.
+    #[test]
+    fn source_file_access_does_not_let_a_backgrounded_cd_move_the_shell() {
+        assert!(
+            check_source_file_access_at_root("cd /tmp & cat src/main.rs").is_some(),
+            "the `cd` is backgrounded, so `cat src/main.rs` still runs in the project root"
+        );
+    }
+
+    /// The over-block direction for `&`. A quoted `&` is data, and the redirection forms that
+    /// CONTAIN an ampersand (`2>&1`, `>&2`, `&>`, `<&3`, `|&`) are not separators. Asserted on
+    /// the splitter directly, where a wrong split is visible as a wrong segment list: through
+    /// the gate a bad split of these benign commands would usually produce nothing that
+    /// blocks, so a gate-level assertion could not tell a correct split from a broken one.
+    #[test]
+    fn a_lone_ampersand_splits_but_redirections_and_quoted_ones_do_not() {
+        const STAGE: &[&str] = &["|", "&"];
+        assert_eq!(split_outside_quotes("a & b", STAGE), vec!["a", "b"]);
+        for whole in [
+            "cargo build 2>&1",
+            "cargo build >&2",
+            "cargo build &> out.log",
+            "cat <&3",
+            "echo \"a & b\"",
+            "echo 'a & b'",
+        ] {
+            assert_eq!(
+                split_outside_quotes(whole, STAGE),
+                vec![whole],
+                "`{whole}` contains an ampersand that is not a background operator"
+            );
+        }
+        // `|&` pipes stderr too: the `|` splits, and the `&` that follows is part of that
+        // operator, not a second separator.
+        assert_eq!(split_outside_quotes("a |& b", STAGE), vec!["a", "& b"]);
+    }
+
+    #[test]
+    fn source_file_access_allows_a_quoted_ampersand_before_a_reader_word() {
+        assert_eq!(
+            check_source_file_access_at_root("echo \"a & cat src/main.rs\""),
+            None,
+            "an ampersand inside quotes is data; the read named there never runs"
         );
     }
 
