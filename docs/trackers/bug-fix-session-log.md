@@ -17309,7 +17309,7 @@ At that point `df` showed 64G free, and no process was still building into a leg
 
 **Valid:** dated 2026-09-30
 
-**Observed:** 2026-09-30, picking up bug `0148d05a47da5457` (edit_code sibling-drop refusal blames a stale LSP range), the second of two `edit_code` bugs another session had just filed.
+**Observed:** 2026-09-30, picking up bug `2b8943f405df498a` (edit_code sibling-drop refusal blames a stale LSP range), the second of two `edit_code` bugs another session had just filed.
 
 **When:** after `git status` on `src/` and `tests/` read clean, a catalog claim (`status: taken`, `claimed_by` my sessionId), and about ten minutes of reading and writing reproduction tests into `src/tools/symbol/tests.rs`.
 
