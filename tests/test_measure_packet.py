@@ -190,7 +190,7 @@ class DecisionPoint(PacketCase):
 
 
 class ToolOnlyMessage(PacketCase):
-    """Bug 05fe7d98e6827714: a judged message with no prose showed only `ABOUT TO RUN:`, which reads as text that
+    """Bug 3cf36991ec89a020: a judged message with no prose showed only `ABOUT TO RUN:`, which reads as text that
     failed to render, and the judged section was an ordinary `## The message` heading that a long context
     message could be mistaken for."""
 
@@ -243,7 +243,7 @@ class ToolOnlyMessage(PacketCase):
 
 
 class CutMarkers(PacketCase):
-    """Bug f32b7d248a833167: a tool result (last 1,500 chars), a tool call's arguments (first 300) and the operator
+    """Bug 2d514ea5f3113cae: a tool result (last 1,500 chars), a tool call's arguments (first 300) and the operator
     or dispatch message (first 1,500) were cut with no marker, so a partial value read as the whole. Per site,
     BOTH directions: a value at the limit is unmarked and one char over is marked (the absence assertion alone is
     monotone under a marker that never fires; the presence alone under one that always does)."""
@@ -857,7 +857,7 @@ class Blinding(PacketCase):
     def test_dates_without_a_time_and_in_file_names_stay(self):
         text = "see docs/issues/2026-09-20-the-bug.md and 2026-09-20 only, or 2026-09-20 at noon"
         self.assertEqual(self._result_body(text), text)
-    # Bug 8829a4aade8bef7f: each pattern began with `\b`, which does not exist between two word characters,
+    # Bug c9e52d2caee49df8: each pattern began with `\b`, which does not exist between two word characters,
     # so a value glued to a letter, digit or `_` passed through unmasked. One test per pattern: a glued value
     # is masked (the narrowing direction) and a look-alike is left alone (the widening direction, which the
     # masked cases alone cannot catch: a pattern widened to eat any digit run would satisfy them).
@@ -893,7 +893,7 @@ class Blinding(PacketCase):
 
 
 class NumberedPlaceholders(PacketCase):
-    """Bug 6e9d80d2be97ff43 (operator ruling 2026-09-30: numbered per packet). `_blind` replaced every uuid,
+    """Bug 64f2c7af4c2845fb (operator ruling 2026-09-30: numbered per packet). `_blind` replaced every uuid,
     timestamp and API id with one constant token, so two different values read as the same one and a labeller
     could not tell reuse from a fresh value. Now one mapping per PACKET numbers each distinct value by its first
     appearance in READING order (operator or dispatch, context oldest to newest, then the judged message), one

@@ -1,11 +1,11 @@
 ---
-id: '8829a4aade8bef7f'
+id: c9e52d2caee49df8
 kind: bug
-status: open
+status: archived
 title: A labelling packet's blinding patterns miss a timestamp, UUID or API id glued to a word character
 tags:
 - cluster/guard-narrower-than-its-name
-closed: ''
+closed: 2026-09-30
 opened: 2026-09-30
 owner: marius
 related:
@@ -76,6 +76,8 @@ None.
 
 ## Fix
 
+**Landed in `1f42d84a`, patch-id `4e27ab51269db2579fe05550cfc6515b761d03e9`** (one commit shared with `f32b7d24` and `05fe7d98`). Done as below, and the trailing anchors were changed too: UUID `(?![0-9a-fA-F])`, timestamp `(?!\d)` after the seconds field.
+
 Replace each leading `\b` with a lookbehind that forbids only what would make the match a fragment of a
 longer value of the same kind:
 
@@ -89,10 +91,9 @@ blinding fix, not a rule change, so it needs no operator ruling.
 
 ## Tests added
 
-None yet. Owed: for each of the three patterns, a value glued on the left and one glued on the right are
-masked. A value that only resembles one is left alone: a 13-digit number next to a date, and a UUID-like
-string with a non-hex character. That last case catches the widening direction. Then one mutation per
-pattern.
+Three tests in `Blinding` (`tests/test_measure_packet.py`), one per pattern: a value glued on the left and on the right is masked, and look-alikes are left alone (a fifth digit before the year, a third digit of seconds, hex glued to a UUID on either side, a non-hex character inside the last group, 19 characters after `_01`). The look-alike cases are the widening direction, which the masked cases cannot catch.
+
+Mutations (9, on a scratchpad copy): UUID lead and trail each changed to `\b` and dropped, timestamp lead to `\b` and dropped, timestamp trailing anchor dropped, API-id `\b` restored, API-id length bound 20 to 10: all KILLED. Not run: the cargo gate (Python only); left un-archived.
 
 ## Workarounds
 
@@ -108,3 +109,8 @@ in the Resume of `measure-packet-cuts-results-and-arguments-without-a-marker`: `
 
 - Spec: `docs/superpowers/specs/2026-09-29-system1-labelled-sample-design.md` L143 onwards (blindness).
 - Walkthrough handoff: `docs/trackers/2026-09-29-system1-pilot-walkthrough-handoff.md`.
+
+## Fix provenance
+
+- **SHA:** `1f42d84a7201ce99e624eac18b10adf41e0ed671` (`experiments`)
+- **patch-id:** `4e27ab51269db2579fe05550cfc6515b761d03e9`

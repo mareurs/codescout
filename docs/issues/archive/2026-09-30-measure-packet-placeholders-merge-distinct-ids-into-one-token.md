@@ -1,11 +1,11 @@
 ---
-id: '6e9d80d2be97ff43'
+id: 64f2c7af4c2845fb
 kind: bug
-status: open
+status: archived
 title: A labelling packet's placeholders merge distinct ids into one token, so same-versus-different is lost
 tags:
 - cluster/unclassified
-closed: ''
+closed: 2026-09-30
 opened: 2026-09-30
 owner: marius
 related:
@@ -58,7 +58,9 @@ None.
 
 ## Fix
 
-**Needs an operator ruling**, because it changes what the labeller sees. The controller's leaning
+**Ruled 2026-09-30 by the operator (relayed in session 00113c9d): numbered per packet, in order of first appearance; relative timestamps NOT chosen.** Sequenced AFTER the `3bbaeeac` wave (peer session codescout-cd is editing `_call`/`_result_line`/`build_packet` now); implementation starts when that commit lands. **Landed in `d16ab085`, patch-id `e17730c5765efae6330232d7584e8fe1cc6ebb17`** (own commit; not shared with the other packet fixes). Implemented as ruled: a `_Ids` per `build_packet`, threaded through `_context_block`, `_call`, `_result_line` and the operator and unit sites, numbering by first appearance in RENDER order (the context is blinded before the judged message, so the first cap-loop pass reuses those blocks). A uuid is the same value whatever its case. Deliberate gap: blinding runs before any cut or cap, so a value only in dropped material keeps its number. Original text:
+
+**Needed an operator ruling**, because it changes what the labeller sees. The controller's leaning
 (2026-09-30) is to number the placeholders within one packet (`<uuid-1>`, `<uuid-2>`, `<timestamp-1>`)
 in order of first appearance. That keeps same-versus-different visible and reveals no value.
 
@@ -71,9 +73,11 @@ choose it.
 
 ## Tests added
 
-None yet. Owed: the same UUID in the operator message and in a context result gets the same number; two
-different UUIDs get different numbers; the numbering is deterministic for the same unit. Mutate the
-mapping to be per-call and confirm the cross-section test fails.
+`NumberedPlaceholders` in `tests/test_measure_packet.py` (8 tests): one value keeps one number across sections and two values differ; numbers follow reading order not build order (the judged message's first-seen value takes the LAST number); a counter per kind; a repeat inside one string and inside call arguments; uuid case; the dispatch prompt shares the mapping; numbers past nine; the documented gap after the cap drops a context message. Nine legacy `Blinding` assertions moved to the numbered forms, and `test_every_place_transcript_text_enters_the_packet_is_blinded` now also pins the per-site order (1..5).
+
+Mutations, one per site, on a scratchpad copy (14): uuid key not lower-cased; number always 1; number never remembered; one counter for all kinds; a fresh `_Ids()` at each of the six blinding call sites (`_call`, `_result_line`, `_context_block` text, operator/dispatch, unit text, and the call sites in the unit and in the context); the unit blinded before the context; the cap-loop rebuild with a fresh mapping. All KILLED, each pattern applied exactly once.
+
+The pinned sha256s in `test_measure_run_sample.py` did NOT move (its corpus keeps ids in paths and set names, not in message text; observed, not proven). Not run: the four-command cargo gate (Python only); `cargo test --test committed_paths` passed. Left un-archived for that reason. **Still owed on the real corpus:** `run.py frame`, then `preflight`, then re-render the pilot, once, after this and `9a269f24`.
 
 ## Workarounds
 
@@ -89,3 +93,8 @@ Constraints are in the Resume of `measure-packet-cuts-results-and-arguments-with
 
 - Sibling: `measure-packet-blinding-patterns-miss-a-value-glued-to-a-word-character` (same function).
 - Walkthrough handoff: `docs/trackers/2026-09-29-system1-pilot-walkthrough-handoff.md`.
+
+## Fix provenance
+
+- **SHA:** `d16ab085c49a35d6add59cc473ea6dfc11ac5688` (`experiments`)
+- **patch-id:** `e17730c5765efae6330232d7584e8fe1cc6ebb17`

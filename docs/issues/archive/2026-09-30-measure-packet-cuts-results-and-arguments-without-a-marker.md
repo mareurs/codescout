@@ -1,11 +1,11 @@
 ---
-id: f32b7d248a833167
+id: 2d514ea5f3113cae
 kind: bug
-status: open
+status: archived
 title: A labelling packet cuts tool results and tool-call arguments with no marker, so a partial value reads as the whole
 tags:
 - cluster/capped-result-presented-as-complete
-closed: ''
+closed: 2026-09-30
 opened: 2026-09-30
 owner: marius
 related:
@@ -84,7 +84,7 @@ None. The mechanism was read from the code and confirmed by the probe.
 
 ## Fix
 
-Plan (not implemented):
+**Landed in `1f42d84a`, patch-id `4e27ab51269db2579fe05550cfc6515b761d03e9`** (one commit for this bug plus `05fe7d98` and `8829a4aa`, so the patch-id is shared). Wording chosen: `[… N earlier characters not shown]` before a kept tail, `[… N more characters not shown]` after a kept head, singular at N=1, thousands separators. The token check still judges the source range. Original plan:
 
 1. At every `_head`/`_tail` call site that cuts, add a marker that says what was dropped and how much,
    for example `[… 840 earlier characters not shown]` before a tail and `[… 1,200 more characters not
@@ -100,9 +100,11 @@ Record SHA and patch-id at fix time.
 
 ## Tests added
 
-None yet. Owed, per site (result tail, argument head, operator or dispatch head): a cut input shows the
-marker, and an uncut input shows none. Both directions are needed, because the absence assertion alone is
-monotone under removal. Then one mutation per site (`./scripts/mutation-probe.sh`).
+`CutMarkers` in `tests/test_measure_packet.py` (8 tests), per site and BOTH directions: a value at the limit is unmarked and one character over is marked, for the result tail, the call arguments (also as context), the operator message and the dispatch prompt; the dropped count with separators (2,500); the marker after the `[exit N]` prefix and before the tail; and the cap still holding with markers. Legacy tests that pinned the unmarked cut text were updated (`test_result_tail_kept_and_args_cut`, `test_exit_code_outside_the_kept_tail_is_still_shown`, the handback and token-in-dropped-head tests). **Since renamed by `9a269f24` (bug `3bbaeeac`), which also reshaped the result cut from tail-only to head 500 + gap marker + tail 1,000:** the first is now `test_result_head_and_tail_kept_and_args_cut`, the second `test_the_exit_prefix_is_shown_for_both_forms_beside_the_kept_head`.
+
+Mutations, one per site, on a scratchpad copy of the tree (13 for this bug: result never/`>=`/whole-text count/side wording/marker after tail; call never/`>=`/whole count; operator never/`>=`/whole count; plural; separator): all KILLED, each pattern applied exactly once.
+
+Not run: the four-command cargo gate (this change is Python only); ran `tests/test_measure_*.py` (785 passed) and `cargo test --test committed_paths`. Left un-archived for that reason.
 
 ## Workarounds
 
@@ -142,3 +144,8 @@ Write the per-site failing tests in `tests/test_measure_packet.py` against the s
 - Walkthrough handoff: `docs/trackers/2026-09-29-system1-pilot-walkthrough-handoff.md`.
 - SDD ledger (git-ignored): `.superpowers/sdd/2026-09-29-system1-labelled-sample/progress.md`, PILOT
   FINDING #2.
+
+## Fix provenance
+
+- **SHA:** `1f42d84a7201ce99e624eac18b10adf41e0ed671` (`experiments`)
+- **patch-id:** `4e27ab51269db2579fe05550cfc6515b761d03e9`

@@ -123,7 +123,7 @@ def _clean(s):
 
 
 class _Ids:
-    """The numbering for ONE packet (bug 6e9d80d2be97ff43, operator ruling 2026-09-30). Every distinct uuid,
+    """The numbering for ONE packet (bug 64f2c7af4c2845fb, operator ruling 2026-09-30). Every distinct uuid,
     timestamp and API id becomes `<uuid-N>` / `<timestamp-N>` / `<id-N>`, N counting from 1 per kind in order of
     first appearance, so the labeller can tell one value reused from two different ones without seeing either.
     One instance is created per build_packet and passed to every piece, and the pieces must be blinded in the
@@ -175,7 +175,7 @@ def _head(source, n):
 def _dropped(n, where=""):
     """The marker for a cut that removed `n` characters: `where` is "earlier" (a kept tail), "more" (a kept
     head) or "" (the gap between a kept head and a kept tail). Distinct from TRIM_MARKER, which is about the
-    judged message; without one a partial value reads as the whole (bug f32b7d248a833167). It is not source
+    judged message; without one a partial value reads as the whole (bug 2d514ea5f3113cae). It is not source
     text: the token check judges the kept source range."""
     label = f"{where} " if where else ""
     return f"[… {n:,} {label}character{'' if n == 1 else 's'} not shown]"
@@ -287,7 +287,7 @@ def _calls_block(lines):
 
 def _join_body(text, lines):
     # a message with calls but no prose says so, else its section is only `ABOUT TO RUN:` and reads as text
-    # that failed to render (bug 05fe7d98e6827714)
+    # that failed to render (bug 3cf36991ec89a020)
     head = [text] if text else ([NO_TEXT_NOTE] if lines else [])
     parts = head + ([_calls_block(lines)] if lines else [])
     return "\n\n".join(parts) or "(no text)"
