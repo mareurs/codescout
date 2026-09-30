@@ -53,8 +53,9 @@ after the class's last method. Two inputs, and they split the bug:
   at column 0. Fixed by `2da4e2fe`.
 - A body whose first line is at column 0, then a column-0 class: everything is shifted,
   the method lands at column 4 and `class C` nests inside the enclosing class. The file
-  parses, so nothing refuses it. **This is what remains open**, and it is the case
-  option (a) in the Fix section still applies to.
+  parses, so nothing refuses it. **This is what remains open.** Option (a) in the Fix
+  section does NOT cover it, because no line here is shallower than the first line (see the
+  correction there).
 
 ## Environment
 
@@ -96,10 +97,19 @@ Verified at the `reindent_to` function, and now end to end: on 2026-09-30, on th
 binary, `edit_code(insert)` after the last method of a class with a body holding a method
 at the target column and a column-0 class placed the class at column 0, top-level.
 
-What stays open, and where option (a) still applies: a body whose first line is NOT at
-the target and which holds a shallower later line (a column-0 method plus a column-0
-class, inserted after a nested method). One shift still cannot place both levels, and
-nothing in the text says which the caller meant.
+What stays open: a body whose first line is NOT at the target column and which holds
+several items at that same shallow column, for example a column-0 method plus a column-0
+class, inserted after a nested method (verified live 2026-09-30: the class ends up nested
+inside the enclosing class and the file still parses). One shift cannot place both
+levels, and nothing in the text says which the caller meant: "both are members of the
+class" and "both are top-level" read identically.
+
+**Correction, same day, to the line this replaces.** It said option (a) "still applies" here.
+It does not: (a) refuses a body with a line indented LESS than its first line, and in this
+case no line is shallower, because the first line and the class are both at column 0. Rule
+(a) as written would let this case through. Whatever is decided has to be a different rule,
+or an explicit caller switch, and it has to avoid refusing the ordinary case the re-base was
+built for: two sibling methods dedented to column 0 and meant to become members.
 
 ## Tests added
 
