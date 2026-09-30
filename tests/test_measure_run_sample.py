@@ -58,31 +58,31 @@ COUNTS = {"substantive": {"top": 12, "handback": 3}, "routine": {"top": 18}}
 # The exported record of the seed-11 main draw (6 substantive + 4 routine), pinned as literals: case id,
 # packet sha256 (deterministic for the fixture), stratum, kind, in draw.json's `cases` order.
 EXPORT_CASES = [
-    ("9cc8493506", "5e60b00766f032e061fc5dc049ad4603a43da19f8822d210ba2ba6b4d7943a0f", "substantive", "top"),
-    ("d6a1394c31", "c560d140225cb1e1ff3eee825a74b76170ec59ec14e6027a2d8234fc4271d1da", "substantive", "top"),
-    ("77ba2592f7", "95290a93da6dbb2df60d304f1ed96a34590510c21a3fdd31e258a308a046e73b", "substantive", "handback"),
-    ("1a64a9afdb", "5753597682f3477ae706c96fb8833b97567830a6480f8417d92c080fd06b13bc", "substantive", "top"),
-    ("b837168a2c", "a9cfffbd82fa2fd88466938b271c4cd5ec9a7e9b3a9ea24d2826d54fe8b92aac", "substantive", "top"),
-    ("0761ce7ec5", "43e3cf4b7402df86ab248ba74df75dd033610b5ebf20b73eb46104695571e2e8", "substantive", "top"),
-    ("d6ec25c96f", "cf449453976052933cea49034560e13e2514a97a8e4d7435a72545c451934f6e", "routine", "top"),
-    ("30fc2c09dd", "ac07955b317ac1f061caf74da091cfec4094ba144819a75a93e2de0c6b54118b", "routine", "top"),
-    ("3c9284abec", "7786e4d6400ece5ae77a970ebeba3e230b6a3d3ff3d26c51e6050b999f3e57c5", "routine", "top"),
-    ("812c9a7436", "642d50b4c8f65ebe86a1f78bb2c61f07fd8bcc0c40188e76853c079c6b71f6b4", "routine", "top"),
+    ("9cc8493506", "430e653648753f6597d3e50082e34c1c4055ac55abb291bfb61f8bb63f2a8575", "substantive", "top"),
+    ("d6a1394c31", "3123af9870be2a87a27acf6054d9361b5efe60ca1fbe8c9d3bca0d550ae11e8e", "substantive", "top"),
+    ("77ba2592f7", "efc86666d0868416a0ce10ff27f2725ead80672cd8d31b560bdb4003b12187b2", "substantive", "handback"),
+    ("1a64a9afdb", "57e81a664497d1700642d9e73708b14710e452457e2e2314bfc78db5ce60703c", "substantive", "top"),
+    ("b837168a2c", "fc52191b68cd63951e316ae6db11bd582935ee1648acc375e8ed65ad2d79911c", "substantive", "top"),
+    ("0761ce7ec5", "b195a24d7805e7a761e47e5b7535ee7ff676a7249e5a61d2775ce323874cee94", "substantive", "top"),
+    ("d6ec25c96f", "5fbe09887577ec2923f988d7ddc4b0e8554ea2bdeaebe35a620d95ea25e23a91", "routine", "top"),
+    ("30fc2c09dd", "776273d57d4f3812958034dd2d51f570dcb934d20d2839e4302c152d80a6bdd2", "routine", "top"),
+    ("3c9284abec", "622d06adb833f76ec9030a5b6dafb2aa5f12c75e63c1fc72269fd7e54353e83c", "routine", "top"),
+    ("812c9a7436", "d2d2ca3d9fbd046210803a3325dc6feb714d284ee0ed6d6e1dc9518ed8c6a919", "routine", "top"),
 ]
 # write_labels(sub_hits=4, rou_hits=1) on that draw, in the order it writes them:
 # (case id, sha256, labels, delivery, recall, seconds)
 V, Q, N, S = ["verify"], "quiet", ["none"], "silent"
 EXPORT_LABELS = [
-    ("77ba2592f7", "95290a93da6dbb2df60d304f1ed96a34590510c21a3fdd31e258a308a046e73b", V, Q, "y", 900.123),
-    ("9cc8493506", "5e60b00766f032e061fc5dc049ad4603a43da19f8822d210ba2ba6b4d7943a0f", V, Q, "n", 901.123),
-    ("1a64a9afdb", "5753597682f3477ae706c96fb8833b97567830a6480f8417d92c080fd06b13bc", V, Q, "n", 902.123),
-    ("d6a1394c31", "c560d140225cb1e1ff3eee825a74b76170ec59ec14e6027a2d8234fc4271d1da", V, Q, "n", 903.123),
-    ("0761ce7ec5", "43e3cf4b7402df86ab248ba74df75dd033610b5ebf20b73eb46104695571e2e8", N, S, "n", 904.123),
-    ("b837168a2c", "a9cfffbd82fa2fd88466938b271c4cd5ec9a7e9b3a9ea24d2826d54fe8b92aac", N, S, "n", 905.123),
-    ("3c9284abec", "7786e4d6400ece5ae77a970ebeba3e230b6a3d3ff3d26c51e6050b999f3e57c5", V, Q, "n", 906.123),
-    ("812c9a7436", "642d50b4c8f65ebe86a1f78bb2c61f07fd8bcc0c40188e76853c079c6b71f6b4", N, S, "n", 907.123),
-    ("d6ec25c96f", "cf449453976052933cea49034560e13e2514a97a8e4d7435a72545c451934f6e", N, S, "n", 908.123),
-    ("30fc2c09dd", "ac07955b317ac1f061caf74da091cfec4094ba144819a75a93e2de0c6b54118b", N, S, "n", 7777.777),
+    ("77ba2592f7", "efc86666d0868416a0ce10ff27f2725ead80672cd8d31b560bdb4003b12187b2", V, Q, "y", 900.123),
+    ("9cc8493506", "430e653648753f6597d3e50082e34c1c4055ac55abb291bfb61f8bb63f2a8575", V, Q, "n", 901.123),
+    ("1a64a9afdb", "57e81a664497d1700642d9e73708b14710e452457e2e2314bfc78db5ce60703c", V, Q, "n", 902.123),
+    ("d6a1394c31", "3123af9870be2a87a27acf6054d9361b5efe60ca1fbe8c9d3bca0d550ae11e8e", V, Q, "n", 903.123),
+    ("0761ce7ec5", "b195a24d7805e7a761e47e5b7535ee7ff676a7249e5a61d2775ce323874cee94", N, S, "n", 904.123),
+    ("b837168a2c", "fc52191b68cd63951e316ae6db11bd582935ee1648acc375e8ed65ad2d79911c", N, S, "n", 905.123),
+    ("3c9284abec", "622d06adb833f76ec9030a5b6dafb2aa5f12c75e63c1fc72269fd7e54353e83c", V, Q, "n", 906.123),
+    ("812c9a7436", "d2d2ca3d9fbd046210803a3325dc6feb714d284ee0ed6d6e1dc9518ed8c6a919", N, S, "n", 907.123),
+    ("d6ec25c96f", "5fbe09887577ec2923f988d7ddc4b0e8554ea2bdeaebe35a620d95ea25e23a91", N, S, "n", 908.123),
+    ("30fc2c09dd", "776273d57d4f3812958034dd2d51f570dcb934d20d2839e4302c152d80a6bdd2", N, S, "n", 7777.777),
 ]
 LABEL_FIELDS = ("case_id", "packet_sha256", "labels", "delivery", "recall", "seconds")
 
@@ -1931,16 +1931,16 @@ class EndToEndThroughTheOperatorTool(Base):
         rows = [json.loads(l) for l in read(exp / MAIN_LABELS).splitlines()]
         # in draw order: 4 routine/sub interleaved as drawn; hits are the first 4 substantive and the first routine
         self.assertEqual(rows, [dict(zip(LABEL_FIELDS, row)) for row in [
-            ("3c9284abec", "7786e4d6400ece5ae77a970ebeba3e230b6a3d3ff3d26c51e6050b999f3e57c5", V, Q, "n", 30.0),
-            ("812c9a7436", "642d50b4c8f65ebe86a1f78bb2c61f07fd8bcc0c40188e76853c079c6b71f6b4", N, S, "n", 31.0),
-            ("d6ec25c96f", "cf449453976052933cea49034560e13e2514a97a8e4d7435a72545c451934f6e", N, S, "n", 32.0),
-            ("77ba2592f7", "95290a93da6dbb2df60d304f1ed96a34590510c21a3fdd31e258a308a046e73b", V, Q, "y", 33.0),
-            ("9cc8493506", "5e60b00766f032e061fc5dc049ad4603a43da19f8822d210ba2ba6b4d7943a0f", V, Q, "n", 34.0),
-            ("1a64a9afdb", "5753597682f3477ae706c96fb8833b97567830a6480f8417d92c080fd06b13bc", V, Q, "n", 35.0),
-            ("d6a1394c31", "c560d140225cb1e1ff3eee825a74b76170ec59ec14e6027a2d8234fc4271d1da", V, Q, "n", 36.0),
-            ("0761ce7ec5", "43e3cf4b7402df86ab248ba74df75dd033610b5ebf20b73eb46104695571e2e8", N, S, "n", 37.0),
-            ("b837168a2c", "a9cfffbd82fa2fd88466938b271c4cd5ec9a7e9b3a9ea24d2826d54fe8b92aac", N, S, "n", 38.0),
-            ("30fc2c09dd", "ac07955b317ac1f061caf74da091cfec4094ba144819a75a93e2de0c6b54118b", N, S, "n", 39.0)]])
+            ("3c9284abec", "622d06adb833f76ec9030a5b6dafb2aa5f12c75e63c1fc72269fd7e54353e83c", V, Q, "n", 30.0),
+            ("812c9a7436", "d2d2ca3d9fbd046210803a3325dc6feb714d284ee0ed6d6e1dc9518ed8c6a919", N, S, "n", 31.0),
+            ("d6ec25c96f", "5fbe09887577ec2923f988d7ddc4b0e8554ea2bdeaebe35a620d95ea25e23a91", N, S, "n", 32.0),
+            ("77ba2592f7", "efc86666d0868416a0ce10ff27f2725ead80672cd8d31b560bdb4003b12187b2", V, Q, "y", 33.0),
+            ("9cc8493506", "430e653648753f6597d3e50082e34c1c4055ac55abb291bfb61f8bb63f2a8575", V, Q, "n", 34.0),
+            ("1a64a9afdb", "57e81a664497d1700642d9e73708b14710e452457e2e2314bfc78db5ce60703c", V, Q, "n", 35.0),
+            ("d6a1394c31", "3123af9870be2a87a27acf6054d9361b5efe60ca1fbe8c9d3bca0d550ae11e8e", V, Q, "n", 36.0),
+            ("0761ce7ec5", "b195a24d7805e7a761e47e5b7535ee7ff676a7249e5a61d2775ce323874cee94", N, S, "n", 37.0),
+            ("b837168a2c", "fc52191b68cd63951e316ae6db11bd582935ee1648acc375e8ed65ad2d79911c", N, S, "n", 38.0),
+            ("30fc2c09dd", "776273d57d4f3812958034dd2d51f570dcb934d20d2839e4302c152d80a6bdd2", N, S, "n", 39.0)]])
 
 
 class PacketCache(Base):

@@ -31,6 +31,7 @@ import measure_corpus_fixture as fx  # noqa: E402
 
 MINUS = "−"  # the sign the context labels use: "−6 … −1"
 MARKER = "AFTER-DECISION-MARKER"
+JUDGED = "The message (the one you judge)"  # the judged section's title; the bare `The message` is gone
 TRIM_MARKER = "[… the earlier part of this message is not shown]"
 # UUID-shaped on purpose: a leaked session id is only scrubbed when it has the shape of one.
 SID = "5b1f0c2e-1111-4222-8333-444455556666"
@@ -180,12 +181,148 @@ class DecisionPoint(PacketCase):
         s.result(ta, f"{MARKER} result of A")  # between the unit's two entries: must not appear
         s.asst("m1", "Part two.", tools=[("run_command", {"command": "ls-B"})])  # unit, entry 2 (same mid)
         p = self.build(s, "m1")
-        msg = self.section(p.text, "The message")
+        msg = self.section(p.text, JUDGED)
         self.assertIn("Part one.\nPart two.", msg)
         after = msg.split("ABOUT TO RUN:", 1)[1]
         self.assertIn('run_command({"command": "ls-A"})', after)
         self.assertIn('run_command({"command": "ls-B"})', after)
         self.assertNotIn(MARKER, p.text)
+
+
+class ToolOnlyMessage(PacketCase):
+    """Bug 05fe7d98e6827714: a judged message with no prose showed only `ABOUT TO RUN:`, which reads as text that
+    failed to render, and the judged section was an ordinary `## The message` heading that a long context
+    message could be mistaken for."""
+
+    JUDGED = "The message (the one you judge)"
+    NOTE = "(no text; the message is only the tool call(s) below)"
+
+    def _tool_only(self, **kw):
+        s = Seq()
+        s.user("go")
+        s.asst("c1", "A long earlier message that is context.", tools=[("run_command", {"command": "ls"})])
+        s.asst("m1", None, tools=[("run_command", {"command": "cargo test"})])
+        return self.build(s, "m1", **kw)
+
+    def test_a_tool_only_message_says_it_has_no_text(self):
+        body = self.section(self._tool_only().text, self.JUDGED)
+        self.assertEqual(body.strip(), self.NOTE + '\n\nABOUT TO RUN:\n- run_command({"command": "cargo test"})')
+
+    def test_a_message_with_text_carries_no_no_text_line(self):
+        s = Seq()
+        s.user("go")
+        s.asst("m1", "Running it.", tools=[("run_command", {"command": "cargo test"})])
+        p = self.build(s, "m1")
+        self.assertNotIn("(no text", p.text)
+        # non-vacuous: the same packet does carry the judged section and its calls
+        self.assertIn("Running it.\n\nABOUT TO RUN:", self.section(p.text, self.JUDGED))
+
+    def test_the_no_text_line_is_not_placed_in_a_context_message(self):
+        # the context message c1 has text; a context message with NO text keeps its old shape (no note)
+        s = Seq()
+        s.user("go")
+        s.asst("c1", None, tools=[("run_command", {"command": "ls"})])
+        s.asst("m1", "The decision.")
+        p = self.build(s, "m1")
+        self.assertNotIn("(no text", p.text)
+
+    def test_the_judged_heading_appears_exactly_once_and_no_context_block_borrows_it(self):
+        p = self._tool_only()
+        self.assertEqual(p.text.count(f"## {self.JUDGED}\n"), 1)
+        self.assertEqual(p.text.count("## The message"), 1)  # the old bare heading is gone, not duplicated
+        ctx = self.section(p.text, "Context")
+        self.assertNotIn("The message", ctx)
+
+    def test_a_message_with_neither_text_nor_calls_keeps_the_plain_placeholder(self):
+        s = Seq()
+        s.user("go")
+        s.asst("m1", None)
+        body = self.section(self.build(s, "m1").text, self.JUDGED)
+        self.assertEqual(body.strip(), "(no text)")
+
+
+
+class CutMarkers(PacketCase):
+    """Bug f32b7d248a833167: a tool result (last 1,500 chars), a tool call's arguments (first 300) and the operator
+    or dispatch message (first 1,500) were cut with no marker, so a partial value read as the whole. Per site,
+    BOTH directions: a value at the limit is unmarked and one char over is marked (the absence assertion alone is
+    monotone under a marker that never fires; the presence alone under one that always does)."""
+
+    def _result_text(self, content, tool="Read"):
+        s = Seq()
+        s.user("go")
+        (t,) = s.asst("m1", "Run.", tools=[(tool, {"file_path": "x"})])
+        s.result(t, content)
+        s.asst("m2", "The decision.")
+        return self.build(s, "m2").text
+
+    def test_a_result_at_the_limit_is_unmarked_and_one_over_says_what_was_dropped(self):
+        at = self._result_text("h" * 1500)
+        self.assertIn("RESULT " + "h" * 1500 + "\n", at)
+        self.assertNotIn("not shown]", at)
+        over = self._result_text("HEAD" + "h" * 1497)  # 1,501 chars: the first is dropped
+        self.assertIn("RESULT [… 1 earlier character not shown]\n" + "EAD" + "h" * 1497 + "\n", over)
+
+    def test_the_result_marker_counts_the_dropped_characters_with_separators(self):
+        text = self._result_text("S" * 2500 + "t" * 1500)  # 4,000 chars: 2,500 dropped
+        self.assertIn("RESULT [… 2,500 earlier characters not shown]\n" + "t" * 1500 + "\n", text)
+
+    def test_the_result_marker_follows_the_exit_and_error_prefix_and_leads_the_tail(self):
+        text = self._result_text("Exit code 7\n" + "y" * 5000, tool="Bash")
+        self.assertIn("RESULT [exit 7] [… 3,512 earlier characters not shown]\n" + "y" * 1500 + "\n", text)
+
+    def test_an_argument_string_at_the_limit_is_unmarked_and_one_over_is_marked(self):
+        def calls_line(cmd_len):
+            s = Seq()
+            s.user("go")
+            s.asst("m1", "Go.", tools=[("run_command", {"command": "c" * cmd_len})])
+            return self.section(self.build(s, "m1").text, JUDGED)
+        at = calls_line(285)  # args JSON = 15 + 285 = 300 chars: kept whole
+        self.assertIn("c" * 285 + '"})', at)
+        self.assertNotIn("not shown]", at)
+        over = calls_line(286)  # 301 chars: only the closing brace is dropped
+        self.assertIn("c" * 286 + '"[… 1 more character not shown])', over)
+
+    def test_a_context_call_argument_cut_is_marked_too(self):
+        s = Seq()
+        s.user("go")
+        s.asst("c1", "Ctx.", tools=[("run_command", {"command": "c" * 585})])  # args JSON 600: 300 dropped
+        s.asst("m1", "The decision.")
+        text = self.build(s, "m1").text
+        self.assertIn("c" * 287 + "[… 300 more characters not shown])", text)
+
+    def test_the_operator_message_at_the_limit_is_unmarked_and_one_over_is_marked(self):
+        def operator(text):
+            s = Seq()
+            s.user(text)
+            s.asst("m1", "The decision.")
+            return self.section(self.build(s, "m1").text, "Operator's last message")
+        at = operator("o" * 1500)
+        self.assertEqual(at.strip(), "o" * 1500)
+        over = operator("o" * 1500 + "XY")
+        self.assertEqual(over.strip(), "o" * 1500 + "\n[… 2 more characters not shown]")
+
+    def test_the_dispatch_prompt_cut_is_marked(self):
+        top = Seq()
+        top.asst("t1", "top.")
+        sub = Seq()
+        sub.user("d" * 1500 + "Z")  # the hand-back path reads the FIRST user text: 1,501 chars
+        sub.asst("h1", "All done.", stop="end_turn")
+        p = self.build(top, "h1", subagents={"w": sub}, kind="handback")
+        self.assertEqual(self.section(p.text, "Dispatch prompt").strip(), "d" * 1500 + "\n[… 1 more character not shown]")
+
+    def test_the_cut_markers_are_counted_inside_the_cap(self):
+        s = Seq()
+        s.user("o" * 1502)
+        for i in range(6):
+            (t,) = s.asst(f"c{i}", f"Ctx {i}.", tools=[("run_command", {"command": "c" * 585})])
+            s.result(t, "r" * 4000)
+        s.asst("m1", "The decision.")
+        p = self.build(s, "m1")
+        self.assertLessEqual(len(p.text), 20000)
+        self.assertEqual(p.chars, len(p.text))
+        self.assertIn("[… 2 more characters not shown]", p.text)  # non-vacuous: the markers are really in this packet
+
 
 
 class OperatorSection(PacketCase):
@@ -250,8 +387,9 @@ class ContextSection(PacketCase):
         # (form, tool, result). 5,000 y's: the only exit code is at the very start, far outside the last
         # 1,500. The JSON form must be VALID JSON as a whole (a top-level object), or it is not parsed.
         cases = (("json", "run_command", '{"exit_code": 7, "stdout": "' + "y" * 5000 + '"}',
-                  "RESULT [exit 7] " + "y" * 1498 + '"}'),
-                 ("line", "Bash", "Exit code 7\n" + "y" * 5000, "RESULT [exit 7] " + "y" * 1500))
+                  "RESULT [exit 7] [… 3,530 earlier characters not shown]\n" + "y" * 1498 + '"}'),
+                 ("line", "Bash", "Exit code 7\n" + "y" * 5000,
+                  "RESULT [exit 7] [… 3,512 earlier characters not shown]\n" + "y" * 1500))
         for label, tool, body, expected in cases:
             with self.subTest(form=label):
                 s = Seq()
@@ -286,8 +424,8 @@ class ContextSection(PacketCase):
         s.asst("m2", "The decision.")
         text = self.build(s, "m2").text
         self.assertIn('CALL run_command({"command": "' + "c" * 285 + '"})\n', text)
-        self.assertIn('CALL run_command({"command": "' + "d" * 286 + '")\n', text)
-        self.assertIn("RESULT " + "b" * 1500 + "\n", text)
+        self.assertIn('CALL run_command({"command": "' + "d" * 286 + '"[… 1 more character not shown])\n', text)
+        self.assertIn("RESULT [… 1 earlier character not shown]\n" + "b" * 1500 + "\n", text)
         self.assertNotIn("A" + "b" * 1500, text)
         self.assertIn("RESULT A" + "b" * 1499 + "\n", text)
 
@@ -376,13 +514,13 @@ class Handback(PacketCase):
         sub.result(a, '{"exit_code": 1, "stdout": "boom"}')
         sub.asst("h2", "All done, 3 tests passed.", stop="end_turn")  # the hand-back: last text-bearing message
         p = self.build(top, "h2", subagents={"w": sub}, kind="handback")
-        self.assertEqual(self.section(p.text, "Dispatch prompt").strip(), "S" + "m" * 1499)
+        self.assertEqual(self.section(p.text, "Dispatch prompt").strip(), "S" + "m" * 1499 + "\n[… 1 more character not shown]")
         self.assertNotIn("Operator's last message", p.text)
         self.assertNotIn("TOP-LEVEL-OPERATOR-TEXT", p.text)
         self.assertNotIn("top-level assistant text", p.text)
         self.assertIn("Looking around.", p.text)
         self.assertIn('RESULT [exit 1] {"exit_code": 1, "stdout": "boom"}', p.text)
-        self.assertIn("All done, 3 tests passed.", self.section(p.text, "The message"))
+        self.assertIn("All done, 3 tests passed.", self.section(p.text, JUDGED))
 
     def test_dispatch_prompt_is_the_first_user_text_and_nothing_later(self):
         top = Seq()
@@ -414,8 +552,8 @@ class Cap(PacketCase):
     """The packet is at most 20,000 chars in TOTAL. Hard-coded budgets (derived by hand from the
     section skeleton, not by the code under test):
       operator "go", no context:        "## Operator's last message\\n\\ngo\\n\\n## Context\\n\\n(no earlier
-                                         assistant messages)\\n\\n## The message\\n\\n" + body + "\\n" -> body budget 19906
-      operator of 1,500 chars, ditto:   body budget 18408
+                                         assistant messages)\\n\\n## The message (the one you judge)\\n\\n" + body + "\\n" -> body budget 19886
+      operator of 1,500 chars, ditto:   body budget 18388
       trim marker:                      49 chars"""
 
     def _packet(self, ctx_texts=(), unit_text="Go.", operator="go", tools=()):
@@ -452,7 +590,7 @@ class Cap(PacketCase):
         self.assertEqual(over.text.count(TRIM_MARKER), 0)  # dropping the context was enough: the unit is whole
 
     def test_the_unit_alone_at_the_body_budget_is_whole_and_one_over_is_trimmed(self):
-        for label, operator, budget in (("operator 1500", "o" * 1500, 18408), ("operator go", "go", 19906)):
+        for label, operator, budget in (("operator 1500", "o" * 1500, 18388), ("operator go", "go", 19886)):
             with self.subTest(case=label):
                 unit = "Q" + "u" * (budget - 2) + "E"  # `budget` chars; "Q" appears nowhere else in a packet
                 at = self._packet(["CTX-MARKER " + "c" * 100], unit_text=unit, operator=operator)
@@ -474,30 +612,31 @@ class Cap(PacketCase):
         p = self._packet(unit_text=unit)
         self.assertEqual(len(p.text), 20000)
         self.assertEqual(p.chars, 20000)
-        self.assertEqual(self.section(p.text, "The message").strip(), TRIM_MARKER + "\n" + unit[-(19906 - 49 - 1):])
+        self.assertEqual(self.section(p.text, JUDGED).strip(), TRIM_MARKER + "\n" + unit[-(19886 - 49 - 1):])
 
     def _calls(self, n):
-        # each pending call renders as "- run_command(" + 300 chars of args + ")" = 315 chars
-        return [("run_command", {"command": f"cmd-{i:03d}-" + "z" * 300}) for i in range(n)]
+        # each pending call renders as "- run_command(" + args JSON of exactly 300 chars (`cmd-NNN-` + 277 z, uncut: a
+        # longer one would gain a cut marker and change every line length) + ")" = 315 chars
+        return [("run_command", {"command": f"cmd-{i:03d}-" + "z" * 277}) for i in range(n)]
 
     def test_a_unit_with_100_tool_calls_stays_within_20000_and_says_what_it_left_out(self):
         p = self._packet(unit_text="Go.", tools=self._calls(100))
         self.assertLessEqual(len(p.text), 20000)
         self.assertEqual(p.chars, len(p.text))
         self.assertIn("Go.\n\nABOUT TO RUN:\n- run_command(", p.text)
-        self.assertIn("cmd-061-", p.text)  # 62 calls fit beside "Go." (block 19,638 chars <= room 19,901)
+        self.assertIn("cmd-061-", p.text)  # 62 calls fit beside "Go." (block 19,638 chars <= room 19,881)
         self.assertNotIn("cmd-062-", p.text)
         self.assertIn("[… 38 more tool calls not shown]", p.text)
         self.assertNotIn(TRIM_MARKER, p.text)  # the text was short enough to stay whole
 
     def test_the_call_list_boundary_is_exact_on_both_sides(self):
         # 62 calls need block = 14 + 316*62 + 30 + 2 = 19,638 chars. With a 266-char text the room is
-        # 19,906 - 266 - 2 = 19,638 exactly: fits; with 267 the room is one short: only 61 fit.
-        fits = self._packet(unit_text="t" * 266, tools=self._calls(100))
+        # 19,886 - 246 - 2 = 19,638 exactly: fits; with 247 the room is one short: only 61 fit.
+        fits = self._packet(unit_text="t" * 246, tools=self._calls(100))
         self.assertEqual(len(fits.text), 20000)
         self.assertIn("cmd-061-", fits.text)
         self.assertNotIn("cmd-062-", fits.text)
-        short = self._packet(unit_text="t" * 267, tools=self._calls(100))
+        short = self._packet(unit_text="t" * 247, tools=self._calls(100))
         self.assertLessEqual(len(short.text), 20000)
         self.assertIn("cmd-060-", short.text)
         self.assertNotIn("cmd-061-", short.text)
@@ -574,7 +713,7 @@ class Blinding(PacketCase):
         (t,) = s.asst("m1", "Run.", tools=[("Read", {"file_path": "x"})])
         s.result(t, content)
         s.asst("m2", "The decision.")
-        return self.build(s, "m2").text.split("RESULT ", 1)[1].split("\n\n## The message", 1)[0]
+        return self.build(s, "m2").text.split("RESULT ", 1)[1].split("\n\n## " + JUDGED, 1)[0]
 
     def test_words_shaped_like_api_ids_are_left_intact(self):
         text = "let msg_count = 3;\nfn toolu_helper() {}\nmsg_01short and toolu_01short"  # no 20 chars after `_01`
@@ -604,6 +743,39 @@ class Blinding(PacketCase):
     def test_dates_without_a_time_and_in_file_names_stay(self):
         text = "see docs/issues/2026-09-20-the-bug.md and 2026-09-20 only, or 2026-09-20 at noon"
         self.assertEqual(self._result_body(text), text)
+    # Bug 8829a4aade8bef7f: each pattern began with `\b`, which does not exist between two word characters,
+    # so a value glued to a letter, digit or `_` passed through unmasked. One test per pattern: a glued value
+    # is masked (the narrowing direction) and a look-alike is left alone (the widening direction, which the
+    # masked cases alone cannot catch: a pattern widened to eat any digit run would satisfy them).
+
+    def test_a_timestamp_glued_to_a_word_character_is_blinded_and_a_lookalike_is_not(self):
+        self.assertEqual(self._result_body("run2026-09-30T12:00:00Z"), "run<timestamp>")
+        self.assertEqual(self._result_body("id_2026-09-30 12:00:00"), "id_<timestamp>")
+        self.assertEqual(self._result_body("2026-09-30T12:00:00Zabc"), "<timestamp>abc")
+        self.assertEqual(self._result_body("2026-09-30 12:00:00x"), "<timestamp>x")
+        for lookalike in ("12026-09-30 12:00:00",   # a fifth digit before the year: not a calendar date
+                          "2026-09-30 12:00:001"):  # a third digit of seconds: not HH:MM:SS
+            with self.subTest(lookalike=lookalike):
+                self.assertEqual(self._result_body(lookalike), lookalike)
+
+    def test_a_uuid_glued_to_a_word_character_is_blinded_and_a_lookalike_is_not(self):
+        u = "11111111-2222-3333-4444-555555555555"
+        self.assertEqual(self._result_body(f"x{u}"), "x<uuid>")
+        self.assertEqual(self._result_body(f"sid_{u}"), "sid_<uuid>")
+        self.assertEqual(self._result_body(f"{u}x"), "<uuid>x")
+        for lookalike in (f"a{u}",                                   # hex glued on: a longer hex run, not this uuid
+                          f"{u}a",                                   # same on the right
+                          "11111111-2222-3333-4444-55555555555g"):   # a non-hex char inside the last group
+            with self.subTest(lookalike=lookalike):
+                self.assertEqual(self._result_body(lookalike), lookalike)
+
+    def test_an_api_id_glued_to_a_word_character_is_blinded_and_a_lookalike_is_not(self):
+        body = "01" + "A" * 20
+        self.assertEqual(self._result_body(f"idmsg_{body}"), "id<id>")
+        self.assertEqual(self._result_body(f"x_toolu_{body}"), "x_<id>")
+        self.assertEqual(self._result_body(f"msg_{body}_tail"), "<id>_tail")
+        lookalike = "id msg_01" + "A" * 19  # nineteen after `_01`: the length bound still holds without `\b`
+        self.assertEqual(self._result_body(lookalike), lookalike)
 
 
 class Tokens(PacketCase):
@@ -676,18 +848,18 @@ class Tokens(PacketCase):
             self.build(top, "h1", subagents={"w": sub}, kind="handback")
 
     def test_token_straddling_the_unit_trim_boundary_refuses(self):
-        # no context, operator "go": the body budget is 19,906 and the trim keeps the last 19,856 chars,
-        # which start at 25,000 - 19,856 = 5,144: the token at 5,140..5,180 is cut at its start
+        # no context, operator "go": the body budget is 19,886 and the trim keeps the last 19,836 chars,
+        # which start at 25,000 - 19,836 = 5,164: the token at 5,160..5,200 is cut at its start
         s = Seq()
         s.user("go")
-        s.asst("m1", "u" * 5140 + self.TOK + "u" * (25000 - 5180))
+        s.asst("m1", "u" * 5160 + self.TOK + "u" * (25000 - 5200))
         with self.assertRaises(packet.TokenFound):
             self.build(s, "m1")
 
     def test_token_wholly_in_a_dropped_head_does_not_refuse(self):
         p = self._with_result(self.TOK + "y" * 4000)  # the tail cut drops the whole token
         self.assertNotIn("ghp_", p.text)
-        self.assertIn("RESULT " + "y" * 1500 + "\n", p.text)
+        self.assertIn("RESULT [… 2,540 earlier characters not shown]\n" + "y" * 1500 + "\n", p.text)
         cmd = "c" * 300 + self.TOK  # the args cut drops the whole token
         s = Seq()
         s.user("go")
@@ -785,7 +957,7 @@ class ExactText(PacketCase):
             f"## Context\n\n### {MINUS}1\nRun tests.\n"
             'CALL run_command({"command": "cargo test"})\n'
             "RESULT [exit 101] Exit code 101\nfailed\n\n"
-            "## The message\n\nDone.\n\nABOUT TO RUN:\n"
+            "## The message (the one you judge)\n\nDone.\n\nABOUT TO RUN:\n"
             '- edit_file({"path": "a"})\n'
         )
         self.assertEqual(self.build(s, "m2").text, expected)
@@ -845,7 +1017,7 @@ class TokenEdges(PacketCase):
             self._built(unit_text="see " + self.TOK)
 
     def test_a_call_straddling_a_token_refuses_only_when_the_trim_keeps_it(self):
-        big = [("run_command", {"command": f"cmd-{i:03d}-" + "z" * 300}) for i in range(100)]
+        big = [("run_command", {"command": f"cmd-{i:03d}-" + "z" * 277}) for i in range(100)]
         straddle = ("run_command", {"command": "c" * 281 + self.TOK})  # the args cut lands inside the token
         kept = big[:5] + [straddle] + big[6:]  # call 5 is shown (62 fit)
         with self.assertRaises(packet.TokenFound):
@@ -874,10 +1046,10 @@ class UnitTrim(PacketCase):
         self.assertNotIn("not shown]", p.text.replace(TRIM_MARKER, ""))
         self.assertNotIn("Q", p.text)
     def test_the_text_trim_never_overflows_when_the_room_equals_the_marker(self):
-        # 62 full calls (315-char lines) + one 249-char line: the call block is 19,855 chars, so the room
-        # left for a trimmed text is 19,906 - 19,855 - 2 = 49 = len(marker): no room for any text beside it
-        calls = [("run_command", {"command": f"cmd-{i:03d}-" + "z" * 300}) for i in range(62)]
-        calls.append(("run_command", {"command": "y" * 219}))  # args JSON 234 chars -> line 249
+        # 62 full calls (315-char lines) + one 229-char line: the call block is 19,835 chars, so the room
+        # left for a trimmed text is 19,886 - 19,835 - 2 = 49 = len(marker): no room for any text beside it
+        calls = [("run_command", {"command": f"cmd-{i:03d}-" + "z" * 277}) for i in range(62)]
+        calls.append(("run_command", {"command": "y" * 199}))  # args JSON 214 chars -> line 229
         s = Seq()
         s.user("go")
         s.asst("m1", "Q" + "u" * 24998 + "E", tools=calls)
@@ -886,55 +1058,75 @@ class UnitTrim(PacketCase):
         self.assertEqual(p.chars, len(p.text))
 
     def test_a_huge_text_beside_a_huge_call_list_keeps_half_the_budget_for_the_text(self):
-        calls = [("run_command", {"command": f"cmd-{i:03d}-" + "z" * 300}) for i in range(100)]
+        calls = [("run_command", {"command": f"cmd-{i:03d}-" + "z" * 277}) for i in range(100)]
         s = Seq()
         s.user("go")
         s.asst("m1", "Q" + "u" * 14999 + "E", tools=calls)
-        body = self.section(self.build(s, "m1").text, "The message")
+        body = self.section(self.build(s, "m1").text, JUDGED)
         head = body.lstrip("\n").split("\n\nABOUT TO RUN:", 1)[0]
-        self.assertEqual(len(head), 9953)  # half of the 19,906 budget, marker (49) and newline (1) included
+        self.assertEqual(len(head), 9943)  # half of the 19,886 budget, marker (49) and newline (1) included
         self.assertTrue(head.startswith(TRIM_MARKER + "\n") and head.endswith("uE"))
     def _many_calls_then_sized(self, sized_cmd_len, total=103):
         # 62 full calls (315-char lines), then ONE call of a chosen size at index 62, then filler calls
-        calls = [("run_command", {"command": f"cmd-{i:03d}-" + "z" * 300}) for i in range(62)]
+        calls = [("run_command", {"command": f"cmd-{i:03d}-" + "z" * 277}) for i in range(62)]
         calls.append(("run_command", {"command": "s" * sized_cmd_len}))  # line = 14 + (15 + len) + 1 chars
-        calls += [("run_command", {"command": f"cmd-{i:03d}-" + "z" * 300}) for i in range(63, total)]
+        calls += [("run_command", {"command": f"cmd-{i:03d}-" + "z" * 277}) for i in range(63, total)]
         return calls
 
     def test_a_tool_only_message_reaches_exactly_20000_and_never_more(self):
         # text=None: the message is only tool calls, the common shape. Room = the whole body budget
-        # 19,906 (operator "go", no context, no text head, no "\n\n" separator). Block for 63 shown =
+        # 19,886 (operator "go", no context) less the no-text note (53 chars) and its "\n\n" (2) = 19,831.
+        # Block for 63 shown =
         # 14 + 62*315 + line + 32 (marker "[… 40 more tool calls not shown]") + 63 newlines = 19,639 + line;
-        # a 267-char line fills 19,906 exactly, a 268-char line is one over.
-        for cmd_len, shown, left, exact in ((237, True, 40, True), (238, False, 41, False)):
+        # a 192-char line fills 19,831 exactly, a 193-char line is one over.
+        for cmd_len, shown, left, exact in ((162, True, 40, True), (163, False, 41, False)):
             with self.subTest(cmd_len=cmd_len):
                 s = Seq()
                 s.user("go")
                 s.asst("m1", None, tools=self._many_calls_then_sized(cmd_len))
                 p = self.build(s, "m1")
-                self.assertIn("## The message\n\nABOUT TO RUN:\n- run_command(", p.text)  # no stray "\n\n" head
+                self.assertIn(f"## {JUDGED}\n\n{ToolOnlyMessage.NOTE}\n\nABOUT TO RUN:\n- run_command(", p.text)  # the note, no stray head
                 self.assertEqual(p.chars, len(p.text))
                 self.assertLessEqual(len(p.text), 20000)
                 if exact:
                     self.assertEqual(len(p.text), 20000)
                 self.assertEqual('run_command({"command": "' + "s" * cmd_len + '"})' in p.text, shown)
                 self.assertIn(f"[… {left} more tool calls not shown]", p.text)
+    def test_a_tool_only_message_drops_only_its_note_when_only_the_note_does_not_fit(self):
+        # 63 calls, no text: block = 14 + 62*315 + line + 62 newlines = 19,606 + line. The body budget is 19,886, the
+        # note costs 53 + 2, so a block over 19,831 fits ALONE but not beside the note. Both sizes below fit
+        # alone; 197 (line 227, block 19,833) leaves 51 spare, MORE than the trim marker (49) -- the size at which
+        # an unguarded trim branch would print a trim marker over EMPTY text -- and 220 (line 250) leaves 28.
+        for cmd_len in (197, 220):
+            with self.subTest(cmd_len=cmd_len):
+                s = Seq()
+                s.user("go")
+                s.asst("m1", None, tools=self._many_calls_then_sized(cmd_len, total=63))
+                p = self.build(s, "m1")
+                body = self.section(p.text, JUDGED)
+                self.assertTrue(body.startswith("\nABOUT TO RUN:\n") or body.startswith("ABOUT TO RUN:\n"), body[:80])
+                self.assertNotIn(ToolOnlyMessage.NOTE, p.text)   # the note yielded ...
+                self.assertNotIn(TRIM_MARKER, p.text)            # ... nothing was "trimmed" from empty text ...
+                self.assertNotIn("not shown]", p.text)           # ... and every call is still listed
+                self.assertIn("s" * cmd_len, p.text)
+                self.assertIn("cmd-061-", p.text)
+
 
     def test_a_token_straddling_the_half_trim_boundary_refuses_beside_a_call_list(self):
-        # 15,000-char text beside 100 calls: the text keeps its last half - 49 - 1 = 9,903 chars, i.e.
-        # from offset 5,097. A token at 5,070..5,110 is cut at its start.
+        # 15,000-char text beside 100 calls: the text keeps its last half - 49 - 1 = 9,893 chars, i.e.
+        # from offset 5,107. A token at 5,080..5,120 is cut at its start.
         tok = "ghp_" + "Z" * 36
         s = Seq()
         s.user("go")
-        s.asst("m1", "u" * 5070 + tok + "u" * (15000 - 5110), tools=self._many_calls_then_sized(237, total=100))
+        s.asst("m1", "u" * 5080 + tok + "u" * (15000 - 5120), tools=self._many_calls_then_sized(237, total=100))
         with self.assertRaises(packet.TokenFound):
             self.build(s, "m1")
 
     def test_a_token_wholly_before_the_half_trim_boundary_renders_beside_a_call_list(self):
         tok = "ghp_" + "Z" * 36
         s = Seq()
-        s.user("go")  # token at 5,057..5,097: ends exactly where the kept range begins
-        s.asst("m1", "u" * 5057 + tok + "u" * (15000 - 5097), tools=self._many_calls_then_sized(237, total=100))
+        s.user("go")  # token at 5,067..5,107: ends exactly where the kept range begins
+        s.asst("m1", "u" * 5067 + tok + "u" * (15000 - 5107), tools=self._many_calls_then_sized(237, total=100))
         p = self.build(s, "m1")
         self.assertNotIn("ghp_", p.text)
         self.assertEqual(p.text.count(TRIM_MARKER), 1)
@@ -972,8 +1164,8 @@ class Surrogates(PacketCase):
             f"## Context\n\n### {MINUS}1\nRun.\n"
             'CALL run_command({"command": "ls"})\n'
             "RESULT before � after\n\n"
-            "## The message\n\nDone.\n")
-        self.assertEqual(p.sha256, "c926c130333123f890040829e21e2a28e47cf0d87db5b87135e80eefb1d9a292")
+            "## The message (the one you judge)\n\nDone.\n")
+        self.assertEqual(p.sha256, "9922c0eafa8bff2b765019f061025cc5626eb24ce4547c94edadc226e800213c")
         self.assertClean(p)
 
     def test_a_lone_surrogate_in_args_the_operator_message_and_the_unit_text_each_builds(self):
@@ -1074,7 +1266,7 @@ class Surrogates(PacketCase):
             f"## Context\n\n### {MINUS}1\nRun {emoji}\n"
             f'CALL run_command({{"command": "echo {emoji}"}})\n'
             f"RESULT ok {emoji}\n\n"
-            f"## The message\n\nDone {emoji}.\n\nABOUT TO RUN:\n"
+            f"## The message (the one you judge)\n\nDone {emoji}.\n\nABOUT TO RUN:\n"
             f'- edit_file({{"path": "a{emoji}"}})\n')
         self.assertEqual(p.sha256, hashlib.sha256(p.text.encode("utf-8")).hexdigest())
 

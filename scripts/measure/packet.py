@@ -11,6 +11,10 @@ surrogate (a truncated
 emoji) becomes U+FFFD so the text can be hashed as UTF-8. The packet is at most PACKET_CHARS characters
 in total, always.
 
+A cut is never silent: a result's dropped head is marked `[… N earlier characters not shown]` before the kept
+tail, and a call's arguments or the operator/dispatch message's dropped end `[… N more characters not shown]`
+after the kept head (_dropped). A judged message with tool calls but no prose says so (NO_TEXT_NOTE), and its
+section is titled JUDGED_HEADING so a long context message cannot be mistaken for it.
 A token-shaped string refuses the build (TokenFound). The check is made on the SOURCE of every piece
 before any cut (a token half-cut by a tail/head/trim would otherwise render its secret body while the
 final text no longer matches the pattern): it refuses when a match OVERLAPS the range that is kept,
@@ -38,14 +42,20 @@ TRIM_MARKER = "[… the earlier part of this message is not shown]"
 NONE_BEFORE = "(none before this point)"
 NO_CONTEXT = "(no earlier assistant messages)"
 NO_RESULT = "(no result before this point)"
+NO_TEXT_NOTE = "(no text; the message is only the tool call(s) below)"
+JUDGED_HEADING = "The message (the one you judge)"
 MINUS = "−"
 
 _TOKEN_RE = re.compile(r"gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,}")
 _EXIT_LINE_RE = re.compile(r"Exit code (-?\d+)")
-_UUID_RE = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
+# No pattern starts or ends with `\b`: that anchor does not exist between two word characters, so a value glued
+# to a letter, digit or `_` (`run2026-09-30T12:00:00Z`, `sid_<uuid>`, `idmsg_01...`) would pass unmasked. Each
+# forbids only what would make the match a fragment of a longer value of its own kind.
+_UUID_RE = re.compile(
+    r"(?<![0-9a-fA-F])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9a-fA-F])")
 _TIMESTAMP_RE = re.compile(
-    r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:\s?(?:Z|[+-]\d{2}:?\d{2}))?")
-_API_ID_RE = re.compile(r"\b(?:msg|toolu)_01[A-Za-z0-9]{20,}")
+    r"(?<!\d)\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?!\d)(?:\.\d+)?(?:\s?(?:Z|[+-]\d{2}:?\d{2}))?")
+_API_ID_RE = re.compile(r"(?:msg|toolu)_01[A-Za-z0-9]{20,}")
 _SURROGATE_RE = re.compile("[\ud800-\udfff]")
 
 
@@ -126,9 +136,20 @@ def _head(source, n):
     return source[:end], _overlaps(source, 0, end)
 
 
+def _dropped(n, where):
+    """The marker for a cut that removed `n` characters: `where` is "earlier" (a kept tail) or "more" (a kept
+    head). Distinct from TRIM_MARKER, which is about the judged message; without one a partial value reads as
+    the whole (bug f32b7d248a833167). It is not source text: the token check judges the kept source range."""
+    return f"[… {n:,} {where} character{'' if n == 1 else 's'} not shown]"
+
+
+
 def _call(name, inp):
-    """('name(args)', leaked) with the JSON arguments cut to ARGS_CHARS."""
-    args, leaked = _head(_blind(json.dumps(inp, ensure_ascii=False, sort_keys=False)), ARGS_CHARS)
+    """('name(args)', leaked) with the JSON arguments cut to ARGS_CHARS, a cut marked."""
+    raw = _blind(json.dumps(inp, ensure_ascii=False, sort_keys=False))
+    args, leaked = _head(raw, ARGS_CHARS)
+    if len(raw) > len(args):
+        args += _dropped(len(raw) - len(args), "more")
     return f"{_clean(name)}({args})", leaked
 
 
@@ -137,7 +158,7 @@ def _is_shell(name):
 
 
 def _result_line(result, shell):
-    """('RESULT ...', leaked). The [exit N] prefix is for shell tools only."""
+    """('RESULT ...', leaked). The [exit N] prefix is for shell tools only; a cut is marked before the tail."""
     if result is None:
         return f"RESULT {NO_RESULT}", False
     text, is_error = result
@@ -149,6 +170,8 @@ def _result_line(result, shell):
     if is_error:
         prefix += "[is_error] "
     tail, leaked = _tail(text, RESULT_TAIL_CHARS)
+    if len(text) > len(tail):
+        tail = _dropped(len(text) - len(tail), "earlier") + "\n" + tail
     return f"RESULT {prefix}{tail}", leaked
 
 
@@ -207,30 +230,37 @@ def _calls_block(lines):
 
 
 def _join_body(text, lines):
-    parts = ([text] if text else []) + ([_calls_block(lines)] if lines else [])
+    # a message with calls but no prose says so, else its section is only `ABOUT TO RUN:` and reads as text
+    # that failed to render (bug 05fe7d98e6827714)
+    head = [text] if text else ([NO_TEXT_NOTE] if lines else [])
+    parts = head + ([_calls_block(lines)] if lines else [])
     return "\n\n".join(parts) or "(no text)"
 
 
 def _fit(text, calls, budget):
     """(body, leaked) for the unit: its text plus the ABOUT TO RUN block, at most `budget` chars, the
-    trim markers counted. Order of sacrifice: the head of the text, then the tail of the call list."""
+    trim markers counted. Order of sacrifice: the head of the text, then the tail of the call list. A
+    text-less message's NO_TEXT_NOTE is presentation, not source: it goes before any call does."""
     lines = [c for c, _ in calls]
     body = _join_body(text, lines)
     if len(body) <= budget:
         return body, any(l for _, l in calls)
+
     block = _calls_block(lines) if lines else ""
     sep = 2 if block else 0
     avail = budget - len(block) - sep
-    if avail > len(TRIM_MARKER):  # the calls fit whole beside a trimmed text
+    if text and avail > len(TRIM_MARKER):  # the calls fit whole beside a trimmed text
         kept, leaked = _tail(text, avail - len(TRIM_MARKER) - 1)
         head = TRIM_MARKER + "\n" + kept
         return head + ("\n\n" + block if block else ""), leaked or any(l for _, l in calls)
+    if not text and block and len(block) <= budget:  # only the note did not fit: drop it, keep every call
+        return block, any(l for _, l in calls)
     # the calls alone are too big: keep the text (trimmed to half the budget if it needs it) and as
     # many leading calls as fit, then say how many were left out
     half = budget // 2
     leaked = False
     if len(text) <= half:
-        head = text
+        head = text or (NO_TEXT_NOTE if lines else "")
     else:
         kept, leaked = _tail(text, half - len(TRIM_MARKER) - 1)
         head = TRIM_MARKER + "\n" + kept
@@ -247,7 +277,8 @@ def _fit(text, calls, budget):
 
 def _render(op_title, op_text, blocks, body):
     ctx = "\n\n".join(blocks) if blocks else NO_CONTEXT
-    return "\n\n".join([f"## {op_title}\n\n{op_text}", f"## Context\n\n{ctx}", f"## The message\n\n{body}"]) + "\n"
+    return "\n\n".join([f"## {op_title}\n\n{op_text}", f"## Context\n\n{ctx}",
+                        f"## {JUDGED_HEADING}\n\n{body}"]) + "\n"
 
 
 def _results_index(entries):
@@ -333,7 +364,10 @@ def build_packet(corpus_dir, unit, case_id, cache=None):
         ops = transcripts.operator_messages(before)
         first = transcripts._message_text(ops[-1]) if ops else None
     if first:
-        op_text, op_leak = _head(_blind(first), OPERATOR_CHARS)
+        blinded = _blind(first)
+        op_text, op_leak = _head(blinded, OPERATOR_CHARS)
+        if len(blinded) > len(op_text):
+            op_text += "\n" + _dropped(len(blinded) - len(op_text), "more")
     else:
         op_text, op_leak = NONE_BEFORE, False
 
