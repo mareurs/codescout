@@ -235,7 +235,7 @@ pub(crate) async fn run_command_interactive(
 }
 /// The response for an interactive run. **The accumulated output is scrubbed here, once, on the whole
 /// text** and never per chunk: `drain_with_settle` decodes whatever each read returned, so a
-/// credential that straddles two reads is in neither chunk whole. (Bug 8df0779550c5b5d8.) The
+/// credential that straddles two reads is in neither chunk whole. (Bug bc0cb248b224d1dd.) The
 /// elicitation prompt in the loop shows the process output to the operator, a human, and is left as is.
 pub(super) fn interactive_response(
     exit_code: i32,

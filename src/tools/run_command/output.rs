@@ -475,7 +475,7 @@ pub(crate) async fn handle_successful_output(
         // unreproduced occurrence. The only difference is that the next occurrence
         // leaves a trace instead of a silence.
         let capture = match std::fs::read_to_string(&tmpfile.0) {
-            // Bug 8df0779550c5b5d8: this is the UNFILTERED stream, read from a file, so it never
+            // Bug bc0cb248b224d1dd: this is the UNFILTERED stream, read from a file, so it never
             // passed the decode in `run_command_inner` that scrubs `stdout`. `env | grep PATH` shows
             // one line inline while this buffer holds the whole environment.
             Ok(content) => {
@@ -916,7 +916,7 @@ pub(crate) fn format_run_command(result: &Value) -> String {
 
     // An EDITED response must say so where the reader looks, and this renderer is what `call_content`
     // shows: a `redacted_credentials` key it does not read would leave a scrubbed output looking like
-    // the command's own (bug 8df0779550c5b5d8).
+    // the command's own (bug bc0cb248b224d1dd).
     if let Some(n) = result[crate::util::redact::REDACTED_KEY].as_u64() {
         s.push_str(&format!(
             "\n⚠ {n} credential-shaped value{} redacted from this output",

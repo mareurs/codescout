@@ -619,7 +619,7 @@ pub(crate) async fn run_command_inner(
     .await
     {
         Ok(Ok(output)) => {
-            // Bug 8df0779550c5b5d8: scrub at the ONE point the raw streams become text, so the inline
+            // Bug bc0cb248b224d1dd: scrub at the ONE point the raw streams become text, so the inline
             // response, the @cmd buffer, test compaction and a background job's `cat @bg_*` all see only
             // the scrubbed text. The tee capture is read from a file elsewhere and is scrubbed there.
             let stdout_text = String::from_utf8_lossy(&output.stdout);

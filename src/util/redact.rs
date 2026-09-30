@@ -1,4 +1,4 @@
-//! Credential-shaped values in command output (bug 8df0779550c5b5d8).
+//! Credential-shaped values in command output (bug bc0cb248b224d1dd).
 //!
 //! `run_command` used to return an environment dump verbatim, so a credential in the process
 //! environment reached the model's context and, from there, the plaintext session transcript.

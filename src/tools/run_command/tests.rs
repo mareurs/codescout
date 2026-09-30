@@ -3864,7 +3864,7 @@ async fn unfiltered_output_carries_a_line_count_and_explicit_empty_stdout() {
         "expected the unfiltered capture's line count (3), not silence: {result}"
     );
 }
-// ---- Bug 8df0779550c5b5d8: a credential in command output must not reach the model -------------------
+// ---- Bug bc0cb248b224d1dd: a credential in command output must not reach the model -------------------
 //
 // Every secret below is PRODUCED by `printf 'ghp_%036d' 0`, so the command text -- which the response
 // may echo, and which is what a transcript records -- never contains a token-shaped literal. The
