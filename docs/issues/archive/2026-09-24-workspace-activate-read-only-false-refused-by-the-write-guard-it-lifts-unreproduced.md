@@ -1,7 +1,7 @@
 ---
-id: '652abef29e8d8c45'
+id: df38c4ac3b9a64a5
 kind: bug
-status: open
+status: fixed
 title: 'BUG: workspace(activate, read_only=false) is refused by the read-only write guard it exists to lift (Workspace::is_write doubles as the read-only gate)'
 tags:
 - cluster/unclassified
@@ -92,7 +92,9 @@ codescout server pid 3289089, `git_sha 396f04c4` (dirty), profile `~/.claude-kat
 
 ## Root cause
 
-Unknown. **Lead, not established:** the successful activate response carries `wrote_to` / `abs_path`, so activation runs through the write path. If that path's guard checks the *current* activation's read-only state before applying the new `read_only=false`, then a read-only project guards against the call that lifts it. The success at step 5 argues against a deterministic version of this. It is consistent with a peer having re-activated in between, which changed the state the guard read.
+Settled by the 2026-09-28 probe (§ *Settled by probe*): **mechanism A** is the refusal, and it is what this file records. `Workspace::is_write` is true for `activate` because activation persists `.codescout/libraries.json` and must take the cross-process write lock, and `check_tool_access` refused every `is_write` call under a read-only activation, so the call the refusal itself prescribes was refused by the block it lifts. The `is_write` flag carried two meanings. **Mechanism B** (why the refusal cleared "on retry") is a separate defect, filed as `docs/issues/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md`, and is NOT fixed by this file's fix.
+
+The earlier lead in this section ("unknown; activation runs through the write path") was right about the path and is superseded by the probe.
 
 ## Evidence
 
@@ -104,19 +106,28 @@ None yet: no mutation or code read beyond locating the message.
 
 ## Fix
 
-Not started. A fix would need a reproduction first (`CLAUDE.md` § Bug Tracking: run the reproduction before reading the fix plan).
+Fixed in `acda6a4064c7daf3e4979995c25b64c3e8d3c745` (`git show <sha> | git patch-id --stable`). The overloaded flag is split along the seam the probe named. `is_write` keeps meaning "takes the write lock" and still drives the lock and the pinned-residency upgrade. A new per-call `Tool::lifts_write_block` (default `false`) is consulted **only** by the read-only gate in `call_tool_inner`, and only `workspace(action="activate")` claims it. The call is still serialised behind the write lock. The refusal texts are unchanged, and the call they name now works.
+
+A scout finding worth keeping: `read_tools_always_allowed` (`src/util/path_security.rs`) carried a comment predicting this exact regression ("if `workspace` ever gains an `is_write` true, activate(read_only: false) becomes unreachable"). `workspace` did gain it (the 2026-09-03 lock fix), and that fixture hard-codes `is_write=false` for `"workspace"`, so it never exercised the real call and stayed green. The comment is corrected.
 
 ## Tests added
 
-None.
+In `src/server.rs`, on the real dispatch path (`call_tool_inner`): `a_read_only_activation_can_be_lifted_by_an_unpinned_activate_end_to_end` (probe rows 2, 5 and 8: the control write is refused, the UNPINNED `activate(read_only=false)` succeeds, and the write afterwards actually lands) and `a_read_only_activation_does_not_block_activating_a_different_root` (the variant the 2026-09-24 reproduction observed). Both were run RED against the unfixed code, with the refusal text from this file, before the fix. `only_the_documented_exit_is_exempt_from_the_write_block` pins the exempt set to exactly `[workspace {"action":"activate"}]`, and `every_write_call_is_refused_under_a_write_block`'s oracle moved from `is_write` to the gate's question.
+
+Mutations, one per guarded site, `scripts/mutation-probe.sh`: the gate reverted to `is_write` KILLED (both reproductions); the exemption dropped KILLED (both reproductions and the pin); the exemption widened to every `workspace` action KILLED **by the pin alone**, the end-to-end tests stayed green; the trait default flipped to `true` KILLED (four tests).
 
 ## Workarounds
 
-Pass `workspace=<abs path>` per call. It worked first time and does not flip process-wide state under peers.
+No longer needed for the refusal: an unpinned `workspace(action='activate', path=…, read_only=false)` works. The per-call `workspace=` pin still works, and still lifts the read-only state process-wide as a side effect. That is mechanism B, open in its own file.
 
 ## Resume
 
-Mechanism known (§ *Settled by probe, 2026-09-28*). The fix for A: exempt `workspace(action="activate")` from the `ActivatedReadOnly` write block while it keeps the write lock. For example, split `is_write`'s two meanings, or let `check_tool_access` pass the exit call that the refusal itself names. The regression test is rows 2 and 8 of the probe: from a read-only activation, an unpinned `activate(read_only=false)` succeeds and an unpinned write is still refused. Fixing A removes the reason callers reach for the pin, but B still needs its own fix (see the separate file).
+Closed by `acda6a40`. Only mechanism B remains, in `9c0e178a0b53bfc4`.
+
+## Fix provenance
+
+- **SHA:** `acda6a4064c7daf3e4979995c25b64c3e8d3c745` (`experiments`)
+- **patch-id:** `fe17b8f8357ee8fa77b860bcbbe948ae74c7ce7b`
 
 ## References
 

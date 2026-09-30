@@ -1225,7 +1225,7 @@ pub trait Tool: Send + Sync {
     /// …, read_only: false)"), so refusing it under the block it exists to lift left a
     /// read-only activation guarding the only unpinned call that could end it — including a
     /// call to a DIFFERENT root.
-    /// docs/issues/2026-09-24-workspace-activate-read-only-false-refused-by-the-write-guard-it-lifts-unreproduced.md
+    /// docs/issues/archive/2026-09-24-workspace-activate-read-only-false-refused-by-the-write-guard-it-lifts-unreproduced.md
     ///
     /// Defaults to `false`: a call is refused under a write block unless its tool says
     /// otherwise, so a write tool added later is gated on the day it is added and an

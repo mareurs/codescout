@@ -8628,7 +8628,7 @@ mod tests {
             "the refusal must name the read-only project so the caller can pin past it: {text}"
         );
     }
-    /// docs/issues/2026-09-24-workspace-activate-read-only-false-refused-by-the-write-guard-it-lifts-unreproduced.md
+    /// docs/issues/archive/2026-09-24-workspace-activate-read-only-false-refused-by-the-write-guard-it-lifts-unreproduced.md
     /// § *Mechanism A*: `workspace(action="activate")` is `is_write=true` (it persists
     /// `.codescout/libraries.json`, so it must take the write lock), and the read-only gate
     /// refused every `is_write` call — including the one call its own refusal text names as

@@ -29,7 +29,7 @@ Probe, 2026-09-28 18:51–18:56Z, session `82cff72e`, with the server shared by 
 4. Unpinned `create_file` immediately after, with no activate in between → **ok**: the read-only state was lifted.
 5. The same with a pinned `read_file` instead of a pinned write: the following unpinned `activate(read_only=false)` is still **refused**. Reads never reach the upgrade.
 
-The full table is in `docs/issues/2026-09-24-workspace-activate-read-only-false-refused-by-the-write-guard-it-lifts-unreproduced.md` § *Settled by probe, 2026-09-28*. This mechanism is why that bug appeared to clear "on retry".
+The full table is in `docs/issues/archive/2026-09-24-workspace-activate-read-only-false-refused-by-the-write-guard-it-lifts-unreproduced.md` § *Settled by probe, 2026-09-28*. This mechanism is why that bug appeared to clear "on retry".
 
 ## Environment
 
@@ -66,9 +66,9 @@ Brief subagents that only scout to pin their reads with `workspace=` and never t
 
 ## Resume
 
-Open. Fix together with, or after, `652abef29e8d8c45`'s mechanism A (the activate refusal): once an unpinned `activate(read_only=false)` works, callers have less reason to reach for the pin.
+Open, and now the only read-only defect left from that probe. Mechanism A (the activate refusal, archived under id `df38c4ac3b9a64a5`) is fixed by `acda6a40`: an unpinned `activate(read_only=false)` works, so callers have less reason to reach for the pin. **Still to decide, and not decided here:** scope writability to the pinned call, or record why an entry is read-only (a default versus an explicit request) so the residency upgrade lifts only a default. Either way, an explicit `read_only=true` activation must survive another caller's pinned write. Note for whoever designs it: the same `is_write` predicate that A split is what feeds `ensure_resident(root, Some(false))` at `src/server.rs:~1404`, and A deliberately left that consumer on `is_write`.
 
 ## References
 
-- `docs/issues/2026-09-24-workspace-activate-read-only-false-refused-by-the-write-guard-it-lifts-unreproduced.md`
+- `docs/issues/archive/2026-09-24-workspace-activate-read-only-false-refused-by-the-write-guard-it-lifts-unreproduced.md`
 - `docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`
