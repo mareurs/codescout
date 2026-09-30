@@ -20,3 +20,7 @@
 ## common
 
 - [dont-fabricate-commit-rationale](common/dont-fabricate-commit-rationale.md) — never invent the "why" in commit messages; state only what changed when the rationale isn't documented
+
+## data-leakage-snow-pheasant
+
+- [rule-tell-phase1-autopsy](data-leakage-snow-pheasant/rule-tell-phase1-autopsy.md) — where the rule-tell phase-1 failure evidence lives (gate, diagnostics, research synthesis, tokenisation bug); read it before reviewing any follow-up
