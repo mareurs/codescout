@@ -86,9 +86,9 @@ line 1178).
   to a level no enclosing block has gives `false`; a consistent over-indent gives `false`
   (correct); an unclosed paren gives `true`. tree-sitter-python does not flag indentation
   errors. So a message that changes only when the flag is true would have left "stale LSP
-  range" in place for the very case that motivated this bug. The guard's blind spot is filed
-  as `docs/issues/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md`
-  and is not fixed here.
+  range" in place for the very case that motivated this bug. The guard's blind spot was filed
+  as `docs/issues/archive/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md`
+  and is not fixed here (it was fixed afterwards, separately).
 
 ## Fix
 

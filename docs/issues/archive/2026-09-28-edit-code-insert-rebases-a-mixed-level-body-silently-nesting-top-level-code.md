@@ -135,7 +135,7 @@ decoded and re-assembled through a closure that re-bases AGAIN, so a switch hono
 the main path would quietly re-base there.
 
 Overlap to know about: session `3e2b9cc8` held uncommitted hunks in the same file
-(`refuse_insert` and a `syntax_regressed` guard at the tail of `do_insert`) for `8c576c06`. Those
+(`refuse_insert` and a `syntax_regressed` guard at the tail of `do_insert`) for `fd426fd1` (filed as `8c576c06`). Those
 are theirs and were not touched or staged here. Their guard is a real backstop for
 `reindent=false` in Python: a body kept at a column that leaves an IndentationError is refused.
 
@@ -174,7 +174,7 @@ assertion passed with the message stripped. It now asserts on the message itself
 (`RecoverableError::message`) and was re-observed red.
 
 Not covered: no test exercises the Python-indentation refusal together with `reindent=false`;
-that guard belongs to `8c576c06` and is tested there.
+that guard belongs to `fd426fd1` (filed as `8c576c06`) and is tested there.
 
 ## Workarounds
 

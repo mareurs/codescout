@@ -832,7 +832,7 @@ async fn python_class_with_three_methods() -> (tempfile::TempDir, ToolContext, &
 /// error, so `syntax_regressed` answered "still parses" and this edit was written under
 /// `status: ok` — a file CPython refuses at import with `IndentationError: unindent does not
 /// match any outer indentation level`. Measured on the live tool 2026-09-30.
-/// docs/issues/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md
+/// docs/issues/archive/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md
 #[tokio::test]
 async fn replace_symbol_refuses_a_python_body_that_dedents_to_no_enclosing_level() {
     let (dir, ctx, src) = python_class_with_three_methods().await;
@@ -990,7 +990,7 @@ async fn tab_indented_python_class() -> (tempfile::TempDir, ToolContext, &'stati
 /// four spaces followed by a tab. CPython accepts that (col 8, alt col 5 against a level at
 /// 4/4), so nothing refused it and the block carried both units, its depth depending on the
 /// reader's tab width. Observed on the live tool 2026-09-30.
-/// docs/issues/2026-09-30-edit-code-rebasing-a-tab-indented-body-onto-a-space-file-mixes-indent-units.md
+/// docs/issues/archive/2026-09-30-edit-code-rebasing-a-tab-indented-body-onto-a-space-file-mixes-indent-units.md
 #[tokio::test]
 async fn replace_symbol_refuses_a_tab_body_for_a_space_indented_file() {
     let (dir, ctx, src) = python_class_with_three_methods().await;

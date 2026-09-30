@@ -454,7 +454,7 @@ pub struct UnitConflict {
 /// caller's own unit, so a tab-indented body re-based onto a space-indented file comes out as the
 /// file's spaces followed by the body's tabs — valid to an interpreter that accepts it, and a
 /// layout whose depth depends on the reader's tab width.
-/// `docs/issues/2026-09-30-edit-code-rebasing-a-tab-indented-body-onto-a-space-file-mixes-indent-units.md`.
+/// `docs/issues/archive/2026-09-30-edit-code-rebasing-a-tab-indented-body-onto-a-space-file-mixes-indent-units.md`.
 ///
 /// Reports a conflict only for what the shift itself would create: a line's inner indentation,
 /// left in the body's unit under a base in the file's. So it stays silent where the result is

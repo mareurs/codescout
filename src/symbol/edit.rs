@@ -467,7 +467,7 @@ pub enum CorruptionVerdict {
 /// column no enclosing block has nor a tab/space mix, yet CPython refuses both at import,
 /// so with the first question alone `edit_code` answered `ok` for a file that could not be
 /// imported. See
-/// `docs/issues/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md`.
+/// `docs/issues/archive/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md`.
 ///
 /// **Gated on the pre-image parsing.** Without that clause every edit to an
 /// already-broken file would be refused, which is exactly when someone is trying to

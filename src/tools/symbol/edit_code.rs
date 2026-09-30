@@ -352,7 +352,7 @@ impl Tool for EditCode {
 /// the double-indented body that started this (a Python dedent to a level no enclosing
 /// block has), because tree-sitter-python does not flag indentation errors. So the
 /// `false` branch ranks the body first too, and names the range only as the fallback.
-/// See `docs/issues/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md`.
+/// See `docs/issues/archive/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md`.
 ///
 /// Wording is load-bearing for telemetry: `usage::db::normalize_err_family` files a
 /// message containing `dropped sibling` under `replace_dropped_sibling` and one
@@ -1632,7 +1632,7 @@ impl EditCode {
         // clean before, so an already-broken file is still editable. Kept out of
         // `finalize_edit_content` itself because edit_file shares it and runs an
         // escape-decoding repair on whatever it flags.
-        // docs/issues/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md
+        // docs/issues/archive/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md
         if crate::ast::detect_language(&full_path).is_some_and(|lang| {
             crate::symbol::edit::syntax_regressed(&content, &final_content, lang)
         }) {

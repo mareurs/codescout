@@ -6,7 +6,7 @@
 //! tab width, and the dedent variant of that mix. All three make CPython refuse the file at
 //! import, and none of them is an ERROR node — measured 2026-09-30 against `python3`'s own
 //! `compile()`. See
-//! `docs/issues/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md`.
+//! `docs/issues/archive/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md`.
 //!
 //! This is a *reimplementation of the tokenizer's indentation rule*, not a parser. It
 //! answers only "would CPython's tokenizer reject this file's indentation?", and it states
