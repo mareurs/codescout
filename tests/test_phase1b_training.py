@@ -6,6 +6,7 @@ import importlib.util
 import json
 import pathlib
 import random
+import re
 import tempfile
 import unittest
 
@@ -152,6 +153,126 @@ class LoadExtraRows(unittest.TestCase):
     def test_refuses_an_unknown_fold(self):
         with self.assertRaises(SystemExit):
             self.load([cx_row(0, fold="T")])
+class GTok:
+    """A stand-in for the BPE tokenizers of the two arms, reproducing only the convention that bug
+    fae16c0498d9c977 is about: a word preceded by a space is a DIFFERENT token (`Ġword`) from the same word
+    at the start of the text (`word`). No model is needed, so this runs anywhere torch imports.
+
+    `split_spaced` words cost TWO tokens (`Ġ`, `word`) when spaced and one when not, the way a BPE vocabulary
+    can split a spaced word it merges unspaced. It is load-bearing for `chunks`: with equal costs a length
+    helper that measured the unspaced text would count the same and no test could see the difference."""
+
+    def __init__(self, split_spaced=()):
+        self.vocab, self.split_spaced = {}, set(split_spaced)
+
+    def _id(self, piece):
+        return self.vocab.setdefault(piece, len(self.vocab) + 1)
+
+    def __call__(self, text, add_special_tokens=False):
+        ids = []
+        for m in re.finditer(r"( ?)(\S+)", text):
+            spaced, word = bool(m.group(1)), m.group(2)
+            if spaced and word in self.split_spaced:
+                ids += [self._id("Ġ"), self._id(word)]
+            else:
+                ids.append(self._id(("Ġ" if spaced else "") + word))
+        return {"input_ids": ids}
+
+
+MARKER, BOS, EOS = 9999, [1], [2]
+
+
+def unit_ids(enc):
+    """The token ids of each unit, cut at the marker positions the encoding records."""
+    out, start = [], len(BOS)
+    for m in enc.markers:
+        out.append(enc.ids[start:m])
+        start = m + 1
+    return out
+
+
+def occurs(part, whole):
+    return any(whole[i:i + len(part)] == part for i in range(len(whole) - len(part) + 1))
+
+
+class EncodeUnitsLeadingSpace(unittest.TestCase):
+    """Bug fae16c0498d9c977: `encode_units` tokenised each sentence alone, so every sentence after the first
+    began `Nobody` where running text has `ĠNobody`. Stage 1's recipes turn `space_fix` on; Phase 1's stays
+    off, because its registered result must stay reproducible, and both directions are pinned here."""
+
+    # Distinct first words on purpose: a later unit that began like the first would occur at the start of
+    # the running text and satisfy the contiguity check for the wrong reason.
+    UNITS = ["Nobody reads the manifest.", "Everyone reads twice.", "Somebody wrote it."]
+
+    def run_text_ids(self, tok):
+        return tok(" ".join(self.UNITS))["input_ids"]
+
+    def test_with_space_fix_every_unit_occurs_in_the_running_text(self):
+        tok = GTok()
+        enc = ta.encode_units(self.UNITS, tok, MARKER, BOS, EOS, space_fix=True)
+        running = self.run_text_ids(tok)
+        for k, ids in enumerate(unit_ids(enc)):
+            self.assertTrue(occurs(ids, running), (k, self.UNITS[k]))
+
+    def test_without_space_fix_a_later_unit_does_not_occur_in_the_running_text(self):
+        # the bug's own reproduction, kept as the registered default so Phase 1 stays what it was
+        tok = GTok()
+        enc = ta.encode_units(self.UNITS, tok, MARKER, BOS, EOS, space_fix=False)
+        running = self.run_text_ids(tok)
+        ids = unit_ids(enc)
+        self.assertTrue(occurs(ids[0], running), "the first unit never carried a space")
+        for k in (1, 2):
+            self.assertFalse(occurs(ids[k], running), (k, self.UNITS[k]))
+
+    def test_the_first_unit_is_the_same_with_and_without_space_fix(self):
+        tok = GTok()
+        on = ta.encode_units(self.UNITS, tok, MARKER, BOS, EOS, space_fix=True)
+        off = ta.encode_units(self.UNITS, tok, MARKER, BOS, EOS, space_fix=False)
+        self.assertEqual(unit_ids(on)[0], unit_ids(off)[0])
+
+    def test_a_window_decides_the_space_by_the_draft_index_not_the_window_index(self):
+        tok = GTok()
+        whole = unit_ids(ta.encode_units(self.UNITS, tok, MARKER, BOS, EOS, space_fix=True))
+        # units[1:] as a window that starts at draft index 1: its first unit is a LATER sentence
+        window = unit_ids(ta.encode_units(self.UNITS[1:], tok, MARKER, BOS, EOS, True, first_index=1))
+        self.assertEqual(window, whole[1:])
+        # the same units as a window that starts at draft index 0 have no space on the first
+        at_zero = unit_ids(ta.encode_units(self.UNITS[1:], tok, MARKER, BOS, EOS, True, first_index=0))
+        self.assertNotEqual(at_zero[0], whole[1])
+        self.assertEqual(at_zero[1:], whole[2:])
+
+    def test_chunks_measure_the_same_text_they_encode(self):
+        # `Nobody` costs two tokens when spaced, one when not; bos+eos = 2. Six units cost [4,5,5,5,5,5] with
+        # the marker (the FIRST is never spaced), so max_len 21 is a token budget of 19. Hand-derived:
+        #   start 0: 4+5+5+5 = 19 fits, a fifth would be 24        -> units 0..3, encodes to 21 <= 21
+        #   start 2 (half-window overlap): 5+5+5 = 15, a fourth 20 -> units 2..4, encodes to 17
+        #   start 3: 5+5+5 = 15, reaches the end                   -> units 3..5, encodes to 17
+        # Wrong lengths are visible two ways. Measured as UNSPACED text every unit counts 4: the window at 2 then
+        # takes four units and encodes to 22 > 21. If the FIRST unit were spaced it would count 5: the window at
+        # 0 would take only three. Only the exact structure sees the second; the length bound sees the first.
+        tok = GTok(split_spaced=["Nobody"])
+        units = [f"Nobody reads it{'!' * k}." for k in range(6)]
+        windows = ta.chunks(units, tok, MARKER, BOS, EOS, 21, space_fix=True)
+        self.assertEqual([(s, len(e.markers)) for s, e in windows], [(0, 4), (2, 3), (3, 3)])
+        for start, enc in windows:
+            self.assertLessEqual(len(enc.ids), 21, (start, len(enc.ids)))
+        whole = unit_ids(ta.encode_units(units, tok, MARKER, BOS, EOS, space_fix=True))
+        for start, enc in windows:
+            self.assertEqual(unit_ids(enc), whole[start:start + len(enc.markers)], start)
+
+    def test_a_draft_that_fits_whole_is_encoded_with_the_space_fix_too(self):
+        # the single-window path returns `encode_units(...)` directly; it must be told about space_fix
+        tok = GTok()
+        for fix in (True, False):
+            windows = ta.chunks(self.UNITS, tok, MARKER, BOS, EOS, None, space_fix=fix)
+            self.assertEqual(len(windows), 1)
+            expected = ta.encode_units(self.UNITS, tok, MARKER, BOS, EOS, space_fix=fix)
+            self.assertEqual(windows[0][1].ids, expected.ids, fix)
+        on = ta.chunks(self.UNITS, tok, MARKER, BOS, EOS, None, space_fix=True)[0][1]
+        off = ta.chunks(self.UNITS, tok, MARKER, BOS, EOS, None, space_fix=False)[0][1]
+        self.assertNotEqual(on.ids, off.ids, "space_fix must change a multi-unit draft, or nothing is tested")
+
+
 
 
 if __name__ == "__main__":
