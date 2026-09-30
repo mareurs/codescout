@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 182
-entry_high_water_W: 146
+entry_high_water_F: 187
+entry_high_water_W: 148
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -65,6 +65,11 @@ entry_high_water_W: 146
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-187 | 2026-09-30 | low | cross-session | mitigated | **A clean `git status` and a fresh catalog claim did not stop a second session starting the same bug, and a red run's `wip_authors` line was what named it** - second instance of `F-186`; withdrew and handed over rather than merged. |
+| F-186 | 2026-09-30 | med | cross-session | open | **Five packet bug files read `status: open` while a live session held three of them, and only a red baseline said so** - 7 of 776 red before my first edit; provenance named the writer; none of the bugs was `taken`. |
+| F-185 | 2026-09-30 | low | self-friction | fixed-verified | **I added two `packet._fit` branches before their tests, and only re-reading my diff caught it** - a green suite was silent about both; sizes 197/220 now reach each and mutations kill them. |
+| F-184 | 2026-09-30 | med | documentation | open | **The measure-packet bug files' shared Resume under-predicts what a packet.py byte change touches** - pinned sha256s in run_sample and ~12 budget-derived literals, four of which stay green while their boundary moves. |
+| F-183 | 2026-09-29 | med | evidence preservation | fixed-verified | **Codex gate evidence overwrite** — reservations and observed mutation checks; integration pending. |
 | F-176 | 2026-09-26 | med | documentation | open | **A residual's literal wording is stronger than the code contract it guards — `entry_prefix` gates only the prose append path.** Residual `5820a758` asks that every TAXONOMY `append_entry` recipe target a tracker declaring `entry_prefix`; at HEAD only the prose branch checks it, so a literal test reds WIN-N and PV-N, which work. Also: recipe ids are machine-local `sha256(abs_path)`, and 5 of 20 session logs declare no `F`. |
 | F-177 | 2026-09-27 | med | eval-harness | fixed-verified | **Codex: Phase1b wrappers erase failed-child status.** Seven injected-failure cases returned zero; working-tree fixes pass eight tests and kill nine applied mutations. Historical model failures remain valid. |
 | F-178 | 2026-09-28 | med | self-friction | fixed-verified | **A hand-written augmentation sidecar stored `params_schema` as a JSON string, and my round-trip check could not see it.** `from_row` compares a parsed mapping, so the file drifted from commit; `to_row` would have restored a string-valued schema on a fresh clone. Two green tests could not express it; `doc(augment)`'s write-through refused and `doctor` named it. |
@@ -256,6 +261,8 @@ entry_high_water_W: 146
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-148 | 2026-09-30 | med | **A red baseline on files I had not touched was an authorship question, and asking it before the first edit kept two sessions from writing the same markers.** Suite, then `git status`, then provenance, then the peer's diff read-only. | Inferred, not observed: a second marker helper over three of the peer's uncommitted functions in a hash-frozen file, plus literals re-invalidated. Observed: the peer's claim that the markers were done held at the bytes. Second data point after `W-135`. | validated |
+| W-147 | 2026-09-30 | med | size the fixture to the limit rather than re-derive boundaries | ~8 hand-derived literals avoided, each a chance for a still-green off-by-N | validated |
 | W-144 | 2026-09-16 | med | **The discriminator was already in the output OF THE RUN THAT ESTABLISHED THE FINDING** — three sessions, three instruments, one evening: `FutureWarning` ×3, a `FAILED` with no `left:`/`right:` lines, a `64 vs 99` line count. Worse than CLAUDE.md's "assert on the name": nobody chose a proxy, the answer was on screen in the scrollback being read to write up the result. Each caught only by a peer stating a checkable fact that collided. | validated |
 | W-146 | 2026-09-28 | med | **A scout scoped to one question read the whole function and found the mechanism I was about to hand-maintain.** Checking whether `update_entry` is safe to parallelize surfaced `resync_snapshot_row`: with a declared `snapshot_anchor`, each patched row's body line is re-rendered in the params transaction. | A policy ("edit the Index line in the same commit") written into three surfaces the day before, 54 hand edits of a 12-column table, and silent decay at the first forgotten one. Instead: 54/54 `row_resynced: true`, 54/54 lines matched params, and one gap in the mechanism filed (`60fcfdf99e3288c6`, fixed `6a6a321e`) | validated |
 | W-142 | 2026-09-15 | high | `git add` writes a complete tree to the object store and `git restore --staged` only un-references it, so staged content survives as an unreachable blob and `git fsck --unreachable` recovers it byte-exact | A peer's 35 uncommitted lines, deleted by me, were recovered exactly; no backup of mine predated their write, so the staged blob was the only copy outside their context | validated |
@@ -17206,6 +17213,120 @@ At that point `df` showed 64G free, and no process was still building into a leg
 **Status:** promoted-to-bug-tracker.
 
 **Rests on:** `8dfc251e`; `src/librarian/tools/doctor.rs`; this session's transcript (session `82cff72e-0245-48cb-ab07-45a1c3d0d388`).
+
+## F-183 — Codex judge gate preserves output location but could overwrite prior evidence
+
+**Valid:** dated 2026-09-29
+
+**Observed:** The live gate checked where logs went, but a second fixture invocation replaced 15 prior logs. CLI output files also overwrote existing evidence and checked JSON writability only after judging.
+
+**Status:** fixed-verified in working tree; integration pending.
+
+**Resolution:** Exclusive reservations before model work, plus tests for legacy evidence, failed attempts, dry runs and two contenders. Six applied mutants were all caught by assertions (zero errors). No model calls. Review: `docs/research/2026-09-29-codex-system1-judge-review.md`; bug: `docs/issues/2026-09-29-codex-judge-gate-relaunch-overwrites-evidence.md`.
+
+**Lesson:** Location safety is not evidence preservation. Test re-entry and races against prior bytes, not only a fresh successful directory.
+
+## F-184 — The measure-packet bug files' shared Resume under-predicts what a packet.py byte change touches
+
+**Valid:** dated 2026-09-30
+
+**Observed:** The six 2026-09-30 `measure-*` bug files share one Resume ("batch every `packet.py` fix, then re-freeze; run all `tests/test_measure_*.py`"). It does not say that changing packet BYTES (here: a 20-char judged-section heading, `## The message` to `## The message (the one you judge)`) has two test-side consequences. (1) `tests/test_measure_run_sample.py` pins 10 packet sha256 literals x 3 places (`EXPORT_CASES`, `EXPORT_LABELS`, an inline rows list), so 4 tests red. (2) `tests/test_measure_packet.py` hard-codes the body budget (19,906 to 19,886; 18,408 to 18,388) and offsets derived from it in about a dozen tests. Of those, 12 went red; the rest (half-trim token offsets 5,057/5,070, room-equals-marker line length, the `9953` half-budget) stayed GREEN while their boundary had moved 10-20 chars, so they no longer discriminated.
+
+**Expected:** a Resume that names the pinned-hash file and the budget-derived literals, so the wave is scoped before it starts.
+
+**Cost:** one full re-derivation pass; found by grepping `19906|18408|49` and reading every passing budget test, not by the red list. Without that, four tests would have kept a moved boundary while reporting coverage.
+
+**Also:** `pytest tests/ -k measure` errors at COLLECTION, because pytest imports every file under `tests/` before `-k` filters and `tests/test_phase1b_*` import sklearn/torch, which are not installed here (3 collection errors, 0 tests run). Use the glob `tests/test_measure_*.py` the bug files actually name.
+
+**Fix direction:** add the two consequences to the Resume of the remaining `measure-packet-*` bugs (`3bbaeeac`, `6e9d80d2`), which will trigger the same cascade when the cuts or placeholders change.
+
+## F-185 — I added two packet._fit branches before their tests, and only re-reading my diff caught it
+
+**Valid:** dated 2026-09-30
+
+**Observed:** While adding the no-text note to `packet._fit` (`scripts/measure/packet.py`) I wrote two new branches (an empty-text guard on the trim branch, and a "drop only the note when it alone does not fit" return) after the change was already in place, and only then wrote tests for them. The TDD skill I had loaded says test-first; I did the heading and note tests first, but treated the `_fit` edge branches as part of the same green step.
+
+**What caught it:** re-reading my own diff before the mutation run, not a red test. The suite was green with both branches untested, since the note tests only exercise budgets where the whole body fits or the call list is far too big. I then derived the two sizes that reach each branch by hand (a 63-call block of 19,833 chars leaves 51 spare, more than the 49-char trim marker: the size at which an unguarded trim prints a trim marker over EMPTY text; 220 leaves 28), wrote one test over both, and confirmed by mutation that dropping the `text and` guard and removing the yield branch each go red.
+
+**Cost:** none realised (caught before commit), but the green suite was silent about both branches. `CLAUDE.md` § Testing Discipline names this: a guard's other-bound-admits-the-input rule is exactly what made 197 and 220 the right pair.
+
+## W-147 — Sizing the cap fixtures to the 300-char limit kept every derived boundary when the cut markers landed
+
+**Valid:** dated 2026-09-30
+
+**Pattern:** when a change adds a marker (or any text) to an output the existing tests pin at exact character counts, size the FIXTURE to the limit instead of re-deriving the arithmetic. The cap tests' pending calls were `cmd-NNN-` + 300 z, i.e. args JSON 323 chars, which the 300-char limit had always cut. Adding a cut marker would have changed every 315-char line and every boundary derived from it (62 calls fit, room 19,638, the 266/267 pair). Changing the fixture to `+ 277 z` gives args JSON of exactly 300: uncut, no marker, and the lines stay 315 chars, so every derived boundary in `Cap`, `UnitTrim` and `TokenEdges` is unchanged.
+
+**Counterfactual:** without it, roughly 8 more hand-derived literals to re-derive (each a chance to write an off-by-N that still passes because the boundary moved, as with the half-trim offsets in F-184). The cut behaviour itself is not lost: it stays covered by `ContextSection.test_result_head_and_tail_kept_and_args_cut` (renamed from `test_result_tail_kept_and_args_cut` by `9a269f24`) and the new `CutMarkers` class, which sit at the 300/301 boundary on purpose.
+
+**Also:** the mutation harness ran on a scratchpad COPY of `scripts/measure` and `tests` (assert the pattern occurs exactly once, apply one mutation, run, report), which put no red in the shared tree. 27 mutations, all killed. `scripts/mutation-probe.sh` mutates a clean worktree and would not have contained the uncommitted edits.
+
+## F-186 — Five packet bug files read `status: open` while a live session held three of them, and only a red baseline said so
+
+**Valid:** dated 2026-09-30
+
+**Observed:** 2026-09-30, picking up packet bugs `2d514ea5f3113cae` (cuts with no marker) and `5deb65cf11add6cf` (fixed-position cuts) from the System 1 labelled-sample work.
+
+**When:** about to write per-site failing tests in `scripts/measure/packet.py` and `tests/test_measure_packet.py`.
+
+**Expected:** the bug files read `status: open`, `owner: marius`, and their Resume says "for a separate fix session". Nobody holds them.
+
+**Got:** the baseline (`python3 -m unittest discover -s tests -p 'test_measure_*.py'`) was red before any edit of mine: 7 failed of 776, against the 768 passing the bug file recorded at `ee313cce`. `git status` showed both files modified, which the session-start snapshot did not. `scripts/file-provenance.py` named one live session as the sole writer of both, and it held uncommitted implementations of `f32b7d24` (the `_dropped` marker helper, in `_call`, `_result_line` and the operator head), `05fe7d98` and `8829a4aa`. Read at the bytes: `packet.py:139-175` and `:366-370`. All five packet bug files still read `status: open` (grep at 07:12); none read `taken`. I learned it from a red suite, not from the ledger.
+
+**Probable cause:** (not verified) the `taken` claim is set by whichever session starts a bug, and nothing in the flow prompts it. Separately, the bug files' shared Resume says "batch every packet.py fix into one wave", which concentrates all fixers in the one file where two sessions collide.
+
+**Workaround:** made no edit. Read the peer's diff read-only, resolved its owner by provenance, re-derived the socket at use, messaged it with my scope, and deferred `3bbaeeac` (the only half it had not done) until it commits.
+
+**Severity:** med. A second implementation of three cut markers over uncommitted lines of a sha256-frozen file: colliding hunks, and hand-derived test literals re-invalidated (the peer re-derived the body budget 19,906 to 19,886 and re-pinned 10 packet sha256 values, 3 places each).
+
+**Status:** open
+
+**Fix idea / Pointer:** set `status: taken` on a bug file when a session starts it (a `taken` row is what tells a second session a live one holds it). Whether the packet bug files' Resume should say "check git status and provenance first" is a call for their owner.
+
+---
+
+## W-148 — A red baseline on files I had not touched was an authorship question, and asking it before the first edit kept two sessions from writing the same markers
+
+**Valid:** dated 2026-09-30
+
+**Observed:** 2026-09-30, the same pickup as `F-186`: two packet bugs, three operator rulings already collected, no code written.
+
+**Pattern:** run the full suite before the first edit, and read a red on files you have not touched as an authorship question first and a test question second. Here that meant `git status`, then `scripts/file-provenance.py`, then reading the peer's diff read-only, all before opening a single failure. The 7 reds were the peer's in-flight edits, not a broken baseline.
+
+**Counterfactual:** without the baseline run I would have written failing tests and then markers into `_call` (`packet.py:147-153`), `_result_line` (`:160-175`) and the operator head (`:366-370`), over the peer's uncommitted lines of a file whose sha256 `run.py frame` records. That produces colliding hunks in three functions, a second `_dropped`-equivalent, and hand-derived literals invalidated again (the peer had just re-derived the body budget 19,906 to 19,886 and re-pinned 10 packet hashes, 3 places each). This is inferred, not observed: I never wrote the code. What was observed is the narrower thing: the peer's reply (`codescout-41`, over its socket) said the marker half was already done, and I confirmed that at the bytes rather than from the message.
+
+**Confirming data points:** (1) this entry. (2) `W-135`, the same class from another day: `git status` before implementing found a peer holding a complete uncommitted implementation. The tells differ (a red suite here, a date in a fixture comment there), which is the useful part: neither was the tooling meant to detect it.
+
+**Impact:** med
+
+**Promote-when:** a third instance where an unexplained red or an unexpectedly modified file, seen before the first edit, saved a duplicate implementation. Then it is a start-of-task step, not a habit.
+
+**Status:** validated
+
+---
+
+## F-187 — A clean `git status` and a fresh catalog claim did not stop a second session starting the same bug, and a red run's `wip_authors` line was what named it
+
+**Valid:** dated 2026-09-30
+
+**Observed:** 2026-09-30, picking up bug `0148d05a47da5457` (edit_code sibling-drop refusal blames a stale LSP range), the second of two `edit_code` bugs another session had just filed.
+
+**When:** after `git status` on `src/` and `tests/` read clean, a catalog claim (`status: taken`, `claimed_by` my sessionId), and about ten minutes of reading and writing reproduction tests into `src/tools/symbol/tests.rs`.
+
+**Expected:** that a clean tree plus a fresh claim meant no one else was on it, which is what `F-186` had concluded was the fix for this class.
+
+**Got:** my first red test run printed a `wip_authors` line naming a second LIVE session (`codescout-4c`, profile `.claude-kat`) as a writer of the same test file. Its uncommitted diff also held `edit_code.rs`: two extracted message helpers for `replace` only, and 82 lines of tests, in the design I had reached independently. It had not claimed the bug in the catalog; its edits landed after my `git status` and after my claim. Neither check I ran could have seen it.
+
+**Probable cause:** (verified only that the ordering held) the check and the claim were both mine and both earlier than its first write; two sessions filing-and-fixing in the same ten minutes is a race no pre-check closes. The claim only helps a peer that reads it before starting.
+
+**Workaround:** identified the peer positively (registry row from its socket: pid, profile, sessionId), read its diff read-only, and messaged it with my verified findings. Withdrew rather than merged, because it was ahead on the source: removed my five symbols from the shared test file (and four stray blank lines the removal left), verified by diff stat that only its 82-line hunk remained, and released my claim.
+
+**Severity:** low. Caught at the first test run, before any commit; cost was one hunk and its cleanup. It would have been `med` had my red control tests stayed in a file whose gate the peer was about to run.
+
+**Status:** mitigated
+
+**Fix idea / Pointer:** re-run `git status` on the target files immediately before the FIRST edit as well as at pickup, and read a `wip_authors` line on any red as a possible second writer, not only as a cause. Two of my three controls were also wrong for a reason worth keeping: a plain `fn`'s range is AST-derived, so a lying mock-LSP range cannot force a sibling drop; the existing tests use an `impl` block for that.
+
+---
 
 ## Template for new entries
 
