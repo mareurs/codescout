@@ -460,15 +460,29 @@ pub enum CorruptionVerdict {
 /// delimiters are not symbols. See
 /// `docs/issues/archive/2026-08-07-edit-code-remove-ast-repair-over-deletes.md`.
 ///
+/// "Does not parse" is two questions, because tree-sitter answers only the first: does the
+/// tree contain an ERROR node ([`crate::ast::has_syntax_errors`]), and — for Python, where
+/// indentation is syntax — does the file's indentation pass the tokenizer
+/// ([`crate::ast::has_indentation_errors`])? tree-sitter-python flags neither a dedent to a
+/// column no enclosing block has nor a tab/space mix, yet CPython refuses both at import,
+/// so with the first question alone `edit_code` answered `ok` for a file that could not be
+/// imported. See
+/// `docs/issues/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md`.
+///
 /// **Gated on the pre-image parsing.** Without that clause every edit to an
 /// already-broken file would be refused, which is exactly when someone is trying to
-/// repair it. The claim made here is narrow and attributable: *this edit* broke it.
+/// repair it. The claim made here is narrow and attributable: *this edit* broke it. The
+/// gate covers both questions — a file whose indentation was already inconsistent is as
+/// "already broken" as one with an unclosed bracket.
 ///
-/// [`crate::ast::has_syntax_errors`] returns `false` for languages with no grammar, so an
-/// unsupported file yields `false` here and nothing is refused on a guess.
+/// Both questions return `false` for a language they do not cover, so an unsupported file
+/// yields `false` here and nothing is refused on a guess.
 pub fn syntax_regressed(pre_source: &str, post_source: &str, lang: &str) -> bool {
-    !crate::ast::has_syntax_errors(pre_source, lang)
-        && crate::ast::has_syntax_errors(post_source, lang)
+    let does_not_parse = |source: &str| {
+        crate::ast::has_syntax_errors(source, lang)
+            || crate::ast::has_indentation_errors(source, lang)
+    };
+    !does_not_parse(pre_source) && does_not_parse(post_source)
 }
 
 /// Decide the post-edit corruption verdict by comparing the pre- and post-write ASTs.
@@ -1068,6 +1082,40 @@ mod tests {
         // No grammar for the language → `has_syntax_errors` is false either way, so
         // nothing is ever refused on a guess.
         assert!(!syntax_regressed(good, broken, "brainfuck"));
+    }
+    #[test]
+    fn syntax_regressed_sees_the_python_indentation_errors_tree_sitter_does_not_flag() {
+        let good = "class C:\n    def a(self):\n        return 1\n";
+        // `def` at 4, body at 12, then a line at 8. tree-sitter-python does not flag this and
+        // CPython refuses it (`IndentationError: unindent does not match any outer level`).
+        let dedent = "class C:\n    def a(self):\n            return 1\n        x = 1\n";
+        // Two levels of a tab-and-space mix, whose depth depends on the tab width.
+        let tabs = "class C:\n    def a(self):\n        return 1\n\treturn 2\n";
+        assert!(
+            !crate::ast::has_syntax_errors(dedent, "python")
+                && !crate::ast::has_syntax_errors(tabs, "python"),
+            "premise: these are the inputs tree-sitter accepts; if it starts flagging them the \
+         cases below no longer isolate the indentation check"
+        );
+
+        // The post-image site: an edit that introduces the error is a regression.
+        assert!(syntax_regressed(good, dedent, "python"));
+        assert!(syntax_regressed(good, tabs, "python"));
+
+        // The pre-image gate, for a file that tree-sitter reads as clean but whose
+        // indentation was already wrong: a further edit is not blamed for it. Without this the
+        // gate would ask only about tree-sitter and refuse every edit to such a file.
+        assert!(
+            !syntax_regressed(dedent, tabs, "python"),
+            "already inconsistent before the edit, so this edit did not break it"
+        );
+        assert!(!syntax_regressed(dedent, dedent, "python"));
+        // An edit that repairs the indentation is not a regression either.
+        assert!(!syntax_regressed(dedent, good, "python"));
+        assert!(!syntax_regressed(good, good, "python"));
+
+        // Python-only: the same text under a language with no indentation rule and no grammar.
+        assert!(!syntax_regressed(good, dedent, "brainfuck"));
     }
 
     #[test]

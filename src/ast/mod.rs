@@ -4,6 +4,7 @@
 //! running language server. Used as the primary fallback when no LSP is
 //! configured, and as a complement to LSP for fast structural analysis.
 
+pub mod indent;
 pub mod parser;
 
 use anyhow::Result;
@@ -21,6 +22,7 @@ use tree_sitter_rust;
 use tree_sitter_typescript;
 
 use crate::lsp::symbols::SymbolInfo;
+pub use indent::has_indentation_errors;
 pub use parser::has_syntax_errors;
 pub use parser::DocstringInfo;
 

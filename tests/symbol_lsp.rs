@@ -790,6 +790,164 @@ impl Foo {
         "file must be restored after sibling-drop rollback"
     );
 }
+/// A three-method Python class with TRUTHFUL ranges, so neither the sibling-drop check nor
+/// a stale-range repair can be what refuses an edit made through it. Whatever refuses a
+/// mis-indented body here is the syntax check alone.
+async fn python_class_with_three_methods() -> (tempfile::TempDir, ToolContext, &'static str) {
+    // 0-indexed lines: 0 class, 1-2 a, 4-5 b, 7-8 c.
+    let src = "class Foo:\n    def a(self):\n        return 1\n\n    def b(self):\n        return 2\n\n    def c(self):\n        return 3\n";
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.py", src)], |root| {
+        let file = root.join("src/lib.py");
+        let method = |name: &str, start: u32, end: u32| SymbolInfo {
+            name: name.to_string(),
+            name_path: format!("Foo/{name}"),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: start,
+            end_line: end,
+            start_col: 4,
+            children: vec![],
+            range_start_line: Some(start),
+            detail: None,
+        };
+        let class = SymbolInfo {
+            name: "Foo".to_string(),
+            name_path: "Foo".to_string(),
+            kind: SymbolKind::Class,
+            file: file.clone(),
+            start_line: 0,
+            end_line: 8,
+            start_col: 0,
+            children: vec![method("a", 1, 2), method("b", 4, 5), method("c", 7, 8)],
+            range_start_line: Some(0),
+            detail: None,
+        };
+        MockLspClient::new().with_symbols(file.clone(), vec![class])
+    })
+    .await;
+    (dir, ctx, src)
+}
+
+/// tree-sitter-python does not mark a dedent to a column no enclosing block has as an
+/// error, so `syntax_regressed` answered "still parses" and this edit was written under
+/// `status: ok` — a file CPython refuses at import with `IndentationError: unindent does not
+/// match any outer indentation level`. Measured on the live tool 2026-09-30.
+/// docs/issues/2026-09-30-edit-code-syntax-guard-accepts-python-indentation-errors-tree-sitter-does-not-flag.md
+#[tokio::test]
+async fn replace_symbol_refuses_a_python_body_that_dedents_to_no_enclosing_level() {
+    let (dir, ctx, src) = python_class_with_three_methods().await;
+
+    // `def` at 4, body at 12, then a line at 8: no enclosing block sits at column 8.
+    let err = EditCode
+        .call(
+            json!({
+                "path": "src/lib.py",
+                "symbol": "Foo/b",
+                "action": "replace",
+                "body": "    def b(self):\n            return 2\n        x = 1"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("left the file syntactically invalid"),
+        "the syntax guard must be what refuses this; got: {msg}"
+    );
+    assert!(
+        msg.contains("indentation"),
+        "the refusal must name indentation, not a stale range; got: {msg}"
+    );
+    let result = std::fs::read_to_string(dir.path().join("src/lib.py")).unwrap();
+    assert_eq!(result, src, "file must be restored after the rollback");
+}
+
+/// The control for the test above: a Python body that nests DEEPER, consistently, is valid
+/// and must still be written. Without it, a guard that refused every Python edit would pass
+/// the refusal test.
+#[tokio::test]
+async fn replace_symbol_accepts_a_python_body_with_consistent_nesting() {
+    let (dir, ctx, _src) = python_class_with_three_methods().await;
+
+    EditCode
+        .call(
+            json!({
+                "path": "src/lib.py",
+                "symbol": "Foo/b",
+                "action": "replace",
+                "body": "    def b(self):\n        if True:\n            return 2\n        return 3"
+            }),
+            &ctx,
+        )
+        .await
+        .expect("a consistently indented body is valid Python and must be written");
+
+    let result = std::fs::read_to_string(dir.path().join("src/lib.py")).unwrap();
+    assert!(
+        result.contains("        if True:\n            return 2\n        return 3\n"),
+        "the new body must be applied verbatim; got:\n{result}"
+    );
+}
+
+/// `insert` reaches the same blindness through `finalize_edit_content`, which asks
+/// tree-sitter only. Same construct as the replace test: `def` at 4, body at 12, then a
+/// line at 8 that no enclosing block sits at.
+#[tokio::test]
+async fn insert_code_refuses_a_python_body_that_dedents_to_no_enclosing_level() {
+    let (dir, ctx, src) = python_class_with_three_methods().await;
+
+    let err = EditCode
+        .call(
+            json!({
+                "path": "src/lib.py",
+                "symbol": "Foo/b",
+                "action": "insert",
+                "position": "after",
+                "body": "    def d(self):\n            return 4\n        x = 1"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("would introduce syntax errors"),
+        "the insert guard must be what refuses this; got: {msg}"
+    );
+    let result = std::fs::read_to_string(dir.path().join("src/lib.py")).unwrap();
+    assert_eq!(result, src, "nothing may be written for a refused insert");
+}
+
+/// Control for the insert refusal: a consistently indented sibling method is written.
+#[tokio::test]
+async fn insert_code_accepts_a_consistently_indented_python_method() {
+    let (dir, ctx, _src) = python_class_with_three_methods().await;
+
+    EditCode
+        .call(
+            json!({
+                "path": "src/lib.py",
+                "symbol": "Foo/b",
+                "action": "insert",
+                "position": "after",
+                "body": "    def d(self):\n        if True:\n            return 4\n        return 5"
+            }),
+            &ctx,
+        )
+        .await
+        .expect("a consistently indented method is valid Python and must be written");
+
+    let result = std::fs::read_to_string(dir.path().join("src/lib.py")).unwrap();
+    assert!(
+        result.contains(
+            "    def d(self):\n        if True:\n            return 4\n        return 5\n"
+        ),
+        "the new method must be written verbatim; got:\n{result}"
+    );
+}
 
 /// BUG-041: `textDocument/didChange` is a fire-and-forget notification, so the
 /// LSP may still be reindexing when the next `documentSymbol` query arrives.
