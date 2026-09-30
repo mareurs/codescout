@@ -400,6 +400,90 @@ class Draw(Base):
                 self.assertEqual(err, f"error: --exclude-set {bad}: key.json is malformed "
                                       f"(not a case_id -> case_key map)\n")
                 self.assertFalse((self.root / f"{SETP}m-{name}").exists())
+    def _keys(self, set_dir):
+        return {v["case_key"] for v in json.loads(read(set_dir / "key.json")).values()}
+
+    def _main_draw(self, name, sub, rou, *exclude_sets):
+        flags = [f for d in exclude_sets for f in ("--exclude-set", d)]
+        main = self.root / (SETP + name)
+        rc, out, err = cli("draw", "--corpus", self.corpus, "--set", main, "--seed", 7, "--substantive", sub,
+                           "--routine", rou, *flags)
+        return rc, out, err, main
+
+    def test_exclude_set_repeats_and_each_flag_is_load_bearing(self):
+        pilot_a = self.draw("pilot-a", 5, 3, 2)
+        pilot_b = self.draw("pilot-b", 6, 3, 2, "--exclude-set", pilot_a)
+        keys_a, keys_b = self._keys(pilot_a), self._keys(pilot_b)
+        self.assertEqual((len(keys_a), len(keys_b), keys_a & keys_b), (5, 5, set()))
+        every = {u.case_key for u in sampler.frame(self.corpus, excluded_sids=set())}
+        # positive controls: draw the WHOLE remaining pool (15 - 3 = 12 substantive, 18 - 2 = 16 routine), so the
+        # unit of the pilot that was NOT excluded must come back. A run that honours only one flag cannot pass both.
+        rc, out, err, main = self._main_draw("only-a", 12, 16, pilot_a)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertTrue(out.startswith("drawn substantive=12 routine=16 excluded=5 "), out)
+        self.assertEqual(self._keys(main), every - keys_a)
+        self.assertTrue(keys_b <= self._keys(main))
+        rc, out, err, main = self._main_draw("only-b", 12, 16, pilot_b)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertTrue(out.startswith("drawn substantive=12 routine=16 excluded=5 "), out)
+        self.assertEqual(self._keys(main), every - keys_b)
+        self.assertTrue(keys_a <= self._keys(main))
+        # both flags: the pool is 15 - 6 = 9 substantive and 18 - 4 = 14 routine, and the draw takes all of it
+        rc, out, err, main = self._main_draw("both", 9, 14, pilot_a, pilot_b)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertTrue(out.startswith("drawn substantive=9 routine=14 excluded=10 "), out)
+        self.assertEqual(self._keys(main), every - keys_a - keys_b)
+        # a unit named by two flags is removed, and counted, once; three flags are as good as two
+        rc, out, err, main = self._main_draw("thrice", 9, 14, pilot_a, pilot_b, pilot_a)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertTrue(out.startswith("drawn substantive=9 routine=14 excluded=10 "), out)
+        rc, out, err, main = self._main_draw("twice", 12, 16, pilot_a, pilot_a)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertTrue(out.startswith("drawn substantive=12 routine=16 excluded=5 "), out)
+        # the pool boundary moves with the union: 9 substantive are drawable, 10 are not
+        rc, _, err, main = self._main_draw("too-many", 10, 0, pilot_a, pilot_b)
+        self.assertEqual(rc, 1)
+        self.assertIn("9 candidates", err)
+        self.assertFalse(main.exists())
+
+    def test_every_named_exclude_set_is_validated_not_only_the_first(self):
+        pilot = self.draw("pilot-a", 5, 3, 2)
+        missing = self.root / "no-such-set"
+        malformed = self.root / "bad-second"
+        malformed.mkdir()
+        (malformed / "key.json").write_text("{not json")
+        no_key = f"error: --exclude-set {missing} holds no key.json; nothing to exclude\n"
+        bad_key = (f"error: --exclude-set {malformed}: key.json is malformed "
+                   f"(not a case_id -> case_key map)\n")
+        for label, sets, expected in (("missing-second", (pilot, missing), no_key),
+                                      ("missing-first", (missing, pilot), no_key),
+                                      ("malformed-second", (pilot, malformed), bad_key),
+                                      ("malformed-last-of-three", (pilot, pilot, malformed), bad_key)):
+            with self.subTest(label):
+                rc, out, err, main = self._main_draw(f"v-{label}", 1, 0, *sets)
+                self.assertEqual((rc, out, err), (1, "", expected))
+                self.assertFalse(main.exists())
+        # positive control: the same valid set alone (and twice) is accepted with the same sizes
+        self.assertEqual(self._main_draw("v-ok", 1, 0, pilot)[0], 0)
+        self.assertEqual(self._main_draw("v-ok2", 1, 0, pilot, pilot)[0], 0)
+
+    def test_the_not_in_this_frame_check_runs_over_the_union_of_every_set(self):
+        foreign_corpus = fx.build_corpus(self.root / "foreign", [dict(session(0), sid=sid_for(50))])
+        foreign = self.root / (SETP + "foreign-set")
+        rc, _, err = cli("draw", "--corpus", foreign_corpus, "--set", foreign, "--seed", 5, "--substantive", 2,
+                         "--routine", 1)
+        self.assertEqual((rc, err), (0, ""))
+        pilot = self.draw("pilot-a", 5, 3, 2)  # this frame's own pilot: 5 valid keys, 3 foreign ones in the other set
+        for label, sets in (("foreign-second", (pilot, foreign)), ("foreign-first", (foreign, pilot))):
+            with self.subTest(label):
+                rc, out, err, main = self._main_draw(f"u-{label}", 2, 1, *sets)
+                self.assertEqual((rc, out), (1, ""))
+                self.assertEqual(err, "error: --exclude-set holds 3 case_key(s) that are not in this frame; the "
+                                      "pilot must come from the same frame, or disjointness is not guaranteed\n")
+                self.assertFalse(main.exists())
+        # positive control: the frame's own pilot alone is accepted with the same sizes
+        self.assertEqual(self._main_draw("u-ok", 2, 1, pilot)[0], 0)
+
 
 
 # Pinned after observation (see the report): the pilot draw (seed 3, 2 substantive + 1 routine) shuffled by

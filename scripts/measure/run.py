@@ -23,7 +23,7 @@ docs/superpowers/plans/2026-09-29-system1-labelled-sample.md) are below it.
                                        may be written anywhere. --exclude-units removes those case_keys
                                        BEFORE counting and records {count, sha256} of the file. Editing
                                        run.py (or any hashed file) after `frame` invalidates the frame file
-    run.py draw --corpus C --set DIR --seed S --substantive N --routine M [--exclude-set DIR2]
+    run.py draw --corpus C --set DIR --seed S --substantive N --routine M [--exclude-set DIR2 [--exclude-set DIR3 ...]]
                 --frame FRAME.json [--exclude-units FILE]
                                        stratified draw into a NEW private (mode 700) set directory
                                        OUTSIDE the repo: key.json (private, holds session ids) and
@@ -126,7 +126,8 @@ def _parser():
     dr.add_argument("--seed", type=int, required=True)
     dr.add_argument("--substantive", type=int, required=True)
     dr.add_argument("--routine", type=int, required=True)
-    dr.add_argument("--exclude-set", help="another set directory whose units are removed from the pool")
+    dr.add_argument("--exclude-set", action="append", help="another set directory whose units are removed from the "
+                                                           "pool; repeat it to exclude several sets (the union)")
     dr.add_argument("--frame", required=True,
                     help="the frame file this draw belongs to (REQUIRED): its sha256 is recorded in draw.json and "
                          "estimate refuses any other frame; it also registers --exclude-units by hash")
@@ -422,15 +423,20 @@ def _cmd_preflight(args):
     return 0
 
 
-def _excluded_case_keys(exclude_set):
-    path = pathlib.Path(exclude_set) / "key.json"
-    if not path.is_file():
-        raise Refused(f"--exclude-set {exclude_set} holds no key.json; nothing to exclude")
-    try:
-        return {v["case_key"] for v in _read_json(path).values()}
-    except (ValueError, KeyError, TypeError, AttributeError):
-        raise Refused(f"--exclude-set {exclude_set}: key.json is malformed (not a case_id -> case_key map)") \
-            from None
+def _excluded_case_keys(exclude_sets):
+    """The union of the case_keys of every --exclude-set directory, each validated on its own: a later set that is
+    missing or malformed is refused even when an earlier one is fine, and the message names that set."""
+    keys = set()
+    for exclude_set in exclude_sets:
+        path = pathlib.Path(exclude_set) / "key.json"
+        if not path.is_file():
+            raise Refused(f"--exclude-set {exclude_set} holds no key.json; nothing to exclude")
+        try:
+            keys |= {v["case_key"] for v in _read_json(path).values()}
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise Refused(f"--exclude-set {exclude_set}: key.json is malformed (not a case_id -> case_key map)") \
+                from None
+    return keys
 
 
 def _frame_bytes(path):
@@ -490,7 +496,7 @@ def _cmd_draw(args):
     frame_data = _frame_bytes(args.frame)
     frame = _parse_frame(frame_data)
     unfit = _registered_exclusion(args, frame)
-    exclude = _excluded_case_keys(args.exclude_set) if args.exclude_set else set()
+    exclude = _excluded_case_keys(args.exclude_set or ())
     units = _frame_units(args.corpus)
     if unfit:
         units = _apply_exclusion(units, unfit)
