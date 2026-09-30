@@ -1189,7 +1189,7 @@ async fn run_command_does_not_include_warning() {
         "run_command should not emit a warning field"
     );
 }
-/// docs/issues/2026-09-24-run-command-refuses-a-filtered-command-when-tmp-is-full.md
+/// docs/issues/archive/2026-09-24-run-command-refuses-a-filtered-command-when-tmp-is-full.md
 ///
 /// The tee capture is an optional side channel; failing to create its temp file used to
 /// refuse the command itself. Three inputs, because each alone is monotone: "degrades on a

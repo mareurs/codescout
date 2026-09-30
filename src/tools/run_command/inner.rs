@@ -205,7 +205,7 @@ fn inject_tee(resolved_command: &str, buffer_only: bool) -> anyhow::Result<TeeIn
 /// needed to diagnose the full disk. Now the command runs un-teed and `skipped` says why.
 /// The `tee_path_is_safe` tripwire below is a different kind of failure — a path the shell
 /// must not be handed — and stays a refusal.
-/// docs/issues/2026-09-24-run-command-refuses-a-filtered-command-when-tmp-is-full.md
+/// docs/issues/archive/2026-09-24-run-command-refuses-a-filtered-command-when-tmp-is-full.md
 pub(super) fn inject_tee_in(
     resolved_command: &str,
     buffer_only: bool,
