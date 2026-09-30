@@ -989,13 +989,14 @@ async fn tab_indented_python_class() -> (tempfile::TempDir, ToolContext, &'stati
 /// body's own unit, so a tab-indented body replacing a method in a four-space file came out as
 /// four spaces followed by a tab. CPython accepts that (col 8, alt col 5 against a level at
 /// 4/4), so nothing refused it and the block carried both units, its depth depending on the
-/// reader's tab width. Observed on the live tool 2026-09-30.
+/// reader's tab width. Observed on the live tool 2026-09-30. The operator's ruling is to CONVERT
+/// the body to the file's unit, reading the width from the file, and to say that it did.
 /// docs/issues/archive/2026-09-30-edit-code-rebasing-a-tab-indented-body-onto-a-space-file-mixes-indent-units.md
 #[tokio::test]
-async fn replace_symbol_refuses_a_tab_body_for_a_space_indented_file() {
-    let (dir, ctx, src) = python_class_with_three_methods().await;
+async fn replace_symbol_converts_a_tab_body_for_a_space_indented_file() {
+    let (dir, ctx, _src) = python_class_with_three_methods().await;
 
-    let err = EditCode
+    let result = EditCode
         .call(
             json!({
                 "path": "src/lib.py",
@@ -1006,23 +1007,32 @@ async fn replace_symbol_refuses_a_tab_body_for_a_space_indented_file() {
             &ctx,
         )
         .await
-        .unwrap_err();
+        .expect("a tab body for a file with a readable space width is converted, not refused");
 
-    let msg = err.to_string();
+    let written = std::fs::read_to_string(dir.path().join("src/lib.py")).unwrap();
     assert!(
-        msg.contains("indented with tabs") && msg.contains("indents with spaces"),
-        "the refusal must name both units; got: {msg}"
+        written.contains("\n    def b(self):\n        return 40\n"),
+        "the block must be one unit, the file's four spaces; got:\n{written:?}"
     );
-    let result = std::fs::read_to_string(dir.path().join("src/lib.py")).unwrap();
-    assert_eq!(result, src, "nothing may be written for a refused replace");
+    assert!(
+        !written.contains('\t'),
+        "no tab may survive in a space file; got:\n{written:?}"
+    );
+    let note = result["indent_converted"].as_str().unwrap_or_default();
+    assert!(
+        note.contains("tabs") && note.contains("4 spaces"),
+        "the conversion must be reported, naming both units; got: {result}"
+    );
 }
 
 /// The direction the bug file marked "not run": a space-indented body into a tab-indented file.
+/// Converting into tabs needs no width from the file; the body's own step says how many spaces
+/// one level is.
 #[tokio::test]
-async fn replace_symbol_refuses_a_space_body_for_a_tab_indented_file() {
-    let (dir, ctx, src) = tab_indented_python_class().await;
+async fn replace_symbol_converts_a_space_body_for_a_tab_indented_file() {
+    let (dir, ctx, _src) = tab_indented_python_class().await;
 
-    let err = EditCode
+    let result = EditCode
         .call(
             json!({
                 "path": "src/lib.py",
@@ -1033,23 +1043,30 @@ async fn replace_symbol_refuses_a_space_body_for_a_tab_indented_file() {
             &ctx,
         )
         .await
-        .unwrap_err();
+        .expect("a space body for a tab-indented file is converted, not refused");
 
-    let msg = err.to_string();
+    let written = std::fs::read_to_string(dir.path().join("src/lib.py")).unwrap();
     assert!(
-        msg.contains("indented with spaces") && msg.contains("indents with tabs"),
-        "the refusal must name both units; got: {msg}"
+        written.contains("\n\tdef b(self):\n\t\treturn 9\n"),
+        "the block must be one unit, the file's tabs; got:\n{written:?}"
     );
-    let result = std::fs::read_to_string(dir.path().join("src/lib.py")).unwrap();
-    assert_eq!(result, src, "nothing may be written for a refused replace");
+    assert!(
+        !written.contains("    "),
+        "no run of spaces may survive in a tab file; got:\n{written:?}"
+    );
+    let note = result["indent_converted"].as_str().unwrap_or_default();
+    assert!(
+        note.contains("spaces") && note.contains("tabs"),
+        "the conversion must be reported, naming both units; got: {result}"
+    );
 }
 
 /// `insert` re-bases through the same seam and had the same defect.
 #[tokio::test]
-async fn insert_code_refuses_a_tab_body_for_a_space_indented_file() {
-    let (dir, ctx, src) = python_class_with_three_methods().await;
+async fn insert_code_converts_a_tab_body_for_a_space_indented_file() {
+    let (dir, ctx, _src) = python_class_with_three_methods().await;
 
-    let err = EditCode
+    let result = EditCode
         .call(
             json!({
                 "path": "src/lib.py",
@@ -1061,15 +1078,22 @@ async fn insert_code_refuses_a_tab_body_for_a_space_indented_file() {
             &ctx,
         )
         .await
-        .unwrap_err();
+        .expect("a tab body for a file with a readable space width is converted, not refused");
 
-    let msg = err.to_string();
+    let written = std::fs::read_to_string(dir.path().join("src/lib.py")).unwrap();
     assert!(
-        msg.contains("indented with tabs") && msg.contains("indents with spaces"),
-        "the refusal must name both units; got: {msg}"
+        written.contains("\n    def d(self):\n        return 4\n"),
+        "the inserted block must be one unit, the file's four spaces; got:\n{written:?}"
     );
-    let result = std::fs::read_to_string(dir.path().join("src/lib.py")).unwrap();
-    assert_eq!(result, src, "nothing may be written for a refused insert");
+    assert!(
+        !written.contains('\t'),
+        "no tab may survive in a space file; got:\n{written:?}"
+    );
+    let note = result["indent_converted"].as_str().unwrap_or_default();
+    assert!(
+        note.contains("tabs") && note.contains("4 spaces"),
+        "the conversion must be reported; got: {result}"
+    );
 }
 
 /// The control for the three refusals: a body in the FILE's own unit is written, in both
@@ -1097,17 +1121,11 @@ async fn replace_symbol_accepts_a_body_in_the_files_own_indent_unit() {
         "the new body must be written verbatim; got:\n{result:?}"
     );
 }
-/// The refusal's own remedy, exercised: `reindent=false` splices the body exactly as written and
-/// so takes the layout out of the unit check's hands. A brace language is used because it is one
-/// where the spliced result is valid — Python's own guards refuse most of the layouts that would
-/// exercise this — and the class is four-space indented while the body is tab-indented, which
-/// is precisely the pair the default refuses.
-#[tokio::test]
-async fn replace_symbol_reindent_false_splices_a_unit_mixing_body_as_written() {
-    // 0-indexed lines: 0 class, 1-3 foo, 5-7 bar, 8 close.
-    let src =
-        "class A {\n    foo() {\n        old();\n    }\n\n    bar() {\n        keep();\n    }\n}\n";
-    let (dir, ctx) = ctx_with_mock(&[("src/lib.js", src)], |root| {
+/// A two-method JavaScript class with truthful ranges. The caller supplies the source so the same
+/// mock serves a four-space file and a file that mixes both units. 0-indexed lines: 0 class,
+/// 1-3 foo, 5-7 bar, 8 close.
+async fn js_class_with_two_methods(src: &str) -> (tempfile::TempDir, ToolContext) {
+    ctx_with_mock(&[("src/lib.js", src)], |root| {
         let file = root.join("src/lib.js");
         let method = |name: &str, start: u32, end: u32| SymbolInfo {
             name: name.to_string(),
@@ -1135,47 +1153,137 @@ async fn replace_symbol_reindent_false_splices_a_unit_mixing_body_as_written() {
         };
         MockLspClient::new().with_symbols(file.clone(), vec![class])
     })
-    .await;
+    .await
+}
 
-    let body = "\tfoo() {\n\t\tfresh();\n\t}";
+const JS_SPACES: &str =
+    "class A {\n    foo() {\n        old();\n    }\n\n    bar() {\n        keep();\n    }\n}\n";
 
-    // The default refuses: the class is indented with spaces, the body with tabs.
-    let err = EditCode
-        .call(
-            json!({
-                "path": "src/lib.js",
-                "symbol": "A/foo",
-                "action": "replace",
-                "body": body
-            }),
-            &ctx,
-        )
-        .await
-        .unwrap_err();
-    assert!(
-        err.to_string().contains("indented with tabs"),
-        "premise: without the switch this pair is refused; got: {err}"
-    );
+/// The same class with `bar` indented by tabs: a file that mixes both units, so there is no single
+/// width to convert a body to.
+const JS_MIXED: &str =
+    "class A {\n    foo() {\n        old();\n    }\n\n\tbar() {\n\t\tkeep();\n\t}\n}\n";
 
-    // The switch the refusal's hint names splices it as written.
+/// `reindent=false` is the caller saying their layout is final: the body is spliced exactly as
+/// written and no unit conversion applies. A brace language is used because it is one where the
+/// spliced result is valid — Python's own guards refuse most of the layouts that would exercise
+/// this — and the class is four-space indented while the body is tab-indented, which is
+/// precisely the pair the default converts.
+#[tokio::test]
+async fn replace_symbol_reindent_false_splices_a_unit_mixing_body_as_written() {
+    let (dir, ctx) = js_class_with_two_methods(JS_SPACES).await;
+
     EditCode
         .call(
             json!({
                 "path": "src/lib.js",
                 "symbol": "A/foo",
                 "action": "replace",
-                "body": body,
+                "body": "\tfoo() {\n\t\tfresh();\n\t}",
                 "reindent": false
             }),
             &ctx,
         )
         .await
-        .expect("reindent=false must take the layout out of the unit check's hands");
+        .expect("reindent=false must splice the body as written");
     let result = std::fs::read_to_string(dir.path().join("src/lib.js")).unwrap();
     assert!(
         result.contains("class A {\n\tfoo() {\n\t\tfresh();\n\t}\n"),
-        "the body must be spliced exactly as written; got:\n{result:?}"
+        "the body must be spliced exactly as written, tabs and all; got:\n{result:?}"
     );
+}
+/// Conversion is not specific to Python: the same tab body into the same four-space class is
+/// converted in a brace language, and reported.
+#[tokio::test]
+async fn replace_symbol_converts_a_tab_body_in_a_brace_language() {
+    let (dir, ctx) = js_class_with_two_methods(JS_SPACES).await;
+
+    let result = EditCode
+        .call(
+            json!({
+                "path": "src/lib.js",
+                "symbol": "A/foo",
+                "action": "replace",
+                "body": "\tfoo() {\n\t\tfresh();\n\t}"
+            }),
+            &ctx,
+        )
+        .await
+        .expect("a tab body for a four-space class is converted");
+    let written = std::fs::read_to_string(dir.path().join("src/lib.js")).unwrap();
+    assert!(
+        written.contains("class A {\n    foo() {\n        fresh();\n    }\n"),
+        "the body must land in the file's four spaces; got:\n{written:?}"
+    );
+    assert!(
+        result["indent_converted"].as_str().is_some(),
+        "the conversion must be reported; got: {result}"
+    );
+}
+
+/// Where the file itself does not settle a unit, there is nothing safe to convert to. A class whose
+/// methods are indented both ways has no single width, so the tool refuses, names both units and
+/// says why, and writes nothing. This is the half of the ruling the operator left open.
+#[tokio::test]
+async fn replace_symbol_refuses_to_convert_into_a_file_that_mixes_both_units() {
+    let (dir, ctx) = js_class_with_two_methods(JS_MIXED).await;
+
+    let err = EditCode
+        .call(
+            json!({
+                "path": "src/lib.js",
+                "symbol": "A/foo",
+                "action": "replace",
+                "body": "\tfoo() {\n\t\tfresh();\n\t}"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("indented with tabs") && msg.contains("indents with spaces"),
+        "the refusal must name both units; got: {msg}"
+    );
+    assert!(
+        msg.contains("mixes"),
+        "the refusal must say why it did not convert; got: {msg}"
+    );
+    let written = std::fs::read_to_string(dir.path().join("src/lib.js")).unwrap();
+    assert_eq!(
+        written, JS_MIXED,
+        "nothing may be written for a refused edit"
+    );
+}
+/// The other half of the ruling left open: a body whose own step cannot be read is refused, with
+/// the reason, rather than converted by guess. Here the body's lines sit at 4 and 7 spaces, a
+/// common divisor of one, headed for a tab-indented file where a step is what the conversion
+/// needs.
+#[tokio::test]
+async fn replace_symbol_refuses_a_body_whose_indent_step_it_cannot_read() {
+    let (dir, ctx, src) = tab_indented_python_class().await;
+
+    let err = EditCode
+        .call(
+            json!({
+                "path": "src/lib.py",
+                "symbol": "Foo/b",
+                "action": "replace",
+                "body": "    def b(self):\n       return 9"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("cannot be converted without guessing"),
+        "the refusal must say the body, not the file, is the problem; got: {msg}"
+    );
+    let written = std::fs::read_to_string(dir.path().join("src/lib.py")).unwrap();
+    assert_eq!(written, src, "nothing may be written for a refused edit");
 }
 
 /// BUG-041: `textDocument/didChange` is a fire-and-forget notification, so the

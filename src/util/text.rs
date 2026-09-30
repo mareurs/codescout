@@ -491,6 +491,119 @@ fn pure_unit(ws: &str) -> Option<IndentUnit> {
         _ => None,
     }
 }
+/// The indentation unit a file is written in, as far as the file itself says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileIndent {
+    Tabs,
+    /// One indentation level is this many spaces.
+    Spaces(usize),
+}
+
+impl FileIndent {
+    /// What a message shows a caller: `tabs`, or `4 spaces`.
+    pub fn describe(self) -> String {
+        match self {
+            FileIndent::Tabs => "tabs".to_string(),
+            FileIndent::Spaces(n) => format!("{n} spaces"),
+        }
+    }
+}
+
+/// The unit `lines` are indented in, or `None` when the file does not settle it.
+///
+/// Read from the file, never assumed: a tab has no width of its own, so converting a tab body
+/// into a space file needs the width the file actually uses, and a file that mixes both units
+/// has no single answer. `None` is returned for a mixed file, for a line whose own indentation
+/// mixes both, for a file with no indentation at all, and for a space width the file does not
+/// firmly show (the common divisor of every indent width is below 2, or fewer than two lines
+/// sit at exactly that width, so one stray comment could have set it). Multi-line string
+/// literal interiors are not indentation and are skipped.
+pub fn file_indent(lines: &[&str]) -> Option<FileIndent> {
+    let text = lines.join("\n");
+    let mask = literal_continuation_mask(&text);
+    let mut tab_lines = 0usize;
+    let mut widths: Vec<usize> = Vec::new();
+    for (line, masked) in text.split('\n').zip(mask.iter().copied()) {
+        if masked || line.trim().is_empty() {
+            continue;
+        }
+        let ws = leading_ws(line);
+        match (ws.contains('\t'), ws.contains(' ')) {
+            (true, true) => return None,
+            (true, false) => tab_lines += 1,
+            (false, true) => widths.push(ws.len()),
+            (false, false) => {}
+        }
+    }
+    match (tab_lines > 0, widths.is_empty()) {
+        (true, true) => Some(FileIndent::Tabs),
+        (false, false) => {
+            let step = widths.iter().copied().fold(0, gcd);
+            let at_step = widths.iter().filter(|w| **w == step).count();
+            (step >= 2 && at_step >= 2).then_some(FileIndent::Spaces(step))
+        }
+        // Both units present, or neither.
+        _ => None,
+    }
+}
+
+/// Convert every code line's leading whitespace in `block` to `file`'s unit, leaving string
+/// literal interiors and blank lines as they are. `None` when the conversion would be a guess:
+/// a line whose own indentation mixes tabs and spaces, or (into tabs) a body whose space step
+/// is not at least 2.
+///
+/// A step is read from the body itself when converting spaces to tabs: the common divisor of
+/// its indentation widths, so `    a` / `        b` is two levels of four.
+pub fn convert_indent_unit(block: &str, file: FileIndent) -> Option<String> {
+    let mask = literal_continuation_mask(block);
+    let lines: Vec<&str> = block.split('\n').collect();
+    let is_code = |i: usize| !mask.get(i).copied().unwrap_or(false) && !lines[i].trim().is_empty();
+    let mut space_widths: Vec<usize> = Vec::new();
+    for i in (0..lines.len()).filter(|&i| is_code(i)) {
+        let ws = leading_ws(lines[i]);
+        match (ws.contains('\t'), ws.contains(' ')) {
+            (true, true) => return None,
+            (false, true) => space_widths.push(ws.len()),
+            _ => {}
+        }
+    }
+    let tab_step = match file {
+        FileIndent::Tabs => {
+            let step = space_widths.iter().copied().fold(0, gcd);
+            if !space_widths.is_empty() && step < 2 {
+                return None;
+            }
+            step
+        }
+        FileIndent::Spaces(_) => 0,
+    };
+    let converted: Vec<String> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| {
+            if !is_code(i) {
+                return (*line).to_string();
+            }
+            let ws = leading_ws(line);
+            let rest = &line[ws.len()..];
+            let new_ws = match file {
+                FileIndent::Spaces(n) => ws.replace('\t', &" ".repeat(n)),
+                FileIndent::Tabs if ws.contains(' ') => "\t".repeat(ws.len() / tab_step),
+                FileIndent::Tabs => ws.to_string(),
+            };
+            format!("{new_ws}{rest}")
+        })
+        .collect();
+    Some(converted.join("\n"))
+}
+/// Greatest common divisor, with `gcd(0, n) == n` so it can seed a fold.
+fn gcd(a: usize, b: usize) -> usize {
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
+}
 
 /// Extract lines from `start_line` to `end_line` (1-indexed, inclusive) without
 /// exceeding `byte_budget` bytes. Returns `(content, lines_shown, complete)`.
@@ -850,6 +963,143 @@ mod tests {
         // still empty the whitespace-only line, which is what tells the two paths apart.
         let body = "        a\n   \n    b";
         assert_eq!(reindent_to(body, "    "), body);
+    }
+    #[test]
+    fn file_indent_reads_the_unit_the_file_shows() {
+        let four = [
+            "class A:",
+            "    def a(self):",
+            "        return 1",
+            "",
+            "    def b(self):",
+            "        return 2",
+        ];
+        assert_eq!(file_indent(&four), Some(FileIndent::Spaces(4)));
+        let two = ["a:", "  b:", "    c: 1", "  d: 2"];
+        assert_eq!(file_indent(&two), Some(FileIndent::Spaces(2)));
+        let tabs = ["class A:", "\tdef a(self):", "\t\treturn 1"];
+        assert_eq!(file_indent(&tabs), Some(FileIndent::Tabs));
+        // The description a message shows.
+        assert_eq!(FileIndent::Spaces(4).describe(), "4 spaces");
+        assert_eq!(FileIndent::Tabs.describe(), "tabs");
+    }
+
+    #[test]
+    fn file_indent_declines_to_name_a_unit_the_file_does_not_settle() {
+        // A line whose own indentation mixes both. The space lines beside it are what make this
+        // discriminate: a mixed line that is merely skipped would leave a plain four-space file.
+        assert_eq!(file_indent(&["a", "    b", "    c", "  \td"]), None);
+        // A file that mixes the two units has no single answer.
+        assert_eq!(file_indent(&["a:", "\tb", "    c"]), None);
+        // A line whose own indentation mixes both.
+        assert_eq!(file_indent(&["a:", "  \tb"]), None);
+        // No indentation at all: nothing to read a unit from.
+        assert_eq!(file_indent(&["a", "b", ""]), None);
+        // Widths with no common step of at least 2 (an aligned continuation at 7 beside 4s).
+        assert_eq!(file_indent(&["a", "    b", "    c", "       d"]), None);
+        // A step shown by one line only is not evidence: one stray comment could have set it.
+        assert_eq!(file_indent(&["a", "    b"]), None);
+        // A step of one space is not a unit, however many lines show it.
+        assert_eq!(file_indent(&["a", " b", " c"]), None);
+    }
+
+    #[test]
+    fn file_indent_ignores_what_is_not_indentation() {
+        // The tab inside the string literal is the literal's value. Read as indentation it would
+        // make this a mixed file.
+        let lines = [
+            "def f():",
+            "    s = \"\"\"",
+            "\tinside",
+            "    \"\"\"",
+            "    return s",
+            "    x = 1",
+        ];
+        assert_eq!(file_indent(&lines), Some(FileIndent::Spaces(4)));
+        // A whitespace-only line is not a code line, whatever its whitespace.
+        let blank = ["def f():", "\t", "    a = 1", "    b = 2"];
+        assert_eq!(file_indent(&blank), Some(FileIndent::Spaces(4)));
+    }
+
+    #[test]
+    fn convert_indent_unit_turns_tabs_into_the_files_spaces() {
+        assert_eq!(
+            convert_indent_unit("\tdef d(self):\n\t\treturn 40", FileIndent::Spaces(4)).as_deref(),
+            Some("    def d(self):\n        return 40")
+        );
+        assert_eq!(
+            convert_indent_unit("\ta:\n\t\tb", FileIndent::Spaces(2)).as_deref(),
+            Some("  a:\n    b")
+        );
+        // Blank lines are left as they are.
+        assert_eq!(
+            convert_indent_unit("\ta\n\n\tb", FileIndent::Spaces(4)).as_deref(),
+            Some("    a\n\n    b")
+        );
+        // A whitespace-only line is not a code line: its tab stays a tab, where converting it would
+        // treat blank space as indentation.
+        assert_eq!(
+            convert_indent_unit("\ta\n\t\n\tb", FileIndent::Spaces(4)).as_deref(),
+            Some("    a\n\t\n    b")
+        );
+    }
+
+    #[test]
+    fn convert_indent_unit_turns_spaces_into_tabs_by_the_bodys_own_step() {
+        assert_eq!(
+            convert_indent_unit("    def d(self):\n        return 40", FileIndent::Tabs).as_deref(),
+            Some("\tdef d(self):\n\t\treturn 40")
+        );
+        // The step is the body's, not an assumed four.
+        assert_eq!(
+            convert_indent_unit("  a:\n    b", FileIndent::Tabs).as_deref(),
+            Some("\ta:\n\t\tb")
+        );
+    }
+
+    #[test]
+    fn convert_indent_unit_declines_where_it_would_be_a_guess() {
+        // A step of one space says nothing about what a level is.
+        assert_eq!(convert_indent_unit("a\n b", FileIndent::Tabs), None);
+        // Widths with no common step of 2 or more.
+        assert_eq!(
+            convert_indent_unit("    a\n       b", FileIndent::Tabs),
+            None
+        );
+        // A line whose own indentation mixes both units, in either direction.
+        assert_eq!(
+            convert_indent_unit("\ta\n  \tb", FileIndent::Spaces(4)),
+            None
+        );
+        assert_eq!(convert_indent_unit("    a\n  \tb", FileIndent::Tabs), None);
+    }
+
+    #[test]
+    fn convert_indent_unit_leaves_string_literal_interiors_alone() {
+        let body = "\tx = \"\"\"a\n\t\tb\n\t\"\"\"\n\ty = 1";
+        let out = convert_indent_unit(body, FileIndent::Spaces(4)).expect("convertible");
+        // The code lines are converted; the literal's interior lines keep their tabs, since that
+        // whitespace is the literal's value.
+        assert!(out.starts_with("    x = \"\"\"a\n"), "{out:?}");
+        assert!(
+            out.contains("\n\t\tb\n"),
+            "interior must be untouched: {out:?}"
+        );
+        assert!(out.ends_with("\n    y = 1"), "{out:?}");
+    }
+    #[test]
+    fn convert_indent_unit_leaves_a_body_already_in_the_files_unit_alone() {
+        // Into tabs, a body that is already tabs has no space step to read, and must not be refused
+        // for lacking one.
+        assert_eq!(
+            convert_indent_unit("\ta\n\t\tb", FileIndent::Tabs).as_deref(),
+            Some("\ta\n\t\tb")
+        );
+        // Into spaces, a body that is already spaces is returned as it is.
+        assert_eq!(
+            convert_indent_unit("    a\n        b", FileIndent::Spaces(4)).as_deref(),
+            Some("    a\n        b")
+        );
     }
 
     #[test]

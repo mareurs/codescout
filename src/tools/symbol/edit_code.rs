@@ -7,7 +7,9 @@ use serde_json::{json, Value};
 use crate::tools::{
     guard_worktree_write, optional_bool_param, RecoverableError, Tool, ToolContext,
 };
-use crate::util::text::{indent_unit_conflict, reindent_to, UnitConflict};
+use crate::util::text::{
+    convert_indent_unit, file_indent, indent_unit_conflict, reindent_to, UnitConflict,
+};
 
 use super::display::{
     format_insert_code, format_remove_symbol, format_rename_symbol, format_replace_symbol,
@@ -452,8 +454,8 @@ fn rebase_body(body: &str, target_base: &str, reindent: bool) -> String {
         body.to_string()
     }
 }
-/// Refusal text for a body whose inner indentation is in a different unit from the file's, so
-/// re-basing it would leave one block indented with both tabs and spaces.
+/// Refusal text for a body whose inner indentation is in a different unit from the file's, when
+/// converting it would be a guess. `why` says which guess.
 ///
 /// Returns `(message, hint)` so a test can read both without a live tool call. The hint names the
 /// file's own unit as the repair and `reindent=false` as the way to take the layout into one's
@@ -463,13 +465,15 @@ pub(crate) fn indent_unit_refusal(
     action: &str,
     label: &str,
     conflict: &UnitConflict,
+    why: &str,
 ) -> (String, String) {
     let (body, file) = (conflict.body.name(), conflict.file.name());
     (
         format!(
             "edit_code {action}('{label}') was given a body indented with {body}, but this \
              symbol's file indents with {file}; re-basing it onto the symbol's column would \
-             leave one block indented with both. Not written."
+             leave one block indented with both, and it was not converted because {why}. \
+             Not written."
         ),
         format!(
             "Indent the body with the file's own unit ({file}) and retry. To splice the body \
@@ -479,7 +483,16 @@ pub(crate) fn indent_unit_refusal(
     )
 }
 
-/// [`rebase_body`], refusing first when the re-base would mix indentation units.
+/// [`rebase_body`], first converting the body to the file's indentation unit when the re-base
+/// would otherwise leave one block indented with both tabs and spaces.
+///
+/// The operator's ruling (2026-09-30) is to convert rather than refuse, with three points left to
+/// the implementation, each answered from the file and never assumed: how many spaces a tab
+/// stands for (the width `file_indent` reads from the file), what to do in a file that already
+/// mixes units (nothing to convert to, so refuse), and string literal interiors (left as they
+/// are, by the same mask the shift uses). Where the file or the body leaves the conversion a
+/// guess, this refuses with the reason. A conversion that happens is returned as a note so the
+/// caller is told, not surprised.
 ///
 /// Asked only when `reindent` is on: with it off the body is spliced as written, and the
 /// caller has taken the layout into their own hands. The repair closure in `do_insert` keeps
@@ -491,14 +504,37 @@ fn checked_rebase(
     reindent: bool,
     action: &str,
     label: &str,
-) -> Result<String, RecoverableError> {
+    file_lines: &[&str],
+) -> Result<(String, Option<String>), RecoverableError> {
     if reindent {
         if let Some(conflict) = indent_unit_conflict(body, target_base) {
-            let (message, hint) = indent_unit_refusal(action, label, &conflict);
-            return Err(RecoverableError::with_hint(message, hint));
+            let refuse = |why: &str| {
+                let (message, hint) = indent_unit_refusal(action, label, &conflict, why);
+                RecoverableError::with_hint(message, hint)
+            };
+            let Some(file) = file_indent(file_lines) else {
+                return Err(refuse(
+                    "the file does not settle one indentation unit (it mixes tabs and spaces, \
+                     or shows no firm width)",
+                ));
+            };
+            return match convert_indent_unit(body, file) {
+                Some(converted) => {
+                    let note = format!(
+                        "body re-indented from {} to {} to match the file",
+                        conflict.body.name(),
+                        file.describe()
+                    );
+                    Ok((rebase_body(&converted, target_base, true), Some(note)))
+                }
+                _ => Err(refuse(
+                    "the body's own indentation cannot be converted without guessing (a line \
+                     that mixes tabs and spaces, or no clear step)",
+                )),
+            };
         }
     }
-    Ok(rebase_body(body, target_base, reindent))
+    Ok((rebase_body(body, target_base, reindent), None))
 }
 
 impl EditCode {
@@ -1260,12 +1296,13 @@ impl EditCode {
         // See do_insert for why the column is sampled at the validated `start_line`
         // rather than at the editing range's start.
         let target_base = anchor_indent(&lines, sym.start_line as usize);
-        let effective_body = checked_rebase(
+        let (effective_body, indent_note) = checked_rebase(
             &effective_body,
             &target_base,
             reindent,
             "replace",
             name_path,
+            &lines,
         )?;
 
         let pre_ast = crate::ast::extract_symbols(&full_path).ok();
@@ -1414,6 +1451,9 @@ impl EditCode {
         if !removed_attributes.is_empty() {
             response["removed_attributes"] = json!(removed_attributes);
         }
+        if let Some(note) = indent_note {
+            response["indent_converted"] = json!(note);
+        }
         // The write succeeded but the dropped-symbol / dropped-sibling checks could
         // not run. Say so — the previous code reported a bare "ok" here, which read
         // as "verified clean" when nothing had actually been verified.
@@ -1473,7 +1513,8 @@ impl EditCode {
         // `editing_start_line` says — that is a different question from what column
         // this symbol sits at.
         let target_base = anchor_indent(&lines, sym.start_line as usize);
-        let reindented = checked_rebase(code, &target_base, reindent, "insert", &sym.name)?;
+        let (reindented, indent_note) =
+            checked_rebase(code, &target_base, reindent, "insert", &sym.name, &lines)?;
         let code_lines: Vec<&str> = reindented.lines().collect();
         let insert_at0 = match position {
             "before" => editing_start_line(&sym, &lines),
@@ -1651,6 +1692,9 @@ impl EditCode {
             json!({ "status": "ok", "inserted_at_line": insert_at + 1, "position": position });
         if repaired {
             response["note"] = json!(crate::tools::edit_repair::REPAIR_NOTE);
+        }
+        if let Some(note) = indent_note {
+            response["indent_converted"] = json!(note);
         }
         if let Some(r) = range_repair {
             response["warning"] = json!(r.warning(&sym.name));

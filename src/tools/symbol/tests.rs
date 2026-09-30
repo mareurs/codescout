@@ -10299,12 +10299,19 @@ fn indent_unit_refusal_names_both_units_and_both_repairs() {
             body: IndentUnit::Tabs,
             file: IndentUnit::Spaces,
         },
+        "the file mixes tabs and spaces",
     );
     // Both units, in the direction they apply: the BODY is tabs and the FILE is spaces. A
     // swapped pair would send the caller to re-indent in the unit they already used.
     assert!(msg.contains("indented with tabs"), "{msg}");
     assert!(msg.contains("indents with spaces"), "{msg}");
     assert!(msg.contains("replace('Foo/b')"), "names the call: {msg}");
+    // The reason it did not convert: without it the caller cannot tell the file's mix from a
+    // body it could not read.
+    assert!(
+        msg.contains("because the file mixes tabs and spaces"),
+        "names why: {msg}"
+    );
     // The remedy has two answers a caller can act on, and the second is a real parameter.
     assert!(
         hint.contains("file's own unit (spaces)"),
@@ -10319,6 +10326,7 @@ fn indent_unit_refusal_names_both_units_and_both_repairs() {
             body: IndentUnit::Spaces,
             file: IndentUnit::Tabs,
         },
+        "x",
     );
     assert!(msg.contains("indented with spaces"), "{msg}");
     assert!(msg.contains("indents with tabs"), "{msg}");
