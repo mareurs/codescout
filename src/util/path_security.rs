@@ -830,6 +830,58 @@ fn executed_command(mut tokens: Vec<String>) -> Vec<String> {
         }
     }
 }
+/// The command a source-gate segment RUNS, and whether `xargs` feeds it: [`executed_command`],
+/// then — while that head is `xargs` — the command `xargs` itself runs.
+///
+/// Kept out of [`producer_index`] on purpose. That function is shared with IL-3, and an `xargs`
+/// skip there would change what the pipe limiter counts as an unbounded producer for a reason
+/// that has nothing to do with it. Only this gate cares that `xargs`'s reader gets its PATHS on
+/// stdin: the segment names no file, so a path-based verdict finds nothing to refuse, and the
+/// second field lets the caller refuse it on that ground instead.
+/// docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+fn executed_reader_command(tokens: Vec<String>) -> (Vec<String>, bool) {
+    let mut exec = executed_command(tokens);
+    let mut stdin_fed = false;
+    while exec.first().map(String::as_str) == Some("xargs") {
+        exec = executed_command(strip_xargs_options(&exec[1..]));
+        stdin_fed = true;
+    }
+    (exec, stdin_fed)
+}
+
+/// `xargs`'s own options removed, leaving the command it runs. Those that take their value as the
+/// NEXT word are skipped with it (`-n 1`, `-I {}`, `--max-args 1`); a value glued on (`-n1`,
+/// `-I{}`, `--max-args=1`) is one token and skipped like any flag, and so is `--`: the only input
+/// it would change is a command NAMED with a leading `-`, which no test can express and no shell
+/// user writes (mutation-probed 2026-09-30: dropping the `--` and lone `-` branches survived).
+/// Unhandled, `xargs -n 1 cat` would read `1` as the command and allow the read.
+fn strip_xargs_options(tokens: &[String]) -> Vec<String> {
+    const VALUED: &[&str] = &[
+        "-a",
+        "-d",
+        "-E",
+        "-I",
+        "-L",
+        "-n",
+        "-P",
+        "-s",
+        "--arg-file",
+        "--delimiter",
+        "--eof",
+        "--max-args",
+        "--max-lines",
+        "--max-procs",
+        "--max-chars",
+    ];
+    let mut i = 0;
+    while let Some(t) = tokens.get(i) {
+        if !t.starts_with('-') {
+            break;
+        }
+        i += if VALUED.contains(&t.as_str()) { 2 } else { 1 };
+    }
+    tokens[i.min(tokens.len())..].to_vec()
+}
 
 /// Check if a command matches a dangerous pattern.
 ///
@@ -1429,7 +1481,8 @@ fn grep_is_counting(stage: &str) -> bool {
 /// Index of the token that names the program a pipeline segment actually runs, skipping what
 /// the shell or a wrapper consumes first: leading `NAME=value` assignments, a closed set of
 /// wrappers that exec their argument — `env` (plus its own assignments/flags), `nice [-n N]`,
-/// `timeout [flags] DURATION`, `nohup`, `time`, `command`, `stdbuf` — and the compound-command
+/// `timeout [flags] DURATION`, `nohup`, `time`, `command`, `stdbuf`, `sudo [flags]` — and the
+/// compound-command
 /// keywords that introduce a command (`if`, `while`, `until`, `do`, `then`, `else`, `elif`,
 /// `!`). Grouping (`(`, `{`)
 /// is NOT skipped here: [`executed_command`], this function's only caller, strips it in both
@@ -1472,6 +1525,32 @@ fn producer_index(tokens: &[String]) -> usize {
             "nice" => &["-n", "--adjustment"],
             "timeout" => &["-k", "-s", "--kill-after", "--signal"],
             "stdbuf" => &["-i", "-o", "-e", "--input", "--output", "--error"],
+            // The value of each is a NAME or a path (`-u root`, `-D /tmp`), never the command:
+            // read as the head, `sudo -u root cat x` would be the unknown program `root`.
+            "sudo" => &[
+                "-u",
+                "-g",
+                "-C",
+                "-D",
+                "-h",
+                "-p",
+                "-R",
+                "-r",
+                "-t",
+                "-T",
+                "-U",
+                "--user",
+                "--group",
+                "--close-from",
+                "--chdir",
+                "--host",
+                "--prompt",
+                "--chroot",
+                "--role",
+                "--type",
+                "--command-timeout",
+                "--other-user",
+            ],
             _ => &[],
         };
         valued.contains(&opt)
@@ -1488,7 +1567,7 @@ fn producer_index(tokens: &[String]) -> usize {
             continue;
         }
         match t {
-            "env" | "nohup" | "time" | "command" | "nice" | "timeout" | "stdbuf" => {
+            "env" | "nohup" | "time" | "command" | "nice" | "timeout" | "stdbuf" | "sudo" => {
                 i += 1;
                 while let Some(opt) = tokens.get(i).filter(|o| o.starts_with('-')) {
                     i += if takes_value(t, opt) { 2 } else { 1 };
@@ -1863,10 +1942,14 @@ const SOURCE_GATE_STAGE_SEPARATORS: &[&str] = &["|", "&"];
 ///   code, which no parser closes. The gate steers callers to `read_file`/`symbols`; it is not
 ///   a security boundary (`acknowledge_risk: true` is the sanctioned escape and this is the
 ///   unsanctioned one).
-/// - **Paths on stdin.** `find . -name '*.rs' | xargs cat` names no file at parse time.
-/// - **A wrapper the head rule does not skip** (`sudo`, `xargs`, a shell keyword or group
-///   prefix) reads as its own name. Closing these is `executed_command`'s job once PR #29
-///   lands; see the bug file cited above.
+/// - **`xargs <reader>` is refused wholesale, and that is an over-refusal by design.** Its paths
+///   arrive on stdin, so the segment names none and a path-based verdict has nothing to check
+///   (`find . -name '*.rs' | xargs cat`); `ls docs | xargs cat` is refused too, because the gate
+///   cannot tell the two apart. `acknowledge_risk: true` is the exit.
+/// - **A wrapper the head rule does not skip** still reads as its own name: `parallel`,
+///   `find -exec cat {} +`, `doas`, `ionice`, a shell function. `sudo` and `xargs` were closed
+///   here; `env`, `nohup`, `time`, keywords and groups by [`executed_command`] (PR #29).
+///   Unmeasured: the list above is what the code says, not a run of each on the live binary.
 /// - Heredocs (`cat <<'EOF'`) read stdin, not a file; any source extension appearing
 ///   inside the heredoc body is not a filename argument. The body is removed by
 ///   [`strip_heredoc_bodies`] before the segment split, so it cannot contribute
@@ -1935,16 +2018,16 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
             // false positives from quoted arguments containing command names, e.g.:
             //   git commit -m "feat: tail-50 of log, output_buffer.rs"
             // The executed command, not the first word: `do cat x` and `( cat x )` read x.
-            let first_token = executed_command(shell_tokens(seg))
-                .into_iter()
-                .next()
-                .unwrap_or_default();
+            let (exec, stdin_fed) = executed_reader_command(shell_tokens(seg));
+            let first_token = exec.into_iter().next().unwrap_or_default();
             if !cmd_re.is_match(&first_token) {
                 continue;
             }
             // The file must live inside the project, because the hint routes to
-            // symbols/read_file and those resolve against the active project.
-            if segment_reads_project_source(seg, ext_re, project_root, &cwd) {
+            // symbols/read_file and those resolve against the active project. A reader run by
+            // `xargs` reads paths the segment does not name, so there is nothing to resolve:
+            // it is refused as an unresolvable path is.
+            if stdin_fed || segment_reads_project_source(seg, ext_re, project_root, &cwd) {
                 blocked.get_or_insert_with(|| seg.clone());
                 offending_runs.push(run_idx);
                 break;
@@ -1954,7 +2037,8 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     let blocked = blocked?;
 
     // Derive the hint from the specific command that triggered the block.
-    let first_cmd = executed_command(shell_tokens(blocked.as_str()))
+    let first_cmd = executed_reader_command(shell_tokens(blocked.as_str()))
+        .0
         .into_iter()
         .next()
         .unwrap_or_default();
@@ -1989,6 +2073,15 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     } else {
         ""
     };
+    // The other refusal whose path the gate never saw: `xargs cat` is handed its files on
+    // stdin by an earlier stage, so "which file?" has no answer in the clause itself.
+    let stdin_note = if executed_reader_command(shell_tokens(blocked.as_str())).1 {
+        "NOTE: `xargs` hands this reader its paths on stdin, so the gate could not see which \
+         files it reads and blocked conservatively. Name the files to read_file/symbols, or \
+         re-run with acknowledge_risk: true if they are not project source. "
+    } else {
+        ""
+    };
 
     // Name the offending clause, mirroring `detect_il3_violation`'s pattern: a compound
     // command still refuses in full (running the permitted clauses anyway is a worse
@@ -2016,7 +2109,7 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     let rerun_note = rerun_without_offenders(command, &stripped, &runs, &offending_runs);
 
     Some(format!(
-        "{clause_note}{rerun_note}{unresolved_note}{remedy}"
+        "{clause_note}{rerun_note}{unresolved_note}{stdin_note}{remedy}"
     ))
 }
 
@@ -4295,12 +4388,9 @@ mod tests {
     //
     // The gate names a segment's PROGRAM by its first token, and no separator list contained a
     // lone `&`, so `echo b & cat src/main.rs` was one segment headed by `echo`. This section
-    // covers that mechanism only. The WRAPPER half (`env cat`, `FOO=1 cat`, `time cat`,
-    // `sudo cat`, `xargs cat`) is deliberately not fixed here: the gate takes the raw first
-    // token and never consults `producer_index`, so every wrapper that function knows is a
-    // bypass too (measured on the live binary 2026-09-30: `env`, `FOO=1` and `time`), but PR #29
-    // unifies the head rule for this gate and IL-3 in `executed_command`, and a second
-    // implementation here would fork it. The test table for that follow-up is in the bug file.
+    // covers that mechanism only. The WRAPPER half was fixed after it: `env`, `FOO=1`, `time`,
+    // `nohup` by PR #29's `executed_command` (measured live 2026-09-30), and `sudo` and `xargs`
+    // in the section below. The test table for that history is in the bug file.
     //
     // The case that must BLOCK has an over-block partner that must NOT, because a gate that
     // "closes" this by refusing anything containing `&` is a different defect.
@@ -4360,6 +4450,126 @@ mod tests {
             None,
             "an ampersand inside quotes is data; the read named there never runs"
         );
+    }
+    // ── Source gate: wrappers that run a reader — `sudo`, `xargs` ────────
+    //
+    // docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+    //
+    // Since PR #29 the gate classifies a segment by `executed_command`, which skips `env`, `FOO=1`,
+    // `time`, `nohup` and friends (measured live 2026-09-30). Two wrappers were left: `sudo`, whose
+    // command follows its own options, and `xargs`, whose reader gets its PATHS on stdin — so the
+    // segment names no file, and slicing at `xargs` alone would still find nothing to refuse.
+    // `xargs <reader>` is therefore refused whatever the segment names, exactly as an unresolvable
+    // `$VAR` path is (the paths cannot be known, and `acknowledge_risk` is the sanctioned exit).
+
+    #[test]
+    fn source_file_access_blocks_a_read_run_through_sudo() {
+        for cmd in [
+            "sudo cat src/main.rs",
+            "sudo -n cat src/main.rs",
+            // `-u` takes its value as the NEXT token; unhandled, `root` is read as the command
+            // and this — the realistic spelling — is allowed.
+            "sudo -u root cat src/main.rs",
+            "sudo -n -E -u root cat src/main.rs",
+            "sudo FOO=1 cat src/main.rs",
+        ] {
+            assert!(
+                check_source_file_access_at_root(cmd).is_some(),
+                "`{cmd}` runs `cat` on project source as another user"
+            );
+        }
+    }
+
+    /// The over-block partner: `-u`'s value is a user NAME, and a user may be called `cat`. If
+    /// the option's value were taken for the command, this harmless `ls` would be refused.
+    #[test]
+    fn source_file_access_allows_a_sudo_command_that_is_not_a_reader() {
+        assert_eq!(
+            check_source_file_access_at_root("sudo ls src/main.rs"),
+            None
+        );
+        assert_eq!(
+            check_source_file_access_at_root("sudo -u cat ls src/main.rs"),
+            None,
+            "the value of -u is a user name, not the command"
+        );
+    }
+
+    #[test]
+    fn source_file_access_blocks_a_reader_fed_by_xargs() {
+        for cmd in [
+            "find src -name '*.rs' | xargs cat",
+            "echo src/main.rs | xargs cat",
+            // The spelling measured live 2026-09-30: the file IS named, the head is `xargs`.
+            "xargs cat src/main.rs",
+            "git ls-files | xargs -I{} cat {}",
+            // `-n` takes its value as the next token; unhandled, `1` is read as the command.
+            "find src | xargs -n 1 head -5",
+            "find src | xargs -0 -n1 sed -n 1p",
+            "find src | xargs --max-args 1 cat",
+            "echo src/main.rs | sudo xargs cat",
+            "echo src/main.rs | xargs sudo cat",
+            // The head rule applies again to what `xargs` runs, so a wrapper of a wrapper is seen.
+            "echo src/main.rs | xargs xargs cat",
+        ] {
+            assert!(
+                check_source_file_access_at_root(cmd).is_some(),
+                "`{cmd}`: the reader's paths arrive on stdin and it may be project source"
+            );
+        }
+    }
+
+    /// The over-block partners for `xargs`. Only the command `xargs` RUNS is judged: `cat` here
+    /// is an argument of `echo`, `grep` has its own tool and is exempt gate-wide, and `wc`
+    /// returns a count.
+    #[test]
+    fn source_file_access_allows_xargs_that_does_not_run_a_reader() {
+        for cmd in [
+            "find src | xargs grep foo",
+            "find src | xargs wc -l",
+            "echo hi | xargs echo",
+            "echo src/main.rs | xargs echo",
+            "echo x | xargs -n1 echo cat",
+        ] {
+            assert_eq!(
+                check_source_file_access_at_root(cmd),
+                None,
+                "`{cmd}` runs no reader"
+            );
+        }
+    }
+
+    /// The refusal says WHY, because the usual remedy question ("which file?") has no answer
+    /// here: the segment names none. A bare `xargs cat` keeps the clause note out of the text
+    /// (no other clauses), so this asserts the note itself — a two-stage pipeline would carry
+    /// the word `xargs` in the clause note and could not tell the two apart.
+    #[test]
+    fn a_reader_fed_by_xargs_is_refused_with_the_reason() {
+        let hint = check_source_file_access_at_root("xargs cat").expect("blocks");
+        assert!(
+            hint.contains("stdin"),
+            "the note must say the paths arrive on stdin: {hint}"
+        );
+    }
+
+    /// The remedy is chosen from the command `xargs` RUNS, not from `xargs`: a `sed` behind it
+    /// gets sed's grep suggestion, as `source_gate_remedy_is_chosen_from_the_executed_command`
+    /// pins for a keyword prefix.
+    #[test]
+    fn source_gate_remedy_for_xargs_is_chosen_from_the_command_it_runs() {
+        let hint = check_source_file_access_at_root("xargs sed -n 1p").expect("blocks");
+        assert!(
+            hint.contains("grep(regex)"),
+            "sed's remedy names grep: {hint}"
+        );
+    }
+
+    /// `sudo` joined the shared head rule, so IL-3 sees through it too: `sudo cargo test | tail`
+    /// masks cargo's exit status exactly as `cargo test | tail` does. This is the intended
+    /// direction of the shared rule, pinned so it is a decision rather than a side effect.
+    #[test]
+    fn il3_sees_through_sudo() {
+        assert!(detect_il3_violation("sudo cargo test | tail -5").is_some());
     }
 
     #[test]
