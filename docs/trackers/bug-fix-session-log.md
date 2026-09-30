@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 187
-entry_high_water_W: 148
+entry_high_water_W: 149
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -262,6 +262,7 @@ entry_high_water_W: 148
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-148 | 2026-09-30 | med | **A red baseline on files I had not touched was an authorship question, and asking it before the first edit kept two sessions from writing the same markers.** Suite, then `git status`, then provenance, then the peer's diff read-only. | Inferred, not observed: a second marker helper over three of the peer's uncommitted functions in a hash-frozen file, plus literals re-invalidated. Observed: the peer's claim that the markers were done held at the bytes. Second data point after `W-135`. | validated |
+| W-149 | 2026-09-30 | med | **A comment predicting the exact regression sat beside a fixture that could not see it.** Reading what the fixture PASSES (`is_write=false` hard-coded for `"workspace"`), not what it asserts, exposed the gap. | Inferred: an exemption fix with both old guards green and the exemption unguarded. Observed: widening it was caught by the new exact-set pin alone. | validated |
 | W-147 | 2026-09-30 | med | size the fixture to the limit rather than re-derive boundaries | ~8 hand-derived literals avoided, each a chance for a still-green off-by-N | validated |
 | W-144 | 2026-09-16 | med | **The discriminator was already in the output OF THE RUN THAT ESTABLISHED THE FINDING** — three sessions, three instruments, one evening: `FutureWarning` ×3, a `FAILED` with no `left:`/`right:` lines, a `64 vs 99` line count. Worse than CLAUDE.md's "assert on the name": nobody chose a proxy, the answer was on screen in the scrollback being read to write up the result. Each caught only by a peer stating a checkable fact that collided. | validated |
 | W-146 | 2026-09-28 | med | **A scout scoped to one question read the whole function and found the mechanism I was about to hand-maintain.** Checking whether `update_entry` is safe to parallelize surfaced `resync_snapshot_row`: with a declared `snapshot_anchor`, each patched row's body line is re-rendered in the params transaction. | A policy ("edit the Index line in the same commit") written into three surfaces the day before, 54 hand edits of a 12-column table, and silent decay at the first forgotten one. Instead: 54/54 `row_resynced: true`, 54/54 lines matched params, and one gap in the mechanism filed (`60fcfdf99e3288c6`, fixed `6a6a321e`) | validated |
@@ -17327,6 +17328,16 @@ At that point `df` showed 64G free, and no process was still building into a leg
 **Fix idea / Pointer:** re-run `git status` on the target files immediately before the FIRST edit as well as at pickup, and read a `wip_authors` line on any red as a possible second writer, not only as a cause. Two of my three controls were also wrong for a reason worth keeping: a plain `fn`'s range is AST-derived, so a lying mock-LSP range cannot force a sibling drop; the existing tests use an `impl` block for that.
 
 ---
+
+## W-149 — A comment predicting the exact regression sat beside a fixture that could not see it, and reading the fixture's INPUT, not its assertion, exposed the gap
+
+**Valid:** dated 2026-09-30
+
+**Observed:** scouting the read-only gate before touching it, `read_tools_always_allowed` (`src/util/path_security.rs`) carried a comment predicting this bug in advance: if `workspace` ever gained an `is_write=true`, `activate(read_only: false)` would become unreachable. `workspace` did gain it (the 2026-09-03 lock fix) and the bug landed anyway, because the fixture hard-codes `is_write=false` for the string `"workspace"`. It asserts about a call that does not exist and never about `activate`, so it stayed green through the regression it names. Reading what the test PASSES, not what it asserts, is what showed it. The reproduction was then written on the real dispatch path (`call_tool_inner`), red against the unfixed code, and the exemption was pinned by an exact-set test because the old population walk could be made green by widening the exemption.
+
+**Counterfactual:** a fix that only exempted `workspace` in `check_tool_access` would have kept `read_tools_always_allowed` and `every_write_call_is_refused_under_a_write_block` green and left the exemption unguarded. Observed: mutating the exemption to every `workspace` action was caught by the new pin ALONE; the end-to-end tests stayed green.
+
+Fix `acda6a40`, bug archived as `df38c4ac3b9a64a5`.
 
 ## Template for new entries
 
