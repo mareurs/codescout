@@ -39,7 +39,7 @@ Several venues were reported from memory; the subagents flagged these, and they 
   - **[cited]** The HF LoRA recipe trains the `score` head at the body's lr (HF blog, LoRA for sequence classification).
   - **[verified here]** JevK5 itself was LoRA-trained at lr 3e-5, warmup 20, 2 epochs, according to the documented command in `jevk5/training/lora.py`.
 - **An input defect: every sentence start loses its leading space.**
-  - **[verified here]** For both tokenizers. Filed as `docs/issues/2026-09-25-encode-units-drops-sentence-leading-space.md`.
+  - **[verified here]** For both tokenizers. Filed as `docs/issues/archive/2026-09-25-encode-units-drops-sentence-leading-space.md`.
 - **What the literature supports as remedies:**
   - normalise the marker feature, or train the head at the body's lr (≤ 1e-4), and clip the head separately;
   - LP-FT: fit the head on frozen features first (Kumar et al., ICLR 2022, arXiv 2202.10054) **[cited]**;

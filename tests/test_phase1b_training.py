@@ -155,7 +155,7 @@ class LoadExtraRows(unittest.TestCase):
             self.load([cx_row(0, fold="T")])
 class GTok:
     """A stand-in for the BPE tokenizers of the two arms, reproducing only the convention that bug
-    fae16c0498d9c977 is about: a word preceded by a space is a DIFFERENT token (`Ġword`) from the same word
+    a90c15852addaa41 is about: a word preceded by a space is a DIFFERENT token (`Ġword`) from the same word
     at the start of the text (`word`). No model is needed, so this runs anywhere torch imports.
 
     `split_spaced` words cost TWO tokens (`Ġ`, `word`) when spaced and one when not, the way a BPE vocabulary
@@ -196,7 +196,7 @@ def occurs(part, whole):
 
 
 class EncodeUnitsLeadingSpace(unittest.TestCase):
-    """Bug fae16c0498d9c977: `encode_units` tokenised each sentence alone, so every sentence after the first
+    """Bug a90c15852addaa41: `encode_units` tokenised each sentence alone, so every sentence after the first
     began `Nobody` where running text has `ĠNobody`. Stage 1's recipes turn `space_fix` on; Phase 1's stays
     off, because its registered result must stay reproducible, and both directions are pinned here."""
 

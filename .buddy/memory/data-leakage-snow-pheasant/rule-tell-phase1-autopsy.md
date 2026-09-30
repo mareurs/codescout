@@ -16,4 +16,4 @@ tags: [rule-tell, fine-tuning, autopsy, preregistration]
 - `docs/evals/phase1b-local-classifier-preregistration.md` — the unregistered next-attempt draft, with its revision history.
 - `docs/research/2026-09-25-phase1-training-research-synthesis.md` — the four research reports, each claim marked verified / cited / derivation.
 - `docs/evals/data/2026-09-24-rule-tell/phase1b/diagnostics/` — the raw diagnostic outputs.
-- `docs/issues/2026-09-25-encode-units-drops-sentence-leading-space.md` — the tokenisation defect both arms carried.
+- `docs/issues/archive/2026-09-25-encode-units-drops-sentence-leading-space.md` — the tokenisation defect both arms carried.
