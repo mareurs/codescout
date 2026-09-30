@@ -372,9 +372,10 @@ REASONS = ("claim_marker", "end_turn", "edit", "git_or_rm_or_release", "dispatch
   - `frame --corpus C --out FRAME.json`: writes `{"corpus_id", "counts": frame_counts,
     "n_units"}` plus the sha256 of `sampler.py` and `packet.py`. Prints the counts. May write
     anywhere, since it holds no text.
-  - `draw --corpus C --set DIR --seed S --substantive N --routine M [--exclude-set DIR2]`:
+  - `draw --corpus C --set DIR --seed S --substantive N --routine M [--exclude-set DIR2 ...]`:
     - refuses a `DIR` inside the repo, or one that already exists (creates it with mode 700);
-    - draws via `sampler.draw` (`exclude` holds the case keys in DIR2's `key.json`);
+    - draws via `sampler.draw` (`exclude` holds the union of the case keys in every DIR2's `key.json`;
+      the flag repeats, added in 4a4e6e9e so the main draw can exclude every pilot);
     - writes `DIR/key.json` (`{case_id: {"case_key", "stratum", "kind", "copy_id", "reasons"}}`)
       and `DIR/draw.json` with `order` shuffled by `random.Random(S + 1)`.
   - `render --corpus C --set DIR`: builds every packet into `DIR/packets/<case_id>.md` and fills
@@ -443,8 +444,11 @@ REASONS = ("claim_marker", "end_turn", "edit", "git_or_rm_or_release", "dispatch
 
 ### Task 8: Main draw and render
 
-- [ ] **Step 1: Draw.** `run.py draw --corpus … --set ~/work/claude/measurement-corpora/2026-09-29-labelled-main --seed <registered seed> --substantive 60 --routine 20 --exclude-set ~/work/claude/measurement-corpora/2026-09-29-labelled-pilot`,
-  then `run.py render …`. Also pass `--frame …` (and `--exclude-units …` if registered); `draw` prints the session counts (aggregates).
+- [ ] **Step 1: Draw.** `run.py draw --corpus … --set ~/work/claude/measurement-corpora/2026-09-29-labelled-main --seed <registered seed> --substantive 60 --routine 20 --exclude-set <EVERY pilot set, one flag each>`,
+  then `run.py render …`. After the 2026-09-30 ruling (fresh pilot-2; up to 3 pilots) that is at least
+  `--exclude-set ~/work/claude/measurement-corpora/2026-09-30-labelled-pilot-1r --exclude-set ~/work/claude/measurement-corpora/2026-09-30-labelled-pilot-2`
+  (pilot-1r holds exactly pilot-1's units), plus pilot-3 if one is drawn. Amendment 1 lists the pilot sets; pass every
+  one it lists. A forgotten flag cannot be detected by the code and leaves that pilot's units in the one-shot main pool. Also pass `--frame …` (and `--exclude-units …` if registered); `draw` prints the session counts (aggregates).
   Confirm that the sha256 of `sampler.py`, `packet.py`, `estimate.py` **and** `run.py` still equal the
   registered values **before** drawing, and stop for a ruling if any differs.
 - [ ] **Step 2: Export and commit.** Run `run.py export … --out-dir docs/evals/data/2026-09-27-system1-base-rates/labelled-sample/`,
