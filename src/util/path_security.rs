@@ -1226,7 +1226,15 @@ fn pipeline_segments(command: &str) -> Vec<String> {
     // Quote-safe without further work — `split_outside_quotes` tracks quote state across
     // line breaks, and a backslash-newline continuation is consumed by its escape branch.
     // BUG docs/issues/archive/2026-08-17-source-gate-does-not-split-on-newlines.md
-    split_outside_quotes(command, &["&&", "||", ";", "\n"])
+    //
+    // A lone `&` backgrounds the command on its left and starts a new one on its right, so it
+    // ends a pipeline exactly as `;` does: `echo x & rg … | tail` pipes `rg`, not `echo x & rg`.
+    // Left out, the segment's pipe LHS was headed by `echo` and an unbounded producer passed;
+    // the reverse, `rg … & echo b | tail`, was refused for a pipe `rg` never feeds.
+    // `split_outside_quotes` matches this entry only where `is_background_ampersand` agrees, so
+    // `2>&1`, `>&2`, `&>`, `<&3` and `|&` stay whole.
+    // docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+    split_outside_quotes(command, &["&&", "||", ";", "\n", "&"])
 }
 
 /// Detect Iron Law 3 violation: piping a **live, potentially-unbounded**
@@ -1335,12 +1343,17 @@ fn il3_offending_lead(segment: &str) -> Option<String> {
     // on it fabricates stages the shell will never create — see
     // `il3_allows_a_quoted_pipe_inside_an_argument`.
     //
-    // Only `|` is listed, and that is safe *because* `pipeline_segments` already
+    // Only the pipe forms (`|&`, `|`) are listed, and that is safe *because* `pipeline_segments` already
     // consumed every unquoted `||`. A `||` that survives to here is inside quotes, so
     // `split_outside_quotes` correctly leaves it alone. The invariant is pinned by
     // `il3_does_not_treat_the_rhs_of_a_logical_or_as_a_pipe_stage` rather than left as
     // a comment, because it is held by a caller.
-    let stages = split_outside_quotes(segment, &["|"]);
+    // `|&` is a pipe too, the one that also carries stderr (`2>&1 |`), so it is listed before
+    // `|`. Split on `|` alone it left the downstream stage as `& tail -1`, whose head is `&`,
+    // not a trimmer, and `rg … |& tail` passed. A lone `&` never reaches here: `pipeline_segments`
+    // already ended the segment at it, and `is_background_ampersand` keeps `|&` whole there.
+    // docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+    let stages = split_outside_quotes(segment, &["|&", "|"]);
     let (pre_pipe, downstream) = match stages.split_first() {
         Some((first, rest)) if !rest.is_empty() => (first.clone(), rest),
         // No pipe at all — nothing to trim.
@@ -1916,7 +1929,11 @@ fn is_background_ampersand(s: &str, at: usize) -> bool {
 /// would resolve against /tmp, read as outside the project, and the read would be ALLOWED: a
 /// bypass created by the fix for a bypass. As a stage separator the run has two stages, so
 /// `cd_effect` (which applies only to a single-stage run) is never consulted.
-const SOURCE_GATE_STAGE_SEPARATORS: &[&str] = &["|", "&"];
+/// `|&` is a pipe that also carries stderr, and is listed before `|` so the `&` is not left as
+/// the head of the next stage (`echo x |& cat src/main.rs` read its stage as `& cat …`, headed
+/// by `&`). Both separators are matched by `split_outside_quotes`, which keeps `2>&1`, `>&2`,
+/// `&>` and `<&3` whole.
+const SOURCE_GATE_STAGE_SEPARATORS: &[&str] = &["|&", "|", "&"];
 
 /// Returns a hint string if `command` is a file-reading tool targeting a source file,
 /// `None` if the command is safe to execute.
@@ -4212,6 +4229,31 @@ mod tests {
             "tail in command position must stay blocked behind an assignment"
         );
     }
+    /// `|&` is a pipe that also carries stderr. The gate splits stages on `|`, which left the next
+    /// stage as `& cat src/main.rs`, headed by `&`, so the reader behind it was never examined.
+    /// Measured 2026-09-30 on the live binary: `echo x |& cat build.rs | wc -l` returned the file,
+    /// where `echo x 2>&1 | cat build.rs | wc -l` is refused.
+    /// docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+    #[test]
+    fn source_gate_sees_a_reader_behind_pipe_ampersand() {
+        for cmd in ["echo x |& cat src/main.rs", "ls |& head -5 src/lib.rs"] {
+            assert!(
+                check_source_file_access_at_root(cmd).is_some(),
+                "must refuse: `{cmd}`"
+            );
+        }
+        // Partners: a non-reader behind `|&`, and a quoted `|&` that is an argument, not a pipe.
+        for cmd in [
+            "echo x |& ls src/main.rs",
+            "git log -3 |& wc -l",
+            r#"echo "a |& cat src/main.rs""#,
+        ] {
+            assert!(
+                check_source_file_access_at_root(cmd).is_none(),
+                "must allow: `{cmd}`"
+            );
+        }
+    }
 
     #[test]
     fn source_gate_remedy_is_chosen_from_the_executed_command() {
@@ -4422,7 +4464,9 @@ mod tests {
     /// blocks, so a gate-level assertion could not tell a correct split from a broken one.
     #[test]
     fn a_lone_ampersand_splits_but_redirections_and_quoted_ones_do_not() {
-        const STAGE: &[&str] = &["|", "&"];
+        // The production constant, not a copy: a local `["|", "&"]` here kept this test green
+        // while the gate's real list drifted, and pinned the `|&` bypass as correct.
+        const STAGE: &[&str] = SOURCE_GATE_STAGE_SEPARATORS;
         assert_eq!(split_outside_quotes("a & b", STAGE), vec!["a", "b"]);
         for whole in [
             "cargo build 2>&1",
@@ -4438,9 +4482,10 @@ mod tests {
                 "`{whole}` contains an ampersand that is not a background operator"
             );
         }
-        // `|&` pipes stderr too: the `|` splits, and the `&` that follows is part of that
-        // operator, not a second separator.
-        assert_eq!(split_outside_quotes("a |& b", STAGE), vec!["a", "& b"]);
+        // `|&` pipes stderr too and is ONE separator. Split on `|` alone it left the next stage
+        // as `& b`, headed by `&`, so a reader behind it was never examined
+        // (`echo x |& cat src/main.rs`).
+        assert_eq!(split_outside_quotes("a |& b", STAGE), vec!["a", "b"]);
     }
 
     #[test]
@@ -5370,6 +5415,67 @@ EOF"#;
         );
         // A quoted `||` never reaches the separator logic at all.
         assert!(detect_il3_violation("git log --grep='a||head' -3").is_none());
+    }
+    /// A lone `&` ends a command the way `;` does: `A & B | C` backgrounds `A` and pipes `B` into
+    /// `C`. With `&` in no separator list, `echo x & rg … | tail` was ONE segment whose pipe LHS
+    /// read as `echo x & rg …`, headed by `echo`, so an unbounded producer passed and the trimmer
+    /// hid its output. Measured 2026-09-30 on the live binary: exit 0, where `rg … | tail`
+    /// alone is refused.
+    /// docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+    #[test]
+    fn il3_sees_an_unbounded_producer_after_a_background_ampersand() {
+        for cmd in [
+            "echo x & rg -c foo Cargo.toml | tail -1",
+            "sleep 1 & cargo test | grep FAILED",
+            "true & find . -name '*.rs' | head -5",
+        ] {
+            assert!(detect_il3_violation(cmd).is_some(), "must refuse: `{cmd}`");
+        }
+    }
+
+    /// The other direction, and red on the old code for the opposite reason: `rg … & echo b | tail`
+    /// backgrounds the `rg`, so only `echo b` feeds the trimmer and the pipeline is bounded. The old
+    /// code read `rg … & echo b` as the LHS, headed by `rg`, and refused it.
+    #[test]
+    fn il3_does_not_pipe_a_backgrounded_producer_into_a_later_trimmer() {
+        for cmd in [
+            "rg -c foo Cargo.toml & echo b | tail -1",
+            "cargo test & echo done | head -2",
+        ] {
+            assert!(detect_il3_violation(cmd).is_none(), "must allow: `{cmd}`");
+        }
+    }
+
+    /// The `&` in a redirection is not the background operator. Each fixture would turn into a
+    /// bounded fragment (`2`, `1`) if the `&` were split, and then be ALLOWED, so these fail
+    /// exactly when a redirection is cut in half.
+    #[test]
+    fn il3_keeps_redirection_ampersands_whole() {
+        for cmd in [
+            "cargo test 2>&1 | tail -1",
+            "rg -c foo Cargo.toml >&2 | tail -1",
+            "cargo test &> out.log | tail -1",
+        ] {
+            assert!(detect_il3_violation(cmd).is_some(), "must refuse: `{cmd}`");
+        }
+    }
+
+    /// `|&` is a pipe that also carries stderr, so it is `2>&1 |`. Split on `|` alone it left the
+    /// downstream stage as `& tail -1`, whose head is `&`, not a trimmer, and the pipeline passed.
+    /// Measured 2026-09-30 on the live binary: `rg … |& tail -1` exit 0, `rg … 2>&1 | tail -1`
+    /// refused.
+    #[test]
+    fn il3_treats_pipe_ampersand_as_a_pipe() {
+        for cmd in [
+            "rg -c foo Cargo.toml |& tail -1",
+            "cargo test |& grep FAILED",
+        ] {
+            assert!(detect_il3_violation(cmd).is_some(), "must refuse: `{cmd}`");
+        }
+        // Partners, each admitted by every other rule: a bounded LHS, and a collapsing stage.
+        for cmd in ["ls src |& tail -1", "rg -c foo Cargo.toml |& wc -l"] {
+            assert!(detect_il3_violation(cmd).is_none(), "must allow: `{cmd}`");
+        }
     }
 
     /// The bypass, and the more serious half of this defect: `pipeline_segments` was
