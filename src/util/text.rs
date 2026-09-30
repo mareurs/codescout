@@ -398,7 +398,17 @@ pub fn reindent_block(new_string: &str, agent_base: &str, file_base: &str) -> St
 /// intact too.
 pub fn reindent_to(block: &str, target_base: &str) -> String {
     let mask = literal_continuation_mask(block);
-    let agent_base = min_indent_outside_literals(block, &mask);
+    match shift_source(block, &mask, target_base) {
+        Some(agent_base) => reindent_block(block, agent_base, target_base),
+        None => block.to_string(),
+    }
+}
+/// The base [`reindent_to`] would shift FROM, or `None` when it returns the block untouched.
+///
+/// One decision, asked by both [`reindent_to`] and [`indent_unit_conflict`], so the predicate
+/// can never describe a shift the function does not make.
+fn shift_source<'a>(block: &'a str, mask: &[bool], target_base: &str) -> Option<&'a str> {
+    let agent_base = min_indent_outside_literals(block, mask);
     // The first line can never be a literal continuation, so the mask needs no
     // consulting here; blank lines carry no indentation signal.
     let first_base = block
@@ -406,9 +416,80 @@ pub fn reindent_to(block: &str, target_base: &str) -> String {
         .find(|l| !l.trim().is_empty())
         .map(leading_ws);
     if agent_base == target_base || first_base == Some(target_base) {
-        return block.to_string();
+        None
+    } else {
+        Some(agent_base)
     }
-    reindent_block(block, agent_base, target_base)
+}
+
+/// The whitespace character an indentation is made of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndentUnit {
+    Tabs,
+    Spaces,
+}
+
+impl IndentUnit {
+    /// The plural a message shows a caller.
+    pub fn name(self) -> &'static str {
+        match self {
+            IndentUnit::Tabs => "tabs",
+            IndentUnit::Spaces => "spaces",
+        }
+    }
+}
+
+/// A body whose inner indentation is in one unit, headed for a file that indents in the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnitConflict {
+    /// The unit the body's own inner indentation uses.
+    pub body: IndentUnit,
+    /// The unit the target's indentation uses.
+    pub file: IndentUnit,
+}
+
+/// Would [`reindent_to`] leave one block indented with both tabs and spaces?
+///
+/// [`reindent_block`] swaps the shared base and keeps every line's remaining indentation in the
+/// caller's own unit, so a tab-indented body re-based onto a space-indented file comes out as the
+/// file's spaces followed by the body's tabs — valid to an interpreter that accepts it, and a
+/// layout whose depth depends on the reader's tab width.
+/// `docs/issues/2026-09-30-edit-code-rebasing-a-tab-indented-body-onto-a-space-file-mixes-indent-units.md`.
+///
+/// Reports a conflict only for what the shift itself would create: a line's inner indentation,
+/// left in the body's unit under a base in the file's. So it stays silent where the result is
+/// one unit — a body with no inner indentation converts cleanly — and where nothing is
+/// re-based, where the target names no single unit, or where the text is a string literal's
+/// value that [`reindent_block`] emits verbatim. A body that mixes units on its own, placed
+/// where no shift happens, is the caller's bytes and not this check's to judge.
+pub fn indent_unit_conflict(block: &str, target_base: &str) -> Option<UnitConflict> {
+    // A base of no characters, or of both kinds, names no unit to be inconsistent with.
+    let file = pure_unit(target_base)?;
+    let mask = literal_continuation_mask(block);
+    let agent_base = shift_source(block, &mask, target_base)?;
+    block
+        .split('\n')
+        .zip(mask.iter().copied())
+        .filter(|(line, masked)| !*masked && !line.trim().is_empty())
+        // A ragged line — one not starting with the base — is rebuilt from its trimmed text by
+        // `reindent_block`, so it keeps no inner indentation of its own.
+        .filter_map(|(line, _)| line.strip_prefix(agent_base))
+        .find_map(|rest| {
+            let inner = leading_ws(rest);
+            let body = match file {
+                IndentUnit::Spaces => inner.contains('\t').then_some(IndentUnit::Tabs),
+                IndentUnit::Tabs => inner.contains(' ').then_some(IndentUnit::Spaces),
+            }?;
+            Some(UnitConflict { body, file })
+        })
+}
+/// The single unit `ws` is made of, or `None` for an empty run or one that mixes both kinds.
+fn pure_unit(ws: &str) -> Option<IndentUnit> {
+    match (ws.contains('\t'), ws.contains(' ')) {
+        (true, false) => Some(IndentUnit::Tabs),
+        (false, true) => Some(IndentUnit::Spaces),
+        _ => None,
+    }
 }
 
 /// Extract lines from `start_line` to `end_line` (1-indexed, inclusive) without
@@ -693,6 +774,82 @@ mod tests {
             out.contains("\n\";\n"),
             "the closing line is literal content too: {out:?}"
         );
+    }
+    #[test]
+    fn an_indent_unit_conflict_names_both_units_in_each_direction() {
+        // The bug's own shape: a tab-indented body onto a file that indents with four spaces. The
+        // base changes unit, but the inner level keeps its tab, so one block carries both.
+        assert_eq!(
+            indent_unit_conflict("\tdef d(self):\n\t\treturn 40", "    "),
+            Some(UnitConflict {
+                body: IndentUnit::Tabs,
+                file: IndentUnit::Spaces
+            })
+        );
+        // The reverse direction, which the bug file named as untested.
+        assert_eq!(
+            indent_unit_conflict("    def d(self):\n        return 40", "\t"),
+            Some(UnitConflict {
+                body: IndentUnit::Spaces,
+                file: IndentUnit::Tabs
+            })
+        );
+        // A body dedented to column 0 has no base to swap, but its inner step is still in the
+        // body's own unit, and the shift puts the file's base in front of it.
+        assert_eq!(
+            indent_unit_conflict("def d():\n    return 1", "\t"),
+            Some(UnitConflict {
+                body: IndentUnit::Spaces,
+                file: IndentUnit::Tabs
+            })
+        );
+    }
+
+    #[test]
+    fn no_indent_unit_conflict_when_the_shifted_block_is_one_unit() {
+        // Same unit on both sides: the ordinary case, and the one a check that disliked any shift
+        // would refuse.
+        assert_eq!(indent_unit_conflict("def d():\n    return 1", "    "), None);
+        assert_eq!(indent_unit_conflict("def d():\n\treturn 1", "\t"), None);
+        // A body with NO inner indentation converts cleanly — `\t` becomes four spaces on every
+        // line — so refusing it would block the one case where the unit change is harmless.
+        assert_eq!(indent_unit_conflict("\tx = 1\n\ty = 2", "    "), None);
+        // Nothing to put in front of the block: column 0 has no unit.
+        assert_eq!(indent_unit_conflict("\tdef d():\n\t\treturn 1", ""), None);
+        // A target that already mixes both units gives no unit to be inconsistent with.
+        assert_eq!(
+            indent_unit_conflict("def d():\n    return 1", "\t    "),
+            None
+        );
+        // `reindent_to` returns a block already based at the target untouched (its first line is
+        // there), so nothing is re-based and nothing is mixed by us.
+        assert_eq!(
+            indent_unit_conflict("    def d(self):\n\treturn 1", "    "),
+            None
+        );
+        // The tab inside a multi-line string literal is the literal's value, and
+        // `reindent_block` emits it verbatim, so it cannot be a unit conflict.
+        assert_eq!(
+            indent_unit_conflict("s = \"\"\"a\n\tb\n\"\"\"", "    "),
+            None
+        );
+        // A whitespace-only line is emitted empty.
+        assert_eq!(
+            indent_unit_conflict("def d():\n\t\n    return 1", "    "),
+            None
+        );
+        // A ragged line — one that does not start with the block's base — is rebuilt from its
+        // trimmed text, so its own tabs are dropped rather than kept. The first line's two spaces
+        // set the base (`min_by_key` keeps the first of two equal-length candidates).
+        assert_eq!(indent_unit_conflict("  a\n\t\tb", "    "), None);
+    }
+    #[test]
+    fn reindent_to_returns_a_block_whose_minimum_is_the_target_byte_for_byte() {
+        // The first line is DEEPER than the target, so the first-line clause of the no-op guard does
+        // not apply; only `agent_base == target_base` does. Shifting from a base to itself would
+        // still empty the whitespace-only line, which is what tells the two paths apart.
+        let body = "        a\n   \n    b";
+        assert_eq!(reindent_to(body, "    "), body);
     }
 
     #[test]

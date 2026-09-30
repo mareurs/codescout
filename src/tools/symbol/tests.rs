@@ -10289,6 +10289,41 @@ fn replace_syntax_broken_names_the_body_before_the_range() {
         "hint sends the caller to the body first: {hint}"
     );
 }
+#[test]
+fn indent_unit_refusal_names_both_units_and_both_repairs() {
+    use crate::util::text::{IndentUnit, UnitConflict};
+    let (msg, hint) = super::edit_code::indent_unit_refusal(
+        "replace",
+        "Foo/b",
+        &UnitConflict {
+            body: IndentUnit::Tabs,
+            file: IndentUnit::Spaces,
+        },
+    );
+    // Both units, in the direction they apply: the BODY is tabs and the FILE is spaces. A
+    // swapped pair would send the caller to re-indent in the unit they already used.
+    assert!(msg.contains("indented with tabs"), "{msg}");
+    assert!(msg.contains("indents with spaces"), "{msg}");
+    assert!(msg.contains("replace('Foo/b')"), "names the call: {msg}");
+    // The remedy has two answers a caller can act on, and the second is a real parameter.
+    assert!(
+        hint.contains("file's own unit (spaces)"),
+        "names the unit to use: {hint}"
+    );
+    assert!(hint.contains("reindent=false"), "names the escape: {hint}");
+
+    let (msg, hint) = super::edit_code::indent_unit_refusal(
+        "insert",
+        "Foo",
+        &UnitConflict {
+            body: IndentUnit::Spaces,
+            file: IndentUnit::Tabs,
+        },
+    );
+    assert!(msg.contains("indented with spaces"), "{msg}");
+    assert!(msg.contains("indents with tabs"), "{msg}");
+    assert!(hint.contains("file's own unit (tabs)"), "{hint}");
+}
 
 // ---- `reindent`: the caller's switch for "my indentation is final" ----
 //

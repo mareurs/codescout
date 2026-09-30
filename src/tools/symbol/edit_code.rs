@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use crate::tools::{
     guard_worktree_write, optional_bool_param, RecoverableError, Tool, ToolContext,
 };
-use crate::util::text::reindent_to;
+use crate::util::text::{indent_unit_conflict, reindent_to, UnitConflict};
 
 use super::display::{
     format_insert_code, format_remove_symbol, format_rename_symbol, format_replace_symbol,
@@ -451,6 +451,54 @@ fn rebase_body(body: &str, target_base: &str, reindent: bool) -> String {
     } else {
         body.to_string()
     }
+}
+/// Refusal text for a body whose inner indentation is in a different unit from the file's, so
+/// re-basing it would leave one block indented with both tabs and spaces.
+///
+/// Returns `(message, hint)` so a test can read both without a live tool call. The hint names the
+/// file's own unit as the repair and `reindent=false` as the way to take the layout into one's
+/// own hands — a caller who reads "wrong unit" can act on either, which is the question a
+/// refusal has to be answerable by.
+pub(crate) fn indent_unit_refusal(
+    action: &str,
+    label: &str,
+    conflict: &UnitConflict,
+) -> (String, String) {
+    let (body, file) = (conflict.body.name(), conflict.file.name());
+    (
+        format!(
+            "edit_code {action}('{label}') was given a body indented with {body}, but this \
+             symbol's file indents with {file}; re-basing it onto the symbol's column would \
+             leave one block indented with both. Not written."
+        ),
+        format!(
+            "Indent the body with the file's own unit ({file}) and retry. To splice the body \
+             exactly as written instead, pass reindent=false — the syntax check still applies. \
+             symbols(name=..., include_body=true) shows the declaration as it stands."
+        ),
+    )
+}
+
+/// [`rebase_body`], refusing first when the re-base would mix indentation units.
+///
+/// Asked only when `reindent` is on: with it off the body is spliced as written, and the
+/// caller has taken the layout into their own hands. The repair closure in `do_insert` keeps
+/// calling [`rebase_body`] directly, because it cannot return an error and its input is the
+/// body that already passed this check before its escapes were decoded.
+fn checked_rebase(
+    body: &str,
+    target_base: &str,
+    reindent: bool,
+    action: &str,
+    label: &str,
+) -> Result<String, RecoverableError> {
+    if reindent {
+        if let Some(conflict) = indent_unit_conflict(body, target_base) {
+            let (message, hint) = indent_unit_refusal(action, label, &conflict);
+            return Err(RecoverableError::with_hint(message, hint));
+        }
+    }
+    Ok(rebase_body(body, target_base, reindent))
 }
 
 impl EditCode {
@@ -1212,7 +1260,13 @@ impl EditCode {
         // See do_insert for why the column is sampled at the validated `start_line`
         // rather than at the editing range's start.
         let target_base = anchor_indent(&lines, sym.start_line as usize);
-        let effective_body = rebase_body(&effective_body, &target_base, reindent);
+        let effective_body = checked_rebase(
+            &effective_body,
+            &target_base,
+            reindent,
+            "replace",
+            name_path,
+        )?;
 
         let pre_ast = crate::ast::extract_symbols(&full_path).ok();
         let pre_count = pre_ast
@@ -1419,7 +1473,7 @@ impl EditCode {
         // `editing_start_line` says — that is a different question from what column
         // this symbol sits at.
         let target_base = anchor_indent(&lines, sym.start_line as usize);
-        let reindented = rebase_body(code, &target_base, reindent);
+        let reindented = checked_rebase(code, &target_base, reindent, "insert", &sym.name)?;
         let code_lines: Vec<&str> = reindented.lines().collect();
         let insert_at0 = match position {
             "before" => editing_start_line(&sym, &lines),

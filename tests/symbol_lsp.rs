@@ -948,6 +948,235 @@ async fn insert_code_accepts_a_consistently_indented_python_method() {
         "the new method must be written verbatim; got:\n{result}"
     );
 }
+/// The mirror of `python_class_with_three_methods`: the same class indented with TABS, so the
+/// file's unit is the one a space-indented body disagrees with.
+async fn tab_indented_python_class() -> (tempfile::TempDir, ToolContext, &'static str) {
+    // 0-indexed lines: 0 class, 1-2 a, 4-5 b.
+    let src = "class Foo:\n\tdef a(self):\n\t\treturn 1\n\n\tdef b(self):\n\t\treturn 2\n";
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.py", src)], |root| {
+        let file = root.join("src/lib.py");
+        let method = |name: &str, start: u32, end: u32| SymbolInfo {
+            name: name.to_string(),
+            name_path: format!("Foo/{name}"),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: start,
+            end_line: end,
+            start_col: 1,
+            children: vec![],
+            range_start_line: Some(start),
+            detail: None,
+        };
+        let class = SymbolInfo {
+            name: "Foo".to_string(),
+            name_path: "Foo".to_string(),
+            kind: SymbolKind::Class,
+            file: file.clone(),
+            start_line: 0,
+            end_line: 5,
+            start_col: 0,
+            children: vec![method("a", 1, 2), method("b", 4, 5)],
+            range_start_line: Some(0),
+            detail: None,
+        };
+        MockLspClient::new().with_symbols(file.clone(), vec![class])
+    })
+    .await;
+    (dir, ctx, src)
+}
+
+/// `reindent_block` swaps the shared base and keeps each line's remaining indentation in the
+/// body's own unit, so a tab-indented body replacing a method in a four-space file came out as
+/// four spaces followed by a tab. CPython accepts that (col 8, alt col 5 against a level at
+/// 4/4), so nothing refused it and the block carried both units, its depth depending on the
+/// reader's tab width. Observed on the live tool 2026-09-30.
+/// docs/issues/2026-09-30-edit-code-rebasing-a-tab-indented-body-onto-a-space-file-mixes-indent-units.md
+#[tokio::test]
+async fn replace_symbol_refuses_a_tab_body_for_a_space_indented_file() {
+    let (dir, ctx, src) = python_class_with_three_methods().await;
+
+    let err = EditCode
+        .call(
+            json!({
+                "path": "src/lib.py",
+                "symbol": "Foo/b",
+                "action": "replace",
+                "body": "\tdef b(self):\n\t\treturn 40"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("indented with tabs") && msg.contains("indents with spaces"),
+        "the refusal must name both units; got: {msg}"
+    );
+    let result = std::fs::read_to_string(dir.path().join("src/lib.py")).unwrap();
+    assert_eq!(result, src, "nothing may be written for a refused replace");
+}
+
+/// The direction the bug file marked "not run": a space-indented body into a tab-indented file.
+#[tokio::test]
+async fn replace_symbol_refuses_a_space_body_for_a_tab_indented_file() {
+    let (dir, ctx, src) = tab_indented_python_class().await;
+
+    let err = EditCode
+        .call(
+            json!({
+                "path": "src/lib.py",
+                "symbol": "Foo/b",
+                "action": "replace",
+                "body": "    def b(self):\n        return 9"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("indented with spaces") && msg.contains("indents with tabs"),
+        "the refusal must name both units; got: {msg}"
+    );
+    let result = std::fs::read_to_string(dir.path().join("src/lib.py")).unwrap();
+    assert_eq!(result, src, "nothing may be written for a refused replace");
+}
+
+/// `insert` re-bases through the same seam and had the same defect.
+#[tokio::test]
+async fn insert_code_refuses_a_tab_body_for_a_space_indented_file() {
+    let (dir, ctx, src) = python_class_with_three_methods().await;
+
+    let err = EditCode
+        .call(
+            json!({
+                "path": "src/lib.py",
+                "symbol": "Foo/b",
+                "action": "insert",
+                "position": "after",
+                "body": "\tdef d(self):\n\t\treturn 4"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("indented with tabs") && msg.contains("indents with spaces"),
+        "the refusal must name both units; got: {msg}"
+    );
+    let result = std::fs::read_to_string(dir.path().join("src/lib.py")).unwrap();
+    assert_eq!(result, src, "nothing may be written for a refused insert");
+}
+
+/// The control for the three refusals: a body in the FILE's own unit is written, in both
+/// unit directions. Without it a guard that refused every tab-or-space body would pass.
+#[tokio::test]
+async fn replace_symbol_accepts_a_body_in_the_files_own_indent_unit() {
+    let (dir, ctx, _src) = tab_indented_python_class().await;
+
+    EditCode
+        .call(
+            json!({
+                "path": "src/lib.py",
+                "symbol": "Foo/b",
+                "action": "replace",
+                "body": "\tdef b(self):\n\t\treturn 9"
+            }),
+            &ctx,
+        )
+        .await
+        .expect("a tab body in a tab-indented file is one unit and must be written");
+
+    let result = std::fs::read_to_string(dir.path().join("src/lib.py")).unwrap();
+    assert!(
+        result.contains("\tdef b(self):\n\t\treturn 9\n"),
+        "the new body must be written verbatim; got:\n{result:?}"
+    );
+}
+/// The refusal's own remedy, exercised: `reindent=false` splices the body exactly as written and
+/// so takes the layout out of the unit check's hands. A brace language is used because it is one
+/// where the spliced result is valid — Python's own guards refuse most of the layouts that would
+/// exercise this — and the class is four-space indented while the body is tab-indented, which
+/// is precisely the pair the default refuses.
+#[tokio::test]
+async fn replace_symbol_reindent_false_splices_a_unit_mixing_body_as_written() {
+    // 0-indexed lines: 0 class, 1-3 foo, 5-7 bar, 8 close.
+    let src =
+        "class A {\n    foo() {\n        old();\n    }\n\n    bar() {\n        keep();\n    }\n}\n";
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.js", src)], |root| {
+        let file = root.join("src/lib.js");
+        let method = |name: &str, start: u32, end: u32| SymbolInfo {
+            name: name.to_string(),
+            name_path: format!("A/{name}"),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: start,
+            end_line: end,
+            start_col: 4,
+            children: vec![],
+            range_start_line: Some(start),
+            detail: None,
+        };
+        let class = SymbolInfo {
+            name: "A".to_string(),
+            name_path: "A".to_string(),
+            kind: SymbolKind::Class,
+            file: file.clone(),
+            start_line: 0,
+            end_line: 8,
+            start_col: 0,
+            children: vec![method("foo", 1, 3), method("bar", 5, 7)],
+            range_start_line: Some(0),
+            detail: None,
+        };
+        MockLspClient::new().with_symbols(file.clone(), vec![class])
+    })
+    .await;
+
+    let body = "\tfoo() {\n\t\tfresh();\n\t}";
+
+    // The default refuses: the class is indented with spaces, the body with tabs.
+    let err = EditCode
+        .call(
+            json!({
+                "path": "src/lib.js",
+                "symbol": "A/foo",
+                "action": "replace",
+                "body": body
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("indented with tabs"),
+        "premise: without the switch this pair is refused; got: {err}"
+    );
+
+    // The switch the refusal's hint names splices it as written.
+    EditCode
+        .call(
+            json!({
+                "path": "src/lib.js",
+                "symbol": "A/foo",
+                "action": "replace",
+                "body": body,
+                "reindent": false
+            }),
+            &ctx,
+        )
+        .await
+        .expect("reindent=false must take the layout out of the unit check's hands");
+    let result = std::fs::read_to_string(dir.path().join("src/lib.js")).unwrap();
+    assert!(
+        result.contains("class A {\n\tfoo() {\n\t\tfresh();\n\t}\n"),
+        "the body must be spliced exactly as written; got:\n{result:?}"
+    );
+}
 
 /// BUG-041: `textDocument/didChange` is a fire-and-forget notification, so the
 /// LSP may still be reindexing when the next `documentSymbol` query arrives.
