@@ -166,11 +166,7 @@ pub(crate) async fn run_command_interactive(
                 if !tail.is_empty() {
                     accumulated_output.push_str(&tail);
                 }
-                return Ok(json!({
-                    "exit_code": code,
-                    "stdout": accumulated_output,
-                    "interactive_rounds": round,
-                }));
+                return Ok(interactive_response(code, &accumulated_output, round, None));
             }
             Ok(None) => {} // still running
             Err(e) => {
@@ -230,10 +226,32 @@ pub(crate) async fn run_command_interactive(
         accumulated_output.push_str(&tail);
     }
 
-    Ok(json!({
-        "exit_code": -1,
-        "stdout": accumulated_output,
-        "interactive_rounds": round,
-        "note": "process killed or loop exited before natural termination",
-    }))
+    Ok(interactive_response(
+        -1,
+        &accumulated_output,
+        round,
+        Some("process killed or loop exited before natural termination"),
+    ))
+}
+/// The response for an interactive run. **The accumulated output is scrubbed here, once, on the whole
+/// text** and never per chunk: `drain_with_settle` decodes whatever each read returned, so a
+/// credential that straddles two reads is in neither chunk whole. (Bug 8df0779550c5b5d8.) The
+/// elicitation prompt in the loop shows the process output to the operator, a human, and is left as is.
+pub(super) fn interactive_response(
+    exit_code: i32,
+    output: &str,
+    rounds: u32,
+    note: Option<&str>,
+) -> serde_json::Value {
+    let scrubbed = crate::util::redact::redact_credentials(output);
+    let mut result = json!({
+        "exit_code": exit_code,
+        "stdout": scrubbed.text,
+        "interactive_rounds": rounds,
+    });
+    if let Some(note) = note {
+        result["note"] = json!(note);
+    }
+    crate::util::redact::note_in(&mut result, scrubbed.count);
+    result
 }

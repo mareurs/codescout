@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use super::super::{RecoverableError, ToolContext};
 use super::output::handle_successful_output;
 use crate::tools::output_buffer::{BackgroundJob, JobState};
+use crate::util::redact::{note_in, redact_credentials};
 
 /// RAII guard: deletes a named temp file when dropped.
 pub(crate) struct TmpfileGuard(pub(crate) String);
@@ -618,10 +619,18 @@ pub(crate) async fn run_command_inner(
     .await
     {
         Ok(Ok(output)) => {
+            // Bug 8df0779550c5b5d8: scrub at the ONE point the raw streams become text, so the inline
+            // response, the @cmd buffer, test compaction and a background job's `cat @bg_*` all see only
+            // the scrubbed text. The tee capture is read from a file elsewhere and is scrubbed there.
+            let stdout_text = String::from_utf8_lossy(&output.stdout);
+            let stderr_text = String::from_utf8_lossy(&output.stderr);
+            let stdout = redact_credentials(&stdout_text);
+            let stderr = redact_credentials(&stderr_text);
+            let redacted = stdout.count + stderr.count;
             let mut result = handle_successful_output(
                 original_command,
-                String::from_utf8_lossy(&output.stdout).into_owned(),
-                String::from_utf8_lossy(&output.stderr).into_owned(),
+                stdout.text.into_owned(),
+                stderr.text.into_owned(),
                 output.status.code().unwrap_or(-1),
                 buffer_only,
                 unfiltered_tmpfile,
@@ -629,6 +638,7 @@ pub(crate) async fn run_command_inner(
                 ctx,
             )
             .await?;
+            note_in(&mut result, redacted);
             // A capture that was wanted and could not be made says so. Absent, the response
             // would be indistinguishable from a command that simply had no filter to capture.
             if let (Some(note), Some(obj)) = (tee_skipped, result.as_object_mut()) {

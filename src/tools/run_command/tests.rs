@@ -3864,6 +3864,250 @@ async fn unfiltered_output_carries_a_line_count_and_explicit_empty_stdout() {
         "expected the unfiltered capture's line count (3), not silence: {result}"
     );
 }
+// ---- Bug 8df0779550c5b5d8: a credential in command output must not reach the model -------------------
+//
+// Every secret below is PRODUCED by `printf 'ghp_%036d' 0`, so the command text -- which the response
+// may echo, and which is what a transcript records -- never contains a token-shaped literal. The
+// tell that redaction did not run is `ghp_0000`, forty characters of zeros after the prefix.
+
+/// The 40-character token the `printf` commands below print, spelled out for the assertions.
+#[cfg(unix)]
+fn printed_token() -> String {
+    format!("ghp_{}", "0".repeat(36))
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_credential_in_stdout_is_redacted_and_the_response_says_so() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "printf 'HOME=/x\\nGITHUB_TOKEN=ghp_%036d\\nPATH=/bin\\n' 0" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        !result.to_string().contains(&printed_token()),
+        "the token reached the response: {result}"
+    );
+    let stdout = result["stdout"].as_str().expect("stdout");
+    assert!(
+        stdout.contains("GITHUB_TOKEN=<redacted-credential>"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("HOME=/x") && stdout.contains("PATH=/bin"),
+        "only the value is lost, not the lines around it: {stdout}"
+    );
+    assert_eq!(result["redacted_credentials"], 1, "{result}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_credential_on_stderr_is_redacted_too() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(json!({ "command": "printf 'ghp_%036d' 0 >&2" }), &ctx)
+        .await
+        .unwrap();
+    assert!(!result.to_string().contains(&printed_token()), "{result}");
+    assert!(
+        result["stderr"]
+            .as_str()
+            .is_some_and(|s| s.contains("<redacted-credential>")),
+        "{result}"
+    );
+    assert_eq!(result["redacted_credentials"], 1, "{result}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_credential_in_output_large_enough_to_buffer_is_redacted_in_the_buffer() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "{ seq 1 3000; printf 'ghp_%036d\\n' 0; seq 1 10; }" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let output_id = result["output_id"]
+        .as_str()
+        .expect("~14KB of output is buffered");
+    let stored = ctx.output_buffer.get(output_id).unwrap().stdout;
+    assert!(
+        stored.contains("<redacted-credential>"),
+        "the buffer must hold the marker"
+    );
+    assert!(
+        !stored.contains(&printed_token()),
+        "a later `grep @cmd_*` must not be able to surface the token"
+    );
+    assert!(!result.to_string().contains(&printed_token()), "{result}");
+    assert_eq!(result["redacted_credentials"], 1, "{result}");
+}
+
+/// The tee capture is the UNFILTERED stream: `env | grep PATH` shows one line inline while the buffer
+/// behind `unfiltered_output` holds the whole environment. It is read from a temp file, so it never
+/// passes the decode that scrubs `stdout`, and it needs its own scrub.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_credential_only_in_the_unfiltered_capture_is_redacted_there() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "printf 'ghp_%036d\\nb\\n' 0 | grep zzz" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        result["stdout"], "",
+        "the filter hides the token inline: {result}"
+    );
+    let handle = result["unfiltered_output"].as_str().expect("tee ref");
+    let stored = ctx.output_buffer.get(handle).unwrap().stdout;
+    assert!(stored.contains("<redacted-credential>"), "{stored}");
+    assert!(
+        !stored.contains(&printed_token()),
+        "the unfiltered buffer held the raw environment"
+    );
+    assert_eq!(result["redacted_credentials"], 1, "{result}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn the_counts_from_the_inline_output_and_the_capture_add() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "printf 'ghp_%036d\\n' 0 | grep ghp" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(!result.to_string().contains(&printed_token()), "{result}");
+    assert_eq!(
+        result["redacted_credentials"], 2,
+        "one value inline plus the same value in the unfiltered capture: {result}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn output_with_no_credential_carries_no_redaction_key() {
+    let (_dir, ctx) = project_ctx().await;
+    for command in ["printf 'hello\\n'", "printf 'a\\nb\\n' | grep zzz"] {
+        let result = RunCommand
+            .call(json!({ "command": command }), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            result.get("redacted_credentials").is_none(),
+            "{command}: an unedited response must not claim an edit: {result}"
+        );
+        assert!(
+            !result.to_string().contains("<redacted-credential>"),
+            "{command}: {result}"
+        );
+    }
+}
+
+/// A `@bg_*` handle substitutes into a shell command as a file name, so a background job's log is
+/// only ever read through `run_command`. That is why the foreground decode covers it, and this test
+/// is the evidence rather than the assumption. The log FILE on disk still holds the raw value; the
+/// last assertion says so, and would fail if that ever changed without this comment changing.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_background_log_is_redacted_when_it_is_read_back() {
+    let (_dir, ctx) = project_ctx().await;
+    let started = RunCommand
+        .call(
+            json!({ "command": "printf 'ghp_%036d\\n' 0", "run_in_background": true }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let handle = started["output_id"]
+        .as_str()
+        .expect("@bg handle")
+        .to_string();
+    let log = ctx
+        .output_buffer
+        .get_background(&handle)
+        .expect("job")
+        .log_path;
+    let mut raw = String::new();
+    for _ in 0..100 {
+        raw = std::fs::read_to_string(&log).unwrap_or_default();
+        if !raw.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(
+        raw.contains(&printed_token()),
+        "the raw log is not scrubbed on disk: {raw:?}"
+    );
+    let read = RunCommand
+        .call(json!({ "command": format!("cat {handle}") }), &ctx)
+        .await
+        .unwrap();
+    assert!(!read.to_string().contains(&printed_token()), "{read}");
+    assert!(
+        read["stdout"]
+            .as_str()
+            .is_some_and(|s| s.contains("<redacted-credential>")),
+        "{read}"
+    );
+}
+
+#[test]
+fn the_interactive_result_is_redacted_once_on_the_whole_accumulated_output() {
+    // a token that arrived in two reads: neither half is a token, the concatenation is
+    let token = format!("ghp_{}", "0".repeat(36));
+    let (first, second) = token.split_at(20);
+    let mut accumulated = String::from("login: ");
+    accumulated.push_str(first);
+    accumulated.push_str(second);
+    for (code, note) in [(0, None), (-1, Some("killed"))] {
+        let result = super::interactive::interactive_response(code, &accumulated, 3, note);
+        assert!(!result.to_string().contains(&token), "{result}");
+        assert_eq!(result["stdout"], "login: <redacted-credential>", "{result}");
+        assert_eq!(result["redacted_credentials"], 1, "{result}");
+        assert_eq!(result["interactive_rounds"], 3);
+        assert_eq!(result["exit_code"], code);
+        assert_eq!(result.get("note").and_then(|n| n.as_str()), note);
+    }
+    let clean = super::interactive::interactive_response(0, "hello", 1, None);
+    assert!(clean.get("redacted_credentials").is_none(), "{clean}");
+}
+#[test]
+fn the_compact_summary_names_a_redaction_and_stays_silent_without_one() {
+    use super::output::format_run_command;
+    let edited = json!({ "exit_code": 0, "stdout": "a\n", "redacted_credentials": 1 });
+    let plural = json!({ "exit_code": 0, "stdout": "a\n", "redacted_credentials": 3 });
+    let clean = json!({ "exit_code": 0, "stdout": "a\n" });
+    assert!(
+        format_run_command(&edited).contains("1 credential-shaped value redacted"),
+        "{}",
+        format_run_command(&edited)
+    );
+    assert!(
+        format_run_command(&plural).contains("3 credential-shaped values redacted"),
+        "{}",
+        format_run_command(&plural)
+    );
+    assert!(
+        !format_run_command(&clean).contains("redacted"),
+        "{}",
+        format_run_command(&clean)
+    );
+    // the buffered shape too: the notice is unconditional across output shapes
+    let buffered = json!({ "output_id": "@cmd_abc", "exit_code": 0, "redacted_credentials": 2 });
+    assert!(format_run_command(&buffered).contains("2 credential-shaped values redacted"));
+}
 
 /// The line count must reflect the FULL unfiltered capture, not the (possibly
 /// truncated-for-inline-storage) stored copy.

@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 
 use super::super::ToolContext;
 use super::inner::TmpfileGuard;
+use crate::util::redact::{note_in, redact_credentials};
 
 /// Reassemble a buffered command summary with a stable, reader-friendly field order.
 ///
@@ -453,6 +454,8 @@ pub(crate) async fn handle_successful_output(
     };
 
     // --- Step 6.5: Read tee capture and store as unfiltered_output ref ---
+    // Values scrubbed from the capture, added to the response where the ref is attached.
+    let mut tee_redacted = 0usize;
     let unfiltered_ref: Option<(
         String,
         Option<crate::tools::output_buffer::Truncation>,
@@ -472,7 +475,14 @@ pub(crate) async fn handle_successful_output(
         // unreproduced occurrence. The only difference is that the next occurrence
         // leaves a trace instead of a silence.
         let capture = match std::fs::read_to_string(&tmpfile.0) {
-            Ok(content) => Some(content),
+            // Bug 8df0779550c5b5d8: this is the UNFILTERED stream, read from a file, so it never
+            // passed the decode in `run_command_inner` that scrubs `stdout`. `env | grep PATH` shows
+            // one line inline while this buffer holds the whole environment.
+            Ok(content) => {
+                let scrubbed = redact_credentials(&content);
+                tee_redacted = scrubbed.count;
+                Some(scrubbed.text.into_owned())
+            }
             Err(e) => {
                 tracing::warn!(
                     path = %tmpfile.0,
@@ -776,6 +786,7 @@ pub(crate) async fn handle_successful_output(
     // covers: without an explicit `"stdout": ""` and a line count, the response looks
     // identical whether the ref holds 2 lines or 20,000.
     if let Some((ref ref_id, truncation, line_count)) = unfiltered_ref {
+        note_in(&mut result, tee_redacted);
         if result.get("stdout").is_none() {
             result["stdout"] = json!("");
         }
@@ -901,6 +912,16 @@ pub(crate) fn format_run_command(result: &Value) -> String {
     }
     if let Some(partial) = result["partial_test_selection"].as_str() {
         s.push_str(&format!("\n⚠ {partial}"));
+    }
+
+    // An EDITED response must say so where the reader looks, and this renderer is what `call_content`
+    // shows: a `redacted_credentials` key it does not read would leave a scrubbed output looking like
+    // the command's own (bug 8df0779550c5b5d8).
+    if let Some(n) = result[crate::util::redact::REDACTED_KEY].as_u64() {
+        s.push_str(&format!(
+            "\n⚠ {n} credential-shaped value{} redacted from this output",
+            if n == 1 { "" } else { "s" }
+        ));
     }
 
     // Last, and unconditional across output shapes for the same reason. This one is
