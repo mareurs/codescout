@@ -71,7 +71,7 @@ None.
 
 ## Fix
 
-**Ruled by the operator 2026-09-30: options 1 and 2 as leaned, with 1,500 characters for record-writing arguments and head 500 + tail 1,000 for results. Implemented and committed together with this note. The fix SHA and patch-id are recorded in a follow-up commit that also flips the status, since a commit cannot cite its own SHA (status stays `open` until then).** The original options follow for the record. Was: needs an operator ruling before implementation, because it changes registered constants. Options
+**Ruled by the operator 2026-09-30: options 1 and 2 as leaned, with 1,500 characters for record-writing arguments and head 500 + tail 1,000 for results. Implemented and committed: `9a269f24`, patch-id `7223e28c28d71b168ff7b77be8c0e46fa3aee7cf` (`git show 9a269f24 | git patch-id --stable`). Status stays `open` until the four-command gate has run on it (this change touches no Rust, so that gate is close to vacuous for it) and the archive can follow.** The original options follow for the record. Was: needs an operator ruling before implementation, because it changes registered constants. Options
 the pilot controller put to the operator on 2026-09-30, with its leaning:
 
 1. **Arguments.** Raise the limit only for tools that write a record, for example to 1,500. The set is
