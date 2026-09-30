@@ -260,16 +260,17 @@ class CutMarkers(PacketCase):
         at = self._result_text("h" * 1500)
         self.assertIn("RESULT " + "h" * 1500 + "\n", at)
         self.assertNotIn("not shown]", at)
-        over = self._result_text("HEAD" + "h" * 1497)  # 1,501 chars: the first is dropped
-        self.assertIn("RESULT [… 1 earlier character not shown]\n" + "EAD" + "h" * 1497 + "\n", over)
+        over = self._result_text("HEAD" + "h" * 1497)  # 1,501 chars: the one dropped is the 501st, in the middle
+        self.assertIn("RESULT HEAD" + "h" * 496 + "\n[… 1 character not shown]\n" + "h" * 1000 + "\n", over)
 
     def test_the_result_marker_counts_the_dropped_characters_with_separators(self):
-        text = self._result_text("S" * 2500 + "t" * 1500)  # 4,000 chars: 2,500 dropped
-        self.assertIn("RESULT [… 2,500 earlier characters not shown]\n" + "t" * 1500 + "\n", text)
+        text = self._result_text("S" * 2500 + "t" * 1500)  # 4,000 chars: 2,500 dropped, the middle
+        self.assertIn("RESULT " + "S" * 500 + "\n[… 2,500 characters not shown]\n" + "t" * 1000 + "\n", text)
 
-    def test_the_result_marker_follows_the_exit_and_error_prefix_and_leads_the_tail(self):
+    def test_the_exit_prefix_leads_the_head_and_the_marker_sits_between_head_and_tail(self):
         text = self._result_text("Exit code 7\n" + "y" * 5000, tool="Bash")
-        self.assertIn("RESULT [exit 7] [… 3,512 earlier characters not shown]\n" + "y" * 1500 + "\n", text)
+        self.assertIn("RESULT [exit 7] Exit code 7\n" + "y" * 488 + "\n[… 3,512 characters not shown]\n" + "y" * 1000 + "\n",
+                      text)
 
     def test_an_argument_string_at_the_limit_is_unmarked_and_one_over_is_marked(self):
         def calls_line(cmd_len):
@@ -322,6 +323,119 @@ class CutMarkers(PacketCase):
         self.assertLessEqual(len(p.text), 20000)
         self.assertEqual(p.chars, len(p.text))
         self.assertIn("[… 2 more characters not shown]", p.text)  # non-vacuous: the markers are really in this packet
+
+
+class KeptWindows(PacketCase):
+    """Bug 3bbaeeac07baaca8, operator rulings 2026-09-30. The window a packet keeps used to be fixed by position,
+    so a record-writing call lost its body after the path and a result lost its counts and headers. Now: a call
+    that writes a durable record keeps 1,500 characters of arguments and every other call keeps 300; a result of
+    more than 1,500 keeps its first 500 and last 1,000 with a marker between. Each rule is pinned in BOTH
+    directions: the widened limit must not spread to non-writers, and the head must not displace the tail."""
+
+    TOK = "ghp_" + "Z" * 36  # a token-shaped string, 40 chars
+    BODY = "B" * 1400  # more than 300, less than 1,500
+
+    def _args_line(self, name, inp):
+        return packet._call(name, inp)[0]
+
+    def test_every_record_writing_call_keeps_a_1400_char_body_whole(self):
+        # iterate the LIVE sets packet reads: a copied literal would pass here while sampler's sets moved on
+        cases = [(n, {"content": self.BODY}) for n in sorted(packet.sampler.EDIT_TOOLS)]
+        cases += [(n, {"action": a, "body": self.BODY})
+                  for n in sorted(packet.sampler.CATALOG_TOOLS) for a in sorted(packet.sampler.CATALOG_WRITE_ACTIONS)]
+        self.assertGreater(len(cases), len(packet.sampler.EDIT_TOOLS))  # non-vacuous: the catalog half is present
+        for name, inp in cases:
+            with self.subTest(name=name, action=inp.get("action")):
+                line = self._args_line(name, inp)
+                self.assertIn(self.BODY, line)
+                self.assertNotIn("not shown]", line)
+
+    def test_a_call_that_does_not_write_a_record_still_cuts_at_300(self):
+        # the OTHER direction: a limit raised for everything satisfies the test above
+        big = self.BODY
+        cases = [("run_command", {"command": big}), ("Read", {"file_path": big}),
+                 ("doc", {"action": "get", "id": big}), ("memory", {"action": "read", "topic": big}),
+                 ("doc", {"action": ["update"], "x": big}),  # a non-string action is not a write action
+                 ("doc", {"x": big}),  # a catalog tool with no action at all
+                 # a write-SHAPED action on a tool that is not a catalog tool: the tool name has to matter too
+                 ("run_command", {"action": "update", "command": big}), ("Read", {"action": "write", "file_path": big})]
+        for name, inp in cases:
+            with self.subTest(name=name, inp=str(inp)[:40]):
+                line = self._args_line(name, inp)
+                self.assertNotIn("B" * 400, line)
+                self.assertRegex(line, r"\[… [\d,]+ more characters not shown\]\)$")
+
+    def test_the_record_limit_is_exactly_1500_arguments_characters(self):
+        # args JSON is '{"content": "' (13) + body + '"}' (2)
+        at = self._args_line("Write", {"content": "c" * 1485})  # 1,500: whole
+        self.assertIn("c" * 1485 + '"})', at)
+        self.assertNotIn("not shown]", at)
+        over = self._args_line("Write", {"content": "c" * 1486})  # 1,501: only the closing brace is dropped
+        self.assertIn("c" * 1486 + '"[… 1 more character not shown])', over)
+
+    def test_a_record_writing_call_keeps_its_body_in_both_the_context_and_the_pending_action(self):
+        s = Seq()
+        s.user("go")
+        s.asst("c1", "Ctx.", tools=[("Write", {"file_path": "/x/a.md", "content": "K" * 1300})])
+        s.asst("m1", "Now the same.", tools=[("edit_file", {"path": "/x/b.md", "new_string": "P" * 1300})])
+        text = self.build(s, "m1").text
+        self.assertIn("K" * 1300, text)  # a context call: the site that builds context blocks
+        self.assertIn("P" * 1300, text)  # the unit's own ABOUT TO RUN call: the site that builds the pending list
+
+    def _result_text(self, content, tool="Read"):
+        s = Seq()
+        s.user("go")
+        (t,) = s.asst("m1", "Run.", tools=[(tool, {"file_path": "x"})])
+        s.result(t, content)
+        s.asst("m2", "The decision.")
+        return self.build(s, "m2").text
+
+    def test_a_result_of_1500_is_whole_and_one_over_keeps_head_500_and_tail_1000_with_a_marker_between(self):
+        at = self._result_text("h" * 1500)
+        self.assertIn("RESULT " + "h" * 1500 + "\n", at)
+        self.assertNotIn("not shown]", at)
+        over = self._result_text("A" * 500 + "¤" + "B" * 1000)  # 1,501: the single dropped char is the ¤
+        self.assertIn("RESULT " + "A" * 500 + "\n[… 1 character not shown]\n" + "B" * 1000 + "\n", over)
+        self.assertNotIn("¤", over)
+
+    def test_a_long_result_keeps_its_header_line_and_its_last_line(self):
+        body = "HEADER: 3 matches\n" + "\n".join(f"line {i} " + "x" * 40 for i in range(200)) + "\nFOOTER: done"
+        text = self._result_text(body)
+        self.assertIn("RESULT HEADER: 3 matches\n", text)  # the counts a tail-only cut used to drop
+        self.assertTrue(body.endswith("FOOTER: done"))
+        self.assertIn("FOOTER: done\n", text)
+        dropped = len(body) - 1500
+        self.assertIn(f"\n[… {dropped:,} characters not shown]\n", text)
+
+    def test_the_exit_code_is_read_from_the_whole_text_when_it_sits_in_the_dropped_middle(self):
+        import json
+        body = json.dumps({"stdout": "y" * 3000, "exit_code": 7, "stderr": "z" * 3000})
+        text = self._result_text(body, tool="Bash")
+        self.assertIn('RESULT [exit 7] {"stdout": "yyy', text)  # the prefix, then the kept head
+        self.assertNotIn("exit_code", text)  # the code really is in the dropped middle: only the prefix shows it
+
+    # -- a token half-cut by EITHER window must refuse. Each case is built so the OTHER window admits it.
+
+    def test_a_token_straddling_the_end_of_the_kept_head_refuses(self):
+        with self.assertRaises(packet.TokenFound):
+            self._result_text("y" * 498 + self.TOK + "w" * 3000)  # head keeps 2 chars of it; the tail is clean
+
+    def test_a_token_straddling_the_start_of_the_kept_tail_refuses(self):
+        with self.assertRaises(packet.TokenFound):
+            self._result_text("y" * 2000 + self.TOK + "w" * 962)  # 3,002 chars: the tail starts 2 chars in
+
+    def test_a_token_wholly_in_the_dropped_middle_does_not_refuse(self):
+        text = self._result_text("y" * 600 + self.TOK + "w" * 3000)
+        self.assertNotIn("ghp_", text)
+
+    def test_a_token_wholly_in_the_kept_head_now_refuses(self):
+        # it was wholly DROPPED under a tail-only cut and never refused; the head makes it visible
+        with self.assertRaises(packet.TokenFound):
+            self._result_text(self.TOK + "y" * 4000)
+
+    def test_a_token_wholly_in_the_kept_tail_refuses(self):
+        with self.assertRaises(packet.TokenFound):
+            self._result_text("y" * 4000 + self.TOK)
 
 
 
@@ -383,13 +497,16 @@ class ContextSection(PacketCase):
         s.asst("m2", "The decision.")
         self.assertIn("RESULT [exit 0] ", self.build(s, "m2").text)
 
-    def test_exit_code_outside_the_kept_tail_is_still_shown(self):
-        # (form, tool, result). 5,000 y's: the only exit code is at the very start, far outside the last
-        # 1,500. The JSON form must be VALID JSON as a whole (a top-level object), or it is not parsed.
+    def test_the_exit_prefix_is_shown_for_both_forms_beside_the_kept_head(self):
+        # (form, tool, result, expected line). INERT as a discriminator of "read from the WHOLE text": the code sits in
+        # the first 500 chars in both forms, so a prefix taken from the kept text alone gives the same 7.
+        # KeptWindows.test_the_exit_code_is_read_from_the_whole_text_when_it_sits_in_the_dropped_middle is the case
+        # that discriminates. The JSON form must be VALID JSON as a whole (a top-level object), or it is not parsed.
         cases = (("json", "run_command", '{"exit_code": 7, "stdout": "' + "y" * 5000 + '"}',
-                  "RESULT [exit 7] [… 3,530 earlier characters not shown]\n" + "y" * 1498 + '"}'),
+                  'RESULT [exit 7] {"exit_code": 7, "stdout": "' + "y" * 472 + "\n[… 3,530 characters not shown]\n"
+                  + "y" * 998 + '"}'),
                  ("line", "Bash", "Exit code 7\n" + "y" * 5000,
-                  "RESULT [exit 7] [… 3,512 earlier characters not shown]\n" + "y" * 1500))
+                  "RESULT [exit 7] Exit code 7\n" + "y" * 488 + "\n[… 3,512 characters not shown]\n" + "y" * 1000))
         for label, tool, body, expected in cases:
             with self.subTest(form=label):
                 s = Seq()
@@ -399,8 +516,6 @@ class ContextSection(PacketCase):
                 s.asst("m2", "The decision.")
                 p = self.build(s, "m2")
                 self.assertIn(expected + "\n", p.text)
-                self.assertNotIn("exit_code", p.text)  # the head that held the code is really cut away
-                self.assertNotIn("Exit code 7", p.text)
 
     def test_is_error_flag_is_shown(self):
         s = Seq()
@@ -410,7 +525,7 @@ class ContextSection(PacketCase):
         s.asst("m2", "The decision.")
         self.assertIn("RESULT [is_error] boom", self.build(s, "m2").text)
 
-    def test_result_tail_kept_and_args_cut(self):
+    def test_result_head_and_tail_kept_and_args_cut(self):
         s = Seq()
         s.user("go")
         # tool input JSON is '{"command": "' + c*N + '"}' = N + 15 chars.
@@ -419,14 +534,13 @@ class ContextSection(PacketCase):
         (t1, t2, t3, t4) = s.asst("m1", "Run.", tools=[("run_command", at_300), ("run_command", over_300),
                                                         ("run_command", {"command": "r1"}),
                                                         ("run_command", {"command": "r2"})])
-        s.result(t3, "A" + "b" * 1500)  # 1,501 chars: the first char is cut
+        s.result(t3, "A" + "b" * 1500)  # 1,501 chars: the 501st, in the middle, is dropped
         s.result(t4, "A" + "b" * 1499)  # 1,500 chars: kept whole, first char included
         s.asst("m2", "The decision.")
         text = self.build(s, "m2").text
         self.assertIn('CALL run_command({"command": "' + "c" * 285 + '"})\n', text)
         self.assertIn('CALL run_command({"command": "' + "d" * 286 + '"[… 1 more character not shown])\n', text)
-        self.assertIn("RESULT [… 1 earlier character not shown]\n" + "b" * 1500 + "\n", text)
-        self.assertNotIn("A" + "b" * 1500, text)
+        self.assertIn("RESULT A" + "b" * 499 + "\n[… 1 character not shown]\n" + "b" * 1000 + "\n", text)
         self.assertIn("RESULT A" + "b" * 1499 + "\n", text)
 
     def test_last_six_context_messages_labelled_oldest_first(self):
@@ -818,9 +932,10 @@ class Tokens(PacketCase):
     # -- but the secret's body would be rendered. Each case is built so every OTHER guard admits it.
 
     def test_token_cut_at_its_start_by_the_result_tail_refuses(self):
-        # 3000 y's, token at 3000..3040, 1462 w's: the last 1,500 chars start at 3002, inside the token
+        # 3000 y's, token at 3000..3040, 962 w's: the last 1,000 chars start at 3002, inside the token; the head
+        # (first 500) is clean, so only the tail window can refuse this
         with self.assertRaises(packet.TokenFound):
-            self._with_result("y" * 3000 + self.TOK + "w" * 1462)
+            self._with_result("y" * 3000 + self.TOK + "w" * 962)
 
     def test_token_cut_at_its_end_by_the_args_cut_refuses(self):
         # args JSON is '{"command": "' (13 chars) + cmd: the token starts at 294 and the cut is at 300
@@ -857,9 +972,9 @@ class Tokens(PacketCase):
             self.build(s, "m1")
 
     def test_token_wholly_in_a_dropped_head_does_not_refuse(self):
-        p = self._with_result(self.TOK + "y" * 4000)  # the tail cut drops the whole token
+        p = self._with_result("y" * 600 + self.TOK + "y" * 3400)  # the result cut drops the whole token (the middle)
         self.assertNotIn("ghp_", p.text)
-        self.assertIn("RESULT [… 2,540 earlier characters not shown]\n" + "y" * 1500 + "\n", p.text)
+        self.assertIn("RESULT " + "y" * 500 + "\n[… 2,540 characters not shown]\n" + "y" * 1000 + "\n", p.text)
         cmd = "c" * 300 + self.TOK  # the args cut drops the whole token
         s = Seq()
         s.user("go")
@@ -976,12 +1091,22 @@ class TokenEdges(PacketCase):
         return self.build(s, "m9")
 
     def test_result_tail_overlap_edges(self):
-        # tail = last 1,500 chars. TOK + 1,500 y's: the tail starts at 40 = the token's end: no overlap.
-        p = self._built(ctx_result=self.TOK + "y" * 1500)
+        # tail = last 1,000 chars. 2,000 y's, then the token (2000..2040), then 1,000 y's: the tail starts at 2040 =
+        # the token's end, so no overlap. The head (first 500) is clean, so only the tail window is in question.
+        p = self._built(ctx_result="y" * 2000 + self.TOK + "y" * 1000)
         self.assertNotIn("ghp_", p.text)
-        # TOK + 1,499 y's: the tail starts at 39 and keeps the token's last char: overlap by one char
+        # 999 y's after it: the tail starts at 2039 and keeps the token's last char: overlap by one char
         with self.assertRaises(packet.TokenFound):
-            self._built(ctx_result=self.TOK + "y" * 1499)
+            self._built(ctx_result="y" * 2000 + self.TOK + "y" * 999)
+
+    def test_result_head_overlap_edges(self):
+        # head = first 500 chars. The token starts at 500 = where the head ends, so no overlap; the tail is clean.
+        p = self._built(ctx_result="y" * 500 + self.TOK + "y" * 3000)
+        self.assertNotIn("ghp_", p.text)
+        # starting at 499 the head keeps the token's first char: overlap by one char
+        with self.assertRaises(packet.TokenFound):
+            self._built(ctx_result="y" * 499 + self.TOK + "y" * 3000)
+
 
     def test_operator_head_overlap_edges(self):
         p = self._built(op="o" * 1500 + self.TOK)  # the token starts exactly where the cut is: no overlap

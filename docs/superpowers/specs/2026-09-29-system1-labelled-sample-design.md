@@ -122,8 +122,13 @@ packet it was given.
   classifier (R25, R26, R103, R104).
 - **The last 6 API messages** before the unit, oldest first. Each shows:
   - its text;
-  - its tool calls, as the tool name plus arguments cut to 300 characters;
-  - its tool results, as the **last** 1,500 characters, plus the exit code whenever one can be parsed.
+  - its tool calls, as the tool name plus its arguments cut to 300 characters, or to 1,500 for a call that
+    writes a durable record (an edit tool, or a catalog tool with a write action: the body is what the
+    judgement depends on);
+  - its tool results, whole up to 1,500 characters, and above that the **first 500 and last 1,000**
+    with a marker between (counts and headers come first, exit and error text last), plus the exit code
+    whenever one can be parsed from the whole result. Every cut, here and above, ends or begins with a
+    marker `[… N characters not shown]`, so a partial value never reads as the whole.
     The transcript's `is_error` flag under-reports failures: the profile found 35% of `cargo test`
     results exiting nonzero and 0.4% flagged.
 - **The unit itself:** its text, then its tool calls marked **about to run**. Their results are never shown.

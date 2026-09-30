@@ -35,8 +35,13 @@ import transcripts  # noqa: E402
 
 CONTEXT_MESSAGES = 6
 OPERATOR_CHARS = 1500
-RESULT_TAIL_CHARS = 1500
+# A result longer than HEAD + TAIL keeps its first HEAD and last TAIL characters with a marker between: the counts
+# and headers many tools print first, and the exit or error text they print last (bug 3bbaeeac07baaca8).
+RESULT_HEAD_CHARS = 500
+RESULT_TAIL_CHARS = 1000
 ARGS_CHARS = 300
+# A call that writes a durable record keeps more of its arguments: the body is what the judgement depends on.
+RECORD_ARGS_CHARS = 1500
 PACKET_CHARS = 20000
 TRIM_MARKER = "[… the earlier part of this message is not shown]"
 NONE_BEFORE = "(none before this point)"
@@ -136,18 +141,31 @@ def _head(source, n):
     return source[:end], _overlaps(source, 0, end)
 
 
-def _dropped(n, where):
-    """The marker for a cut that removed `n` characters: `where` is "earlier" (a kept tail) or "more" (a kept
-    head). Distinct from TRIM_MARKER, which is about the judged message; without one a partial value reads as
-    the whole (bug f32b7d248a833167). It is not source text: the token check judges the kept source range."""
-    return f"[… {n:,} {where} character{'' if n == 1 else 's'} not shown]"
+def _dropped(n, where=""):
+    """The marker for a cut that removed `n` characters: `where` is "earlier" (a kept tail), "more" (a kept
+    head) or "" (the gap between a kept head and a kept tail). Distinct from TRIM_MARKER, which is about the
+    judged message; without one a partial value reads as the whole (bug f32b7d248a833167). It is not source
+    text: the token check judges the kept source range."""
+    label = f"{where} " if where else ""
+    return f"[… {n:,} {label}character{'' if n == 1 else 's'} not shown]"
+
+
+def _writes_record(name, inp):
+    """True for a call whose arguments ARE the durable record it writes (bug 3bbaeeac07baaca8): an edit tool, or
+    a catalog tool with a write action. The sets are the sampler's own, imported so the two cannot drift."""
+    if name in sampler.EDIT_TOOLS:
+        return True
+    action = inp.get("action")
+    return name in sampler.CATALOG_TOOLS and isinstance(action, str) and action in sampler.CATALOG_WRITE_ACTIONS
 
 
 
 def _call(name, inp):
-    """('name(args)', leaked) with the JSON arguments cut to ARGS_CHARS, a cut marked."""
+    """('name(args)', leaked) with the JSON arguments cut to RECORD_ARGS_CHARS for a call that writes a record
+    and to ARGS_CHARS for any other, a cut marked."""
+    limit = RECORD_ARGS_CHARS if _writes_record(name, inp) else ARGS_CHARS
     raw = _blind(json.dumps(inp, ensure_ascii=False, sort_keys=False))
-    args, leaked = _head(raw, ARGS_CHARS)
+    args, leaked = _head(raw, limit)
     if len(raw) > len(args):
         args += _dropped(len(raw) - len(args), "more")
     return f"{_clean(name)}({args})", leaked
@@ -158,21 +176,27 @@ def _is_shell(name):
 
 
 def _result_line(result, shell):
-    """('RESULT ...', leaked). The [exit N] prefix is for shell tools only; a cut is marked before the tail."""
+    """('RESULT ...', leaked). The [exit N] prefix is for shell tools only. A result of more than
+    RESULT_HEAD_CHARS + RESULT_TAIL_CHARS keeps its head and its tail with the gap marked between them."""
     if result is None:
         return f"RESULT {NO_RESULT}", False
     text, is_error = result
     text = _blind(text)
     prefix = ""
-    code = exit_code(text) if shell else None  # from the WHOLE text: the code is often outside the kept tail
+    code = exit_code(text) if shell else None  # from the WHOLE text: the code is often in the dropped middle
     if code is not None:
         prefix += f"[exit {code}] "
     if is_error:
         prefix += "[is_error] "
-    tail, leaked = _tail(text, RESULT_TAIL_CHARS)
-    if len(text) > len(tail):
-        tail = _dropped(len(text) - len(tail), "earlier") + "\n" + tail
-    return f"RESULT {prefix}{tail}", leaked
+    keep = RESULT_HEAD_CHARS + RESULT_TAIL_CHARS
+    if len(text) <= keep:
+        shown, leaked = _tail(text, keep)  # the whole text; the flag still says whether a token is in it
+    else:
+        head, head_leak = _head(text, RESULT_HEAD_CHARS)
+        tail, tail_leak = _tail(text, RESULT_TAIL_CHARS)
+        shown = head + "\n" + _dropped(len(text) - keep) + "\n" + tail
+        leaked = head_leak or tail_leak
+    return f"RESULT {prefix}{shown}", leaked
 
 
 def _tool_calls(entries):

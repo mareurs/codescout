@@ -71,7 +71,7 @@ None.
 
 ## Fix
 
-**Needs an operator ruling before implementation**, because it changes registered constants. Options
+**Ruled by the operator 2026-09-30: options 1 and 2 as leaned, with 1,500 characters for record-writing arguments and head 500 + tail 1,000 for results. Implemented and committed together with this note. The fix SHA and patch-id are recorded in a follow-up commit that also flips the status, since a commit cannot cite its own SHA (status stays `open` until then).** The original options follow for the record. Was: needs an operator ruling before implementation, because it changes registered constants. Options
 the pilot controller put to the operator on 2026-09-30, with its leaning:
 
 1. **Arguments.** Raise the limit only for tools that write a record, for example to 1,500. The set is
@@ -86,10 +86,15 @@ marker work is in `measure-packet-cuts-results-and-arguments-without-a-marker`. 
 
 ## Tests added
 
-None yet. Owed: a record-writing call keeps its body up to the new limit while a non-writing call keeps
-300. A head-plus-tail result keeps both its first and last lines. The per-tool limit needs a mutation that
-swaps the set membership, and a test that fails if the non-writing limit also grows. That last test
-catches the monotone direction.
+`KeptWindows` in `tests/test_measure_packet.py` (12 tests, plus one exact-edge test in `TokenEdges`), each rule in BOTH directions:
+
+- **Arguments:** every call in the live `sampler.EDIT_TOOLS` and every `CATALOG_TOOLS` x `CATALOG_WRITE_ACTIONS` pair keeps a 1,400-character body whole; the exact limit is 1,500 (whole at 1,500, one character marked at 1,501); and the other direction, a call that is not a record write (shell, read, a catalog tool with a read action or a non-string or missing action, and a write-shaped `action` on a non-catalog tool) still cuts at 300. A context call and the unit's own ABOUT TO RUN call are both covered.
+- **Results:** whole at 1,500; at 1,501 the first 500 and last 1,000 with the one dropped character marked between; a long result keeps its header line and its last line; the exit code is still read from the WHOLE text when it sits in the dropped middle.
+- **Token guard, per window:** a token straddling the end of the head, or the start of the tail, refuses (each built so the other window is clean); a token wholly in the dropped middle does not refuse; a token wholly in the kept head now refuses (it was dropped, and never refused, under the tail-only cut); wholly in the kept tail refuses. Exact-edge cases for both windows are in `TokenEdges`.
+
+Nine legacy tests that pinned the tail-only shape were rewritten to the new windows, one renamed pair among them (`test_result_tail_kept_and_args_cut` is now `test_result_head_and_tail_kept_and_args_cut`, `test_exit_code_outside_the_kept_tail_is_still_shown` is now `test_the_exit_prefix_is_shown_for_both_forms_beside_the_kept_head`). The latter is annotated as INERT for the read-from-the-whole-text property, because the code now sits in the kept head in both forms.
+
+**Mutation run, isolated worktree (`./scripts/mutation-probe.sh`), 21 mutants, 21 KILLED, 0 survived:** head 499/501, tail 999/1001, record limit 1499/1501, non-writer limit 301/1500, the edit half and the catalog half of `_writes_record` off, the `isinstance` guard dropped, the tool-name clause dropped, the limit ignoring the writer, the head leak flag and the tail leak flag each dropped alone, a whole-text token check (the over-refusal direction), whole at `<` and at `<= keep + 1`, the dropped count, the exit code read from the tail only, and the marker label. Read off unittest's summary line, because the probe's own verdict parse is cargo-only (it printed INCONCLUSIVE each time). Gap found by reasoning and closed before the run: without a non-catalog tool carrying a write-shaped `action`, dropping the tool-name clause survived.
 
 ## Workarounds
 
