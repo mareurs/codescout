@@ -1,7 +1,7 @@
 ---
 id: '2bac7e0a27fbc392'
 kind: bug
-status: open
+status: mitigated
 title: diagnose_run reports own-negative firing on the fold its thresholds were chosen on
 owners:
 - marius
@@ -30,6 +30,25 @@ Phase-1b Stage 1, seed 20260935, recipes s1-r1 and s1-r2 (two independently trai
 - `own_negatives_fired` is identical on 13 of 14 rules, e.g. d_adjacency 2/26, question_asked 2/32, closed_population 1/15. Only d_visibility differs (1/15 against 0/15).
 - The items that fire differ. Of the 13 rules where any negative fired in either run, the fired ids are different in 9, e.g. d_adjacency `train-d_adjacency-10179:neg` against `train-d_adjacency-9161:neg`. Recomputed offline from each run's `fold-logits.json`, `calibration.json` and `thresholds.json`.
 - `thresholds.json`, d_adjacency, both runs: val_tp 26, val_fp 2. 26/28 = 0.929 meets the target; a third false positive, 26/29 = 0.897, does not.
+
+
+## Measurement (2026-09-30)
+
+`phase1b/measure_own_negative_firing.py`, offline from the six Stage 1 runs' `fold-logits.json`, `calibration.json` and `thresholds.json`. **Control:** its validation-fold count equals the committed `own_negatives_fired` on all 84 run-rule cells; the calibration-fold pooled counts it produces (21, 15, 9, 12, 13, 13 of 180) equal the `cal own neg` column of the committed `stage1/summary.txt`, which `stage1_summary.py` computes separately.
+
+- **The count is a function of the threshold rule, and the finding above understates how far.** `own_negatives_fired` equals `thresholds.json`'s `val_fp` in 84 of 84 run-rule cells, and `val_fp` equals ⌊`val_tp`/9⌋ in 84 of 84, not only on completely separated rules. The field carries nothing `thresholds.json` does not already hold.
+- **The 13-of-14 figure is one seed's.** Counts equal between s1-r1 and s1-r2: 13/14 rules (seed 20260935), 11/14 (20260937), 12/14 (20260940); fired ids differ on 9, 8 and 9 of 13 rules with any fire.
+- **Pooled, the two folds behave differently across the same six models.** Validation: 16-19 of 260 in every run. Calibration: 9-21 of 180. Across seeds of one recipe (s1-r1) the calibration count spans 12; s1-r1 minus s1-r2 within a seed is +9, +2, -4. So seed moves the calibration figure more than recipe does, and six runs cannot separate model signal from training noise there.
+- **The calibration fold is disjoint from validation** (0 ids in common) and small per rule: 4-23 negatives, so a per-rule count is 0-8 events. Pooled it is usable; per rule it is not a ranking.
+
+**Where the honest figure already lives:** `stage1_summary.py` reports the calibration-fold figure, and the phase-1b preregistration's Stage 2 section describes `step4.py` as measuring calibration-fold firing on each head's own frozen negatives. `own_negatives_fired` is written by `diagnose_run.py` and read by no script; the preregistration's Stage 1 results already say it "is not reported", and the Stage 2 section says `diagnose_run.py` "stays as it is"; the Stage 1 section lists only AUC and cross-rule firing as what it is used for.
+
+
+## Decision (2026-09-30)
+
+**Operator ruling: option 4, leave `diagnose_run.py` as it is.** Status `mitigated`, not `fixed`: the misnamed field is still written into `stage1/*.json` and the script is unchanged, so the defect stands and is contained. Containment is that nothing reads the field, the preregistration says it is not reported, and the calibration-fold figure is the one `stage1_summary.py` and `step4.py` report. A reader of a `stage1/*.json` should take `own_negatives_fired` as `thresholds.json`'s `val_fp` (see Measurement) and not as out-of-sample firing.
+
+Reopen if a script starts reading the field. Not done, and why: moving it to the calibration fold or renaming it edits an instrument the Stage 2 registration says stays as it is, for a field no consumer reads; dropping it loses nothing but changes the same bytes.
 
 ## What is not affected
 
