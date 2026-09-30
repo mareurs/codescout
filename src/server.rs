@@ -677,7 +677,16 @@ impl CodeScoutServer {
         is_write: bool,
         workspace_override: Option<&std::path::Path>,
     ) -> std::result::Result<(), CallToolResult> {
-        let security = self.agent.security_config_for(workspace_override).await;
+        // A write is decided against the config that carries the pin's consent (for this
+        // call only); everything else against the plain one. `is_write` here is the gate's
+        // question, so an exempt exit call (`workspace(activate)`) takes the plain config.
+        let security = if is_write {
+            self.agent
+                .security_config_for_write(workspace_override)
+                .await
+        } else {
+            self.agent.security_config_for(workspace_override).await
+        };
         crate::util::path_security::check_tool_access(name, is_write, &security)
             .map_err(|e| CallToolResult::error(vec![Content::text(e.to_string())]))
     }
@@ -1384,38 +1393,28 @@ impl CodeScoutServer {
 
         let workspace_override = Self::extract_workspace_override(&input);
 
-        // Computed ONCE and threaded to both consumers below — the pinned-residency
-        // upgrade and the access gate. Deriving it twice is how the two halves of
-        // this decision drift apart, which is the defect in
+        // Computed ONCE and threaded to its consumers — the write lock and the access gate
+        // below. Deriving it twice is how the two halves of this decision drift apart, which
+        // is the defect in
         // docs/issues/archive/2026-09-14-read-only-blocks-five-tool-names-not-the-writes-it-promises.md
         let is_write = tool.is_write(&input);
 
-        // A per-request workspace= pin is the caller's explicit, deliberate
-        // choice of target — they named the exact path. For a write-tool
-        // call, grant that pinned workspace write access on first residency
-        // (or upgrade it if already resident read-only) instead of leaving
-        // it at ensure_resident's read-only default. Without this, a pin to
-        // a workspace that was never separately `activate`d always fails
-        // "file writes disabled" below, even though the pin itself already
-        // is the caller's consent — and `activate`ing it instead would clear
-        // every other resident workspace (see `Agent::activate`), defeating
-        // the point of pinning. Read-only calls never reach this branch, so
-        // a pinned read still gets the safer read-only default.
-        if let Some(root) = workspace_override.as_deref() {
-            if is_write {
-                let _ = self
-                    .agent
-                    .ensure_resident(root.to_path_buf(), Some(false))
-                    .await;
-            }
-        }
+        // A per-request workspace= pin is the caller's explicit, deliberate choice of target
+        // — they named the exact path — and for a write call that is its consent to write
+        // there. That consent used to be recorded by upgrading the pinned workspace's SHARED
+        // registry entry to writable (`ensure_resident(root, Some(false))`), so one pinned
+        // write lifted a read-only activation another caller had made on purpose, for every
+        // caller, persistently. It is now applied to this call alone, inside
+        // `check_tool_access` below (`Agent::security_config_for_write`), and nothing is
+        // written to the registry. Residency itself is on demand, at the first touch.
+        // docs/issues/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
 
         // The gate asks a NARROWER question than the lock does. `is_write` is "takes the
         // cross-process write lock"; the gate refuses writes under a write block, except
         // the call that is the documented way out of one (`Tool::lifts_write_block`).
         // Both are derived here, once, from the same tool and input, so the two answers
-        // cannot be derived from different inputs. The lock and the residency upgrade above
-        // and below keep `is_write`: an exempt call still serialises behind the lock.
+        // cannot be derived from different inputs. The lock keeps `is_write`: an exempt
+        // call still serialises behind it.
         let gated_as_write = is_write && !tool.lifts_write_block(&input);
 
         if let Err(err) = self
@@ -8484,8 +8483,11 @@ mod tests {
         // call — so a per-request `workspace=` pin could never succeed at
         // writing to a workspace that was never separately `activate`d, even
         // though naming it in `workspace=` is already the caller's explicit
-        // consent. A write-tool call with a pin must now upgrade that
-        // workspace to writable on first touch.
+        // consent. A write-tool call with a pin must therefore succeed on first touch:
+        // the pin is that call's consent (`Agent::security_config_for_write`). It is NOT
+        // recorded on the shared registry entry, which used to be upgraded to writable and
+        // so lifted read-only guards for every caller — see
+        // `a_pinned_write_does_not_lift_an_explicit_read_only_for_unpinned_callers`.
         let dir_a = tempdir().unwrap();
         let (_dir_b, server) = make_server().await;
         std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
@@ -8756,6 +8758,164 @@ mod tests {
                 .content
                 .iter()
                 .find_map(|c| c.as_text().map(|t| t.text.clone()))
+        );
+    }
+    async fn dispatch_tool(
+        server: &CodeScoutServer,
+        name: &str,
+        args: serde_json::Value,
+    ) -> CallToolResult {
+        let req = CallToolRequestParams::new(name.to_string())
+            .with_arguments(serde_json::from_value(args).unwrap());
+        server
+            .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap()
+    }
+
+    fn result_text(r: &CallToolResult) -> String {
+        r.content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.clone()))
+            .unwrap_or_default()
+    }
+
+    /// docs/issues/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
+    /// (mechanism B, probe rows 5, 7 and 8).
+    ///
+    /// A `workspace=` pin is documented as per-call, but a pinned WRITE ran
+    /// `ensure_resident(root, Some(false))`, which set `read_only = false` on the registry
+    /// entry every caller shares. So one pinned write silently lifted a read-only
+    /// activation that another caller made on purpose (a scouting subagent, say), for
+    /// everyone, and the lift persisted.
+    ///
+    /// The order is what makes each half falsifiable, and the assertion that fails on the
+    /// unfixed code is the LAST one:
+    ///
+    /// * the CONTROL unpinned write is refused first (row 8), so the guard is demonstrably
+    ///   armed and a later "still refused" is not vacuous;
+    /// * the PINNED write must SUCCEED (row 5). Refusing it would "fix" the leak by making
+    ///   the pin useless, and it is the behaviour the controller in the 2026-09-28 incident
+    ///   depends on: its writes must not be blocked by a subagent's guard;
+    /// * the UNPINNED write afterwards must be refused AGAIN (row 7 flips from ok to
+    ///   refused). That is the whole defect: the guard survives another caller's pinned
+    ///   write. A gate gutted to allow everything would satisfy the second bullet and fail
+    ///   the first and third, so only the triple discriminates.
+    ///
+    /// `memory` for the writes, for the lean-lane reason given on
+    /// `a_read_only_activation_refuses_an_unpinned_write_end_to_end`.
+    #[tokio::test]
+    async fn a_pinned_write_does_not_lift_an_explicit_read_only_for_unpinned_callers() {
+        let (_home, server) = make_server().await;
+        let browsed = tempdir().unwrap();
+        std::fs::create_dir_all(browsed.path().join(".codescout")).unwrap();
+        let root = std::fs::canonicalize(browsed.path()).unwrap();
+        let pin = root.to_string_lossy().to_string();
+        let write = |topic: &str, pinned: bool| {
+            let mut a = serde_json::json!({
+                "action": "write", "topic": topic, "content": "probe"
+            });
+            if pinned {
+                a["workspace"] = serde_json::json!(pin);
+            }
+            a
+        };
+
+        let armed = dispatch_tool(
+            &server,
+            "workspace",
+            serde_json::json!({ "action": "activate", "path": pin, "read_only": true }),
+        )
+        .await;
+        assert_ne!(
+            armed.is_error,
+            Some(true),
+            "precondition: {}",
+            result_text(&armed)
+        );
+
+        let control = dispatch_tool(&server, "memory", write("pin-control", false)).await;
+        assert_eq!(
+            control.is_error,
+            Some(true),
+            "control: an unpinned write must be refused while explicitly read-only; got: {}",
+            result_text(&control)
+        );
+
+        let pinned = dispatch_tool(&server, "memory", write("pin-write", true)).await;
+        assert_ne!(
+            pinned.is_error,
+            Some(true),
+            "a pinned write is the caller's consent for THAT call and must still succeed; got: {}",
+            result_text(&pinned)
+        );
+
+        let after = dispatch_tool(&server, "memory", write("pin-after", false)).await;
+        assert_eq!(
+            after.is_error,
+            Some(true),
+            "a pin is per-call: the pinned write above must not have lifted the read-only \
+             activation for an UNPINNED caller. Got: {}",
+            result_text(&after)
+        );
+    }
+
+    /// The other enforcement site. `approve_write` reads `security_config_for` itself and
+    /// refuses when `file_write_enabled` is false, separately from the server's gate, so a
+    /// fix that scoped consent only in the gate would leave a pinned `approve_write` refused
+    /// under a read-only guard — or, done the other way, would lift it. It must behave
+    /// exactly like any other pinned write: succeed for that call, lift nothing.
+    #[tokio::test]
+    async fn a_pinned_approve_write_under_read_only_lifts_nothing_for_unpinned_callers() {
+        let (_home, server) = make_server().await;
+        let browsed = tempdir().unwrap();
+        std::fs::create_dir_all(browsed.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(browsed.path().join("notes")).unwrap();
+        let root = std::fs::canonicalize(browsed.path()).unwrap();
+        let pin = root.to_string_lossy().to_string();
+
+        let armed = dispatch_tool(
+            &server,
+            "workspace",
+            serde_json::json!({ "action": "activate", "path": pin, "read_only": true }),
+        )
+        .await;
+        assert_ne!(
+            armed.is_error,
+            Some(true),
+            "precondition: {}",
+            result_text(&armed)
+        );
+
+        let approved = dispatch_tool(
+            &server,
+            "approve_write",
+            serde_json::json!({ "path": "notes", "workspace": pin }),
+        )
+        .await;
+        // NOT `is_error`: `approve_write` refuses through a `RecoverableError`, which comes back
+        // with `is_error == false` so sibling calls survive. Asserting `is_error != Some(true)`
+        // is therefore satisfied by the very refusal this test exists to catch — it survived
+        // the mutation that puts `approve_write` back on the plain config. The refusal's own
+        // text is the discriminator.
+        let approved_text = result_text(&approved);
+        assert!(
+            !approved_text.contains("file writes are disabled"),
+            "a pinned approve_write is a pinned write and must succeed for that call; got: \
+             {approved_text}"
+        );
+
+        let after = dispatch_tool(
+            &server,
+            "memory",
+            serde_json::json!({ "action": "write", "topic": "approve-after", "content": "probe" }),
+        )
+        .await;
+        assert_eq!(
+            after.is_error,
+            Some(true),
+            "the pinned approve_write must not have lifted the read-only activation; got: {}",
+            result_text(&after)
         );
     }
 

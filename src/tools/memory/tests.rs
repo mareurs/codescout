@@ -720,7 +720,7 @@ async fn cross_embed_memory_stores_under_pinned_project_not_session_default() {
     .unwrap();
     // Make the pinned workspace resident so the pin can resolve it.
     ctx.agent
-        .ensure_resident(pinned_dir.path().to_path_buf(), None)
+        .ensure_resident(pinned_dir.path().to_path_buf())
         .await
         .unwrap();
 

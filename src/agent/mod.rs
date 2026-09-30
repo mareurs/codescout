@@ -516,6 +516,28 @@ struct ProjectResources {
 /// plus library paths, with writes disabled when the project is read-only.
 /// Shared by `security_config` (default) and `security_config_for` (pinned).
 fn project_security_config(p: &ActiveProject) -> crate::util::path_security::PathSecurityConfig {
+    project_security_config_with(p, false)
+}
+
+/// [`project_security_config`], optionally with the caller's consent to write past a
+/// read-only activation.
+///
+/// **Consent is a property of one call, never of the project.** A `workspace=` pin on a
+/// write call is documented as resolving "that single call", but its consent used to be
+/// recorded by flipping `p.read_only` on the registry entry every caller shares
+/// (`ensure_resident(root, Some(false))`), so one pinned write lifted a read-only
+/// activation that another caller had made on purpose, for everyone, and the lift
+/// persisted. Here it is only an input to this derivation, so it cannot outlive the call
+/// that supplied it and there is nothing to restore.
+/// docs/issues/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
+///
+/// It lifts the READ-ONLY half only. A project whose own `project.toml` turns writes off
+/// stays `ConfiguredOff` under consent: that is the durable setting, not a session choice a
+/// pin may override (`call_tool_inner_honors_workspace_override_for_security_config`).
+fn project_security_config_with(
+    p: &ActiveProject,
+    write_consent: bool,
+) -> crate::util::path_security::PathSecurityConfig {
     let mut config = p.config.security.to_path_security_config();
     config.library_paths = p
         .library_registry
@@ -523,7 +545,8 @@ fn project_security_config(p: &ActiveProject) -> crate::util::path_security::Pat
         .iter()
         .map(|e| e.path.clone())
         .collect();
-    if p.read_only {
+    let read_only = p.read_only && !write_consent;
+    if read_only {
         config.file_write_enabled = false;
     }
     // Record WHY writes are off, and for which project, so `check_tool_access`
@@ -537,7 +560,7 @@ fn project_security_config(p: &ActiveProject) -> crate::util::path_security::Pat
     // docs/issues/archive/2026-08-26-workspace-read-only-flips-mid-session.md
     let cause = crate::util::path_security::WriteBlockCause::classify(
         p.config.security.file_write_enabled,
-        p.read_only,
+        read_only,
     );
     config.write_block = cause.map(|cause| crate::util::path_security::WriteBlock {
         root: p.root.clone(),
@@ -749,38 +772,32 @@ impl Agent {
     /// Ensure `root` is resident in the registry (load + cache on miss) WITHOUT
     /// clearing the registry or changing `default_workspace_root`. Lets a
     /// per-request pinned workspace be resolved alongside the default. Pinned,
-    /// non-home workspaces default to read-only. Idempotent — EXCEPT that
-    /// passing `Some(false)` on an already-resident, currently-read-only entry
-    /// upgrades it to writable (never downgrades an already-writable entry).
-    /// This lets a write-tool call pin a workspace it was never separately
-    /// `activate`d into without requiring a full `activate` (which would clear
-    /// every other resident workspace — see `Agent::activate`).
-    pub async fn ensure_resident(&self, root: PathBuf, read_only: Option<bool>) -> Result<()> {
+    /// non-home workspaces default to read-only.
+    ///
+    /// Idempotent, and it NEVER changes an already-resident entry. It used to take
+    /// `read_only: Option<bool>` and, on `Some(false)`, flip a resident read-only entry to
+    /// writable so a pinned write could proceed. That entry is shared by every caller, so one
+    /// pinned write lifted a read-only activation another caller had made on purpose, for
+    /// everyone, and the lift persisted — the opposite of a pin's documented "resolves that
+    /// single call". The pin's consent to write is now applied per call, in
+    /// [`Agent::security_config_for_write`], and nothing here records it.
+    /// docs/issues/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
+    ///
+    /// Still does not require a full `activate`, which would clear every other resident
+    /// workspace — see `Agent::activate`.
+    pub async fn ensure_resident(&self, root: PathBuf) -> Result<()> {
         let root = std::fs::canonicalize(&root).unwrap_or(root);
-        {
-            let mut inner = self.inner.write().await;
-            if let Some(ws) = inner.workspaces.get_mut(&root) {
-                if read_only == Some(false) {
-                    if let Some(p) = ws.focused_active_mut().and_then(|p| p.as_active_mut()) {
-                        p.read_only = false;
-                    }
-                }
-                return Ok(());
-            }
+        if self.inner.read().await.workspaces.contains_key(&root) {
+            return Ok(());
         }
         let res = Self::load_project_resources(&root).await?;
         let mut inner = self.inner.write().await;
         // Re-check under the write lock — another caller may have inserted it
         // while we did the lock-free I/O.
-        if let Some(ws) = inner.workspaces.get_mut(&root) {
-            if read_only == Some(false) {
-                if let Some(p) = ws.focused_active_mut().and_then(|p| p.as_active_mut()) {
-                    p.read_only = false;
-                }
-            }
+        if inner.workspaces.contains_key(&root) {
             return Ok(());
         }
-        let ws = inner.build_workspace(&root, read_only, res);
+        let ws = inner.build_workspace(&root, None, res);
         inner.workspaces.insert(root, ws);
         Ok(())
     }
@@ -795,7 +812,7 @@ impl Agent {
         F: FnOnce(&ActiveProject) -> Result<T>,
     {
         if let Some(root) = workspace_override {
-            self.ensure_resident(root.to_path_buf(), None).await?;
+            self.ensure_resident(root.to_path_buf()).await?;
         }
         let inner = self.inner.read().await;
         let ws = match workspace_override {
@@ -833,15 +850,52 @@ impl Agent {
     /// Re-reads `project.toml` first if it has changed on disk since the cached
     /// config was built. See `security_config` for why that check lives at this
     /// seam rather than at `ensure_resident`.
+    ///
+    /// This is the config for everything EXCEPT deciding whether a write may proceed. A
+    /// caller about to decide that must use [`Agent::security_config_for_write`], which is
+    /// the one place a pin's consent is applied.
     pub async fn security_config_for(
         &self,
         workspace_override: Option<&Path>,
+    ) -> crate::util::path_security::PathSecurityConfig {
+        self.security_config_for_call(workspace_override, false)
+            .await
+    }
+
+    /// The config a WRITE call is gated on: [`Agent::security_config_for`], except that a
+    /// `workspace=` pin is the caller's consent to write to the project it names, **for this
+    /// one call**.
+    ///
+    /// Consent lifts a read-only ACTIVATION only. Nothing is written to the shared registry
+    /// entry, so it cannot outlive the call and there is nothing to restore; an unpinned
+    /// caller, or another pinned caller, still meets the guard that was set. With no pin
+    /// there is no consent: the default project's own read-only state binds its callers.
+    /// A project that disables writes in its own `project.toml` is not lifted either.
+    ///
+    /// Both places that decide a write — the server's access gate and `approve_write` — use
+    /// this, so the two cannot disagree about what a pin means.
+    /// docs/issues/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
+    pub async fn security_config_for_write(
+        &self,
+        workspace_override: Option<&Path>,
+    ) -> crate::util::path_security::PathSecurityConfig {
+        self.security_config_for_call(workspace_override, workspace_override.is_some())
+            .await
+    }
+
+    async fn security_config_for_call(
+        &self,
+        workspace_override: Option<&Path>,
+        write_consent: bool,
     ) -> crate::util::path_security::PathSecurityConfig {
         // Fast path: derive under the read lock and learn, in the SAME pass, whether
         // project.toml moved under us. One `stat`, no read, no parse, no write lock.
         let probe = self
             .with_project_at(workspace_override, |p| {
-                Ok((project_security_config(p), p.config_is_stale()))
+                Ok((
+                    project_security_config_with(p, write_consent),
+                    p.config_is_stale(),
+                ))
             })
             .await;
         match probe {
@@ -856,9 +910,11 @@ impl Agent {
                         Ok(())
                     })
                     .await;
-                self.with_project_at(workspace_override, |p| Ok(project_security_config(p)))
-                    .await
-                    .unwrap_or_default()
+                self.with_project_at(workspace_override, |p| {
+                    Ok(project_security_config_with(p, write_consent))
+                })
+                .await
+                .unwrap_or_default()
             }
             Err(_) => crate::util::path_security::PathSecurityConfig::default(),
         }
@@ -983,7 +1039,7 @@ impl Agent {
         F: FnOnce(&mut ActiveProject) -> Result<T>,
     {
         if let Some(root) = workspace_override {
-            self.ensure_resident(root.to_path_buf(), None).await?;
+            self.ensure_resident(root.to_path_buf()).await?;
         }
         let mut inner = self.inner.write().await;
         let ws = match workspace_override {
@@ -1588,7 +1644,7 @@ impl Agent {
     /// always agree on the cache namespace under a pin.
     pub async fn call_edges_project_id_for(&self, workspace_override: Option<&Path>) -> String {
         if let Some(root) = workspace_override {
-            let _ = self.ensure_resident(root.to_path_buf(), None).await;
+            let _ = self.ensure_resident(root.to_path_buf()).await;
         }
         let inner = self.inner.read().await;
         let ws = match workspace_override {
@@ -2617,14 +2673,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ensure_resident_upgrades_read_only_pin_to_writable() {
+    async fn a_write_pin_consents_for_the_call_and_records_nothing() {
         // FINDING (docs/issues/archive/2026-07-09-edit-code-write-path-ignores-workspace-pin.md,
-        // "Live-verification finding"): ensure_resident's non-home default is
-        // read-only, and every internal caller passed None — so a workspace
-        // pin could never become writable without a full `activate` (which
-        // clears every other resident workspace). ensure_resident(root,
-        // Some(false)) must upgrade an already-resident, read-only entry in
-        // place instead of no-op'ing on the idempotence check.
+        // "Live-verification finding"): a pinned WRITE to a non-home root, which is read-only by
+        // default, must be able to proceed without a full `activate` (which clears every other
+        // resident workspace). That is still required. It used to be met by
+        // `ensure_resident(root, Some(false))` flipping the SHARED entry to writable, so one
+        // pinned write lifted a read-only activation for every caller
+        // (docs/issues/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md).
+        // It is met now by `security_config_for_write`, which applies the pin's consent to that
+        // one derivation and writes nothing.
         let dir_a = tempdir().unwrap();
         let dir_b = tempdir().unwrap();
         std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
@@ -2634,26 +2692,89 @@ mod tests {
         let agent = Agent::new(Some(dir_b.path().to_path_buf())).await.unwrap();
 
         // First touch (read-oriented default): A becomes resident, read-only.
-        agent.ensure_resident(root_a.clone(), None).await.unwrap();
-        let read_only_before = agent
-            .with_project_at(Some(&root_a), |p| Ok(p.read_only))
-            .await
-            .unwrap();
-        assert!(read_only_before, "fresh pin must default to read-only");
+        agent.ensure_resident(root_a.clone()).await.unwrap();
+        let cfg = agent.security_config_for(Some(&root_a)).await;
+        assert!(
+            !cfg.file_write_enabled,
+            "control: a fresh pin must default to read-only"
+        );
 
-        // Upgrade: the SAME already-resident entry must flip to writable.
-        agent
-            .ensure_resident(root_a.clone(), Some(false))
-            .await
-            .unwrap();
-        let read_only_after = agent
+        // The pinned WRITE is let through for its own call ...
+        let write_cfg = agent.security_config_for_write(Some(&root_a)).await;
+        assert!(
+            write_cfg.file_write_enabled && write_cfg.write_block.is_none(),
+            "a pinned write must be consented to, or a pin can never write without a full activate"
+        );
+
+        // ... and that consent is NOT recorded anywhere. This is the assertion that fails if
+        // the shared entry is mutated again: the entry, and the config any other caller
+        // derives from it, are exactly what they were.
+        let still_read_only = agent
             .with_project_at(Some(&root_a), |p| Ok(p.read_only))
             .await
             .unwrap();
         assert!(
-            !read_only_after,
-            "ensure_resident(Some(false)) must upgrade an already-resident \
-             read-only entry to writable"
+            still_read_only,
+            "a pinned write must not change the shared entry"
+        );
+        let after = agent.security_config_for(Some(&root_a)).await;
+        assert!(
+            !after.file_write_enabled,
+            "another caller's config must still be read-only after a pinned write"
+        );
+        assert_eq!(
+            after.write_block.map(|b| b.cause),
+            Some(crate::util::path_security::WriteBlockCause::ActivatedReadOnly),
+            "and must still attribute the block to the read-only activation"
+        );
+    }
+
+    /// Consent needs a PIN. Without one the call runs against the default project, whose own
+    /// read-only state binds its callers: the pin is the named, deliberate choice of target,
+    /// and an unpinned write has made no choice.
+    #[tokio::test]
+    async fn no_pin_means_no_write_consent() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let root = canonical(dir.path());
+        let agent = Agent::new(Some(root.clone())).await.unwrap();
+        agent.activate(root, Some(true)).await.unwrap();
+
+        let cfg = agent.security_config_for_write(None).await;
+        assert!(
+            !cfg.file_write_enabled,
+            "an unpinned write must not be consented to under an explicit read-only activation"
+        );
+    }
+
+    /// The pin lifts the read-only ACTIVATION, never a project's own `project.toml`. That
+    /// setting is durable and a pin is a per-call convenience, so consent must not reach it.
+    /// Paired with the case above: "consent lifts read-only" alone is satisfied by a
+    /// derivation that ignores every write block, and only this case says it does not.
+    #[tokio::test]
+    async fn a_write_pin_does_not_lift_a_project_that_disables_writes_in_its_config() {
+        let home = tempdir().unwrap();
+        let locked = tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(locked.path().join(".codescout")).unwrap();
+        std::fs::write(
+            locked.path().join(".codescout").join("project.toml"),
+            "[project]\nname = \"locked\"\n\n[security]\nfile_write_enabled = false\n",
+        )
+        .unwrap();
+        let locked_root = canonical(locked.path());
+        let agent = Agent::new(Some(home.path().to_path_buf())).await.unwrap();
+        agent.ensure_resident(locked_root.clone()).await.unwrap();
+
+        let cfg = agent.security_config_for_write(Some(&locked_root)).await;
+        assert!(
+            !cfg.file_write_enabled,
+            "a project whose own config turns writes off must stay off under a pin"
+        );
+        assert_eq!(
+            cfg.write_block.map(|b| b.cause),
+            Some(crate::util::path_security::WriteBlockCause::ConfiguredOff),
+            "and must be attributed to its config, whose remedy is different"
         );
     }
 

@@ -501,7 +501,7 @@ async fn resolve_memory_dirs(input: &Value, ctx: &ToolContext) -> anyhow::Result
     // docs/issues/archive/2026-09-14-a-workspace-pin-to-an-unparseable-config-silently-reads-the-default-project.md
     if let Some(root) = ctx.workspace_override.as_deref() {
         ctx.agent
-            .ensure_resident(root.to_path_buf(), None)
+            .ensure_resident(root.to_path_buf())
             .await
             .map_err(|e| {
                 super::RecoverableError::with_hint(

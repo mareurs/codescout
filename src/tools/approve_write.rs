@@ -65,9 +65,13 @@ impl Tool for ApproveWrite {
                 RecoverableError::new("approve_write: no active project — activate a project first")
             })?;
 
+        // The write-consent config, not the plain one: `approve_write` IS a write decision, so
+        // a `workspace=` pin's consent applies to this call exactly as it does in the server's
+        // access gate — and, as there, is recorded nowhere. Reading the plain config here
+        // would refuse a pinned call the gate had just let through.
         let security = ctx
             .agent
-            .security_config_for(ctx.workspace_override.as_deref())
+            .security_config_for_write(ctx.workspace_override.as_deref())
             .await;
 
         if !security.file_write_enabled {
