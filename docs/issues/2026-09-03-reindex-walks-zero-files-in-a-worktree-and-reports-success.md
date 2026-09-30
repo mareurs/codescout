@@ -146,6 +146,25 @@ the main checkout covering the same class, did not surface in a semantic
 `doc(action="find", kind="bug")` from here either. It appeared only once an explicit
 `rel_path` filter was run at `scope="repo"`.
 
+### Re-observed 2026-09-24, in a second worktree — and `find`'s own warning is silenced there
+
+In `.worktrees/fix-lessons-friction` (branched from `experiments` @ `506924f2`), a markdown file
+created with `create_file` was invisible to `doc(action="find", filter={rel_path: {contains: …}})`
+→ `count: 0`. Two facets this file did not yet record, both from the same session:
+
+- **The `unindexed_files` hint is absent in the worktree.** The main checkout's `find` carries
+  `unindexed_files: 1` + `unindexed_hint` (the fix from
+  `docs/issues/archive/2026-08-17-artifact-find-is-silent-about-files-the-catalog-has-never-seen.md`);
+  the worktree's response for the same kind of query carries no such field. So the one surface
+  built to say "some files here cannot match" is silent exactly where files go missing — the zero
+  reads as trustworthy.
+- **`scope.abs_path` names the worktree while every row names the main checkout** —
+  `find(kind="tracker")` from the worktree returned `scope.abs_path =
+  …/.worktrees/fix-lessons-friction` beside items at `…/Codescout/docs/…`. Supports hypothesis 6.
+
+Cost that day: six bug files were written in that worktree and none can be tagged through the
+catalog until the branch merges — each carries that step in its own `## Resume`, per the
+workaround above.
 ## Hypotheses tried
 
 1. **Hypothesis:** the file was written somewhere unexpected.

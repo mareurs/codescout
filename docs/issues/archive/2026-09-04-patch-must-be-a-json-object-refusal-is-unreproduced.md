@@ -101,6 +101,23 @@ same id, same intent, no intervening change to the artifact.
 4. **Payload size breaks it.** Test: variant 5, and separately a *successful* ~1.5 KB single-edit
    `insert_after` that landed the banner this session. **Verdict:** rejected.
 
+5. **(Added 2026-09-24, untested at the transport.) The harness sent `patch` as a STRING holding
+   JSON, and codescout rescues that shape for arrays but not for objects.** Read at the source:
+   `optional_array_param` (`src/tools/core/params.rs:317`) re-parses a string-encoded array
+   "for MCP clients that stringify arrays", while `doc(update)`'s guard
+   (`src/librarian/tools/update.rs:449`, `!p.is_object()`) refuses a string-encoded object with
+   **exactly** the observed message. So if the payload was stringified, a `body_edits` ARRAY
+   elsewhere would have survived and this OBJECT would not — which fits "splitting into smaller
+   calls succeeded" only if stringification depends on payload shape or size, and nothing measured
+   shows that. **Test attempted, inconclusive:** two `doc(update, id=674c1e24c2d421fa)` calls
+   meant to send `patch` as a string both arrived as an object (`old_string not found`) — the
+   client normalizes object-typed parameters before sending, so it cannot produce the string form.
+   Both probes were no-ops by construction. **Verdict:** deferred; the Resume step (log the raw
+   `patch` on the rejection path) decides this hypothesis too — a logged `Value::String` confirms
+   it, and the fix would then be an object twin of `optional_array_param`.
+   Found while chasing a sibling report (`codescout-lessons.md` § 6.5, non-ASCII escapes through
+   the edit tools), filed as
+   `docs/issues/2026-09-24-edit-tools-collapse-unicode-escapes-in-tool-arguments.md`.
 ## Fix
 **WONTFIX — not a code defect; root cause found 2026-09-24** (open-bug sweep, `deep-agent-workflow-observations:DWF-7`). The refusal was accurate. In `usage.db`, 15 `doc`/`artifact` calls since this file was opened carry a `patch` whose `json_type` is `text` — a string, not an object. All 15 failed, and **14 of the 15 strings are not valid JSON**. One of the two calls this file reports (row 104000, 00:39:45 UTC) ends in `…"}]` with its closing `}` missing. Against that, 1893 object-typed patches went through in the same window. So the caller produced malformed JSON, the client passed it on as a string, and `update.rs:448-454` correctly refused it. "Transport mangling" in this file was close, but the origin is the caller, not the server.
 

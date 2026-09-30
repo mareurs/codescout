@@ -6,6 +6,7 @@
 
 pub mod indent;
 pub mod parser;
+pub mod python_ranges;
 
 use anyhow::Result;
 use std::path::Path;

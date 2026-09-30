@@ -14,7 +14,7 @@ use codescout::agent::Agent;
 use codescout::lsp::LspManager;
 use codescout::tools::edit_file::EditFile;
 use codescout::tools::output_buffer::OutputBuffer;
-use codescout::tools::symbol::EditCode;
+use codescout::tools::symbol::{EditCode, Symbols};
 use codescout::tools::{Tool, ToolContext};
 use serde_json::json;
 use std::sync::Arc;
@@ -1002,4 +1002,64 @@ pub fn target() -> i32 {
         "without `attributes` arg, existing attrs preserved; got:\n{result}"
     );
     assert!(result.contains("99"), "body still replaced; got:\n{result}");
+}
+
+// ===========================================================================
+// A multi-line Python constant's range is its first line
+// BUG docs/issues/2026-09-24-python-multiline-constant-range-is-its-first-line.md
+// ===========================================================================
+
+/// pyright reports an assignment's range as its name alone. Before the fix,
+/// `symbols(include_body=true)` returned `MARKERS = (` as the whole body and
+/// `edit_code(replace)` rewrote only that line, which the syntax guard refused.
+/// This drives the real pyright path end to end, so it proves the range fix is
+/// WIRED into `document_symbols` — the unit tests in `src/ast/python_ranges.rs`
+/// and `src/lsp/client.rs` cannot.
+#[tokio::test]
+#[ignore] // requires pyright
+async fn python_multi_line_constant_body_and_replace_cover_the_whole_statement() {
+    if !lsp_available("pyright-langserver") {
+        eprintln!("Skipping: pyright-langserver not installed");
+        return;
+    }
+
+    let code = "MARKERS: tuple[str, ...] = (\n    \"alpha\",\n    \"beta\",\n)\n\n\ndef after():\n    return MARKERS\n";
+    let (dir, ctx) = project_with_files(&[("consts.py", code)]).await;
+
+    let out = Symbols
+        .call(
+            json!({ "path": "consts.py", "name": "MARKERS", "include_body": true }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let text = out.to_string();
+    assert!(
+        text.contains("beta") && text.contains(")"),
+        "body must run to the closing paren; got:\n{text}"
+    );
+
+    EditCode
+        .call(
+            json!({
+                "path": "consts.py",
+                "symbol": "MARKERS",
+                "action": "replace",
+                "body": "MARKERS: tuple[str, ...] = (\"gamma\",)"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let result = std::fs::read_to_string(dir.path().join("consts.py")).unwrap();
+    assert!(result.contains("(\"gamma\",)"), "new value; got:\n{result}");
+    assert!(
+        !result.contains("alpha") && !result.contains("beta"),
+        "the old tuple contents must be gone, not orphaned; got:\n{result}"
+    );
+    assert!(
+        result.contains("def after"),
+        "the next function must survive; got:\n{result}"
+    );
 }
