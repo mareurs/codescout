@@ -158,13 +158,67 @@ pub(super) fn tee_path_is_safe(path: &str) -> bool {
         })
 }
 
-fn inject_tee(
+/// What tee injection decided for one command.
+pub(super) struct TeeInjection {
+    /// The command to run: spliced with a `tee` capture, or the original untouched.
+    pub(super) command: String,
+    /// Deletes the capture file when dropped. `None` when nothing is being captured.
+    pub(super) capture: Option<TmpfileGuard>,
+    /// Why a capture that WOULD have been taken was skipped, for the caller to surface.
+    /// `None` both when there was nothing to capture (no terminal filter) and when the
+    /// capture is in place — only a capture that was wanted and could not be made sets it.
+    pub(super) skipped: Option<String>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Test-only override of the directory the tee capture is created in. Per-THREAD, not
+    /// process env: `set_var` is process-global and races every other test in the binary
+    /// (`docs/conventions/test-env-isolation.md`). Sound only because `#[tokio::test]`
+    /// runs on one thread and `inject_tee` executes inline on it, never on a spawned task.
+    pub(super) static TEE_DIR_OVERRIDE: std::cell::RefCell<Option<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn tee_dir() -> std::path::PathBuf {
+    #[cfg(test)]
+    {
+        if let Some(dir) = TEE_DIR_OVERRIDE.with(|d| d.borrow().clone()) {
+            return dir;
+        }
+    }
+    std::env::temp_dir()
+}
+
+fn inject_tee(resolved_command: &str, buffer_only: bool) -> anyhow::Result<TeeInjection> {
+    inject_tee_in(resolved_command, buffer_only, &tee_dir())
+}
+
+/// `inject_tee` with the capture directory as an argument, so a test can hand it one that
+/// cannot be written to without touching process env.
+///
+/// **The capture is a best-effort side channel, and a failure to create it must not become
+/// a refused command.** It exists only to offer the unfiltered stream as a bonus
+/// `@cmd_*` buffer; the command it instruments does not need it. Creating the file used to
+/// propagate its error with `?`, so a full `/tmp` refused every filter-terminated command
+/// — on a machine with native `Bash` denied, that is no working shell at the moment one is
+/// needed to diagnose the full disk. Now the command runs un-teed and `skipped` says why.
+/// The `tee_path_is_safe` tripwire below is a different kind of failure — a path the shell
+/// must not be handed — and stays a refusal.
+/// docs/issues/2026-09-24-run-command-refuses-a-filtered-command-when-tmp-is-full.md
+pub(super) fn inject_tee_in(
     resolved_command: &str,
     buffer_only: bool,
-) -> anyhow::Result<(String, Option<TmpfileGuard>)> {
+    tmp_dir: &std::path::Path,
+) -> anyhow::Result<TeeInjection> {
     use super::super::command_summary::detect_terminal_filter;
+    let untouched = |skipped: Option<String>| TeeInjection {
+        command: resolved_command.to_string(),
+        capture: None,
+        skipped,
+    };
     if buffer_only {
-        return Ok((resolved_command.to_string(), None));
+        return Ok(untouched(None));
     }
     // A `|` inside a heredoc BODY is data destined for a file, not pipeline syntax, and
     // `detect_terminal_filter` — quote-aware but with no notion of a heredoc — read it as
@@ -173,44 +227,60 @@ fn inject_tee(
     // and the splice is unchanged. See
     // docs/issues/archive/2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md.
     let masked = crate::util::path_security::mask_heredoc_bodies(resolved_command);
-    if let Some(pipe_pos) = detect_terminal_filter(&masked) {
-        // Use tempfile::NamedTempFile for unpredictable path (SF-3).
-        // persist() converts it to a regular file we manage via TmpfileGuard.
-        let named = tempfile::Builder::new()
-            .prefix("codescout-unfiltered-")
-            .tempfile()?;
-        let tmppath = named.into_temp_path();
-        // Forward-slash form — this string is interpolated into a shell command
-        // run by Git Bash on Windows, where `\` is an escape character. Rust's
-        // fs APIs accept the forward-slash form too, so TmpfileGuard cleanup is
-        // unaffected.
-        let tmpfile = crate::platform::shell_path_str(&tmppath);
-        // Keep the file on disk — TmpfileGuard handles cleanup.
-        tmppath.keep()?;
-        // Safety (SF-4): see tee_path_is_safe. The path is also single-quoted
-        // below, so this is a tripwire rather than the only defence.
-        if !tee_path_is_safe(&tmpfile) {
-            return Err(RecoverableError::new(format!(
-                "temporary file path contains unexpected characters: {}",
-                tmpfile,
-            ))
-            .into());
-        }
-        // Single-quote the path: commands run under a POSIX shell on both
-        // platforms now, and quoting neutralises anything the allowlist might
-        // not anticipate (a future temp-dir naming scheme, a space in the path).
-        // `'` itself is excluded by the allowlist, so the quoting cannot be
-        // escaped from.
-        let cmd = format!(
-            "{} | tee '{}' | {}",
-            resolved_command[..pipe_pos].trim_end(),
-            tmpfile,
-            resolved_command[pipe_pos + 1..].trim_start()
-        );
-        Ok((cmd, Some(TmpfileGuard(tmpfile))))
-    } else {
-        Ok((resolved_command.to_string(), None))
+    let Some(pipe_pos) = detect_terminal_filter(&masked) else {
+        return Ok(untouched(None));
+    };
+    let skip = |why: &dyn std::fmt::Display| {
+        untouched(Some(format!(
+            "the unfiltered-output capture was skipped: its temp file could not be created in \
+             {} ({why}). The command ran normally; only the `unfiltered_output` buffer is missing.",
+            tmp_dir.display(),
+        )))
+    };
+    // Use tempfile::NamedTempFile for unpredictable path (SF-3).
+    // persist() converts it to a regular file we manage via TmpfileGuard.
+    let named = match tempfile::Builder::new()
+        .prefix("codescout-unfiltered-")
+        .tempfile_in(tmp_dir)
+    {
+        Ok(named) => named,
+        Err(e) => return Ok(skip(&e)),
+    };
+    let tmppath = named.into_temp_path();
+    // Forward-slash form — this string is interpolated into a shell command
+    // run by Git Bash on Windows, where `\` is an escape character. Rust's
+    // fs APIs accept the forward-slash form too, so TmpfileGuard cleanup is
+    // unaffected.
+    let tmpfile = crate::platform::shell_path_str(&tmppath);
+    // Keep the file on disk — TmpfileGuard handles cleanup.
+    if let Err(e) = tmppath.keep() {
+        return Ok(skip(&e));
     }
+    // Safety (SF-4): see tee_path_is_safe. The path is also single-quoted
+    // below, so this is a tripwire rather than the only defence.
+    if !tee_path_is_safe(&tmpfile) {
+        return Err(RecoverableError::new(format!(
+            "temporary file path contains unexpected characters: {}",
+            tmpfile,
+        ))
+        .into());
+    }
+    // Single-quote the path: commands run under a POSIX shell on both
+    // platforms now, and quoting neutralises anything the allowlist might
+    // not anticipate (a future temp-dir naming scheme, a space in the path).
+    // `'` itself is excluded by the allowlist, so the quoting cannot be
+    // escaped from.
+    let command = format!(
+        "{} | tee '{}' | {}",
+        resolved_command[..pipe_pos].trim_end(),
+        tmpfile,
+        resolved_command[pipe_pos + 1..].trim_start()
+    );
+    Ok(TeeInjection {
+        command,
+        capture: Some(TmpfileGuard(tmpfile)),
+        skipped: None,
+    })
 }
 
 /// Classify a command into a known-slow bucket. Returns a short label used
@@ -395,7 +465,11 @@ pub(crate) async fn run_command_inner(
     // When the last pipe stage is a known filter (grep, head, tail, sed, awk, etc.),
     // inject `tee /tmp/codescout-unfiltered-XXXX` before the filter so the caller
     // can surface the unfiltered stream as a buffer ref without re-running the command.
-    let (effective_command, unfiltered_tmpfile) = inject_tee(resolved_command, buffer_only)?;
+    let TeeInjection {
+        command: effective_command,
+        capture: unfiltered_tmpfile,
+        skipped: tee_skipped,
+    } = inject_tee(resolved_command, buffer_only)?;
 
     // --- Step 5: Execute command ---
     // On Unix we spawn into a new process group (process_group(0) → PGID = child PID)
@@ -544,7 +618,7 @@ pub(crate) async fn run_command_inner(
     .await
     {
         Ok(Ok(output)) => {
-            handle_successful_output(
+            let mut result = handle_successful_output(
                 original_command,
                 String::from_utf8_lossy(&output.stdout).into_owned(),
                 String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -554,7 +628,16 @@ pub(crate) async fn run_command_inner(
                 &work_dir,
                 ctx,
             )
-            .await
+            .await?;
+            // A capture that was wanted and could not be made says so. Absent, the response
+            // would be indistinguishable from a command that simply had no filter to capture.
+            if let (Some(note), Some(obj)) = (tee_skipped, result.as_object_mut()) {
+                obj.insert(
+                    "unfiltered_output_skipped".to_string(),
+                    serde_json::Value::String(note),
+                );
+            }
+            Ok(result)
         }
         Ok(Err(e)) => Err(RecoverableError::new(format!("command execution error: {}", e)).into()),
         Err(_) => {

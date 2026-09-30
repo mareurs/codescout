@@ -1189,6 +1189,114 @@ async fn run_command_does_not_include_warning() {
         "run_command should not emit a warning field"
     );
 }
+/// docs/issues/2026-09-24-run-command-refuses-a-filtered-command-when-tmp-is-full.md
+///
+/// The tee capture is an optional side channel; failing to create its temp file used to
+/// refuse the command itself. Three inputs, because each alone is monotone: "degrades on a
+/// bad dir" is satisfied by a helper that ALWAYS degrades, and "no filter needs no dir" is
+/// satisfied by one that never reaches the tee branch. Only together with the positive case
+/// (a good dir DOES capture) do they pin the one branch that changed.
+///
+/// The bad directory does not exist, which forces the creation-failure branch — the same
+/// `tempfile_in` error path a full `/tmp` takes — but not ENOSPC itself, which cannot be
+/// produced portably in a unit test.
+#[test]
+fn a_tee_capture_that_cannot_be_created_degrades_instead_of_refusing() {
+    let good = tempdir().unwrap();
+    let bad = good.path().join("does-not-exist");
+
+    let degraded = super::inner::inject_tee_in("echo hi | head -1", false, &bad)
+        .expect("an unusable capture dir must degrade, not refuse the command");
+    assert_eq!(
+        degraded.command, "echo hi | head -1",
+        "the command must run un-teed and otherwise untouched"
+    );
+    assert!(degraded.capture.is_none(), "nothing is being captured");
+    let note = degraded
+        .skipped
+        .expect("a capture that was wanted and could not be made must say so");
+    assert!(
+        note.contains("does-not-exist") && note.contains("unfiltered_output"),
+        "the note names the directory and the missing buffer; got: {note}"
+    );
+
+    // Control: no terminal filter means no capture is wanted, so nothing is skipped and the
+    // unusable directory is never consulted.
+    let plain = super::inner::inject_tee_in("echo hi", false, &bad).unwrap();
+    assert_eq!(plain.command, "echo hi");
+    assert!(plain.skipped.is_none(), "nothing wanted, nothing skipped");
+
+    // Positive: a usable directory still captures — the degrade path is not the only path.
+    let captured = super::inner::inject_tee_in("echo hi | head -1", false, good.path()).unwrap();
+    assert!(
+        captured.command.contains("| tee '"),
+        "a usable dir must splice the tee; got: {}",
+        captured.command
+    );
+    assert!(captured.capture.is_some());
+    assert!(captured.skipped.is_none());
+}
+
+/// The same defect through the tool, so the WIRING is covered and not only the helper: the
+/// command runs, its output arrives, and the response says the unfiltered buffer is missing.
+///
+/// The directory is injected through a per-thread seam, not `TMPDIR`
+/// (`docs/conventions/test-env-isolation.md`). `#[tokio::test]` is single-threaded, so the
+/// override set here is the one `inject_tee` reads.
+#[tokio::test]
+async fn a_full_tmp_does_not_refuse_a_filtered_command_and_the_response_says_so() {
+    struct ResetTeeDir;
+    impl Drop for ResetTeeDir {
+        fn drop(&mut self) {
+            super::inner::TEE_DIR_OVERRIDE.with(|d| *d.borrow_mut() = None);
+        }
+    }
+    let _reset = ResetTeeDir;
+    let (dir, ctx) = project_ctx().await;
+
+    super::inner::TEE_DIR_OVERRIDE
+        .with(|d| *d.borrow_mut() = Some(dir.path().join("does-not-exist")));
+    let degraded = RunCommand
+        .call(
+            json!({ "command": "echo hi | head -1", "timeout_secs": 5 }),
+            &ctx,
+        )
+        .await
+        .expect("an uncreatable capture file must not refuse the command");
+    assert!(
+        degraded["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("hi"),
+        "the command must have run; got: {degraded}"
+    );
+    assert!(
+        degraded["unfiltered_output_skipped"].is_string(),
+        "the response must say the unfiltered buffer is missing; got: {degraded}"
+    );
+    assert!(
+        degraded.get("unfiltered_output").is_none(),
+        "no capture existed, so no buffer ref may be offered; got: {degraded}"
+    );
+
+    // Control on the same call with a usable directory: no skip note, and the buffer is there.
+    super::inner::TEE_DIR_OVERRIDE.with(|d| *d.borrow_mut() = Some(dir.path().to_path_buf()));
+    let healthy = RunCommand
+        .call(
+            json!({ "command": "echo hi | head -1", "timeout_secs": 5 }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        healthy.get("unfiltered_output_skipped").is_none(),
+        "a healthy capture must not carry a skip note; got: {healthy}"
+    );
+    assert!(
+        healthy.get("unfiltered_output").is_some(),
+        "a healthy capture must still offer its buffer; got: {healthy}"
+    );
+}
 
 #[tokio::test]
 async fn execute_shell_command_exit_code_preserved() {
