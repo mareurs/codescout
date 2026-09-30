@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 187
+entry_high_water_F: 188
 entry_high_water_W: 149
 ---
 
@@ -66,6 +66,7 @@ entry_high_water_W: 149
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-187 | 2026-09-30 | low | cross-session | mitigated | **A clean `git status` and a fresh catalog claim did not stop a second session starting the same bug, and a red run's `wip_authors` line was what named it** - second instance of `F-186`; withdrew and handed over rather than merged. |
+| F-188 | 2026-09-30 | med | doc-vs-code | open | **A bug file's mechanism claim ("the gate skips a closed wrapper list") was false: the gate never calls `producer_index`, so `env`/`FOO=1`/`time cat` all bypass, and PR #29 it leaned on was unmerged** - measured on the live binary before any code; only the `&` half fixed. |
 | F-186 | 2026-09-30 | med | cross-session | open | **Five packet bug files read `status: open` while a live session held three of them, and only a red baseline said so** - 7 of 776 red before my first edit; provenance named the writer; none of the bugs was `taken`. |
 | F-185 | 2026-09-30 | low | self-friction | fixed-verified | **I added two `packet._fit` branches before their tests, and only re-reading my diff caught it** - a green suite was silent about both; sizes 197/220 now reach each and mutations kill them. |
 | F-184 | 2026-09-30 | med | documentation | open | **The measure-packet bug files' shared Resume under-predicts what a packet.py byte change touches** - pinned sha256s in run_sample and ~12 budget-derived literals, four of which stay green while their boundary moves. |
@@ -17338,6 +17339,16 @@ At that point `df` showed 64G free, and no process was still building into a leg
 **Counterfactual:** a fix that only exempted `workspace` in `check_tool_access` would have kept `read_tools_always_allowed` and `every_write_call_is_refused_under_a_write_block` green and left the exemption unguarded. Observed: mutating the exemption to every `workspace` action was caught by the new pin ALONE; the end-to-end tests stayed green.
 
 Fix `acda6a40`, bug archived as `df38c4ac3b9a64a5`.
+
+## F-188 — A bug file's mechanism claim was false (the gate never calls producer_index), and the PR it leaned on was unmerged; measuring first kept the fix from forking #29's head rule
+
+**Valid:** dated 2026-09-30
+
+**Observed:** scouting the source-file gate before fixing `a703b36d`, the bug file said the wrapper bypass was `producer_index` lacking `sudo`/`xargs` ("the gate skips a closed list of prefixes"). Reading `check_source_file_access` showed it takes the RAW first token (`shell_tokens(seg).next()`) and never calls `producer_index`, so the premise was wrong in the direction that matters: every wrapper that function knows was a bypass. Measured on the live binary before writing any code: `env cat`, `FOO=1 cat` and `time cat` each returned 107 lines. The same rule also over-blocks: `cat=1 ls src/x.rs` reads as a `cat`. A second gap: the bug file treated PR #29 as merged; it is open (+2060/-127, touches the same functions), which a peer (`codescout-d7`) named when I asked about the file, not the tree.
+
+**Cost:** had I implemented the filed fix (add `sudo`/`xargs` to `producer_index`) the wrapper bypass would have stayed open for the most common wrappers, and the change would have forked the head rule #29 exists to unify and conflicted with it. Instead only the `&` mechanism was fixed, the wrapper half deferred with its test table.
+
+**Status:** open until #29 lands and the `sudo`/`xargs` follow-up is done.
 
 ## Template for new entries
 
