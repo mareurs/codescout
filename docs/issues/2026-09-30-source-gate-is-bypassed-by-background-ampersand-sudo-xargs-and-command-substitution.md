@@ -1,15 +1,17 @@
 ---
 id: a703b36da995dab3
 kind: bug
-status: open
+status: taken
 title: 'BUG: the source-file gate is bypassed by a background `&`, a `sudo`/`xargs` wrapper, and a command substitution'
 owners:
 - marius
 tags:
 - cluster/guard-narrower-than-its-name
+claimed_at: 2026-09-30
+claimed_by: 0b05903e-39c7-4f8a-be01-b85cfd9502a3
 opened: 2026-09-30
 severity: low
-unverified: '`find ... -exec cat {} +`, `parallel cat`, `doas cat`, `ionice cat` are inferred bypasses from the head rule and were never run. The sudo/xargs fix (4d392858) is verified by unit tests and mutation and by a peer''s probe of a rebuilt working-tree binary; the author has NOT re-measured the table below on a binary built from that commit.'
+unverified: '`sudo cat` was reported refused by the author of 4d392858 on a rebuilt binary; THIS session did not run sudo (privilege escalation) and has not reproduced it. The table has NOT been re-measured on a binary containing the `|&` / lone-`&` IL-3 fix (8614aebf): no build contains it yet. Mechanism 3 and `find -exec` / `parallel` are open by design.'
 ---
 
 ## Summary
@@ -102,7 +104,22 @@ Measured on the rebuilt live binary after #29 merged and `5d39e0d8` was built, e
 
 **Not covered.** The allow-partners for `xargs` (`xargs echo cat`, `xargs wc`, `xargs grep`) were green before the fix and have no mutation of their own: nothing here proves they would go red if the head check became "any token is a reader". `$(…)`, backticks, `bash -c`, `eval` stay documented limits (mechanism 3). `find … -exec cat {} +`, `parallel cat`, `doas`, `ionice` are inferred bypasses, unmeasured.
 
-**A fifth variant, found by codescout-d7 after this file was first written: `|&`.** Splitting `a |& b` on `|` leaves the stage `& b`, headed by `&`, so `echo x |& cat build.rs \| wc -l` ran in both the source gate and IL-3. The test `a_lone_ampersand_splits_but_redirections_and_quoted_ones_do_not` in `5d39e0d8` asserted `split("a |& b") == ["a", "& b"]` with a comment calling that correct, so it PINNED the bypass as intended; the fix (`81a95660`, patch-id `179ce63b60a1e4278fe9f6d4f67af5f1019841cb`, unpushed at the time of writing) changes that behaviour and must change that assertion with it.
+**A fifth variant, found by codescout-d7 after this file was first written: `|&`.** Splitting `a |& b` on `|` leaves the stage `& b`, headed by `&`, so `echo x |& cat build.rs \| wc -l` ran in both the source gate and IL-3. The test `a_lone_ampersand_splits_but_redirections_and_quoted_ones_do_not` in `5d39e0d8` asserted `split("a |& b") == ["a", "& b"]` with a comment calling that correct, so it PINNED the bypass as intended; the fix (`8614aebf`, patch-id `72c450e8519e3836168a6c1700dcb1e76de49623`, gated as `162ec65e` in an isolated worktree; it was `81a95660` / `179ce63b…` before it was rebased onto `4d392858` and before it changed that assertion, as it must; unpushed) changes that behaviour and must change that assertion with it.
+
+### Spellings still open, MEASURED on the rebuilt binary (2026-09-30, after `4d392858`, before the `|&` fix)
+
+Measured by the author of `4d392858` on the rebuilt live binary and then **reproduced independently by codescout-d7 on the same binary** (each command run once against `build.rs`, 107 lines, suffixed `| wc -l`; control `cat build.rs | wc -l` refused). Every row below returned the file:
+
+| command | what it is |
+|---|---|
+| `echo x \|& cat build.rs` | the `|&` variant (fixed on a branch, not yet in any build) |
+| `ionice cat build.rs` | a wrapper nobody listed: the head is `ionice` |
+| `doas cat build.rs`, `doas -u root cat build.rs`; IL-3: `doas -n cargo --version \| tail -1` | another unlisted wrapper; `doas` is installed here (setuid, no `/etc/doas.conf`) and refused to run anything itself, so `wc -l` printed 0: a gate bypass, not a disclosure |
+| `find build.rs -maxdepth 0 -exec cat {} +` | the reader is an argument of `find` |
+| `parallel cat ::: build.rs` | the reader is an argument of `parallel` (installed here) |
+| `bash -c 'cat build.rs'`, `echo $(cat build.rs)` | mechanism 3, documented |
+
+Refused, reproduced: `echo build.rs \| xargs cat` (note says the paths arrive on stdin) and the plain control. Reported by the other author and NOT reproduced here: `sudo -n cat`, `sudo -n -u root cat`, `env cat`, `echo b & cat`, and IL-3's `sudo -n cargo --version | tail -1`. `ionice`, `find -exec`, `parallel` and `doas` therefore moved from "inferred" to **measured bypasses** (`doas` was reported by the author of `4d392858` and reproduced here). They are not closable by adding to a wrapper list one name at a time (`ionice` could be, `find -exec` and `parallel` cannot): they are mechanism 3 in another spelling, and the honest remedy is the same: name them in the docstring's Known limits.
 
 ## Tests added
 
@@ -119,9 +136,9 @@ None needed by callers; the gate is failing open. Agents should keep using `read
 
 Open, in order:
 
-1. **`|&`** in the source gate and IL-3, plus IL-3's own lone `&` (`echo x & rg -c zzz f | tail -1` ran; `rg … & echo b | tail -1` was refused, a false positive): codescout-d7, branch `il3-lone-ampersand` at `81a95660`, not pushed when this was written. It must also update the `a |& b` assertion named above.
+1. **`|&`** in the source gate and IL-3, plus IL-3's own lone `&` (`echo x & rg -c zzz f | tail -1` ran; `rg … & echo b | tail -1` was refused, a false positive): codescout-d7: committed locally as `8614aebf` (gated as `162ec65e`: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0; rebased onto `4d392858`, the `a |& b` assertion now uses the production constant), not pushed.
 2. **Mechanism 3** (`$(…)`, backticks, `bash -c`, `eval`): documented, not closable by a head rule.
-3. **`find -exec`, `parallel`, `doas`, `ionice`**: inferred, unmeasured.
+3. **`find -exec`, `parallel`, `ionice`, `doas`**: MEASURED bypasses, see the table above. `ionice` and `doas` are one-line wrapper-list entries like `sudo`; `find -exec` and `parallel` are not closable name by name, and the remedy for those is the Known-limits docstring.
 4. **Re-run the table above on a binary built from a tree containing `4d392858` and the `|&` fix.** Whoever closes this file owns that measurement; the author of `4d392858` has not made it.
 
 ## References
