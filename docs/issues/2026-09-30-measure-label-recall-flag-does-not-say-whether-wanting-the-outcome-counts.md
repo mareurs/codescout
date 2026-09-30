@@ -62,21 +62,40 @@ None.
 
 ## Fix
 
-Reword the banner line and the legend. Suggested wording, which the operator should confirm:
+Ruled by the operator 2026-09-30: a short banner line, with the full rule in the recall legend. The banner is
+exactly at its screen caps (24 lines, 79 columns, pinned by `test_banner_fits_one_screen_and_is_plain_ascii`),
+so the four-line wording suggested here would have redded that test.
 
-- `y` only if you already remember how this case turned out, from before this labelling session.
-- Wanting to know the outcome is not remembering it. Answer `n`.
-- Do not look it up: no transcript, no git log, no tracker. There is no sanctioned lookup. If the packet
-  alone cannot settle the case, the answer is `u`, not a lookup.
+- Banner item 5, one line (76 columns): `y only if you remember the outcome. Just curious = n. No lookups.`
+- `LEGEND_RECALL`, three lines, printed before the first recall prompt of every case and again after an invalid
+  answer (`_ask_until`): `y` only if you already remember how the case turned out, from before this session;
+  wanting to know is not remembering, answer `n`; never look it up (no transcript, git log or tracker); if the
+  packet alone cannot settle the case, that is label `u`, not a lookup.
 
-`label.py` is **not** one of the four files `run.py frame` hashes, so this change needs no re-freeze. The
-banner is 24 lines; check it still fits the screen, and update any test that pins the banner's line count
-or text.
+The `u` advice sits in the legend and not on the recall line because the recall prompt accepts only `y` or `n`:
+`u` is a label at the labels prompt.
+
+Not changed: `RECALL_PROMPT` and the `_echo` line. Both still read as "remember how this turned out", which the
+legend now qualifies at the moment of asking; say so if the echo should carry "from before this session" too.
+
+`label.py` is not one of the four files `run.py frame` hashes, so no re-freeze is owed for this change.
 
 ## Tests added
 
-None yet. Owed: the legend names both "remember" and "looking it up" (a shape test that fails if either
-addressee is dropped, per the `CLAUDE.md` remedy-text rule).
+In `tests/test_measure_label.py`:
+
+- The golden banner (item 5) and `L_RECALL` were changed first and watched red: five failures, all the old
+  production text against the new golden text.
+- `test_the_recall_rule_answers_each_state_a_labeller_can_be_in` names each state a labeller can be in and the
+  reply the legend gives it: remembers, y; only curious, n; tempted to look, refused, with label `u` as the
+  alternative. A shape test buys arrival, not answerability, so the states are enumerated.
+- The path to the labeller is covered by the existing `test_a_legend_is_printed_above_each_prompt` and
+  `test_invalid_answers_say_what_was_wrong_and_reprint_the_legend_once`, both of which pin `L_RECALL`.
+
+**Mutation run, isolated worktree, 7 mutants, 7 KILLED, 0 survived** (read off unittest's summary, the probe's own
+verdict parse being cargo-only): the curiosity rule flipped in the legend and in the banner; the banner grown past 79
+columns; the legend no longer delivered to the guide channel; the lookup ban dropped; the alternative label changed
+from `u` to `n`; the remember-only clause dropped. 807 measure tests pass.
 
 ## Workarounds
 

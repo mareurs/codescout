@@ -925,7 +925,7 @@ GOLDEN_BANNER_BODY = """\
    silent unless it skips the check and then relies on it).
 4. Delivery: s silent | q quiet (a suggestion to the main agent) | i interrupt.
    v/q/c need q or i; n/u need s.
-5. Recall: y if you remember how this turned out from outside the packet.
+5. Recall: y only if you remember the outcome. Just curious = n. No lookups.
 6. Note is optional, Enter skips. Then Enter keeps your answer, r redoes it.
 7. p re-shows the packet; x quits, and you can resume later. Every answer is
    saved as soon as you keep it."""
@@ -936,8 +936,9 @@ DEFAULT_ARGV = ["less", "-R", "-X", "-P", HINT]
 L_LABELS = "Labels: v=verify q=qualify c=correct (any combination) | n=none | u=unresolved | p=re-show | x=quit"
 L_DELIVERY = ("Delivery: s=silent | q=quiet (a suggestion to the main agent) | i=interrupt | p=re-show | x=quit\n"
               "  (v/q/c need q or i; n/u need s)")
-L_RECALL = ("Recall: y=you remember how this turned out from outside the packet | n=you do not | "
-            "p=re-show | x=quit")
+L_RECALL = ("Recall: y=you already remember how this case turned out, from before this session | n=you do not\n"
+            "  Wanting to know is not remembering: answer n. Never look it up (no transcript, git log or tracker).\n"
+            "  If the packet alone cannot settle the case, that is label u, not a lookup. | p=re-show | x=quit")
 L_NOTE = "Note (optional): anything worth remembering about this case. Enter skips. Here x is just text."
 L_KEEP = "Enter=keep and save this answer | r=redo this case | x=quit (this case is not saved)"
 
@@ -953,6 +954,18 @@ class BannerTests(Base):
             self.assertLessEqual(len(lines), 24)
             self.assertLessEqual(max(len(l) for l in lines), 79)
             text.encode("ascii")
+
+    def test_the_recall_rule_answers_each_state_a_labeller_can_be_in(self):
+        # A labeller who remembers, one who is only curious, and one tempted to look it up. A shape test buys ARRIVAL,
+        # not ANSWERABILITY, so each state is named here with the reply the legend gives it. The legend is shown before
+        # the first recall prompt of every case (see test_a_legend_is_printed_above_each_prompt); the banner says it once.
+        legend = label.LEGEND_RECALL
+        self.assertRegex(legend, r"y=you already remember")  # remembers -> y
+        self.assertRegex(legend, r"Wanting to know is not remembering: answer n")  # curious -> n
+        self.assertRegex(legend, r"Never look it up")  # tempted -> refused ...
+        self.assertRegex(legend, r"cannot settle the case, that is label u")  # ... with what to do instead
+        self.assertIn("Just curious = n", label.banner(False))
+        self.assertIn("No lookups", label.banner(False))
 
     def test_run_next_prints_the_banner_once_before_the_first_case(self):
         d = make_set(self.root, ["a", "b"])

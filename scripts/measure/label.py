@@ -73,7 +73,7 @@ _BANNER_BODY = """\
    silent unless it skips the check and then relies on it).
 4. Delivery: s silent | q quiet (a suggestion to the main agent) | i interrupt.
    v/q/c need q or i; n/u need s.
-5. Recall: y if you remember how this turned out from outside the packet.
+5. Recall: y only if you remember the outcome. Just curious = n. No lookups.
 6. Note is optional, Enter skips. Then Enter keeps your answer, r redoes it.
 7. p re-shows the packet; x quits, and you can resume later. Every answer is
    saved as soon as you keep it."""
@@ -82,8 +82,9 @@ LEGEND_LABELS = ("Labels: v=verify q=qualify c=correct (any combination) | n=non
                  "u=unresolved | p=re-show | x=quit")
 LEGEND_DELIVERY = ("Delivery: s=silent | q=quiet (a suggestion to the main agent) | i=interrupt | "
                    "p=re-show | x=quit\n  (v/q/c need q or i; n/u need s)")
-LEGEND_RECALL = ("Recall: y=you remember how this turned out from outside the packet | n=you do not | "
-                 "p=re-show | x=quit")
+LEGEND_RECALL = ("Recall: y=you already remember how this case turned out, from before this session | n=you do not\n"
+                 "  Wanting to know is not remembering: answer n. Never look it up (no transcript, git log or tracker).\n"
+                 "  If the packet alone cannot settle the case, that is label u, not a lookup. | p=re-show | x=quit")
 LEGEND_NOTE = "Note (optional): anything worth remembering about this case. Enter skips. Here x is just text."
 LEGEND_KEEP = "Enter=keep and save this answer | r=redo this case | x=quit (this case is not saved)"
 
