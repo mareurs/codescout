@@ -55,21 +55,25 @@ inner structure entirely when a line does not start with the base.
 
 ## Fix
 
-Option (a), narrowed to what the shift itself creates.
+**Operator ruling, 2026-09-30: CONVERT, not refuse.** Relayed by session `e41af068` and recorded as a note event on this row, then confirmed by the operator in the fixing session (answer: *both* — convert where the file settles the unit, refuse where it does not). The first fix, `86a52ee1`, was a refusal, shipped before the ruling reached the fixing session; `ad707cd2` replaced it.
 
-`text::indent_unit_conflict` reports a conflict when a line's inner indentation is left in the body's unit under a base in the file's. It stays silent where the result is one unit: a body with no inner indentation converts cleanly (`\t` becomes four spaces on every line), so refusing on "the units differ" would block the one case where the change is harmless. It is also silent where nothing is re-based (`reindent_to` returns the block untouched), where the target names no single unit (column 0, or a base that mixes both), and inside string literals, which `reindent_block` emits verbatim. It shares `reindent_to`'s "will this shift?" decision through `shift_source`, so it cannot describe a shift the function does not make.
+The ruling left three points open, each answered from the file and never assumed:
 
-`replace` and `insert` ask it through `checked_rebase`, only when `reindent` is on; with `reindent=false` the body is spliced as written and the layout is the caller's. The refusal names both units and two repairs a caller can act on: the file's own unit, or `reindent=false`.
+- **Tab width.** `text::file_indent` reads it: the common divisor of the file's space-indent widths, accepted only when it is at least 2 and at least two lines sit at exactly that width, so one stray comment cannot set it. Converting the other way, into tabs, reads the step from the body itself (`convert_indent_unit`).
+- **A file that already mixes units, or shows no firm width.** Nothing to convert to, so the edit is refused, naming both units and saying why.
+- **String-literal interiors and whitespace-only lines.** Left as they are, by the mask the shift already uses.
 
-Option (b), converting, was not taken: it needs a tab width and is a guess in a file that already mixes.
+`checked_rebase` (`src/tools/symbol/edit_code.rs`) asks `indent_unit_conflict` whether the shift would mix units, then converts, or refuses with a reason: the file does not settle a unit, or the body's own indentation cannot be converted without guessing (a line mixing both units, or no clear step). A conversion is reported to the caller as `indent_converted`, so it is never silent. `reindent=false` is unchanged: the body is spliced as written and no conversion applies.
+
+Option (b) as first written here said converting "needs a tab width and is a guess in a file that already mixes". Both halves stand: the width is now read from the file, and the mixed file is the refusal.
 
 ## Tests
 
-Red first: `replace_symbol_refuses_a_tab_body_for_a_space_indented_file`, `replace_symbol_refuses_a_space_body_for_a_tab_indented_file` and `insert_code_refuses_a_tab_body_for_a_space_indented_file` (`tests/symbol_lsp.rs`) answered `Ok` and wrote before the change. Controls: `replace_symbol_accepts_a_body_in_the_files_own_indent_unit`, and `replace_symbol_reindent_false_splices_a_unit_mixing_body_as_written`, which runs in a JavaScript class because a brace language is where the spliced result is valid, and asserts both that the default refuses that pair and that the switch the hint names splices it.
+Conversion, red first against the refusal it replaced (five red): `replace_symbol_converts_a_tab_body_for_a_space_indented_file`, `replace_symbol_converts_a_space_body_for_a_tab_indented_file`, `insert_code_converts_a_tab_body_for_a_space_indented_file` and `replace_symbol_converts_a_tab_body_in_a_brace_language` (`tests/symbol_lsp.rs`), each asserting the written block is one unit and that `indent_converted` names both. Where it must still refuse: `replace_symbol_refuses_to_convert_into_a_file_that_mixes_both_units` and `replace_symbol_refuses_a_body_whose_indent_step_it_cannot_read`, each asserting the reason and that nothing was written. Controls: `replace_symbol_accepts_a_body_in_the_files_own_indent_unit`, and `replace_symbol_reindent_false_splices_a_unit_mixing_body_as_written`, which keeps the tab body tabs in a four-space JavaScript class.
 
-Unit (`src/util/text.rs`): `an_indent_unit_conflict_names_both_units_in_each_direction`, `no_indent_unit_conflict_when_the_shifted_block_is_one_unit` (nine controls, each built so dropping one check flips it), and `reindent_to_returns_a_block_whose_minimum_is_the_target_byte_for_byte`, which pins a clause of `reindent_to` that moving it into `shift_source` exposed as untested. `indent_unit_refusal_names_both_units_and_both_repairs` (`src/tools/symbol/tests.rs`) asserts the message names the body's unit and the file's unit the right way round, and that the hint names the file's unit and `reindent=false`.
+Unit (`src/util/text.rs`): `file_indent_*` (the unit a file shows, what it declines to name, what is not indentation), `convert_indent_unit_*` (tabs to spaces, spaces to tabs by the body's own step, where it declines, literal interiors, a body already in the file's unit), and the detector's own tests from the first fix. `indent_unit_refusal_names_both_units_and_both_repairs` (`src/tools/symbol/tests.rs`) asserts the message names both units the right way round, the reason, and that the hint names the file's unit and `reindent=false`.
 
-20 mutations, one per guarded site (12 over the predicate and `shift_source`, 8 over the call sites, the `reindent` gate and the message text), all killed on the committed bytes. One survivor on the way, `agent_base == target_base` in `shift_source`, differed only for whitespace-only lines, and is now pinned.
+25 mutations over the conversion, one per guarded site (line classification, the width rule, both conversion directions, the gate, the unsettled-file and unreadable-body refusals, the note text and both response sites), all killed on the committed bytes. Two survivors on the way were test gaps: a single-space step accepted as a unit, and a whitespace-only line converted as if it were code. A re-check added in `checked_rebase` was argued unreachable and deleted rather than tested. The 20 mutations of the first fix's refusal are superseded by this set.
 
 ## Workarounds
 
@@ -80,6 +84,7 @@ Indent the body with the file's own unit.
 - The escape-decoding repair closure in `do_insert` re-bases the decoded body with the plain `rebase_body`: it cannot return an error, and its input already passed the check before its `\t` escapes were decoded. A body that only becomes unit-mixing once decoded is not refused.
 - `edit_file`'s whitespace-normalized repair calls `reindent_block` with its own bases. It is disabled for indentation-significant languages, and in brace languages a tab/space mix changes no meaning.
 - A symbol whose anchor line samples as column 0 (`anchor_indent` returns `""` past its window) gets no judgement: there is no base to be inconsistent with.
+- The width is read from the file's own indentation, not from a project formatter configuration (`rustfmt.toml`, `.editorconfig`). A file whose existing indentation disagrees with its formatter is converted to what it shows.
 
 ## References
 
@@ -88,7 +93,9 @@ Indent the body with the file's own unit.
 
 ## Fix provenance
 
-- **SHA:** `86a52ee1c6a56a1fdeaffc3441a06f087afc77ba` (`experiments`)
+- **SHA:** `86a52ee1c6a56a1fdeaffc3441a06f087afc77ba` (`experiments`) — the first fix, a refusal; superseded by the commit below
 - **patch-id:** `dd568fa84220fe58889ca279daaf6aaf6b9032ae`
+- **SHA:** `ad707cd292afa13fc4021bc66246bc3a983ed82b` (`experiments`) — conversion per the operator's ruling; the refusal remains only where the file does not settle a unit
+- **patch-id:** `106ada024d50605aca0f90aa38236c74776f611e`
 
-Gate: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0` on 2026-09-30, on the bytes committed here, in a tree that also held two other sessions' uncommitted files (`src/server.rs`, `src/util/path_security.rs`). The change is not librarian, `server-stack` or ONNX code, so the gate's blind lanes do not apply to it.
+Gate: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0` on 2026-09-30 for each, on the committed bytes. The change is not librarian, `server-stack` or ONNX code, so the gate's blind lanes do not apply to it.
