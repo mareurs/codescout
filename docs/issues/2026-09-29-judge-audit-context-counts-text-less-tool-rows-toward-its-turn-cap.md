@@ -43,6 +43,8 @@ Build an events DB for any frozen corpus (`join.build_events`) and call `judge.b
 mode on a top-level assistant message that follows a tool call. The context lists the tool rows
 with empty text, and they are counted among the 12.
 
+**Reproduced 2026-09-30 (session 00113c9d) on SYNTHETIC rows only** (`join._create_schema` plus inserted `turns` rows, no corpus): a prompt row, one `assistant_text` row ("Running them now."), then 8 tool round-trips (a `tool_use` row and a `tool_result` row each, `text` NULL), then the decision. `judge.build_input(..., "audit")` returned **12 context rows, all `tool_use`/`tool_result`, 0 with text, 0 chars**; the operator prompt and the narration were both outside the window, and `pre_evidence` held only the decision. So a short tool exchange empties the context completely; it does not merely thin it. Text-less kinds are `tool_use`, `tool_result`, `assistant_thinking` (never stored, by design) and `meta`; only the first two carry evidence.
+
 ## Environment
 
 `scripts/measure/judge.py` `_session_part` (the `CONTEXT_MAX_TURNS = 12` and
@@ -61,6 +63,8 @@ The completed Task 9b gate is not affected. Its items were document excerpts bui
 (`DOC_CONTEXT_CHARS`), not `_session_part`, and audit mode never ran on the corpus.
 
 ## Fix
+
+Open, and **deliberately deferred by the registered spec**: `docs/superpowers/specs/2026-09-29-system1-labelled-sample-design.md` § *Out of scope* puts "Moving `judge.py` onto this packet rule, a new prompt and a new gate" in a later spec and says this bug "stays open until then" (§ *Packet rule*: the packet is identical for the operator and any later judge). Not patched in session 00113c9d for that reason. Original note:
 
 Open. The packet rule for operator-labelled cases is being redesigned (design session 2026-09-29),
 and the judge must receive the same packet as the operator. So the fix belongs to that redesign:
