@@ -3605,6 +3605,47 @@ async fn edit_file_crlf_tolerant_match_succeeds_on_python_file() {
     let after = std::fs::read_to_string(&f).unwrap();
     assert_eq!(after, "def f():\r\n    x = 42\r\n    return x\r\n");
 }
+#[tokio::test]
+async fn edit_file_crlf_tolerant_match_refuses_a_python_dedent_tree_sitter_does_not_flag() {
+    // The CRLF-tolerant branch runs BEFORE the `indentation_significant` early return, so a
+    // Python file reaches its `after && !before` gate — unlike the whitespace-normalized
+    // gate below it, which Python never reaches. That gate asked tree-sitter only, and wrote
+    // this dedent (measured on the live tool 2026-09-30: `py_compile` then failed).
+    let (dir, ctx) = project_ctx().await;
+    let f = dir.path().join("g.py");
+    let original = "def f():\r\n    return 1\r\ndef g():\r\n    return 2\r\n";
+    std::fs::write(&f, original).unwrap();
+    // tree-sitter-invisible post-image, asserted so the test cannot pass on the old check.
+    assert!(
+        !crate::ast::has_syntax_errors(
+            "def f():\n    return 1\ndef g():\n    return 2\n  x = 3\n",
+            "python"
+        ),
+        "fixture is no longer tree-sitter-invisible; pick a new one"
+    );
+
+    let err = EditFile
+        .call(
+            json!({
+                "path": f.to_str().unwrap(),
+                "old_string": "def g():\n    return 2",
+                "new_string": "def g():\n    return 2\n  x = 3"
+            }),
+            &ctx,
+        )
+        .await
+        .expect_err("a CRLF-tolerant rewrite that breaks Python indentation must be refused");
+
+    assert!(
+        err.to_string().contains("would introduce syntax errors"),
+        "refusal should say why, got: {err}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&f).unwrap(),
+        original,
+        "a refused edit writes nothing"
+    );
+}
 
 #[tokio::test]
 async fn normalized_fallback_disabled_for_yaml() {
@@ -4722,6 +4763,66 @@ async fn edit_file_warns_on_syntax_error_after_edit() {
         warning.contains("syntax"),
         "warning should mention 'syntax', got: {warning:?}"
     );
+}
+#[tokio::test]
+async fn edit_file_warns_on_a_python_dedent_tree_sitter_does_not_flag() {
+    // The edit dedents to column 2, a level no enclosing block sits at, so CPython raises
+    // `IndentationError` at import. tree-sitter-python recovers from it without an ERROR
+    // node, which is why the fixture's post-image is asserted clean under `has_syntax_errors`
+    // first: if a grammar upgrade ever starts flagging it, this test would pass on the old
+    // check and stop guarding `has_indentation_errors`, so it must fail loudly instead.
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("app.py");
+    std::fs::write(&path, "def f():\n    return 1\ndef g():\n    return 2\n").unwrap();
+    let post = "def f():\n    return 1\ndef g():\n    return 2\n  x = 3\n";
+    assert!(
+        !crate::ast::has_syntax_errors(post, "python"),
+        "fixture is no longer tree-sitter-invisible; pick a new one"
+    );
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": path.to_str().unwrap(),
+                "old_string": "    return 2",
+                "new_string": "    return 2\n  x = 3"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result["status"], "ok", "the warning is non-fatal");
+    assert!(
+        result["warning"]
+            .as_str()
+            .is_some_and(|w| w.contains("syntax")),
+        "a dedent no block has must warn, got: {result}"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), post);
+}
+
+#[tokio::test]
+async fn edit_file_stays_silent_on_a_python_edit_that_indents_cleanly() {
+    // Control for the test above, and the guard for the opposite direction: a warning that
+    // fires on every Python edit would satisfy that test too.
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("app.py");
+    std::fs::write(&path, "def f():\n    return 1\ndef g():\n    return 2\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": path.to_str().unwrap(),
+                "old_string": "    return 2",
+                "new_string": "    if True:\n        return 2"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result, json!("ok"), "a clean edit returns the bare ok");
 }
 
 // ── EditFile — batch edits ────────────────────────────────────────────────

@@ -909,9 +909,10 @@ async fn perform_edit(
             new_content.push_str(&content[w.end_byte..]);
 
             if let Some(lang) = crate::ast::detect_language(std::path::Path::new(path)) {
-                let before = crate::ast::has_syntax_errors(&content, lang);
-                let after = crate::ast::has_syntax_errors(&new_content, lang);
-                if after && !before {
+                // `syntax_regressed` is tree-sitter plus, for Python, the indentation scanner:
+                // this branch runs before the `indentation_significant` early return below, so
+                // a Python file reaches it and tree-sitter alone waves a dedent through.
+                if crate::symbol::edit::syntax_regressed(&content, &new_content, lang) {
                     return Err(super::RecoverableError::with_hint(
                         format!(
                             "CRLF-tolerant match at lines {}-{} would introduce syntax errors — not written",
@@ -1060,9 +1061,14 @@ async fn perform_edit(
         return Ok(json!({ "status": "ok", "note": note }));
     }
 
-    // Syntax check: warn if the edit introduced parse errors (non-fatal).
+    // Syntax check: warn if the edit introduced parse errors (non-fatal). Python also asks the
+    // indentation scanner, because tree-sitter recovers from a dedent to a column no block has
+    // and from a tab/space mix without an ERROR node, and CPython refuses both at import. This
+    // is the warn-don't-refuse site, so a scanner false positive costs a note, not a rewrite.
     if let Some(lang) = crate::ast::detect_language(std::path::Path::new(path)) {
-        if crate::ast::has_syntax_errors(&new_content, lang) {
+        if crate::ast::has_syntax_errors(&new_content, lang)
+            || crate::ast::has_indentation_errors(&new_content, lang)
+        {
             return Ok(json!({
                 "status": "ok",
                 "warning": "syntax error detected after edit — file may be malformed. Use read_file to inspect and fix."
