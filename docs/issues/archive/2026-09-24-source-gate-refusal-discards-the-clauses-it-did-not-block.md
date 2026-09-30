@@ -1,5 +1,5 @@
 ---
-status: fixed
+status: archived
 opened: 2026-09-24
 closed: 2026-09-24
 severity: low
@@ -64,6 +64,11 @@ and the control `source_gate_rerun_is_not_suppressed_by_a_quoted_or_mid_word_has
 
 Review fix: `c4043285` on branch `fix/lessons-friction` · patch-id `07184a2f8dfc2f054db97537536b619489cc4e95`.
 
+## Fix provenance
+
+- **SHA:** `ce41048f` (`experiments`)
+- **patch-id:** `066083d1ea88e38ed7083576925b833c14bf39d5`
+
 ## Tests added
 
 Eight `source_gate_*` tests in `src/util/path_security.rs`, one per row of the rewrite table,
@@ -72,7 +77,7 @@ recorded in the commit message.
 
 Writing the compound-construct fixture exposed a separate pre-existing bypass — a run that
 STARTS with `do`/`then`/`(` is not blocked at all — filed as
-`docs/issues/2026-09-24-source-gate-is-bypassed-by-a-keyword-or-group-prefix.md`. The fixtures
+`docs/issues/archive/2026-09-24-source-gate-is-bypassed-by-a-keyword-or-group-prefix.md`. The fixtures
 use shapes that are blocked today.
 ## Workarounds
 Re-type the permitted clauses.

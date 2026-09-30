@@ -1006,7 +1006,7 @@ pub fn target() -> i32 {
 
 // ===========================================================================
 // A multi-line Python constant's range is its first line
-// BUG docs/issues/2026-09-24-python-multiline-constant-range-is-its-first-line.md
+// BUG docs/issues/archive/2026-09-24-python-multiline-constant-range-is-its-first-line.md
 // ===========================================================================
 
 /// pyright reports an assignment's range as its name alone. Before the fix,

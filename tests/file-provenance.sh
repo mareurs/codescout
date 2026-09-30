@@ -1021,7 +1021,7 @@ hasnt "and infers no cause from zero records"                     "$nr" "LIKELY 
 
 echo
 echo "== a linked worktree finds its transcripts, and each relative write its tree =="
-# docs/issues/2026-09-24-file-provenance-reads-no-transcripts-inside-a-worktree.md
+# docs/issues/archive/2026-09-24-file-provenance-reads-no-transcripts-inside-a-worktree.md
 #
 # Everything above pins FILE_PROVENANCE_ROOTS, so none of it exercises DISCOVERY -- which
 # is where this bug lived. These cases run with a fake HOME and a real repo + worktree.

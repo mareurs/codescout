@@ -1,12 +1,14 @@
 ---
-status: fixed
-opened: 2026-09-24
-closed: 2026-09-24
-severity: low
-owner: marius
-related: [docs/issues/2026-09-24-source-gate-refusal-discards-the-clauses-it-did-not-block.md]
-tags: [cluster/guard-narrower-than-its-name]
 kind: bug
+status: archived
+tags:
+- cluster/guard-narrower-than-its-name
+closed: 2026-09-24
+opened: 2026-09-24
+owner: marius
+related:
+- docs/issues/archive/2026-09-24-source-gate-refusal-discards-the-clauses-it-did-not-block.md
+severity: low
 ---
 
 # BUG: the source-file gate is bypassed when the reader follows a shell keyword or an opening group
@@ -67,6 +69,11 @@ Fix: `ce41048f` on branch `fix/lessons-friction` · patch-id `066083d1ea88e38ed7
   showed it could never fire behind `executed_command`, its only caller.
 
 Review fix: `c4043285` on branch `fix/lessons-friction` · patch-id `07184a2f8dfc2f054db97537536b619489cc4e95`.
+
+## Fix provenance
+
+- **SHA:** `ce41048f` (`experiments`)
+- **patch-id:** `066083d1ea88e38ed7083576925b833c14bf39d5`
 
 ## Tests added
 

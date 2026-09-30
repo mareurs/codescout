@@ -1,5 +1,5 @@
 ---
-status: fixed
+status: archived
 opened: 2026-09-24
 closed: 2026-09-24
 severity: medium
@@ -67,6 +67,10 @@ ranges are both corrected:
   `with_python_ranges_by_file` in `LspClient::workspace_symbols` (in place, order preserved).
 
 Fix: `ce41048f` on branch `fix/lessons-friction` · patch-id `066083d1ea88e38ed7083576925b833c14bf39d5`.
+## Fix provenance
+
+- **SHA:** `ce41048f` (`experiments`)
+- **patch-id:** `066083d1ea88e38ed7083576925b833c14bf39d5`
 ## Tests added
 
 - 11 unit tests, `src/ast/python_ranges.rs` `tests` — every load-bearing site was mutated and

@@ -290,7 +290,7 @@ fn convert_document_symbols(
 /// constant arrives one line long — and `symbols` bodies and `edit_code` ranges are
 /// both derived from it. Widen those ranges to the whole statement, here where the
 /// symbols enter codescout, so every consumer agrees on the correct span.
-/// BUG docs/issues/2026-09-24-python-multiline-constant-range-is-its-first-line.md
+/// BUG docs/issues/archive/2026-09-24-python-multiline-constant-range-is-its-first-line.md
 fn with_python_ranges(
     mut symbols: Vec<super::SymbolInfo>,
     language_id: &str,

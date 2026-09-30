@@ -4,7 +4,7 @@
 //! multi-line constant arrives as a one-line symbol. Every consumer of the range then
 //! agrees on the wrong answer: `symbols(include_body=true)` shows `NAME = (` as the whole
 //! body, and `edit_code(replace)` rewrites that one line and orphans the rest.
-//! BUG docs/issues/2026-09-24-python-multiline-constant-range-is-its-first-line.md
+//! BUG docs/issues/archive/2026-09-24-python-multiline-constant-range-is-its-first-line.md
 
 use std::collections::HashMap;
 

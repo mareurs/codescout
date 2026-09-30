@@ -1,5 +1,5 @@
 ---
-status: fixed
+status: archived
 opened: 2026-09-24
 closed: 2026-09-24
 severity: medium
@@ -88,6 +88,11 @@ Tests: 11 more assertions in `tests/file-provenance.sh` (179 total), each negati
 positive control; 7/7 mutations killed.
 
 Review fix: `c4043285` on branch `fix/lessons-friction` · patch-id `07184a2f8dfc2f054db97537536b619489cc4e95`.
+
+## Fix provenance
+
+- **SHA:** `d10d7f60` (`experiments`)
+- **patch-id:** `f6700f1da3b06df15dd6e52222da6f4b54724232`
 
 ## Tests added
 

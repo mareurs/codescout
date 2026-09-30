@@ -322,7 +322,7 @@ def transcript_roots(root: Path) -> list[Path]:
     worktree the sessions doing the work usually sit in the MAIN checkout and reach the
     worktree by activating it, so its transcript dir is read too; `scan()` then decides,
     write by write, which tree a relative path named.
-    docs/issues/2026-09-24-file-provenance-reads-no-transcripts-inside-a-worktree.md
+    docs/issues/archive/2026-09-24-file-provenance-reads-no-transcripts-inside-a-worktree.md
     """
     env = os.environ.get("FILE_PROVENANCE_ROOTS")
     if env:

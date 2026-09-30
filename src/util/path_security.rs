@@ -807,7 +807,7 @@ fn shell_tokens(cmd: &str) -> Vec<String> {
 /// which also catches `( FOO=1 cat …)`. A trailing `)`/`}` is trimmed from the HEAD too: a
 /// one-word group `(pytest)` is the single token `(pytest)`, and leaving `pytest)` as the head
 /// matched nothing and let the pipe through. No command name ends in either character.
-/// BUG docs/issues/2026-09-24-source-gate-is-bypassed-by-a-keyword-or-group-prefix.md
+/// BUG docs/issues/archive/2026-09-24-source-gate-is-bypassed-by-a-keyword-or-group-prefix.md
 fn executed_command(mut tokens: Vec<String>) -> Vec<String> {
     loop {
         let i = producer_index(&tokens).min(tokens.len());
@@ -1442,7 +1442,7 @@ fn grep_is_counting(stage: &str) -> bool {
 /// `scripts/gate.sh` sets. docs/issues/archive/2026-09-24-il3-unbounded-pipe-block-is-bypassed-by-a-leading-env-assignment.md
 /// The keywords and grouping are the source gate's half of the same premise: `do cat x`,
 /// `( cat x )` and `{ cat x; }` read project source unchecked.
-/// docs/issues/2026-09-24-source-gate-is-bypassed-by-a-keyword-or-group-prefix.md
+/// docs/issues/archive/2026-09-24-source-gate-is-bypassed-by-a-keyword-or-group-prefix.md
 ///
 /// **A closed wrapper list, and the limit is stated rather than hidden:** a wrapper not named
 /// here (`ionice`, a shell function) still reads as its own name and falls to bounded — the
@@ -1624,7 +1624,7 @@ fn git_subcommand_is_single_line(tokens: &[String]) -> bool {
 /// nor `git ls-files <dir>` (a pathspec expands; measured 2026-09-24,
 /// `git ls-files --error-unmatch src` printed 340 lines). The modes that read stdin or
 /// print object content are excluded by flag.
-/// BUG docs/issues/2026-09-24-il3-refuses-git-plumbing-bounded-by-its-arguments.md
+/// BUG docs/issues/archive/2026-09-24-il3-refuses-git-plumbing-bounded-by-its-arguments.md
 fn git_subcommand_is_argument_bounded(tokens: &[String]) -> bool {
     let Some(sub) = tokens.get(1) else {
         return false;
@@ -2029,7 +2029,7 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
 /// drops the separators: re-joining `test -f x && rm y` with `;` would make the `rm`
 /// unconditional, and a `;` inside a loop, `if`, `( … )` or `{ … }` is not a top-level
 /// separator at all.
-/// BUG docs/issues/2026-09-24-source-gate-refusal-discards-the-clauses-it-did-not-block.md
+/// BUG docs/issues/archive/2026-09-24-source-gate-refusal-discards-the-clauses-it-did-not-block.md
 fn rerun_without_offenders(
     command: &str,
     stripped: &str,
@@ -3903,7 +3903,7 @@ mod tests {
         );
     }
 
-    // BUG docs/issues/2026-09-24-source-gate-refusal-discards-the-clauses-it-did-not-block.md
+    // BUG docs/issues/archive/2026-09-24-source-gate-refusal-discards-the-clauses-it-did-not-block.md
     // The refusal stays whole (running the permitted clauses would leave the caller
     // unable to tell which side effects happened); what it owes is the command minus the
     // blocked clauses, ready to re-run — and only where dropping a clause cannot change
@@ -4014,7 +4014,7 @@ mod tests {
         assert_eq!(rerun_of(&hint), None, "{hint}");
     }
 
-    // BUG docs/issues/2026-09-24-source-gate-is-bypassed-by-a-keyword-or-group-prefix.md
+    // BUG docs/issues/archive/2026-09-24-source-gate-is-bypassed-by-a-keyword-or-group-prefix.md
     #[test]
     fn source_gate_sees_through_keyword_group_and_assignment_prefixes() {
         for cmd in [
@@ -5346,7 +5346,7 @@ EOF"#;
         assert!(detect_il3_violation("git rev-parse --all | head -20").is_some());
     }
 
-    // BUG docs/issues/2026-09-24-il3-refuses-git-plumbing-bounded-by-its-arguments.md
+    // BUG docs/issues/archive/2026-09-24-il3-refuses-git-plumbing-bounded-by-its-arguments.md
     #[test]
     fn il3_allows_git_plumbing_bounded_by_its_argument_count() {
         // At most one line per argument, and the arguments are on the command line.
