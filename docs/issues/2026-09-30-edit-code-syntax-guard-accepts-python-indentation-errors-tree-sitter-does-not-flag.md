@@ -106,7 +106,7 @@ Not decided. Options:
 Option (a) matches the project's stance elsewhere (a loud refusal beats a silent acceptance) and
 is the one to prototype. Whatever is chosen, the message on a hit should say the file
 stopped parsing and name indentation, not the stale-range wording, which is the subject of the
-sibling bug `0148d05a47da5457`.
+sibling bug `2b8943f405df498a`.
 
 ## Tests added
 
@@ -131,7 +131,7 @@ scratch Python class on the current binary and confirm `status: ok`. Then protot
 
 ## References
 
-- `docs/issues/2026-09-30-edit-code-sibling-drop-refusal-blames-a-stale-lsp-range-for-an-unparseable-body.md`
+- `docs/issues/archive/2026-09-30-edit-code-sibling-drop-refusal-blames-a-stale-lsp-range-for-an-unparseable-body.md`
   (the message this guard's hit should not reuse)
 - `docs/issues/2026-09-30-edit-code-rebasing-a-tab-indented-body-onto-a-space-file-mixes-indent-units.md`
   (related indentation defect in the re-base step)

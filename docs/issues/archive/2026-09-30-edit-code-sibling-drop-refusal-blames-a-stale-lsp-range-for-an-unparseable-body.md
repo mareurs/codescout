@@ -1,14 +1,13 @@
 ---
-id: '0148d05a47da5457'
+id: 2b8943f405df498a
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: edit_code''s sibling-drop refusal blames a stale LSP range for a failure the tool''s own re-indent caused'
 tags:
 - cluster/hint-composed-without-the-request
 - edit_code
 - error-message
-claimed_at: 2026-09-30
-claimed_by: e41af068-cf07-4c83-867f-71be1ba7f586
+closed: 2026-09-30
 ---
 
 # BUG: edit_code's sibling-drop refusal blames a stale LSP range for a failure the tool's own re-indent caused
@@ -116,6 +115,15 @@ a broken parse as the consequence, would lose its actionable message.
 these messages. The fix was written against it and the tests pin the resulting family, so a
 rewording that drops a phrase moves failures between telemetry families without any test
 about the message itself going red.
+
+Fixed in `62a6b903` on `experiments`.
+
+Gate evidence: one `gate.sh` run on the final tree exited with `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, and the new tests appear as `ok` in both lanes. The tree it ran on carried peers' uncommitted work, which compiled. The live binary has NOT been rebuilt with this change, so no `edit_code` call has exercised the new wording.
+
+## Fix provenance
+
+- **SHA:** `62a6b903` (`experiments`)
+- **patch-id:** `db49d215a6be844f2b99a14505c014bc914d57d0`
 
 ## Tests
 
