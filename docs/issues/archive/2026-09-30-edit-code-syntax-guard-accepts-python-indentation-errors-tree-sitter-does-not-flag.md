@@ -153,7 +153,7 @@ unit and give every continuation line its depth relative to the first line.
   (the message this guard's hit should not reuse)
 - `docs/issues/archive/2026-09-30-edit-code-rebasing-a-tab-indented-body-onto-a-space-file-mixes-indent-units.md`
   (related indentation defect in the re-base step; fixed in the same session)
-- `docs/issues/2026-09-30-edit-file-post-edit-syntax-warning-is-blind-to-python-indentation-errors.md`
+- `docs/issues/archive/2026-09-30-edit-file-post-edit-syntax-warning-is-blind-to-python-indentation-errors.md`
   (the `edit_file` half, left open)
 - `docs/issues/archive/2026-08-07-edit-code-remove-ast-repair-over-deletes.md` (the case
   `syntax_regressed` was added for)
