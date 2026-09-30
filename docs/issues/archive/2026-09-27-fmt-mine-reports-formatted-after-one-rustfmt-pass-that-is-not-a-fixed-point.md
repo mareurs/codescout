@@ -1,7 +1,7 @@
 ---
-id: d1eff909c0d8a73a
+id: 17bee02774495475
 kind: bug
-status: open
+status: fixed
 title: 'BUG: fmt-mine.sh reports "formatted" after one rustfmt pass that is not a fixed point'
 tags:
 - cluster/record-asserts-an-unchecked-completion
@@ -24,7 +24,7 @@ A session that ran `./scripts/fmt-mine.sh` (reported formatted), then committed,
 
 ## Reproduction
 
-Deterministic, reproduced 2026-09-27 in a scratch file holding only this function inside a `mod m { … }`, at 4- and at 8-space base indentation:
+Deterministic, reproduced 2026-09-27 in a scratch file holding only this function inside a `mod m { … }`, at 4- and at 8-space base indentation. **The `mod m { … }` wrapper is required, and the snippet below is shown unwrapped:** re-derived 2026-09-30, the bare function at column 0 reaches a fixed point in one pass (`--check` rc 0 after pass 1); wrapped in `mod m { … }` the same function gives `--check` rc 1 after pass 1 and rc 0 after pass 2.
 
 ```rust
 fn check_prose(root: &Path, r: &Recipe) -> Option<String> {
@@ -55,11 +55,16 @@ Two parts. rustfmt's non-idempotence on an over-long literal inside a returned m
 
 ## Fix
 
-Not started. Candidate: after `rustfmt --edition 2021 $MINE`, re-run `rustfmt --check --edition 2021 $MINE` and repeat the format up to a small bound (2–3 passes); report `formatted` only on a clean check, and name the file and the pass count otherwise. A test in `tests/` can pin it with the construct above as the fixture.
+Fixed in `5487b52f` (patch-id `d29ab890e40ccc067186143c5f880acf1987839b`, `git show <sha> | git patch-id --stable`). `scripts/fmt-mine.sh` now runs `rustfmt` then `rustfmt --check` in a loop bounded at 3 passes. It prints `formatted` only after a clean check, and otherwise prints `NOT a fixed point after N pass(es)`, names the files still dirty, and exits 1. rc > 1 from `--check` reads as still-dirty, which can only withhold the word `formatted`.
 
 ## Tests added
 
-None yet.
+`tests/fmt-mine.sh` case 10 (the two-pass construct, wrapped in `mod m`; asserts a fresh `rustfmt --check` on the resulting bytes is clean) and case 11 (a fake `rustfmt` on PATH that never settles; asserts exit 1, `NOT a fixed point`, the file named, and no `formatted N file(s)` line). Suite 50 passed, 0 failed. Mutations, one per guarded site, run with `scripts/mutation-probe.sh`: `FMT_MAX_PASSES=3` to `1` killed case 10; the `--check` verdict replaced by `true` killed case 10 and all four case-11 assertions; the failure branch's `exit 1` to `exit 0` killed case 11 `exits 1`.
+
+## Fix provenance
+
+- **SHA:** `5487b52fda1210de7f2efeab5e8c9e7878e217f3` (`experiments`)
+- **patch-id:** `d29ab890e40ccc067186143c5f880acf1987839b`
 
 ## References
 

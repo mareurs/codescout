@@ -38,7 +38,7 @@ Shipped as `#[cfg(test)] mod taxonomy_recipes` in `src/librarian/tools/append_en
 - `95ff5e64` — the scanner; patch-id `65af3b9768151c0da15f49ba1ea7ccb6f38c16fc`
 - `8fd92e0a` — the checks and the corpus test; patch-id `dd6ac4fcdb13166039a54d45548bb2009f776875`
 
-Follow-ups filed: `fc491a58e7a9b561` (the other surfaces that route to `append_entry` are unchecked), `4d25c5b252c36a70` (the session-log template's own recipe is refused on a fresh copy), `d1eff909c0d8a73a` (`fmt-mine.sh` reports formatted after a rustfmt pass that is not a fixed point — met while landing this).
+Follow-ups filed: `fc491a58e7a9b561` (the other surfaces that route to `append_entry` are unchecked), `4d25c5b252c36a70` (the session-log template's own recipe is refused on a fresh copy), `17bee02774495475` (`fmt-mine.sh` reports formatted after a rustfmt pass that is not a fixed point — met while landing this).
 
 ## Tests added
 

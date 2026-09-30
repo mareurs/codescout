@@ -1,7 +1,7 @@
 ---
-id: de44b3e0d02bd11f
+id: a0eb5a92623f3e63
 kind: bug
-status: open
+status: fixed
 title: The worktree read notice still names list[0] as the tree to activate, so every unpinned call points at a mutation-probe slot
 tags:
 - cluster/hint-composed-without-the-request
@@ -79,6 +79,21 @@ notice text above appeared on every unpinned call in this session. The function 
   § Fix: "Lead with `root` — the main repo — and offer the worktree list second … name the caller's own
   … or name none."
 
+## Fix
+
+Fixed in `5487b52f` (patch-id `d29ab890e40ccc067186143c5f880acf1987839b`, `git show <sha> | git patch-id --stable`). `worktree_read_notice` now aims `workspace(action='activate', path=…)` at `root`, the main repo, and offers the worktree list second for a caller who wants a linked tree, the same shape as `guard_worktree_write` (`fc6f5bb7`). The function is now `pub(super)` so the sibling `tests.rs` can drive it.
+
+**Not done, deliberately (follow-ups, not part of this fix):** (1) one shared helper for the prescription between `guard_worktree_write` and `worktree_read_notice`, so a third site cannot drift; the two sites are still separate format strings. (2) the doc comment's *"the condition is self-limiting"* paragraph is still written, and no longer holds while the mutation-probe pool keeps its slots. (3) whether a permanent probe pool should count as "linked worktrees" for this notice at all is a separate question.
+
+## Tests added
+
+`tools::core::tests::worktree_read_notice_activate_remedy_names_the_main_repo_not_a_worktree`. It parses the `path="…"` argument of the `activate` clause and asserts it equals the canonical `root`, and separately asserts the worktree list is still in the notice. It asserts on the argument and not the whole message because the message's first sentence names `root` and its list names every worktree, so "contains root" is true of the broken text. Observed red: with `list[0]` restored through `scripts/mutation-probe.sh` the test is KILLED with `left: …/wt-feat, right: …/main`.
+
+## Fix provenance
+
+- **SHA:** `5487b52fda1210de7f2efeab5e8c9e7878e217f3` (`experiments`)
+- **patch-id:** `d29ab890e40ccc067186143c5f880acf1987839b`
+
 ## Hypotheses tried
 
 1. **Hypothesis:** already fixed by `fc6f5bb7`. **Test:** read `worktree_read_notice` at HEAD.
@@ -88,33 +103,10 @@ notice text above appeared on every unpinned call in this session. The function 
    **Test:** read its archived file and the peer branch. **Verdict:** rejected. That bug is the
    peer-serve branch and is fixed. This is the interactive branch.
 
-## Fix
-
-Apply the `fc6f5bb7` remedy here too: name `root` as the tree to activate (it is the answer in nearly
-every case), list the worktrees as the alternatives, and keep the `workspace=` per-call form. Better
-still, share one helper for the prescription between `guard_worktree_write` and `worktree_read_notice`,
-so a third site cannot drift. That is the *mutate once per guarded SITE* law applied to a remedy string.
-Also correct the "self-limiting" paragraph of the doc comment. Whether a permanent probe pool should
-count as "linked worktrees" for this notice at all is a separate question; raise it rather than fold it
-in.
-
-## Tests added
-
-None yet. Owed: with two worktrees present and no project chosen, the notice's `activate` path is the
-main root and not either worktree. Assert on the path argument inside `activate(…)` specifically,
-because the worktree paths legitimately appear in the list, so a bare `contains(root)` is satisfiable by
-accident (IC-9). Mutate `root` back to `list[0]` and confirm the test fails.
-
 ## Workarounds
 
 Call `workspace(action='activate', path="/home/marius/work/claude/codescout")` (the main repo, not what
 the notice names), or pass `workspace=` per call.
-
-## Resume
-
-Write the failing test beside the existing `worktree_read_notice` tests (find them with
-`references(symbol="worktree_read_notice", path="src/tools/core/types.rs")`), then change the format
-argument and share the prescription with `guard_worktree_write`.
 
 ## References
 

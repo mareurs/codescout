@@ -280,7 +280,7 @@ has "9 names the file it would have collaterally rewritten" "$OUT" "src/peer.rs"
 echo "== 10. rustfmt NEEDS TWO PASSES: the script reaches the fixed point, not just one pass =="
 # The construct is rustfmt 1.9.0-stable's non-idempotence, reproduced 2026-09-30: an
 # over-long string literal in a returned `format!` inside a match arm, INSIDE a `mod`.
-# docs/issues/2026-09-27-fmt-mine-reports-formatted-after-one-rustfmt-pass-that-is-not-a-fixed-point.md
+# docs/issues/archive/2026-09-27-fmt-mine-reports-formatted-after-one-rustfmt-pass-that-is-not-a-fixed-point.md
 #
 # LOAD-BEARING FIXTURE DETAIL: the `mod m { ... }` wrapper is part of the reproduction.
 # The bare function, at column 0, formats to a fixed point in ONE pass — the bug file's own

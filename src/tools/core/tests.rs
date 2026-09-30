@@ -988,7 +988,7 @@ async fn guard_worktree_write_hint_names_the_main_repo_not_an_arbitrary_worktree
 /// "message contains root" is satisfied by the broken text and "message does not contain
 /// the worktree" is false on correct text. Only the argument discriminates.
 ///
-/// docs/issues/2026-09-30-the-worktree-read-notice-still-names-list-0-as-the-tree-to-activate.md
+/// docs/issues/archive/2026-09-30-the-worktree-read-notice-still-names-list-0-as-the-tree-to-activate.md
 #[tokio::test]
 async fn worktree_read_notice_activate_remedy_names_the_main_repo_not_a_worktree() {
     let tmp = tempfile::tempdir().unwrap();

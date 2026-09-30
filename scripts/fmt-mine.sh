@@ -286,7 +286,7 @@ fi
 # collapsed). A single pass followed by "formatted" asserted a fixed point it never observed,
 # and the pre-commit `rustfmt --check` hook was what caught it, on a hunk this script had
 # just claimed to have formatted.
-# docs/issues/2026-09-27-fmt-mine-reports-formatted-after-one-rustfmt-pass-that-is-not-a-fixed-point.md
+# docs/issues/archive/2026-09-27-fmt-mine-reports-formatted-after-one-rustfmt-pass-that-is-not-a-fixed-point.md
 #
 # The bound is small because a real fixed point arrives on pass 2; a construct still moving on
 # pass 3 is an oscillation, and looping further only hides it. That case is REPORTED and

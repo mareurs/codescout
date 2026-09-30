@@ -240,7 +240,7 @@ pub(super) async fn worktree_read_notice(
     // that tree the session's home project. The full list is already in the message
     // for a caller who genuinely wants one of them. Same repair as
     // `guard_worktree_write` (fc6f5bb7); this was the second site of the defect.
-    // docs/issues/2026-09-30-the-worktree-read-notice-still-names-list-0-as-the-tree-to-activate.md
+    // docs/issues/archive/2026-09-30-the-worktree-read-notice-still-names-list-0-as-the-tree-to-activate.md
     Some(format!(
         "Reads are resolving against \"{}\". This repo also has linked git \
          worktrees [{}] and no project has been explicitly activated, so results \
