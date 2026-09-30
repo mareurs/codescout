@@ -1,13 +1,14 @@
 ---
-id: b72b082b562ddea8
+id: fe1537f6bb132a20
 kind: bug
-status: open
+status: fixed
 title: 'BUG: edit_code re-indents a body the caller already indented to the symbol''s column whenever ONE line is shallower, and the refusal blames a stale LSP range'
 tags:
 - cluster/addressing-without-an-escape-hatch
 - edit_code
 - indentation
 - python
+closed: 2026-09-30
 ---
 
 # BUG: edit_code re-indents a body the caller already indented to the symbol's column whenever ONE line is shallower, and the refusal blames a stale LSP range
@@ -78,6 +79,26 @@ In `reindent_to`, treat a body whose FIRST code line is already at `target_base`
 already based, whatever the later lines do. The first line is the declaration, the line
 that has to land at the target; when it is there the caller has placed the block, and
 one uniform shift cannot improve a block whose levels differ.
+
+
+Fixed in `2da4e2fe` on `experiments`, patch-id `73164631c5220ec441ee9251889315305684956a`
+(`git show 2da4e2fe | git patch-id --stable`, whole diff redirected to a file first).
+
+Gate evidence, stated as observed rather than as a green claim. In one `gate.sh` run on
+2026-09-30 the lean and default test lanes exited 0, with the fix in the tree. The same
+run showed `FMT=1` and `CLIPPY=101`. FMT was two files: a peer's `run_command/tests.rs`,
+which `fmt-mine.sh` refused as not this session's, and `src/util/text.rs`, where a doubled
+blank line from this fix's own test insert was the only diff and is corrected in the commit.
+CLIPPY's error text was cut by the run's `tail -60`, so its cause was not read; a separate
+`cargo clippy --workspace --all-targets --features local-embed -- -D warnings` re-run on
+the tree afterwards exited 0. A peer reported a transient compile error in
+`run_command/inner.rs` in that window, which fits but was not verified. No single
+four-lane run was green end to end.
+
+## Fix provenance
+
+- **SHA:** `2da4e2fe` (`experiments`)
+- **patch-id:** `73164631c5220ec441ee9251889315305684956a`
 
 ## Tests added
 

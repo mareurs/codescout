@@ -81,7 +81,7 @@ would also refuse a body whose first line is ALREADY at the target column, which
 the shape reported here (a method at the target's column, then a column-0 class). That
 shape needs no refusal: `reindent_to` now returns a body unchanged when its first code
 line is at the target column, so `class B` keeps column 0. See
-`2026-09-30-edit-code-reindent-takes-its-base-from-the-shallowest-line-so-one-column-0-line-double-indents-a-pre-indented-body.md`.
+`docs/issues/archive/2026-09-30-edit-code-reindent-takes-its-base-from-the-shallowest-line-so-one-column-0-line-double-indents-a-pre-indented-body.md`.
 Verified at the `reindent_to` function only, with the shape from this report as a unit
 test. The `edit_code(insert)` path itself has NOT been re-run on it.
 
