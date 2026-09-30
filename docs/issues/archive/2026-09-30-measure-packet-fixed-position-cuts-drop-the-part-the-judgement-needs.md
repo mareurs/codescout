@@ -1,11 +1,11 @@
 ---
-id: '3bbaeeac07baaca8'
+id: 5deb65cf11add6cf
 kind: bug
-status: open
+status: archived
 title: A labelling packet's fixed-position cuts drop the part of a tool call or result that the judgement needs
 tags:
 - cluster/truncated-window-ordered-by-the-wrong-key
-closed: ''
+closed: 2026-09-30
 opened: 2026-09-30
 owner: marius
 related:
@@ -71,7 +71,7 @@ None.
 
 ## Fix
 
-**Ruled by the operator 2026-09-30: options 1 and 2 as leaned, with 1,500 characters for record-writing arguments and head 500 + tail 1,000 for results. Implemented and committed: `9a269f24`, patch-id `7223e28c28d71b168ff7b77be8c0e46fa3aee7cf` (`git show 9a269f24 | git patch-id --stable`). Status stays `open` until the four-command gate has run on it (this change touches no Rust, so that gate is close to vacuous for it) and the archive can follow.** The original options follow for the record. Was: needs an operator ruling before implementation, because it changes registered constants. Options
+**Ruled by the operator 2026-09-30: options 1 and 2 as leaned, with 1,500 characters for record-writing arguments and head 500 + tail 1,000 for results. Implemented and committed: `9a269f24`, patch-id `7223e28c28d71b168ff7b77be8c0e46fa3aee7cf` (`git show 9a269f24 | git patch-id --stable`). Gate, 2026-09-30, `./scripts/gate.sh` on `HEAD` `2da4e2fe` plus another session's uncommitted `src/tools/run_command/inner.rs` and `tests.rs`: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0` (lean lane 3,743 passed, default lane 5,890 passed, no SIGTERM or panic in the output). An earlier run the same day was not green for reasons outside this change (a peer's unformatted file, two new `util::text` tests red before their fix landed, a default lane killed by SIGTERM); the re-run is the one that counts. This change touches no Rust, so that gate is close to vacuous for it; the evidence for it is the measure suite (798 passed) and the 21-mutant run under Tests added.** The original options follow for the record. Was: needs an operator ruling before implementation, because it changes registered constants. Options
 the pilot controller put to the operator on 2026-09-30, with its leaning:
 
 1. **Arguments.** Raise the limit only for tools that write a record, for example to 1,500. The set is
@@ -83,6 +83,11 @@ the pilot controller put to the operator on 2026-09-30, with its leaning:
 
 Update spec L125-126 in the same change, or in Amendment 1, which has not been committed yet. The
 marker work is in `measure-packet-cuts-results-and-arguments-without-a-marker`. Land them together.
+
+## Fix provenance
+
+- **SHA:** `9a269f24acad136397826c855f8f83433c6f68cd` (`experiments`)
+- **patch-id:** `7223e28c28d71b168ff7b77be8c0e46fa3aee7cf`
 
 ## Tests added
 

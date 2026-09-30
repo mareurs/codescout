@@ -326,7 +326,7 @@ class CutMarkers(PacketCase):
 
 
 class KeptWindows(PacketCase):
-    """Bug 3bbaeeac07baaca8, operator rulings 2026-09-30. The window a packet keeps used to be fixed by position,
+    """Bug 5deb65cf11add6cf, operator rulings 2026-09-30. The window a packet keeps used to be fixed by position,
     so a record-writing call lost its body after the path and a result lost its counts and headers. Now: a call
     that writes a durable record keeps 1,500 characters of arguments and every other call keeps 300; a result of
     more than 1,500 keeps its first 500 and last 1,000 with a marker between. Each rule is pinned in BOTH

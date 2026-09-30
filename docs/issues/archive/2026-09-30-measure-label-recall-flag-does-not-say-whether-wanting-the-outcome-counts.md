@@ -1,11 +1,11 @@
 ---
-id: e3ca4c0b4589cb47
+id: b0c3ffa887f1ab92
 kind: bug
-status: open
+status: archived
 title: The label tool's recall flag does not say whether wanting to see the outcome counts as remembering it
 tags:
 - cluster/unclassified
-closed: ''
+closed: 2026-09-30
 opened: 2026-09-30
 owner: marius
 related: []
@@ -80,7 +80,12 @@ legend now qualifies at the moment of asking; say so if the echo should carry "f
 
 `label.py` is not one of the four files `run.py frame` hashes, so no re-freeze is owed for this change.
 
-Fixed: `acd78f10`, patch-id `8ba3a82c906e9401eb1ebc67f9200bcca779bc4d` (`git show acd78f10 | git patch-id --stable`). Status stays `open` until the four-command gate has run green on it; the gate as run on 2026-09-30 was not green for reasons outside this change (a peer's unformatted file, two new red `util::text` tests in someone's uncommitted work, and a default lane killed by SIGTERM).
+Fixed: `acd78f10`, patch-id `8ba3a82c906e9401eb1ebc67f9200bcca779bc4d` (`git show acd78f10 | git patch-id --stable`). Gate, 2026-09-30, `./scripts/gate.sh` on `HEAD` `2da4e2fe` plus another session's uncommitted `src/tools/run_command/inner.rs` and `tests.rs`: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0` (lean lane 3,743 passed, default lane 5,890 passed, no SIGTERM or panic in the output). An earlier run the same day was not green for reasons outside this change; the re-run is the one that counts. This change touches no Rust, so the evidence for it is the measure suite (807 passed) and the 7-mutant run under Tests added.
+
+## Fix provenance
+
+- **SHA:** `acd78f10a3d261be400f97e0956496cba29ecee1` (`experiments`)
+- **patch-id:** `8ba3a82c906e9401eb1ebc67f9200bcca779bc4d`
 
 ## Tests added
 

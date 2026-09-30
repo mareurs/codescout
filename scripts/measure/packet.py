@@ -42,7 +42,7 @@ import transcripts  # noqa: E402
 CONTEXT_MESSAGES = 6
 OPERATOR_CHARS = 1500
 # A result longer than HEAD + TAIL keeps its first HEAD and last TAIL characters with a marker between: the counts
-# and headers many tools print first, and the exit or error text they print last (bug 3bbaeeac07baaca8).
+# and headers many tools print first, and the exit or error text they print last (bug 5deb65cf11add6cf).
 RESULT_HEAD_CHARS = 500
 RESULT_TAIL_CHARS = 1000
 ARGS_CHARS = 300
@@ -182,7 +182,7 @@ def _dropped(n, where=""):
 
 
 def _writes_record(name, inp):
-    """True for a call whose arguments ARE the durable record it writes (bug 3bbaeeac07baaca8): an edit tool, or
+    """True for a call whose arguments ARE the durable record it writes (bug 5deb65cf11add6cf): an edit tool, or
     a catalog tool with a write action. The sets are the sampler's own, imported so the two cannot drift."""
     if name in sampler.EDIT_TOOLS:
         return True
