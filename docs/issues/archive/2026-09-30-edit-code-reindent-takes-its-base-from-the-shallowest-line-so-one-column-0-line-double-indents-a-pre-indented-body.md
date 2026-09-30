@@ -68,7 +68,7 @@ minimum on purpose ("keeps re-basing correct even when the first line is more in
 than a later one") and did not consider a body that is already at the target with one
 line below it.
 
-The open sibling `2026-09-28-edit-code-insert-rebases-a-mixed-level-body-silently-nesting-top-level-code.md`
+The sibling `docs/issues/archive/2026-09-28-edit-code-insert-rebases-a-mixed-level-body-silently-nesting-top-level-code.md` (open when this was written, since fixed with a caller switch)
 is the same mechanism reached through `insert`: a method at the target column plus a
 column-0 class. Its root-cause section is still a hypothesis; this reproduces the
 mechanism.
