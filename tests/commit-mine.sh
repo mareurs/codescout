@@ -32,6 +32,14 @@
 #   - `--` not refused -> F7 | refusal's pointer to the helper deleted -> R1
 # Both backstops stay: each is the only assertion that would see the wrong commit if a
 # guard above it ever admitted the input. Inert-as-killer, not inert-as-check.
+# F10-F12 (an unattributed `-` leftover, fe8affc7) were mutated the same way, one per site, and
+# the probe's own verdict is INCONCLUSIVE for any non-cargo runner, so these are read off the
+# suite's summary line against its 53/0 baseline:
+#   - the `-` split deleted             -> F10 x5 + F11 x3 (45/8)
+#   - the closing line's unattributed tail deleted -> F10 closing + F11 tail (51/2)
+#   - the "for their owners" clause made unconditional -> F12 only (52/1): it is the one case
+#     where nothing is left behind, and nothing else pins the ordinary closing line
+#   - the remedy pointer to the conventions page deleted -> F10 pointer (52/1)
 # F2 kills the hazard the design argument says cannot happen: that committing from a
 # private index leaves the SHARED index stale, so the peer's next bare commit reverts mine.
 #
@@ -224,6 +232,65 @@ cd "$(new_repo)" || exit 1
 [ -e .git/session-stage-log ] && no "F8 fixture: the log must be absent" || ok
 out=$(as "$A" bash scripts/commit-mine.sh -m x 2>&1); rc=$?
 eq "F8 no stage log -> exit 3, never 'everything is mine'" "$rc" "3"
+
+# ------------------------------------------------------------ F10: `-` is not a peer
+# A hunk staged through a command the recorder does not treat as staging is stamped `-`, which
+# is not anyone's: fe8affc7 measured this as the ordinary way to stage a hunk of a file a peer
+# is also editing. The helper used to print it as "not yours (staged by -)" and close with
+# "left 1 staged for their owners", both false for a path that may be the caller's own and is
+# coupled to what it just committed.
+cd "$(new_repo)" || exit 1
+echo mine > a.txt
+as "$A" git add -- a.txt
+printf 'snapshot\n' > "$WORK/snap"
+blob=$(git hash-object -w "$WORK/snap")
+as "$A" git update-index --cacheinfo "100644,$blob,old.txt"
+# The fixture must actually produce a `-` row, or every assertion below is about a path the
+# recorder attributed after all (and would pass on the old script).
+awk -F'\t' '$1 == "-" && $3 == "old.txt" { f = 1 } END { exit !f }' .git/session-stage-log \
+    && ok || no "F10 fixture: old.txt must be recorded as \`-\`"
+h0=$(head_of)
+out=$(as "$A" bash scripts/commit-mine.sh -m x 2>&1); rc=$?
+eq "F10 an unattributed leftover does not fail the commit" "$rc" "0"
+eq "F10 commits exactly A's whole file" "$(git show --name-only --format= HEAD)" "a.txt"
+has "F10 names the path it left" "$out" "old.txt"
+has "F10 names it as unattributed, not as a peer's" "$out" "UNATTRIBUTED"
+hasnt "F10 does not call it a peer's" "$out" "staged by -"
+hasnt "F10 does not say its owner will take it" "$out" "for their owners"
+has "F10 the closing line, the one a caller reads, carries it too" \
+    "$(printf '%s\n' "$out" | tail -n 1)" "unattributed"
+has "F10 names where a hunk of yours is made attributable" "$out" "shared-checkout-commit-sequence.md"
+
+# ------------------------------------------------------------ F11: named and unattributed, apart
+# One run holding both kinds: the closing line must count each under its own name, so a
+# mutation that lumps them reads as a lost count, not as a reworded one.
+cd "$(new_repo)" || exit 1
+echo mine > a.txt
+as "$A" git add -- a.txt
+echo theirs > b.txt
+as "$B" git add -- b.txt
+printf 'snapshot\n' > "$WORK/snap"
+blob=$(git hash-object -w "$WORK/snap")
+as "$A" git update-index --cacheinfo "100644,$blob,old.txt"
+out=$(as "$A" bash scripts/commit-mine.sh -m x 2>&1); rc=$?
+eq "F11 exit 0" "$rc" "0"
+has "F11 the named peer is still named, with its id" "$out" "b.txt    (staged by $B)"
+has "F11 the unattributed path is listed apart" "$out" "UNATTRIBUTED"
+closing=$(printf '%s\n' "$out" | tail -n 1)
+has "F11 closing line counts the named path for its owner" "$closing" "left 1 staged for their owners"
+has "F11 ...and the unattributed one separately" "$closing" "1 unattributed"
+
+# ------------------------------------------------------------ F12: nothing left behind
+# The ordinary closing line is unchanged by F10's rewording: a caller who left nothing behind
+# still reads the same sentence, with no `unattributed` tail bolted on.
+cd "$(new_repo)" || exit 1
+echo mine > a.txt
+as "$A" git add -- a.txt
+out=$(as "$A" bash scripts/commit-mine.sh -m x 2>&1); rc=$?
+eq "F12 exit 0" "$rc" "0"
+eq "F12 the closing line is the unchanged ordinary one" \
+    "$(printf '%s\n' "$out" | tail -n 1)" \
+    "commit-mine: committed 1 path(s) of yours; left 0 staged for their owners."
 
 echo
 echo "passed=$PASS failed=$FAIL"

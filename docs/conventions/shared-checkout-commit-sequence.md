@@ -245,6 +245,39 @@ leaves a complete tree in the object store and `git restore --staged` only un-re
 `git fsck --unreachable` recovers it byte-exact — which is how 35 lines deleted during exactly
 this procedure were restored. `bug-fix-session-log:W-142`.
 
+### A hunk the recorder can attribute
+
+The construction above rewrites the working file for the seconds between its steps, which is
+the peer's file. There is a form that never touches it, and it exists because of how the stage
+log decides whose a staged blob is: it claims a `(blob, path)` pair for the running session only
+while `git add`, `git rm --cached` or `git commit` is the command, and stamps every other first
+sighting `-`. `git add -p` applies its hunks through a helper and `git update-index
+--cacheinfo` is not on that list, so **both stage your hunk and leave it unattributed** —
+`scripts/commit-mine.sh` then reports it as `UNATTRIBUTED` and commits without it
+(`fe8affc7141081ef`, measured 2026-09-30: four insert tests committed, the guard they exercise
+left behind, red until the follow-up). Restaging byte-identical content does not repair it: that
+is not an index write, so the recorder does not run again and the `-` row stays.
+
+What does get claimed is a real `git add` of *different* content. Build the snapshot of the file
+(HEAD plus only your hunks) in a scratch work tree, so nothing on disk changes, and add it
+against the real repository:
+
+```
+S=$(mktemp -d)
+ln -s "$(git rev-parse --show-toplevel)/scripts" "$S/scripts"   # the hook finds scripts/ from the work tree
+git show HEAD:<path> > "$S/<path>"                               # then apply only your hunks to it
+GIT_DIR="$(git rev-parse --git-dir)" GIT_WORK_TREE="$S" git add <path>
+git diff --cached -- <path>                                      # yours alone; read it
+scripts/commit-mine.sh -F <message file>
+```
+
+Verified 2026-09-30 in a throwaway repository: the recorder logs the row `named`, `commit-mine`
+takes the path, the committed file holds only your hunk, and the peer's bytes in the working file
+are untouched. Two limits. Without the `scripts` link the hook is skipped silently and you are
+back to an unattributed row, so check the log row rather than trusting that the add ran. And the
+precondition of the section above still holds: you must be able to reconstruct the file with only
+your hunks, which is impossible where your lines and theirs overlap. That is a merge, not a split.
+
 ## The empty intersection, which no sequence fixes
 
 `foreign-index` accepts **only** a pathspec commit when the index holds a peer's paths.
@@ -264,7 +297,7 @@ your set, and a coupled pair you staged lands together even while a peer's unsta
 same working-tree file. The bare-commit refusal names it at the moment of need. **What it cannot
 split:** one index entry holding two authors' hunks, i.e. a peer re-staged the file over yours.
 Ownership is recorded per `(blob, path)`, so that entry is theirs and is left out, and the refusal
-that follows is correct. The reproduction and the contract are `tests/commit-mine.sh` (R1–R3, F1–F9).
+that follows is correct. The reproduction and the contract are `tests/commit-mine.sh` (R1–R3, F1–F12).
 
 ## Why not guide injection
 

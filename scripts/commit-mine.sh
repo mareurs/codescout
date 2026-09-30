@@ -82,11 +82,39 @@ while IFS=$'\t' read -r kind owner path; do
     esac
 done <<< "$classified"
 
-if ((${#owner_of[@]})); then
+# `-` is the recorder's "could not attribute" stamp, and it is NOT a peer: the same file's
+# other readers (pre-commit-foreign-index.sh) name it "unrecorded" and warn it "is frequently a
+# peer's" and may equally be the caller's own, because `git add -p` and `git update-index
+# --cacheinfo` are not staging commands to the recorder. So the two kinds are told apart here.
+# Printing `-` as "staged by -" and closing with "left N for their owners" (fe8affc7) claimed an
+# owner exists, which is false for exactly the paths most likely to be a coupled part of the
+# caller's own change.
+named_left=() unattributed_left=()
+for p in "${!owner_of[@]}"; do
+    if [ "${owner_of[$p]}" = "-" ]; then
+        unattributed_left+=("$p")
+    else
+        named_left+=("$p")
+    fi
+done
+
+if ((${#named_left[@]})); then
     echo "commit-mine: leaving staged — not yours:" >&2
-    for p in "${!owner_of[@]}"; do
+    for p in "${named_left[@]}"; do
         printf '    %s    (staged by %s)\n' "$p" "${owner_of[$p]}" >&2
     done
+fi
+if ((${#unattributed_left[@]})); then
+    echo "commit-mine: leaving staged — UNATTRIBUTED (the stage log cannot say whose; \`-\` is not a peer):" >&2
+    for p in "${unattributed_left[@]}"; do
+        printf '    %s\n' "$p" >&2
+    done
+    echo "  One of these can be YOUR OWN hunk: the recorder does not see \`git add -p\` or \`update-index\`" >&2
+    echo "  as staging, so it stamps what they stage \`-\`. This commit does NOT contain them, so if what" >&2
+    echo "  you are committing depends on one, it lands without it. Read \`git diff --cached -- <path>\`:" >&2
+    echo "  yours and needed -> stage it so the recorder attributes it (docs/conventions/" >&2
+    echo "  shared-checkout-commit-sequence.md § The entangled single file, \"A hunk the recorder can" >&2
+    echo "  attribute\"), then re-run; not yours -> leave it; cannot tell -> scripts/peer-sessions.sh." >&2
 fi
 
 if ! ((${#mine[@]})); then
@@ -135,7 +163,15 @@ done
 GIT_INDEX_FILE="$priv" git commit "$@"
 rc=$?
 if [ "$rc" -eq 0 ]; then
-    printf 'commit-mine: committed %s path(s) of yours; left %s staged for their owners.\n' \
-        "${#mine[@]}" "${#owner_of[@]}" >&2
+    closing="commit-mine: committed ${#mine[@]} path(s) of yours"
+    # "For their owners" asserts an owner exists, so it is said only when one is named, or when
+    # nothing at all was left (the unchanged line for the ordinary case).
+    if ((${#named_left[@]})) || ! ((${#unattributed_left[@]})); then
+        closing="$closing; left ${#named_left[@]} staged for their owners"
+    fi
+    if ((${#unattributed_left[@]})); then
+        closing="$closing; ${#unattributed_left[@]} unattributed (one may be yours — see above)"
+    fi
+    printf '%s.\n' "$closing" >&2
 fi
 exit "$rc"
