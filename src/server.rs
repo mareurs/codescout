@@ -5288,8 +5288,19 @@ mod tests {
     /// `run_command "ls"` from `run_command "git reset --hard"`, plus the four words *"takes
     /// no lock"* — the operator ruling a caller would otherwise read the property as
     /// contradicting.
+    ///
+    /// **Ratcheted UP 2026-09-30, 56_972 → 57_150 (+178), for `edit_code`'s `reindent`
+    /// property (acf3e131).** Measured, not estimated, `tool_surface_report_lengths` on a clean
+    /// worktree at HEAD against the working tree: TOTAL 56_916 before, 57_150 after, and
+    /// **`edit_code` is the only row that moves: schema 2_001 → 2_235 (+234)**; the description
+    /// and annotation columns are identical. The budget rises +178 and the surface +234 because
+    /// the old budget had 56 of headroom. What the bytes buy: the one switch that lets a caller
+    /// say "my indentation is final". Without it `insert`/`replace` re-base the whole body onto
+    /// the target's column, so a method plus a top-level class, both written at the left margin,
+    /// nest the class inside the enclosing one. In Python that is still valid code, so nothing
+    /// reports it: pytest silently collected 48 of 54 tests in the reported incident.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_972;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_150;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 
-use crate::tools::{guard_worktree_write, RecoverableError, Tool, ToolContext};
+use crate::tools::{
+    guard_worktree_write, optional_bool_param, RecoverableError, Tool, ToolContext,
+};
 use crate::util::text::reindent_to;
 
 use super::display::{
@@ -167,6 +169,10 @@ impl Tool for EditCode {
                     "enum": ["before", "after"],
                     "description": "insert only, default 'after'"
                 },
+                "reindent": {
+                    "type": "boolean",
+                    "description": "replace and insert only, default true. false splices the body exactly as written, with no re-base onto the symbol's column, for a body that mixes levels (a method plus a top-level class)."
+                },
                 "at_line": {
                     "type": "integer",
                     "description": "Tie-breaker for two symbols whose name_path is byte-identical — two inherent impl-blocks for one type, or two #[cfg]-gated definitions of the same item. Reach for a more specific name_path FIRST; this is only for the case where no more specific name exists. Pass any 1-based line inside the one you mean, as symbols() prints it (declaration, body, or end all work). The ambiguity error lists each candidate's span for exactly this purpose. Ignored when the name already resolves to one symbol."
@@ -297,6 +303,7 @@ impl Tool for EditCode {
                         .into());
                     }
                 };
+                let reindent = reindent_param(&input)?;
                 let mut result = self
                     .do_replace(
                         ctx,
@@ -305,6 +312,7 @@ impl Tool for EditCode {
                         body,
                         attributes.as_deref(),
                         at_line,
+                        reindent,
                     )
                     .await?;
                 result["hint"] = json!(format!(
@@ -322,7 +330,8 @@ impl Tool for EditCode {
                     .into());
                 };
                 let position = input["position"].as_str().unwrap_or("after");
-                self.do_insert(ctx, name_path, rel_path, body, position, at_line)
+                let reindent = reindent_param(&input)?;
+                self.do_insert(ctx, name_path, rel_path, body, position, at_line, reindent)
                     .await
             }
             _ => Err(RecoverableError::new(format!("unknown action '{action}'")).into()),
@@ -411,6 +420,37 @@ pub(crate) fn replace_syntax_broken_reason(name_path: &str) -> (String, &'static
          calls — parallel edit_code writes in one block can leave the LSP with a \
          stale view (BUG-021).",
     )
+}
+
+/// Read the optional `reindent` switch: `true` (the default) re-bases a body onto the target
+/// symbol's column, `false` splices it exactly as the caller wrote it.
+///
+/// An absent or null value is the default. A value that is present and cannot be read as a
+/// boolean is REFUSED rather than defaulted: `optional_bool_param` reads an unreadable value
+/// as absent, and for a switch whose whole purpose is "do not touch my layout" a typo that
+/// silently means "do touch it" is exactly the failure the switch exists to prevent.
+fn reindent_param(input: &Value) -> Result<bool, RecoverableError> {
+    match input.get("reindent") {
+        None | Some(Value::Null) => Ok(true),
+        Some(raw) => optional_bool_param(input, "reindent").ok_or_else(|| {
+            RecoverableError::with_hint(
+                format!("'reindent' must be true or false, got {raw}"),
+                "Pass reindent=false to keep your body's indentation exactly as written, or \
+                 omit it to have the body re-based onto the target symbol's column.",
+            )
+        }),
+    }
+}
+
+/// Re-base `body` onto `target_base`, or return it untouched when the caller turned
+/// re-basing off. The one place the three splice sites ask the question, so they cannot
+/// disagree about it.
+fn rebase_body(body: &str, target_base: &str, reindent: bool) -> String {
+    if reindent {
+        reindent_to(body, target_base)
+    } else {
+        body.to_string()
+    }
 }
 
 impl EditCode {
@@ -1006,6 +1046,10 @@ impl EditCode {
         Ok(response)
     }
 
+    // Eight arguments with `reindent`. The caller's options (`at_line`, `attributes`,
+    // `reindent`) are independent per-call choices that arrive together from `call()`; a
+    // bundle struct would be used by exactly these two methods and read no better.
+    #[allow(clippy::too_many_arguments)]
     async fn do_replace(
         &self,
         ctx: &ToolContext,
@@ -1014,6 +1058,7 @@ impl EditCode {
         new_body: &str,
         attributes: Option<&[String]>,
         at_line: Option<u32>,
+        reindent: bool,
     ) -> anyhow::Result<Value> {
         let full_path =
             resolve_write_path_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;
@@ -1167,7 +1212,7 @@ impl EditCode {
         // See do_insert for why the column is sampled at the validated `start_line`
         // rather than at the editing range's start.
         let target_base = anchor_indent(&lines, sym.start_line as usize);
-        let effective_body = reindent_to(&effective_body, &target_base);
+        let effective_body = rebase_body(&effective_body, &target_base, reindent);
 
         let pre_ast = crate::ast::extract_symbols(&full_path).ok();
         let pre_count = pre_ast
@@ -1331,6 +1376,8 @@ impl EditCode {
         Ok(response)
     }
 
+    // Eight arguments with `reindent`; see `do_replace` for why these are not bundled.
+    #[allow(clippy::too_many_arguments)]
     async fn do_insert(
         &self,
         ctx: &ToolContext,
@@ -1339,6 +1386,7 @@ impl EditCode {
         code: &str,
         position: &str,
         at_line: Option<u32>,
+        reindent: bool,
     ) -> anyhow::Result<Value> {
         let full_path =
             resolve_write_path_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;
@@ -1371,7 +1419,7 @@ impl EditCode {
         // `editing_start_line` says — that is a different question from what column
         // this symbol sits at.
         let target_base = anchor_indent(&lines, sym.start_line as usize);
-        let reindented = reindent_to(code, &target_base);
+        let reindented = rebase_body(code, &target_base, reindent);
         let code_lines: Vec<&str> = reindented.lines().collect();
         let insert_at0 = match position {
             "before" => editing_start_line(&sym, &lines),
@@ -1488,7 +1536,7 @@ impl EditCode {
             candidate.push('\n');
         }
         let reassemble = |decoded_code: &str| -> String {
-            let reindented = reindent_to(decoded_code, &target_base);
+            let reindented = rebase_body(decoded_code, &target_base, reindent);
             let decoded_lines: Vec<&str> = reindented.lines().collect();
             let mut rl: Vec<&str> = Vec::new();
             rl.extend_from_slice(&lines[..insert_at]);

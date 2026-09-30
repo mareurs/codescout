@@ -13,7 +13,16 @@ Consolidates the older individual tools (`replace_symbol`, `insert_code`, `renam
 | `action` | string | yes | One of `replace`, `insert`, `remove`, `rename` |
 | `body` | string | action-dependent | `replace`: new full body; `insert`: code to inject |
 | `position` | string | no | `insert` only — `"before"` or `"after"` the symbol (default `"after"`) |
+| `reindent` | boolean | no | `replace` and `insert` only, default `true`. `false` splices `body` exactly as written, with no re-basing onto the symbol's column — see [Indentation](#indentation) |
 | `new_name` | string | rename only | New identifier for the symbol |
+
+### Indentation
+
+By default `edit_code` re-bases `body` so its least-indented line sits at the symbol's own column. That is what you want when you write a method at the left margin and mean it to become a class member: it is indented to fit.
+
+It is wrong for a body that mixes levels. A method and a separate top-level class, both written at the left margin, are shifted together, and the class ends up nested inside the enclosing one. In Python that is still valid code, so nothing reports it. The tool cannot tell "both belong inside" from "one belongs outside" by reading the text.
+
+Pass `reindent: false` and the body is spliced **exactly as written**, with your own indentation. A body whose first line is already at the symbol's column is left alone without the flag; `reindent: false` is for the case where it is not. A value that is not `true` or `false` is refused and nothing is written.
 
 ## Actions
 

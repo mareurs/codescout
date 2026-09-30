@@ -10289,3 +10289,251 @@ fn replace_syntax_broken_names_the_body_before_the_range() {
         "hint sends the caller to the body first: {hint}"
     );
 }
+
+// ---- `reindent`: the caller's switch for "my indentation is final" ----
+//
+// `edit_code` re-bases a body onto the target symbol's column. That is right for the case it
+// was built for (a method written at the left margin, meant to become a class member) and
+// silently wrong for a body that mixes levels: a column-0 method plus a column-0 class, all
+// shifted, nests the class inside the enclosing one. Nothing in the text says which the
+// caller meant, so the caller gets a switch. `reindent=false` splices the body as written.
+// docs/issues/2026-09-28-edit-code-insert-rebases-a-mixed-level-body-silently-nesting-top-level-code.md
+//
+// Every case is an end-to-end call through a MOCK LSP, so none of them can skip the way the
+// rust-analyzer-gated insert tests do when the server is slow: a skip reads as a pass.
+
+/// A one-method `impl` with the method registered in a mock LSP. `a` starts on line 2 (0-based)
+/// and ends on line 4; its name is at column 7, which is what position validation checks.
+async fn reindent_fixture() -> (tempfile::TempDir, ToolContext, std::path::PathBuf) {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider, SymbolInfo, SymbolKind};
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    // Canonicalised root: the mock's `document_symbols` does an exact PathBuf lookup.
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let file = root.join("src").join("lib.rs");
+    std::fs::write(
+        &file,
+        "struct Point { x: f64, y: f64 }\nimpl Point {\n    fn a(&self) -> f64 {\n        1.0\n    }\n}\n",
+    )
+    .unwrap();
+    let method = SymbolInfo {
+        name: "a".to_string(),
+        name_path: "Point/a".to_string(),
+        kind: SymbolKind::Method,
+        file: file.clone(),
+        start_line: 2,
+        end_line: 4,
+        start_col: 7,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let lsp = MockLspProvider::with_client(MockLspClient::new().with_symbols(&file, vec![method]));
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+    (dir, ctx, file)
+}
+
+fn has_line(content: &str, exact: &str) -> bool {
+    content.lines().any(|l| l == exact)
+}
+
+#[tokio::test]
+async fn edit_code_insert_splices_the_body_as_written_when_reindent_is_false() {
+    let (_dir, ctx, file) = reindent_fixture().await;
+    EditCode
+        .call(
+            json!({
+                "action": "insert", "symbol": "Point/a", "path": "src/lib.rs",
+                "body": "fn helper() {}", "reindent": false,
+            }),
+            &ctx,
+        )
+        .await
+        .expect("insert with reindent=false must succeed");
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        has_line(&content, "fn helper() {}"),
+        "the body must land at the column the caller wrote (0), not the target's 4:\n{content}"
+    );
+    assert!(
+        !has_line(&content, "    fn helper() {}"),
+        "the body must not ALSO have been re-based:\n{content}"
+    );
+}
+
+#[tokio::test]
+async fn edit_code_insert_rebases_by_default_so_the_switch_test_is_not_vacuous() {
+    // The control for the test above: the SAME call without the switch. If this did not
+    // move the body to column 4, the reindent=false test would pass with the switch removed.
+    let (_dir, ctx, file) = reindent_fixture().await;
+    EditCode
+        .call(
+            json!({
+                "action": "insert", "symbol": "Point/a", "path": "src/lib.rs",
+                "body": "fn helper() {}",
+            }),
+            &ctx,
+        )
+        .await
+        .expect("insert must succeed");
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        has_line(&content, "    fn helper() {}"),
+        "omitting `reindent` must keep the re-base:\n{content}"
+    );
+    assert!(!has_line(&content, "fn helper() {}"), "{content}");
+}
+
+#[tokio::test]
+async fn edit_code_insert_keeps_the_callers_layout_through_the_escape_repair_too() {
+    // `do_insert` has a SECOND re-base site: when the body arrives with literal `\n` sequences
+    // it is decoded and re-assembled through a closure that re-bases again. A switch honoured
+    // only on the main path would quietly re-base here. The `note` asserts the repair path was
+    // actually taken, so this cannot pass by never reaching the closure.
+    let body = "fn helper() {}\\nfn other() {}";
+    let (_dir, ctx, file) = reindent_fixture().await;
+    let kept = EditCode
+        .call(
+            json!({
+                "action": "insert", "symbol": "Point/a", "path": "src/lib.rs",
+                "body": body, "reindent": false,
+            }),
+            &ctx,
+        )
+        .await
+        .expect("escaped body with reindent=false must be repaired and written");
+    assert!(
+        kept.get("note").is_some(),
+        "the escape repair must have run, or this test says nothing about its closure: {kept}"
+    );
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        has_line(&content, "fn helper() {}") && has_line(&content, "fn other() {}"),
+        "both decoded lines must stay at column 0:\n{content}"
+    );
+
+    // The control: the same escaped body without the switch is re-based to column 4.
+    let (_dir2, ctx2, file2) = reindent_fixture().await;
+    let rebased = EditCode
+        .call(
+            json!({
+                "action": "insert", "symbol": "Point/a", "path": "src/lib.rs",
+                "body": body,
+            }),
+            &ctx2,
+        )
+        .await
+        .expect("escaped body must be repaired and written");
+    assert!(rebased.get("note").is_some(), "{rebased}");
+    let content2 = std::fs::read_to_string(&file2).unwrap();
+    assert!(
+        has_line(&content2, "    fn helper() {}") && has_line(&content2, "    fn other() {}"),
+        "without the switch the repaired body is re-based:\n{content2}"
+    );
+}
+
+#[tokio::test]
+async fn edit_code_replace_splices_the_body_as_written_when_reindent_is_false() {
+    let body = "fn a(&self) -> f64 {\n    42.0\n}";
+    let (_dir, ctx, file) = reindent_fixture().await;
+    EditCode
+        .call(
+            json!({
+                "action": "replace", "symbol": "Point/a", "path": "src/lib.rs",
+                "body": body, "reindent": false,
+            }),
+            &ctx,
+        )
+        .await
+        .expect("replace with reindent=false must succeed");
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        has_line(&content, "fn a(&self) -> f64 {") && has_line(&content, "    42.0"),
+        "the body must keep the columns the caller wrote:\n{content}"
+    );
+
+    // The control: without the switch the same body is re-based onto the method's column.
+    let (_dir2, ctx2, file2) = reindent_fixture().await;
+    EditCode
+        .call(
+            json!({
+                "action": "replace", "symbol": "Point/a", "path": "src/lib.rs", "body": body,
+            }),
+            &ctx2,
+        )
+        .await
+        .expect("replace must succeed");
+    let content2 = std::fs::read_to_string(&file2).unwrap();
+    assert!(
+        has_line(&content2, "    fn a(&self) -> f64 {") && has_line(&content2, "        42.0"),
+        "omitting `reindent` must keep the re-base:\n{content2}"
+    );
+}
+
+#[tokio::test]
+async fn edit_code_refuses_a_reindent_value_it_cannot_read_instead_of_ignoring_it() {
+    // `optional_bool_param` reads an unreadable value as ABSENT. For a switch whose whole
+    // purpose is "do not touch my layout", a typo silently meaning "do touch it" is the
+    // accepted-parameter-silently-dropped failure, so an unreadable value is refused.
+    let (_dir, ctx, file) = reindent_fixture().await;
+    let before = std::fs::read_to_string(&file).unwrap();
+    let err = EditCode
+        .call(
+            json!({
+                "action": "insert", "symbol": "Point/a", "path": "src/lib.rs",
+                "body": "fn helper() {}", "reindent": "no",
+            }),
+            &ctx,
+        )
+        .await
+        .expect_err("an unreadable `reindent` must be refused");
+    // The MESSAGE, not the displayed text: the display also carries the hint, which names the
+    // parameter too, so asserting on the display passes with the message stripped. Measured
+    // by mutation: that variant of this assertion survived.
+    let recoverable = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .expect("an unreadable value is a recoverable refusal, not a crash");
+    assert!(
+        recoverable.message.contains("reindent"),
+        "the refusal's own message must name the parameter: {}",
+        recoverable.message
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        before,
+        "a refused call must not write"
+    );
+}
+
+#[tokio::test]
+async fn edit_code_reads_the_string_false_the_way_other_tools_do() {
+    // Some clients send booleans as strings; `optional_bool_param` is the repo's convention
+    // and accepts "true"/"false". "false" must switch the re-base off, not be refused.
+    let (_dir, ctx, file) = reindent_fixture().await;
+    EditCode
+        .call(
+            json!({
+                "action": "insert", "symbol": "Point/a", "path": "src/lib.rs",
+                "body": "fn helper() {}", "reindent": "false",
+            }),
+            &ctx,
+        )
+        .await
+        .expect("reindent=\"false\" must be accepted");
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(has_line(&content, "fn helper() {}"), "{content}");
+}

@@ -1,8 +1,10 @@
 ---
 kind: bug
-status: open
+status: taken
 tags:
 - cluster/addressing-without-an-escape-hatch
+claimed_at: 2026-09-30
+claimed_by: e41af068-cf07-4c83-867f-71be1ba7f586
 closed: null
 opened: 2026-09-28
 owner: marius
@@ -110,6 +112,34 @@ case no line is shallower, because the first line and the class are both at colu
 (a) as written would let this case through. Whatever is decided has to be a different rule,
 or an explicit caller switch, and it has to avoid refusing the ordinary case the re-base was
 built for: two sibling methods dedented to column 0 and meant to become members.
+
+
+**Operator ruling 2026-09-30: option C, an explicit caller switch.** Not a refusal (B) and not
+a documented workaround (A). Reasoning given to the operator: the tool cannot recover from the
+text whether "a method plus a class, both at the left margin" means "both members" or "one
+member, one top-level", so guessing silently or refusing on a guess puts the ambiguity in the
+wrong place. The same analysis found that rule (a) above would not have refused this case at
+all, which is why it was dropped and not refined.
+
+**Built:** one optional boolean on `edit_code`, `reindent` (default `true`), for the two actions
+that re-base a body, `replace` and `insert`. `reindent=false` splices the body exactly as the
+caller wrote it. Omitting it changes nothing. The default stays `true` because the re-base is
+right for the case it was built for, two sibling methods dedented to column 0 and meant to
+become members. An unreadable value (`"no"`, `42`) is REFUSED and nothing is written, because
+`optional_bool_param` reads such a value as absent, and for a switch meaning "do not touch my
+layout" a typo silently meaning "do touch it" is the accepted-parameter-silently-dropped
+failure. The string `"false"` is accepted, as other tools accept it.
+
+`src/tools/symbol/edit_code.rs` has three re-base sites, and all three go through one helper
+(`rebase_body`): `do_replace`, `do_insert`'s main path, and `do_insert`'s escape-repair
+closure. The third is easy to miss: when a body arrives with literal `\n` sequences it is
+decoded and re-assembled through a closure that re-bases AGAIN, so a switch honoured only on
+the main path would quietly re-base there.
+
+Overlap to know about: session `3e2b9cc8` held uncommitted hunks in the same file
+(`refuse_insert` and a `syntax_regressed` guard at the tail of `do_insert`) for `8c576c06`. Those
+are theirs and were not touched or staged here. Their guard is a real backstop for
+`reindent=false` in Python: a body kept at a column that leaves an IndentationError is refused.
 
 ## Tests added
 
