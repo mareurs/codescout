@@ -254,7 +254,7 @@ while `git add`, `git rm --cached` or `git commit` is the command, and stamps ev
 sighting `-`. `git add -p` applies its hunks through a helper and `git update-index
 --cacheinfo` is not on that list, so **both stage your hunk and leave it unattributed** —
 `scripts/commit-mine.sh` then reports it as `UNATTRIBUTED` and commits without it
-(`fe8affc7141081ef`, measured 2026-09-30: four insert tests committed, the guard they exercise
+(`43a50b8d8af976be`, measured 2026-09-30: four insert tests committed, the guard they exercise
 left behind, red until the follow-up). Restaging byte-identical content does not repair it: that
 is not an index write, so the recorder does not run again and the `-` row stays.
 

@@ -165,6 +165,6 @@ unit and give every continuation line its depth relative to the first line.
 - **SHA:** `9d2049ddcb77327cc709f4a9ba25568ea4d3fd6f` (`experiments`) — the `insert` guard those tests exercise
 - **patch-id:** `4b6fd63e7ccca2862572389d7edd97276d54200a`
 
-Two commits because the shared-index ownership recorder stamped the first snapshot of `edit_code.rs` `-` and `commit-mine` left it out, so the first commit carried the insert tests without the guard (`fe8affc7141081ef`). Read them as one change.
+Two commits because the shared-index ownership recorder stamped the first snapshot of `edit_code.rs` `-` and `commit-mine` left it out, so the first commit carried the insert tests without the guard (`43a50b8d8af976be`). Read them as one change.
 
 Gate: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0` on 2026-09-30, on a tree holding both commits plus the then-uncommitted fix for the tab/space sibling (`86a52ee1`). An earlier gate on the combined tree was red only on `tool_surface_under_budget`, from another session's uncommitted `reindent` parameter description, and on a refused `fmt-mine` for files another session also wrote; neither was this change. The gate is vacuous for nothing this change touches: it is neither librarian code nor `server-stack` nor the ONNX path.
