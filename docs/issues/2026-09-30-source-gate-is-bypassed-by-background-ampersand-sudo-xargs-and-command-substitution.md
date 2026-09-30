@@ -9,7 +9,7 @@ tags:
 - cluster/guard-narrower-than-its-name
 opened: 2026-09-30
 severity: low
-unverified: 'sudo cat was NOT run (it means privilege escalation): its bypass is inferred from the head-token rule under which xargs cat was measured to pass. Whether sudo/xargs also mask an unbounded pipe in IL-3 (producer_index is shared) is likewise unmeasured.'
+unverified: '`find ... -exec cat {} +`, `parallel cat`, `doas cat`, `ionice cat` are inferred bypasses from the head rule and were never run. The sudo/xargs fix (4d392858) is verified by unit tests and mutation and by a peer''s probe of a rebuilt working-tree binary; the author has NOT re-measured the table below on a binary built from that commit.'
 ---
 
 ## Summary
@@ -30,7 +30,7 @@ echo $(cat build.rs) | wc -l             -> exit 0, 1   (the file was read insid
 echo `cat build.rs` | wc -l              -> exit 0, 1
 bash -c 'cat build.rs' | wc -l           -> exit 0, 107
 eval cat build.rs | wc -l                -> exit 0, 107
-sudo cat build.rs                        -> NOT RUN. Inferred from the same head-token rule as xargs.
+sudo cat build.rs                        -> not run at first; measured later the same day: `sudo -n cat build.rs` printed the file (see "Wrapper half" under Fix)
 ```
 The independent review of #29 reported `&`, `sudo`, `xargs` and `$(...)`. Backticks, `bash -c` and `eval`
 were not reported: they put the reader inside an argument exactly as `$(...)` does, and were found while
@@ -72,28 +72,57 @@ head is a reader.
 
 ## Fix
 
-**Mechanism 1 (`&`) is FIXED; mechanisms 2 and 3 are not, on purpose. This bug stays open.**
+**Mechanisms 1 (`&`) and 2 (wrappers) are FIXED; a fifth variant, `|&`, is open; mechanism 3 is documented. This bug stays open.** Updated 2026-09-30 after #29 merged; the paragraph on mechanism 2 below is what was believed before it did.
 
 **Fixed:** `5d39e0d887ba7232e641448c3ca1a861253c3525` (patch-id `44c0e2fb0fab7b8c5914826b74812bd7fee3a82d`, `git show <sha> | git patch-id --stable`). A lone `&` is now a STAGE separator (`SOURCE_GATE_STAGE_SEPARATORS`), guarded by `is_background_ampersand` so `2>&1`, `>&2`, `&>`, `<&3`, `|&` and `&&` stay whole. It is a stage separator and deliberately not a run separator: a backgrounded `cd` runs in a subshell, so as a run boundary it would resolve a later relative path against the `cd` target, read it as outside the project, and ALLOW the read, a bypass created by the fix (`source_file_access_does_not_let_a_backgrounded_cd_move_the_shell`). Five mutations (guard always true, each neighbour check dropped, `&` out of the stage list, `&` in the run list) were all killed. The gate's "Known limits" docstring now names what stays open.
 
-**Mechanism 2 is WIDER than this file said, and is not fixed here.** This file says `producer_index` skips a closed wrapper list and `sudo`/`xargs` are missing from it. Measured 2026-09-30 on the live binary (each `| wc -l`): the gate does not consult `producer_index` at all. It classifies a stage by its raw first token (`shell_tokens(seg).next()`). So EVERY wrapper `producer_index` knows is a bypass, not only `sudo`/`xargs`: `env cat build.rs`, `FOO=1 cat build.rs` and `time cat build.rs` each returned 107 lines. Not run, but the same code path: `nohup`, `nice`, `timeout`, `command`, `sudo`. The same first-token rule also causes a FALSE POSITIVE: `cat=1 ls src/main.rs` reads as a `cat` (the regex is `\bcat\b` over the raw token). It was not fixed because PR #29 (OPEN, `fix/lessons-friction`, +2060/-127, touches `path_security.rs`) adds `executed_command`, one head rule shared by this gate and IL-3 that skips keywords, groups and wrappers including `stdbuf`; a second implementation here would fork it and conflict with it. #29 does NOT add `sudo`/`xargs` and does NOT make `&` a separator, so both remain open after it lands.
+**Mechanism 2 is WIDER than this file said, and was not fixed in `5d39e0d8` (see "Wrapper half" below for what closed it).** This file says `producer_index` skips a closed wrapper list and `sudo`/`xargs` are missing from it. Measured 2026-09-30 on the live binary (each `| wc -l`): the gate does not consult `producer_index` at all. It classifies a stage by its raw first token (`shell_tokens(seg).next()`). So EVERY wrapper `producer_index` knows is a bypass, not only `sudo`/`xargs`: `env cat build.rs`, `FOO=1 cat build.rs` and `time cat build.rs` each returned 107 lines. Not run, but the same code path: `nohup`, `nice`, `timeout`, `command`, `sudo`. The same first-token rule also causes a FALSE POSITIVE: `cat=1 ls src/main.rs` reads as a `cat` (the regex is `\bcat\b` over the raw token). It was not fixed because PR #29 (OPEN, `fix/lessons-friction`, +2060/-127, touches `path_security.rs`) adds `executed_command`, one head rule shared by this gate and IL-3 that skips keywords, groups and wrappers including `stdbuf`; a second implementation here would fork it and conflict with it. #29 did not add `sudo`/`xargs` and did not make `&` a separator: `&` was closed by `5d39e0d8` and `sudo`/`xargs` by `4d392858`.
 
 **Mechanism 3 (`$(...)`, backticks, `bash -c`, `eval`) is documented, not fixable by a head rule**, and now says so in the docstring.
 
-### Follow-up, once #29 lands
+### Wrapper half — measured, then closed (2026-09-30)
 
-Add `sudo` (value options `-u -g -C -h -p -r -t -U -D -R -T`) and `xargs` (`-I -n -P -d -E -L -s -a -J`) to `executed_command`, then re-run this table on the then-current binary. Because the head classifier is shared with IL-3, `sudo cargo test | tail` and `xargs cargo test | tail` will newly read as unbounded pipes: probably right, but measure it. Test table (each BLOCK case needs its ALLOW partner): BLOCK `env cat src/main.rs`, `FOO=1 cat src/main.rs`, `time cat src/main.rs`, `nohup cat src/main.rs`, `nice -n 5 cat src/main.rs`, `timeout 5 cat src/main.rs`, `command cat src/main.rs`, `sudo cat src/main.rs`, `sudo -u root cat src/main.rs`, `xargs cat src/main.rs`, `xargs -n 1 cat src/main.rs`; ALLOW (assert `None`) `sudo ls src/main.rs`, `xargs ls src/main.rs`, `env FOO=1 wc -l src/main.rs`, `FOO=1 ls src/main.rs`, `time ls src/main.rs`, `cat=1 ls src/main.rs` (the last is red on the old code for the opposite reason).
+Measured on the rebuilt live binary after #29 merged and `5d39e0d8` was built, each command run once against `build.rs`:
+
+| command | result |
+|---|---|
+| `echo b & cat build.rs` | refused (`5d39e0d8`); the refusal names the clause: "offending clause: `cat build.rs` (1 other clause … not run)" |
+| `cd /tmp & cat build.rs` | refused: a backgrounded `cd` moves nothing |
+| `env cat build.rs`, `FOO=1 cat build.rs`, `time cat build.rs`, `nohup cat build.rs` | refused (#29's `executed_command`) |
+| `echo build.rs \| xargs cat` | **printed the file** |
+| `sudo -n cat build.rs` | **printed the file** (passwordless sudo here; it ran, read-only) |
+| `ls src/util/path_security.rs`, `echo ok && echo also-ok` | allowed (over-block controls) |
+
+**Fixed by `4d39285807fa0792056accc088d310ad29e42000`** (patch-id `3ecd695f53366c9a9be4e056ca6815a29d4b65c6`, `git show <sha> | git patch-id --stable`):
+
+- `sudo` joined `producer_index`, with its valued options (`-u -g -C -D -h -p -R -r -t -T -U` and the long forms), so `sudo -u root cat x` reads `cat` and not `root`. `producer_index` is shared with IL-3, so `sudo cargo test | tail` now reads as an unbounded pipe too: the intended direction, pinned by `il3_sees_through_sudo`.
+- `xargs` is handled in the SOURCE GATE only (`executed_reader_command`), deliberately not in `producer_index`. Its reader gets its PATHS on stdin, so the segment names no file and a path-based verdict finds nothing to refuse: slicing at `xargs` alone would have fixed nothing. A reader run by `xargs` is refused whatever the segment names, as an unresolvable `$VAR` path is, and the refusal says why. This is an OVER-refusal by design (`ls docs | xargs cat` is refused too); `acknowledge_risk: true` is the exit. Chosen over accepting the limit because the realistic spellings (`find … | xargs cat`, `git ls-files | xargs cat`) all read project source.
+
+**Verification.** `util::path_security` 251 passed; the wrapper tests were RED first (4 failed). Mutated once per site (12): 10 KILLED (the `sudo` arm; `sudo`'s valued options, killed by BOTH the block case and its allow-partner; `stdin_fed` set; `xargs`'s valued options, re-run after later edits; the gate's `stdin_fed` check; the stdin note; the remedy chosen from `xargs`'s command; the nested-`xargs` loop; the option-stripping call); 2 SURVIVED as semantically inert (the `--` and lone `-` branches of `strip_xargs_options`: the only input they change is a command NAMED with a leading `-`) and were deleted. Gate on `66a631ea` plus this diff in an isolated worktree: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0. The shared-tree gate was red only in a peer's uncommitted file.
+
+**Not covered.** The allow-partners for `xargs` (`xargs echo cat`, `xargs wc`, `xargs grep`) were green before the fix and have no mutation of their own: nothing here proves they would go red if the head check became "any token is a reader". `$(…)`, backticks, `bash -c`, `eval` stay documented limits (mechanism 3). `find … -exec cat {} +`, `parallel cat`, `doas`, `ionice` are inferred bypasses, unmeasured.
+
+**A fifth variant, found by codescout-d7 after this file was first written: `|&`.** Splitting `a |& b` on `|` leaves the stage `& b`, headed by `&`, so `echo x |& cat build.rs \| wc -l` ran in both the source gate and IL-3. The test `a_lone_ampersand_splits_but_redirections_and_quoted_ones_do_not` in `5d39e0d8` asserted `split("a |& b") == ["a", "& b"]` with a comment calling that correct, so it PINNED the bypass as intended; the fix (`81a95660`, patch-id `179ce63b60a1e4278fe9f6d4f67af5f1019841cb`, unpushed at the time of writing) changes that behaviour and must change that assertion with it.
 
 ## Tests added
 
-Landed with `5d39e0d8`, in `src/util/path_security.rs`: `a_lone_ampersand_splits_but_redirections_and_quoted_ones_do_not` (the splitter, asserted directly because through the gate a wrong split of a benign command usually blocks nothing, so a gate-level test cannot tell a correct split from a broken one), `source_file_access_blocks_a_read_after_a_background_ampersand`, `source_file_access_does_not_let_a_backgrounded_cd_move_the_shell`, and the over-block partner `source_file_access_allows_a_quoted_ampersand_before_a_reader_word`. All were run RED before the fix. Wrapper tests were written, run RED (they fail on this code, which is how mechanism 2 was measured), and then REMOVED from the tree because they cannot pass until #29 lands; their table is in the Fix section above.
+Landed with `5d39e0d8` (the `&` half): `a_lone_ampersand_splits_but_redirections_and_quoted_ones_do_not`, `source_file_access_blocks_a_read_after_a_background_ampersand`, `source_file_access_does_not_let_a_backgrounded_cd_move_the_shell` and the over-block partner `source_file_access_allows_a_quoted_ampersand_before_a_reader_word`, all run RED first.
+
+Landed with `4d392858` (`sudo`/`xargs`), all run RED first (4 failed): `source_file_access_blocks_a_read_run_through_sudo`, `source_file_access_allows_a_sudo_command_that_is_not_a_reader` (the partner: `-u cat` names a user), `source_file_access_blocks_a_reader_fed_by_xargs` (including `xargs cat src/main.rs`, the spelling first measured, and a nested `xargs xargs cat`), `source_file_access_allows_xargs_that_does_not_run_a_reader`, `a_reader_fed_by_xargs_is_refused_with_the_reason` (asserts the note itself, because a two-stage pipeline would already carry the word `xargs` in the clause note), `source_gate_remedy_for_xargs_is_chosen_from_the_command_it_runs` and `il3_sees_through_sudo`.
+
+The env/`FOO=`/`time`/`nohup` cases are #29's tests (`executed_command`), not repeated here.
 
 ## Workarounds
 None needed by callers; the gate is failing open. Agents should keep using `read_file`/`symbols`.
 
 ## Resume
 
-Open for mechanism 2 (wrappers, `sudo`/`xargs`) and the IL-3 side of `&` (`detect_il3_violation` has its own separator handling; a lone `&` was not checked there). Sequence after PR #29 merges.
+Open, in order:
+
+1. **`|&`** in the source gate and IL-3, plus IL-3's own lone `&` (`echo x & rg -c zzz f | tail -1` ran; `rg … & echo b | tail -1` was refused, a false positive): codescout-d7, branch `il3-lone-ampersand` at `81a95660`, not pushed when this was written. It must also update the `a |& b` assertion named above.
+2. **Mechanism 3** (`$(…)`, backticks, `bash -c`, `eval`): documented, not closable by a head rule.
+3. **`find -exec`, `parallel`, `doas`, `ionice`**: inferred, unmeasured.
+4. **Re-run the table above on a binary built from a tree containing `4d392858` and the `|&` fix.** Whoever closes this file owns that measurement; the author of `4d392858` has not made it.
 
 ## References
 - PR #29 (merged head classification for IL-3 and this gate); its independent review listed the first four.
