@@ -380,6 +380,16 @@ pub fn reindent_block(new_string: &str, agent_base: &str, file_base: &str) -> St
 /// inner structure. Returns the block **unchanged** when it is already based at
 /// `target_base` — so correctly-indented input is never disturbed.
 ///
+/// "Already based" means either of two things. The block's least-indented code
+/// line is at `target_base`, or its **first** code line is. The second matters
+/// when a caller has already indented the body to the symbol's column but one
+/// line sits shallower — a column-0 comment, a top-level sibling. The minimum is
+/// then a column the caller never chose, and shifting by it pushes every other
+/// line too deep while the shallow one stays put: an `IndentationError` in
+/// Python, a silently nested class in a mixed-level insert. The first line is the
+/// declaration, the line that has to land at the target, so when it is already
+/// there the caller has placed the block and no single shift could improve it.
+///
 /// The base is measured over code lines only. Measuring it over every line lets
 /// a multi-line string literal whose interior sits at column 0 report the block
 /// as dedented, which defeats this no-op guard and shifts the literal's contents
@@ -389,7 +399,13 @@ pub fn reindent_block(new_string: &str, agent_base: &str, file_base: &str) -> St
 pub fn reindent_to(block: &str, target_base: &str) -> String {
     let mask = literal_continuation_mask(block);
     let agent_base = min_indent_outside_literals(block, &mask);
-    if agent_base == target_base {
+    // The first line can never be a literal continuation, so the mask needs no
+    // consulting here; blank lines carry no indentation signal.
+    let first_base = block
+        .split('\n')
+        .find(|l| !l.trim().is_empty())
+        .map(leading_ws);
+    if agent_base == target_base || first_base == Some(target_base) {
         return block.to_string();
     }
     reindent_block(block, agent_base, target_base)
@@ -589,6 +605,41 @@ mod tests {
     fn reindent_to_preserves_blank_lines() {
         let body = "a\n\nb";
         assert_eq!(reindent_to(body, "  "), "  a\n\n  b");
+    }
+    #[test]
+    fn reindent_to_trusts_a_first_line_already_at_the_target_over_a_shallower_later_line() {
+        // A caller who already indented the body to the symbol's column, then put ONE
+        // column-0 line in it -- a comment, a preprocessor line, a top-level sibling. The
+        // minimum indent is then 0, which is not the caller's base, and shifting by it
+        // pushes every OTHER line four columns too deep while the column-0 line stays put.
+        // In Python that is an IndentationError; edit_code's sibling-drop guard then
+        // reports it as a "stale LSP range". The FIRST line is the declaration -- the line
+        // that must land at the target -- so when it is already there, nothing needs moving.
+        let body = "    def a(self):\n        x = 1\n# note\n        return x";
+        assert_eq!(reindent_to(body, "    "), body);
+    }
+
+    #[test]
+    fn reindent_to_leaves_a_mixed_level_body_alone_when_its_first_line_is_at_the_target() {
+        // The shape from the open mixed-level insert bug: a method at the target column
+        // followed by a top-level class at column 0. One shift cannot place both levels, so
+        // the only correct answer is the caller's own layout. Shifting nests `class B`
+        // inside the method's class, which Python accepts and pytest silently stops
+        // collecting.
+        let body = "    def m(self):\n        pass\n\nclass B:\n    pass";
+        assert_eq!(reindent_to(body, "    "), body);
+    }
+
+    #[test]
+    fn reindent_to_still_shifts_when_the_first_line_is_not_at_the_target() {
+        // Bounds the two tests above from the other side: the first-line rule must fire
+        // only when the first line IS at the target. A column-0 first line with a column-0
+        // comment below it is the ordinary dedented body and must still be re-based.
+        let body = "def a(self):\n    x = 1\n# note\n    return x";
+        assert_eq!(
+            reindent_to(body, "    "),
+            "    def a(self):\n        x = 1\n    # note\n        return x"
+        );
     }
 
     // Every fixture below uses `\n`-escaped strings rather than multi-line literals.

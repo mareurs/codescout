@@ -75,6 +75,21 @@ Options, to be decided after reproducing:
 
 Option (a) is the conservative one. It turns a silent wrong placement into a loud refusal, and the remedy it names is something the caller can do.
 
+
+**Update 2026-09-30 (partial, supersedes the framing above).** Option (a) as written
+would also refuse a body whose first line is ALREADY at the target column, which is
+the shape reported here (a method at the target's column, then a column-0 class). That
+shape needs no refusal: `reindent_to` now returns a body unchanged when its first code
+line is at the target column, so `class B` keeps column 0. See
+`2026-09-30-edit-code-reindent-takes-its-base-from-the-shallowest-line-so-one-column-0-line-double-indents-a-pre-indented-body.md`.
+Verified at the `reindent_to` function only, with the shape from this report as a unit
+test. The `edit_code(insert)` path itself has NOT been re-run on it.
+
+What stays open, and where option (a) still applies: a body whose first line is NOT at
+the target and which holds a shallower later line (a column-0 method plus a column-0
+class, inserted after a nested method). One shift still cannot place both levels, and
+nothing in the text says which the caller meant.
+
 ## Tests added
 
 (pending)
