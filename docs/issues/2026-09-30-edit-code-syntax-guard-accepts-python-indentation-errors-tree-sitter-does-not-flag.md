@@ -63,6 +63,28 @@ const PRE: &str = "class Foo:\n    def a(self):\n        return 1\n\n    def b(s
 `PRE` itself reports `has_syntax_errors=false`. The control row is what shows the probe can
 return true; the last row is a correct negative (the file is valid Python).
 
+
+**Reproduced end to end 2026-09-30 through `edit_code` on the current release binary** (built
+after `62a6b903`; the new wording of the sibling-drop bug's fix was confirmed present in it), by
+session `e41af068`. On a scratch Python class with methods `a`, `b`, `c` at 4-space indent,
+`edit_code(action="replace", symbol="Foo/b")` with the body
+
+    def b(self):
+            x = 1
+        y = 2
+
+(first line at column 0, `x = 1` at 8, `y = 2` at 4) returned `{"status": "ok",
+"replaced_lines": "5-6"}`. The re-base shifted every line by 4, so the file on disk was
+
+    5      def b(self):
+    6              x = 1
+    7          y = 2
+
+and `py_compile` rejected it: `IndentationError: unindent does not match any outer indentation
+level (line 7)`. The control in the same session, an unclosed paren, was refused correctly. So
+the blind spot in the table above is not only a property of synthetic strings: the tool
+accepted, wrote and reported success for a file the interpreter refuses.
+
 ## Environment
 
 `src/symbol/edit.rs` (`syntax_regressed`, `corruption_verdict`), `src/ast/parser.rs`
