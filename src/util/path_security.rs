@@ -4093,6 +4093,32 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn source_gate_ignores_a_reader_name_inside_a_quoted_assignment_value() {
+        // A quoted assignment value is DATA. Each fixture puts a reader name at a word boundary
+        // (`x-tail-y`) and a source path into ONE token: drop either and the raw first token
+        // stops matching the reader regex, so the gate's old head-token rule passes it too and
+        // this stops discriminating. The two shapes reach different code: a standalone
+        // assignment leaves no command at all, an assignment prefix leaves `echo` as the head.
+        for cmd in [
+            r#"P="docs/issues/x-tail-y.md src/tools/mod.rs"; echo assigned"#,
+            r#"P="docs/issues/x-tail-y.md src/tools/mod.rs" echo assigned"#,
+        ] {
+            assert!(
+                check_source_file_access_at_root(cmd).is_none(),
+                "a reader name inside a quoted assignment value is data, not a command: `{cmd}`"
+            );
+        }
+        // Control: the same value followed by a real `tail` is refused, so the fixtures above
+        // sit inside the gate's reach and their `None` is a verdict, not a blind spot.
+        assert!(
+            check_source_file_access_at_root(
+                r#"P="docs/issues/x-tail-y.md src/tools/mod.rs"; tail src/tools/mod.rs"#
+            )
+            .is_some(),
+            "tail in command position must stay blocked behind an assignment"
+        );
+    }
 
     #[test]
     fn source_gate_remedy_is_chosen_from_the_executed_command() {
